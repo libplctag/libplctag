@@ -1,0 +1,282 @@
+/***************************************************************************
+ *   Copyright (C) 2012 by Process Control Engineers                       *
+ *   Author Kyle Hayes  kylehayes@processcontrolengineers.com              *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU Library General Public License as       *
+ *   published by the Free Software Foundation; either version 2 of the    *
+ *   License, or (at your option) any later version.                       *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU Library General Public License for more details.                  *
+ *                                                                         *
+ *   You should have received a copy of the GNU Library General Public     *
+ *   License along with this program; if not, write to the                 *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ *                                                                         *
+ ***************************************************************************/
+
+ /**************************************************************************
+  * CHANGE LOG                                                             *
+  *                                                                        *
+  * 2012-02-22  KRH - Created file.                                        *
+  *                                                                        *
+  **************************************************************************/
+
+#ifndef __LIBPLCTAG_H__
+#define __LIBPLCTAG_H__
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+#include <stdint.h>
+
+#ifdef WIN32
+    #define LIB_EXPORT  __declspec( dllexport )  extern
+#else
+    #define LIB_EXPORT extern
+#endif
+
+
+
+/* WARNING THIS IS MACHINE/COMPILER DEPENDENT!!!! */
+typedef float real32_t;
+
+
+/* opaque type definitions */
+typedef struct plc_tag_t *plc_tag;
+#define PLC_TAG_NULL ((plc_tag)NULL)
+
+
+/* data type defs for tags
+ * Lower byte is size in bits,
+ * upper byte is overall type. */
+#define PLC_LIB_BOOL    (0x101)
+#define PLC_LIB_UINT8   (0x108)
+#define PLC_LIB_SINT8   (0x208)
+#define PLC_LIB_UINT16  (0x110)
+#define PLC_LIB_SINT16  (0x210)
+#define PLC_LIB_UINT32  (0x120)
+#define PLC_LIB_SINT32  (0x220)
+#define PLC_LIB_REAL32  (0x320)
+
+/* get the number of bytes for a data type.  Do not use
+ * for BOOL
+ */
+#define PLC_LIB_DATA_SIZE_BYTES(x) (((x) & 0xFF)/8)
+
+
+
+/* library internal status. */
+#define PLCTAG_STATUS_PENDING		(1)
+#define PLCTAG_STATUS_OK			(0)
+
+#define PLCTAG_ERR_NULL_PTR			(-1)
+#define PLCTAG_ERR_OUT_OF_BOUNDS	(-2)
+#define PLCTAG_ERR_NO_MEM			(-3)
+#define PLCTAG_ERR_LL_ADD			(-4)
+#define PLCTAG_ERR_BAD_PARAM		(-5)
+#define PLCTAG_ERR_CREATE			(-6)
+#define PLCTAG_ERR_NOT_EMPTY		(-7)
+#define PLCTAG_ERR_OPEN				(-8)
+#define PLCTAG_ERR_SET				(-9)
+#define PLCTAG_ERR_WRITE			(-10)
+#define PLCTAG_ERR_TIMEOUT			(-11)
+#define PLCTAG_ERR_TIMEOUT_ACK		(-12)
+#define PLCTAG_ERR_RETRIES			(-13)
+#define PLCTAG_ERR_READ				(-14)
+#define PLCTAG_ERR_BAD_DATA			(-15)
+#define PLCTAG_ERR_ENCODE			(-16)
+#define PLCTAG_ERR_DECODE			(-17)
+#define PLCTAG_ERR_UNSUPPORTED		(-18)
+#define PLCTAG_ERR_TOO_LONG			(-19)
+#define PLCTAG_ERR_CLOSE			(-20)
+#define PLCTAG_ERR_NOT_ALLOWED		(-21)
+#define PLCTAG_ERR_THREAD			(-22)
+#define PLCTAG_ERR_NO_DATA			(-23)
+#define PLCTAG_ERR_THREAD_JOIN		(-24)
+#define PLCTAG_ERR_THREAD_CREATE	(-25)
+#define PLCTAG_ERR_MUTEX_DESTROY	(-26)
+#define PLCTAG_ERR_MUTEX_UNLOCK		(-27)
+#define PLCTAG_ERR_MUTEX_INIT		(-28)
+#define PLCTAG_ERR_MUTEX_LOCK		(-29)
+#define PLCTAG_ERR_NOT_IMPLEMENTED	(-30)
+#define PLCTAG_ERR_BAD_DEVICE		(-31)
+#define PLCTAG_ERR_BAD_GATEWAY		(-32)
+#define PLCTAG_ERR_REMOTE_ERR		(-33)
+#define PLCTAG_ERR_NOT_FOUND		(-34)
+#define PLCTAG_ERR_ABORT			(-35)
+
+
+
+
+
+/*
+ * plc_err
+ * 
+ * Use this routine to dump errors into the logs yourself.  Note
+ * that it is a macro and thus the line number and function
+ * will only be those of the C code.  If you use a wrapper around
+ * this, you may want to call the underlying plc_err_impl 
+ * routine directly.
+ */
+
+/* helper functions for logging/errors */
+LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_code, const char *fmt, ...);
+#if defined(USE_STD_VARARG_MACROS) || defined(WIN32)
+#define plc_err(lib,level,e,f,...) \
+   plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,__VA_ARGS__)
+#else
+#define plc_err(lib,level,e,f,a...) \
+   plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,##a )
+#endif
+
+
+
+/* tag functions */
+
+/* 
+ * plc_tag_create
+ * 
+ * Create a new tag based on the passed attributed string.  The attributes
+ * are protocol-specific.  The only required part of the string is the key-
+ * value pair "protocol=XXX" where XXX is one of the supported protocol
+ * types.
+ *
+ * An opaque pointer is returned on success.  NULL is returned on allocation
+ * failure.  Other failures will set the tag status.
+ */
+
+LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str);
+
+
+
+
+
+/*
+ * protocol-specific functions.
+ */
+
+
+/*
+ * plc_tag_abort
+ *
+ * Abort any outstanding IO to the PLC.  If there is something in flight, then
+ * it is marked invalid.  Note that this does not abort anything that might
+ * be still processing in the report PLC.
+ *
+ * The status will be PLCTAG_STATUS_OK unless there is an error such as
+ * a null pointer.
+ *
+ * This is a function provided by the underlying protocol implementation.
+ */
+LIB_EXPORT int plc_tag_abort(plc_tag tag);
+
+
+
+
+/*
+ * plc_tag_destroy
+ * 
+ * This frees all resources associated with the tag.  Internally, it may result in closed
+ * connections etc.   This calls through to a protocol-specific function.
+ *
+ * This is a function provided by the underlying protocol implementation.
+ */
+LIB_EXPORT int plc_tag_destroy(plc_tag tag);
+
+
+
+
+
+
+/*
+ * plc_tag_read
+ *
+ * Start a read.  If the timeout value is zero, then wait until the read
+ * returns or the timeout occurs, whichever is first.  Return the status.
+ * If the timeout value is zero, then plc_tag_read will normally return
+ * PLCTAG_STATUS_PENDING.
+ *
+ * This is a function provided by the underlying protocol implementation.
+ */
+LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout);
+
+
+
+
+/*
+ * plc_tag_status
+ *
+ * Return the current status of the tag.  This will be PLCTAG_STATUS_PENDING if there is
+ * an uncompleted IO operation.  It will be PLCTAG_STATUS_OK if everything is fine.  Other
+ * errors will be returned as appropriate.
+ *
+ * This is a function provided by the underlying protocol implementation.
+ */
+LIB_EXPORT int plc_tag_status(plc_tag tag);
+
+
+
+
+
+
+/*
+ * plc_tag_write
+ *
+ * Start a write.  If the timeout value is zero, then wait until the write
+ * returns or the timeout occurs, whichever is first.  Return the status.
+ * If the timeout value is zero, then plc_tag_write will usually return
+ * PLCTAG_STATUS_PENDING.  The write is considered done
+ * when it has been written to the socket.
+ *
+ * This is a function provided by the underlying protocol implementation.
+ */
+LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout);
+
+
+
+
+/*
+ * Tag data accessors.
+ */
+
+LIB_EXPORT int plc_tag_get_size(plc_tag tag);
+
+LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag tag, int offset);
+LIB_EXPORT int plc_tag_set_uint32(plc_tag tag, int offset, uint32_t val);
+
+LIB_EXPORT int32_t plc_tag_get_int32(plc_tag tag, int offset);
+LIB_EXPORT int plc_tag_set_int32(plc_tag, int offset, int32_t val);
+
+
+LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag tag, int offset);
+LIB_EXPORT int plc_tag_set_uint16(plc_tag tag, int offset, uint16_t val);
+
+LIB_EXPORT int16_t plc_tag_get_int16(plc_tag tag, int offset);
+LIB_EXPORT int plc_tag_set_int16(plc_tag, int offset, int16_t val);
+
+
+LIB_EXPORT uint8_t plc_tag_get_uint8(plc_tag tag, int offset);
+LIB_EXPORT int plc_tag_set_uint8(plc_tag tag, int offset, uint8_t val);
+
+LIB_EXPORT int8_t plc_tag_get_int8(plc_tag tag, int offset);
+LIB_EXPORT int plc_tag_set_int8(plc_tag, int offset, int8_t val);
+
+
+LIB_EXPORT float plc_tag_get_float32(plc_tag tag, int offset);
+LIB_EXPORT int plc_tag_set_float32(plc_tag tag, int offset, float val);
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
+/*end of header */
+#endif
