@@ -206,7 +206,7 @@ processor is located at slot zero in the backplane.
 
 This example is for Linux.
 
-<pre>
+```c
 #include <stdio.h>
 #include <unistd.h>
 #include <libplctag.h>
@@ -297,8 +297,7 @@ int main(int argc, char **argv)
     return 0;
 }
 
-<pre>
-
+```
 
 
 Future Work
