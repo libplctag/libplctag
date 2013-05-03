@@ -66,12 +66,14 @@ extern int mutex_lock(mutex_p m);
 extern int mutex_unlock(mutex_p m);
 extern int mutex_destroy(mutex_p *m);
 
+
+
 /* macros are evil */
 
 /*
  * Use this one like this:
  *
- *     synchronized(my_lock) {
+ *     critical_block(my_mutex) {
  *         locked_data++;
  *         foo(locked_data);
  *     }
@@ -85,8 +87,8 @@ extern int mutex_destroy(mutex_p *m);
  * unlock the mutex.  It will NOT break out of any surrounding loop outside the
  * synchronized block.
  */
-#define synchronized(lock) \
-for(int flag_##__LINE__ = 1; flag_##__LINE__ ; flag_##__LINE__ = 0, mutex_unlock(lock))  for(int rc_##__LINE__ = mutex_lock(lock); rc_##__LINE__ == PLCTAG_STATUS_OK && flag_##__LINE__ ; flag_##__LINE__ = 0)
+#define critical_block(lock) \
+for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))  for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock); __sync_rc_nargle_##__LINE__ == PLCTAG_STATUS_OK && __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0)
 
 /* thread functions/defs */
 typedef struct thread_t *thread_p;

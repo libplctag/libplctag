@@ -223,7 +223,7 @@ plc_tag ab_tag_create(attr attribs)
 	 * The rest of this is inside a locked block.
 	 */
 	pdebug("Locking mutex");
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		/* fake exceptions */
 		do {
 			/*
@@ -350,7 +350,7 @@ int ab_tag_destroy(plc_tag p_tag)
 		ab_session_p session = tag->session;
 
 		/* fiddling with shared data here, synchronize */
-		synchronized(tag_mutex) {
+		critical_block(tag_mutex) {
 			pdebug("Removing tag");
 			session_remove_tag_unsafe(session,tag);
 
@@ -2414,7 +2414,7 @@ int check_mutex()
 {
 	uint32_t res = 0;
 
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		res = session_get_new_connection_id_unsafe(session);
 	}
 
@@ -2449,7 +2449,7 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
 {
 	uint16_t res;
 
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		res = session_get_new_seq_id_unsafe(sess);
 	}
 
@@ -2528,7 +2528,7 @@ int request_add(ab_session_p sess, ab_request_p req)
 {
 	int rc = PLCTAG_STATUS_OK;
 
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		rc = request_add_unsafe(sess,req);
 	}
 
@@ -2582,7 +2582,7 @@ int request_remove(ab_session_p sess, ab_request_p req)
 {
 	int rc = PLCTAG_STATUS_OK;
 
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		rc = request_remove_unsafe(sess,req);
 	}
 
@@ -3002,7 +3002,7 @@ void *request_handler_func(void *not_used)
 
 		//pdebug("Locking mutex");
 
-		synchronized(tag_mutex) {
+		critical_block(tag_mutex) {
 			/*
 			 * loop over the sessions.  For each session, see if we can read some
 			 * data.  If we can, read it in and try to update a request.  If the
@@ -3103,7 +3103,7 @@ int add_session(ab_session_p s)
 	int rc;
 
 	pdebug("Locking mutex");
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		rc = add_session_unsafe(s);
 	}
 
@@ -3156,7 +3156,7 @@ int remove_session(ab_session_p s)
 	int rc;
 
 	pdebug("Locking mutex");
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		rc = remove_session_unsafe(s);
 	}
 	pdebug("Mutex released");
@@ -3353,7 +3353,7 @@ int ab_session_destroy_unsafe(ab_session_p session)
 int ab_session_destroy(ab_session_p session) {
 	int rc;
 
-	synchronized(tag_mutex) {
+	critical_block(tag_mutex) {
 		rc = ab_session_destroy_unsafe(session);
 	}
 
