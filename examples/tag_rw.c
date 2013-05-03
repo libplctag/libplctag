@@ -37,6 +37,16 @@
 
 
 
+#define PLC_LIB_BOOL    (0x101)
+#define PLC_LIB_UINT8   (0x108)
+#define PLC_LIB_SINT8   (0x208)
+#define PLC_LIB_UINT16  (0x110)
+#define PLC_LIB_SINT16  (0x210)
+#define PLC_LIB_UINT32  (0x120)
+#define PLC_LIB_SINT32  (0x220)
+#define PLC_LIB_REAL32  (0x320)
+
+
 #define DATA_TIMEOUT 5000
 
 void usage(void) {

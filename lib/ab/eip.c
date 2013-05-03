@@ -183,7 +183,7 @@ plc_tag ab_tag_create(attr attribs)
     }
 
     /* AB PLCs are little endian. */
-    tag->p_tag.endian = PCOMM_DATA_LITTLE_ENDIAN;
+    tag->p_tag.endian = PLCTAG_DATA_LITTLE_ENDIAN;
 
     /* allocate memory for the data */
     data_size = attr_get_int(tag->attributes,"elem_count",1) * attr_get_int(tag->attributes,"elem_size",0);

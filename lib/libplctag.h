@@ -24,6 +24,7 @@
   *                                                                        *
   * 2012-02-22  KRH - Created file.                                        *
   *                                                                        *
+  * 2013-05-03  KRH - Removed left-over cruft from previous version of API *
   **************************************************************************/
 
 #ifndef __LIBPLCTAG_H__
@@ -51,24 +52,6 @@ typedef float real32_t;
 /* opaque type definitions */
 typedef struct plc_tag_t *plc_tag;
 #define PLC_TAG_NULL ((plc_tag)NULL)
-
-
-/* data type defs for tags
- * Lower byte is size in bits,
- * upper byte is overall type. */
-#define PLC_LIB_BOOL    (0x101)
-#define PLC_LIB_UINT8   (0x108)
-#define PLC_LIB_SINT8   (0x208)
-#define PLC_LIB_UINT16  (0x110)
-#define PLC_LIB_SINT16  (0x210)
-#define PLC_LIB_UINT32  (0x120)
-#define PLC_LIB_SINT32  (0x220)
-#define PLC_LIB_REAL32  (0x320)
-
-/* get the number of bytes for a data type.  Do not use
- * for BOOL
- */
-#define PLC_LIB_DATA_SIZE_BYTES(x) (((x) & 0xFF)/8)
 
 
 
@@ -114,31 +97,13 @@ typedef struct plc_tag_t *plc_tag;
 
 
 
-
-
 /*
- * plc_err
- * 
- * Use this routine to dump errors into the logs yourself.  Note
- * that it is a macro and thus the line number and function
- * will only be those of the C code.  If you use a wrapper around
- * this, you may want to call the underlying plc_err_impl 
- * routine directly.
+ * tag functions
+ *
+ * The following is the public API for tag operations.
+ *
+ * These are implemented in a protocol-specific manner.
  */
-
-/* helper functions for logging/errors */
-LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_code, const char *fmt, ...);
-#if defined(USE_STD_VARARG_MACROS) || defined(WIN32)
-#define plc_err(lib,level,e,f,...) \
-   plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,__VA_ARGS__)
-#else
-#define plc_err(lib,level,e,f,a...) \
-   plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,##a )
-#endif
-
-
-
-/* tag functions */
 
 /* 
  * plc_tag_create
@@ -153,14 +118,6 @@ LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_
  */
 
 LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str);
-
-
-
-
-
-/*
- * protocol-specific functions.
- */
 
 
 /*

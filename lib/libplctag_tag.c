@@ -411,7 +411,7 @@ extern uint32_t plc_tag_get_uint32(plc_tag t, int offset)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = ((uint32_t)(t->data[offset])) +
 			  ((uint32_t)(t->data[offset+1]) << 8) +
 			  ((uint32_t)(t->data[offset+2]) << 16) +
@@ -458,7 +458,7 @@ extern int plc_tag_set_uint32(plc_tag t, int offset, uint32_t val)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		t->data[offset]   = (uint8_t)(val & 0xFF);
 		t->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
 		t->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
@@ -509,7 +509,7 @@ extern int32_t  plc_tag_get_int32(plc_tag t, int offset)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = (int32_t)(((uint32_t)(t->data[offset])) +
 			            ((uint32_t)(t->data[offset+1]) << 8) +
 			            ((uint32_t)(t->data[offset+2]) << 16) +
@@ -558,7 +558,7 @@ extern int plc_tag_set_int32(plc_tag t, int offset, int32_t ival)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		t->data[offset]   = (uint8_t)(val & 0xFF);
 		t->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
 		t->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
@@ -609,7 +609,7 @@ extern uint16_t plc_tag_get_uint16(plc_tag t, int offset)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = ((uint16_t)(t->data[offset])) +
 			  ((uint16_t)(t->data[offset+1]) << 8);
 	} else {
@@ -653,7 +653,7 @@ extern int plc_tag_set_uint16(plc_tag t, int offset, uint16_t val)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		t->data[offset]   = (uint8_t)(val & 0xFF);
 		t->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
 	} else {
@@ -701,7 +701,7 @@ extern int16_t  plc_tag_get_int16(plc_tag t, int offset)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = (int16_t)(((uint16_t)(t->data[offset])) +
 				        ((uint16_t)(t->data[offset+1]) << 8));
 	} else {
@@ -747,7 +747,7 @@ extern int plc_tag_set_int16(plc_tag t, int offset, int16_t ival)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		t->data[offset]   = (uint8_t)(val & 0xFF);
 		t->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
 	} else {
@@ -958,7 +958,7 @@ extern float    plc_tag_get_float32(plc_tag t, int offset)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		ures = ((uint32_t)(t->data[offset])) +
 			  ((uint32_t)(t->data[offset+1]) << 8) +
 			  ((uint32_t)(t->data[offset+2]) << 16) +
@@ -1014,7 +1014,7 @@ extern int plc_tag_set_float32(plc_tag t, int offset, float fval)
 	}
 
 	/* check whether data is little endian or big endian */
-	if(t->endian == PCOMM_DATA_LITTLE_ENDIAN) {
+	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		t->data[offset]   = (uint8_t)(val & 0xFF);
 		t->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
 		t->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
