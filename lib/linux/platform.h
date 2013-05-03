@@ -26,8 +26,8 @@
   *                                                                        *
   **************************************************************************/
 
-#ifndef OS_H_
-#define OS_H_
+#ifndef __PLATFORM_H__
+#define __PLATFORM_H__
 
 #include <stddef.h>
 #include <stdint.h>
