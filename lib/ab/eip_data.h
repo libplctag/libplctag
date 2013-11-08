@@ -53,6 +53,12 @@
 								   * Hopefully 512 is safe.  This should be checked.
 								   */
 
+#define MAX_PCCC_PACKET_SIZE (244) /*
+									* That's what the docs say.
+									*
+									* Needs more testing.
+									*/
+
 
 /* AB Constants*/
 #define AB_EIP_OK   (0)
@@ -613,7 +619,7 @@ START_PACK typedef struct {
     uint16_t pccc_offset;           /* offset of requested in total request */
     uint16_t pccc_transfer_size;    /* total number of words requested */
     uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
-} END_PACK eip_pccc_req;
+} END_PACK eip_pccc_req_old;
 
 
 
@@ -662,7 +668,7 @@ START_PACK typedef struct {
     uint8_t pccc_status;            /* STS 0x00 in request */
     uint16_t pccc_seq_num;          /* TNSW transaction/connection sequence number */
     uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC request. */
-} END_PACK eip_pccc_resp;
+} END_PACK eip_pccc_resp_old;
 
 
 
@@ -708,7 +714,7 @@ START_PACK typedef struct {
     uint16_t pccc_pad;              /* what is this?? */
     uint16_t pccc_transfer_size;    /* number of words requested */
     uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
-} END_PACK eip_pccc_dhp_req;
+} END_PACK eip_pccc_dhp_req_old;
 
 
 
@@ -757,7 +763,7 @@ START_PACK typedef struct {
     uint8_t pccc_status;            /* STS 0x00 in request */
     uint16_t pccc_seq_num;         /* TNSW transaction/connection sequence number */
     uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC request. */
-} END_PACK eip_pccc_dhp_resp;
+} END_PACK eip_pccc_dhp_resp_old;
 
 
 
@@ -793,7 +799,7 @@ START_PACK typedef struct {
     uint8_t service_code;           /* ALWAYS 0x4C, CIP_READ */
     /*uint8_t req_path_size;*/          /* path size in words */
     uint8_t req_path[ZLA_SIZE];
-} END_PACK eip_cip_req;
+} END_PACK eip_cip_req_old;
 
 
 
@@ -834,7 +840,7 @@ START_PACK typedef struct {
 
     /* CIP Data*/
     uint8_t resp_data[ZLA_SIZE];
-} END_PACK eip_cip_resp;
+} END_PACK eip_cip_resp_old;
 
 
 
@@ -869,7 +875,7 @@ START_PACK typedef struct {
 
     /* Unconnected send */
     uint8_t secs_per_tick;       	/* seconds per tick */
-    uint8_t timeout_ticks;       	/* timeout = srd_secs_per_tick * src_timeout_ticks */
+    uint8_t timeout_ticks;       	/* timeout = src_secs_per_tick * src_timeout_ticks */
 
     /* size ? */
     uint16_t uc_cmd_length;			/* length of embedded packet */
@@ -914,6 +920,47 @@ START_PACK typedef struct {
 
 } END_PACK eip_cip_uc_resp;
 
+
+
+START_PACK typedef struct {
+    /* PCCC Command Req Routing */
+    uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
+    uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
+    uint8_t req_path[4];            /* ALWAYS 0x20,0x67,0x24,0x01 for PCCC */
+    uint8_t request_id_size;        /* ALWAYS 7 */
+    uint16_t vendor_id;             /* Our CIP Vendor ID */
+    uint32_t vendor_serial_number;  /* Our CIP Vendor Serial Number */
+
+    /* PCCC Command */
+    uint8_t pccc_command;           /* CMD read, write etc. */
+    uint8_t pccc_status;            /* STS 0x00 in request */
+    uint16_t pccc_seq_num;          /* TNS transaction/sequence id */
+    uint8_t pccc_function;          /* FNC sub-function of command */
+    uint16_t pccc_offset;           /* offset of requested in total request */
+    uint16_t pccc_transfer_size;    /* total number of words requested */
+    uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
+} END_PACK pccc_req;
+
+
+
+START_PACK typedef struct {
+    /* PCCC Reply */
+    uint8_t reply_code;          /* 0xCB Execute PCCC Reply */
+    uint8_t reserved;               /* 0x00 in reply */
+    uint8_t general_status;         /* 0x00 for success */
+    uint8_t status_size;            /* number of 16-bit words of extra status, 0 if success */
+
+    /* PCCC Command Req Routing */
+    uint8_t request_id_size;        /* ALWAYS 7 */
+    uint16_t vendor_id;             /* Our CIP Vendor ID */
+    uint32_t vendor_serial_number;  /* Our CIP Vendor Serial Number */
+
+    /* PCCC Command */
+    uint8_t pccc_command;           /* CMD read, write etc. */
+    uint8_t pccc_status;            /* STS 0x00 in request */
+    uint16_t pccc_seq_num;          /* TNSW transaction/connection sequence number */
+    uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC response. */
+} END_PACK pccc_resp;
 
 
 

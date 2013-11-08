@@ -505,110 +505,185 @@ int ab_tag_status_pccc(plc_tag p_tag)
 
 
 
-/* FIXME -- this needs to be converted to unconnected messaging */
+/*
+ * ab_tag_read_pccc_start
+ *
+ * Start a PCCC tag read (PLC5, SLC).
+ *
+ * FIXME - this does not handle fragmentation of large requests!
+ */
 
 int ab_tag_read_pccc_start(plc_tag p_tag)
 {
+    int rc = PLCTAG_STATUS_OK;
     ab_tag_p tag;
-    eip_pccc_req *pccc;
-    uint8_t *data;
     int elem_count = 0;
-    int rc;
-    uint16_t conn_seq_id = 0;
     ab_request_p req;
+    uint16_t conn_seq_id = 0;
+    int i;
+    int overhead;
+    int data_per_packet;
+    int num_reqs;
 
     pdebug("Starting");
 
     tag = (ab_tag_p)p_tag;
 
-    /* get element count */
+    /* get the number of elements we will read */
     elem_count = attr_get_int(tag->attributes,"elem_count",1);
 
-    /* get a request buffer */
-    rc = request_create(&req);
+    /* how many packets will we need? How much overhead? */
+    overhead = sizeof(pccc_resp) + 4; /* MAGIC 4 = fudge */
 
-    if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to get new request.  rc=%d",rc);
-    	p_tag->status = rc;
-    	return rc;
-    }
+    data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
 
-    /* point the struct pointers to the buffer*/
-    pccc = (eip_pccc_req*)(req->data);
+	if(data_per_packet <= 0) {
+		pdebug("Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
+		p_tag->status = PLCTAG_ERR_TOO_LONG;
+		return PLCTAG_ERR_TOO_LONG;
+	}
 
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_pccc_req);
+	num_reqs = (p_tag->size + (data_per_packet-1)) / data_per_packet;
 
-    /* copy laa into the request */
-    mem_copy(data,tag->encoded_name,tag->encoded_name_size);
-    data += tag->encoded_name_size;
+	pdebug("We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
 
-    /* we need the count twice? */
-    *((uint16_t*)data) = h2le16(elem_count); /* FIXME - bytes or INTs? */
-    data += sizeof(uint16_t);
+	tag->reqs = (ab_request_p*)mem_alloc(num_reqs * sizeof(ab_request_p));
 
-    /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_CONNECTED_SEND);    /* ALWAYS 0x0070 Unconnected Send*/
+	if(!tag->reqs) {
+		pdebug("Unable to get memory for request array!");
+		p_tag->status = PLCTAG_ERR_NO_MEM;
+		return rc;
+	}
 
-    /* router timeout */
-    pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
+	/* store this for later */
+	tag->num_requests = num_reqs;
+	tag->frag_size = data_per_packet;
 
-    /* Common Packet Format fields */
-    pccc->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
-    pccc->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
-    pccc->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4 ? */
-    //pccc->cpf_targ_conn_id = tag->connection->targ_connection_id;
-    pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
-    pccc->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&(pccc->cpf_conn_seq_num)));/* REQ: fill in with length of remaining data. */
+	/* loop over the requests */
+	for(i = 0; i < tag->num_requests; i++) {
+	    eip_cip_uc_req *cip;
+	    pccc_req *pccc;
+	    uint8_t *data;
+	    uint8_t *embed_start, *embed_end;
 
-    /* connection sequence id */
-    //tag->connection->conn_seq_num++;
-    //pccc->cpf_conn_seq_num = h2le16(tag->connection->conn_seq_num);
+		/* get a request buffer */
+		rc = request_create(&req);
 
-    /* Command Routing */
-    pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
-    pccc->req_path_size = 2;   /* ALWAYS 2, size in words of path, next field */
-    pccc->req_path[0] = 0x20;  /* class */
-    pccc->req_path[1] = 0x67;  /* PCCC Execute */
-    pccc->req_path[2] = 0x24;  /* instance */
-    pccc->req_path[3] = 0x01;  /* instance 1 */
+		if(rc != PLCTAG_STATUS_OK) {
+			pdebug("Unable to get new request.  rc=%d",rc);
+			p_tag->status = rc;
+			return rc;
+		}
 
-    /* PCCC ID */
-    pccc->request_id_size = 7;  /* ALWAYS 7 */
-    pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);             /* Our CIP Vendor */
-    pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);      /* our unique serial number */
+		/* point the struct pointers to the buffer*/
+		cip = (eip_cip_uc_req*)(req->data);
 
-    /* PCCC Command */
-    //conn_seq_id = (uint16_t)session_get_new_seq_id(tag->session); /* FIXME - this does not work on big endian machines! */
-    pccc->pccc_command = AB_PCCC_TYPED_CMD;
-    pccc->pccc_status = 0;  /* STS 0 in request */
-    pccc->pccc_seq_num = h2le16(conn_seq_id); /* fill in  later */
-    pccc->pccc_function = AB_PCCC_TYPED_READ_FUNC;
-    pccc->pccc_transfer_size = h2le16(elem_count); /* This is not in the docs, but it is in the data. */
-    											   /* FIXME - bytes or INTs? */
+		/* set up the embedded PCCC packet */
+		embed_start = (req->data) + sizeof(eip_cip_uc_req);
 
-    /* get ready to add the request to the queue for this session */
-    req->request_size = data - (req->data);
-    req->send_request = 1;
+		pccc = (pccc_req *)(embed_start);
 
-    /* add the request to the session's list. */
-    rc = request_add(tag->session, req);
+		/* Command Routing */
+		pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
+		pccc->req_path_size = 2;   /* ALWAYS 2, size in words of path, next field */
+		pccc->req_path[0] = 0x20;  /* class */
+		pccc->req_path[1] = 0x67;  /* PCCC Execute */
+		pccc->req_path[2] = 0x24;  /* instance */
+		pccc->req_path[3] = 0x01;  /* instance 1 */
 
-    if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to lock add request to session! rc=%d",rc);
-    	request_destroy(&req);
-    	p_tag->status = rc;
-    	return rc;
-    }
+		/* PCCC ID */
+		pccc->request_id_size = 7;  /* ALWAYS 7 */
+		pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);             /* Our CIP Vendor */
+		pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);      /* our unique serial number */
 
-    /* save the request for later */
+		/* fill in the PCCC command */
+		pccc->pccc_command = AB_PCCC_TYPED_CMD;
+		pccc->pccc_status = 0;  /* STS 0 in request */
+		pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
+		pccc->pccc_function = AB_PCCC_TYPED_READ_FUNC;
+		pccc->pccc_transfer_size = h2le16(elem_count); /* This is not in the docs, but it is in the data. */
 
-    /* FIXME
-     *
-     * This must be rewritten to use multiple request buffers.
-     */
+		/* point to the end of the struct */
+		data = ((uint8_t *)pccc) + sizeof(pccc_req);
 
-    //tag->req = req;
+		/* copy laa tag name into the request */
+		mem_copy(data,tag->encoded_name,tag->encoded_name_size);
+		data += tag->encoded_name_size;
+
+		/* we need the count twice? */
+		*((uint16_t*)data) = h2le16(elem_count); /* FIXME - bytes or INTs? */
+		data += sizeof(uint16_t);
+
+		embed_end = data;
+
+		/*
+		 * after the embedded packet, we need to tell the message router
+		 * how to get to the target device.
+		 */
+
+		/* Now copy in the routing information for the embedded message */
+		/*
+		 * routing information.  Format:
+		 *
+		 * uint8_t path_size
+		 * uint8_t reserved (zero)
+		 * uint8_t[...] path (padded to even number of entries)
+		 */
+		*data = (tag->conn_path_size)/2; /* in 16-bit words */
+		data++;
+		*data = 0;
+		data++;
+		mem_copy(data,tag->conn_path, tag->conn_path_size);
+		data += tag->conn_path_size;
+
+		/* now we go back and fill in the fields of the static part */
+
+		/* encap fields */
+		cip->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* ALWAYS 0x0070 Unconnected Send*/
+
+		/* router timeout */
+		cip->router_timeout = h2le16(1);                 /* one second timeout, enough? */
+
+		/* Common Packet Format fields for unconnected send. */
+		cip->cpf_item_count 		= h2le16(2);				/* ALWAYS 2 */
+		cip->cpf_nai_item_type 		= h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
+		cip->cpf_nai_item_length 	= h2le16(0);   				/* ALWAYS 0 */
+		cip->cpf_udi_item_type		= h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
+		cip->cpf_udi_item_length	= h2le16(data - (uint8_t*)(&(cip->cm_service_code)));  /* REQ: fill in with length of remaining data. */
+
+		/* CM Service Request - Connection Manager */
+		cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND;        /* 0x52 Unconnected Send */
+		cip->cm_req_path_size = 2;   /* 2, size in 16-bit words of path, next field */
+		cip->cm_req_path[0] = 0x20;  /* class */
+		cip->cm_req_path[1] = 0x06;  /* Connection Manager */
+		cip->cm_req_path[2] = 0x24;  /* instance */
+		cip->cm_req_path[3] = 0x01;  /* instance 1 */
+
+		/* Unconnected send needs timeout information */
+		cip->secs_per_tick = AB_EIP_SECS_PER_TICK;	/* seconds per tick */
+		cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS;  /* timeout = srd_secs_per_tick * src_timeout_ticks */
+
+		/* size of embedded packet */
+		cip->uc_cmd_length = h2le16(embed_end - embed_start);
+
+		/* set the size of the request */
+		req->request_size = data - (req->data);
+
+		/* mark it as ready to send */
+		req->send_request = 1;
+
+
+		/* add the request to the session's list. */
+		rc = request_add(tag->session, req);
+
+		if(rc != PLCTAG_STATUS_OK) {
+			pdebug("Unable to lock add request to session! rc=%d",rc);
+			request_destroy(&req);
+			p_tag->status = rc;
+			return rc;
+		}
+	}
+
     tag->read_in_progress = 1;
 
     tag->p_tag.status = PLCTAG_STATUS_PENDING;
@@ -627,7 +702,7 @@ int ab_tag_read_pccc_start(plc_tag p_tag)
 int ab_tag_read_pccc_check(plc_tag p_tag)
 {
     ab_tag_p tag;
-    eip_pccc_resp *pccc_resp;
+    eip_pccc_resp_old *pccc_resp;
     uint8_t *data;
     uint8_t *data_end;
     int pccc_res_type;
@@ -656,7 +731,7 @@ int ab_tag_read_pccc_check(plc_tag p_tag)
 
     /* fake exceptions */
     do {
-    	pccc_resp = (eip_pccc_resp*)(req->data);
+    	pccc_resp = (eip_pccc_resp_old*)(req->data);
 
 		data_end = (req->data + pccc_resp->encap_length + sizeof(eip_encap_t));
 
@@ -744,7 +819,7 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
 {
 	int rc = PLCTAG_STATUS_OK;
     ab_tag_p tag;
-    eip_pccc_req *pccc;
+    eip_pccc_req_old *pccc;
     uint8_t *data;
     uint8_t element_def[16];
     int element_def_size;
@@ -769,10 +844,10 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
     	return rc;
     }
 
-    pccc = (eip_pccc_req*)(req->data);
+    pccc = (eip_pccc_req_old*)(req->data);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_pccc_req);
+    data = (req->data) + sizeof(eip_pccc_req_old);
 
     /* copy laa into the request */
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
@@ -901,7 +976,7 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
 int ab_tag_write_pccc_check(plc_tag p_tag)
 {
     ab_tag_p tag;
-    eip_pccc_resp *pccc_resp;
+    eip_pccc_resp_old *pccc_resp;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
 
@@ -945,7 +1020,7 @@ int ab_tag_write_pccc_check(plc_tag p_tag)
 
     /* fake exception */
     do {
-		pccc_resp = (eip_pccc_resp*)(req->data);
+		pccc_resp = (eip_pccc_resp_old*)(req->data);
 
 		/* check the response status */
 		if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
@@ -1058,7 +1133,7 @@ int ab_tag_status_pccc_dhp(plc_tag p_tag)
 int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
 {
     ab_tag_p tag;
-    eip_pccc_dhp_req *pccc;
+    eip_pccc_dhp_req_old *pccc;
     uint8_t *data;
     int elem_count = 0;
     int rc = PLCTAG_STATUS_OK;
@@ -1081,10 +1156,10 @@ int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
     	return rc;
     }
 
-    pccc = (eip_pccc_dhp_req*)(req->data);
+    pccc = (eip_pccc_dhp_req_old*)(req->data);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_pccc_req);
+    data = (req->data) + sizeof(eip_pccc_req_old);
 
     /* copy laa into the request */
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
@@ -1167,7 +1242,7 @@ int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
 int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
 {
     ab_tag_p tag;
-    eip_pccc_dhp_resp *pccc_resp;
+    eip_pccc_dhp_resp_old *pccc_resp;
     uint8_t *data;
     uint8_t *data_end;
     int pccc_res_type;
@@ -1217,7 +1292,7 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
 
      /* fake exception */
      do {
-		pccc_resp = (eip_pccc_dhp_resp*)(req->data);
+		pccc_resp = (eip_pccc_dhp_resp_old*)(req->data);
 
 		data_end = (req->data + pccc_resp->encap_length + sizeof(eip_encap_t));
 
@@ -1295,7 +1370,7 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
 int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
 {
     ab_tag_p tag;
-    eip_pccc_dhp_req *pccc;
+    eip_pccc_dhp_req_old *pccc;
     uint8_t *data;
     uint8_t element_def[16];
     int element_def_size;
@@ -1321,10 +1396,10 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
     	return rc;
     }
 
-    pccc = (eip_pccc_dhp_req*)(req->data);
+    pccc = (eip_pccc_dhp_req_old*)(req->data);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_pccc_req);
+    data = (req->data) + sizeof(eip_pccc_req_old);
 
     /* copy laa into the request */
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
@@ -1448,7 +1523,7 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
 int ab_tag_write_pccc_dhp_check(plc_tag p_tag)
 {
     ab_tag_p tag;
-    eip_pccc_dhp_resp *pccc_resp;
+    eip_pccc_dhp_resp_old *pccc_resp;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
 
@@ -1493,7 +1568,7 @@ int ab_tag_write_pccc_dhp_check(plc_tag p_tag)
 
  	/* fake exception */
  	do {
-		pccc_resp = (eip_pccc_dhp_resp*)(req->data);
+		pccc_resp = (eip_pccc_dhp_resp_old*)(req->data);
 
 		/* check the response status */
 		if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
@@ -1622,7 +1697,7 @@ int ab_tag_read_cip_start(plc_tag p_tag)
 
 	data_per_packet = MAX_EIP_PACKET_SIZE - overhead;
 
-	/* we want a multiple of 4 bytes */
+	/* we want a multiple of 4 bytes, round down */
 	data_per_packet &= 0xFFFFFFFC;
 
 	if(data_per_packet <= 0) {
@@ -2904,7 +2979,7 @@ int session_check_incoming_data(ab_session_p session)
 			 * field.  Use the PCCC sequence in those cases??  How do we tell?
 			 */
 			if(encap->encap_command == AB_EIP_CONNECTED_SEND) {
-				eip_cip_resp *resp = (eip_cip_resp *)(session->recv_data);
+				eip_cip_resp_old *resp = (eip_cip_resp_old *)(session->recv_data);
 
 				if(resp->cpf_orig_conn_id == tmp->conn_id && resp->cpf_conn_seq_num == tmp->conn_seq) {
 					break;
