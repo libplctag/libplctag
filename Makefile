@@ -19,17 +19,17 @@
 #
 
 
-ifeq ($(PLCCOMM_ROOT),)
-PLCCOMM_ROOT = ./
+ifeq ($(LIBPLCTAG_ROOT),)
+LIBPLCTAG_ROOT = ./
 endif
 
 	
 SUBDIRS = lib examples
 DEFINES = DEBUG=1
 
-all: plccomm
+all: libplctag
 
-plccomm:
+libplctag:
 	@for mdir in $(SUBDIRS); do \
 		if test -d $$mdir; then \
 			if test -f $$mdir/configure -a ! -f $$mdir/Makefile; then \
