@@ -2011,6 +2011,7 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 	/* how much overhead per packet? */
 	if(tag->encoded_type_info_size) {
 		encoded_type_size = tag->encoded_type_info_size;
+		pdebug("got existing encoded type size of %d", encoded_type_size);
 	} else {
 		/*
 		 * FIXME
@@ -2101,7 +2102,12 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 		embed_start = data;
 
 		/* set up the CIP Read request */
-		*data = AB_EIP_CMD_CIP_WRITE_FRAG;
+		if(num_reqs == 1) {
+			*data = AB_EIP_CMD_CIP_WRITE;
+		} else {
+			*data = AB_EIP_CMD_CIP_WRITE_FRAG;
+		}
+
 		data++;
 
 		/* copy the tag name into the request */
@@ -2146,18 +2152,29 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 		*((uint16_t*)data) = h2le16(elem_count);
 		data += 2;
 
-		/* put in the byte offset */
-		*((uint32_t*)data) = h2le32(byte_offset);
-		data += 4;
+		if(num_reqs > 1) {
+			/* put in the byte offset */
+			*((uint32_t*)data) = h2le32(byte_offset);
+			data += 4;
+		}
 
 		/* now copy the data to write */
 		if(tag->frag_size < (p_tag->size - byte_offset)) {
 			mem_copy(data, tag->p_tag.data + byte_offset, tag->frag_size);
 			data += tag->frag_size;
+
+			/* no need for padding here as frag_size is a multiple of 4. */
 		} else {
 			mem_copy(data, tag->p_tag.data + byte_offset, p_tag->size - byte_offset);
 			data += p_tag->size - byte_offset;
+
+			/* need to pad data to multiple of 16-bits */
+			if((p_tag->size - byte_offset) & 0x01) {
+				*data = 0;
+				data++;
+			}
 		}
+
 
 		/* mark the end of the embedded packet */
 		embed_end = data;
@@ -2275,6 +2292,8 @@ int ab_tag_write_cip_check(plc_tag p_tag)
      * of the tag's data buffer.
      */
     for(i = 0; i < tag->num_requests; i++) {
+    	int reply_service;
+
     	req = tag->reqs[i];
 
     	if(!req) {
@@ -2297,7 +2316,10 @@ int ab_tag_write_cip_check(plc_tag p_tag)
 			break;
 		}
 
-		if(cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)) {
+    	/* if we have fragmented the request, we need to look for a different return code */
+		reply_service = ((tag->num_requests > 1) ? (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK) : (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK));
+
+		if(cip_resp->reply_service != reply_service) {
 			pdebug("CIP response reply service unexpected: %d",cip_resp->reply_service);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
@@ -2692,7 +2714,7 @@ int check_tag_name(ab_tag_p tag)
         case AB_PROTOCOL_PLC:
         case AB_PROTOCOL_MLGX:
             if(!ab_make_laa(tag->encoded_name,&(tag->encoded_name_size),name,MAX_TAG_NAME)) {
-                pdebug("parse of PCCC-style tag name failed!");
+                pdebug("parse of PCCC-style tag name %s failed!",name);
 
                 return PLCTAG_ERR_BAD_PARAM;
             }
@@ -2700,7 +2722,7 @@ int check_tag_name(ab_tag_p tag)
             break;
         case AB_PROTOCOL_LGX:
             if(!convert_tag_name(tag,name)) {
-                pdebug("parse of CIP-style tag name failed!");
+                pdebug("parse of CIP-style tag name %s failed!",name);
 
                 return PLCTAG_ERR_BAD_PARAM;
             }
