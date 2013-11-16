@@ -1684,6 +1684,7 @@ int ab_tag_read_cip_start(plc_tag p_tag)
     int overhead;
     int data_per_packet;
     int num_reqs;
+    int elem_size;
 
     pdebug("Starting");
 
@@ -1699,6 +1700,21 @@ int ab_tag_read_cip_start(plc_tag p_tag)
 
 	/* we want a multiple of 4 bytes, round down */
 	data_per_packet &= 0xFFFFFFFC;
+
+	/*
+	 * There seems to be a case where the PLC will not break some types up
+	 * such as strings.  So, we will need to get data on boundaries of
+	 * that size.  Also note that apparently anything with a size bigger than
+	 * 4 bytes will be a multiple of 4 bytes in size.
+	 *
+	 * FIXME there has to be a better way to do this.
+	 */
+
+    elem_size = attr_get_int(tag->attributes,"elem_size",0);
+	if(elem_size > 4) {
+		int num_elems_per_packet = (int)data_per_packet / (int) elem_size;
+		data_per_packet = num_elems_per_packet * elem_size;
+	}
 
 	if(data_per_packet <= 0) {
 		pdebug("Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
