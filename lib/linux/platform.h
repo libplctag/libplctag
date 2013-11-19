@@ -143,15 +143,15 @@ extern int64_t time_ms(void);
 
 extern void pdebug_impl(const char *func, int line_num, const char *templ, ...);
 #if defined(USE_STD_VARARG_MACROS) || defined(WIN32)
-#define pdebug(f,...) \
-   if(DEBUG) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__)
+#define pdebug(d,f,...) \
+   do { if(d) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__); } while(0)
 #else
-#define pdebug(f,a...) \
-   if(DEBUG) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,##a )
+#define pdebug(d,f,a...) \
+   do{ if(d) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,##a ); } while(0)
 #endif
 
 extern void pdebug_dump_bytes_impl(uint8_t *data,int count);
-#define pdebug_dump_bytes(d,c)  if(DEBUG) pdebug_dump_bytes_impl(d,c)
+#define pdebug_dump_bytes(dbg, d,c)  do { if(dbg) pdebug_dump_bytes_impl(d,c); } while(0)
 
 
 

@@ -196,87 +196,87 @@ uint16_t calculate_crc16(uint8_t *data, int size)
 
 
 
-void decode_pccc_error(int error)
+void decode_pccc_error(plc_tag tag, int error)
 {
     switch(error) {
         case 1:
-            pdebug("Error converting block address.");
+            pdebug(tag->debug,"Error converting block address.");
             break;
 
         case 2:
-            pdebug("Less levels specified in address than minimum for any address.");
+            pdebug(tag->debug,"Less levels specified in address than minimum for any address.");
             break;
 
         case 3:
-            pdebug("More levels specified in address than system supports");
+            pdebug(tag->debug,"More levels specified in address than system supports");
             break;
 
         case 4:
-            pdebug("Symbol not found.");
+            pdebug(tag->debug,"Symbol not found.");
             break;
 
         case 5:
-            pdebug("Symbol is of improper format.");
+            pdebug(tag->debug,"Symbol is of improper format.");
             break;
 
         case 6:
-            pdebug("Address doesn't point to something usable.");
+            pdebug(tag->debug,"Address doesn't point to something usable.");
             break;
 
         case 7:
-            pdebug("File is wrong size.");
+            pdebug(tag->debug,"File is wrong size.");
             break;
 
         case 8:
-            pdebug("Cannot complete request, situation has changed since the start of the command.");
+            pdebug(tag->debug,"Cannot complete request, situation has changed since the start of the command.");
             break;
 
         case 9:
-            pdebug("File is too large.");
+            pdebug(tag->debug,"File is too large.");
             break;
 
         case 0x0A:
-            pdebug("Transaction size plus word address is too large.");
+            pdebug(tag->debug,"Transaction size plus word address is too large.");
             break;
 
         case 0x0B:
-            pdebug("Access denied, improper privilege.");
+            pdebug(tag->debug,"Access denied, improper privilege.");
             break;
 
         case 0x0C:
-            pdebug("Condition cannot be generated - resource is not available (some has upload active)");
+            pdebug(tag->debug,"Condition cannot be generated - resource is not available (some has upload active)");
             break;
 
         case 0x0D:
-            pdebug("Condition already exists - resource is already available.");
+            pdebug(tag->debug,"Condition already exists - resource is already available.");
             break;
 
         case 0x0E:
-            pdebug("Shutdown could not be executed.");
+            pdebug(tag->debug,"Shutdown could not be executed.");
             break;
 
         case 0x0F:
-            pdebug("Requestor does not have upload or download access - no privilege.");
+            pdebug(tag->debug,"Requestor does not have upload or download access - no privilege.");
             break;
 
         case 0x10:
-            pdebug("Histogram overflow.");
+            pdebug(tag->debug,"Histogram overflow.");
             break;
 
         case 0x11:
-            pdebug("Illegal data type.");
+            pdebug(tag->debug,"Illegal data type.");
             break;
 
         case 0x12:
-            pdebug("Bad parameter.");
+            pdebug(tag->debug,"Bad parameter.");
             break;
 
         case 0x13:
-            pdebug("Address reference exists to deleted data table.");
+            pdebug(tag->debug,"Address reference exists to deleted data table.");
             break;
 
         default:
-            pdebug("Unknown error response 0x%02x.",error);
+            pdebug(tag->debug,"Unknown error response 0x%02x.",error);
             break;
     }
 }

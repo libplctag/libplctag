@@ -283,12 +283,13 @@ struct ab_connection_t_old {
 
 
 struct ab_tag_t {
-    struct plc_tag_t p_tag;
+    /*struct plc_tag_t p_tag;*/
+	TAG_BASE_STRUCT;
 
     ab_tag_p next;
     ab_tag_p prev;
 
-    attr attributes;
+    //attr attributes;
 
     /* how do we talk to this device? */
     int protocol_type;
@@ -298,7 +299,6 @@ struct ab_tag_t {
 
     /* pointers back to session */
     ab_session_p session;
-    //ab_connection connection;
 
     /* this contains the encoded name */
     uint8_t encoded_name[MAX_TAG_NAME];
@@ -307,12 +307,17 @@ struct ab_tag_t {
     /* the connection IOI path */
     uint8_t conn_path[MAX_CONN_PATH];
     uint8_t conn_path_size;
+
     uint8_t routing_path[MAX_CONN_PATH];
     uint8_t routing_path_size;
 
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
     int encoded_type_info_size;
+
+    /* number of elements and size of each in the tag. */
+    int elem_count;
+    int elem_size;
 
     /* outstanding requests */
     int num_requests;
@@ -340,6 +345,7 @@ struct ab_request_t {
 	int abort_request;
 
 	int status;
+	int debug;
 
 	ab_session_p session;
 

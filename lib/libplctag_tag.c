@@ -62,17 +62,13 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     plc_tag tag = PLC_TAG_NULL;
     attr attribs = NULL;
 
-    pdebug("Starting.");
-
     if(!attrib_str || !str_length(attrib_str)) {
-        pdebug("Null or empty attribute string!");
         return PLC_TAG_NULL;
     }
 
     attribs = attr_create_from_str(attrib_str);
 
     if(!attribs) {
-    	pdebug("Unable to create attributes!");
     	return PLC_TAG_NULL;
     }
 
@@ -87,8 +83,6 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     if(!tag) {
         return tag;
     }
-
-    pdebug("Done.");
 
     return tag;
 }
@@ -110,7 +104,9 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 
 LIB_EXPORT int plc_tag_abort(plc_tag tag)
 {
-    pdebug("Starting.");
+	int debug = tag->debug;
+
+    pdebug(debug, "Starting.");
 
     if(!tag || !tag->vtable)
         return PLCTAG_ERR_NULL_PTR;
@@ -119,7 +115,7 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag)
     tag->status = PLCTAG_STATUS_OK;
 
     if(!tag->vtable->abort) {
-        pdebug("Tag does not have a abort function!");
+        pdebug(debug,"Tag does not have a abort function!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -147,7 +143,9 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag)
 
 LIB_EXPORT int plc_tag_destroy(plc_tag tag)
 {
-    pdebug("Starting.");
+	int debug = tag->debug;
+
+    pdebug(debug, "Starting.");
 
     if(!tag)
         return PLCTAG_STATUS_OK;
@@ -156,7 +154,7 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag)
     /*tag->status = PLCTAG_STATUS_OK;*/
 
     if(!tag->vtable || !tag->vtable->destroy) {
-        pdebug("tag destructor not defined!");
+        pdebug(debug, "tag destructor not defined!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -184,16 +182,17 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag)
 
 LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
 {
-    int rc;
+    int debug = tag->debug;
+	int rc;
 
-    pdebug("Starting.");
+    pdebug(debug, "Starting.");
 
     if(!tag)
         return PLCTAG_ERR_NULL_PTR;
 
     /* check for null parts */
     if(!tag->vtable || !tag->vtable->read) {
-        pdebug("Tag does not have a read function!");
+        pdebug(debug, "Tag does not have a read function!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -243,7 +242,7 @@ LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
     	}
     }
 
-    pdebug("Done");
+    pdebug(debug, "Done");
 
     return rc;
 }
@@ -270,7 +269,7 @@ LIB_EXPORT int plc_tag_status(plc_tag tag)
         return PLCTAG_ERR_NULL_PTR;
 
     if(!tag->vtable || !tag->vtable->status) {
-        pdebug("tag status accessor not defined!");
+        pdebug(tag->debug, "tag status accessor not defined!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -300,9 +299,10 @@ LIB_EXPORT int plc_tag_status(plc_tag tag)
 
 LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
 {
-    int rc;
+    int debug = tag->debug;
+	int rc;
 
-    pdebug("Starting.");
+    pdebug(debug, "Starting.");
 
     if(!tag)
         return PLCTAG_ERR_NULL_PTR;
@@ -311,7 +311,7 @@ LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
     /*tag->status = PLCTAG_STATUS_OK;*/
 
     if(!tag->vtable || !tag->vtable->write) {
-        pdebug("Tag does not have a write function!");
+        pdebug(debug, "Tag does not have a write function!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -357,7 +357,7 @@ LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
     	}
     }
 
-    pdebug("Done");
+    pdebug(debug, "Done");
 
     return rc;
 }
@@ -374,8 +374,6 @@ LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
 
 LIB_EXPORT int plc_tag_get_size(plc_tag tag)
 {
-    pdebug("Starting.");
-
     if(!tag)
         return PLCTAG_ERR_NULL_PTR;
 

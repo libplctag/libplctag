@@ -62,7 +62,7 @@ extern "C"
 int ab_make_laa(uint8_t *data, int *size, const char *name, int max_tag_name_size);
 uint8_t calculate_bcc(uint8_t *data,int size);
 uint16_t calculate_crc16(uint8_t *data, int size);
-void decode_pccc_error(int error);
+void decode_pccc_error(plc_tag tag, int error);
 uint8_t *ab_decode_pccc_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
 int ab_encode_pccc_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
 

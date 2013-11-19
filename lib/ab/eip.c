@@ -60,45 +60,47 @@ extern "C"
 /* API functions */
 
 /* generic */
-int ab_tag_abort(plc_tag tag);
-int ab_tag_destroy(plc_tag p_tag);
+int ab_tag_abort(ab_tag_p tag);
+int ab_tag_destroy(ab_tag_p p_tag);
 
 /* PCCC */
-int ab_tag_status_pccc(plc_tag p_tag);
-int ab_tag_read_pccc_start(plc_tag p_tag);
-int ab_tag_read_pccc_check(plc_tag p_tag);
-int ab_tag_write_pccc_start(plc_tag p_tag);
-int ab_tag_write_pccc_check(plc_tag p_tag);
+int ab_tag_status_pccc(ab_tag_p tag);
+int ab_tag_read_pccc_start(ab_tag_p tag);
+int ab_tag_read_pccc_check(ab_tag_p tag);
+int ab_tag_write_pccc_start(ab_tag_p tag);
+int ab_tag_write_pccc_check(ab_tag_p tag);
 
 /* PCCC with DH+ last hop */
-int ab_tag_status_pccc_dhp(plc_tag p_tag);
-int ab_tag_read_pccc_dhp_start(plc_tag p_tag);
-int ab_tag_read_pccc_dhp_check(plc_tag p_tag);
-int ab_tag_write_pccc_dhp_start(plc_tag p_tag);
-int ab_tag_write_pccc_dhp_check(plc_tag p_tag);
+int ab_tag_status_pccc_dhp(ab_tag_p tag);
+int ab_tag_read_pccc_dhp_start(ab_tag_p tag);
+int ab_tag_read_pccc_dhp_check(ab_tag_p tag);
+int ab_tag_write_pccc_dhp_start(ab_tag_p tag);
+int ab_tag_write_pccc_dhp_check(ab_tag_p tag);
 
 /* CIP "native" */
-int ab_tag_status_cip(plc_tag p_tag);
-int ab_tag_read_cip_start(plc_tag p_tag);
-int ab_tag_read_cip_check(plc_tag p_tag);
-int ab_tag_write_cip_start(plc_tag p_tag);
-int ab_tag_write_cip_check(plc_tag p_tag);
+int ab_tag_status_cip(ab_tag_p tag);
+int ab_tag_read_cip_start(ab_tag_p tag);
+int ab_tag_read_cip_check(ab_tag_p tag);
+int ab_tag_write_cip_start(ab_tag_p tag);
+int ab_tag_write_cip_check(ab_tag_p tag);
 
 
 /* various helper functions */
 int check_mutex();
-ab_session_p ab_session_create(const char *host, int gw_port);
-int ab_session_connect(ab_session_p session, const char *host);
+ab_session_p ab_session_create(ab_tag_p tag, const char *host, int gw_port);
+int ab_session_connect(ab_tag_p tag, ab_session_p session, const char *host);
 int ab_session_empty(ab_session_p session);
-int ab_session_register(ab_session_p session);
-int ab_session_unregister(ab_session_p session);
+int ab_session_register(ab_tag_p tag, ab_session_p session);
+int ab_session_unregister(ab_tag_p tag, ab_session_p session);
 int convert_path_to_ioi(ab_tag_p tag, const char *path);
 int convert_tag_name(ab_tag_p tag, const char *name);
 char *ab_decode_cip_status(int status);
-int ab_check_cpu(ab_tag_p tag);
-int find_or_create_session(ab_tag_p tag);
-int check_tag_name(ab_tag_p tag);
+int ab_check_cpu(ab_tag_p tag, attr attribs);
+int find_or_create_session(ab_tag_p tag, attr attribs);
+int check_tag_name(ab_tag_p tag, const char *name);
 tag_vtable_p set_tag_vtable(ab_tag_p tag);
+
+/* request related functions. */
 void *request_handler_func(void *);
 int request_create(ab_request_p *req);
 int request_add(ab_session_p sess, ab_request_p req);
@@ -106,17 +108,17 @@ int request_remove(ab_session_p sess, ab_request_p req);
 int request_destroy(ab_request_p *req);
 
 
-int add_session_unsafe(ab_session_p n);
-int add_session(ab_session_p s);
-int remove_session_unsafe(ab_session_p n);
-int remove_session(ab_session_p s);
-ab_session_p find_session_by_host_unsafe(const char  *t);
+int add_session_unsafe(ab_tag_p tag, ab_session_p n);
+int add_session(ab_tag_p tag, ab_session_p s);
+int remove_session_unsafe(ab_tag_p tag, ab_session_p n);
+int remove_session(ab_tag_p tag, ab_session_p s);
+ab_session_p find_session_by_host_unsafe(ab_tag_p tag, const char  *t);
 
-int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag);
-int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag);
+int session_add_tag_unsafe(ab_tag_p tag, ab_session_p session);
+int session_remove_tag_unsafe(ab_tag_p tag, ab_session_p session);
 
-int ab_session_destroy(ab_session_p session);
-int ab_session_destroy_unsafe(ab_session_p session);
+int ab_session_destroy(ab_tag_p tag, ab_session_p session);
+int ab_session_destroy_unsafe(ab_tag_p tag, ab_session_p session);
 
 
 
@@ -147,11 +149,11 @@ struct tag_vtable_t plc_dhp_vtable = { ab_tag_abort, ab_tag_destroy, ab_tag_read
 plc_tag ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
-    int data_size=0;
     const char *path;
 	int rc;
+	int debug = attr_get_int(attribs,"debug",0);
 
-    pdebug("Starting.");
+    pdebug(debug,"Starting.");
 
 
     /*
@@ -162,58 +164,62 @@ plc_tag ab_tag_create(attr attribs)
     tag = (ab_tag_p)mem_alloc(sizeof(struct ab_tag_t));
 
     if(!tag) {
-    	pdebug("Unable to allocate memory for AB EIP tag!");
+    	pdebug(debug,"Unable to allocate memory for AB EIP tag!");
     	return PLC_TAG_NULL;
     }
 
+    /* store the debug status */
+    tag->debug = debug;
+
     /* store the attributes */
-    tag->attributes = attribs;
+   // tag->attributes = attribs;
 
     /* put in a temporary vtable so that deletes work */
-    tag->p_tag.vtable = &default_vtable;
+    tag->vtable = &default_vtable;
 
     /*
      * check the CPU type.
      *
      * This determines the protocol type.
      */
-    if(ab_check_cpu(tag) != PLCTAG_STATUS_OK) {
-        tag->p_tag.status = PLCTAG_ERR_BAD_DEVICE;
+    if(ab_check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
+        tag->status = PLCTAG_ERR_BAD_DEVICE;
         return (plc_tag)tag;
     }
 
     /* AB PLCs are little endian. */
-    tag->p_tag.endian = PLCTAG_DATA_LITTLE_ENDIAN;
+    tag->endian = PLCTAG_DATA_LITTLE_ENDIAN;
 
     /* allocate memory for the data */
-    data_size = attr_get_int(tag->attributes,"elem_count",1) * attr_get_int(tag->attributes,"elem_size",0);
+    tag->elem_count = attr_get_int(attribs,"elem_count",1);
+    tag->elem_size = attr_get_int(attribs,"elem_size",0);
+    tag->size = (tag->elem_count) * (tag->elem_size);
 
-    if(data_size == 0) {
+    if(tag->size == 0) {
     	/* failure! Need data_size! */
-    	tag->p_tag.status = PLCTAG_ERR_BAD_PARAM;
+    	tag->status = PLCTAG_ERR_BAD_PARAM;
     	return (plc_tag)tag;
     }
 
-    tag->p_tag.size = data_size;
-    tag->p_tag.data = mem_alloc(tag->p_tag.size);
+    tag->data = mem_alloc(tag->size);
 
-    if(tag->p_tag.data == NULL) {
-    	tag->p_tag.status = PLCTAG_ERR_NO_MEM;
+    if(tag->data == NULL) {
+    	tag->status = PLCTAG_ERR_NO_MEM;
     	return (plc_tag)tag;
     }
 
     /* get the connection path, punt if there is not one. */
-    path = attr_get_str(tag->attributes,"path",NULL);
+    path = attr_get_str(attribs,"path",NULL);
 
     if(path == NULL) {
-    	tag->p_tag.status = PLCTAG_ERR_BAD_PARAM;
+    	tag->status = PLCTAG_ERR_BAD_PARAM;
     	return (plc_tag)tag;
     }
 
     /* make sure the global mutex is set up */
     rc = check_mutex();
     if(rc != PLCTAG_STATUS_OK) {
-    	tag->p_tag.status = rc;
+    	tag->status = rc;
     	return (plc_tag)tag;
     }
 
@@ -222,7 +228,7 @@ plc_tag ab_tag_create(attr attribs)
 	 *
 	 * The rest of this is inside a locked block.
 	 */
-	pdebug("Locking mutex");
+	pdebug(debug,"Locking mutex");
 	critical_block(tag_mutex) {
 		/* fake exceptions */
 		do {
@@ -232,8 +238,8 @@ plc_tag ab_tag_create(attr attribs)
 			if(!request_handler_thread) {
 				rc = thread_create(&request_handler_thread,request_handler_func, 32*1024, NULL);
 				if(rc != PLCTAG_STATUS_OK) {
-					pdebug("Unable to create request handler thread!");
-					tag->p_tag.status = rc;
+					pdebug(debug,"Unable to create request handler thread!");
+					tag->status = rc;
 					break;
 				}
 			}
@@ -241,9 +247,9 @@ plc_tag ab_tag_create(attr attribs)
 			/*
 			 * Find or create a session.
 			 */
-			if(find_or_create_session(tag) != PLCTAG_STATUS_OK) {
-				pdebug("Unable to create session!");
-				tag->p_tag.status = PLCTAG_ERR_BAD_GATEWAY;
+			if(find_or_create_session(tag, attribs) != PLCTAG_STATUS_OK) {
+				pdebug(debug,"Unable to create session!");
+				tag->status = PLCTAG_ERR_BAD_GATEWAY;
 				break;
 			}
 
@@ -255,8 +261,8 @@ plc_tag ab_tag_create(attr attribs)
 		     * any DH+ special data.
 		     */
 		    if(convert_path_to_ioi(tag,path) != PLCTAG_STATUS_OK) {
-		        pdebug("Unable to convert links strings to binary path!");
-				tag->p_tag.status = PLCTAG_ERR_BAD_PARAM;
+		        pdebug(debug,"Unable to convert links strings to binary path!");
+				tag->status = PLCTAG_ERR_BAD_PARAM;
 		        break;
 		    }
 
@@ -265,36 +271,36 @@ plc_tag ab_tag_create(attr attribs)
 			 * check the tag name, this is protocol specific.
 			 */
 
-			if(check_tag_name(tag) != PLCTAG_STATUS_OK) {
-				pdebug("Bad tag name!");
-				tag->p_tag.status = PLCTAG_ERR_BAD_PARAM;
+			if(check_tag_name(tag, attr_get_str(attribs,"name","NONE")) != PLCTAG_STATUS_OK) {
+				pdebug(debug,"Bad tag name!");
+				tag->status = PLCTAG_ERR_BAD_PARAM;
 				break;
 			}
 
 			/*
 			 * set up tag vtable.  This is protocol specific
 			 */
-			tag->p_tag.vtable = set_tag_vtable(tag);
+			tag->vtable = set_tag_vtable(tag);
 
-			if(!tag->p_tag.vtable) {
-				pdebug("Unable to set tag vtable!");
-				tag->p_tag.status = PLCTAG_ERR_BAD_PARAM;
+			if(!tag->vtable) {
+				pdebug(debug,"Unable to set tag vtable!");
+				tag->status = PLCTAG_ERR_BAD_PARAM;
 				break;
 			}
 
 			/*
 			 * add the tag to the session's list.
 			 */
-			if(session_add_tag_unsafe(tag->session,tag) != PLCTAG_STATUS_OK) {
-				pdebug("unable to add new tag to connection!");
+			if(session_add_tag_unsafe(tag, tag->session) != PLCTAG_STATUS_OK) {
+				pdebug(debug,"unable to add new tag to connection!");
 
-				tag->p_tag.status = PLCTAG_ERR_CREATE;
+				tag->status = PLCTAG_ERR_CREATE;
 				break;
 			}
 		} while(0);
     }
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return (plc_tag)tag;
 }
@@ -302,9 +308,8 @@ plc_tag ab_tag_create(attr attribs)
 
 
 
-int ab_tag_abort(plc_tag p_tag)
+int ab_tag_abort(ab_tag_p tag)
 {
-	ab_tag_p tag = (ab_tag_p)p_tag;
 	int i;
 
 	for(i = 0; i < tag->num_requests; i++) {
@@ -331,19 +336,19 @@ int ab_tag_abort(plc_tag p_tag)
 
 
 
-int ab_tag_destroy(plc_tag p_tag)
+int ab_tag_destroy(ab_tag_p tag)
 {
 	int rc = PLCTAG_STATUS_OK;
-    ab_tag_p tag = (ab_tag_p)p_tag;
+    int debug = tag->debug;
 
-    pdebug("Starting.");
+    pdebug(debug,"Starting.");
 
     /* already destroyed? */
     if(!tag)
         return rc;
 
 	/* stop any current actions. */
-	plc_tag_abort(p_tag);
+	plc_tag_abort((plc_tag)tag);
 
 	/* remove it from the current connection */
 	if(tag->session) {
@@ -351,13 +356,13 @@ int ab_tag_destroy(plc_tag p_tag)
 
 		/* fiddling with shared data here, synchronize */
 		critical_block(tag_mutex) {
-			pdebug("Removing tag");
-			session_remove_tag_unsafe(session,tag);
+			pdebug(debug,"Removing tag");
+			session_remove_tag_unsafe(tag, session);
 
 			/* if the session is now empty, remove it */
 			if(ab_session_empty(session)) {
-				pdebug("Removing session");
-				ab_session_destroy_unsafe(session);
+				pdebug(debug,"Removing session");
+				ab_session_destroy_unsafe(tag, session);
 			}
 		}
 
@@ -366,25 +371,25 @@ int ab_tag_destroy(plc_tag p_tag)
 	}
 
 	/* remove any attributes saved. */
-	if(tag->attributes) {
+	/*if(tag->attributes) {
 		attr_destroy(tag->attributes);
 		tag->attributes = NULL;
-	}
+	}*/
 
 	if(tag->reqs) {
 		mem_free(tag->reqs);
 		tag->reqs = NULL;
 	}
 
-	if(tag->p_tag.data) {
-		mem_free(tag->p_tag.data);
-		tag->p_tag.data = NULL;
+	if(tag->data) {
+		mem_free(tag->data);
+		tag->data = NULL;
 	}
 
 	/* release memory */
 	mem_free(tag);
 
-	pdebug("done");
+	pdebug(debug,"done");
 
     return rc;
 }
@@ -466,22 +471,20 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
  * CIP-specific status.  This functions as a "tickler" routine
  * to check on the completion of async requests.
  */
-int ab_tag_status_pccc(plc_tag p_tag)
+int ab_tag_status_pccc(ab_tag_p tag)
 {
-	ab_tag_p tag = (ab_tag_p)p_tag;
-
 	if(tag->read_in_progress) {
-		int rc = ab_tag_read_pccc_check(p_tag);
+		int rc = ab_tag_read_pccc_check(tag);
 
-		p_tag->status = rc;
+		tag->status = rc;
 
 		return rc;
 	}
 
 	if(tag->write_in_progress) {
-		int rc = ab_tag_write_pccc_check(p_tag);
+		int rc = ab_tag_write_pccc_check(tag);
 
-		p_tag->status = rc;
+		tag->status = rc;
 
 		return rc;
 	}
@@ -492,13 +495,13 @@ int ab_tag_status_pccc(plc_tag p_tag)
 	 */
 	if(tag->session) {
 		if(!tag->session->is_connected) {
-			p_tag->status = PLCTAG_STATUS_PENDING;
+			tag->status = PLCTAG_STATUS_PENDING;
 		} else {
-			p_tag->status = PLCTAG_STATUS_OK;
+			tag->status = PLCTAG_STATUS_OK;
 		}
 	}
 
-	return p_tag->status;
+	return tag->status;
 }
 
 
@@ -509,28 +512,20 @@ int ab_tag_status_pccc(plc_tag p_tag)
  * ab_tag_read_pccc_start
  *
  * Start a PCCC tag read (PLC5, SLC).
- *
- * FIXME - this does not handle fragmentation of large requests!
  */
 
-int ab_tag_read_pccc_start(plc_tag p_tag)
+int ab_tag_read_pccc_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab_tag_p tag;
-    int elem_count = 0;
     ab_request_p req;
     uint16_t conn_seq_id = 0;
     int i;
     int overhead;
     int data_per_packet;
     int num_reqs;
+    int debug = tag->debug;
 
-    pdebug("Starting");
-
-    tag = (ab_tag_p)p_tag;
-
-    /* get the number of elements we will read */
-    elem_count = attr_get_int(tag->attributes,"elem_count",1);
+    pdebug(debug,"Starting");
 
     /* how many packets will we need? How much overhead? */
     overhead = sizeof(pccc_resp) + 4; /* MAGIC 4 = fudge */
@@ -538,26 +533,35 @@ int ab_tag_read_pccc_start(plc_tag p_tag)
     data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
 
 	if(data_per_packet <= 0) {
-		pdebug("Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
-		p_tag->status = PLCTAG_ERR_TOO_LONG;
+		pdebug(debug,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
+		tag->status = PLCTAG_ERR_TOO_LONG;
 		return PLCTAG_ERR_TOO_LONG;
 	}
 
-	num_reqs = (p_tag->size + (data_per_packet-1)) / data_per_packet;
+	num_reqs = (tag->size + (data_per_packet-1)) / data_per_packet;
 
-	pdebug("We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
+	if(num_reqs > 1) {
+		pdebug(debug,"PCCC requests cannot be fragmented.  Too much data requested.");
+		return PLCTAG_ERR_TOO_LONG;
+	}
+
+	pdebug(debug,"We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
 
 	tag->reqs = (ab_request_p*)mem_alloc(num_reqs * sizeof(ab_request_p));
 
 	if(!tag->reqs) {
-		pdebug("Unable to get memory for request array!");
-		p_tag->status = PLCTAG_ERR_NO_MEM;
+		pdebug(debug,"Unable to get memory for request array!");
+		tag->status = PLCTAG_ERR_NO_MEM;
 		return rc;
 	}
 
 	/* store this for later */
 	tag->num_requests = num_reqs;
 	tag->frag_size = data_per_packet;
+
+	/*
+	 * NOTE: there should only be one request.  PCCC does not support fragments.
+	 */
 
 	/* loop over the requests */
 	for(i = 0; i < tag->num_requests; i++) {
@@ -570,10 +574,12 @@ int ab_tag_read_pccc_start(plc_tag p_tag)
 		rc = request_create(&req);
 
 		if(rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to get new request.  rc=%d",rc);
-			p_tag->status = rc;
+			pdebug(debug,"Unable to get new request.  rc=%d",rc);
+			tag->status = rc;
 			return rc;
 		}
+
+		req->debug = tag->debug;
 
 		/* point the struct pointers to the buffer*/
 		cip = (eip_cip_uc_req*)(req->data);
@@ -601,7 +607,7 @@ int ab_tag_read_pccc_start(plc_tag p_tag)
 		pccc->pccc_status = 0;  /* STS 0 in request */
 		pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
 		pccc->pccc_function = AB_PCCC_TYPED_READ_FUNC;
-		pccc->pccc_transfer_size = h2le16(elem_count); /* This is not in the docs, but it is in the data. */
+		pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
 
 		/* point to the end of the struct */
 		data = ((uint8_t *)pccc) + sizeof(pccc_req);
@@ -611,7 +617,7 @@ int ab_tag_read_pccc_start(plc_tag p_tag)
 		data += tag->encoded_name_size;
 
 		/* we need the count twice? */
-		*((uint16_t*)data) = h2le16(elem_count); /* FIXME - bytes or INTs? */
+		*((uint16_t*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
 		data += sizeof(uint16_t);
 
 		embed_end = data;
@@ -677,31 +683,37 @@ int ab_tag_read_pccc_start(plc_tag p_tag)
 		rc = request_add(tag->session, req);
 
 		if(rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to lock add request to session! rc=%d",rc);
+			pdebug(debug,"Unable to lock add request to session! rc=%d",rc);
 			request_destroy(&req);
-			p_tag->status = rc;
+			tag->status = rc;
 			return rc;
 		}
+
+		/* save the request for later */
+		tag->reqs[i] = req;
+		req = NULL;
 	}
 
     tag->read_in_progress = 1;
 
-    tag->p_tag.status = PLCTAG_STATUS_PENDING;
+    tag->status = PLCTAG_STATUS_PENDING;
 
     return PLCTAG_STATUS_PENDING;
 }
 
 
 
-/* FIXME
+/*
+ * ab_tag_read_pccc_check
  *
- * This must be rewritten to use multiple request buffers and unconnected explicit messages.
+ * NOTE that we can have only one outstanding request because PCCC
+ * does not support fragments.
  */
 
 
-int ab_tag_read_pccc_check(plc_tag p_tag)
+int ab_tag_read_pccc_check(ab_tag_p tag)
 {
-    ab_tag_p tag;
+    ;
     eip_pccc_resp_old *pccc_resp;
     uint8_t *data;
     uint8_t *data_end;
@@ -709,25 +721,24 @@ int ab_tag_read_pccc_check(plc_tag p_tag)
     int pccc_res_length;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
+    int debug = tag->debug;
 
-    pdebug("Starting");
+    pdebug(debug,"Starting");
 
-    tag = (ab_tag_p)p_tag;
-
+    /* PCCC only can have one request outstanding */
     /* is there an outstanding request? */
-    //if(!tag->req) {
-    	//tag->read_in_progress = 0;
-    	//tag->p_tag.status = PLCTAG_ERR_NULL_PTR;
-    	//return PLCTAG_ERR_NULL_PTR;
-    //}
+    if(!tag->reqs || !(tag->reqs[0])) {
+    	tag->read_in_progress = 0;
+    	tag->status = PLCTAG_ERR_NULL_PTR;
+    	return PLCTAG_ERR_NULL_PTR;
+    }
 
-    //if(!tag->req->resp_received) {
-    //	tag->p_tag.status = PLCTAG_STATUS_PENDING;
-    //	return PLCTAG_STATUS_PENDING;
-    //}
-
-    /* FIXME, just here to get compilation */
     req = tag->reqs[0];
+
+    if(!req->resp_received) {
+    	tag->status = PLCTAG_STATUS_PENDING;
+    	return PLCTAG_STATUS_PENDING;
+    }
 
     /* fake exceptions */
     do {
@@ -736,26 +747,26 @@ int ab_tag_read_pccc_check(plc_tag p_tag)
 		data_end = (req->data + pccc_resp->encap_length + sizeof(eip_encap_t));
 
 		if(le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-			pdebug("Unexpected EIP packet type received: %d!",pccc_resp->encap_command);
+			pdebug(debug,"Unexpected EIP packet type received: %d!",pccc_resp->encap_command);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(le2h16(pccc_resp->encap_status) != AB_EIP_OK) {
-			pdebug("EIP command failed, response code: %d",pccc_resp->encap_status);
+			pdebug(debug,"EIP command failed, response code: %d",pccc_resp->encap_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		if(pccc_resp->general_status != AB_EIP_OK) {
-			pdebug("PCCC command failed, response code: %d",pccc_resp->general_status);
+			pdebug(debug,"PCCC command failed, response code: %d",pccc_resp->general_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		if(pccc_resp->pccc_status != AB_EIP_OK) {
 			/*pdebug(PLC_LOG_ERR,PLC_ERR_READ, "PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
-			decode_pccc_error(pccc_resp->pccc_data[0]);
+			decode_pccc_error((plc_tag)tag, pccc_resp->pccc_data[0]);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
@@ -764,7 +775,7 @@ int ab_tag_read_pccc_check(plc_tag p_tag)
 		data = pccc_resp->pccc_data;
 
 		if(!(data = ab_decode_pccc_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
-			pdebug("Unable to decode PCCC response data type and data size!");
+			pdebug(debug,"Unable to decode PCCC response data type and data size!");
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
@@ -777,19 +788,19 @@ int ab_tag_read_pccc_check(plc_tag p_tag)
 
 		if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
 			if(!(data = ab_decode_pccc_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
-				pdebug("Unable to decode PCCC response array element data type and data size!");
+				pdebug(debug,"Unable to decode PCCC response array element data type and data size!");
 				rc = PLCTAG_ERR_BAD_DATA;
 				break;
 			}
 		}
 
 		/* copy data into the tag. */
-		if((data_end - data) > p_tag->size) {
+		if((data_end - data) > tag->size) {
 			rc = PLCTAG_ERR_TOO_LONG;
 			break;
 		}
 
-		mem_copy(p_tag->data,data,data_end - data);
+		mem_copy(tag->data, data, data_end - data);
 
 		rc = PLCTAG_STATUS_OK;
     } while(0);
@@ -798,14 +809,15 @@ int ab_tag_read_pccc_check(plc_tag p_tag)
     if(req) {
      	request_destroy(&req);
         req = NULL;
+        tag->reqs[0] = NULL;
     }
 
     /* the read is done. */
     tag->read_in_progress = 0;
 
-    p_tag->status = rc;
+    tag->status = rc;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return rc;
 }
@@ -815,10 +827,9 @@ int ab_tag_read_pccc_check(plc_tag p_tag)
 
 /* FIXME -- this needs to be converted to unconnected messaging and multiple requests. */
 
-int ab_tag_write_pccc_start(plc_tag p_tag)
+int ab_tag_write_pccc_start(ab_tag_p tag)
 {
 	int rc = PLCTAG_STATUS_OK;
-    ab_tag_p tag;
     eip_pccc_req_old *pccc;
     uint8_t *data;
     uint8_t element_def[16];
@@ -826,23 +837,22 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
     uint8_t array_def[16];
     int array_def_size;
     int pccc_data_type;
-    int elem_size = 0;
-    int elem_count = 0;
     uint16_t conn_seq_id = 0;
     ab_request_p req = NULL;
+    int debug = tag->debug;
 
-    pdebug("Starting.");
-
-    tag = (ab_tag_p)p_tag;
+    pdebug(debug,"Starting.");
 
     /* get a request buffer */
     rc = request_create(&req);
 
     if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to get new request.  rc=%d",rc);
-    	p_tag->status = rc;
+    	pdebug(debug,"Unable to get new request.  rc=%d",rc);
+    	tag->status = rc;
     	return rc;
     }
+
+    req->debug = tag->debug;
 
     pccc = (eip_pccc_req_old*)(req->data);
 
@@ -854,17 +864,14 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
     data += tag->encoded_name_size;
 
     /* What type and size do we have? */
-    elem_size = attr_get_int(tag->attributes,"elem_size",0);
-    elem_count = attr_get_int(tag->attributes,"elem_count",1);
-
-    if(elem_size != 2 && elem_size != 4) {
-        pdebug("Unsupported data type size: %d",elem_size);
+    if(tag->elem_size != 2 && tag->elem_size != 4) {
+        pdebug(debug,"Unsupported data type size: %d",tag->elem_size);
     	request_destroy(&req);
-    	tag->p_tag.status = PLCTAG_ERR_NOT_ALLOWED;
+    	tag->status = PLCTAG_ERR_NOT_ALLOWED;
         return PLCTAG_ERR_NOT_ALLOWED;
     }
 
-    if(elem_size == 4)
+    if(tag->elem_size == 4)
         pccc_data_type = AB_PCCC_DATA_REAL;
     else
         pccc_data_type = AB_PCCC_DATA_INT;
@@ -872,17 +879,17 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
     /* generate the data type/data size fields, first the element part so that
      * we can get the size for the array part.
      */
-    if(!(element_def_size = ab_encode_pccc_dt_byte(element_def,sizeof(element_def),pccc_data_type,elem_size))) {
-        pdebug("Unable to encode PCCC request array element data type and size fields!");
+    if(!(element_def_size = ab_encode_pccc_dt_byte(element_def,sizeof(element_def),pccc_data_type,tag->elem_size))) {
+        pdebug(debug,"Unable to encode PCCC request array element data type and size fields!");
     	request_destroy(&req);
-    	tag->p_tag.status = PLCTAG_ERR_ENCODE;
+    	tag->status = PLCTAG_ERR_ENCODE;
         return PLCTAG_ERR_ENCODE;
     }
 
-    if(!(array_def_size = ab_encode_pccc_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY,element_def_size + elem_size*elem_count))) {
-        pdebug("Unable to encode PCCC request data type and size fields!");
+    if(!(array_def_size = ab_encode_pccc_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY,element_def_size + tag->size))) {
+        pdebug(debug,"Unable to encode PCCC request data type and size fields!");
     	request_destroy(&req);
-        tag->p_tag.status = PLCTAG_ERR_ENCODE;
+        tag->status = PLCTAG_ERR_ENCODE;
         return PLCTAG_ERR_ENCODE;
     }
 
@@ -895,8 +902,8 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
     data += element_def_size;
 
     /* now copy the data to write */
-    mem_copy(data,tag->p_tag.data,tag->p_tag.size);
-    data += tag->p_tag.size;
+    mem_copy(data,tag->data,tag->size);
+    data += tag->size;
 
     /* now fill in the rest of the structure. */
 
@@ -941,7 +948,7 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
      *
      * Seems to be the number of elements??
      */
-    pccc->pccc_transfer_size = h2le16(elem_count); /* This is not in the docs, but it is in the data. */
+    pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
 
 
     /* get ready to add the request to the queue for this session */
@@ -954,9 +961,9 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
     rc = request_add(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to lock add request to session! rc=%d",rc);
+    	pdebug(debug,"Unable to lock add request to session! rc=%d",rc);
     	request_destroy(&req);
-    	p_tag->status = rc;
+    	tag->status = rc;
     	return rc;
     }
 
@@ -965,36 +972,38 @@ int ab_tag_write_pccc_start(plc_tag p_tag)
 
     /* the write is now pending */
     tag->write_in_progress = 1;
-    tag->p_tag.status = PLCTAG_STATUS_PENDING;
+    tag->status = PLCTAG_STATUS_PENDING;
 
     return PLCTAG_STATUS_PENDING;
 }
 
 
 
-/* FIXME -- this needs to be converted to unconnected messaging and multiple requests. */
-int ab_tag_write_pccc_check(plc_tag p_tag)
+/*
+ * ab_tag_write_pccc_check
+ *
+ * Fragments are not supported.
+ */
+int ab_tag_write_pccc_check(ab_tag_p tag)
 {
-    ab_tag_p tag;
     eip_pccc_resp_old *pccc_resp;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
+    int debug = tag->debug;
 
-    pdebug("Starting.");
-
-    tag = (ab_tag_p)p_tag;
-
-    req = tag->reqs[0];
+    pdebug(debug,"Starting.");
 
     /* is there an outstanding request? */
-    if(!req) {
+    if(!tag->reqs || !(tag->reqs[0]) ) {
     	tag->write_in_progress = 0;
-    	tag->p_tag.status = PLCTAG_ERR_NULL_PTR;
+    	tag->status = PLCTAG_ERR_NULL_PTR;
     	return PLCTAG_ERR_NULL_PTR;
     }
 
+    req = tag->reqs[0];
+
     if(!req->resp_received) {
-    	tag->p_tag.status = PLCTAG_STATUS_PENDING;
+    	tag->status = PLCTAG_STATUS_PENDING;
     	return PLCTAG_STATUS_PENDING;
     }
 
@@ -1005,15 +1014,15 @@ int ab_tag_write_pccc_check(plc_tag p_tag)
 	rc = request_remove(tag->session, req);
 
 	if(rc != PLCTAG_STATUS_OK) {
-		pdebug("Unable to remove the request from the list! rc=%d",rc);
+		pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
 
 		/* since we could not remove it, maybe the thread can. */
-		plc_tag_abort(p_tag);
+		plc_tag_abort((plc_tag)tag);
 
 		/* not our request any more */
 		req = NULL;
 
-		tag->p_tag.status = rc;
+		tag->status = rc;
 
 		return rc;
 	}
@@ -1024,43 +1033,44 @@ int ab_tag_write_pccc_check(plc_tag p_tag)
 
 		/* check the response status */
 		if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-			pdebug("EIP unexpected response packet type: %d!",pccc_resp->encap_command);
+			pdebug(debug,"EIP unexpected response packet type: %d!",pccc_resp->encap_command);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(le2h16(pccc_resp->encap_status) != AB_EIP_OK) {
-			pdebug("EIP command failed, response code: %d",pccc_resp->encap_status);
+			pdebug(debug,"EIP command failed, response code: %d",pccc_resp->encap_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		if(pccc_resp->general_status != AB_EIP_OK) {
-			pdebug("PCCC command failed, response code: %d",pccc_resp->general_status);
+			pdebug(debug,"PCCC command failed, response code: %d",pccc_resp->general_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		if(pccc_resp->pccc_status != AB_EIP_OK) {
 			/*pdebug(PLC_LOG_ERR,PLC_ERR_READ, "PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
-			decode_pccc_error(pccc_resp->pccc_data[0]);
+			decode_pccc_error((plc_tag)tag, pccc_resp->pccc_data[0]);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
-		tag->p_tag.status = PLCTAG_STATUS_OK;
+		tag->status = PLCTAG_STATUS_OK;
 		rc = PLCTAG_STATUS_OK;
     } while(0);
 
     tag->write_in_progress = 0;
-    tag->p_tag.status = rc;
+    tag->status = rc;
 
     if(req) {
     	request_destroy(&(req));
     	req = NULL;
+    	tag->reqs[0] = NULL;
     }
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     /* Success! */
     return rc;
@@ -1085,22 +1095,20 @@ int ab_tag_write_pccc_check(plc_tag p_tag)
  * PCCC/DH+-specific status.  This functions as a "tickler" routine
  * to check on the completion of async requests.
  */
-int ab_tag_status_pccc_dhp(plc_tag p_tag)
+int ab_tag_status_pccc_dhp(ab_tag_p tag)
 {
-	ab_tag_p tag = (ab_tag_p)p_tag;
-
 	if(tag->read_in_progress) {
-		int rc = ab_tag_read_pccc_check(p_tag);
+		int rc = ab_tag_read_pccc_check(tag);
 
-		p_tag->status = rc;
+		tag->status = rc;
 
 		return rc;
 	}
 
 	if(tag->write_in_progress) {
-		int rc = ab_tag_write_pccc_check(p_tag);
+		int rc = ab_tag_write_pccc_check(tag);
 
-		p_tag->status = rc;
+		tag->status = rc;
 
 		return rc;
 	}
@@ -1116,45 +1124,71 @@ int ab_tag_status_pccc_dhp(plc_tag p_tag)
 	 */
 	if(tag->session) {
 		if(!tag->session->is_connected) {
-			p_tag->status = PLCTAG_STATUS_PENDING;
+			tag->status = PLCTAG_STATUS_PENDING;
 		} else {
-			p_tag->status = PLCTAG_STATUS_OK;
+			tag->status = PLCTAG_STATUS_OK;
 		}
 	}
 
-	return p_tag->status;
+	return tag->status;
 }
 
 
 
 
 
-/* FIXME -- this needs to be converted to unconnected messaging */
-int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
+/*
+ * ab_tag_read_pccc_dhp_start
+ *
+ * This does not support multiple request fragments.
+ */
+int ab_tag_read_pccc_dhp_start(ab_tag_p tag)
 {
-    ab_tag_p tag;
     eip_pccc_dhp_req_old *pccc;
     uint8_t *data;
-    int elem_count = 0;
+    int num_reqs;
+    int data_per_packet;
     int rc = PLCTAG_STATUS_OK;
     uint16_t conn_seq_id = 0;
     ab_request_p req;
+    int debug = tag->debug;
 
-    pdebug("Starting");
+    pdebug(debug,"Starting");
 
-    tag = (ab_tag_p)p_tag;
+    data_per_packet = MAX_PCCC_PACKET_SIZE - sizeof(eip_pccc_dhp_req_old) - 4;
 
-    /* get element count */
-    elem_count = attr_get_int(tag->attributes,"elem_count",1);
+	num_reqs = (tag->size + (data_per_packet-1)) / data_per_packet;
+
+	if(num_reqs > 1) {
+		pdebug(debug,"PCCC requests cannot be fragmented.  Too much data requested.");
+		return PLCTAG_ERR_TOO_LONG;
+	}
+
+	pdebug(debug,"We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
+
+	tag->reqs = (ab_request_p*)mem_alloc(num_reqs * sizeof(ab_request_p));
+
+	if(!tag->reqs) {
+		pdebug(debug,"Unable to get memory for request array!");
+		tag->status = PLCTAG_ERR_NO_MEM;
+		return rc;
+	}
+
+	/* store this for later */
+	tag->num_requests = num_reqs;
+	tag->frag_size = data_per_packet;
+
 
     /* get a request buffer */
     rc = request_create(&req);
 
     if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to get new request.  rc=%d",rc);
-    	p_tag->status = rc;
+    	pdebug(debug,"Unable to get new request.  rc=%d",rc);
+    	tag->status = rc;
     	return rc;
     }
+
+    req->debug = tag->debug;
 
     pccc = (eip_pccc_dhp_req_old*)(req->data);
 
@@ -1166,7 +1200,7 @@ int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
     data += tag->encoded_name_size;
 
     /* we need the count twice? */
-    *((uint16_t*)data) = h2le16(elem_count); /* FIXME - bytes or INTs? */
+    *((uint16_t*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
     data += sizeof(uint16_t);
 
     /* encap fields */
@@ -1204,7 +1238,7 @@ int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id);
     pccc->pccc_function = AB_PCCC_TYPED_READ_FUNC;
-    pccc->pccc_transfer_size = h2le16(elem_count); /* This is not in the docs, but it is in the data. */
+    pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
                                                         /* FIXME - bytes or INTs? */
 
     /* get ready to add the request to the queue for this session */
@@ -1217,9 +1251,9 @@ int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
     rc = request_add(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to lock add request to session! rc=%d",rc);
+    	pdebug(debug,"Unable to lock add request to session! rc=%d",rc);
     	request_destroy(&req);
-    	p_tag->status = rc;
+    	tag->status = rc;
     	return rc;
     }
 
@@ -1228,9 +1262,9 @@ int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
     tag->read_in_progress = 1;
 
     /* the read is now pending */
-    tag->p_tag.status = PLCTAG_STATUS_PENDING;
+    tag->status = PLCTAG_STATUS_PENDING;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -1238,10 +1272,13 @@ int ab_tag_read_pccc_dhp_start(plc_tag p_tag)
 
 
 
-/* FIXME -- this needs to be converted to unconnected messaging. */
-int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
+/*
+ * ab_tag_read_pccc_dhp_check
+ *
+ * PCCC does not support request fragments.
+ */
+int ab_tag_read_pccc_dhp_check(ab_tag_p tag)
 {
-    ab_tag_p tag;
     eip_pccc_dhp_resp_old *pccc_resp;
     uint8_t *data;
     uint8_t *data_end;
@@ -1249,24 +1286,23 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
     int pccc_res_length;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
+    int debug = tag->debug;
 
-    pdebug("Starting");
+    pdebug(debug,"Starting");
 
-    tag = (ab_tag_p)p_tag;
+    /* is there an outstanding request? */
+    if(!tag->reqs || !(tag->reqs[0]) ) {
+    	tag->read_in_progress = 0;
+    	tag->status = PLCTAG_ERR_NULL_PTR;
+    	return PLCTAG_ERR_NULL_PTR;
+    }
 
     req = tag->reqs[0];
 
-    /* is there an outstanding request? */
-     if(!req) {
- 	tag->read_in_progress = 0;
-     	tag->p_tag.status = PLCTAG_ERR_NULL_PTR;
-     	return PLCTAG_ERR_NULL_PTR;
-     }
-
-     if(!req->resp_received) {
-     	tag->p_tag.status = PLCTAG_STATUS_PENDING;
-     	return PLCTAG_STATUS_PENDING;
-     }
+    if(!req->resp_received) {
+    	tag->status = PLCTAG_STATUS_PENDING;
+    	return PLCTAG_STATUS_PENDING;
+    }
 
 
  	/*
@@ -1276,15 +1312,15 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
  	rc = request_remove(tag->session, req);
 
  	if(rc != PLCTAG_STATUS_OK) {
- 		pdebug("Unable to remove the request from the list! rc=%d",rc);
+ 		pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
 
  		/* since we could not remove it, maybe the thread can. */
- 		plc_tag_abort(p_tag);
+ 		plc_tag_abort((plc_tag)tag);
 
  		/* not our request any more */
  		req = NULL;
 
- 		tag->p_tag.status = rc;
+ 		tag->status = rc;
 
  		return rc;
  	}
@@ -1297,20 +1333,20 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
 		data_end = (req->data + pccc_resp->encap_length + sizeof(eip_encap_t));
 
 		if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-			pdebug("Unexpected EIP packet type received: %d!",pccc_resp->encap_command);
+			pdebug(debug,"Unexpected EIP packet type received: %d!",pccc_resp->encap_command);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(le2h16(pccc_resp->encap_status) != AB_EIP_OK) {
-			pdebug("EIP command failed, response code: %d",pccc_resp->encap_status);
+			pdebug(debug,"EIP command failed, response code: %d",pccc_resp->encap_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		if(pccc_resp->pccc_status != AB_EIP_OK) {
 			/*pdebug(PLC_LOG_ERR,PLC_ERR_READ, "PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
-			decode_pccc_error(pccc_resp->pccc_data[0]);
+			decode_pccc_error((plc_tag)tag, pccc_resp->pccc_data[0]);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
@@ -1319,7 +1355,7 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
 		data = pccc_resp->pccc_data;
 
 		if(!(data = ab_decode_pccc_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
-			pdebug("Unable to decode PCCC response data type and data size!");
+			pdebug(debug,"Unable to decode PCCC response data type and data size!");
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
@@ -1332,20 +1368,20 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
 
 		if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
 			if(!(data = ab_decode_pccc_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
-				pdebug("Unable to decode PCCC response array element data type and data size!");
+				pdebug(debug,"Unable to decode PCCC response array element data type and data size!");
 				rc = PLCTAG_ERR_BAD_DATA;
 				break;
 			}
 		}
 
 		/* copy data into the tag. */
-		if((data_end - data) > p_tag->size) {
+		if((data_end - data) > tag->size) {
 			rc = PLCTAG_ERR_TOO_LONG;
 			break;
 		}
 
 		/* all OK, copy the data. */
-		mem_copy(p_tag->data,data,data_end - data);
+		mem_copy(tag->data, data, data_end - data);
 
 		rc = PLCTAG_STATUS_OK;
      } while(0);
@@ -1353,13 +1389,15 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
      if(req) {
      	request_destroy(&(req));
         req = NULL;
+        mem_free(tag->reqs);
+        tag->reqs = NULL;
      }
 
      tag->read_in_progress = 0;
 
-     tag->p_tag.status = rc;
+     tag->status = rc;
 
-     pdebug("Done.");
+     pdebug(debug,"Done.");
 
      return rc;
 }
@@ -1367,9 +1405,8 @@ int ab_tag_read_pccc_dhp_check(plc_tag p_tag)
 
 
 /* FIXME -- this needs to be converted to unconnected messaging */
-int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
+int ab_tag_write_pccc_dhp_start(ab_tag_p tag)
 {
-    ab_tag_p tag;
     eip_pccc_dhp_req_old *pccc;
     uint8_t *data;
     uint8_t element_def[16];
@@ -1377,24 +1414,47 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
     uint8_t array_def[16];
     int array_def_size;
     int pccc_data_type;
-    int elem_size;
-    int elem_count;
     int rc = PLCTAG_STATUS_OK;
     uint16_t conn_seq_id = 0;
     ab_request_p req;
+    int data_per_packet;
+    int num_reqs;
+    int debug = tag->debug;
 
-    pdebug("Starting.");
+    data_per_packet = MAX_PCCC_PACKET_SIZE - sizeof(eip_pccc_dhp_req_old) - 4;
 
-    tag = (ab_tag_p)p_tag;
+	num_reqs = (tag->size + (data_per_packet-1)) / data_per_packet;
+
+	if(num_reqs > 1) {
+		pdebug(debug,"PCCC requests cannot be fragmented.  Too much data requested.");
+		return PLCTAG_ERR_TOO_LONG;
+	}
+
+	pdebug(debug,"We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
+
+	tag->reqs = (ab_request_p*)mem_alloc(num_reqs * sizeof(ab_request_p));
+
+	if(!tag->reqs) {
+		pdebug(debug,"Unable to get memory for request array!");
+		tag->status = PLCTAG_ERR_NO_MEM;
+		return rc;
+	}
+
+	/* store this for later */
+	tag->num_requests = num_reqs;
+	tag->frag_size = data_per_packet;
+
 
     /* get a request buffer */
     rc = request_create(&req);
 
     if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to get new request.  rc=%d",rc);
-    	p_tag->status = rc;
+    	pdebug(debug,"Unable to get new request.  rc=%d",rc);
+    	tag->status = rc;
     	return rc;
     }
+
+    req->debug = tag->debug;
 
     pccc = (eip_pccc_dhp_req_old*)(req->data);
 
@@ -1406,17 +1466,14 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
     data += tag->encoded_name_size;
 
     /* What type and size do we have? */
-	elem_size = attr_get_int(tag->attributes,"elem_size",0);
-	elem_count = attr_get_int(tag->attributes,"elem_count",1);
-
-	if(elem_size != 2 && elem_size != 4) {
-		pdebug("Unsupported data type size: %d",elem_size);
+	if(tag->elem_size != 2 && tag->elem_size != 4) {
+		pdebug(debug,"Unsupported data type size: %d",tag->elem_size);
     	request_destroy(&req);
-		tag->p_tag.status = PLCTAG_ERR_NOT_ALLOWED;
+		tag->status = PLCTAG_ERR_NOT_ALLOWED;
 		return PLCTAG_ERR_NOT_ALLOWED;
 	}
 
-	if(elem_size == 4)
+	if(tag->elem_size == 4)
 		pccc_data_type = AB_PCCC_DATA_REAL;
 	else
 		pccc_data_type = AB_PCCC_DATA_INT;
@@ -1425,17 +1482,17 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
      * we can get the size for the array part.
      */
 
-    if(!(element_def_size = ab_encode_pccc_dt_byte(element_def,sizeof(element_def),pccc_data_type,elem_size))) {
-        pdebug("Unable to encode PCCC request array element data type and size fields!");
+    if(!(element_def_size = ab_encode_pccc_dt_byte(element_def,sizeof(element_def),pccc_data_type,tag->elem_size))) {
+        pdebug(debug,"Unable to encode PCCC request array element data type and size fields!");
         request_destroy(&req);
-        tag->p_tag.status = PLCTAG_ERR_ENCODE;
+        tag->status = PLCTAG_ERR_ENCODE;
         return PLCTAG_ERR_ENCODE;
     }
 
-    if(!(array_def_size = ab_encode_pccc_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY,element_def_size + elem_size*elem_count))) {
-        pdebug("Unable to encode PCCC request data type and size fields!");
+    if(!(array_def_size = ab_encode_pccc_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY,element_def_size + tag->size))) {
+        pdebug(debug,"Unable to encode PCCC request data type and size fields!");
         request_destroy(&req);
-        tag->p_tag.status = PLCTAG_ERR_ENCODE;
+        tag->status = PLCTAG_ERR_ENCODE;
         return PLCTAG_ERR_ENCODE;
     }
 
@@ -1448,8 +1505,8 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
     data += element_def_size;
 
     /* now copy the data to write */
-    mem_copy(data,tag->p_tag.data, elem_size * elem_count);
-    data += elem_size * elem_count;
+    mem_copy(data,tag->data, tag->size);
+    data += tag->size;
 
 
     /* now fill in the rest of the structure. */
@@ -1486,7 +1543,7 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
      *
      * Seems to be the number of elements?
      */
-    pccc->pccc_transfer_size = h2le16(elem_count); /* This is not in the docs, but it is in the data. */
+    pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
 
 
     /* get ready to add the request to the queue for this session */
@@ -1499,9 +1556,9 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
     rc = request_add(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to lock add request to session! rc=%d",rc);
+    	pdebug(debug,"Unable to lock add request to session! rc=%d",rc);
     	request_destroy(&req);
-    	p_tag->status = rc;
+    	tag->status = rc;
     	return rc;
     }
 
@@ -1510,9 +1567,9 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
 
     /* the write is now pending */
     tag->write_in_progress = 1;
-    tag->p_tag.status = PLCTAG_STATUS_PENDING;
+    tag->status = PLCTAG_STATUS_PENDING;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -1520,28 +1577,33 @@ int ab_tag_write_pccc_dhp_start(plc_tag p_tag)
 
 
 /* FIXME -- this needs to be converted to unconnected messaging. */
-int ab_tag_write_pccc_dhp_check(plc_tag p_tag)
+int ab_tag_write_pccc_dhp_check(ab_tag_p tag)
 {
-    ab_tag_p tag;
     eip_pccc_dhp_resp_old *pccc_resp;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
+    int debug = tag->debug;
 
-    pdebug("Starting.");
+    pdebug(debug,"Starting.");
 
-    tag = (ab_tag_p)p_tag;
+    /* is there an outstanding request? */
+    if(!tag->reqs || !(tag->reqs[0]) ) {
+    	tag->write_in_progress = 0;
+    	tag->status = PLCTAG_ERR_NULL_PTR;
+    	return PLCTAG_ERR_NULL_PTR;
+    }
 
     req = tag->reqs[0];
 
     /* is there an outstanding request? */
      if(!req) {
     	 tag->write_in_progress = 0;
-     	tag->p_tag.status = PLCTAG_ERR_NULL_PTR;
+     	tag->status = PLCTAG_ERR_NULL_PTR;
      	return PLCTAG_ERR_NULL_PTR;
      }
 
      if(!req->resp_received) {
-     	tag->p_tag.status = PLCTAG_STATUS_PENDING;
+     	tag->status = PLCTAG_STATUS_PENDING;
      	return PLCTAG_STATUS_PENDING;
      }
 
@@ -1552,15 +1614,15 @@ int ab_tag_write_pccc_dhp_check(plc_tag p_tag)
  	rc = request_remove(tag->session, req);
 
  	if(rc != PLCTAG_STATUS_OK) {
- 		pdebug("Unable to remove the request from the list! rc=%d",rc);
+ 		pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
 
  		/* since we could not remove it, maybe the thread can. */
- 		plc_tag_abort(p_tag);
+ 		plc_tag_abort((plc_tag)tag);
 
  		/* not our request any more */
  		req = NULL;
 
- 		tag->p_tag.status = rc;
+ 		tag->status = rc;
 
  		return rc;
  	}
@@ -1572,26 +1634,26 @@ int ab_tag_write_pccc_dhp_check(plc_tag p_tag)
 
 		/* check the response status */
 		if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-			pdebug("EIP unexpected response packet type: %d!",pccc_resp->encap_command);
+			pdebug(debug,"EIP unexpected response packet type: %d!",pccc_resp->encap_command);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(le2h16(pccc_resp->encap_status) != AB_EIP_OK) {
-			pdebug("EIP command failed, response code: %d",pccc_resp->encap_status);
+			pdebug(debug,"EIP command failed, response code: %d",pccc_resp->encap_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		if(pccc_resp->pccc_status != AB_EIP_OK) {
-			/*pdebug("PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
-			decode_pccc_error(pccc_resp->pccc_data[0]);
+			/*pdebug(debug,"PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
+			decode_pccc_error((plc_tag)tag, pccc_resp->pccc_data[0]);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		/*if(pccc_resp->general_status != AB_EIP_OK) {
-			pdebug("PCCC command failed, response code: %d",pccc_resp->general_status);
+			pdebug(debug,"PCCC command failed, response code: %d",pccc_resp->general_status);
 			return 0;
 		}*/
 
@@ -1600,14 +1662,18 @@ int ab_tag_write_pccc_dhp_check(plc_tag p_tag)
     } while(0);
 
     tag->write_in_progress = 0;
-    tag->p_tag.status = rc;
+    tag->status = rc;
 
     if(req) {
     	request_destroy(&(req));
      	req = NULL;
+     	if(tag->reqs) {
+     		mem_free(tag->reqs);
+     		tag->reqs = NULL;
+     	}
     }
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return rc;
 }
@@ -1628,22 +1694,20 @@ int ab_tag_write_pccc_dhp_check(plc_tag p_tag)
  * CIP-specific status.  This functions as a "tickler" routine
  * to check on the completion of async requests.
  */
-int ab_tag_status_cip(plc_tag p_tag)
+int ab_tag_status_cip(ab_tag_p tag)
 {
-	ab_tag_p tag = (ab_tag_p)p_tag;
-
 	if(tag->read_in_progress) {
-		int rc = ab_tag_read_cip_check(p_tag);
+		int rc = ab_tag_read_cip_check(tag);
 
-		p_tag->status = rc;
+		tag->status = rc;
 
 		return rc;
 	}
 
 	if(tag->write_in_progress) {
-		int rc = ab_tag_write_cip_check(p_tag);
+		int rc = ab_tag_write_cip_check(tag);
 
-		p_tag->status = rc;
+		tag->status = rc;
 
 		return rc;
 	}
@@ -1659,38 +1723,32 @@ int ab_tag_status_cip(plc_tag p_tag)
 	 */
 	if(tag->session) {
 		if(!tag->session->is_connected) {
-			p_tag->status = PLCTAG_STATUS_PENDING;
+			tag->status = PLCTAG_STATUS_PENDING;
 		} else {
-			p_tag->status = PLCTAG_STATUS_OK;
+			tag->status = PLCTAG_STATUS_OK;
 		}
 	}
 
-	return p_tag->status;
+	return tag->status;
 }
 
 
 
-int ab_tag_read_cip_start(plc_tag p_tag)
+int ab_tag_read_cip_start(ab_tag_p tag)
 {
 	int rc = PLCTAG_STATUS_OK;
-    ab_tag_p tag;
     eip_cip_uc_req *cip;
     uint8_t *data;
     uint8_t *embed_start, *embed_end;
-    int elem_count;
     ab_request_p req = NULL;
     int i;
     int byte_offset = 0;
     int overhead;
     int data_per_packet;
     int num_reqs;
-    int elem_size;
+    int debug = tag->debug;
 
-    pdebug("Starting");
-
-    /* cast the tag to the right type. */
-    tag = (ab_tag_p)p_tag;
-
+    pdebug(debug,"Starting");
 
 	/* how much overhead per packet? This is for the response packet, not the request  */
 	overhead = sizeof(eip_cip_uc_resp) 		/* base packet size */
@@ -1708,29 +1766,33 @@ int ab_tag_read_cip_start(plc_tag p_tag)
 	 * 4 bytes will be a multiple of 4 bytes in size.
 	 *
 	 * FIXME there has to be a better way to do this.
+	 *
+	 * It appears that the PLC is chunking the response into as many pieces
+	 * of the base element size as will fit into the response.  If the element
+	 * size is bigger than the response packet (total size 540 bytes I think),
+	 * then it appears to simply break it up on some smaller boundary.
 	 */
 
-    elem_size = attr_get_int(tag->attributes,"elem_size",0);
-	if(elem_size > 4) {
-		int num_elems_per_packet = (int)data_per_packet / (int) elem_size;
-		data_per_packet = num_elems_per_packet * elem_size;
+    if(tag->elem_size > 4 && tag->elem_size < data_per_packet) {
+		int num_elems_per_packet = (int)data_per_packet / (int) tag->elem_size;
+		data_per_packet = num_elems_per_packet * tag->elem_size;
 	}
 
 	if(data_per_packet <= 0) {
-		pdebug("Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
-		p_tag->status = PLCTAG_ERR_TOO_LONG;
+		pdebug(debug,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
+		tag->status = PLCTAG_ERR_TOO_LONG;
 		return PLCTAG_ERR_TOO_LONG;
 	}
 
-	num_reqs = (p_tag->size + (data_per_packet-1)) / data_per_packet;
+	num_reqs = (tag->size + (data_per_packet-1)) / data_per_packet;
 
-	pdebug("We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
+	pdebug(debug,"We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
 
 	tag->reqs = (ab_request_p*)mem_alloc(num_reqs * sizeof(ab_request_p));
 
 	if(!tag->reqs) {
-		pdebug("Unable to get memory for request array!");
-		p_tag->status = PLCTAG_ERR_NO_MEM;
+		pdebug(debug,"Unable to get memory for request array!");
+		tag->status = PLCTAG_ERR_NO_MEM;
 		return rc;
 	}
 
@@ -1744,10 +1806,12 @@ int ab_tag_read_cip_start(plc_tag p_tag)
 		rc = request_create(&req);
 
 		if(rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to get new request.  rc=%d",rc);
-			p_tag->status = rc;
+			pdebug(debug,"Unable to get new request.  rc=%d",rc);
+			tag->status = rc;
 			return rc;
 		}
+
+		req->debug = tag->debug;
 
 		/* point the request struct at the buffer */
 		cip = (eip_cip_uc_req*)(req->data);
@@ -1776,8 +1840,7 @@ int ab_tag_read_cip_start(plc_tag p_tag)
 		data += tag->encoded_name_size;
 
 		/* add the count of elements to read. */
-	    elem_count = attr_get_int(tag->attributes,"elem_count",1);
-		*((uint16_t*)data) = h2le16(elem_count);
+		*((uint16_t*)data) = h2le16(tag->elem_count);
 		data += sizeof(uint16_t);
 
 		/* add the byte offset for this request */
@@ -1848,9 +1911,9 @@ int ab_tag_read_cip_start(plc_tag p_tag)
 		rc = request_add(tag->session, req);
 
 		if(rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to add request to session! rc=%d",rc);
+			pdebug(debug,"Unable to add request to session! rc=%d",rc);
 			request_destroy(&req);
-			p_tag->status = rc;
+			tag->status = rc;
 			return rc;
 		}
 
@@ -1863,9 +1926,9 @@ int ab_tag_read_cip_start(plc_tag p_tag)
     tag->read_in_progress = 1;
 
     /* the read is now pending */
-    tag->p_tag.status = PLCTAG_STATUS_PENDING;
+    tag->status = PLCTAG_STATUS_PENDING;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -1875,27 +1938,27 @@ int ab_tag_read_cip_start(plc_tag p_tag)
 
 
 
-int ab_tag_read_cip_check(plc_tag p_tag)
+int ab_tag_read_cip_check(ab_tag_p tag)
 {
 	int rc = PLCTAG_STATUS_OK;
-	ab_tag_p tag = (ab_tag_p)p_tag;
 	eip_cip_uc_resp *cip_resp;
     uint8_t *data;
     uint8_t *data_end;
     int i;
     ab_request_p req;
     int byte_offset = 0;
+    int debug = tag->debug;
 
     /* is there an outstanding request? */
     if(!tag->reqs) {
     	tag->read_in_progress = 0;
-    	tag->p_tag.status = PLCTAG_ERR_NULL_PTR;
+    	tag->status = PLCTAG_ERR_NULL_PTR;
     	return PLCTAG_ERR_NULL_PTR;
     }
 
     for(i = 0; i < tag->num_requests; i++) {
 		if(tag->reqs[i] && !tag->reqs[i]->resp_received) {
-			tag->p_tag.status = PLCTAG_STATUS_PENDING;
+			tag->status = PLCTAG_STATUS_PENDING;
 			return PLCTAG_STATUS_PENDING;
 		}
     }
@@ -1921,26 +1984,26 @@ int ab_tag_read_cip_check(plc_tag p_tag)
 		data_end = (req->data + cip_resp->encap_length + sizeof(eip_encap_t));
 
 		if(le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-			pdebug("Unexpected EIP packet type received: %d!",cip_resp->encap_command);
+			pdebug(debug,"Unexpected EIP packet type received: %d!",cip_resp->encap_command);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-			pdebug("EIP command failed, response code: %d",cip_resp->encap_status);
+			pdebug(debug,"EIP command failed, response code: %d",cip_resp->encap_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
 		if(cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)) {
-			pdebug("CIP response reply service unexpected: %d",cip_resp->reply_service);
+			pdebug(debug,"CIP response reply service unexpected: %d",cip_resp->reply_service);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-			pdebug("CIP read failed with status: %d",cip_resp->status);
-			pdebug(ab_decode_cip_status(cip_resp->status));
+			pdebug(debug,"CIP read failed with status: %d",cip_resp->status);
+			pdebug(debug,ab_decode_cip_status(cip_resp->status));
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
@@ -1949,7 +2012,7 @@ int ab_tag_read_cip_check(plc_tag p_tag)
 		data = (req->data)+sizeof(eip_cip_uc_resp);
 
 		/* the first byte of the response is a type byte. */
-		pdebug("type byte = %d (%x)",(int)*data,(int)*data);
+		pdebug(debug,"type byte = %d (%x)",(int)*data,(int)*data);
 
 		/*
 		 * AB has a relatively complicated scheme for data typing.  The type is
@@ -1991,7 +2054,7 @@ int ab_tag_read_cip_check(plc_tag p_tag)
 
 			/* check for extra long types */
 			if(type_length > MAX_TAG_TYPE_INFO) {
-				pdebug("Read data type info is too long (%d)!", type_length);
+				pdebug(debug,"Read data type info is too long (%d)!", type_length);
 				rc = PLCTAG_ERR_TOO_LONG;
 				break;
 			}
@@ -2004,21 +2067,21 @@ int ab_tag_read_cip_check(plc_tag p_tag)
 
 			data += type_length;
 		} else {
-			pdebug("Unsupported data type returned, type byte=%d",*data);
+			pdebug(debug,"Unsupported data type returned, type byte=%d",*data);
 			rc = PLCTAG_ERR_UNSUPPORTED;
 			break;
 		}
 
 		/* copy data into the tag. */
-		if((byte_offset + (data_end - data)) > p_tag->size) {
-			pdebug("Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",byte_offset + (int)(data_end-data),p_tag->size);
+		if((byte_offset + (data_end - data)) > tag->size) {
+			pdebug(debug,"Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",byte_offset + (int)(data_end-data),tag->size);
 			rc = PLCTAG_ERR_TOO_LONG;
 			break;
 		}
 
-		pdebug("Got %d bytes of data", (data_end - data));
+		pdebug(debug,"Got %d bytes of data", (data_end - data));
 
-		mem_copy(p_tag->data  + byte_offset, data, (data_end - data));
+		mem_copy(tag->data  + byte_offset, data, (data_end - data));
 
 		/* update byte_offset */
 		byte_offset += tag->frag_size;
@@ -2040,7 +2103,7 @@ int ab_tag_read_cip_check(plc_tag p_tag)
     	tmp_rc = request_remove(tag->session, req);
 
 		if(tmp_rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to remove the request from the list! rc=%d",rc);
+			pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
 
 			/* since we could not remove it, maybe the thread can. */
 			req->abort_request = 1;
@@ -2062,9 +2125,9 @@ int ab_tag_read_cip_check(plc_tag p_tag)
 
     tag->read_in_progress = 0;
 
-    tag->p_tag.status = rc;
+    tag->status = rc;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return rc;
 }
@@ -2073,15 +2136,12 @@ int ab_tag_read_cip_check(plc_tag p_tag)
 
 
 
-int ab_tag_write_cip_start(plc_tag p_tag)
+int ab_tag_write_cip_start(ab_tag_p tag)
 {
 	int rc = PLCTAG_STATUS_OK;
-    ab_tag_p tag;
     eip_cip_uc_req *cip;
     uint8_t *data;
     uint8_t *embed_start, *embed_end;
-    int elem_size;
-    int elem_count;
     ab_request_p req = NULL;
     int i;
     int encoded_type_size = 0;
@@ -2089,27 +2149,21 @@ int ab_tag_write_cip_start(plc_tag p_tag)
     int overhead;
     int data_per_packet;
     int num_reqs;
+    int debug = tag->debug;
 
-    pdebug("Starting");
-
-    /* cast the tag to the right type. */
-    tag = (ab_tag_p)p_tag;
-
-	/* What data size do we have? */
-	elem_size = attr_get_int(tag->attributes,"elem_size",0);
-	elem_count = attr_get_int(tag->attributes,"elem_count",1);
+    pdebug(debug,"Starting");
 
 	/* how much overhead per packet? */
 	if(tag->encoded_type_info_size) {
 		encoded_type_size = tag->encoded_type_info_size;
-		pdebug("got existing encoded type size of %d", encoded_type_size);
+		pdebug(debug,"got existing encoded type size of %d", encoded_type_size);
 	} else {
 		/*
 		 * FIXME
 		 *
 		 * All this code should be removed.
 		 */
-		switch(elem_size) {
+		switch(tag->elem_size) {
 			case 1:
 				encoded_type_size = 2;
 				break;
@@ -2121,8 +2175,8 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 				break;
 			default:
 				/* FIXME - handle structures! */
-				pdebug("Unsupported data element size: %d!",elem_size);
-				tag->p_tag.status = PLCTAG_ERR_UNSUPPORTED;
+				pdebug(debug,"Unsupported data element size: %d!",tag->elem_size);
+				tag->status = PLCTAG_ERR_UNSUPPORTED;
 				return PLCTAG_ERR_UNSUPPORTED;
 				break;
 		}
@@ -2142,20 +2196,20 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 	data_per_packet &= 0xFFFFFFFC;
 
 	if(data_per_packet <= 0) {
-		pdebug("Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
-		p_tag->status = PLCTAG_ERR_TOO_LONG;
+		pdebug(debug,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
+		tag->status = PLCTAG_ERR_TOO_LONG;
 		return PLCTAG_ERR_TOO_LONG;
 	}
 
-	num_reqs = (p_tag->size + (data_per_packet-1)) / data_per_packet;
+	num_reqs = (tag->size + (data_per_packet-1)) / data_per_packet;
 
-	pdebug("We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
+	pdebug(debug,"We need %d requests of up to %d bytes each.", num_reqs, data_per_packet);
 
 	tag->reqs = (ab_request_p*)mem_alloc(num_reqs * sizeof(ab_request_p));
 
 	if(!tag->reqs) {
-		pdebug("Unable to get memory for request array!");
-		p_tag->status = PLCTAG_ERR_NO_MEM;
+		pdebug(debug,"Unable to get memory for request array!");
+		tag->status = PLCTAG_ERR_NO_MEM;
 		return PLCTAG_ERR_NO_MEM;
 	}
 
@@ -2169,10 +2223,12 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 		rc = request_create(&req);
 
 		if(rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to get new request.  rc=%d",rc);
-			p_tag->status = rc;
+			pdebug(debug,"Unable to get new request.  rc=%d",rc);
+			tag->status = rc;
 			return rc;
 		}
+
+		req->debug = tag->debug;
 
 		cip = (eip_cip_uc_req*)(req->data);
 
@@ -2217,7 +2273,7 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 			 *
 			 * All this code should be removed.
 			 */
-			switch(elem_size) {
+			switch(tag->elem_size) {
 				case 1:
 					*data = AB_CIP_DATA_SINT; data++;
 					*data = 0; data++; /* padding */
@@ -2232,15 +2288,15 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 					break;
 				default:
 					/* FIXME - handle structures! */
-					pdebug("Unsupported data element size: %d!",elem_size);
-					tag->p_tag.status = PLCTAG_ERR_UNSUPPORTED;
+					pdebug(debug,"Unsupported data element size: %d!",tag->elem_size);
+					tag->status = PLCTAG_ERR_UNSUPPORTED;
 					return PLCTAG_ERR_UNSUPPORTED;
 					break;
 			}
 		}
 
 		/* copy the item count, little endian */
-		*((uint16_t*)data) = h2le16(elem_count);
+		*((uint16_t*)data) = h2le16(tag->elem_count);
 		data += 2;
 
 		if(num_reqs > 1) {
@@ -2250,17 +2306,17 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 		}
 
 		/* now copy the data to write */
-		if(tag->frag_size < (p_tag->size - byte_offset)) {
-			mem_copy(data, tag->p_tag.data + byte_offset, tag->frag_size);
+		if(tag->frag_size < (tag->size - byte_offset)) {
+			mem_copy(data, tag->data + byte_offset, tag->frag_size);
 			data += tag->frag_size;
 
 			/* no need for padding here as frag_size is a multiple of 4. */
 		} else {
-			mem_copy(data, tag->p_tag.data + byte_offset, p_tag->size - byte_offset);
-			data += p_tag->size - byte_offset;
+			mem_copy(data, tag->data + byte_offset, tag->size - byte_offset);
+			data += tag->size - byte_offset;
 
 			/* need to pad data to multiple of 16-bits */
-			if((p_tag->size - byte_offset) & 0x01) {
+			if((tag->size - byte_offset) & 0x01) {
 				*data = 0;
 				data++;
 			}
@@ -2326,10 +2382,10 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 		rc = request_add(tag->session, req);
 
 		if(rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to lock add request to session! rc=%d",rc);
-			plc_tag_abort(p_tag);
+			pdebug(debug,"Unable to lock add request to session! rc=%d",rc);
+			plc_tag_abort((plc_tag)tag);
 			request_destroy(&req);
-			p_tag->status = rc;
+			tag->status = rc;
 			return rc;
 		}
 
@@ -2339,9 +2395,9 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 
     /* the write is now pending */
     tag->write_in_progress = 1;
-    tag->p_tag.status = PLCTAG_STATUS_PENDING;
+    tag->status = PLCTAG_STATUS_PENDING;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -2351,26 +2407,24 @@ int ab_tag_write_cip_start(plc_tag p_tag)
 
 
 
-int ab_tag_write_cip_check(plc_tag p_tag)
+int ab_tag_write_cip_check(ab_tag_p tag)
 {
-    ab_tag_p tag;
     eip_cip_uc_resp *cip_resp;
     int rc = PLCTAG_STATUS_OK;
     int i;
     ab_request_p req;
-
-    tag = (ab_tag_p)p_tag;
+    int debug = tag->debug;
 
     /* is there an outstanding request? */
     if(!tag->reqs) {
     	tag->write_in_progress = 0;
-    	tag->p_tag.status = PLCTAG_ERR_NULL_PTR;
+    	tag->status = PLCTAG_ERR_NULL_PTR;
     	return PLCTAG_ERR_NULL_PTR;
     }
 
     for(i = 0; i < tag->num_requests; i++) {
 		if(tag->reqs[i] && !tag->reqs[i]->resp_received) {
-			tag->p_tag.status = PLCTAG_STATUS_PENDING;
+			tag->status = PLCTAG_STATUS_PENDING;
 			return PLCTAG_STATUS_PENDING;
 		}
     }
@@ -2396,13 +2450,13 @@ int ab_tag_write_cip_check(plc_tag p_tag)
 		cip_resp = (eip_cip_uc_resp*)(req->data);
 
 		if(le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-			pdebug("Unexpected EIP packet type received: %d!",cip_resp->encap_command);
+			pdebug(debug,"Unexpected EIP packet type received: %d!",cip_resp->encap_command);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-			pdebug("EIP command failed, response code: %d",cip_resp->encap_status);
+			pdebug(debug,"EIP command failed, response code: %d",cip_resp->encap_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
@@ -2411,14 +2465,14 @@ int ab_tag_write_cip_check(plc_tag p_tag)
 		reply_service = ((tag->num_requests > 1) ? (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK) : (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK));
 
 		if(cip_resp->reply_service != reply_service) {
-			pdebug("CIP response reply service unexpected: %d",cip_resp->reply_service);
+			pdebug(debug,"CIP response reply service unexpected: %d",cip_resp->reply_service);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
 		if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-			pdebug("CIP read failed with status: %d",cip_resp->status);
-			pdebug(ab_decode_cip_status(cip_resp->status));
+			pdebug(debug,"CIP read failed with status: %d",cip_resp->status);
+			pdebug(debug,ab_decode_cip_status(cip_resp->status));
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
@@ -2435,7 +2489,7 @@ int ab_tag_write_cip_check(plc_tag p_tag)
     	tmp_rc = request_remove(tag->session, req);
 
 		if(tmp_rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to remove the request from the list! rc=%d",rc);
+			pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
 
 			/* since we could not remove it, maybe the thread can. */
 			req->abort_request = 1;
@@ -2456,9 +2510,9 @@ int ab_tag_write_cip_check(plc_tag p_tag)
     tag->num_requests = 0;
 
     tag->write_in_progress = 0;
-    tag->p_tag.status = rc;
+    tag->status = rc;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return rc;
 }
@@ -2480,7 +2534,7 @@ int ab_tag_write_cip_check(plc_tag p_tag)
  * check to see if the global mutex is set up.  If not, do an atomic
  * lock and set it up.
  */
-int check_mutex()
+int check_mutex(int debug)
 {
 	int rc = PLCTAG_STATUS_OK;
 
@@ -2493,7 +2547,7 @@ int check_mutex()
 	if(!tag_mutex) {
 		rc = mutex_create(&tag_mutex);
 		if(rc != PLCTAG_STATUS_OK) {
-			pdebug("Unable to create global tag mutex!");
+			pdebug(debug,"Unable to create global tag mutex!");
 		}
 	}
 
@@ -2724,9 +2778,9 @@ int request_destroy(ab_request_p *req)
 
 
 
-int ab_check_cpu(ab_tag_p tag)
+int ab_check_cpu(ab_tag_p tag, attr attribs)
 {
-    const char *cpu_type = attr_get_str(tag->attributes,"cpu","NONE");
+    const char *cpu_type = attr_get_str(attribs,"cpu","NONE");
 
     if(    !str_cmp_i(cpu_type,"plc")
         || !str_cmp_i(cpu_type,"plc5")
@@ -2742,7 +2796,7 @@ int ab_check_cpu(ab_tag_p tag)
         || !str_cmp_i(cpu_type,"flexlogix")
         || !str_cmp_i(cpu_type,"flgx")) { tag->protocol_type = AB_PROTOCOL_LGX; }
     else {
-        pdebug("Unsupported device type: %s",cpu_type);
+        pdebug(tag->debug,"Unsupported device type: %s",cpu_type);
 
     	return PLCTAG_ERR_BAD_DEVICE;
     }
@@ -2755,29 +2809,30 @@ int ab_check_cpu(ab_tag_p tag)
 
 
 
-int find_or_create_session(ab_tag_p tag)
+int find_or_create_session(ab_tag_p tag, attr attribs)
 {
-    const char *session_gw = attr_get_str(tag->attributes,"gateway","");
-    int session_gw_port = attr_get_int(tag->attributes,"gateway_port",AB_EIP_DEFAULT_PORT);
+	int debug = tag->debug;
+    const char *session_gw = attr_get_str(attribs,"gateway","");
+    int session_gw_port = attr_get_int(attribs,"gateway_port",AB_EIP_DEFAULT_PORT);
     ab_session_p session;
-    int shared_session = attr_get_int(tag->attributes,"share_session",1); /* share the session by default. */
+    int shared_session = attr_get_int(attribs,"share_session",1); /* share the session by default. */
 
     /* if we are to share sessions, then look for an existing one. */
     if(shared_session) {
-    	session = find_session_by_host_unsafe(session_gw);
+    	session = find_session_by_host_unsafe(tag, session_gw);
     } else {
     	/* no sharing, create a new one */
     	session = AB_SESSION_NULL;
     }
 
     if(session == AB_SESSION_NULL) {
-        session = ab_session_create(session_gw, session_gw_port);
+        session = ab_session_create(tag, session_gw, session_gw_port);
     } else {
-        pdebug("find_or_create_session() reusing existing session.");
+        pdebug(debug,"find_or_create_session() reusing existing session.");
     }
 
     if(session == AB_SESSION_NULL) {
-        pdebug("unable to create or find a session!");
+        pdebug(debug,"unable to create or find a session!");
 
     	return PLCTAG_ERR_BAD_GATEWAY;
     }
@@ -2792,9 +2847,9 @@ int find_or_create_session(ab_tag_p tag)
 
 
 
-int check_tag_name(ab_tag_p tag)
+int check_tag_name(ab_tag_p tag, const char *name)
 {
-	const char *name = attr_get_str(tag->attributes,"name","NONE");
+	int debug = tag->debug;
 
 	if(str_cmp(name,"NONE") == 0) {
 		return PLCTAG_ERR_BAD_PARAM;
@@ -2805,7 +2860,7 @@ int check_tag_name(ab_tag_p tag)
         case AB_PROTOCOL_PLC:
         case AB_PROTOCOL_MLGX:
             if(!ab_make_laa(tag->encoded_name,&(tag->encoded_name_size),name,MAX_TAG_NAME)) {
-                pdebug("parse of PCCC-style tag name %s failed!",name);
+                pdebug(debug,"parse of PCCC-style tag name %s failed!",name);
 
                 return PLCTAG_ERR_BAD_PARAM;
             }
@@ -2813,7 +2868,7 @@ int check_tag_name(ab_tag_p tag)
             break;
         case AB_PROTOCOL_LGX:
             if(!convert_tag_name(tag,name)) {
-                pdebug("parse of CIP-style tag name %s failed!",name);
+                pdebug(debug,"parse of CIP-style tag name %s failed!",name);
 
                 return PLCTAG_ERR_BAD_PARAM;
             }
@@ -2822,7 +2877,7 @@ int check_tag_name(ab_tag_p tag)
 
         default:
             /* how would we get here? */
-            pdebug("unsupported protocol %d",tag->protocol_type);
+            pdebug(debug,"unsupported protocol %d",tag->protocol_type);
 
             return PLCTAG_ERR_BAD_PARAM;
 
@@ -2842,7 +2897,7 @@ int send_eip_request(ab_request_p req)
 {
 	int rc;
 
-	pdebug("Starting.");
+	/*pdebug(debug,"Starting.");*/
 
 	/* if we have not already started, then start the send */
 	if(!req->send_in_progress) {
@@ -2866,7 +2921,7 @@ int send_eip_request(ab_request_p req)
 		encap->encap_options             = h2le32(0);
 
 		/* display the data */
-		pdebug_dump_bytes(req->data,req->request_size);
+		pdebug_dump_bytes(req->debug, req->data,req->request_size);
 
 		req->send_in_progress = 1;
 	}
@@ -2932,7 +2987,7 @@ int recv_eip_response(ab_session_p session)
 			if(rc < 0) {
 				if(rc != PLCTAG_ERR_NO_DATA) {
 					/* error! */
-					pdebug("Error reading socket! rc=%d",rc);
+					/*pdebug(debug,"Error reading socket! rc=%d",rc);*/
 					return rc;
 				}
 			} else {
@@ -2949,15 +3004,14 @@ int recv_eip_response(ab_session_p session)
 
 	/* did we get all the data? */
 	if(session->recv_offset >= data_needed) {
-		pdebug("got full packet of size %d",session->recv_offset);
-		pdebug_dump_bytes(session->recv_data,session->recv_offset);
-
 		session->resp_seq_id = ((eip_encap_t*)(session->recv_data))->encap_sender_context;
 		session->has_response = 1;
 
+		/*
 		if(session->resp_seq_id == 0) {
-			pdebug("Got zero response ID");
+			pdebug(debug,"Got zero response ID");
 		}
+		*/
 	}
 
 	return rc;
@@ -3000,7 +3054,7 @@ int session_check_incoming_data(ab_session_p session)
 	if(session->has_response){
 		/* we got a response, so decrement the number of messages in flight counter */
 		/*session->num_reqs_in_flight--;
-		pdebug("num_reqs_in_flight=%d",session->num_reqs_in_flight);*/
+		pdebug(debug,"num_reqs_in_flight=%d",session->num_reqs_in_flight);*/
 
 		/* find the request for which there is a response pending. */
 		ab_request_p tmp = session->requests;
@@ -3035,6 +3089,9 @@ int session_check_incoming_data(ab_session_p session)
 		}
 
 		if(tmp) {
+			pdebug(tmp->debug,"got full packet of size %d",session->recv_offset);
+			pdebug_dump_bytes(tmp->debug, session->recv_data,session->recv_offset);
+
 			/* copy the data from the session's buffer */
 			mem_copy(tmp->data, session->recv_data, session->recv_offset);
 
@@ -3042,9 +3099,9 @@ int session_check_incoming_data(ab_session_p session)
 			tmp->send_in_progress = 0;
 			tmp->send_request = 0;
 			tmp->request_size = session->recv_offset;
-		} else {
-			pdebug("Response for unknown request.");
-		}
+		} /*else {
+			pdebug(debug,"Response for unknown request.");
+		}*/
 
 		/*
 		 * if we did not find a request, it may have already been aborted, so
@@ -3076,7 +3133,7 @@ int request_check_outgoing_data(ab_session_p session, ab_request_p req)
 		session->current_request = req;
 
 		/*session->num_reqs_in_flight++;
-		pdebug("num_reqs_in_flight=%d",session->num_reqs_in_flight);*/
+		pdebug(debug,"num_reqs_in_flight=%d",session->num_reqs_in_flight);*/
 	}
 
 	/* if we are already sending this request, check its status */
@@ -3105,15 +3162,16 @@ void *request_handler_func(void *not_used)
 {
 	int rc;
 	ab_session_p cur_sess;
+	int debug = 1;
 
 	while(1) {
 		/* we need the mutex */
 		if(tag_mutex == NULL) {
-			pdebug("tag_mutex is NULL!");
+			pdebug(debug,"tag_mutex is NULL!");
 			break;
 		}
 
-		//pdebug("Locking mutex");
+		//pdebug(debug,"Locking mutex");
 
 		critical_block(tag_mutex) {
 			/*
@@ -3133,7 +3191,7 @@ void *request_handler_func(void *not_used)
 				rc = session_check_incoming_data(cur_sess);
 
 				if(rc != PLCTAG_STATUS_OK) {
-					pdebug("Error when checking for incoming session data! %d",rc);
+					pdebug(debug,"Error when checking for incoming session data! %d",rc);
 					/* FIXME - do something useful with this error */
 				}
 
@@ -3193,7 +3251,7 @@ void *request_handler_func(void *not_used)
 
 
 
-int add_session_unsafe(ab_session_p n)
+int add_session_unsafe(ab_tag_p tag,  ab_session_p n)
 {
     if(!n)
         return PLCTAG_ERR_NULL_PTR;
@@ -3211,13 +3269,13 @@ int add_session_unsafe(ab_session_p n)
 }
 
 
-int add_session(ab_session_p s)
+int add_session(ab_tag_p tag,  ab_session_p s)
 {
 	int rc;
 
-	pdebug("Locking mutex");
+	pdebug(tag->debug,"Locking mutex");
 	critical_block(tag_mutex) {
-		rc = add_session_unsafe(s);
+		rc = add_session_unsafe(tag, s);
 	}
 
 	return rc;
@@ -3226,7 +3284,7 @@ int add_session(ab_session_p s)
 
 
 
-int remove_session_unsafe(ab_session_p n)
+int remove_session_unsafe(ab_tag_p tag, ab_session_p n)
 {
 	ab_session_p tmp;
 
@@ -3264,15 +3322,15 @@ int remove_session_unsafe(ab_session_p n)
 
 
 
-int remove_session(ab_session_p s)
+int remove_session(ab_tag_p tag,  ab_session_p s)
 {
 	int rc;
 
-	pdebug("Locking mutex");
+	pdebug(tag->debug,"Locking mutex");
 	critical_block(tag_mutex) {
-		rc = remove_session_unsafe(s);
+		rc = remove_session_unsafe(tag, s);
 	}
-	pdebug("Mutex released");
+	pdebug(tag->debug,"Mutex released");
 
 	return rc;
 }
@@ -3281,7 +3339,7 @@ int remove_session(ab_session_p s)
 
 
 
-ab_session_p find_session_by_host_unsafe(const char  *t)
+ab_session_p find_session_by_host_unsafe(ab_tag_p tag, const char  *t)
 {
 	ab_session_p tmp;
 	int count = 0;
@@ -3293,7 +3351,7 @@ ab_session_p find_session_by_host_unsafe(const char  *t)
 		count++;
 	}
 
-	pdebug("found %d sessions",count);
+	pdebug(tag->debug,"found %d sessions",count);
 
     if(!tmp) {
     	return (ab_session_p)NULL;
@@ -3304,7 +3362,7 @@ ab_session_p find_session_by_host_unsafe(const char  *t)
 
 
 /* not threadsafe */
-int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag)
+int session_add_tag_unsafe(ab_tag_p tag, ab_session_p session)
 {
 	tag->next = session->tags;
 	session->tags = tag;
@@ -3314,10 +3372,11 @@ int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag)
 
 
 /* not threadsafe */
-int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
+int session_remove_tag_unsafe(ab_tag_p tag, ab_session_p session)
 {
 	ab_tag_p tmp, prev;
 	int count = 0;
+	int debug = tag->debug;
 
 	tmp = session->tags;
 	prev = NULL;
@@ -3328,7 +3387,7 @@ int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
 		count++;
 	}
 
-	pdebug("found %d tags",count);
+	pdebug(debug,"found %d tags",count);
 
 	if(tmp) {
 		if(!prev) {
@@ -3343,16 +3402,17 @@ int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
 
 
 
-ab_session_p ab_session_create(const char *host, int gw_port)
+ab_session_p ab_session_create(ab_tag_p tag, const char *host, int gw_port)
 {
     ab_session_p session = AB_SESSION_NULL;
+    int debug = tag->debug;
 
-    pdebug("Starting");
+    pdebug(debug,"Starting");
 
     session = (ab_session_p)mem_alloc(sizeof(struct ab_session_t));
 
     if(!session) {
-        pdebug("alloc failed errno: %d",errno);
+        pdebug(debug,"alloc failed errno: %d",errno);
 
         return AB_SESSION_NULL;
     }
@@ -3360,15 +3420,15 @@ ab_session_p ab_session_create(const char *host, int gw_port)
     str_copy(session->host,host,MAX_SESSION_HOST);
 
     /* we must connect to the gateway and register */
-    if(!ab_session_connect(session,host)) {
+    if(!ab_session_connect(tag, session,host)) {
         mem_free(session);
-        pdebug("session connect failed!");
+        pdebug(debug,"session connect failed!");
         return AB_SESSION_NULL;
     }
 
-    if(!ab_session_register(session)) {
-        ab_session_destroy_unsafe(session);
-        pdebug("session registration failed!");
+    if(!ab_session_register(tag, session)) {
+        ab_session_destroy_unsafe(tag, session);
+        pdebug(debug,"session registration failed!");
         return AB_SESSION_NULL;
     }
 
@@ -3381,9 +3441,9 @@ ab_session_p ab_session_create(const char *host, int gw_port)
     session->session_seq_id = 0;
 
     /* this is called while the mutex is held */
-    add_session_unsafe(session);
+    add_session_unsafe(tag, session);
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return session;
 }
@@ -3399,40 +3459,43 @@ ab_session_p ab_session_create(const char *host, int gw_port)
  * the passed session object.
  */
 
-int ab_session_connect(ab_session_p session, const char *host)
+int ab_session_connect(ab_tag_p tag, ab_session_p session, const char *host)
 {
 	int rc;
+	int debug = tag->debug;
 
-    pdebug("Starting.");
+    pdebug(debug,"Starting.");
 
     /* Open a socket for communication with the gateway. */
     rc = socket_create(&(session->sock));
 
     if(rc) {
-    	pdebug("Unable to create socket for session!");
+    	pdebug(debug,"Unable to create socket for session!");
     	return 0;
     }
 
     rc = socket_connect_tcp(session->sock, host, AB_EIP_DEFAULT_PORT);
 	
     if(rc != PLCTAG_STATUS_OK) {
-    	pdebug("Unable to connect socket for session!");
+    	pdebug(debug,"Unable to connect socket for session!");
     	return 0;
     }
 
     /* everything is OK.  We have a TCP stream open to a gateway. */
     session->is_connected = 1;
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 	
     return 1;
 }
 
 
 
-int ab_session_destroy_unsafe(ab_session_p session)
+int ab_session_destroy_unsafe(ab_tag_p tag, ab_session_p session)
 {
-    pdebug("Starting.");
+	int debug = tag->debug;
+
+    pdebug(debug,"Starting.");
 
     if(!session)
         return 1;
@@ -3440,11 +3503,11 @@ int ab_session_destroy_unsafe(ab_session_p session)
     /* do not destroy the session if there are
      * connections still */
     if(session->tags) {
-        pdebug("Attempt to destroy session while open tags exist!");
+        pdebug(debug,"Attempt to destroy session while open tags exist!");
         return 0;
     }
 
-    if(ab_session_unregister(session))
+    if(ab_session_unregister(tag, session))
         return 0;
 
     /* close the socket. */
@@ -3454,20 +3517,22 @@ int ab_session_destroy_unsafe(ab_session_p session)
         session->is_connected = 0;
     }
 
-    remove_session_unsafe(session);
+    remove_session_unsafe(tag, session);
 
     mem_free(session);
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return 1;
 }
 
-int ab_session_destroy(ab_session_p session) {
+
+
+int ab_session_destroy(ab_tag_p tag, ab_session_p session) {
 	int rc;
 
 	critical_block(tag_mutex) {
-		rc = ab_session_destroy_unsafe(session);
+		rc = ab_session_destroy_unsafe(tag, session);
 	}
 
 	return rc;
@@ -3484,15 +3549,16 @@ int ab_session_empty(ab_session_p session)
 
 
 
-int ab_session_register(ab_session_p session)
+int ab_session_register(ab_tag_p tag, ab_session_p session)
 {
+	int debug = tag->debug;
     eip_session_reg_req *req;
     eip_encap_t *resp;
     int rc;
     int data_size = 0;
     uint64_t timeout_time;
 
-    pdebug("Starting.");
+    pdebug(debug,"Starting.");
 
     /*
      * clear the session data.
@@ -3527,14 +3593,14 @@ int ab_session_register(ab_session_p session)
     session->recv_offset = 0;
     timeout_time = time_ms() + 5000; /* MAGIC */
 
-    pdebug("sending data:");
-    pdebug_dump_bytes(session->recv_data, data_size);
+    pdebug(debug,"sending data:");
+    pdebug_dump_bytes(debug,session->recv_data, data_size);
 
     while(timeout_time > time_ms() && session->recv_offset < data_size) {
     	rc = socket_write(session->sock, session->recv_data + session->recv_offset, data_size - session->recv_offset);
 
     	if(rc < 0) {
-			pdebug("Unable to send session registration packet! rc=%d",rc);
+			pdebug(debug,"Unable to send session registration packet! rc=%d",rc);
 		    session->recv_offset = 0;
 			return rc;
 		}
@@ -3572,7 +3638,7 @@ int ab_session_register(ab_session_p session)
     		if(rc < 0) {
     			if(rc != PLCTAG_ERR_NO_DATA) {
 					/* error! */
-					pdebug("Error reading socket! rc=%d",rc);
+					pdebug(debug,"Error reading socket! rc=%d",rc);
 					return rc;
     			}
     		} else {
@@ -3604,8 +3670,8 @@ int ab_session_register(ab_session_p session)
     session->recv_offset = 0;
 
 
-    pdebug("received response:");
-    pdebug_dump_bytes(session->recv_data, data_size);
+    pdebug(debug,"received response:");
+    pdebug_dump_bytes(debug,session->recv_data, data_size);
 
 
     /* encap header is at the start of the buffer */
@@ -3613,12 +3679,12 @@ int ab_session_register(ab_session_p session)
 
     /* check the response status */
     if(le2h16(resp->encap_command) != AB_EIP_REGISTER_SESSION) {
-        pdebug("EIP unexpected response packet type: %d!",resp->encap_command);
+        pdebug(debug,"EIP unexpected response packet type: %d!",resp->encap_command);
         return PLCTAG_ERR_BAD_DATA;
     }
 
     if(le2h16(resp->encap_status) != AB_EIP_OK) {
-        pdebug("EIP command failed, response code: %d",resp->encap_status);
+        pdebug(debug,"EIP command failed, response code: %d",resp->encap_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -3627,7 +3693,7 @@ int ab_session_register(ab_session_p session)
      */
     session->session_handle = resp->encap_session_handle; /* opaque to us */
 
-    pdebug("Done.");
+    pdebug(debug,"Done.");
 
     return 1;
 }
@@ -3635,18 +3701,14 @@ int ab_session_register(ab_session_p session)
 
 
 
-int ab_session_unregister(ab_session_p session)
+int ab_session_unregister(ab_tag_p tag, ab_session_p session)
 {
-    pdebug("Starting.");
-
     if(session->sock) {
     	socket_close(session->sock);
     	socket_destroy(&(session->sock));
     	session->sock = NULL;
     	session->is_connected = 0;
     }
-
-    pdebug("Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -3929,7 +3991,7 @@ int convert_tag_name(ab_tag_p tag,const char *name)
                         *dp = val; dp++;     /* value */
                     }
 
-                    /* each up whitespace */
+                    /* eat up whitespace */
                     while(isspace(*p)) p++;
                 } while(*p == ',');
 

@@ -43,7 +43,7 @@ incdir=include
 
 
 CNOLIBFLAGS += -fno-strict-aliasing -g -I. -fms-extensions -Wall -I./linux
-CFLAGS += -std=c99 -fPIC $(CNOLIBFLAGS) -DDEBUG=0 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L
+CFLAGS += -std=c99 -fPIC $(CNOLIBFLAGS) -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L
 DLIBS +=
 LIBS += $(DLIBS)
 SHLIBS = $(LIBS)

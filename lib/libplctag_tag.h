@@ -52,7 +52,7 @@
  */
 
 /* helper functions for logging/errors */
-LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_code, const char *fmt, ...);
+/*LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_code, const char *fmt, ...);
 #if defined(USE_STD_VARARG_MACROS) || defined(WIN32)
 #define plc_err(lib,level,e,f,...) \
    plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,__VA_ARGS__)
@@ -60,7 +60,7 @@ LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_
 #define plc_err(lib,level,e,f,a...) \
    plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,##a )
 #endif
-
+*/
 
 
 
@@ -90,12 +90,15 @@ typedef struct tag_vtable_t *tag_vtable_p;
  * The base type only has a vtable for operations.
  */
 
+#define TAG_BASE_STRUCT tag_vtable_p vtable; \
+						int status; \
+						int endian; \
+						int debug; \
+						int size; \
+						uint8_t *data
+
 struct plc_tag_t {
-	tag_vtable_p vtable;
-	int status;
-	int endian;
-	int size;
-	uint8_t *data;
+	TAG_BASE_STRUCT;
 };
 
 
