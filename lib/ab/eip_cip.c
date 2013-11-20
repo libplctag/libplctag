@@ -745,7 +745,18 @@ static int check_read_status(ab_tag_p tag)
 		if(cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
 			pdebug(debug,"CIP read failed with status: %d",cip_resp->status);
 			pdebug(debug,cip_decode_status(cip_resp->status));
-			rc = PLCTAG_ERR_REMOTE_ERR;
+			switch(cip_resp->status) {
+				case 0x04:		/* FIXME - should be defined constants */
+				case 0x05:
+				case 0x13:
+				case 0x1C:
+					rc = PLCTAG_ERR_BAD_PARAM;
+					break;
+				default:
+					rc = PLCTAG_ERR_REMOTE_ERR;
+					break;
+			}
+
 			break;
 		}
 
@@ -832,11 +843,21 @@ static int check_read_status(ab_tag_p tag)
 		/* save the size of the response for next time */
 		tag->read_req_sizes[i] = (data_end - data);
 
-		/* bump the byte offset */
-		byte_offset += (data_end - data);
+		/*
+		 * did we get any data back? a zero-length response is
+		 * an error here.
+		 */
 
-		/* set the return code */
-		rc = PLCTAG_STATUS_OK;
+		if((data_end - data) == 0) {
+			rc = PLCTAG_ERR_NO_DATA;
+			break;
+		} else {
+			/* bump the byte offset */
+			byte_offset += (data_end - data);
+
+			/* set the return code */
+			rc = PLCTAG_STATUS_OK;
+		}
     } /* end of for(i = 0; i < tag->num_requests; i++) */
 
     /* are we actually done? */
