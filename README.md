@@ -151,7 +151,7 @@ data structure as lightweight as possible.
 
 The Allen-Bradley EIP protocol is very asynchronous and the part of it that we
 have implemented does use a thread internally.  We kept it to just one thread and
-use non-blocking IO.  
+use non-blocking IO. 
 
 
 The API
@@ -160,35 +160,40 @@ The API
 The library uses opaque pointers with accessor functions.  There are only a
 few functions in the API:
 
-plc_tag plc_tag_create(const char *attrib_str);
-int plc_tag_abort(plc_tag tag);
-int plc_tag_destroy(plc_tag tag);
-int plc_tag_read(plc_tag tag, int timeout);
-int plc_tag_status(plc_tag tag);
-int plc_tag_write(plc_tag tag, int timeout);
+These functions operation on all types of tags:
 
-int plc_tag_get_size(plc_tag tag);
+	plc_tag plc_tag_create(const char *attrib_str);
+	int plc_tag_abort(plc_tag tag);
+	int plc_tag_destroy(plc_tag tag);
+	int plc_tag_read(plc_tag tag, int timeout);
+	int plc_tag_status(plc_tag tag);
+	int plc_tag_write(plc_tag tag, int timeout);
+	int plc_tag_get_size(plc_tag tag);
 
-uint32_t plc_tag_get_uint32(plc_tag tag, int offset);
-int plc_tag_set_uint32(plc_tag tag, int offset, uint32_t val);
+The following functions get and set data within a tag's
+local data.  Note that after you set something, you must
+still call plc_tag_write(tag) to push it to the PLC.
 
-int32_t plc_tag_get_int32(plc_tag tag, int offset);
-int plc_tag_set_int32(plc_tag, int offset, int32_t val);
+	uint32_t plc_tag_get_uint32(plc_tag tag, int offset);
+	int plc_tag_set_uint32(plc_tag tag, int offset, uint32_t val);
 
-uint16_t plc_tag_get_uint16(plc_tag tag, int offset);
-int plc_tag_set_uint16(plc_tag tag, int offset, uint16_t val);
+	int32_t plc_tag_get_int32(plc_tag tag, int offset);
+	int plc_tag_set_int32(plc_tag, int offset, int32_t val);
 
-int16_t plc_tag_get_int16(plc_tag tag, int offset);
-int plc_tag_set_int16(plc_tag, int offset, int16_t val);
+	uint16_t plc_tag_get_uint16(plc_tag tag, int offset);
+	int plc_tag_set_uint16(plc_tag tag, int offset, uint16_t val);
 
-uint8_t plc_tag_get_uint8(plc_tag tag, int offset);
-int plc_tag_set_uint8(plc_tag tag, int offset, uint8_t val);
+	int16_t plc_tag_get_int16(plc_tag tag, int offset);
+	int plc_tag_set_int16(plc_tag, int offset, int16_t val);
 
-int8_t plc_tag_get_int8(plc_tag tag, int offset);
-int plc_tag_set_int8(plc_tag, int offset, int8_t val);
+	uint8_t plc_tag_get_uint8(plc_tag tag, int offset);
+	int plc_tag_set_uint8(plc_tag tag, int offset, uint8_t val);
 
-float plc_tag_get_float32(plc_tag tag, int offset);
-int plc_tag_set_float32(plc_tag tag, int offset, float val);
+	int8_t plc_tag_get_int8(plc_tag tag, int offset);
+	int plc_tag_set_int8(plc_tag, int offset, int8_t val);
+
+	float plc_tag_get_float32(plc_tag tag, int offset);
+	int plc_tag_set_float32(plc_tag tag, int offset, float val);
 
 Most of the functions in the API are for data access.
 
