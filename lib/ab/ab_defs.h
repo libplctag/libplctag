@@ -33,7 +33,6 @@
 
 #include <stdint.h>
 #include <libplctag_tag.h>
-#include <ab/ab_common.h>
 #include <platform.h>
 #include <util/attr.h>
 
@@ -43,14 +42,14 @@
 #define MAX_MSG_SIZE		(1024)
 #define MAX_TAG_NAME 		(64)
 #define MAX_TAG_TYPE_INFO 	(64)
-#define MAX_REQ_RESP_SIZE	(768) /* 512 bytes data plus 256 header, enough? */
-#define MAX_EIP_PACKET_SIZE	(512) /*
-								   * experimentally chosen.  AB says somewhere that you must
+#define MAX_REQ_RESP_SIZE	(768) /* enough? */
+#define MAX_EIP_PACKET_SIZE	(540) /*
+								   * AB says somewhere that you must
 								   * support packets of 544 bytes.  We support 768.  That should
-								   * be good for now.  However, we only see packets of 538 bytes
-								   * or less come in.
+								   * be good for now.  The maximum we've seen is 540.  We'll
+								   * use that.
 								   *
-								   * Hopefully 512 is safe.  This should be checked.
+								   * Hopefully 540 is safe.  This should be checked.
 								   */
 
 #define MAX_PCCC_PACKET_SIZE (244) /*
@@ -58,6 +57,8 @@
 									*
 									* Needs more testing.
 									*/
+
+#define DEFAULT_MAX_REQUESTS (10)	/* number of requests and request sizes to allocate by default. */
 
 
 /* AB Constants*/
@@ -99,6 +100,7 @@
 #define AB_EIP_PCCC_TYPED_READ_FUNC ((uint8_t)0x68)
 #define AB_EIP_PCCC_TYPED_WRITE_FUNC ((uint8_t)0x67)
 
+
 /* PCCC defs */
 #define AB_PCCC_DATA_BIT            1
 #define AB_PCCC_DATA_BIT_STRING     2
@@ -111,6 +113,8 @@
 #define AB_PCCC_DATA_ARRAY          9
 #define AB_PCCC_DATA_ADDRESS        15
 #define AB_PCCC_DATA_BCD            16
+
+
 
 
 /* base data type byte values */
@@ -319,9 +323,15 @@ struct ab_tag_t {
     int elem_count;
     int elem_size;
 
-    /* outstanding requests */
-    int num_requests;
-    int frag_size;
+    /* requests */
+    int pre_write_read;
+    int first_read;
+    int num_read_requests; /* number of read requests */
+    int num_write_requests; /* number of write requests */
+    int max_requests; /* how many can we have without reallocating? */
+    int *read_req_sizes;
+    int *write_req_sizes;
+
     ab_request_p *reqs;
 
     /* flags for operations */
@@ -337,7 +347,12 @@ struct ab_tag_t {
  */
 
 struct ab_request_t {
-	ab_request_p next;
+	ab_request_p next; 	/* for linked list */
+
+	int req_id; 		/* which request is this for the tag? */
+	int data_size; 		/* how many bytes did we get? */
+
+	/* flags for communicating with background thread */
 	int send_request;
 	int send_in_progress;
 	int resp_received;
@@ -347,14 +362,18 @@ struct ab_request_t {
 	int status;
 	int debug;
 
+	/* used when processing a response */
+	int processed;
+
 	ab_session_p session;
 
 	uint64_t session_seq_id;
 	uint32_t conn_id;
 	uint16_t conn_seq;
 
+	/* used by the background thread for incrementally getting data */
 	int current_offset;
-	int request_size;
+	int request_size; /* total bytes, not just data */
 	uint8_t data[MAX_REQ_RESP_SIZE];
 };
 

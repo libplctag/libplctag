@@ -214,6 +214,7 @@ LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
      */
     if(timeout) {
     	uint64_t timeout_time = timeout + time_ms();
+    	uint64_t start_time = time_ms();
 
     	while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
 			rc = plc_tag_status(tag);
@@ -240,6 +241,8 @@ LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
     		tag->status = PLCTAG_ERR_TIMEOUT;
     		rc = PLCTAG_ERR_TIMEOUT;
     	}
+
+    	pdebug(debug,"elapsed time %ldms",(time_ms()-start_time));
     }
 
     pdebug(debug, "Done");

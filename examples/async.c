@@ -1,3 +1,31 @@
+/***************************************************************************
+ *   Copyright (C) 2013 by Process Control Engineers                       *
+ *   Author Kyle Hayes  kylehayes@processcontrolengineers.com              *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU Library General Public License as       *
+ *   published by the Free Software Foundation; either version 2 of the    *
+ *   License, or (at your option) any later version.                       *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU Library General Public     *
+ *   License along with this program; if not, write to the                 *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
+
+/*
+ * This example reads from a large DINT array.  It creates 150 tags that each read from one element of the
+ * array. It fires off all the tags at once and waits for them to complete the reads. In this case, it waits
+ * a fixed amount of time and then tries to read the tags.
+ */
+
+
 #include <stdio.h>
 #include <unistd.h>
 #include "../lib/libplctag.h"
@@ -28,6 +56,7 @@ int main(int argc, char **argv)
     fprintf(stderr,"Sleeping to let the connect complete.\n");
     sleep(1);
     for(i=0; i < NUM_TAGS; i++) {
+    	/* called to update the status in the tag. */
     	plc_tag_status(tag[i]);
     }
 
@@ -61,44 +90,6 @@ int main(int argc, char **argv)
 	}
 
 
-   /*
-    for(i=0; i < DATA_SIZE; i++) {
-    	int32_t val = plc_tag_get_int32(tag,(i*4));
-
-    	if(val == 0) {
-    		val = i+1;
-    	} else {
-    		val++;
-    	}
-
-    	val = i+1;
-
-    	fprintf(stderr,"Setting element %d to %d\n",i,val);
-
-    	plc_tag_set_int32(tag,(i*4),val);
-    }
-
-    rc = plc_tag_write(tag, DATA_TIMEOUT);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
-        return 0;
-    }
-
-
-    rc = plc_tag_read(tag, DATA_TIMEOUT);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
-        return 0;
-    }
-
-    for(i=0; i < DATA_SIZE; i++) {
-        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*4)));
-    }
-*/
     /* we are done */
     for(i=0; i < NUM_TAGS; i++) {
     	plc_tag_destroy(tag[i]);

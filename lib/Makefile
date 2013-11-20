@@ -31,8 +31,8 @@ INSTALL=install
 
 
 LIBPLC_LIB_SO=libplctag.so
-LIBPLC_LIB_SRC=libplctag_tag.c linux/platform.c util/attr.c ab/eip.c ab/util.c
-LIBPLC_LIB_HEADER=libplctag.h libplctag_tag.h linux/platform.h util/attr.h ab/ab.h
+LIBPLC_LIB_SRC=libplctag_tag.c linux/platform.c util/attr.c ab/ab.c ab/common.c ab/cip.c ab/eip_cip.c ab/eip_dhp_pccc.c ab/eip_pccc.c ab/pccc.c
+LIBPLC_LIB_HEADER=libplctag.h $(LIBPLC_LIB_SRC:%.c=%.h)
 LIBPLC_LIB_OBJ=$(LIBPLC_LIB_SRC:%.c=%.o)
 
 
@@ -95,3 +95,4 @@ killdepend:
 	@echo "*******************************************"
 	@echo "** Removing Old dependencies..."
 	@find . -name "Makefile.depends" -print | $(XARGS) rm %
+

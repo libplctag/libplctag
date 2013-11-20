@@ -1075,7 +1075,7 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
     va_list va;
     struct tm t;
     time_t epoch;
-    char prefix[512];
+    char prefix[2048];
 
     /* build the prefix */
     /* get the time parts */
@@ -1130,6 +1130,7 @@ extern void pdebug_dump_bytes_impl(uint8_t *data,int count)
         snprintf(buf+end,sizeof(buf)-end,"\n");*/
 
     pdebug("%s",buf);
+    fflush(stderr);
 }
 
 

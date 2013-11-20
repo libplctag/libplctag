@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2012 by Process Control Engineers                       *
+ *   Copyright (C) 2013 by Process Control Engineers                       *
  *   Author Kyle Hayes  kylehayes@processcontrolengineers.com              *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -21,47 +21,16 @@
  /**************************************************************************
   * CHANGE LOG                                                             *
   *                                                                        *
-  * 2012-06-20  KRH - Created file.                                        *
-  *                                                                        *
+  * 2013-11-19  KRH - Created file.                                        *
   **************************************************************************/
 
+#ifndef __LIBPLCTAG_AB_EIP_DHP_PCCC_H__
+#define __LIBPLCTAG_AB_EIP_DHP_PCCC_H__
 
-#ifndef __AB_AB_COMMON_H__
-#define __AB_AB_COMMON_H__
-
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-
-/* common definitions for EIP and PCCC.  Mostly just PCCC */
-
-
-/* PCCC commands */
-#define AB_PCCC_TYPED_CMD ((uint8_t)0x0F)
-#define AB_PCCC_TYPED_READ_FUNC ((uint8_t)0x68)
-#define AB_PCCC_TYPED_WRITE_FUNC ((uint8_t)0x67)
-
-/* PCCC defs */
-#define AB_PCCC_DATA_BIT            1
-#define AB_PCCC_DATA_BIT_STRING     2
-#define AB_PCCC_DATA_BYTE_STRING    3
-#define AB_PCCC_DATA_INT            4
-#define AB_PCCC_DATA_TIMER          5
-#define AB_PCCC_DATA_COUNTER        6
-#define AB_PCCC_DATA_CONTROL        7
-#define AB_PCCC_DATA_REAL           8
-#define AB_PCCC_DATA_ARRAY          9
-#define AB_PCCC_DATA_ADDRESS        15
-#define AB_PCCC_DATA_BCD            16
-
-
-
-
-#ifdef __cplusplus
-}
-#endif
+/* PCCC with DH+ last hop */
+int eip_dhp_pccc_tag_status(ab_tag_p tag);
+int eip_dhp_pccc_tag_read_start(ab_tag_p tag);
+int eip_dhp_pccc_tag_write_start(ab_tag_p tag);
 
 
 #endif

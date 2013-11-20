@@ -45,27 +45,28 @@ LIBS = -lplctag -lpthread -pthread
 SHLIBS = $(LIBS)
 # LIBPLC_LIB_SO = ../lib/libplctag.so
 
-TARGETS = $(ASYNC) $(SIMPLE) $(LIBPLC_TEST)
+TARGETS = async simple string toggle_bool write_string tag_rw
 
 all: $(TARGETS)
+	
+async: async.c
+	$(CC) -o async async.c $(CFLAGS) $(SHLIBS)
 
-$(ASYNC): $(ASYNC_OBJ) $(DEP_LIBS)
-	$(CC) -o $@ $(ASYNC_OBJ) $(LDFLAGS) $(SHLIBS) -L. $(LIBPLC_LIB_SO)
+simple: simple.c
+	$(CC) -o simple simple.c $(CFLAGS) $(SHLIBS)
 
-$(ASYNC_OBJ): $(ASYNC_SRC)
-	$(CC) -c -o $@ $(ASYNC_SRC) $(CFLAGS)
+string: string.c
+	$(CC) -o string string.c $(CFLAGS) $(SHLIBS)
 
-$(SIMPLE): $(SIMPLE_OBJ) $(DEP_LIBS)
-	$(CC) -o $@ $(SIMPLE_OBJ) $(LDFLAGS) $(SHLIBS) -L. $(LIBPLC_LIB_SO)
+toggle_bool: toggle_bool.c
+	$(CC) -o toggle_bool toggle_bool.c $(CFLAGS) $(SHLIBS)
 
-$(SIMPLE_OBJ): $(SIMPLE_SRC)
-	$(CC) -c -o $@ $(SIMPLE_SRC) $(CFLAGS)
+write_string: write_string.c
+	$(CC) -o write_string write_string.c $(CFLAGS) $(SHLIBS)
 
-$(LIBPLC_TEST): $(LIBPLC_TEST_OBJ) $(DEP_LIBS)
-	$(CC) -o $@ $(LIBPLC_TEST_OBJ) $(LDFLAGS) $(SHLIBS) -L. $(LIBPLC_LIB_SO)
+tag_rw: tag_rw.c
+	$(CC) -o tag_rw tag_rw.c $(CFLAGS) $(SHLIBS)
 
-$(LIBPLC_TEST_OBJ): $(LIBPLC_TEST_SRC)
-	$(CC) -c -o $@ $(LIBPLC_TEST_SRC) $(CFLAGS)
 
 clean:
 	rm -rf $(TARGETS) *.o *.so *~ Makefile.depends *.log

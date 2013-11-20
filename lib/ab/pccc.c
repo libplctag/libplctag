@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2012 by Process Control Engineers                       *
+ *   Copyright (C) 2013 by Process Control Engineers                       *
  *   Author Kyle Hayes  kylehayes@processcontrolengineers.com              *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -21,20 +21,22 @@
  /**************************************************************************
   * CHANGE LOG                                                             *
   *                                                                        *
-  * 2012-06-15  KRH - Created file.                                        *
-  *                                                                        *
+  * 2013-11-19  KRH - Created file.                                        *
   **************************************************************************/
 
-
 #include <string.h>
-#include "libplctag_tag.h"
-#include "ab/util.h"
+#include <libplctag.h>
+#include <libplctag_tag.h>
+#include <platform.h>
+#include <ab/ab_defs.h>
+#include <ab/common.h>
+#include <ab/pccc.h>
 
 
 
 
 /*
- * ab_make_laa()
+ * pccc_encode_tag_name()
  *
  * This takes a PLC5-style tag name like N7:4 and
  * turns it into a logical ASCII address.  These
@@ -42,7 +44,7 @@
  * name, then another 0 byte.
  */
 
-int ab_make_laa(uint8_t *data, int *size, const char *name, int max_tag_name_size)
+int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag_name_size)
 {
     *size = 0;
 
@@ -98,7 +100,7 @@ int ab_make_laa(uint8_t *data, int *size, const char *name, int max_tag_name_siz
 
 
 
-uint8_t calculate_bcc(uint8_t *data,int size)
+uint8_t pccc_calculate_bcc(uint8_t *data,int size)
 {
     int bcc = 0;
     int i;
@@ -120,22 +122,17 @@ uint8_t calculate_bcc(uint8_t *data,int size)
 /* Calculate AB's version of CRC-16.  We use a precalculated
  * table for simplicity.   Note that modern processors execute
  * so many instructions per second, that using a table, even
- * this small, is probably slower.  One miss to main memory will
- * cost the equivalent of hundreds of instructions.  This table is
- * 512 bytes, so at least 8 cache lines (assuming 64-byte cache lines).
- * Hopefully L2 or LLC will take the pain out of this.  Access of this
- * table is basically random, so we will probably keep all 8 cache lines
- * hot for a while.
+ * this small, is probably slower.
  */
- 
-uint16_t CRC16Bytes[] = 
+
+uint16_t CRC16Bytes[] =
 	   {0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
         0xC601, 0x06C0, 0x0780, 0xC741, 0x0500, 0xC5C1, 0xC481, 0x0440,
         0xCC01, 0x0CC0, 0x0D80, 0xCD41, 0x0F00, 0xCFC1, 0xCE81, 0x0E40,
         0x0A00, 0xCAC1, 0xCB81, 0x0B40, 0xC901, 0x09C0, 0x0880, 0xC841,
-        0xD801, 0x18C0, 0x1980, 0xD941, 0x1B00, 0xDBC1, 0xDA81, 0x1A40, 
-        0x1E00, 0xDEC1, 0xDF81, 0x1F40, 0xDD01, 0x1DC0, 0x1C80, 0xDC41, 
-        0x1400, 0xD4C1, 0xD581, 0x1540, 0xD701, 0x17C0, 0x1680, 0xD641, 
+        0xD801, 0x18C0, 0x1980, 0xD941, 0x1B00, 0xDBC1, 0xDA81, 0x1A40,
+        0x1E00, 0xDEC1, 0xDF81, 0x1F40, 0xDD01, 0x1DC0, 0x1C80, 0xDC41,
+        0x1400, 0xD4C1, 0xD581, 0x1540, 0xD701, 0x17C0, 0x1680, 0xD641,
         0xD201, 0x12C0, 0x1380, 0xD341, 0x1100, 0xD1C1, 0xD081, 0x1040,
         0xF001, 0x30C0, 0x3180, 0xF141, 0x3300, 0xF3C1, 0xF281, 0x3240,
         0x3600, 0xF6C1, 0xF781, 0x3740, 0xF501, 0x35C0, 0x3480, 0xF441,
@@ -149,21 +146,21 @@ uint16_t CRC16Bytes[] =
         0x6600, 0xA6C1, 0xA781, 0x6740, 0xA501, 0x65C0, 0x6480, 0xA441,
         0x6C00, 0xACC1, 0xAD81, 0x6D40, 0xAF01, 0x6FC0, 0x6E80, 0xAE41,
         0xAA01, 0x6AC0, 0x6B80, 0xAB41, 0x6900, 0xA9C1, 0xA881, 0x6840,
-        0x7800, 0xB8C1, 0xB981, 0x7940, 0xBB01, 0x7BC0, 0x7A80, 0xBA41, 
-        0xBE01, 0x7EC0, 0x7F80, 0xBF41, 0x7D00, 0xBDC1, 0xBC81, 0x7C40, 
-        0xB401, 0x74C0, 0x7580, 0xB541, 0x7700, 0xB7C1, 0xB681, 0x7640, 
-        0x7200, 0xB2C1, 0xB381, 0x7340, 0xB101, 0x71C0, 0x7080, 0xB041, 
-        0x5000, 0x90C1, 0x9181, 0x5140, 0x9301, 0x53C0, 0x5280, 0x9241, 
-        0x9601, 0x56C0, 0x5780, 0x9741, 0x5500, 0x95C1, 0x9481, 0x5440, 
-        0x9C01, 0x5CC0, 0x5D80, 0x9D41, 0x5F00, 0x9FC1, 0x9E81, 0x5E40, 
-        0x5A00, 0x9AC1, 0x9B81, 0x5B40, 0x9901, 0x59C0, 0x5880, 0x9841, 
-        0x8801, 0x48C0, 0x4980, 0x8941, 0x4B00, 0x8BC1, 0x8A81, 0x4A40, 
-        0x4E00, 0x8EC1, 0x8F81, 0x4F40, 0x8D01, 0x4DC0, 0x4C80, 0x8C41, 
-        0x4400, 0x84C1, 0x8581, 0x4540, 0x8701, 0x47C0, 0x4680, 0x8641, 
+        0x7800, 0xB8C1, 0xB981, 0x7940, 0xBB01, 0x7BC0, 0x7A80, 0xBA41,
+        0xBE01, 0x7EC0, 0x7F80, 0xBF41, 0x7D00, 0xBDC1, 0xBC81, 0x7C40,
+        0xB401, 0x74C0, 0x7580, 0xB541, 0x7700, 0xB7C1, 0xB681, 0x7640,
+        0x7200, 0xB2C1, 0xB381, 0x7340, 0xB101, 0x71C0, 0x7080, 0xB041,
+        0x5000, 0x90C1, 0x9181, 0x5140, 0x9301, 0x53C0, 0x5280, 0x9241,
+        0x9601, 0x56C0, 0x5780, 0x9741, 0x5500, 0x95C1, 0x9481, 0x5440,
+        0x9C01, 0x5CC0, 0x5D80, 0x9D41, 0x5F00, 0x9FC1, 0x9E81, 0x5E40,
+        0x5A00, 0x9AC1, 0x9B81, 0x5B40, 0x9901, 0x59C0, 0x5880, 0x9841,
+        0x8801, 0x48C0, 0x4980, 0x8941, 0x4B00, 0x8BC1, 0x8A81, 0x4A40,
+        0x4E00, 0x8EC1, 0x8F81, 0x4F40, 0x8D01, 0x4DC0, 0x4C80, 0x8C41,
+        0x4400, 0x84C1, 0x8581, 0x4540, 0x8701, 0x47C0, 0x4680, 0x8641,
         0x8201, 0x42C0, 0x4380, 0x8341, 0x4100, 0x81C1, 0x8081, 0x4040};
 
 
-uint16_t calculate_crc16(uint8_t *data, int size)
+uint16_t pccc_calculate_crc16(uint8_t *data, int size)
 {
     uint16_t running_crc = 0;
 	uint8_t running_byte = 0;
@@ -176,13 +173,13 @@ uint16_t calculate_crc16(uint8_t *data, int size)
 		 * and the table is precalculated to have all the right
 		 * 256 values.
 		 */
-		 
+
 		/* mask the CRC and XOR with the data byte */
 		running_byte = (uint8_t)(running_crc & 0x00FF) ^ data[i];
-		
+
 		/* calculate the next CRC value by shifting and XORing with
 		 * the value we get from a table lookup using the running
-		 * byte as an index.  This chains the data forward as we 
+		 * byte as an index.  This chains the data forward as we
 		 * calculate the CRC.
 		 */
 		running_crc = (running_crc >> 8) ^ CRC16Bytes[running_byte];
@@ -196,89 +193,91 @@ uint16_t calculate_crc16(uint8_t *data, int size)
 
 
 
-void decode_pccc_error(plc_tag tag, int error)
+const char *pccc_decode_error(int error)
 {
     switch(error) {
         case 1:
-            pdebug(tag->debug,"Error converting block address.");
+            return "Error converting block address.";
             break;
 
         case 2:
-            pdebug(tag->debug,"Less levels specified in address than minimum for any address.");
+            return "Less levels specified in address than minimum for any address.";
             break;
 
         case 3:
-            pdebug(tag->debug,"More levels specified in address than system supports");
+            return "More levels specified in address than system supports";
             break;
 
         case 4:
-            pdebug(tag->debug,"Symbol not found.");
+            return "Symbol not found.";
             break;
 
         case 5:
-            pdebug(tag->debug,"Symbol is of improper format.");
+            return "Symbol is of improper format.";
             break;
 
         case 6:
-            pdebug(tag->debug,"Address doesn't point to something usable.");
+            return "Address doesn't point to something usable.";
             break;
 
         case 7:
-            pdebug(tag->debug,"File is wrong size.");
+            return "File is wrong size.";
             break;
 
         case 8:
-            pdebug(tag->debug,"Cannot complete request, situation has changed since the start of the command.");
+            return "Cannot complete request, situation has changed since the start of the command.";
             break;
 
         case 9:
-            pdebug(tag->debug,"File is too large.");
+            return "File is too large.";
             break;
 
         case 0x0A:
-            pdebug(tag->debug,"Transaction size plus word address is too large.");
+            return "Transaction size plus word address is too large.";
             break;
 
         case 0x0B:
-            pdebug(tag->debug,"Access denied, improper privilege.");
+            return "Access denied, improper privilege.";
             break;
 
         case 0x0C:
-            pdebug(tag->debug,"Condition cannot be generated - resource is not available (some has upload active)");
+            return "Condition cannot be generated - resource is not available (some has upload active)";
             break;
 
         case 0x0D:
-            pdebug(tag->debug,"Condition already exists - resource is already available.");
+            return "Condition already exists - resource is already available.";
             break;
 
         case 0x0E:
-            pdebug(tag->debug,"Shutdown could not be executed.");
+            return "Shutdown could not be executed.";
             break;
 
         case 0x0F:
-            pdebug(tag->debug,"Requestor does not have upload or download access - no privilege.");
+            return "Requester does not have upload or download access - no privilege.";
             break;
 
         case 0x10:
-            pdebug(tag->debug,"Histogram overflow.");
+            return "Histogram overflow.";
             break;
 
         case 0x11:
-            pdebug(tag->debug,"Illegal data type.");
+            return "Illegal data type.";
             break;
 
         case 0x12:
-            pdebug(tag->debug,"Bad parameter.");
+            return "Bad parameter.";
             break;
 
         case 0x13:
-            pdebug(tag->debug,"Address reference exists to deleted data table.");
+            return "Address reference exists to deleted data table.";
             break;
 
         default:
-            pdebug(tag->debug,"Unknown error response 0x%02x.",error);
+            return "Unknown error response.";
             break;
     }
+
+    return "Unknown error response.";
 }
 
 
@@ -287,7 +286,7 @@ void decode_pccc_error(plc_tag tag, int error)
 
 
 
-uint8_t *ab_decode_pccc_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length)
+uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length)
 {
     uint32_t d_type;
     uint32_t d_size;
@@ -361,7 +360,7 @@ uint8_t *ab_decode_pccc_dt_byte(uint8_t *data,int data_size, int *pccc_res_type,
 
 
 
-int ab_encode_pccc_dt_byte(uint8_t *data,int buf_size,uint32_t data_type,uint32_t data_size)
+int pccc_encode_dt_byte(uint8_t *data,int buf_size,uint32_t data_type,uint32_t data_size)
 {
     uint8_t *dt_byte = data;
     uint8_t d_byte;
@@ -417,6 +416,7 @@ int ab_encode_pccc_dt_byte(uint8_t *data,int buf_size,uint32_t data_type,uint32_
 
     return data - dt_byte;
 }
+
 
 
 
