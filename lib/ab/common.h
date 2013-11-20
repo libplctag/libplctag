@@ -31,7 +31,6 @@
 
 #include <ab/ab.h>
 #include <ab/ab_defs.h>
-#include <ab/util.h>
 #include <util/attr.h>
 
 
