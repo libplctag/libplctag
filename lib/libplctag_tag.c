@@ -25,16 +25,12 @@
   *                                                                        *
   * 2012-06-24  KRH - Updated plc_err() calls for new API.                 *
   *                                                                        *
+  * 2013-12-24  KRH - Various munging to make this compile under VS2012    *
+  *                                                                        *
   **************************************************************************/
 
-
-
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-
+#include <limits.h>
+#include <float.h>
 #include <libplctag.h>
 #include <libplctag_tag.h>
 #include <platform.h>
@@ -86,7 +82,6 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 
     return tag;
 }
-
 
 
 
@@ -386,7 +381,7 @@ LIB_EXPORT int plc_tag_get_size(plc_tag tag)
 
 
 
-extern uint32_t plc_tag_get_uint32(plc_tag t, int offset)
+LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag t, int offset)
 {
 	uint32_t res = UINT32_MAX;
 
@@ -431,7 +426,7 @@ extern uint32_t plc_tag_get_uint32(plc_tag t, int offset)
 
 
 
-extern int plc_tag_set_uint32(plc_tag t, int offset, uint32_t val)
+LIB_EXPORT int plc_tag_set_uint32(plc_tag t, int offset, uint32_t val)
 {
 	int rc;
 
@@ -484,7 +479,7 @@ extern int plc_tag_set_uint32(plc_tag t, int offset, uint32_t val)
 
 
 
-extern int32_t  plc_tag_get_int32(plc_tag t, int offset)
+LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag t, int offset)
 {
 	int32_t res = INT32_MIN;
 
@@ -529,7 +524,7 @@ extern int32_t  plc_tag_get_int32(plc_tag t, int offset)
 
 
 
-extern int plc_tag_set_int32(plc_tag t, int offset, int32_t ival)
+LIB_EXPORT int plc_tag_set_int32(plc_tag t, int offset, int32_t ival)
 {
 	int rc;
 
@@ -584,7 +579,7 @@ extern int plc_tag_set_int32(plc_tag t, int offset, int32_t ival)
 
 
 
-extern uint16_t plc_tag_get_uint16(plc_tag t, int offset)
+LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag t, int offset)
 {
 	uint16_t res = UINT16_MAX;
 
@@ -626,7 +621,7 @@ extern uint16_t plc_tag_get_uint16(plc_tag t, int offset)
 
 
 
-extern int plc_tag_set_uint16(plc_tag t, int offset, uint16_t val)
+LIB_EXPORT int plc_tag_set_uint16(plc_tag t, int offset, uint16_t val)
 {
 	int rc;
 
@@ -676,7 +671,7 @@ extern int plc_tag_set_uint16(plc_tag t, int offset, uint16_t val)
 
 
 
-extern int16_t  plc_tag_get_int16(plc_tag t, int offset)
+LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag t, int offset)
 {
 	int16_t res = INT16_MIN;
 
@@ -718,7 +713,7 @@ extern int16_t  plc_tag_get_int16(plc_tag t, int offset)
 
 
 
-extern int plc_tag_set_int16(plc_tag t, int offset, int16_t ival)
+LIB_EXPORT int plc_tag_set_int16(plc_tag t, int offset, int16_t ival)
 {
 	int rc;
 
@@ -770,7 +765,7 @@ extern int plc_tag_set_int16(plc_tag t, int offset, int16_t ival)
 
 
 
-extern uint8_t  plc_tag_get_uint8(plc_tag t, int offset)
+LIB_EXPORT uint8_t  plc_tag_get_uint8(plc_tag t, int offset)
 {
 	uint8_t res = UINT8_MAX;
 
@@ -805,7 +800,7 @@ extern uint8_t  plc_tag_get_uint8(plc_tag t, int offset)
 
 
 
-extern int plc_tag_set_uint8(plc_tag t, int offset, uint8_t val)
+LIB_EXPORT int plc_tag_set_uint8(plc_tag t, int offset, uint8_t val)
 {
 	int rc;
 
@@ -849,7 +844,7 @@ extern int plc_tag_set_uint8(plc_tag t, int offset, uint8_t val)
 
 
 
-extern int8_t   plc_tag_get_int8(plc_tag t, int offset)
+LIB_EXPORT int8_t   plc_tag_get_int8(plc_tag t, int offset)
 {
 	int8_t res = INT8_MIN;
 
@@ -884,7 +879,7 @@ extern int8_t   plc_tag_get_int8(plc_tag t, int offset)
 
 
 
-extern int plc_tag_set_int8(plc_tag t, int offset, int8_t val)
+LIB_EXPORT int plc_tag_set_int8(plc_tag t, int offset, int8_t val)
 {
 	int rc;
 
@@ -932,10 +927,10 @@ extern int plc_tag_set_int8(plc_tag t, int offset, int8_t val)
  *
  * This is not portable!
  */
-extern float    plc_tag_get_float32(plc_tag t, int offset)
+LIB_EXPORT float plc_tag_get_float32(plc_tag t, int offset)
 {
 	uint32_t ures;
-	float res = INFINITY;
+	float res = FLT_MAX;
 
 	/* is there a tag? */
 	if(!t)
@@ -985,7 +980,7 @@ extern float    plc_tag_get_float32(plc_tag t, int offset)
  *
  * This is not portable!
  */
-extern int plc_tag_set_float32(plc_tag t, int offset, float fval)
+LIB_EXPORT int plc_tag_set_float32(plc_tag t, int offset, float fval)
 {
 	int rc;
 

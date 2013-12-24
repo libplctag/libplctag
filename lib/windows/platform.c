@@ -32,6 +32,7 @@
  ******************************* WINDOWS ***********************************
  **************************************************************************/
 
+#include <platform.h>
 
 #define _WINSOCKAPI_
 #include <windows.h>
@@ -43,6 +44,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <winnt.h>
+#include <errno.h>
+#include <math.h>
+#include <process.h>
+#include <time.h>
+#include <stdio.h>
+
+#include <libplctag.h>
 
 
 /*#ifdef __cplusplus
@@ -57,7 +65,6 @@ extern "C"
 #include <fcntl.h>
 #include <stdlib.h>*/
 
-#include <platform.h>
 
 
 
@@ -180,7 +187,7 @@ extern int str_cmp_i(const char *first, const char *second)
  */
 extern int str_copy(char *dst, const char *src, int size)
 {
-	strncpy(dst,src,size);
+	strncpy_s(dst, size, src, strlen(src)+1);
 	return 0;
 }
 
@@ -215,7 +222,7 @@ extern char *str_dup(const char *str)
 		return NULL;
 	}
 
-	return strdup(str);
+	return _strdup(str);
 }
 
 
@@ -259,7 +266,7 @@ extern int str_to_float(const char *str, float *val)
 	/* Windows does not have strtof() */
 	tmp_val_d = strtod(str,&endptr);
 
-	if (errno == ERANGE && (tmp_val == HUGE_VALF || tmp_val == -HUGE_VALF || tmp_val == 0)) {
+	if (errno == ERANGE && (tmp_val_d == HUGE_VAL || tmp_val_d == -HUGE_VAL || tmp_val_d == (double)0.0)) {
 		return -1;
 	}
 
@@ -304,7 +311,7 @@ extern char **str_split(const char *str, const char *sep)
 	size = sizeof(char *)*(sub_str_count+1)+str_length(str)+1;
 
 	/* allocate enough memory */
-	res = mem_alloc(size);
+	res = (char**)mem_alloc(size);
 	if(!res)
 		return NULL;
 
@@ -491,7 +498,7 @@ struct thread_t {
  * FIXME - use the stacksize!
  */
 
-extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg)
+extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg)
 {
 	/*pdebug("Starting.");*/
 
@@ -556,8 +563,6 @@ void thread_stop(void)
 
 int thread_join(thread_p t)
 {
-	void *unused;
-
 	/*pdebug("Starting.");*/
 
 	if(!t) {
@@ -660,11 +665,14 @@ extern void lock_release(lock_t *lock)
  **************************************************************************/
 
 
-struct plc_socket_t {
+struct sock_t {
 	int fd;
 	int port;
 	int is_open;
 };
+
+
+#define MAX_IPS (8)
 
 
 /* windows needs to have the Winsock library initialized 
@@ -716,7 +724,7 @@ extern int socket_create(sock_p *s)
 
 extern int socket_connect_tcp(sock_p s, const char *host, int port)
 {
-	in_addr_t ips[MAX_IPS];
+	IN_ADDR ips[MAX_IPS];
 	int num_ips = 0;
 	struct sockaddr_in gw_addr;
     int sock_opt = 1;
@@ -724,7 +732,6 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     int i = 0;
     int done = 0;
 	int fd;
-    int flags;
     struct timeval timeout; /* used for timing out connections etc. */
 
 	/*pdebug("Starting.");*/
@@ -742,7 +749,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     sock_opt = 1;
 
     if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
-		_close(fd);
+		closesocket(fd);
         /*pdebug("Error setting socket reuse option, errno: %d",errno);*/
         return PLCTAG_ERR_OPEN;
     }
@@ -751,13 +758,13 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     timeout.tv_usec = 0;
 
     if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
-		close(fd);
+		closesocket(fd);
         /*pdebug("Error setting socket receive timeout option, errno: %d",errno);*/
         return PLCTAG_ERR_OPEN;
     }
 
     if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
-		close(fd);
+		closesocket(fd);
         /*pdebug("Error setting socket set timeout option, errno: %d",errno);*/
         return PLCTAG_ERR_OPEN;
     }
@@ -781,7 +788,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
         /* copy the IP list */
         for(num_ips = 0; h->h_addr_list[num_ips] && num_ips < MAX_IPS; num_ips++) {
-            ips[num_ips] = *((in_addr_t *)h->h_addr_list[num_ips]);
+            ips[num_ips] = *((IN_ADDR *)h->h_addr_list[num_ips]);
         }
 
         free(h);
@@ -802,7 +809,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     do {
     	int rc;
         /* try each IP until we run out or get a connection. */
-        gw_addr.sin_addr.s_addr = ips[i];
+        gw_addr.sin_addr.s_addr = ips[i].S_un.S_addr;
 
         /*pdebug("Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));*/
 
@@ -829,7 +836,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
      * we make the socket non-blocking here, after connect(). 
 	 */
     
-    if(ioctlsocket(Socket,FIONBIO,&non_blocking)) {
+    if(ioctlsocket(fd,FIONBIO,&non_blocking)) {
       /*pdebug("Error getting socket options, errno: %d", errno);*/
       closesocket(fd);
       return PLCTAG_ERR_OPEN;
@@ -850,98 +857,6 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
 
 
-plc_socket plc_lib_open_socket(plc_lib lib, const char *host_and_port, int default_port)
-{
-	plc_socket sock;
-    struct in_addr ips[MAX_IPS];
-    int num_ips;
-    int port = 0;
-    struct sockaddr_in gw_addr;
-    int sock_opt = 1;
-    int i = 0;
-    int done = 0;
-	int fd;
-	
-	plc_err(lib, PLC_LOG_INFO, PLC_ERR_NONE, "Starting.");
-
-    /* attempt to open the socket library. */
-    if(!plc_lib_socket_lib_init()) {
-        plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Unable to initialize socket library.");
-        return PLC_SOCKET_NULL;
-    }
-	
-    /* parse the host and port string and look up the IPs. */
-    if(!plc_lib_parse_host(lib, host_and_port, default_port, MAX_IPS, ips, &num_ips, &port)) {
-        plc_err(lib,PLC_LOG_ERR, PLC_ERR_BAD_PARAM, "Unable to parse gateway and port from path!");
-        return PLC_SOCKET_NULL;
-    }
-
-    /* Open a socket for communication with the gateway. */
-    fd = socket(AF_INET, SOCK_STREAM, 0/*IPPROTO_TCP*/);
-
-    /* check for errors */
-    if(fd < 0) {
-        plc_err(lib,PLC_LOG_ERR, PLC_ERR_OPEN, "Socket creation failed, errno: %d",errno);
-        return PLC_SOCKET_NULL;
-    }
-
-    /* set up our socket to allow reuse if we crash suddenly. */
-    sock_opt = 1;
-
-    if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
-		closesocket(fd);
-        plc_err(lib,PLC_LOG_ERR, PLC_ERR_OPEN, "Error setting socket option, errno: %d",errno);
-        return 0;
-    }
-
-    /* now try to connect to the remote gateway.  We may need to
-     * try several of the IPs we have.
-     */
-
-    i = 0;
-    done = 0;
-
-    memset((void *)&gw_addr,0, sizeof(gw_addr));
-    gw_addr.sin_family = AF_INET ;
-    gw_addr.sin_port = htons(port);
-
-    do {
-        /* try each IP until we run out or get a connection. */
-        gw_addr.sin_addr.s_addr = ips[i].S_un.S_addr;
-
-        plc_err(lib,PLC_LOG_INFO, PLC_ERR_NONE, "Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));
-
-        if(connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr)) == 0) {
-            plc_err(lib,PLC_LOG_INFO, PLC_ERR_NONE, "Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));
-            done = 1;
-        } else {
-            plc_err(lib,PLC_LOG_INFO, PLC_ERR_NONE, "Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);
-            i++;
-        }
-    } while(!done && i < num_ips);
-
-    if(!done) {
-		closesocket(fd);
-        plc_err(lib,PLC_LOG_ERR, PLC_ERR_OPEN, "Unable to connect to any gateway host IP address!");
-        return PLC_SOCKET_NULL;
-    }
-
-	sock = (plc_socket)calloc(1,sizeof(struct plc_socket_t));
-	
-	if(!sock) {
-		closesocket(fd);
-		plc_err(lib, PLC_LOG_ERR, PLC_ERR_NO_MEM, "Unable to allocat socket struct.");
-		return PLC_SOCKET_NULL;
-	}
-	
-	sock->fd = fd;
-	sock->port = port;
-	
-	return sock;
-}
-
-
-
 
 
 extern int socket_read(sock_p s, uint8_t *buf, int size)
@@ -954,7 +869,7 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-    rc = recv(s->fd, buf, size, 0);
+    rc = recv(s->fd, (char *)buf, size, 0);
 	
     if(rc < 0) {
 		err=WSAGetLastError();
@@ -979,7 +894,7 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-    rc = send(s->fd, buf, size, MSG_NOSIGNAL);
+    rc = send(s->fd, (char *)buf, size, MSG_NOSIGNAL);
 
     if(rc < 0) {
 		err=WSAGetLastError();
@@ -1008,8 +923,8 @@ extern int socket_close(sock_p s)
 		return PLCTAG_ERR_CLOSE;
 	}
 
-	sock->fd = 0;
-	sock->is_open = 0;
+	s->fd = 0;
+	s->is_open = 0;
 
 	return PLCTAG_STATUS_OK;
 }
@@ -1047,7 +962,7 @@ struct serial_port_t {
 };
 
 
-serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_rate, int data_bits, int stop_bits, int parity_type)
+serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int baud_rate, int data_bits, int stop_bits, int parity_type)
 {
 	serial_port_p serial_port;
     COMMCONFIG dcbSerialParams;
@@ -1055,7 +970,7 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
     HANDLE hSerialPort;
     int BAUD, PARITY, DATABITS, STOPBITS;
 
-    plc_err(lib, PLC_LOG_DEBUG, PLC_ERR_NONE, "Starting.");
+    //plc_err(lib, PLC_LOG_DEBUG, PLC_ERR_NONE, "Starting.");
 
 
     /* create the configuration for the serial port. */
@@ -1093,8 +1008,8 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
             break;
         default:
             /* unsupported baud rate */
-            plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported baud rate: %d. Use standard baud rates (300,600,1200,2400...).",baud_rate);
-            return PLC_SERIAL_PORT_NULL;
+            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported baud rate: %d. Use standard baud rates (300,600,1200,2400...).",baud_rate);
+            return NULL;
     }
 
 
@@ -1118,8 +1033,8 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
 			
 		default:
 			/* unsupported number of data bits. */
-            plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of data bits: %d. Use 5-8.",data_bits);
-            return PLC_SERIAL_PORT_NULL;
+            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of data bits: %d. Use 5-8.",data_bits);
+            return NULL;
 	}
 	
 
@@ -1132,8 +1047,8 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
             break;
         default:
             /* unsupported number of stop bits. */
-            plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of stop bits, %d, must be 1 or 2.",stop_bits);
-            return PLC_SERIAL_PORT_NULL;
+            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of stop bits, %d, must be 1 or 2.",stop_bits);
+            return NULL;
     }
 
     switch(parity_type) {
@@ -1148,16 +1063,16 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
             break;
         default:
             /* unsupported number of stop bits. */
-            plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported parity type, must be none (0), odd (1) or even (2).");
-            return PLC_SERIAL_PORT_NULL;
+            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported parity type, must be none (0), odd (1) or even (2).");
+            return NULL;
     }
 
     /* allocate the structure */
 	serial_port = (serial_port_p)calloc(1,sizeof(struct serial_port_t));
 	
 	if(!serial_port) {
-		plc_err(lib, PLC_LOG_ERR, PLC_ERR_NO_MEM, "Unable to allocate serial port struct.");
-		return PLC_SERIAL_PORT_NULL;
+		//plc_err(lib, PLC_LOG_ERR, PLC_ERR_NO_MEM, "Unable to allocate serial port struct.");
+		return NULL;
 	}
 
     /* open the serial port device */
@@ -1172,16 +1087,16 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
     /* did the open succeed? */
     if(hSerialPort == INVALID_HANDLE_VALUE) {
         free(serial_port);
-        plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error opening serial device %s",path);
-        return PLC_SERIAL_PORT_NULL;
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error opening serial device %s",path);
+        return NULL;
     }
 
     /* get existing serial port configuration and save it. */
     if(!GetCommState(hSerialPort, &(serial_port->oldDCBSerialParams.dcb))) {
         free(serial_port);
         CloseHandle(hSerialPort);
-        plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port configuration.",path);
-        return PLC_SERIAL_PORT_NULL;
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port configuration.",path);
+        return NULL;
     }
 
     /* copy the params. */
@@ -1204,8 +1119,8 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
     if(!SetCommState(hSerialPort, &dcbSerialParams.dcb)) {
         free(serial_port);
         CloseHandle(hSerialPort);
-        plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error setting serial port configuration.",path);
-        return PLC_SERIAL_PORT_NULL;
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error setting serial port configuration.",path);
+        return NULL;
     }
 
     /* attempt to get the current serial port timeout set up */
@@ -1213,8 +1128,8 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
         SetCommState(hSerialPort, &(serial_port->oldDCBSerialParams.dcb));
         free(serial_port);
         CloseHandle(hSerialPort);
-        plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port timeouts.",path);
-        return PLC_SERIAL_PORT_NULL;
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port timeouts.",path);
+        return NULL;
     }
 
     timeouts = serial_port->oldTimeouts;
@@ -1231,8 +1146,8 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
         SetCommState(hSerialPort, &(serial_port->oldDCBSerialParams.dcb));
         free(serial_port);
         CloseHandle(hSerialPort);
-        plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port timeouts.",path);
-        return PLC_SERIAL_PORT_NULL;
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port timeouts.",path);
+        return NULL;
     }
 	
     return serial_port;
@@ -1244,7 +1159,7 @@ serial_port_p plc_lib_open_serial_port(plc_lib lib, const char *path, int baud_r
 
 
 
-int plc_lib_close_serial_port(plc_lib lib, serial_port_p serial_port)
+int plc_lib_close_serial_port(/*plc_lib lib,*/ serial_port_p serial_port)
 {
     /* try to prevent this from being called twice */
     if(!serial_port || !serial_port->hSerialPort)
@@ -1551,10 +1466,10 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
     epoch = time(0);
 
     /* FIXME - should capture error return! */
-    localtime_r(&epoch,&t);
+    localtime_s(&t, &epoch);
 
     /* create the prefix and format for the file entry. */
-    snprintf(prefix, sizeof prefix,"%04d-%02d-%02d %02d:%02d:%02d %s:%d %s\n",
+    sprintf_s(prefix, sizeof prefix,"%04d-%02d-%02d %02d:%02d:%02d %s:%d %s\n",
                                     t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,
                                     func,line_num,templ);
 
@@ -1573,30 +1488,30 @@ extern void pdebug_dump_bytes_impl(uint8_t *data,int count)
     int end;
     char buf[2048];
 
-    snprintf(buf,sizeof buf,"Dumping bytes:\n");
+    sprintf_s(buf,sizeof buf,"Dumping bytes:\n");
 
     end = str_length(buf);
 
     for(i=0; i<count; i++) {
         if((i%10) == 0) {
-            snprintf(buf+end,sizeof(buf)-end,"%05d",i);
+            sprintf_s(buf+end,sizeof(buf)-end,"%05d",i);
 
             end = strlen(buf);
         }
 
-        snprintf(buf+end,sizeof(buf)-end," %02x",data[i]);
+        sprintf_s(buf+end,sizeof(buf)-end," %02x",data[i]);
 
         end = strlen(buf);
 
         if((i%10) == 9) {
-            snprintf(buf+end,sizeof(buf)-end,"\n");
+            sprintf_s(buf+end,sizeof(buf)-end,"\n");
 
             end = strlen(buf);
         }
     }
 
     /*if( ((i%10)!=9) || (i>=count && (i%10)==9))
-        snprintf(buf+end,sizeof(buf)-end,"\n");*/
+        sprintf_s(buf+end,sizeof(buf)-end,"\n");*/
 
     pdebug("%s",buf);
     fflush(stderr);

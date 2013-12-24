@@ -125,7 +125,7 @@ plc_tag ab_tag_create(attr attribs)
     	return (plc_tag)tag;
     }
 
-    tag->data = mem_alloc(tag->size);
+    tag->data = (uint8_t*)mem_alloc(tag->size);
 
     if(tag->data == NULL) {
     	tag->status = PLCTAG_ERR_NO_MEM;

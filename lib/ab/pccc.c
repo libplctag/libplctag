@@ -60,7 +60,7 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
      * the magic constant of 3 is for the leading zero, the $
      * and the trailing zero.
      */
-    if(strlen(name) > max_tag_name_size-3) {
+    if(str_length(name) > max_tag_name_size-3) {
         return 0;
     }
 

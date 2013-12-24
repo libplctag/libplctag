@@ -233,7 +233,7 @@ extern int attr_set_int(attr attrs, const char *name, int val)
 {
 	char buf[64];
 
-	snprintf(buf, sizeof buf, "%d", val);
+	sprintf_s(buf, sizeof buf, "%d", val);
 
 	return attr_set_str(attrs, name, buf);
 }
@@ -244,7 +244,7 @@ extern int attr_set_float(attr attrs, const char *name, float val)
 {
 	char buf[64];
 
-	snprintf(buf, sizeof buf, "%f", val);
+	sprintf_s(buf, sizeof buf, "%f", val);
 
 	return attr_set_str(attrs, name, buf);
 }

@@ -82,8 +82,12 @@ int ab_session_unregister(ab_tag_p tag, ab_session_p session);
 
 int session_check_incoming_data(ab_session_p session);
 int request_check_outgoing_data(ab_session_p session, ab_request_p req);
-void *request_handler_func(void *not_used);
 
+#ifdef WIN32
+DWORD __stdcall request_handler_func(LPVOID not_used);
+#else
+void *request_handler_func(void *not_used);
+#endif
 
 #ifdef __cplusplus
 }

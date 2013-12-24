@@ -110,6 +110,7 @@ int ab_tag_destroy(ab_tag_p tag)
 		ab_session_p session = tag->session;
 
 		/* fiddling with shared data here, synchronize */
+		//for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(tag_mutex))  for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(tag_mutex); LINE_ID(__sync_rc_nargle_) == PLCTAG_STATUS_OK && LINE_ID(__sync_flag_nargle_) ; LINE_ID(__sync_flag_nargle_) = 0) {
 		critical_block(tag_mutex) {
 			pdebug(debug,"Removing tag");
 			session_remove_tag_unsafe(tag, session);
@@ -434,7 +435,7 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
 	uint16_t res;
 
 	critical_block(tag_mutex) {
-		res = session_get_new_seq_id_unsafe(sess);
+		res = (uint16_t)session_get_new_seq_id_unsafe(sess);
 	}
 
 	return res;
@@ -1241,9 +1242,11 @@ int request_check_outgoing_data(ab_session_p session, ab_request_p req)
 }
 
 
-
-
+#ifdef WIN32
+DWORD __stdcall request_handler_func(LPVOID not_used)
+#else
 void *request_handler_func(void *not_used)
+#endif
 {
 	int rc;
 	ab_session_p cur_sess;

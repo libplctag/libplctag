@@ -30,10 +30,6 @@
 #ifndef __LIBPLCTAG_H__
 #define __LIBPLCTAG_H__
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
 
 #include <stdint.h>
 
@@ -231,9 +227,6 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag, int offset, float val);
 
 
 
-#ifdef __cplusplus
-}
-#endif
 
 /*end of header */
 #endif

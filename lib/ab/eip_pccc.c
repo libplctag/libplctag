@@ -541,7 +541,6 @@ static int check_write_status(ab_tag_p tag)
 
 static int check_read_status(ab_tag_p tag)
 {
-    ;
     eip_pccc_resp_old *pccc_resp;
 
     uint8_t *data;

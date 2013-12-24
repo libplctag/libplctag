@@ -44,6 +44,21 @@ extern "C"
 #endif
 */
 
+#define _WINSOCKAPI_
+#include <windows.h>
+#include <tchar.h>
+#include <strsafe.h>
+#include <io.h>
+#include <Winsock2.h>
+#include <Ws2tcpip.h>
+#include <string.h>
+#include <stdlib.h>
+#include <winnt.h>
+#include <errno.h>
+#include <math.h>
+#include <process.h>
+#include <time.h>
+#include <stdio.h>
 
 /*#include <WinSock2.h>*/
 /*#include <Ws2tcpip.h>*/
@@ -53,7 +68,7 @@ extern "C"
 /*#include <stdlib.h>*/
 #include <malloc.h>
 
-#include "libplctag_lib.h"
+//#include "libplctag_lib.h"
 
 
 
@@ -64,7 +79,7 @@ extern "C"
 #define END_PACK __pragma( pack(pop) )
 
 /* VS C++ uses foo[] to denote a zero length array. */
-#define ZLA_SIZE
+#define ZLA_SIZE	0
 
 /* export definitions. */
 
@@ -115,19 +130,25 @@ extern int mutex_destroy(mutex_p *m);
  * unlock the mutex.  It will NOT break out of any surrounding loop outside the
  * synchronized block.
  */
+
+#define PLCTAG_CAT2(a,b) a##b
+#define PLCTAG_CAT(a,b) PLCTAG_CAT2(a,b)
+#define LINE_ID(base) PLCTAG_CAT(base,__LINE__)
+
 #define critical_block(lock) \
-for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))  for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock); __sync_rc_nargle_##__LINE__ == PLCTAG_STATUS_OK && __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0)
+for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))  for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock); LINE_ID(__sync_rc_nargle_) == PLCTAG_STATUS_OK && LINE_ID(__sync_flag_nargle_) ; LINE_ID(__sync_flag_nargle_) = 0)
 
 /* thread functions/defs */
 typedef struct thread_t *thread_p;
-typedef void *(*thread_func_t)(void *arg);
-extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg);
+//typedef PTHREAD_START_ROUTINE thread_func_t;
+//typedef DWORD /*WINAPI*/ (*thread_func_t)(void *lpParam );
+extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg);
 extern void thread_stop(void);
 extern int thread_join(thread_p t);
 extern int thread_destroy(thread_p *t);
 
 /* atomic operations */
-typedef LONG volatile lock_t;
+typedef volatile long int lock_t;
 
 #define LOCK_INIT (0)
 
@@ -167,7 +188,7 @@ extern uint32_t be2h32(uint32_t v);
 
 /* misc functions */
 extern int sleep_ms(int ms);
-extern int64_t time_ms(void);
+extern uint64_t time_ms(void);
 
 extern void pdebug_impl(const char *func, int line_num, const char *templ, ...);
 #if defined(USE_STD_VARARG_MACROS) || defined(WIN32)
