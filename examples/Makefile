@@ -40,7 +40,7 @@ LIBPLC_TEST = tag_rw
 LIBPLC_TEST_SRC = tag_rw.c
 LIBPLC_TEST_OBJ = $(LIBPLC_TEST_SRC:%.c=%.o)
 
-CFLAGS += -fno-strict-aliasing -g -I. -fms-extensions -Wall -I/usr/local/include 
+CFLAGS += -fno-strict-aliasing -g -I. -I../lib -fms-extensions -Wall -I/usr/local/include 
 LIBS = -lplctag -lpthread -pthread
 SHLIBS = $(LIBS)
 # LIBPLC_LIB_SO = ../lib/libplctag.so

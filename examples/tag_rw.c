@@ -53,6 +53,8 @@
 #include <pgetopt.h>
 #define getopt pgetopt
 #define optarg poptarg
+#else
+#include <unistd.h>
 #endif
 
 void usage(void) {
