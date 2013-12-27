@@ -33,8 +33,6 @@
 #include <stdarg.h>
 #include <string.h>
 #include <libplctag.h>
-#include <pgetopt.h>
-
 
 
 #define PLC_LIB_BOOL    (0x101)
@@ -52,6 +50,7 @@
 
 #ifdef WIN32
 #define strcasecmp stricmp
+#include <pgetopt.h>
 #define getopt pgetopt
 #define optarg poptarg
 #endif
@@ -85,10 +84,6 @@ int main(int argc, char **argv)
     int i;
     int c;
     int rc;
-
-	for(i=0; i< argc; i++) {
-		printf("arg[%d]=%s\n",i,argv[i]);
-	}
 
 	while ((c=getopt(argc,argv,"t:w:p:?h"))!=EOF) {
 		switch(c) {
