@@ -504,7 +504,7 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
 	int debug = 1;
 
 	if(!t) {
-		pdebug(debug, "null thread pointer.");
+		//pdebug(debug, "null thread pointer.");
 		return PLCTAG_ERR_NULL_PTR;
 	}
 
@@ -512,7 +512,7 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
 
 	if(! *t) {
 		/* FIXME - should not be the same error as above. */
-		pdebug(debug, "null thread pointer.");
+		//pdebug(debug, "null thread pointer.");
 		return PLCTAG_ERR_NULL_PTR;
 	}
 
@@ -526,7 +526,7 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
                 NULL);                  /* do not need thread ID       */
 
     if(!(*t)->h_thread) {
-		pdebug(debug, "error creating thread.");
+		//pdebug(debug, "error creating thread.");
 		mem_free(*t);
 		*t=NULL;
 
