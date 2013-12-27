@@ -87,6 +87,8 @@ extern "C"
 
 #define __PRETTY_FUNCTION__ __FUNCTION__
 
+#define snprintf sprintf_s
+
 
 /* memory functions/defs */
 extern void *mem_alloc(int size);
