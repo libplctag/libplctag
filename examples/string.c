@@ -20,7 +20,12 @@
 
 
 #include <stdio.h>
+#ifdef WIN32
+#include <stdlib.h>
+#define sleep _sleep
+#else
 #include <unistd.h>
+#endif
 #include "../lib/libplctag.h"
 
 
