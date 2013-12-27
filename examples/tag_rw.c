@@ -31,9 +31,9 @@
 #include <stdlib.h>
 #include <time.h>
 #include <stdarg.h>
-#include <unistd.h>
 #include <string.h>
-#include "../lib/libplctag.h"
+#include <libplctag.h>
+#include <pgetopt.h>
 
 
 
@@ -49,9 +49,16 @@
 
 #define DATA_TIMEOUT 5000
 
+
+#ifdef WIN32
+#define strcasecmp stricmp
+#define getopt pgetopt
+#define optarg poptarg
+#endif
+
 void usage(void) {
     printf( "Usage:\n "
-            "tag_rw [-l] -t <type> -p <path> -n <name> -c <count> [-w <val>] \n"
+            "tag_rw [-l] -t <type> -p <path> [-w <val>] \n"
             "  -t <type> - type is one of 'uint8', 'sint8', 'uint16', 'sint16', \n "
             "              'uint32', 'sint32', or 'real32'.  The type is the type\n"
             "              of the data to be read/written to the named tag.  The\n"
@@ -78,6 +85,10 @@ int main(int argc, char **argv)
     int i;
     int c;
     int rc;
+
+	for(i=0; i< argc; i++) {
+		printf("arg[%d]=%s\n",i,argv[i]);
+	}
 
 	while ((c=getopt(argc,argv,"t:w:p:?h"))!=EOF) {
 		switch(c) {

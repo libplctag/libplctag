@@ -187,7 +187,7 @@ extern int str_cmp_i(const char *first, const char *second)
  */
 extern int str_copy(char *dst, const char *src, int size)
 {
-	strncpy_s(dst, size, src, strlen(src)+1);
+	strncpy_s(dst, size+1, src, size);
 	return 0;
 }
 
@@ -501,9 +501,10 @@ struct thread_t {
 extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg)
 {
 	/*pdebug("Starting.");*/
+	int debug = 1;
 
 	if(!t) {
-		/*pdebug("null thread pointer.");*/
+		pdebug(debug, "null thread pointer.");
 		return PLCTAG_ERR_NULL_PTR;
 	}
 
@@ -511,7 +512,7 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
 
 	if(! *t) {
 		/* FIXME - should not be the same error as above. */
-		/*pdebug("null thread pointer.");*/
+		pdebug(debug, "null thread pointer.");
 		return PLCTAG_ERR_NULL_PTR;
 	}
 
@@ -524,8 +525,8 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
                 0,                      /* use default creation flags  */
                 NULL);                  /* do not need thread ID       */
 
-    if((*t)->h_thread) {
-		/*pdebug("error creating thread.");*/
+    if(!(*t)->h_thread) {
+		pdebug(debug, "error creating thread.");
 		mem_free(*t);
 		*t=NULL;
 

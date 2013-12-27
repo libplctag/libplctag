@@ -33,12 +33,21 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+	#define C_FUNC extern "C"
+#else
+	#define C_FUNC
+#endif
+
 #ifdef WIN32
-    #define LIB_EXPORT  __declspec( dllexport )  extern
+	#ifdef LIBPLCTAGDLL_EXPORTS
+		#define LIB_EXPORT C_FUNC __declspec(dllexport)
+	#else
+		#define LIB_EXPORT C_FUNC __declspec(dllimport)
+	#endif
 #else
     #define LIB_EXPORT extern
 #endif
-
 
 
 /* WARNING THIS IS MACHINE/COMPILER DEPENDENT!!!! */
