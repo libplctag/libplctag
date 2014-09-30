@@ -158,6 +158,18 @@ plc_tag ab_tag_create(attr attribs)
 	critical_block(tag_mutex) {
 		/* fake exceptions */
 		do {
+
+			/*
+			 * set up tag vtable.  This is protocol specific
+			 */
+			tag->vtable = set_tag_vtable(tag);
+
+			if(!tag->vtable) {
+				pdebug(debug,"Unable to set tag vtable!");
+				tag->status = PLCTAG_ERR_BAD_PARAM;
+				break;
+			}
+
 			/*
 			 * Check the request handler thread.
 			 */
@@ -199,17 +211,6 @@ plc_tag ab_tag_create(attr attribs)
 
 			if(check_tag_name(tag, attr_get_str(attribs,"name","NONE")) != PLCTAG_STATUS_OK) {
 				pdebug(debug,"Bad tag name!");
-				tag->status = PLCTAG_ERR_BAD_PARAM;
-				break;
-			}
-
-			/*
-			 * set up tag vtable.  This is protocol specific
-			 */
-			tag->vtable = set_tag_vtable(tag);
-
-			if(!tag->vtable) {
-				pdebug(debug,"Unable to set tag vtable!");
 				tag->status = PLCTAG_ERR_BAD_PARAM;
 				break;
 			}
