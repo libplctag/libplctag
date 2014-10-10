@@ -47,8 +47,7 @@ extern "C"
 #include <ab/ab.h>
 #include <ab/ab_defs.h>
 #include <util/attr.h>
-
-
+#include <pthread.h>
 
 
 /*
@@ -1251,8 +1250,12 @@ void *request_handler_func(void *not_used)
 	int rc;
 	ab_session_p cur_sess;
 	int debug = 1;
+	int sessions_exist = 1;
 
-	while(1) {
+	// Detach thread so resources are reclaimed on termination
+	pthread_detach( pthread_self() );
+
+	while(sessions_exist) {
 		/* we need the mutex */
 		if(tag_mutex == NULL) {
 			pdebug(debug,"tag_mutex is NULL!");
@@ -1269,6 +1272,7 @@ void *request_handler_func(void *not_used)
 			 * them.
 			 */
 
+			sessions_exist = !!sessions;
 			cur_sess = sessions;
 
 			while(cur_sess) {
