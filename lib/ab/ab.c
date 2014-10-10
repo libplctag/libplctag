@@ -156,75 +156,71 @@ plc_tag ab_tag_create(attr attribs)
 	 */
 	pdebug(debug,"Locking mutex");
 	critical_block(tag_mutex) {
-		/* fake exceptions */
-		do {
+		/*
+		 * set up tag vtable.  This is protocol specific
+		 */
+		tag->vtable = set_tag_vtable(tag);
 
-			/*
-			 * set up tag vtable.  This is protocol specific
-			 */
-			tag->vtable = set_tag_vtable(tag);
+		if(!tag->vtable) {
+			pdebug(debug,"Unable to set tag vtable!");
+			tag->status = PLCTAG_ERR_BAD_PARAM;
+			break;
+		}
 
-			if(!tag->vtable) {
-				pdebug(debug,"Unable to set tag vtable!");
-				tag->status = PLCTAG_ERR_BAD_PARAM;
+		/*
+		 * Check the request handler thread.
+		 */
+		if(!request_handler_thread) {
+			rc = thread_create(&request_handler_thread,request_handler_func, 32*1024, NULL);
+			if(rc != PLCTAG_STATUS_OK) {
+				pdebug(debug,"Unable to create request handler thread!");
+				tag->status = rc;
 				break;
 			}
+		}
 
-			/*
-			 * Check the request handler thread.
-			 */
-			if(!request_handler_thread) {
-				rc = thread_create(&request_handler_thread,request_handler_func, 32*1024, NULL);
-				if(rc != PLCTAG_STATUS_OK) {
-					pdebug(debug,"Unable to create request handler thread!");
-					tag->status = rc;
-					break;
-				}
-			}
+		/*
+		 * Find or create a session.
+		 */
+		if(find_or_create_session(tag, attribs) != PLCTAG_STATUS_OK) {
+			pdebug(debug,"Unable to create session!");
+			tag->status = PLCTAG_ERR_BAD_GATEWAY;
+			break;
+		}
 
-			/*
-			 * Find or create a session.
-			 */
-			if(find_or_create_session(tag, attribs) != PLCTAG_STATUS_OK) {
-				pdebug(debug,"Unable to create session!");
-				tag->status = PLCTAG_ERR_BAD_GATEWAY;
-				break;
-			}
-
-		    /*
-		     * parse the link path into the tag.  Note that it must
-		     * pad the byte string to a multiple of 16-bit words. The function
-		     * also adds the protocol/PLC specific routing information to the
-		     * links specified.  This fills in fields in the connection about
-		     * any DH+ special data.
-		     */
-		    if(cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
-		        pdebug(debug,"Unable to convert links strings to binary path!");
-				tag->status = PLCTAG_ERR_BAD_PARAM;
-		        break;
-		    }
+		/*
+		 * parse the link path into the tag.  Note that it must
+		 * pad the byte string to a multiple of 16-bit words. The function
+		 * also adds the protocol/PLC specific routing information to the
+		 * links specified.  This fills in fields in the connection about
+		 * any DH+ special data.
+		 */
+		if(cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
+			pdebug(debug,"Unable to convert links strings to binary path!");
+			tag->status = PLCTAG_ERR_BAD_PARAM;
+			break;
+		}
 
 
-			/*
-			 * check the tag name, this is protocol specific.
-			 */
+		/*
+		 * check the tag name, this is protocol specific.
+		 */
 
-			if(check_tag_name(tag, attr_get_str(attribs,"name","NONE")) != PLCTAG_STATUS_OK) {
-				pdebug(debug,"Bad tag name!");
-				tag->status = PLCTAG_ERR_BAD_PARAM;
-				break;
-			}
+		if(check_tag_name(tag, attr_get_str(attribs,"name","NONE")) != PLCTAG_STATUS_OK) {
+			pdebug(debug,"Bad tag name!");
+			tag->status = PLCTAG_ERR_BAD_PARAM;
+			break;
+		}
 
-			/*
-			 * add the tag to the session's list.
-			 */
-			if(session_add_tag_unsafe(tag, tag->session) != PLCTAG_STATUS_OK) {
-				pdebug(debug,"unable to add new tag to connection!");
+		/*
+		 * add the tag to the session's list.
+		 */
+		if(session_add_tag_unsafe(tag, tag->session) != PLCTAG_STATUS_OK) {
+			pdebug(debug,"unable to add new tag to connection!");
 
-				tag->status = PLCTAG_ERR_CREATE;
-				break;
-			}
-		} while(0);
+			tag->status = PLCTAG_ERR_CREATE;
+			break;
+		}
     }
 
     pdebug(debug,"Done.");
