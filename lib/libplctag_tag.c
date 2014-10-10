@@ -76,9 +76,15 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
      */
     tag = ab_tag_create(attribs);
 
-    if(!tag) {
-        return tag;
-    }
+    /*
+     * Release memory for attributes
+     *
+     * some code is commented out that would have kept a pointer
+     * to the attributes in the tag and released the memory upon
+     * tag destruction. To prevent a memory leak without maintaining
+     * that pointer, the memory needs to be released here.
+     */
+     attr_destroy(attribs);
 
     return tag;
 }
