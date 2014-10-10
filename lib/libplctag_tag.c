@@ -273,6 +273,11 @@ LIB_EXPORT int plc_tag_status(plc_tag tag)
         return PLCTAG_ERR_NULL_PTR;
 
     if(!tag->vtable || !tag->vtable->status) {
+        if(tag->status) {
+            pdebug(tag->debug, "tag status not ok!");
+            return tag->status;
+        }
+
         pdebug(tag->debug, "tag status accessor not defined!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
