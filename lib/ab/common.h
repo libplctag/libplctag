@@ -40,8 +40,8 @@ extern "C"
 #endif
 
 
-extern mutex_p tag_mutex;
-extern thread_p request_handler_thread;
+extern volatile mutex_p io_thread_mutex;
+extern volatile thread_p io_handler_thread;
 
 /* generic */
 int ab_tag_abort(ab_tag_p tag);

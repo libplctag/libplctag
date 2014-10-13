@@ -293,8 +293,6 @@ struct ab_tag_t {
     ab_tag_p next;
     ab_tag_p prev;
 
-    //attr attributes;
-
     /* how do we talk to this device? */
     int protocol_type;
     int use_dhp_direct;

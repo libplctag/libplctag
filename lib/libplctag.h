@@ -102,6 +102,7 @@ typedef struct plc_tag_t *plc_tag;
 
 
 
+
 /*
  * tag functions
  *
@@ -123,6 +124,36 @@ typedef struct plc_tag_t *plc_tag;
  */
 
 LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str);
+
+
+/*
+ * plc_tag_lock
+ * 
+ * Lock the tag against use by other threads.  Because operations on a tag are
+ * very much asynchronous, actions like getting and extracting the data from
+ * a tag take more than one API call.  If more than one thread is using the same tag,
+ * then the internal state of the tag will get broken and you will probably experience
+ * a crash.
+ * 
+ * This should be used to initially lock a tag when starting operations with it
+ * followed by a call to plc_tag_unlock when you have everything you need from the tag.
+ */
+ 
+LIB_EXPORT int plc_tag_lock(plc_tag tag);
+
+
+
+/*
+ * plc_tag_unlock
+ * 
+ * The opposite action of plc_tag_unlock.  This allows other threads to access the
+ * tag.
+ */
+ 
+LIB_EXPORT int plc_tag_unlock(plc_tag tag);
+
+
+
 
 
 /*

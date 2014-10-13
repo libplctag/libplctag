@@ -40,12 +40,12 @@ LIBPLC_TEST = tag_rw
 LIBPLC_TEST_SRC = tag_rw.c
 LIBPLC_TEST_OBJ = $(LIBPLC_TEST_SRC:%.c=%.o)
 
-CFLAGS += -fno-strict-aliasing -g -I. -I../lib -fms-extensions -Wall -I/usr/local/include 
-LIBS = -lplctag -lpthread -pthread
+CFLAGS += -fno-strict-aliasing -g -I. -I../lib -fms-extensions -Wall -I/usr/local/include
+LIBS = -L../lib -lplctag -lpthread -pthread
 SHLIBS = $(LIBS)
 # LIBPLC_LIB_SO = ../lib/libplctag.so
 
-TARGETS = async simple string toggle_bool write_string tag_rw
+TARGETS = async simple string toggle_bool write_string tag_rw multithread
 
 all: $(TARGETS)
 	
@@ -66,6 +66,9 @@ write_string: write_string.c
 
 tag_rw: tag_rw.c
 	$(CC) -o tag_rw tag_rw.c $(CFLAGS) $(SHLIBS)
+
+multithread: multithread.c
+	$(CC) -o multithread multithread.c $(CFLAGS) $(SHLIBS)
 
 
 clean:

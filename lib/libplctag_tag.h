@@ -91,6 +91,7 @@ typedef struct tag_vtable_t *tag_vtable_p;
  */
 
 #define TAG_BASE_STRUCT tag_vtable_p vtable; \
+						mutex_p mut; \
 						int status; \
 						int endian; \
 						int debug; \

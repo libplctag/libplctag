@@ -120,7 +120,14 @@ int eip_cip_tag_status(ab_tag_p tag)
 
 
 
-
+/*
+ * eip_cip_tag_read_start
+ * 
+ * This function must be called only from within one thread, or while
+ * the tag's mutex is locked.
+ * 
+ * The function starts the process of getting tag data from the PLC.
+ */
 
 
 int eip_cip_tag_read_start(ab_tag_p tag)
@@ -131,7 +138,7 @@ int eip_cip_tag_read_start(ab_tag_p tag)
     int debug = tag->debug;
 
     pdebug(debug,"Starting");
-
+	
 	/* is this the first read? */
 	if(tag->first_read) {
 		/*
@@ -203,6 +210,17 @@ int eip_cip_tag_read_start(ab_tag_p tag)
 
 
 
+
+
+/*
+ * eip_cip_tag_write_start
+ * 
+ * This must be called from one thread alone, or while the tag mutex is
+ * locked.
+ * 
+ * The routine starts the process of writing to a tag.
+ */
+
 int eip_cip_tag_write_start(ab_tag_p tag)
 {
 	int rc = PLCTAG_STATUS_OK;
@@ -228,7 +246,7 @@ int eip_cip_tag_write_start(ab_tag_p tag)
     }
 
     /*
-     * calculate the numer and size of the write requests
+     * calculate the number and size of the write requests
      * if we have not already done so.
      */
     if(!tag->num_write_requests) {
@@ -262,6 +280,11 @@ int eip_cip_tag_write_start(ab_tag_p tag)
 
     return PLCTAG_STATUS_PENDING;
 }
+
+
+
+
+
 
 
 /*
@@ -664,7 +687,14 @@ int build_write_request(ab_tag_p tag, int slot, int byte_offset)
 
 
 
-
+/*
+ * check_read_status
+ * 
+ * This routine checks for any outstanding requests and copies in data
+ * that has arrived.  At the end of the request, it will clean up the request
+ * buffers.  This is not thread-safe!  It should be called with the tag mutex
+ * locked!
+ */
 
 static int check_read_status(ab_tag_p tag)
 {
@@ -866,11 +896,11 @@ static int check_read_status(ab_tag_p tag)
 			/* no, not yet */
 			if(tag->first_read) {
 				/* call read start again to get the next piece */
-				pdebug(debug,"calling ab_rag_read_cip_start() to get the next chunk.");
+				pdebug(debug,"calling ab_rag_read_cip_start_unsafe() to get the next chunk.");
 				rc = eip_cip_tag_read_start(tag);
 			} else {
 				pdebug(debug,"Insufficient data read for tag!");
-				plc_tag_abort((plc_tag)tag);
+				ab_tag_abort(tag);
 				rc = PLCTAG_ERR_READ;
 			}
 		} else {
@@ -878,30 +908,38 @@ static int check_read_status(ab_tag_p tag)
 			tag->first_read = 0;
 
 			tag->read_in_progress = 0;
+			
+			/* have the IO thread take care of the request buffers */
+			ab_tag_abort(tag);
 
 			/* Now remove the requests from the session's request list. */
-			for(i = 0; i < tag->num_read_requests; i++) {
-				int tmp_rc;
+			
+			/* FIXME - this functionality has been removed to simplify
+			 * this case.  All deallocation of requests is done by the
+			 * IO thread now.  The abort call above handles this.
+			 */
+			//for(i = 0; i < tag->num_read_requests; i++) {
+				//int tmp_rc;
 
-				req = tag->reqs[i];
+				//req = tag->reqs[i];
 
-				tmp_rc = request_remove(tag->session, req);
+				//tmp_rc = request_remove(tag->session, req);
 
-				if(tmp_rc != PLCTAG_STATUS_OK) {
-					pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
+				//if(tmp_rc != PLCTAG_STATUS_OK) {
+				//	pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
+				//
+				//	/* since we could not remove it, maybe the thread can. */
+				//	req->abort_request = 1;
+				//
+				//	rc = tmp_rc;
+				//} else {
+				//	/* free up the request resources */
+				//	request_destroy(&req);
+				//}
 
-					/* since we could not remove it, maybe the thread can. */
-					req->abort_request = 1;
-
-					rc = tmp_rc;
-				} else {
-					/* free up the request resources */
-					request_destroy(&req);
-				}
-
-				/* mark it as freed */
-				tag->reqs[i] = NULL;
-			}
+				///* mark it as freed */
+				//tag->reqs[i] = NULL;
+			//}
 
 			/* if this is a pre-read for a write, then pass off the the write routine */
 			if(tag->pre_write_read) {
@@ -928,7 +966,12 @@ static int check_read_status(ab_tag_p tag)
 
 
 
-
+/*
+ * check_write_status
+ * 
+ * This routine must be called with the tag mutex locked.  It checks the current
+ * status of a write operation.  If the write is done, it triggers the clean up.
+ */
 
 
 static int check_write_status(ab_tag_p tag)
@@ -1004,29 +1047,35 @@ static int check_write_status(ab_tag_p tag)
 
     /*
      * Now remove the requests from the session's request list.
+	 * 
+	 * FIXME - this has been removed in favor of making the
+	 * IO thread do the clean up.
      */
-    for(i = 0; i < tag->num_write_requests; i++) {
-    	int tmp_rc;
+    //for(i = 0; i < tag->num_write_requests; i++) {
+    //	int tmp_rc;
 
-    	req = tag->reqs[i];
+    //	req = tag->reqs[i];
 
-    	tmp_rc = request_remove(tag->session, req);
+    //	tmp_rc = request_remove(tag->session, req);
 
-		if(tmp_rc != PLCTAG_STATUS_OK) {
-			pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
+	//	if(tmp_rc != PLCTAG_STATUS_OK) {
+	//		pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
 
-			/* since we could not remove it, maybe the thread can. */
-			req->abort_request = 1;
+	//		/* since we could not remove it, maybe the thread can. */
+	//		req->abort_request = 1;
 
-			rc = tmp_rc;
-		} else {
-			/* free up the request resources */
-			request_destroy(&req);
-		}
+	//		rc = tmp_rc;
+	//	} else {
+	//		/* free up the request resources */
+	//		request_destroy(&req);
+	//	}
 
-		/* mark it as freed */
-		tag->reqs[i] = NULL;
-    }
+	//	/* mark it as freed */
+	//	tag->reqs[i] = NULL;
+    //}
+	
+	/* this triggers the clean up */
+	ab_tag_abort(tag);
 
     tag->write_in_progress = 0;
     tag->status = rc;

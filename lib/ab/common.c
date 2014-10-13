@@ -56,23 +56,27 @@ extern "C"
  */
 
 /* session/tag handling */
-ab_session_p sessions = NULL;
-mutex_p tag_mutex = NULL;
-lock_t tag_mutex_lock = LOCK_INIT; /* used for protecting access to set up the above mutex */
+volatile ab_session_p sessions = NULL;
+volatile mutex_p io_thread_mutex = NULL;
+volatile lock_t tag_mutex_lock = LOCK_INIT; /* used for protecting access to set up the above mutex */
 
 /* request/response handling thread */
-thread_p request_handler_thread = NULL;
+volatile thread_p io_handler_thread = NULL;
 
 
 
-
-
-
+/*
+ * ab_tag_abort
+ * 
+ * This does the work of stopping any inflight requests.
+ * This is not thread-safe.  It must be called from a function
+ * that locks the tag's mutex or only from a single thread.
+ */
 
 int ab_tag_abort(ab_tag_p tag)
 {
 	int i;
-
+	
 	for(i = 0; i < tag->max_requests; i++) {
 		if(tag->reqs[i]) {
 			tag->reqs[i]->abort_request = 1;
@@ -90,6 +94,15 @@ int ab_tag_abort(ab_tag_p tag)
 
 
 
+/*
+ * ab_tag_destroy
+ * 
+ * This is not completely thread-safe.  Two threads could hit this at
+ * once.  It will safely remove outstanding requests, but that is about
+ * it.  If two threads hit this at the same time, at least a double-free
+ * will result.
+ */
+
 
 int ab_tag_destroy(ab_tag_p tag)
 {
@@ -102,17 +115,22 @@ int ab_tag_destroy(ab_tag_p tag)
     if(!tag)
         return rc;
 
-	/* stop any current actions. */
+	/* 
+	 * stop any current actions. Note that we
+	 * want to use the thread-safe version here.  We
+	 * do lock a mutex later, but a different one.
+	 */
 	plc_tag_abort((plc_tag)tag);
 
-	/* remove it from the current connection */
-	if(tag->session) {
-		ab_session_p session = tag->session;
 
-		/* fiddling with shared data here, synchronize */
-		//for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(tag_mutex))  for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(tag_mutex); LINE_ID(__sync_rc_nargle_) == PLCTAG_STATUS_OK && LINE_ID(__sync_flag_nargle_) ; LINE_ID(__sync_flag_nargle_) = 0) {
-		critical_block(tag_mutex) {
+	/* this needs to be synchronized.  We are going to remove the tag completely. */
+	critical_block(io_thread_mutex) {	
+		/* remove it from the current connection */
+		if(tag->session) {
+			ab_session_p session = tag->session;
+
 			pdebug(debug,"Removing tag");
+
 			session_remove_tag_unsafe(tag, session);
 
 			/* if the session is now empty, remove it */
@@ -120,41 +138,35 @@ int ab_tag_destroy(ab_tag_p tag)
 				pdebug(debug,"Removing session");
 				ab_session_destroy_unsafe(tag, session);
 			}
+
+			/* null out the pointer just in case. */
+			tag->session = NULL;
 		}
 
-		/* null out the pointer just in case. */
-		tag->session = NULL;
+		if(tag->reqs) {
+			mem_free(tag->reqs);
+			tag->reqs = NULL;
+		}
+
+		if(tag->read_req_sizes) {
+			mem_free(tag->read_req_sizes);
+			tag->read_req_sizes = NULL;
+		}
+
+		if(tag->write_req_sizes) {
+			mem_free(tag->write_req_sizes);
+			tag->write_req_sizes = NULL;
+		}
+
+		if(tag->data) {
+			mem_free(tag->data);
+			tag->data = NULL;
+		}
+
+		/* release memory */
+		mem_free(tag);
 	}
-
-	/* remove any attributes saved. */
-	/*if(tag->attributes) {
-		attr_destroy(tag->attributes);
-		tag->attributes = NULL;
-	}*/
-
-	if(tag->reqs) {
-		mem_free(tag->reqs);
-		tag->reqs = NULL;
-	}
-
-	if(tag->read_req_sizes) {
-		mem_free(tag->read_req_sizes);
-		tag->read_req_sizes = NULL;
-	}
-
-	if(tag->write_req_sizes) {
-		mem_free(tag->write_req_sizes);
-		tag->write_req_sizes = NULL;
-	}
-
-	if(tag->data) {
-		mem_free(tag->data);
-		tag->data = NULL;
-	}
-
-	/* release memory */
-	mem_free(tag);
-
+	
 	pdebug(debug,"done");
 
     return rc;
@@ -388,20 +400,20 @@ int check_mutex(int debug)
 	int rc = PLCTAG_STATUS_OK;
 
 	/* loop until we get the lock flag */
-	while(!lock_acquire(&tag_mutex_lock)) {
+	while(!lock_acquire((lock_t *)&tag_mutex_lock)) {
 		sleep_ms(1);
 	}
 
 	/* first see if the mutex is there. */
-	if(!tag_mutex) {
-		rc = mutex_create(&tag_mutex);
+	if(!io_thread_mutex) {
+		rc = mutex_create((mutex_p *)&io_thread_mutex);
 		if(rc != PLCTAG_STATUS_OK) {
 			pdebug(debug,"Unable to create global tag mutex!");
 		}
 	}
 
 	/* we hold the lock, so clear it.*/
-	lock_release(&tag_mutex_lock);
+	lock_release((lock_t *)&tag_mutex_lock);
 
 	return rc;
 }
@@ -434,7 +446,7 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
 {
 	uint16_t res;
 
-	critical_block(tag_mutex) {
+	critical_block(io_thread_mutex) {
 		res = (uint16_t)session_get_new_seq_id_unsafe(sess);
 	}
 
@@ -513,7 +525,7 @@ int request_add(ab_session_p sess, ab_request_p req)
 {
 	int rc = PLCTAG_STATUS_OK;
 
-	critical_block(tag_mutex) {
+	critical_block(io_thread_mutex) {
 		rc = request_add_unsafe(sess,req);
 	}
 
@@ -567,7 +579,7 @@ int request_remove(ab_session_p sess, ab_request_p req)
 {
 	int rc = PLCTAG_STATUS_OK;
 
-	critical_block(tag_mutex) {
+	critical_block(io_thread_mutex) {
 		rc = request_remove_unsafe(sess,req);
 	}
 
@@ -663,7 +675,7 @@ int add_session(ab_tag_p tag,  ab_session_p s)
 	int rc;
 
 	pdebug(tag->debug,"Locking mutex");
-	critical_block(tag_mutex) {
+	critical_block(io_thread_mutex) {
 		rc = add_session_unsafe(tag, s);
 	}
 
@@ -716,7 +728,7 @@ int remove_session(ab_tag_p tag,  ab_session_p s)
 	int rc;
 
 	pdebug(tag->debug,"Locking mutex");
-	critical_block(tag_mutex) {
+	critical_block(io_thread_mutex) {
 		rc = remove_session_unsafe(tag, s);
 	}
 	pdebug(tag->debug,"Mutex released");
@@ -921,7 +933,7 @@ int ab_session_destroy(ab_tag_p tag, ab_session_p session)
 {
 	int rc;
 
-	critical_block(tag_mutex) {
+	critical_block(io_thread_mutex) {
 		rc = ab_session_destroy_unsafe(tag, session);
 	}
 
@@ -1254,14 +1266,14 @@ void *request_handler_func(void *not_used)
 
 	while(1) {
 		/* we need the mutex */
-		if(tag_mutex == NULL) {
+		if(io_thread_mutex == NULL) {
 			pdebug(debug,"tag_mutex is NULL!");
 			break;
 		}
 
 		//pdebug(debug,"Locking mutex");
 
-		critical_block(tag_mutex) {
+		critical_block(io_thread_mutex) {
 			/*
 			 * loop over the sessions.  For each session, see if we can read some
 			 * data.  If we can, read it in and try to update a request.  If the

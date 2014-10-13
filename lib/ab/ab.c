@@ -95,12 +95,6 @@ plc_tag ab_tag_create(attr attribs)
     /* store the debug status */
     tag->debug = debug;
 
-    /* store the attributes */
-   // tag->attributes = attribs;
-
-    /* put in a temporary vtable so that deletes work */
-    tag->vtable = &default_vtable;
-
     /*
      * check the CPU type.
      *
@@ -155,7 +149,7 @@ plc_tag ab_tag_create(attr attribs)
 	 * The rest of this is inside a locked block.
 	 */
 	pdebug(debug,"Locking mutex");
-	critical_block(tag_mutex) {
+	critical_block(io_thread_mutex) {
 		/*
 		 * set up tag vtable.  This is protocol specific
 		 */
@@ -168,10 +162,10 @@ plc_tag ab_tag_create(attr attribs)
 		}
 
 		/*
-		 * Check the request handler thread.
+		 * Check the request IO handler thread.
 		 */
-		if(!request_handler_thread) {
-			rc = thread_create(&request_handler_thread,request_handler_func, 32*1024, NULL);
+		if(!io_handler_thread) {
+			rc = thread_create((thread_p*)&io_handler_thread,request_handler_func, 32*1024, NULL);
 			if(rc != PLCTAG_STATUS_OK) {
 				pdebug(debug,"Unable to create request handler thread!");
 				tag->status = rc;

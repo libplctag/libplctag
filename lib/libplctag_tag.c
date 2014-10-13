@@ -57,6 +57,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 {
     plc_tag tag = PLC_TAG_NULL;
     attr attribs = NULL;
+	int rc = PLCTAG_STATUS_OK;
 
     if(!attrib_str || !str_length(attrib_str)) {
         return PLC_TAG_NULL;
@@ -67,15 +68,25 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     if(!attribs) {
     	return PLC_TAG_NULL;
     }
-
+	
     /*
      * create the tag, this is protocol specific.
      *
-     * This routine must free the attributes if it does not
-     * need them any more.
+     * If this routine wants to keep the attributes around, it needs
+	 * to clone them.
      */
     tag = ab_tag_create(attribs);
 
+	/*
+	 * FIXME - this really should be here???  Maybe not?  But, this is 
+	 * the only place it can be without making every protocol type do this automatically.
+	 */
+	if(tag && tag->status == PLCTAG_STATUS_OK) {
+		rc = mutex_create(&tag->mut);
+		
+		tag->status = rc;
+	}
+	
     /*
      * Release memory for attributes
      *
@@ -88,6 +99,66 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 
     return tag;
 }
+
+
+
+/*
+ * plc_tag_lock
+ * 
+ * Lock the tag against use by other threads.  Because operations on a tag are
+ * very much asynchronous, actions like getting and extracting the data from
+ * a tag take more than one API call.  If more than one thread is using the same tag,
+ * then the internal state of the tag will get broken and you will probably experience
+ * a crash.
+ * 
+ * This should be used to initially lock a tag when starting operations with it
+ * followed by a call to plc_tag_unlock when you have everything you need from the tag.
+ */
+ 
+LIB_EXPORT int plc_tag_lock(plc_tag tag)
+{
+	int debug = tag->debug;
+
+    pdebug(debug, "Starting.");
+
+    if(!tag || !tag->mut)
+        return PLCTAG_ERR_NULL_PTR;
+
+    /* lock the mutex */
+    tag->status = mutex_lock(tag->mut);
+	
+	pdebug(debug, "Done.");
+	
+	return tag->status;
+}
+
+
+
+
+/*
+ * plc_tag_unlock
+ * 
+ * The opposite action of plc_tag_unlock.  This allows other threads to access the
+ * tag.
+ */
+ 
+LIB_EXPORT int plc_tag_unlock(plc_tag tag)
+{
+	int debug = tag->debug;
+
+    pdebug(debug, "Starting.");
+
+    if(!tag || !tag->mut)
+        return PLCTAG_ERR_NULL_PTR;
+
+    /* unlock the mutex */
+    tag->status = mutex_unlock(tag->mut);
+	
+	pdebug(debug,"Done.");
+	
+	return tag->status;
+}
+
 
 
 
@@ -151,9 +222,12 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag)
     if(!tag)
         return PLCTAG_STATUS_OK;
 
-    /* clear the status */
-    /*tag->status = PLCTAG_STATUS_OK;*/
-
+    /* clear the mutex */
+	if(tag->mut) {
+		mutex_destroy(&tag->mut);
+		tag->mut = NULL;
+	} 
+	
     if(!tag->vtable || !tag->vtable->destroy) {
         pdebug(debug, "tag destructor not defined!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
