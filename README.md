@@ -66,13 +66,16 @@ to use of this library.  This code is licensed under the GNU LGPL.
 Current Status
 ==============
 
-We are on version 0.7.  That includes:
+We are on version 0.8.  That includes:
 
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).
-* read/write 8, 16, and 32-bit signed and unsigned integers.
-* read/write 32-bit IEEE format (little endian if that means anything here) floating point.
+* native support for multiple data types:
+  * read/write 8, 16, and 32-bit signed and unsigned integers.
+  * read/write single booleans.
+  * read/write 32-bit IEEE format (little endian) floating point.
+* raw support for user-defined structures (you need to pull out the data piece by piece)
 * read/write arrays of the above.
-* support for 32 and 64-bit x86 Linux (Ubuntu 11.10 and 12.04 tested).
+* support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04 and 14.04 tested).
 * tested support AB ControlLogix (version 16 and version 20 firmware).
 * sample code.
 * a fairly stable API.
@@ -83,12 +86,8 @@ We will not be on version 1.0 until:
 
 * we get the Windows code working again.
 * reduce the need for C99 features.
-* we have completed support for PLC5 systems directly and via DH+.
-* we have completed AB DF1 serial support.
-* we have enough projects completed to make sure that the API does not need to change.
+* we have completed support for PLC5 systems directly.
 * we get more testing on other PLC types.
-* we write better internal error checking for things like supported types for a given protocol and packet sizes.
-* we have at least one really solid wrapper.
 * we have real documentation!
 
 PLC5 and ControlLogix are trademarks of Rockwell/Allen Bradley.  Windows is a trademark
@@ -103,9 +102,9 @@ We need and welcome help with the following:
 * autotools and other things that help portability.
 * 64-bit Windows.
 * other versions of Windows.
-* language wrappers like Python, Ruby, Java, VB, C++ etc.
+* more language wrappers like Python, Ruby, VB, C++ etc.
 * help making parts of the library optional.
-* make sure the code compiles in C and C++.
+* make sure the code compiles in both C and C++.
 
 
 Portability
@@ -120,7 +119,7 @@ issue for some compilers:
 * we use packed structures and access structure elements off of alignment boundaries.
 * zero-element arrays.
 * threading.  We tried to avoid this, but at least Allen-Bradley/Rockwell's protocol is very much asynchronous.
-* we still have one spot where we use inline variable declaration.  This will be removed shortly.
+* we still have one spot where we use inline variable declaration.
 
 We do not have access to any big-endian machines.  We would love to have someone
 with such access let us know if it is working.  We have put in byte swapping
@@ -144,9 +143,14 @@ memory.
 Threading
 =========
 
-The library does use threads for the AB protocol.  The protocol-independent part
-of the library has no global data.  If you share a tag between two threads, you are
-going to get undefined behavior unless you serialize access.  We tried to keep the tag
+Access to the C tag data structure is not
+thread-safe.  We have added lock/unlock API calls that use mutexes, but if you are using the library
+wrapped in another language, you should use that language's synchronization primitives to prevent simultaneous access.
+
+There is example code (POSIX only) showing how to use the tag lock and unlock API functions.
+
+If you share a tag between two threads, you are
+going to get undefined behavior (almost certainly a crash) unless you serialize access.  We tried to keep the tag
 data structure as lightweight as possible.
 
 The Allen-Bradley EIP protocol is very asynchronous and the part of it that we
@@ -163,6 +167,8 @@ few functions in the API:
 These functions operation on all types of tags:
 
 	plc_tag plc_tag_create(const char *attrib_str);
+	int plc_tag_lock(plc_tag tag);
+	int plc_tag_unlock(plc_tag tag);
 	int plc_tag_abort(plc_tag tag);
 	int plc_tag_destroy(plc_tag tag);
 	int plc_tag_read(plc_tag tag, int timeout);
@@ -325,19 +331,21 @@ That said, we have some longer term things in mind:
 History
 =======
 
-We were tired of poor, expensive and non-portable OPC implementations.
+We were tired of poor quality, expensive and non-portable OPC implementations.
 Actually, we were tired of OPC.  It is a large protocol and provides
 far more functionality than we need.  It is also not terribly portable since it is
 based on Microsoft's OLE.  We
 looked around to find an open-source library that would provide the 20% of
 functionality of PLC access we needed to do 100% of our work.  We found some
 very old and abandoned libraries for PCCC (AB's older protocol) and just one
-EIP/CIP library, also abandoned, that was marginally portable: TuxEIP.
+EIP/CIP library, also apparently abandoned, that was marginally portable: TuxEIP.
 
-TuxEIP was written by a couple of people (probably in France based on the
-email addresses and names) who seem to have disappeared off of the Internet.  The library's
+TuxEIP was written by a company (probably in France based on the
+email addresses and names) which seems to have disappeared off of the Internet.  The library's
 original home site was long gone (still available via the Internet Archive).
 It was only used as slightly patched version in the pvbrowser project.
+
+(**UPDATE:** TuxEIP can be found on Github now!)
 
 We set about seeing if we could use the code.  We ran into some problems:
 
@@ -373,12 +381,13 @@ the discovery that the AP protocol packets are not as dynamically sized as the
 TuxEIP code makes it seem.  It turns out that there are a few basic complete
 packets with one dynamically sized part at the end.  We were able to make our code a lot
 simpler and almost completely remove dynamic memory allocation from the library during
-normal operation.
+normal operation.  Note that this means we definitely do **not** support the whole CIP protocol!
 
 We copied no code from TuxEIP.  Those areas that are similar are due to the
 necessities of coding the correct binary packet format.  Where we had no other
 source, we tend to use the same element names as in TuxEIP where they appear to
-correspond with a named construct that is part of the actual CIP specification.
+correspond with some named construct that is part of the actual CIP specification 
+(at least that is what we thought was happening since we do not have that specification).
 Where we had no clue, we made names up to fit what we thought was going on.
 
 We could only find a few tidbits of free information on the Internet about how
@@ -386,7 +395,7 @@ the various layers of the EtherNet/IP (CIP) protocol(s) work.  There are several
 layers to the whole thing.  Luckily, TuxEIP had already blazed that trail and
 we were able to examine that code to find out how things worked.
 
-The EtherNet/IP (CIP) protocol specificiation is very large and very complicated
+The EtherNet/IP (as part of CIP) protocol specification is very large and very complicated
 and covers several generations of Rockwell/Allen-Bradley PLCs.  Parts of it
 date to systems that AB built before Ethernet was common and proprietary
 networks like serial AppleTalk etc. were around.
