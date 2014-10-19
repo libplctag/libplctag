@@ -230,9 +230,6 @@ struct ab_session_t {
     /* Sequence ID for requests. */
     uint64_t session_seq_id;
 
-    /* a list of the connections on this session */
-    //ab_connection connections;
-
     /* current request being sent, only one at a time */
     ab_request_p current_request;
 
