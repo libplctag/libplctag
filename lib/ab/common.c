@@ -404,6 +404,11 @@ int check_mutex(int debug)
 		sleep_ms(1);
 	}
 
+	/*
+	 * FIXME - this is still a race condition on some processors.
+	 * Replace with a CAS loop.
+	 */
+
 	/* first see if the mutex is there. */
 	if(!io_thread_mutex) {
 		rc = mutex_create((mutex_p *)&io_thread_mutex);
