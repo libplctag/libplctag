@@ -32,7 +32,6 @@ here to find out when that happens.
 
 
 
-
 Goals
 =====
 
@@ -205,6 +204,9 @@ still call plc_tag_write(tag) to push it to the PLC.
 	int plc_tag_set_float32(plc_tag tag, int offset, float val);
 
 Most of the functions in the API are for data access.
+
+See the [API](https://github.com/kyle-github/libplctag/wiki/API "API Wiki Page") for more information.
+
 
 Sample Code
 ===========
