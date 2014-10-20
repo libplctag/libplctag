@@ -74,7 +74,7 @@ multithread: multithread.c
 	$(CC) -o multithread multithread.c $(CFLAGS) $(SHLIBS)
 
 multithread_plc5: multithread_plc5.c
-	$(CC) -o multithread_plc multithread_plc5.c $(CFLAGS) $(SHLIBS)
+	$(CC) -o multithread_plc5 multithread_plc5.c $(CFLAGS) $(SHLIBS)
 
 
 clean:
