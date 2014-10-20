@@ -334,13 +334,7 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* get rid of the request now */
-    if(req) {
-     	//request_destroy(&req);
-		ab_tag_abort(tag);
-        req = NULL;
-    } else {
-		tag->read_in_progress = 0;
-	}
+	ab_tag_abort(tag);
 
     tag->status = rc;
 
@@ -566,26 +560,6 @@ static int check_write_status(ab_tag_p tag)
     	return PLCTAG_STATUS_PENDING;
     }
 
-	/*
-	 * we have a response. Remove the request/response from
-	 * the list for the session.
-	 */
-	rc = request_remove(tag->session, req);
-
-	if(rc != PLCTAG_STATUS_OK) {
-		pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
-
-		/* since we could not remove it, maybe the thread can. */
-		plc_tag_abort((plc_tag)tag);
-
-		/* not our request any more */
-		req = NULL;
-
-		tag->status = rc;
-
-		return rc;
-	}
-
     /* fake exception */
     do {
 		pccc = (pccc_resp*)(req->data);
@@ -620,12 +594,8 @@ static int check_write_status(ab_tag_p tag)
 		rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    if(req) {
-		ab_tag_abort(tag);
-    	req = NULL;
-    } else {
-		tag->write_in_progress = 0;		
-	}
+	/* let the IO thread free the memory. */
+	ab_tag_abort(tag);
 
     tag->status = rc;
 
