@@ -889,6 +889,7 @@ START_PACK typedef struct {
     uint16_t cpf_udi_item_length;   /* REQ: fill in with length of remaining data. */
 
     /* CM Service Request - Connection Manager */
+	/* NOTE, we overlay the following if this is PCCC */
     uint8_t cm_service_code;        /* ALWAYS 0x52 Unconnected Send */
     uint8_t cm_req_path_size;       /* ALWAYS 2, size in words of path, next field */
     uint8_t cm_req_path[4];         /* ALWAYS 0x20,0x06,0x24,0x01 for CM, instance 1*/
@@ -943,6 +944,28 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
+	    /* encap header */
+    uint16_t encap_command;    		/* ALWAYS 0x006f Unconnected Send*/
+    uint16_t encap_length;   		/* packet size in bytes - 24 */
+    uint32_t encap_session_handle;  /* from session set up */
+    uint32_t encap_status;          /* always _sent_ as 0 */
+    uint64_t encap_sender_context;	/* whatever we want to set this to, used for
+                                     * identifying responses when more than one
+                                     * are in flight at once.
+                                     */
+    uint32_t encap_options;         /* 0, reserved for future use */
+
+    /* Interface Handle etc. */
+    uint32_t interface_handle;      /* ALWAYS 0 */
+    uint16_t router_timeout;        /* in seconds, 5 or 10 seems to be good.*/
+
+    /* Common Packet Format - CPF Unconnected */
+    uint16_t cpf_item_count;        /* ALWAYS 2 */
+    uint16_t cpf_nai_item_type;     /* ALWAYS 0 */
+    uint16_t cpf_nai_item_length;   /* ALWAYS 0 */
+    uint16_t cpf_udi_item_type;     /* ALWAYS 0x00B2 - Unconnected Data Item */
+    uint16_t cpf_udi_item_length;   /* REQ: fill in with length of remaining data. */
+
     /* PCCC Command Req Routing */
     uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
     uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
@@ -964,6 +987,28 @@ START_PACK typedef struct {
 
 
 START_PACK typedef struct {
+	    /* encap header */
+    uint16_t encap_command;    		/* ALWAYS 0x006f Unconnected Send*/
+    uint16_t encap_length;   		/* packet size in bytes - 24 */
+    uint32_t encap_session_handle;  /* from session set up */
+    uint32_t encap_status;          /* always _sent_ as 0 */
+    uint64_t encap_sender_context;	/* whatever we want to set this to, used for
+                                     * identifying responses when more than one
+                                     * are in flight at once.
+                                     */
+    uint32_t encap_options;         /* 0, reserved for future use */
+
+    /* Interface Handle etc. */
+    uint32_t interface_handle;      /* ALWAYS 0 */
+    uint16_t router_timeout;        /* in seconds, 5 or 10 seems to be good.*/
+
+    /* Common Packet Format - CPF Unconnected */
+    uint16_t cpf_item_count;        /* ALWAYS 2 */
+    uint16_t cpf_nai_item_type;     /* ALWAYS 0 */
+    uint16_t cpf_nai_item_length;   /* ALWAYS 0 */
+    uint16_t cpf_udi_item_type;     /* ALWAYS 0x00B2 - Unconnected Data Item */
+    uint16_t cpf_udi_item_length;   /* REQ: fill in with length of remaining data. */
+
     /* PCCC Reply */
     uint8_t reply_code;          /* 0xCB Execute PCCC Reply */
     uint8_t reserved;               /* 0x00 in reply */

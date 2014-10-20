@@ -94,26 +94,25 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
-    uint16_t conn_seq_id = 0;
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
     int overhead;
     int data_per_packet;
-    eip_cip_uc_req *cip;
     pccc_req *pccc;
     uint8_t *data;
-    uint8_t *embed_start, *embed_end;
+    uint8_t *embed_start;
     int debug = tag->debug;
 
     pdebug(debug,"Starting");
 
     /* how many packets will we need? How much overhead? */
-    overhead = sizeof(pccc_resp) + 4; /* MAGIC 4 = fudge */
+    overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
     data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
 
 	if(data_per_packet <= 0) {
 		pdebug(debug,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
 		tag->status = PLCTAG_ERR_TOO_LONG;
-		return PLCTAG_ERR_TOO_LONG;
+		return tag->status;
 	}
 
 	if(data_per_packet < tag->size) {
@@ -135,7 +134,6 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 		}
 	}
 
-
 	/* get a request buffer */
 	rc = request_create(&req);
 
@@ -147,21 +145,11 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
 	req->debug = tag->debug;
 
-	/*
-	 * create a connection sequence ID for this.  Must be
-	 * unique.  Use our existing session ID code for this.
-	 *
-	 * FIXME - this calls through a mutex.
-	 */
-	conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
-
 	/* point the struct pointers to the buffer*/
-	cip = (eip_cip_uc_req*)(req->data);
+	pccc = (pccc_req*)(req->data);
 
 	/* set up the embedded PCCC packet */
-	embed_start = (req->data) + sizeof(eip_cip_uc_req);
-
-	pccc = (pccc_req *)(embed_start);
+	embed_start = (uint8_t*)(&pccc->service_code);
 
 	/* Command Routing */
 	pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
@@ -185,66 +173,32 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
 	/* point to the end of the struct */
 	data = ((uint8_t *)pccc) + sizeof(pccc_req);
-
+	
 	/* copy LAA tag name into the request */
 	mem_copy(data,tag->encoded_name,tag->encoded_name_size);
 	data += tag->encoded_name_size;
-
+	
 	/* we need the count twice? */
 	*((uint16_t*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
 	data += sizeof(uint16_t);
-
-	embed_end = data;
-
+	
 	/*
 	 * after the embedded packet, we need to tell the message router
 	 * how to get to the target device.
 	 */
 
-	/* Now copy in the routing information for the embedded message */
-	/*
-	 * routing information.  Format:
-	 *
-	 * uint8_t path_size
-	 * uint8_t reserved (zero)
-	 * uint8_t[...] path (padded to even number of entries)
-	 */
-	*data = (tag->conn_path_size)/2; /* in 16-bit words */
-	data++;
-	*data = 0;
-	data++;
-	mem_copy(data,tag->conn_path, tag->conn_path_size);
-	data += tag->conn_path_size;
-
-	/* now we go back and fill in the fields of the static part */
-
 	/* encap fields */
-	cip->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* ALWAYS 0x0070 Unconnected Send*/
+	pccc->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* ALWAYS 0x0070 Unconnected Send*/
 
 	/* router timeout */
-	cip->router_timeout = h2le16(1);                 /* one second timeout, enough? */
+	pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
 
 	/* Common Packet Format fields for unconnected send. */
-	cip->cpf_item_count 		= h2le16(2);				/* ALWAYS 2 */
-	cip->cpf_nai_item_type 		= h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
-	cip->cpf_nai_item_length 	= h2le16(0);   				/* ALWAYS 0 */
-	cip->cpf_udi_item_type		= h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
-	cip->cpf_udi_item_length	= h2le16(data - (uint8_t*)(&(cip->cm_service_code)));  /* REQ: fill in with length of remaining data. */
-
-	/* CM Service Request - Connection Manager */
-	cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND;        /* 0x52 Unconnected Send */
-	cip->cm_req_path_size = 2;   /* 2, size in 16-bit words of path, next field */
-	cip->cm_req_path[0] = 0x20;  /* class */
-	cip->cm_req_path[1] = 0x06;  /* Connection Manager */
-	cip->cm_req_path[2] = 0x24;  /* instance */
-	cip->cm_req_path[3] = 0x01;  /* instance 1 */
-
-	/* Unconnected send needs timeout information */
-	cip->secs_per_tick = AB_EIP_SECS_PER_TICK;	/* seconds per tick */
-	cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS;  /* timeout = srd_secs_per_tick * src_timeout_ticks */
-
-	/* size of embedded packet */
-	cip->uc_cmd_length = h2le16(embed_end - embed_start);
+	pccc->cpf_item_count 		= h2le16(2);				/* ALWAYS 2 */
+	pccc->cpf_nai_item_type 	= h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
+	pccc->cpf_nai_item_length 	= h2le16(0);   				/* ALWAYS 0 */
+	pccc->cpf_udi_item_type		= h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
+	pccc->cpf_udi_item_length	= h2le16(data - embed_start);  /* REQ: fill in with length of remaining data. */
 
 	/* set the size of the request */
 	req->request_size = data - (req->data);
@@ -277,24 +231,179 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
 
 
+/*
+ * check_read_status
+ *
+ * NOTE that we can have only one outstanding request because PCCC
+ * does not support fragments.
+ */
+
+
+static int check_read_status(ab_tag_p tag)
+{
+    pccc_resp *pccc;
+
+    uint8_t *data;
+    uint8_t *data_end;
+    int pccc_res_type;
+    int pccc_res_length;
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p req;
+    int debug = tag->debug;
+
+    pdebug(debug,"Starting");
+
+    /* PCCC only can have one request outstanding */
+    /* is there an outstanding request? */
+    if(!tag->reqs || !(tag->reqs[0])) {
+    	tag->read_in_progress = 0;
+    	tag->status = PLCTAG_ERR_NULL_PTR;
+    	return PLCTAG_ERR_NULL_PTR;
+    }
+
+    req = tag->reqs[0];
+
+    if(!req->resp_received) {
+    	tag->status = PLCTAG_STATUS_PENDING;
+    	return PLCTAG_STATUS_PENDING;
+    }
+
+    /* fake exceptions */
+    do {
+    	pccc = (pccc_resp*)(req->data);
+
+		data_end = (req->data + pccc->encap_length + sizeof(eip_encap_t));
+
+		if(le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
+			pdebug(debug,"Unexpected EIP packet type received: %d!",pccc->encap_command);
+			rc = PLCTAG_ERR_BAD_DATA;
+			break;
+		}
+
+		if(le2h16(pccc->encap_status) != AB_EIP_OK) {
+			pdebug(debug,"EIP command failed, response code: %d",pccc->encap_status);
+			rc = PLCTAG_ERR_REMOTE_ERR;
+			break;
+		}
+
+		if(pccc->general_status != AB_EIP_OK) {
+			pdebug(debug,"PCCC command failed, response code: %d",pccc->general_status);
+			rc = PLCTAG_ERR_REMOTE_ERR;
+			break;
+		}
+
+		if(pccc->pccc_status != AB_EIP_OK) {
+			/*pdebug(PLC_LOG_ERR,PLC_ERR_READ, "PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
+			pdebug(debug,pccc_decode_error(pccc->pccc_data[0]));
+			rc = PLCTAG_ERR_REMOTE_ERR;
+			break;
+		}
+
+		/* point to the start of the data */
+		data = pccc->pccc_data;
+
+		if(!(data = pccc_decode_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
+			pdebug(debug,"Unable to decode PCCC response data type and data size!");
+			rc = PLCTAG_ERR_BAD_DATA;
+			break;
+		}
+
+		/* this gives us the overall type of the response and the number of bytes remaining in it.
+		 * If the type is an array, then we need to decode another one of these words
+		 * to get the type of each element and the size of each element.  We will
+		 * need to adjust the size if we care.
+		 */
+
+		if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
+			if(!(data = pccc_decode_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
+				pdebug(debug,"Unable to decode PCCC response array element data type and data size!");
+				rc = PLCTAG_ERR_BAD_DATA;
+				break;
+			}
+		}
+
+		/* copy data into the tag. */
+		if((data_end - data) > tag->size) {
+			rc = PLCTAG_ERR_TOO_LONG;
+			break;
+		}
+
+		mem_copy(tag->data, data, data_end - data);
+
+		rc = PLCTAG_STATUS_OK;
+    } while(0);
+
+    /* get rid of the request now */
+    if(req) {
+     	//request_destroy(&req);
+		ab_tag_abort(tag);
+        req = NULL;
+    } else {
+		tag->read_in_progress = 0;
+	}
+
+    tag->status = rc;
+
+    pdebug(debug,"Done.");
+
+    return rc;
+}
+
+
+
+
 
 /* FIXME  convert to unconnected messages. */
 
 int eip_pccc_tag_write_start(ab_tag_p tag)
 {
 	int rc = PLCTAG_STATUS_OK;
-    eip_pccc_req_old *pccc;
+    pccc_req *pccc;
     uint8_t *data;
     uint8_t element_def[16];
     int element_def_size;
     uint8_t array_def[16];
     int array_def_size;
     int pccc_data_type;
-    uint16_t conn_seq_id = 0;
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
     ab_request_p req = NULL;
     int debug = tag->debug;
+	uint8_t *embed_start;
+	int overhead, data_per_packet;
 
     pdebug(debug,"Starting.");
+	
+	/* how many packets will we need? How much overhead? */
+    overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
+
+    data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
+
+	if(data_per_packet <= 0) {
+		pdebug(debug,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
+		tag->status = PLCTAG_ERR_TOO_LONG;
+		return tag->status;
+	}
+
+	if(data_per_packet < tag->size) {
+		pdebug(debug,"PCCC requests cannot be fragmented.  Too much data requested.");
+		tag->status = PLCTAG_ERR_TOO_LONG;
+		return tag->status;
+	}
+
+	
+	/* set up the requests */
+	if(!tag->reqs) {
+		tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+		tag->max_requests = 1;
+		tag->num_read_requests = 1;
+		tag->num_write_requests = 1;
+
+		if(!tag->reqs) {
+			pdebug(debug,"Unable to get memory for request array!");
+			tag->status = PLCTAG_ERR_NO_MEM;
+			return tag->status;
+		}
+	}
 
     /* get a request buffer */
     rc = request_create(&req);
@@ -307,10 +416,13 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
     req->debug = tag->debug;
 
-    pccc = (eip_pccc_req_old*)(req->data);
+    pccc = (pccc_req*)(req->data);
+
+	/* set up the embedded PCCC packet */
+	embed_start = (uint8_t*)(&pccc->service_code);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_pccc_req_old);
+    data = (req->data) + sizeof(pccc_req);
 
     /* copy laa into the request */
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
@@ -361,22 +473,17 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     /* now fill in the rest of the structure. */
 
     /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_CONNECTED_SEND);    /* ALWAYS 0x0070 Unconnected Send*/
+    pccc->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* ALWAYS 0x0070 Unconnected Send*/
 
     /* router timeout */
     pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
 
-    /* Common Packet Format fields */
-    pccc->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
-    pccc->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
-    pccc->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4 ? */
-    //pccc->cpf_targ_conn_id = tag->connection->targ_connection_id;
-    pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
-    pccc->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&(pccc->cpf_conn_seq_num)));/* REQ: fill in with length of remaining data. */
-
-    /* connection sequence id */
-    //conn_seq_id = connection_get_new_seq_id(tag->connection);
-    pccc->cpf_conn_seq_num = h2le16(conn_seq_id);
+ 	/* Common Packet Format fields for unconnected send. */
+	pccc->cpf_item_count 		= h2le16(2);				/* ALWAYS 2 */
+	pccc->cpf_nai_item_type 	= h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
+	pccc->cpf_nai_item_length 	= h2le16(0);   				/* ALWAYS 0 */
+	pccc->cpf_udi_item_type		= h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
+	pccc->cpf_udi_item_length	= h2le16(data - embed_start);  /* REQ: fill in with length of remaining data. */
 
     /* Command Routing */
     pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
@@ -407,7 +514,6 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     /* get ready to add the request to the queue for this session */
     req->request_size = data - (req->data);
     req->send_request = 1;
-    //req->conn_id = tag->connection->orig_connection_id;
     req->conn_seq = conn_seq_id;
 
     /* add the request to the session's list. */
@@ -439,7 +545,7 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
  */
 static int check_write_status(ab_tag_p tag)
 {
-    eip_pccc_resp_old *pccc_resp;
+    pccc_resp *pccc;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
     int debug = tag->debug;
@@ -482,30 +588,30 @@ static int check_write_status(ab_tag_p tag)
 
     /* fake exception */
     do {
-		pccc_resp = (eip_pccc_resp_old*)(req->data);
+		pccc = (pccc_resp*)(req->data);
 
 		/* check the response status */
-		if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-			pdebug(debug,"EIP unexpected response packet type: %d!",pccc_resp->encap_command);
+		if( le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
+			pdebug(debug,"EIP unexpected response packet type: %d!",pccc->encap_command);
 			rc = PLCTAG_ERR_BAD_DATA;
 			break;
 		}
 
-		if(le2h16(pccc_resp->encap_status) != AB_EIP_OK) {
-			pdebug(debug,"EIP command failed, response code: %d",pccc_resp->encap_status);
+		if(le2h16(pccc->encap_status) != AB_EIP_OK) {
+			pdebug(debug,"EIP command failed, response code: %d",pccc->encap_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
-		if(pccc_resp->general_status != AB_EIP_OK) {
-			pdebug(debug,"PCCC command failed, response code: %d",pccc_resp->general_status);
+		if(pccc->general_status != AB_EIP_OK) {
+			pdebug(debug,"PCCC command failed, response code: %d",pccc->general_status);
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
 
-		if(pccc_resp->pccc_status != AB_EIP_OK) {
-			/*pdebug(PLC_LOG_ERR,PLC_ERR_READ, "PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
-			pdebug(debug,pccc_decode_error(pccc_resp->pccc_data[0]));
+		if(pccc->pccc_status != AB_EIP_OK) {
+			/*pdebug(PLC_LOG_ERR,PLC_ERR_READ, "PCCC command failed, response code: %d",pccc->pccc_status);*/
+			pdebug(debug,pccc_decode_error(pccc->pccc_data[0]));
 			rc = PLCTAG_ERR_REMOTE_ERR;
 			break;
 		}
@@ -514,139 +620,18 @@ static int check_write_status(ab_tag_p tag)
 		rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    tag->write_in_progress = 0;
-    tag->status = rc;
-
     if(req) {
-    	request_destroy(&(req));
+		ab_tag_abort(tag);
     	req = NULL;
-    	tag->reqs[0] = NULL;
-    }
+    } else {
+		tag->write_in_progress = 0;		
+	}
+
+    tag->status = rc;
 
     pdebug(debug,"Done.");
 
     /* Success! */
-    return rc;
-}
-
-
-
-/*
- * check_read_status
- *
- * NOTE that we can have only one outstanding request because PCCC
- * does not support fragments.
- */
-
-
-static int check_read_status(ab_tag_p tag)
-{
-    eip_pccc_resp_old *pccc_resp;
-
-    uint8_t *data;
-    uint8_t *data_end;
-    int pccc_res_type;
-    int pccc_res_length;
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req;
-    int debug = tag->debug;
-
-    pdebug(debug,"Starting");
-
-    /* PCCC only can have one request outstanding */
-    /* is there an outstanding request? */
-    if(!tag->reqs || !(tag->reqs[0])) {
-    	tag->read_in_progress = 0;
-    	tag->status = PLCTAG_ERR_NULL_PTR;
-    	return PLCTAG_ERR_NULL_PTR;
-    }
-
-    req = tag->reqs[0];
-
-    if(!req->resp_received) {
-    	tag->status = PLCTAG_STATUS_PENDING;
-    	return PLCTAG_STATUS_PENDING;
-    }
-
-    /* fake exceptions */
-    do {
-    	pccc_resp = (eip_pccc_resp_old*)(req->data);
-
-		data_end = (req->data + pccc_resp->encap_length + sizeof(eip_encap_t));
-
-		if(le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-			pdebug(debug,"Unexpected EIP packet type received: %d!",pccc_resp->encap_command);
-			rc = PLCTAG_ERR_BAD_DATA;
-			break;
-		}
-
-		if(le2h16(pccc_resp->encap_status) != AB_EIP_OK) {
-			pdebug(debug,"EIP command failed, response code: %d",pccc_resp->encap_status);
-			rc = PLCTAG_ERR_REMOTE_ERR;
-			break;
-		}
-
-		if(pccc_resp->general_status != AB_EIP_OK) {
-			pdebug(debug,"PCCC command failed, response code: %d",pccc_resp->general_status);
-			rc = PLCTAG_ERR_REMOTE_ERR;
-			break;
-		}
-
-		if(pccc_resp->pccc_status != AB_EIP_OK) {
-			/*pdebug(PLC_LOG_ERR,PLC_ERR_READ, "PCCC command failed, response code: %d",pccc_resp->pccc_status);*/
-			pdebug(debug,pccc_decode_error(pccc_resp->pccc_data[0]));
-			rc = PLCTAG_ERR_REMOTE_ERR;
-			break;
-		}
-
-		/* point to the start of the data */
-		data = pccc_resp->pccc_data;
-
-		if(!(data = pccc_decode_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
-			pdebug(debug,"Unable to decode PCCC response data type and data size!");
-			rc = PLCTAG_ERR_BAD_DATA;
-			break;
-		}
-
-		/* this gives us the overall type of the response and the number of bytes remaining in it.
-		 * If the type is an array, then we need to decode another one of these words
-		 * to get the type of each element and the size of each element.  We will
-		 * need to adjust the size if we care.
-		 */
-
-		if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
-			if(!(data = pccc_decode_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
-				pdebug(debug,"Unable to decode PCCC response array element data type and data size!");
-				rc = PLCTAG_ERR_BAD_DATA;
-				break;
-			}
-		}
-
-		/* copy data into the tag. */
-		if((data_end - data) > tag->size) {
-			rc = PLCTAG_ERR_TOO_LONG;
-			break;
-		}
-
-		mem_copy(tag->data, data, data_end - data);
-
-		rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    /* get rid of the request now */
-    if(req) {
-     	request_destroy(&req);
-        req = NULL;
-        tag->reqs[0] = NULL;
-    }
-
-    /* the read is done. */
-    tag->read_in_progress = 0;
-
-    tag->status = rc;
-
-    pdebug(debug,"Done.");
-
     return rc;
 }
 

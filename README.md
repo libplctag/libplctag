@@ -45,8 +45,7 @@ The primary goals of this library are to provide:
 * a portable library for big and little-endian and 32 and 64-bit processors.
 
 We do not hit all those goals yet.  We broke Windows compatibility on the
-last major internal change.  We also broke PLC5 access during that time.
-We will be working on those repairs next.
+last major internal change.  PLC5 access is working for INT and floating point types.
 
 Non Goals
 =========
@@ -75,6 +74,10 @@ We are on version 0.8.  That includes:
   * read/write 32-bit IEEE format (little endian) floating point.
 * raw support for user-defined structures (you need to pull out the data piece by piece)
 * read/write arrays of the above.
+* support for Rockwell/Allen-Bradley PLC5 PLCs (E-series with Ethernet) via CIP/PCCC.
+  * read/write of 16-bit INT.
+  * read/write of 32-bit floating point.
+  * read/write of arrays of the above.
 * support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04 and 14.04 tested).
 * tested support AB ControlLogix (version 16 and version 20 firmware).
 * sample code.
