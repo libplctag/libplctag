@@ -126,10 +126,10 @@ plc_tag ab_tag_create(attr attribs)
     	return (plc_tag)tag;
     }
 
-    /* get the connection path, punt if there is not one. */
+    /* get the connection path, punt if there is not one and we have a Logix-class PLC. */
     path = attr_get_str(attribs,"path",NULL);
 
-    if(path == NULL) {
+    if(path == NULL && tag->protocol_type == AB_PROTOCOL_LGX) {
     	tag->status = PLCTAG_ERR_BAD_PARAM;
     	return (plc_tag)tag;
     }
@@ -188,8 +188,10 @@ plc_tag ab_tag_create(attr attribs)
 		 * also adds the protocol/PLC specific routing information to the
 		 * links specified.  This fills in fields in the connection about
 		 * any DH+ special data.
+		 * 
+		 * Skip this if we don't have a path.
 		 */
-		if(cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
+		if(path && cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
 			pdebug(debug,"Unable to convert links strings to binary path!");
 			tag->status = PLCTAG_ERR_BAD_PARAM;
 			break;
