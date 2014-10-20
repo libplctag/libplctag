@@ -142,7 +142,7 @@ void thread_func(void *data)
 				value = (value > 500.0 ? 0.0 : value + 1.5);
 				
 				/* yes, we should be checking this return value too... */
-				plc_tag_set_float32(tag, 0, (int32_t)value);
+				plc_tag_set_float32(tag, 0, value);
 				
 				/* write the value */
 				rc = plc_tag_write(tag, DATA_TIMEOUT);
