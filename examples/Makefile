@@ -45,7 +45,7 @@ LIBS = -L../lib -lplctag -lpthread -pthread
 SHLIBS = $(LIBS)
 # LIBPLC_LIB_SO = ../lib/libplctag.so
 
-TARGETS = async simple string toggle_bool write_string tag_rw multithread multithread_plc5 plc5
+TARGETS = async simple string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_cached_read plc5
 
 all: $(TARGETS)
 	
@@ -75,6 +75,9 @@ multithread: multithread.c
 
 multithread_plc5: multithread_plc5.c
 	$(CC) -o multithread_plc5 multithread_plc5.c $(CFLAGS) $(SHLIBS)
+
+multithread_cached_read: multithread_cached_read.c
+	$(CC) -o multithread_cached_read multithread_cached_read.c $(CFLAGS) $(SHLIBS)
 
 
 clean:

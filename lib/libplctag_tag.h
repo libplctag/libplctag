@@ -95,6 +95,8 @@ typedef struct tag_vtable_t *tag_vtable_p;
 						int status; \
 						int endian; \
 						int debug; \
+						uint64_t read_cache_expire; \
+						uint64_t read_cache_ms; \
 						int size; \
 						uint8_t *data
 

@@ -85,6 +85,9 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 		rc = mutex_create(&tag->mut);
 		
 		tag->status = rc;
+		
+		tag->read_cache_expire = (uint64_t)0;
+		tag->read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
 	}
 	
     /*
@@ -185,6 +188,9 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag)
 
     /* clear the status */
     tag->status = PLCTAG_STATUS_OK;
+	
+	/* who knows what state the tag data is in.  */
+	tag->read_cache_expire = (uint64_t)0;
 
     if(!tag->vtable->abort) {
         pdebug(debug,"Tag does not have a abort function!");
@@ -272,11 +278,21 @@ LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
 
-    /* clear the status */
-    /*tag->status = PLCTAG_STATUS_OK;*/
+
+	/* check read cache, if not expired, return existing data. */
+	if(tag->read_cache_expire > time_ms()) {
+		pdebug(debug, "Returning cached data.");
+		tag->status = PLCTAG_STATUS_OK;
+		return tag->status;
+	}
 
     /* the protocol implementation does not do the timeout. */
     rc = tag->vtable->read(tag);
+	
+	/* set up the cache time */
+	if(tag->read_cache_ms) {
+		tag->read_cache_expire = time_ms() + tag->read_cache_ms;
+	}
 
     /* if error, return now */
     if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
@@ -387,12 +403,14 @@ LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
 
     pdebug(debug, "Starting.");
 
-    if(!tag)
+    if(!tag) {
         return PLCTAG_ERR_NULL_PTR;
+	}
+	
+	/* we are writing so the tag existing data is stale. */
+	tag->read_cache_expire = (uint64_t)0;
 
-    /* clear the status */
-    /*tag->status = PLCTAG_STATUS_OK;*/
-
+	/* check the vtable */
     if(!tag->vtable || !tag->vtable->write) {
         pdebug(debug, "Tag does not have a write function!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
