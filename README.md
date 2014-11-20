@@ -64,7 +64,7 @@ to use of this library.  This code is licensed under the GNU LGPL.
 Current Status
 ==============
 
-We are on version 0.8.  That includes:
+We are on version 0.9.  That includes:
 
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).
 * native support for multiple data types:
@@ -73,11 +73,12 @@ We are on version 0.8.  That includes:
   * read/write 32-bit IEEE format (little endian) floating point.
 * raw support for user-defined structures (you need to pull out the data piece by piece)
 * read/write arrays of the above.
-* support for Rockwell/Allen-Bradley PLC5 PLCs (E-series with Ethernet) via CIP/PCCC.
+* support for Rockwell/Allen-Bradley PLC5 PLCs (E-series with Ethernet), and SLC 500 with Ethernet via CIP.
   * read/write of 16-bit INT.
   * read/write of 32-bit floating point.
-  * read/write of arrays of the above.
+  * read/write of arrays of the above (arrays not tested on SLC 500).
 * support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04 and 14.04 tested).
+* support for Mac OS X (well, it builds and seems to work... not deeply tested)
 * tested support AB ControlLogix (version 16 and version 20 firmware).
 * sample code.
 * a fairly stable API.
@@ -88,7 +89,6 @@ We will not be on version 1.0 until:
 
 * we get the Windows code working again.
 * reduce the need for C99 features.
-* we have completed support for PLC5 systems directly.
 * we get more testing on other PLC types.
 * we have real documentation!
 
