@@ -2,7 +2,7 @@
 libplctag
 =========
 
-This library for Linux and Windows (almost fixed) provides a means of accessing PLCs to read and write simple data.
+This library for Linux and Windows (still broken, but almost fixed) provides a means of accessing PLCs to read and write simple data.
 
 
 WARNING - DISCLAIMER
