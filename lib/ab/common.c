@@ -1351,7 +1351,12 @@ void *request_handler_func(void *not_used)
 
 	thread_stop();
 
+	/* FIXME -- this should be factored out as a platform dependency.*/
+#ifdef WIN32
+	return (DWORD)0;
+#else
 	return NULL;
+#endif
 }
 
 
