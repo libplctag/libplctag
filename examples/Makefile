@@ -24,6 +24,7 @@ LIBPLC_ROOT = ./
 endif
 
 CC=gcc
+CPP=g++
 LD=ld
 AR=ar
 INSTALL=install
@@ -45,7 +46,7 @@ LIBS = -L../lib -lplctag -lpthread -pthread
 SHLIBS = $(LIBS)
 # LIBPLC_LIB_SO = ../lib/libplctag.so
 
-TARGETS = async simple string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_cached_read plc5 slc500
+TARGETS = async simple simple_cpp string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_cached_read plc5 slc500
 
 all: $(TARGETS)
 	
@@ -54,6 +55,9 @@ async: async.c
 
 simple: simple.c
 	$(CC) -o simple simple.c $(CFLAGS) $(SHLIBS)
+
+simple_cpp: simple_cpp.cpp
+	$(CPP) -o simple_cpp simple_cpp.cpp $(CFLAGS) $(SHLIBS)
 
 plc5: plc5.c
 	$(CC) -o plc5 plc5.c $(CFLAGS) $(SHLIBS)

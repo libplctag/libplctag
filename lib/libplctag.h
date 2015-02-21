@@ -25,6 +25,8 @@
   * 2012-02-22  KRH - Created file.                                        *
   *                                                                        *
   * 2013-05-03  KRH - Removed left-over cruft from previous version of API *
+  *                                                                        *
+  * 2015-02-21	KRH - Tweaked LIB_EXPORT definition to work with C++.      *
   **************************************************************************/
 
 #ifndef __LIBPLCTAG_H__
@@ -34,19 +36,23 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-	#define C_FUNC extern "C"
-#else
-	#define C_FUNC
+extern "C" {
 #endif
 
+
 #ifdef WIN32
-	#ifdef LIBPLCTAGDLL_EXPORTS
-		#define LIB_EXPORT C_FUNC __declspec(dllexport)
+	#ifdef __cplusplus
+		#define C_FUNC extern "C"
 	#else
-		#define LIB_EXPORT C_FUNC __declspec(dllimport)
+		#define C_FUNC
+	#endif
+	#ifdef LIBPLCTAGDLL_EXPORTS
+		#define LIB_EXPORT __declspec(dllexport)
+	#else
+		#define LIB_EXPORT __declspec(dllimport)
 	#endif
 #else
-    #define LIB_EXPORT extern
+	#define LIB_EXPORT extern
 #endif
 
 
@@ -265,6 +271,10 @@ LIB_EXPORT int plc_tag_set_int8(plc_tag, int offset, int8_t val);
 LIB_EXPORT float plc_tag_get_float32(plc_tag tag, int offset);
 LIB_EXPORT int plc_tag_set_float32(plc_tag tag, int offset, float val);
 
+
+#ifdef __cplusplus
+}
+#endif
 
 
 
