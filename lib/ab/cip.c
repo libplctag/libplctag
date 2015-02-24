@@ -303,7 +303,7 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
                 *name_len = 0;
                 dp++;
 
-                while(isalnum(*p) || *p == '_') {
+                while(isalnum(*p) || *p == '_' || *p == ':') {
                     *dp = *p;
                     dp++;
                     p++;
