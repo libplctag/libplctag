@@ -283,8 +283,8 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
     while(*p) {
         switch(state) {
             case START:
-                /* must start with an alpha character. */
-                if(isalpha(*p) || *p == '_') {
+                /* must start with an alpha character or _ or :. */
+                if(isalpha(*p) || *p == '_' || *p == ':') {
                     state = NAME;
                 } else if(*p == '.') {
                     state = DOT;
