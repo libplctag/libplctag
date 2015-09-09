@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2013 by Process Control Engineers                       *
- *   Author Kyle Hayes  kylehayes@processcontrolengineers.com              *
+ *   Copyright (C) 2015 by OmanTek                                         *
+ *   Author Kyle Hayes  kylehayes@omantek.com                              *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -156,7 +156,7 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     data += sizeof(uint16_t);
 
     /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_CONNECTED_SEND);    /* ALWAYS 0x0070 Unconnected Send*/
+    pccc->encap_command = h2le16(AB_EIP_CONNECTED_SEND);    /* ALWAYS 0x006F Unconnected Send*/
 
     /* router timeout */
     pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */

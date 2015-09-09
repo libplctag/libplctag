@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2013 by Process Control Engineers                       *
- *   Author Kyle Hayes  kylehayes@processcontrolengineers.com              *
+ *   Copyright (C) 2015 by OmanTek                                         *
+ *   Author Kyle Hayes  kylehayes@omantek.com                              *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -17,6 +17,7 @@
  *   Free Software Foundation, Inc.,                                       *
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
+
 
 
 #include <stdio.h>
