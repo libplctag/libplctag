@@ -28,7 +28,7 @@ LGPL.
 We will be setting up forums or a mailing list to support this library.  Look
 here to find out when that happens.
 
-- the Process Control Engineering team.
+- the OmanTek team.
 
 
 
@@ -43,8 +43,7 @@ The primary goals of this library are to provide:
 * an easily wrappable library.
 * a portable library for big and little-endian and 32 and 64-bit processors.
 
-We do not hit all those goals yet.  We broke Windows compatibility on the
-last major internal change.  PLC5 access is working for INT and floating point types.
+We do not hit all those goals yet. 
 
 Non Goals
 =========
@@ -64,7 +63,7 @@ to use of this library.  This code is licensed under the GNU LGPL.
 Current Status
 ==============
 
-We are on version 0.9.  That includes:
+We are on version 1.0 Beta.  That includes:
 
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).
 * native support for multiple data types:
@@ -77,20 +76,25 @@ We are on version 0.9.  That includes:
   * read/write of 16-bit INT.
   * read/write of 32-bit floating point.
   * read/write of arrays of the above (arrays not tested on SLC 500).
-* support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04 and 14.04 tested).
+* preliminary support for Rockwell/Allen-Bradley PLC5 PLCs accessed over a DH+ bridge (i.e. a LGX chassis with a DHRIO module).
+  * read/write of 16-bit INT.
+  * read/write of 32-bit floating point.
+  * read/write of arrays of the above.
+  * this is not well tested yet.
+* support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04, 14.04 and 15.04 tested).
 * support for Mac OS X (well, it builds and seems to work... not deeply tested)
+* preliminary support for Windows x86 (32-bit) builds, not well tested (help very welcome!).  
 * tested support AB ControlLogix (version 16 and version 20 firmware).
 * sample code.
-* a fairly stable API.
+* a fairly stable API.  It has only had minor additions in three years.
 * a fairly solid wrapper for Java.
 * we have deployed this in customer environments.
+* Other groups use this library (if you do, please let us know).
 
 We will not be on version 1.0 until:
 
 * we get the Windows code working again.
-* reduce the need for C99 features.
-* we get more testing on other PLC types.
-* we have real documentation!
+* we have better documentation!
 
 PLC5 and ControlLogix are trademarks of Rockwell/Allen Bradley.  Windows is a trademark
 of Microsoft.  Please let us know if we missed some so that we can get
@@ -403,12 +407,21 @@ we were able to examine that code to find out how things worked.
 The EtherNet/IP (as part of CIP) protocol specification is very large and very complicated
 and covers several generations of Rockwell/Allen-Bradley PLCs.  Parts of it
 date to systems that AB built before Ethernet was common and proprietary
-networks like serial AppleTalk etc. were around.
+networks like serial Data Highway were all that was around.
 
 As we started our work on the library, we realized that it would be possible to
 write a higher-level API that would handle all the protocol-specific parts of
 basic read/write PLC communication.  We changed our library again and started
 that work.  That is what resulted in this project.
+
+
+Contact
+=======
+
+Please contact us via GitHub's issue tracker.  If needed, we will initiate private
+communication from there.  
+
+Thanks for looking at this project.  We hope you find it useful!
 
 
 
