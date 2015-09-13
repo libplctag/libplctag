@@ -760,9 +760,11 @@ void* request_handler_func(void* not_used)
         } /* end synchronized block */
         pdebug(debug,"leaving critical block %p",global_session_mut);
 
-        /* give up the CPU. 1ms is not really going to happen.  Usually it is more based on the OS */
-        // FIXME FIXME
-        sleep_ms(100);
+        /*
+         * give up the CPU. 1ms is not really going to happen.  Usually it is more based on the OS
+         * default time and is usually around 10ms.  But, this sleep usually causes context switch.
+         */
+        sleep_ms(1);
     }
 
     thread_stop();
