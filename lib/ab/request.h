@@ -21,21 +21,67 @@
 /**************************************************************************
  * CHANGE LOG                                                             *
  *                                                                        *
- * 2012-02-23  KRH - Created file.                                        *
- * 2012-06-15  KRH - Added DF1 registration function.                     *
+ * 2015-09-12  KRH - Created file.                                        *
  *                                                                        *
  **************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_H__
-#define __LIBPLCTAG_AB_H__ 1
+#ifndef __PLCTAG_AB_REQUEST_H__
+#define __PLCTAG_AB_REQUEST_H__ 1
+
+#include <ab/ab_common.h>
 
 
-#include <libplctag.h>
-#include <util/attr.h>
+#define MAX_REQ_RESP_SIZE	(768) /* enough? */
+
+/*
+ * this structure contains data necessary to set up a request and hold
+ * the resulting response.
+ */
+
+struct ab_request_t {
+	ab_request_p next; 	/* for linked list */
+
+	int req_id; 		/* which request is this for the tag? */
+	int data_size; 		/* how many bytes did we get? */
+
+	/* flags for communicating with background thread */
+	int send_request;
+	int send_in_progress;
+	int resp_received;
+	int recv_in_progress;
+	int abort_request;
+	int abort_after_send; /* for one shot packets */
+
+	int status;
+	int debug;
+
+	/* used when processing a response */
+	int processed;
+
+	ab_session_p session;
+
+	uint64_t session_seq_id;
+	uint32_t conn_id;
+	uint16_t conn_seq;
+
+	/* used by the background thread for incrementally getting data */
+	int current_offset;
+	int request_size; /* total bytes, not just data */
+	uint8_t data[MAX_REQ_RESP_SIZE];
+};
 
 
 
-plc_tag ab_tag_create(attr attribs);
+
+
+int request_create(ab_request_p *req);
+int request_add_unsafe(ab_session_p sess, ab_request_p req);
+int request_add(ab_session_p sess, ab_request_p req);
+int request_remove_unsafe(ab_session_p sess, ab_request_p req);
+int request_remove(ab_session_p sess, ab_request_p req);
+int request_destroy_unsafe(ab_request_p* req_pp);
+int request_destroy(ab_request_p *req);
+
 
 
 #endif

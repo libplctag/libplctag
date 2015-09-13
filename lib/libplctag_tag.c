@@ -18,16 +18,16 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
- /**************************************************************************
-  * CHANGE LOG                                                             *
-  *                                                                        *
-  * 2012-02-23  KRH - Created file.                                        *
-  *                                                                        *
-  * 2012-06-24  KRH - Updated plc_err() calls for new API.                 *
-  *                                                                        *
-  * 2013-12-24  KRH - Various munging to make this compile under VS2012    *
-  *                                                                        *
-  **************************************************************************/
+/**************************************************************************
+ * CHANGE LOG                                                             *
+ *                                                                        *
+ * 2012-02-23  KRH - Created file.                                        *
+ *                                                                        *
+ * 2012-06-24  KRH - Updated plc_err() calls for new API.                 *
+ *                                                                        *
+ * 2013-12-24  KRH - Various munging to make this compile under VS2012    *
+ *                                                                        *
+ **************************************************************************/
 
 #include <limits.h>
 #include <float.h>
@@ -55,83 +55,83 @@
 
 LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 {
-    plc_tag tag = PLC_TAG_NULL;
-    attr attribs = NULL;
+	plc_tag tag = PLC_TAG_NULL;
+	attr attribs = NULL;
 	int rc = PLCTAG_STATUS_OK;
 
-    if(!attrib_str || !str_length(attrib_str)) {
-        return PLC_TAG_NULL;
-    }
+	if(!attrib_str || !str_length(attrib_str)) {
+		return PLC_TAG_NULL;
+	}
 
-    attribs = attr_create_from_str(attrib_str);
+	attribs = attr_create_from_str(attrib_str);
 
-    if(!attribs) {
-    	return PLC_TAG_NULL;
-    }
-	
-    /*
-     * create the tag, this is protocol specific.
-     *
-     * If this routine wants to keep the attributes around, it needs
-	 * to clone them.
-     */
-    tag = ab_tag_create(attribs);
+	if(!attribs) {
+		return PLC_TAG_NULL;
+	}
 
 	/*
-	 * FIXME - this really should be here???  Maybe not?  But, this is 
+	 * create the tag, this is protocol specific.
+	 *
+	 * If this routine wants to keep the attributes around, it needs
+	 * to clone them.
+	 */
+	tag = ab_tag_create(attribs);
+
+	/*
+	 * FIXME - this really should be here???  Maybe not?  But, this is
 	 * the only place it can be without making every protocol type do this automatically.
 	 */
 	if(tag && tag->status == PLCTAG_STATUS_OK) {
 		rc = mutex_create(&tag->mut);
-		
+
 		tag->status = rc;
-		
+
 		tag->read_cache_expire = (uint64_t)0;
 		tag->read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
 	}
-	
-    /*
-     * Release memory for attributes
-     *
-     * some code is commented out that would have kept a pointer
-     * to the attributes in the tag and released the memory upon
-     * tag destruction. To prevent a memory leak without maintaining
-     * that pointer, the memory needs to be released here.
-     */
-     attr_destroy(attribs);
 
-    return tag;
+	/*
+	 * Release memory for attributes
+	 *
+	 * some code is commented out that would have kept a pointer
+	 * to the attributes in the tag and released the memory upon
+	 * tag destruction. To prevent a memory leak without maintaining
+	 * that pointer, the memory needs to be released here.
+	 */
+	attr_destroy(attribs);
+
+	return tag;
 }
 
 
 
 /*
  * plc_tag_lock
- * 
+ *
  * Lock the tag against use by other threads.  Because operations on a tag are
  * very much asynchronous, actions like getting and extracting the data from
  * a tag take more than one API call.  If more than one thread is using the same tag,
  * then the internal state of the tag will get broken and you will probably experience
  * a crash.
- * 
+ *
  * This should be used to initially lock a tag when starting operations with it
  * followed by a call to plc_tag_unlock when you have everything you need from the tag.
  */
- 
+
 LIB_EXPORT int plc_tag_lock(plc_tag tag)
 {
 	int debug = tag->debug;
 
-    pdebug(debug, "Starting.");
+	pdebug(debug, "Starting.");
 
-    if(!tag || !tag->mut)
-        return PLCTAG_ERR_NULL_PTR;
+	if(!tag || !tag->mut)
+		return PLCTAG_ERR_NULL_PTR;
 
-    /* lock the mutex */
-    tag->status = mutex_lock(tag->mut);
-	
+	/* lock the mutex */
+	tag->status = mutex_lock(tag->mut);
+
 	pdebug(debug, "Done.");
-	
+
 	return tag->status;
 }
 
@@ -140,25 +140,25 @@ LIB_EXPORT int plc_tag_lock(plc_tag tag)
 
 /*
  * plc_tag_unlock
- * 
+ *
  * The opposite action of plc_tag_unlock.  This allows other threads to access the
  * tag.
  */
- 
+
 LIB_EXPORT int plc_tag_unlock(plc_tag tag)
 {
 	int debug = tag->debug;
 
-    pdebug(debug, "Starting.");
+	pdebug(debug, "Starting.");
 
-    if(!tag || !tag->mut)
-        return PLCTAG_ERR_NULL_PTR;
+	if(!tag || !tag->mut)
+		return PLCTAG_ERR_NULL_PTR;
 
-    /* unlock the mutex */
-    tag->status = mutex_unlock(tag->mut);
-	
+	/* unlock the mutex */
+	tag->status = mutex_unlock(tag->mut);
+
 	pdebug(debug,"Done.");
-	
+
 	return tag->status;
 }
 
@@ -181,25 +181,25 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag)
 {
 	int debug = tag->debug;
 
-    pdebug(debug, "Starting.");
+	pdebug(debug, "Starting.");
 
-    if(!tag || !tag->vtable)
-        return PLCTAG_ERR_NULL_PTR;
+	if(!tag || !tag->vtable)
+		return PLCTAG_ERR_NULL_PTR;
 
-    /* clear the status */
-    tag->status = PLCTAG_STATUS_OK;
-	
+	/* clear the status */
+	tag->status = PLCTAG_STATUS_OK;
+
 	/* who knows what state the tag data is in.  */
 	tag->read_cache_expire = (uint64_t)0;
 
-    if(!tag->vtable->abort) {
-        pdebug(debug,"Tag does not have a abort function!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-        return PLCTAG_ERR_NOT_IMPLEMENTED;
-    }
+	if(!tag->vtable->abort) {
+		pdebug(debug,"Tag does not have a abort function!");
+		tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+		return PLCTAG_ERR_NOT_IMPLEMENTED;
+	}
 
-    /* this may be synchronous. */
-    return tag->vtable->abort(tag);
+	/* this may be synchronous. */
+	return tag->vtable->abort(tag);
 }
 
 
@@ -222,30 +222,38 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag)
 LIB_EXPORT int plc_tag_destroy(plc_tag tag)
 {
 	int debug = tag->debug;
+	mutex_p temp_mut;
+	int rc;
 
-    pdebug(debug, "Starting.");
+	pdebug(debug, "Starting.");
 
-    if(!tag)
-        return PLCTAG_STATUS_OK;
+	if(!tag)
+		return PLCTAG_STATUS_OK;
 
-    /* clear the mutex */
+	/* clear the mutex */
 	if(tag->mut) {
-		mutex_destroy(&tag->mut);
+		temp_mut = tag->mut;
 		tag->mut = NULL;
-	} 
-	
-    if(!tag->vtable || !tag->vtable->destroy) {
-        pdebug(debug, "tag destructor not defined!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-        return PLCTAG_ERR_NOT_IMPLEMENTED;
-    }
 
-    /*
-     * It is the responsibility of the destroy
-     * function to free all memory associated with
-     * the tag.
-     */
-    return tag->vtable->destroy(tag);
+		critical_block(temp_mut) {
+			if(!tag->vtable || !tag->vtable->destroy) {
+				pdebug(debug, "tag destructor not defined!");
+				tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+				return PLCTAG_ERR_NOT_IMPLEMENTED;
+			}
+
+			/*
+			 * It is the responsibility of the destroy
+			 * function to free all memory associated with
+			 * the tag.
+			 */
+			rc = tag->vtable->destroy(tag);
+		}
+
+		mutex_destroy(&temp_mut);
+	}
+
+	return rc;
 }
 
 
@@ -263,20 +271,20 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag)
 
 LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
 {
-    int debug = tag->debug;
+	int debug = tag->debug;
 	int rc;
 
-    pdebug(debug, "Starting.");
+	pdebug(debug, "Starting.");
 
-    if(!tag)
-        return PLCTAG_ERR_NULL_PTR;
+	if(!tag)
+		return PLCTAG_ERR_NULL_PTR;
 
-    /* check for null parts */
-    if(!tag->vtable || !tag->vtable->read) {
-        pdebug(debug, "Tag does not have a read function!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-        return PLCTAG_ERR_NOT_IMPLEMENTED;
-    }
+	/* check for null parts */
+	if(!tag->vtable || !tag->vtable->read) {
+		pdebug(debug, "Tag does not have a read function!");
+		tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+		return PLCTAG_ERR_NOT_IMPLEMENTED;
+	}
 
 
 	/* check read cache, if not expired, return existing data. */
@@ -286,28 +294,28 @@ LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
 		return tag->status;
 	}
 
-    /* the protocol implementation does not do the timeout. */
-    rc = tag->vtable->read(tag);
-	
+	/* the protocol implementation does not do the timeout. */
+	rc = tag->vtable->read(tag);
+
 	/* set up the cache time */
 	if(tag->read_cache_ms) {
 		tag->read_cache_expire = time_ms() + tag->read_cache_ms;
 	}
 
-    /* if error, return now */
-    if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
-        return rc;
-    }
+	/* if error, return now */
+	if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
+		return rc;
+	}
 
-    /*
-     * if there is a timeout, then loop until we get
-     * an error or we timeout.
-     */
-    if(timeout) {
-    	uint64_t timeout_time = timeout + time_ms();
-    	uint64_t start_time = time_ms();
+	/*
+	 * if there is a timeout, then loop until we get
+	 * an error or we timeout.
+	 */
+	if(timeout) {
+		uint64_t timeout_time = timeout + time_ms();
+		uint64_t start_time = time_ms();
 
-    	while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
+		while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
 			rc = plc_tag_status(tag);
 
 			/*
@@ -319,26 +327,26 @@ LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
 			}
 
 			sleep_ms(5); /* MAGIC */
-    	}
+		}
 
-    	/*
-    	 * if we dropped out of the while loop but the status is
-    	 * still pending, then we timed out.
-    	 *
-    	 * Abort the operation and set the status to show the timeout.
-    	 */
-    	if(rc == PLCTAG_STATUS_PENDING) {
-    		plc_tag_abort(tag);
-    		tag->status = PLCTAG_ERR_TIMEOUT;
-    		rc = PLCTAG_ERR_TIMEOUT;
-    	}
+		/*
+		 * if we dropped out of the while loop but the status is
+		 * still pending, then we timed out.
+		 *
+		 * Abort the operation and set the status to show the timeout.
+		 */
+		if(rc == PLCTAG_STATUS_PENDING) {
+			plc_tag_abort(tag);
+			tag->status = PLCTAG_ERR_TIMEOUT;
+			rc = PLCTAG_ERR_TIMEOUT;
+		}
 
-    	pdebug(debug,"elapsed time %ldms",(time_ms()-start_time));
-    }
+		pdebug(debug,"elapsed time %ldms",(time_ms()-start_time));
+	}
 
-    pdebug(debug, "Done");
+	pdebug(debug, "Done");
 
-    return rc;
+	return rc;
 }
 
 
@@ -357,26 +365,26 @@ LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
  */
 LIB_EXPORT int plc_tag_status(plc_tag tag)
 {
-    /*pdebug("Starting.");*/
+	/*pdebug("Starting.");*/
 
-    if(!tag)
-        return PLCTAG_ERR_NULL_PTR;
+	if(!tag)
+		return PLCTAG_ERR_NULL_PTR;
 
-    if(!tag->vtable || !tag->vtable->status) {
-        if(tag->status) {
-            pdebug(tag->debug, "tag status not ok!");
-            return tag->status;
-        }
+	if(!tag->vtable || !tag->vtable->status) {
+		if(tag->status) {
+			pdebug(tag->debug, "tag status not ok!");
+			return tag->status;
+		}
 
-        pdebug(tag->debug, "tag status accessor not defined!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-        return PLCTAG_ERR_NOT_IMPLEMENTED;
-    }
+		pdebug(tag->debug, "tag status accessor not defined!");
+		tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+		return PLCTAG_ERR_NOT_IMPLEMENTED;
+	}
 
-    /* clear the status */
-    /*tag->status = PLCTAG_STATUS_OK;*/
+	/* clear the status */
+	/*tag->status = PLCTAG_STATUS_OK;*/
 
-    return tag->vtable->status(tag);
+	return tag->vtable->status(tag);
 }
 
 
@@ -398,40 +406,40 @@ LIB_EXPORT int plc_tag_status(plc_tag tag)
 
 LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
 {
-    int debug = tag->debug;
+	int debug = tag->debug;
 	int rc;
 
-    pdebug(debug, "Starting.");
+	pdebug(debug, "Starting.");
 
-    if(!tag) {
-        return PLCTAG_ERR_NULL_PTR;
+	if(!tag) {
+		return PLCTAG_ERR_NULL_PTR;
 	}
-	
+
 	/* we are writing so the tag existing data is stale. */
 	tag->read_cache_expire = (uint64_t)0;
 
 	/* check the vtable */
-    if(!tag->vtable || !tag->vtable->write) {
-        pdebug(debug, "Tag does not have a write function!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-        return PLCTAG_ERR_NOT_IMPLEMENTED;
-    }
+	if(!tag->vtable || !tag->vtable->write) {
+		pdebug(debug, "Tag does not have a write function!");
+		tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+		return PLCTAG_ERR_NOT_IMPLEMENTED;
+	}
 
-    /* the protocol implementation does not do the timeout. */
-    rc = tag->vtable->write(tag);
+	/* the protocol implementation does not do the timeout. */
+	rc = tag->vtable->write(tag);
 
-    /* if error, return now */
-    if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK)
-        return rc;
+	/* if error, return now */
+	if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK)
+		return rc;
 
-    /*
-     * if there is a timeout, then loop until we get
-     * an error or we timeout.
-     */
-    if(timeout) {
-    	uint64_t timeout_time = timeout + time_ms();
+	/*
+	 * if there is a timeout, then loop until we get
+	 * an error or we timeout.
+	 */
+	if(timeout) {
+		uint64_t timeout_time = timeout + time_ms();
 
-    	while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
+		while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
 			rc = plc_tag_status(tag);
 
 			/*
@@ -443,24 +451,24 @@ LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
 			}
 
 			sleep_ms(5); /* MAGIC */
-    	}
+		}
 
-    	/*
-    	 * if we dropped out of the while loop but the status is
-    	 * still pending, then we timed out.
-    	 *
-    	 * Abort the operation and set the status to show the timeout.
-    	 */
-    	if(rc == PLCTAG_STATUS_PENDING) {
-    		plc_tag_abort(tag);
-    		tag->status = PLCTAG_ERR_TIMEOUT;
-    		rc = PLCTAG_ERR_TIMEOUT;
-    	}
-    }
+		/*
+		 * if we dropped out of the while loop but the status is
+		 * still pending, then we timed out.
+		 *
+		 * Abort the operation and set the status to show the timeout.
+		 */
+		if(rc == PLCTAG_STATUS_PENDING) {
+			plc_tag_abort(tag);
+			tag->status = PLCTAG_ERR_TIMEOUT;
+			rc = PLCTAG_ERR_TIMEOUT;
+		}
+	}
 
-    pdebug(debug, "Done");
+	pdebug(debug, "Done");
 
-    return rc;
+	return rc;
 }
 
 
@@ -475,10 +483,10 @@ LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
 
 LIB_EXPORT int plc_tag_get_size(plc_tag tag)
 {
-    if(!tag)
-        return PLCTAG_ERR_NULL_PTR;
+	if(!tag)
+		return PLCTAG_ERR_NULL_PTR;
 
-    return tag->size;
+	return tag->size;
 }
 
 
@@ -512,14 +520,14 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag t, int offset)
 	/* check whether data is little endian or big endian */
 	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = ((uint32_t)(t->data[offset])) +
-			  ((uint32_t)(t->data[offset+1]) << 8) +
-			  ((uint32_t)(t->data[offset+2]) << 16) +
-			  ((uint32_t)(t->data[offset+3]) << 24);
+		      ((uint32_t)(t->data[offset+1]) << 8) +
+		      ((uint32_t)(t->data[offset+2]) << 16) +
+		      ((uint32_t)(t->data[offset+3]) << 24);
 	} else {
 		res = ((uint32_t)(t->data[offset]) << 24) +
-			  ((uint32_t)(t->data[offset+1]) << 16) +
-			  ((uint32_t)(t->data[offset+2]) << 8) +
-			  ((uint32_t)(t->data[offset+3]));
+		      ((uint32_t)(t->data[offset+1]) << 16) +
+		      ((uint32_t)(t->data[offset+2]) << 8) +
+		      ((uint32_t)(t->data[offset+3]));
 	}
 
 	t->status = PLCTAG_STATUS_OK;
@@ -610,14 +618,14 @@ LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag t, int offset)
 	/* check whether data is little endian or big endian */
 	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = (int32_t)(((uint32_t)(t->data[offset])) +
-			            ((uint32_t)(t->data[offset+1]) << 8) +
-			            ((uint32_t)(t->data[offset+2]) << 16) +
-			            ((uint32_t)(t->data[offset+3]) << 24));
+		                ((uint32_t)(t->data[offset+1]) << 8) +
+		                ((uint32_t)(t->data[offset+2]) << 16) +
+		                ((uint32_t)(t->data[offset+3]) << 24));
 	} else {
 		res = (int32_t)(((uint32_t)(t->data[offset]) << 24) +
-			            ((uint32_t)(t->data[offset+1]) << 16) +
-			            ((uint32_t)(t->data[offset+2]) << 8) +
-			            ((uint32_t)(t->data[offset+3])));
+		                ((uint32_t)(t->data[offset+1]) << 16) +
+		                ((uint32_t)(t->data[offset+2]) << 8) +
+		                ((uint32_t)(t->data[offset+3])));
 	}
 
 	t->status = PLCTAG_STATUS_OK;
@@ -710,10 +718,10 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag t, int offset)
 	/* check whether data is little endian or big endian */
 	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = ((uint16_t)(t->data[offset])) +
-			  ((uint16_t)(t->data[offset+1]) << 8);
+		      ((uint16_t)(t->data[offset+1]) << 8);
 	} else {
 		res = ((uint16_t)(t->data[offset+2]) << 8) +
-			  ((uint16_t)(t->data[offset+3]));
+		      ((uint16_t)(t->data[offset+3]));
 	}
 
 	t->status = PLCTAG_STATUS_OK;
@@ -802,10 +810,10 @@ LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag t, int offset)
 	/* check whether data is little endian or big endian */
 	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		res = (int16_t)(((uint16_t)(t->data[offset])) +
-				        ((uint16_t)(t->data[offset+1]) << 8));
+		                ((uint16_t)(t->data[offset+1]) << 8));
 	} else {
 		res = (int16_t)(((uint16_t)(t->data[offset+2]) << 8) +
-			            ((uint16_t)(t->data[offset+3])));
+		                ((uint16_t)(t->data[offset+3])));
 	}
 
 	t->status = PLCTAG_STATUS_OK;
@@ -1059,14 +1067,14 @@ LIB_EXPORT float plc_tag_get_float32(plc_tag t, int offset)
 	/* check whether data is little endian or big endian */
 	if(t->endian == PLCTAG_DATA_LITTLE_ENDIAN) {
 		ures = ((uint32_t)(t->data[offset])) +
-			  ((uint32_t)(t->data[offset+1]) << 8) +
-			  ((uint32_t)(t->data[offset+2]) << 16) +
-			  ((uint32_t)(t->data[offset+3]) << 24);
+		       ((uint32_t)(t->data[offset+1]) << 8) +
+		       ((uint32_t)(t->data[offset+2]) << 16) +
+		       ((uint32_t)(t->data[offset+3]) << 24);
 	} else {
 		ures = ((uint32_t)(t->data[offset]) << 24) +
-			  ((uint32_t)(t->data[offset+1]) << 16) +
-			  ((uint32_t)(t->data[offset+2]) << 8) +
-			  ((uint32_t)(t->data[offset+3]));
+		       ((uint32_t)(t->data[offset+1]) << 16) +
+		       ((uint32_t)(t->data[offset+2]) << 8) +
+		       ((uint32_t)(t->data[offset+3]));
 	}
 
 	t->status = PLCTAG_STATUS_OK;
@@ -1129,6 +1137,3 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag t, int offset, float fval)
 
 	return PLCTAG_STATUS_OK;
 }
-
-
-

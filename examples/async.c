@@ -37,48 +37,50 @@
 
 int main(int argc, char **argv)
 {
-    plc_tag tag[NUM_TAGS];
-    int rc;
-    int i;
+	plc_tag tag[NUM_TAGS];
+	int rc;
+	int i;
 
-    /* create the tags */
-    for(i=0; i< NUM_TAGS; i++) {
-    	char tmp_tag_path[256] = {0,};
-    	snprintf(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
-    	tag[i]  = plc_tag_create(tmp_tag_path);
+	/* create the tags */
+	for(i=0; i< NUM_TAGS; i++) {
+		char tmp_tag_path[256] = {0,};
+		snprintf(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
+		tag[i]  = plc_tag_create(tmp_tag_path);
 
-    	if(!tag[i]) {
-    		fprintf(stderr,"Error: could not create tag %d\n",i);
-    	}
-    }
+		if(!tag[i]) {
+			fprintf(stderr,"Error: could not create tag %d\n",i);
+		}
+	}
 
-    /* let the connect complete */
-    fprintf(stderr,"Sleeping to let the connect complete.\n");
-    sleep(1);
-    for(i=0; i < NUM_TAGS; i++) {
-    	/* called to update the status in the tag. */
-    	plc_tag_status(tag[i]);
-    }
+	/* let the connect complete */
+	fprintf(stderr,"Sleeping to let the connect complete.\n");
+	sleep(1);
 
-    /* get the data */
-    for(i=0; i < NUM_TAGS; i++) {
-    	rc = plc_tag_read(tag[i], 0);
+	for(i=0; i < NUM_TAGS; i++) {
+		/* called to update the status in the tag. */
+		plc_tag_status(tag[i]);
+	}
+
+	/* get the data */
+	for(i=0; i < NUM_TAGS; i++) {
+		rc = plc_tag_read(tag[i], 0);
 
 		if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
 			fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
 
 			return 0;
 		}
-    }
+	}
 
-    /* sleeping to let the reads complete */
-    fprintf(stderr,"Sleeping to let the reads complete.\n");
-    sleep(2);
+	/* sleeping to let the reads complete */
+	fprintf(stderr,"Sleeping to let the reads complete.\n");
+	sleep(2);
 
 
-    /* get any data we can */
+	/* get any data we can */
 	for(i=0; i < NUM_TAGS; i++) {
 		rc = plc_tag_status(tag[i]);
+
 		if(rc == PLCTAG_STATUS_PENDING) {
 			fprintf(stderr,"Tag %d is still pending.\n",i);
 		} else if(rc != PLCTAG_STATUS_OK) {
@@ -90,12 +92,10 @@ int main(int argc, char **argv)
 	}
 
 
-    /* we are done */
-    for(i=0; i < NUM_TAGS; i++) {
-    	plc_tag_destroy(tag[i]);
-    }
+	/* we are done */
+	for(i=0; i < NUM_TAGS; i++) {
+		plc_tag_destroy(tag[i]);
+	}
 
-    return 0;
+	return 0;
 }
-
-

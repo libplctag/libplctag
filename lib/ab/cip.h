@@ -18,17 +18,17 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
- /**************************************************************************
-  * CHANGE LOG                                                             *
-  *                                                                        *
-  * 2013-11-19  KRH - Created file.                                        *
-  **************************************************************************/
+/**************************************************************************
+ * CHANGE LOG                                                             *
+ *                                                                        *
+ * 2013-11-19  KRH - Created file.                                        *
+ **************************************************************************/
 
 #ifndef __LIBPLCTAG_AB_CIP_H__
 #define __LIBPLCTAG_AB_CIP_H__
 
-#include "libplctag.h"
-#include "ab/ab_defs.h"
+#include <libplctag.h>
+#include <ab/ab_common.h>
 
 
 int cip_encode_path(ab_tag_p tag, const char *path);

@@ -1,5 +1,5 @@
 #
-#   Copyright 2012, Process Control Engineers
+#   Copyright 2015, OmanTek
 #   Author: Kyle Hayes
 #
 #    This library is free software; you can redistribute it and/or
@@ -46,7 +46,7 @@ LIBS = -L../lib -lplctag -lpthread -pthread
 SHLIBS = $(LIBS)
 # LIBPLC_LIB_SO = ../lib/libplctag.so
 
-TARGETS = async simple simple_cpp string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_cached_read plc5 slc500
+TARGETS = async simple simple_cpp simple_dual string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_plc5_dhp multithread_cached_read plc5 slc500
 
 all: $(TARGETS)
 	
@@ -58,6 +58,9 @@ simple: simple.c
 
 simple_cpp: simple_cpp.cpp
 	$(CPP) -o simple_cpp simple_cpp.cpp $(CFLAGS) $(SHLIBS)
+
+simple_dual: simple_dual.c
+	$(CC) -o simple_dual simple_dual.c $(CFLAGS) $(SHLIBS)
 
 plc5: plc5.c
 	$(CC) -o plc5 plc5.c $(CFLAGS) $(SHLIBS)
@@ -82,6 +85,9 @@ multithread: multithread.c
 
 multithread_plc5: multithread_plc5.c
 	$(CC) -o multithread_plc5 multithread_plc5.c $(CFLAGS) $(SHLIBS)
+
+multithread_plc5_dhp: multithread_plc5_dhp.c
+	$(CC) -o multithread_plc5_dhp multithread_plc5_dhp.c $(CFLAGS) $(SHLIBS)
 
 multithread_cached_read: multithread_cached_read.c
 	$(CC) -o multithread_cached_read multithread_cached_read.c $(CFLAGS) $(SHLIBS)

@@ -21,21 +21,50 @@
 /**************************************************************************
  * CHANGE LOG                                                             *
  *                                                                        *
- * 2012-02-23  KRH - Created file.                                        *
- * 2012-06-15  KRH - Added DF1 registration function.                     *
+ * 2015-09-12  KRH - Created file.                                        *
  *                                                                        *
  **************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_H__
-#define __LIBPLCTAG_AB_H__ 1
-
+#ifndef __PLCTAG_AB_AB_COMMON_H__
+#define __PLCTAG_AB_AB_COMMON_H__ 1
 
 #include <libplctag.h>
-#include <util/attr.h>
+#include <libplctag_tag.h>
+
+typedef struct ab_tag_t *ab_tag_p;
+#define AB_TAG_NULL ((ab_tag_p)NULL)
+
+typedef struct ab_connection_t *ab_connection_p;
+#define AB_CONNECTION_NULL ((ab_connection_p)NULL)
+
+typedef struct ab_session_t *ab_session_p;
+#define AB_SESSION_NULL ((ab_session_p)NULL)
+
+typedef struct ab_request_t *ab_request_p;
+#define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 
+extern volatile ab_session_p sessions;
+extern volatile mutex_p global_session_mut;
+extern volatile thread_p io_handler_thread;
 
-plc_tag ab_tag_create(attr attribs);
 
+int ab_tag_abort(ab_tag_p tag);
+int ab_tag_destroy(ab_tag_p p_tag);
+int check_cpu(ab_tag_p tag, attr attribs);
+int check_tag_name(ab_tag_p tag, const char *name);
+int check_mutex(int debug);
+
+
+#ifdef WIN32
+DWORD __stdcall request_handler_func(LPVOID not_used);
+#else
+void *request_handler_func(void *not_used);
+#endif
+#ifdef WIN32
+DWORD __stdcall request_handler_func(LPVOID not_used);
+#else
+void *request_handler_func(void *not_used);
+#endif
 
 #endif

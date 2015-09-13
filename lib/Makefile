@@ -38,8 +38,11 @@ ifeq ($(UNAME_S),Darwin)
 endif
 
 
-LIBPLC_LIB_SRC=libplctag_tag.c linux/platform.c util/attr.c ab/ab.c ab/common.c ab/cip.c ab/eip_cip.c ab/eip_dhp_pccc.c ab/eip_pccc.c ab/pccc.c
-LIBPLC_LIB_HEADER=libplctag.h $(LIBPLC_LIB_SRC:%.c=%.h)
+LIBPLC_LIB_SRC=libplctag_tag.c linux/platform.c util/attr.c \
+				ab/ab_common.c ab/cip.c ab/connection.c ab/eip.c \
+				ab/eip_cip.c ab/eip_dhp_pccc.c ab/eip_pccc.c ab/pccc.c \
+				ab/request.c ab/session.c
+LIBPLC_LIB_HEADER=libplctag.h ab/ab.h ab/tag.h $(LIBPLC_LIB_SRC:%.c=%.h)
 LIBPLC_LIB_OBJ=$(LIBPLC_LIB_SRC:%.c=%.o)
 
 
@@ -71,15 +74,12 @@ libplctag_tag.o: libplctag_tag.c libplctag_tag.h libplctag.h linux/platform.h ut
 linux/platform.o: linux/platform.c linux/platform.h libplctag.h
 	$(CC) -c -o $@ linux/platform.c $(CFLAGS)
 
-ab/eip.o: ab/eip.c ab/ab.h ab/eip_data.h ab/util.h libplctag.h linux/platform.h util/attr.h
-	$(CC) -c -o $@ ab/eip.c $(CFLAGS)
-
 #ab/df1.o: ab/df1.c ab/ab.h ab/df1_data.h ab/util.h linux/platform.h
 #	$(CC) -c -o $@ ab/df1.c $(CFLAGS)
 
 ab/util.o: ab/util.c ab/util.h ab/util.h libplctag.h linux/platform.h util/attr.h
 	$(CC) -c -o $@ ab/util.c $(CFLAGS)
-	
+
 util/attr.o: util/attr.c util/attr.h linux/platform.h
 	$(CC) -c -o $@ util/attr.c $(CFLAGS)
 

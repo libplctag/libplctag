@@ -18,13 +18,13 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
- /**************************************************************************
-  * CHANGE LOG                                                             *
-  *                                                                        *
-  * 2012-11-27  KRH - Created file from old platform dependent code.       *
-  *                   Genericized thread creation.                         *
-  *                                                                        *
-  **************************************************************************/
+/**************************************************************************
+ * CHANGE LOG                                                             *
+ *                                                                        *
+ * 2012-11-27  KRH - Created file from old platform dependent code.       *
+ *                   Genericized thread creation.                         *
+ *                                                                        *
+ **************************************************************************/
 
 
 #include <platform.h>
@@ -286,6 +286,7 @@ extern char **str_split(const char *str, const char *sep)
 
 	/* allocate enough memory */
 	res = mem_alloc(size);
+
 	if(!res)
 		return NULL;
 
@@ -298,6 +299,7 @@ extern char **str_split(const char *str, const char *sep)
 	/* set up the pointers */
 	sub_str_count=0;
 	sub = strstr(tmp,sep);
+
 	while(sub && *sub) {
 		/* separator could be at the front, ignore that. */
 		if(sub != tmp) {
@@ -344,6 +346,7 @@ int mutex_create(mutex_p *m)
 	/*pdebug("Starting.");*/
 
 	*m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
+
 	if(! *m) {
 		/*pdebug("null mutex pointer.");*/
 		return PLCTAG_ERR_NULL_PTR;
@@ -356,7 +359,7 @@ int mutex_create(mutex_p *m)
 		return PLCTAG_ERR_MUTEX_INIT;
 	}
 
-    (*m)->initialized = 1;
+	(*m)->initialized = 1;
 
 	/*pdebug("Done.");*/
 
@@ -366,16 +369,16 @@ int mutex_create(mutex_p *m)
 
 int mutex_lock(mutex_p m)
 {
-	//pdebug("Starting");
+	pdebug(1,"locking mutex %p",m);
 
 	if(!m) {
 		/*pdebug("null mutex pointer.");*/
 		return PLCTAG_ERR_NULL_PTR;
 	}
 
-    if(!m->initialized) {
-        return PLCTAG_ERR_MUTEX_INIT;
-    }
+	if(!m->initialized) {
+		return PLCTAG_ERR_MUTEX_INIT;
+	}
 
 	if(pthread_mutex_lock(&(m->p_mutex))) {
 		/*pdebug("error locking mutex.");*/
@@ -391,16 +394,16 @@ int mutex_lock(mutex_p m)
 
 int mutex_unlock(mutex_p m)
 {
-	//pdebug("Starting.");
+	pdebug(1, "unlocking mutex %p",m);
 
 	if(!m) {
 		/*pdebug("null mutex pointer.");*/
 		return PLCTAG_ERR_NULL_PTR;
 	}
 
-    if(!m->initialized) {
-        return PLCTAG_ERR_MUTEX_INIT;
-    }
+	if(!m->initialized) {
+		return PLCTAG_ERR_MUTEX_INIT;
+	}
 
 	if(pthread_mutex_unlock(&(m->p_mutex))) {
 		/*pdebug("error unlocking mutex.");*/
@@ -477,10 +480,10 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
 	}
 
 	/* create a pthread.  0 means success. */
-    if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
+	if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
 		/*pdebug("error creating thread.");*/
-        return PLCTAG_ERR_THREAD_CREATE;
-    }
+		return PLCTAG_ERR_THREAD_CREATE;
+	}
 
 	/*pdebug("Done.");*/
 
@@ -631,130 +634,130 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 	in_addr_t ips[MAX_IPS];
 	int num_ips = 0;
 	struct sockaddr_in gw_addr;
-    int sock_opt = 1;
-    int i = 0;
-    int done = 0;
+	int sock_opt = 1;
+	int i = 0;
+	int done = 0;
 	int fd;
-    int flags;
-    struct timeval timeout; /* used for timing out connections etc. */
+	int flags;
+	struct timeval timeout; /* used for timing out connections etc. */
 
-	/*pdebug("Starting.");*/
+	pdebug(1,"Starting.");
 
-    /* Open a socket for communication with the gateway. */
-    fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	/* Open a socket for communication with the gateway. */
+	fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    /* check for errors */
-    if(fd < 0) {
-        /*pdebug("Socket creation failed, errno: %d",errno);*/
-        return PLCTAG_ERR_OPEN;
-    }
+	/* check for errors */
+	if(fd < 0) {
+		pdebug(1,"Socket creation failed, errno: %d",errno);
+		return PLCTAG_ERR_OPEN;
+	}
 
-    /* set up our socket to allow reuse if we crash suddenly. */
-    sock_opt = 1;
+	/* set up our socket to allow reuse if we crash suddenly. */
+	sock_opt = 1;
 
-    if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
+	if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
 		close(fd);
-        /*pdebug("Error setting socket reuse option, errno: %d",errno);*/
-        return PLCTAG_ERR_OPEN;
-    }
+		/*pdebug("Error setting socket reuse option, errno: %d",errno);*/
+		return PLCTAG_ERR_OPEN;
+	}
 
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 0;
+	timeout.tv_sec = 10;
+	timeout.tv_usec = 0;
 
-    if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
+	if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
 		close(fd);
-        /*pdebug("Error setting socket receive timeout option, errno: %d",errno);*/
-        return PLCTAG_ERR_OPEN;
-    }
+		/*pdebug("Error setting socket receive timeout option, errno: %d",errno);*/
+		return PLCTAG_ERR_OPEN;
+	}
 
-    if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
+	if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
 		close(fd);
-        /*pdebug("Error setting socket set timeout option, errno: %d",errno);*/
-        return PLCTAG_ERR_OPEN;
-    }
+		/*pdebug("Error setting socket set timeout option, errno: %d",errno);*/
+		return PLCTAG_ERR_OPEN;
+	}
 
-    /* figure out what address we are connecting to. */
+	/* figure out what address we are connecting to. */
 
-    /* try a numeric IP address conversion first. */
-    if(inet_pton(AF_INET,host,(struct in_addr *)ips) > 0) {
-        /*pdebug("Found numeric IP address: %s",host);*/
-        num_ips = 1;
-    } else {
-        struct hostent *h=NULL;
+	/* try a numeric IP address conversion first. */
+	if(inet_pton(AF_INET,host,(struct in_addr *)ips) > 0) {
+		/*pdebug("Found numeric IP address: %s",host);*/
+		num_ips = 1;
+	} else {
+		struct hostent *h=NULL;
 
-    	/* not numeric, try DNS */
-        h = gethostbyname(host);
+		/* not numeric, try DNS */
+		h = gethostbyname(host);
 
-        if(!h) {
-            /*pdebug("Call to gethostbyname() failed, errno: %d!", errno);*/
-            return PLCTAG_ERR_OPEN;
-        }
+		if(!h) {
+			/*pdebug("Call to gethostbyname() failed, errno: %d!", errno);*/
+			return PLCTAG_ERR_OPEN;
+		}
 
-        /* copy the IP list */
-        for(num_ips = 0; h->h_addr_list[num_ips] && num_ips < MAX_IPS; num_ips++) {
-            ips[num_ips] = *((in_addr_t *)h->h_addr_list[num_ips]);
-        }
+		/* copy the IP list */
+		for(num_ips = 0; h->h_addr_list[num_ips] && num_ips < MAX_IPS; num_ips++) {
+			ips[num_ips] = *((in_addr_t *)h->h_addr_list[num_ips]);
+		}
 
-        free(h);
-    }
+		free(h);
+	}
 
 
-    /* now try to connect to the remote gateway.  We may need to
-     * try several of the IPs we have.
-     */
+	/* now try to connect to the remote gateway.  We may need to
+	 * try several of the IPs we have.
+	 */
 
-    i = 0;
-    done = 0;
+	i = 0;
+	done = 0;
 
-    memset((void *)&gw_addr,0, sizeof(gw_addr));
-    gw_addr.sin_family = AF_INET ;
-    gw_addr.sin_port = htons(port);
+	memset((void *)&gw_addr,0, sizeof(gw_addr));
+	gw_addr.sin_family = AF_INET ;
+	gw_addr.sin_port = htons(port);
 
-    do {
-    	int rc;
-        /* try each IP until we run out or get a connection. */
-        gw_addr.sin_addr.s_addr = ips[i];
+	do {
+		int rc;
+		/* try each IP until we run out or get a connection. */
+		gw_addr.sin_addr.s_addr = ips[i];
 
-        /*pdebug("Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));*/
+		/*pdebug("Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));*/
 
-        rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
+		rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
 
-        if( rc == 0) {
-            /*pdebug("Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));*/
-            done = 1;
-        } else {
-            /*pdebug("Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);*/
-            i++;
-        }
-    } while(!done && i < num_ips);
+		if( rc == 0) {
+			/*pdebug("Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));*/
+			done = 1;
+		} else {
+			/*pdebug("Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);*/
+			i++;
+		}
+	} while(!done && i < num_ips);
 
-    if(!done) {
+	if(!done) {
 		close(fd);
-        /*pdebug("Unable to connect to any gateway host IP address!");*/
-        return PLCTAG_ERR_OPEN;
-    }
+		/*pdebug("Unable to connect to any gateway host IP address!");*/
+		return PLCTAG_ERR_OPEN;
+	}
 
 
-    /* FIXME
-     * connect() is a little easier to handle in blocking mode, for now
-     * we make the socket non-blocking here, after connect(). */
-    flags=fcntl(fd,F_GETFL,0);
+	/* FIXME
+	 * connect() is a little easier to handle in blocking mode, for now
+	 * we make the socket non-blocking here, after connect(). */
+	flags=fcntl(fd,F_GETFL,0);
 
-    if(flags<0) {
-      /*pdebug("Error getting socket options, errno: %d", errno);*/
-      close(fd);
-      return PLCTAG_ERR_OPEN;
-    }
+	if(flags<0) {
+		/*pdebug("Error getting socket options, errno: %d", errno);*/
+		close(fd);
+		return PLCTAG_ERR_OPEN;
+	}
 
-    flags |= O_NONBLOCK;
+	flags |= O_NONBLOCK;
 
-    if(fcntl(fd,F_SETFL,flags)<0) {
-        /*pdebug("Error setting socket to non-blocking, errno: %d", errno);*/
-        close(fd);
-        return PLCTAG_ERR_OPEN;
-    }
+	if(fcntl(fd,F_SETFL,flags)<0) {
+		/*pdebug("Error setting socket to non-blocking, errno: %d", errno);*/
+		close(fd);
+		return PLCTAG_ERR_OPEN;
+	}
 
-    /* save the values */
+	/* save the values */
 	s->fd = fd;
 	s->port = port;
 
@@ -766,53 +769,55 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
 extern int socket_read(sock_p s, uint8_t *buf, int size)
 {
-    int rc;
+	int rc;
 
-    if(!s || !buf) {
-    	return PLCTAG_ERR_NULL_PTR;
-    }
+	if(!s || !buf) {
+		return PLCTAG_ERR_NULL_PTR;
+	}
 
-    /* The socket is non-blocking. */
-    rc = read(s->fd,buf,size);
+	/* The socket is non-blocking. */
+	rc = read(s->fd,buf,size);
 
-    if(rc < 0) {
-    	if(errno == EAGAIN || errno == EWOULDBLOCK) {
-    		return PLCTAG_ERR_NO_DATA;
-    	} else {
-    		return PLCTAG_ERR_READ;
-    	}
-    }
+	if(rc < 0) {
+		if(errno == EAGAIN || errno == EWOULDBLOCK) {
+			return PLCTAG_ERR_NO_DATA;
+		} else {
+			return PLCTAG_ERR_READ;
+		}
+	}
 
-    return rc;
+	return rc;
 }
 
 
 extern int socket_write(sock_p s, uint8_t *buf, int size)
 {
-    int rc;
+	int rc;
 
-    if(!s || !buf) {
-    	return PLCTAG_ERR_NULL_PTR;
-    }
+	if(!s || !buf) {
+		return PLCTAG_ERR_NULL_PTR;
+	}
 
-    /* The socket is non-blocking. */
-    rc = write(s->fd,buf,size);
+	/* The socket is non-blocking. */
+	rc = write(s->fd,buf,size);
 
-    if(rc < 0) {
-    	if(errno == EAGAIN || errno == EWOULDBLOCK) {
-    		return PLCTAG_ERR_NO_DATA;
-    	} else {
-    		return PLCTAG_ERR_READ;
-    	}
-    }
+	if(rc < 0) {
+		if(errno == EAGAIN || errno == EWOULDBLOCK) {
+			return PLCTAG_ERR_NO_DATA;
+		} else {
+			return PLCTAG_ERR_READ;
+		}
+	}
 
-    return rc;
+	return rc;
 }
 
 
 
 extern int socket_close(sock_p s)
 {
+	/*pdebug(1,"Starting.");*/
+
 	if(!s)
 		return PLCTAG_ERR_NULL_PTR;
 
@@ -875,7 +880,7 @@ extern uint16_t h2be16(uint16_t v)
 	bytes[1] = ((v >> 8) & 0xFF);
 
 	return ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+	       |((uint32_t)(bytes[1]));
 }
 
 
@@ -888,7 +893,7 @@ extern uint16_t be2h16(uint16_t v)
 	bytes[1] = ((v >> 8) & 0xFF);
 
 	return ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+	       |((uint32_t)(bytes[1]));
 }
 
 
@@ -914,9 +919,9 @@ extern uint32_t h2be32(uint32_t v)
 	bytes[3] = ((v >> 24) & 0xFF);
 
 	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+	       |((uint32_t)(bytes[1]) << 16)
+	       |((uint32_t)(bytes[2]) << 8)
+	       |((uint32_t)(bytes[3]));
 }
 
 
@@ -930,9 +935,9 @@ extern uint32_t be2h32(uint32_t v)
 	bytes[3] = ((v >> 24) & 0xFF);
 
 	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+	       |((uint32_t)(bytes[1]) << 16)
+	       |((uint32_t)(bytes[2]) << 8)
+	       |((uint32_t)(bytes[3]));
 }
 
 
@@ -946,7 +951,7 @@ extern uint16_t h2le16(uint16_t v)
 	bytes[1] = ((v >> 8) & 0xFF);
 
 	return  ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+	        |((uint32_t)(bytes[1]));
 }
 
 
@@ -958,7 +963,7 @@ extern uint16_t le2h16(uint16_t v)
 	bytes[1] = ((v >> 8) & 0xFF);
 
 	return  ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+	        |((uint32_t)(bytes[1]));
 }
 
 
@@ -985,9 +990,9 @@ extern uint32_t h2le32(uint32_t v)
 	bytes[3] = ((v >> 24) & 0xFF);
 
 	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+	       |((uint32_t)(bytes[1]) << 16)
+	       |((uint32_t)(bytes[2]) << 8)
+	       |((uint32_t)(bytes[3]));
 }
 
 extern uint32_t le2h32(uint32_t v)
@@ -1000,9 +1005,9 @@ extern uint32_t le2h32(uint32_t v)
 	bytes[3] = ((v >> 24) & 0xFF);
 
 	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+	       |((uint32_t)(bytes[1]) << 16)
+	       |((uint32_t)(bytes[2]) << 8)
+	       |((uint32_t)(bytes[3]));
 }
 
 
@@ -1042,12 +1047,12 @@ extern uint32_t be2h32(uint32_t v)
  */
 int sleep_ms(int ms)
 {
-    struct timeval tv;
+	struct timeval tv;
 
-    tv.tv_sec = ms/1000;
-    tv.tv_usec = (ms % 1000)*1000;
+	tv.tv_sec = ms/1000;
+	tv.tv_usec = (ms % 1000)*1000;
 
-    return select(0,NULL,NULL,NULL, &tv);
+	return select(0,NULL,NULL,NULL, &tv);
 }
 
 
@@ -1058,11 +1063,11 @@ int sleep_ms(int ms)
  */
 int64_t time_ms(void)
 {
-    struct timeval tv;
+	struct timeval tv;
 
-    gettimeofday(&tv,NULL);
+	gettimeofday(&tv,NULL);
 
-    return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
+	return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
 }
 
 
@@ -1072,27 +1077,27 @@ int64_t time_ms(void)
 
 extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
 {
-    va_list va;
-    struct tm t;
-    time_t epoch;
-    char prefix[2048];
+	va_list va;
+	struct tm t;
+	time_t epoch;
+	char prefix[2048];
 
-    /* build the prefix */
-    /* get the time parts */
-    epoch = time(0);
+	/* build the prefix */
+	/* get the time parts */
+	epoch = time(0);
 
-    /* FIXME - should capture error return! */
-    localtime_r(&epoch,&t);
+	/* FIXME - should capture error return! */
+	localtime_r(&epoch,&t);
 
-    /* create the prefix and format for the file entry. */
-    snprintf(prefix, sizeof prefix,"%04d-%02d-%02d %02d:%02d:%02d %s:%d %s\n",
-                                    t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,
-                                    func,line_num,templ);
+	/* create the prefix and format for the file entry. */
+	snprintf(prefix, sizeof prefix,"%04d-%02d-%02d %02d:%02d:%02d %s:%d %s\n",
+	         t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,
+	         func,line_num,templ);
 
-    /* print it out. */
-    va_start(va,templ);
-    vfprintf(stderr,prefix,va);
-    va_end(va);
+	/* print it out. */
+	va_start(va,templ);
+	vfprintf(stderr,prefix,va);
+	va_end(va);
 }
 
 
@@ -1100,39 +1105,35 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
 
 extern void pdebug_dump_bytes_impl(uint8_t *data,int count)
 {
-    int i;
-    int end;
-    char buf[2048];
+	int i;
+	int end;
+	char buf[2048];
 
-    snprintf(buf,sizeof buf,"Dumping bytes:\n");
+	snprintf(buf,sizeof buf,"Dumping bytes:\n");
 
-    end = str_length(buf);
+	end = str_length(buf);
 
-    for(i=0; i<count; i++) {
-        if((i%10) == 0) {
-            snprintf(buf+end,sizeof(buf)-end,"%05d",i);
+	for(i=0; i<count; i++) {
+		if((i%10) == 0) {
+			snprintf(buf+end,sizeof(buf)-end,"%05d",i);
 
-            end = strlen(buf);
-        }
+			end = strlen(buf);
+		}
 
-        snprintf(buf+end,sizeof(buf)-end," %02x",data[i]);
+		snprintf(buf+end,sizeof(buf)-end," %02x",data[i]);
 
-        end = strlen(buf);
+		end = strlen(buf);
 
-        if((i%10) == 9) {
-            snprintf(buf+end,sizeof(buf)-end,"\n");
+		if((i%10) == 9) {
+			snprintf(buf+end,sizeof(buf)-end,"\n");
 
-            end = strlen(buf);
-        }
-    }
+			end = strlen(buf);
+		}
+	}
 
-    /*if( ((i%10)!=9) || (i>=count && (i%10)==9))
-        snprintf(buf+end,sizeof(buf)-end,"\n");*/
+	/*if( ((i%10)!=9) || (i>=count && (i%10)==9))
+	    snprintf(buf+end,sizeof(buf)-end,"\n");*/
 
-    pdebug("%s",buf);
-    fflush(stderr);
+	pdebug("%s",buf);
+	fflush(stderr);
 }
-
-
-
-
