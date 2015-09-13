@@ -116,11 +116,11 @@ int main(int argc, char **argv)
     }
 
     /* we are done, clean up tag 2 first */
-    plc_tag_destroy(tag1);
+    plc_tag_destroy(tag2);
 
     sleep(1);
 
-    plc_tag_destroy(tag2);
+    plc_tag_destroy(tag1);
 
     sleep(1);
 
