@@ -369,7 +369,7 @@ int mutex_create(mutex_p *m)
 
 int mutex_lock(mutex_p m)
 {
-	pdebug(1,"locking mutex %p",m);
+	/*pdebug(1,"locking mutex %p",m);*/
 
 	if(!m) {
 		/*pdebug("null mutex pointer.");*/
@@ -394,7 +394,7 @@ int mutex_lock(mutex_p m)
 
 int mutex_unlock(mutex_p m)
 {
-	pdebug(1, "unlocking mutex %p",m);
+	/*pdebug(1, "unlocking mutex %p",m);*/
 
 	if(!m) {
 		/*pdebug("null mutex pointer.");*/
@@ -641,14 +641,14 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 	int flags;
 	struct timeval timeout; /* used for timing out connections etc. */
 
-	pdebug(1,"Starting.");
+	/*pdebug(1,"Starting.");*/
 
 	/* Open a socket for communication with the gateway. */
 	fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
 	/* check for errors */
 	if(fd < 0) {
-		pdebug(1,"Socket creation failed, errno: %d",errno);
+		/*pdebug(1,"Socket creation failed, errno: %d",errno);*/
 		return PLCTAG_ERR_OPEN;
 	}
 
