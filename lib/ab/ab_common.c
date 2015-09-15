@@ -686,7 +686,7 @@ void* request_handler_func(void* not_used)
             break;
         }
 
-        pdebug(debug,"entering critical block %p",global_session_mut);
+        /*pdebug(debug,"entering critical block %p",global_session_mut);*/
         critical_block(global_session_mut) {
             /*
              * loop over the sessions.  For each session, see if we can read some
@@ -713,7 +713,7 @@ void* request_handler_func(void* not_used)
                 cur_req = cur_sess->requests;
                 prev_req = NULL;
 
-                pdebug(debug,"checking outstanding requests.");
+                /*pdebug(debug,"checking outstanding requests.");*/
 
                 while (cur_req) {
                     /* check for abort before anything else. */
@@ -754,11 +754,11 @@ void* request_handler_func(void* not_used)
                 }
 
                 /*  move to the next session */
-                pdebug(debug,"cur_sess=%p, cur_sess->next=%p",cur_sess, cur_sess->next);
+                /*pdebug(debug,"cur_sess=%p, cur_sess->next=%p",cur_sess, cur_sess->next);*/
                 cur_sess = cur_sess->next;
             }
         } /* end synchronized block */
-        pdebug(debug,"leaving critical block %p",global_session_mut);
+        /*pdebug(debug,"leaving critical block %p",global_session_mut);*/
 
         /*
          * give up the CPU. 1ms is not really going to happen.  Usually it is more based on the OS
