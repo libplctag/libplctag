@@ -2,7 +2,9 @@
 libplctag
 =========
 
-This library for Linux and Windows (still broken, but almost fixed) provides a means of accessing PLCs to read and write simple data.
+This library for Linux, Mac OSX (seems to work) and Windows (not heavily tested) provides a means of accessing PLCs to read and write simple data.
+
+Status: 1.0 Beta
 
 
 WARNING - DISCLAIMER
@@ -62,6 +64,10 @@ to use of this library.  This code is licensed under the GNU LGPL.
 
 Current Status
 ==============
+
+The library has been in production use for several years.  Up to now, the lack of a 1.0 designation was
+due to missing features.  We are now in late beta for 1.0 and will be there as soon as the Windows code
+is rechecked for bit rot.
 
 We are on version 1.0 Beta.  That includes:
 
@@ -363,7 +369,7 @@ provide code with our projects, we needed more options than allowed by
 the GPL.
 * the code, while officially at 1.0, was not really finished.  It was not clear
 which parts were fully functional and which were not.  Basic read/write access
-of tags was fairly strong.  There was a fair amount of code that appeared to
+of tags was fairly strong.  There was code that appeared to
 be designed to dig deep into AB PLCs. We did not need most of the code.
 * the code was only marginally portable.  Significant work would have to be
 done to make it safe for other systems than 32-bit little-endian Linux.  The
@@ -414,12 +420,20 @@ write a higher-level API that would handle all the protocol-specific parts of
 basic read/write PLC communication.  We changed our library again and started
 that work.  That is what resulted in this project.
 
+None of this could have happened without the hard work that the authors of
+TuxEIP did before us.  Thanks!
 
 Contact
 =======
 
-Please contact us via GitHub's issue tracker.  If needed, we will initiate private
-communication from there.  
+There are two ways to contact us.  If you have general questions or comments about the
+library or its use, please join and post on the Google group libplctag. (yes, we know, 
+this took far too long to set up!)
+
+If you find bugs or need specific features, please file them on GitHub's issue tracker for
+the project.
+
+If needed, we will initiate private communication from there.  
 
 Thanks for looking at this project.  We hope you find it useful!
 
