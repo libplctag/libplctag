@@ -532,7 +532,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
      * see if we can get some data.
      */
 
-    pdebug(session->debug, "Starting.");
+    /*pdebug(session->debug, "Starting.");*/
 
     if (!session->has_response) {
         rc = recv_eip_response_unsafe(session);
@@ -625,7 +625,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
         session->has_response = 0;
     }
 
-    pdebug(session->debug, "Done");
+    /*pdebug(session->debug, "Done");*/
 
     return rc;
 }
@@ -634,7 +634,7 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(session->debug,"Starting.");
+    /*pdebug(session->debug,"Starting.");*/
 
     /*
      * Check to see if we can send something.
@@ -664,7 +664,7 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req)
         }
     }
 
-    pdebug(session->debug,"Done.");
+    /*pdebug(session->debug,"Done.");*/
 
     return rc;
 }
