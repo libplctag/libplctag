@@ -50,6 +50,7 @@
 
 
 #ifdef WIN32
+#include <windows.h>
 #define strcasecmp stricmp
 #include <pgetopt.h>
 #define getopt pgetopt
@@ -73,6 +74,19 @@ void usage(void)
 	        "\n"
 	        "Example: tag_rw -t uint32 -p 'protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=200&name=pcomm_test_dint_array'\n");
 }
+
+
+#ifdef WIN32
+void my_sleep(int seconds)
+{
+	Sleep(seconds * 1000);
+}
+#else
+void my_sleep(int seconds)
+{
+	sleep(seconds);
+}
+#endif
 
 
 int main(int argc, char **argv)
@@ -201,7 +215,7 @@ int main(int argc, char **argv)
 	timeout = 5;
 
 	while(timeout-- && plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-		sleep(1);
+		my_sleep(1);
 	}
 
 	rc = plc_tag_status(tag);
