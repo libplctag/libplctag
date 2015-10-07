@@ -15,10 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\examples\tag_rw.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\examples\utils\pgetopt.c">
+    <ClCompile Include="..\..\examples\string.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

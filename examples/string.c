@@ -23,11 +23,12 @@
 #include <stdio.h>
 #ifdef WIN32
 #include <stdlib.h>
-#define sleep _sleep
+#include <windows.h>
+#define sleep Sleep
 #else
 #include <unistd.h>
 #endif
-#include "../lib/libplctag.h"
+#include <libplctag.h>
 
 
 /*
