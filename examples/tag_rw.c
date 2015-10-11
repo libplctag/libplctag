@@ -104,6 +104,10 @@ int main(int argc, char **argv)
 	int rc;
 	int timeout;
 
+	for (i = 0; i < argc; i++) {
+		printf("Arg[%d]=%s\n", i, argv[i]);
+	}
+
 	while ((c=getopt(argc,argv,"t:w:p:?h"))!=EOF) {
 		switch(c) {
 			case 't':

@@ -109,7 +109,9 @@ libplctag: $(LIBRARY_NAME)
 
 # delete output directories
 clean:
-	@del $(OBJS) $(LIBRARY_NAME)
+	@del $(OBJS) 
+	@del $(LIBRARY_NAME)
+	@del libplctag.*
 
 # create directories and build application
 all: clean libplctag
