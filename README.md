@@ -426,7 +426,7 @@ Contact
 =======
 
 There are two ways to contact us.  If you have general questions or comments about the
-library or its use, please join and post on the Google group libplctag. (yes, we know, 
+library or its use, please join and post on the Google group [libplctag](https://groups.google.com/forum/#!forum/libplctag). (yes, we know, 
 this took far too long to set up!)
 
 If you find bugs or need specific features, please file them on GitHub's issue tracker for
