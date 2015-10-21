@@ -1,0 +1,20 @@
+Python wrapper contributed by Matt McPheeters.  
+
+This contains a Python wrapper and a reimplementation of the tag_rw example!  Thanks!!!
+
+Here is what Matt said:
+
+Please find my best effort of a working example for Python 2.7.10 or later,
+on a machine that has libplctag.so (or plctag.dll) built and "on the path".
+
+This should work, although the company that made their DH+ gateway
+visible to us has since took it all down (so I can't verify after just basic
+loading of the .so and checking of parameters).  I get the tag create error
+though!
+
+You can make this totally available on GitHub.  But it needs some level of
+test and verification.  Should just have to install Python 2.7.10, ./run.sh, after
+replacing the "TODO:attribute.." with a known good attribute string from your pure
+C testing.
+
+
