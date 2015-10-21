@@ -3,7 +3,7 @@ libplctag
 
 This library for Linux, Mac OSX (seems to work) and Windows (not heavily tested) provides a means of accessing PLCs to read and write simple data.
 
-Status: 1.0 Beta
+Status: 1.0
 
 
 WARNING - DISCLAIMER
@@ -68,7 +68,7 @@ The library has been in production use for several years.  Up to now, the lack o
 due to missing features.  We are now in late beta for 1.0 and will be there as soon as the Windows code
 is rechecked for bit rot.
 
-We are on version 1.0 Beta.  That includes:
+We are on version 1.0.  That includes:
 
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).
 * native support for multiple data types:
@@ -81,25 +81,26 @@ We are on version 1.0 Beta.  That includes:
   * read/write of 16-bit INT.
   * read/write of 32-bit floating point.
   * read/write of arrays of the above (arrays not tested on SLC 500).
-* preliminary support for Rockwell/Allen-Bradley PLC5 PLCs accessed over a DH+ bridge (i.e. a LGX chassis with a DHRIO module).
+* support for Rockwell/Allen-Bradley PLC5 PLCs accessed over a DH+ bridge (i.e. a LGX chassis with a DHRIO module).
   * read/write of 16-bit INT.
   * read/write of 32-bit floating point.
   * read/write of arrays of the above.
-  * this is not well tested yet.
 * support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04, 14.04 and 15.04 tested).
 * support for Mac OS X (well, it builds and seems to work... not deeply tested)
-* preliminary support for Windows x86 (32-bit) builds, not well tested (help very welcome!).  
+* basic support for Windows x86 (32-bit) builds, not well tested (help very welcome!). Support is basic because:
+  * we do not use Windows for our deployments.
+  * there is nmake support, but it is not particularly complicated.
+  * only the tag_rw example program has been tested (though that tests the whole API)
+  * there is an example Visual Studio project that we are hoping to include soon.
 * tested support AB ControlLogix (version 16 and version 20 firmware).
 * sample code.
 * a fairly stable API.  It has only had minor additions in three years.
-* a fairly solid wrapper for Java.
+* a fairly solid wrapper for Java.  Contributed wrappers for Python and C++.
 * we have deployed this in customer environments.
 * Other groups use this library (if you do, please let us know).
 
-We will not be on version 1.0 until:
-
-* we get the Windows code working again.
-* we have better documentation!
+Planning for version 2.0 has started.  Please see the contact section at the bottom for a link to the 
+Google forum (Google Groups) for discussion.
 
 PLC5 and ControlLogix are trademarks of Rockwell/Allen Bradley.  Windows is a trademark
 of Microsoft.  Please let us know if we missed some so that we can get
@@ -158,7 +159,7 @@ Access to the C tag data structure is not
 thread-safe.  We have added lock/unlock API calls that use mutexes, but if you are using the library
 wrapped in another language, you should use that language's synchronization primitives to prevent simultaneous access.
 
-There is example code (POSIX only) showing how to use the tag lock and unlock API functions.
+There is example code (C POSIX only) showing how to use the tag lock and unlock API functions.
 
 If you share a tag between two threads, you are
 going to get undefined behavior (almost certainly a crash) unless you serialize access.  We tried to keep the tag
@@ -340,6 +341,10 @@ That said, we have some longer term things in mind:
 * make parts of the library optional.  If you do not need DF1, you should not need to have the code.
 * add more protocols.  We hope that the API will be able to support most of the commonly used PLC data access protocols.
 
+Current work is starting on version 2.0 of the library.  As before, our goal is to keep
+API changes to an absolute minimum and if there are any, keep them purely to additions.
+The 2.0 series will be focused around internal changes and supporting multi-tag reads and AB 
+implicit (IO) messages.
 
 
 History
@@ -375,8 +380,9 @@ done to make it safe for other systems than 32-bit little-endian Linux.  The
 pvbrowser project did some small patches to get it to compile with MinGW
 on Windows, but it would not get very far with Visual Studio C/C++.  We tried.
 * the code was organized such that it would be complicated to wrap for use in
-Python or other languages.   We did a small preliminary Python wrapper for a tiny
-part of it.  It took a while and we were not very happy with it.
+Python or other languages.   We did a small preliminary Python wrapper for a
+part of it.  It took a while and we were not very happy with it.  Raw pointers just
+do not translate well.
 * the code did not hide the intricacies of the EtherNet/IP (CIP) protocol, but
 made application logic deal with them.
 * the code had a lot of calls to malloc/free that made us nervous about both
@@ -432,7 +438,7 @@ this took far too long to set up!)
 If you find bugs or need specific features, please file them on GitHub's issue tracker for
 the project.
 
-If needed, we will initiate private communication from there.  
+If needed, we will initiate private communication from there.
 
 Thanks for looking at this project.  We hope you find it useful!
 
