@@ -46,12 +46,15 @@ LIBS = -L../lib -lplctag -lpthread -pthread
 SHLIBS = $(LIBS)
 # LIBPLC_LIB_SO = ../lib/libplctag.so
 
-TARGETS = async simple simple_cpp simple_dual string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_plc5_dhp multithread_cached_read plc5 slc500
+TARGETS = async data_dumper simple simple_cpp simple_dual string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_plc5_dhp multithread_cached_read plc5 slc500
 
 all: $(TARGETS)
 	
 async: async.c
 	$(CC) -o async async.c $(CFLAGS) $(SHLIBS)
+
+data_dumper: data_dumper.c
+	$(CC) -o data_dumper data_dumper.c $(CFLAGS) $(SHLIBS)
 
 simple: simple.c
 	$(CC) -o simple simple.c $(CFLAGS) $(SHLIBS)
