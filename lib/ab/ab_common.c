@@ -677,7 +677,7 @@ void* request_handler_func(void* not_used)
 {
     int rc;
     ab_session_p cur_sess;
-    int debug = 1;
+    int debug = 0;
 
     while (1) {
         /* we need the mutex */
