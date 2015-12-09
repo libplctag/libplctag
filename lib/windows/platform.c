@@ -699,8 +699,10 @@ extern int socket_create(sock_p *s)
 {
 	/*pdebug("Starting.");*/
 
-	/* FIXME - check return value! */
-	socket_lib_init();
+	if(!socket_lib_init()) {
+		/*pdebug("error initializing Windows Sockets.");*/
+		return PLCTAG_ERR_WINSOCK;
+	}
 
 	if(!s) {
 		/*pdebug("null socket pointer.");*/

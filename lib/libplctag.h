@@ -104,6 +104,7 @@ extern "C" {
 #define PLCTAG_ERR_REMOTE_ERR		(-33)
 #define PLCTAG_ERR_NOT_FOUND		(-34)
 #define PLCTAG_ERR_ABORT			(-35)
+#define PLCTAG_ERR_WINSOCK			(-36)
 
 
 
