@@ -62,7 +62,7 @@
 void usage(void)
 {
 	printf( "Usage:\n "
-	        "tag_rw [-l] -t <type> -p <path> [-w <val>] \n"
+	        "tag_rw -t <type> -p <path> [-w <val>] \n"
 	        "  -t <type> - type is one of 'uint8', 'sint8', 'uint16', 'sint16', \n "
 	        "              'uint32', 'sint32', or 'real32'.  The type is the type\n"
 	        "              of the data to be read/written to the named tag.  The\n"
