@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <stdint.h>
+#include <inttypes.h>
 #include <sys/time.h>
 #include "../lib/libplctag.h"
 
@@ -143,7 +143,7 @@ void thread_func(void *data)
 				
 		end = time_ms();
 		
-		fprintf(stderr,"%ld Thread %d got result %d with return code %s in %dms\n",time_ms(),tid,value,decode_error(rc),(int)(end-start));
+		fprintf(stderr,"%" PRId64 " Thread %d got result %d with return code %s in %dms\n",time_ms(),tid,value,decode_error(rc),(int)(end-start));
 		
 		sleep_ms(10);
 	}
