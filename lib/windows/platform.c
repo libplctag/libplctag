@@ -676,21 +676,11 @@ struct sock_t {
  * before use. Does it need to be static?
  */
 
-static BOOL bWinsockInitialized = FALSE;
 static WSADATA wsaData;
 
 static int socket_lib_init(void)
 {
-    if(bWinsockInitialized)
-        return 1;
-
-    if(WSAStartup(MAKEWORD(2,2), &wsaData) != NO_ERROR) {
-        return 0;
-    }
-
-    bWinsockInitialized = TRUE;
-
-    return 1;
+    return WSAStartup(MAKEWORD(2,2), &wsaData) == NO_ERROR;
 }
 
 
@@ -939,6 +929,9 @@ extern int socket_destroy(sock_p *s)
 	mem_free(*s);
 
 	*s = 0;
+
+	if(WSACleanup() != NO_ERROR)
+		return PLCTAG_ERR_WINSOCK;
 
 	return PLCTAG_STATUS_OK;
 }
