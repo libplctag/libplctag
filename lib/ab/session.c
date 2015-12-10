@@ -56,7 +56,7 @@ uint64_t session_get_new_seq_id_unsafe(ab_session_p sess)
 
 uint64_t session_get_new_seq_id(ab_session_p sess)
 {
-    uint16_t res;
+    uint16_t res = 0;
 
     pdebug(sess->debug, "entering critical block %p",global_session_mut);
     critical_block(global_session_mut) {
@@ -183,7 +183,7 @@ int find_or_create_session(ab_session_p *tag_session, attr attribs)
     int debug = attr_get_int(attribs,"debug",0);
     const char* session_gw = attr_get_str(attribs, "gateway", "");
     int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
-    ab_session_p session;
+    ab_session_p session = AB_SESSION_NULL;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
 
@@ -244,7 +244,7 @@ int add_session_unsafe(ab_session_p n)
 
 int add_session(ab_session_p s)
 {
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(s->debug, "entering critical block %p", global_session_mut);
     critical_block(global_session_mut) {
@@ -293,7 +293,7 @@ int remove_session_unsafe(ab_session_p n)
 
 int remove_session(ab_session_p s)
 {
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(s->debug, "entering critical block %p", global_session_mut);
     critical_block(global_session_mut) {
@@ -536,7 +536,7 @@ int session_destroy_unsafe(ab_session_p session)
 
 int session_destroy(ab_session_p session)
 {
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(session->debug, "entering critical block %p", global_session_mut);
     critical_block(global_session_mut) {

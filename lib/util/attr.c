@@ -30,7 +30,7 @@
 #include <stdio.h>
 
 
-typedef struct attr_entry_t *attr_entry;
+
 
 struct attr_entry_t {
 	attr_entry next;

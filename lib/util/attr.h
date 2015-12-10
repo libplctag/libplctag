@@ -29,9 +29,10 @@
 #define ATTR_H_
 
 
-
+typedef struct attr_entry_t *attr_entry;
 typedef struct attr_t *attr;
 
+attr_entry find_entry(attr a, const char *name);
 extern attr attr_create(void);
 extern attr attr_create_from_str(const char *attr_str);
 extern int attr_set_str(attr attrs, const char *name, const char *val);
@@ -40,7 +41,7 @@ extern int attr_set_float(attr attrs, const char *name, float val);
 extern const char *attr_get_str(attr attrs, const char *name, const char *def);
 extern int attr_get_int(attr attrs, const char *name, int def);
 extern float attr_get_float(attr attrs, const char *name, float def);
-extern int att_remove(attr attrs, const char *name);
+extern int attr_remove(attr attrs, const char *name);
 extern void attr_destroy(attr attrs);
 
 

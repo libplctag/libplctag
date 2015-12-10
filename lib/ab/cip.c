@@ -56,7 +56,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
 	int link_index=0;
 	int last_is_dhp=0;
 	int has_dhp=0;
-	char dhp_channel;
+	char dhp_channel=0;
 	int src_addr=0, dest_addr=0;
 	int tmp=0;
 	char **links=NULL;
