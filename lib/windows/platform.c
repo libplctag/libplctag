@@ -768,6 +768,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         struct hostent *h=NULL;
 
     	/* not numeric, try DNS */
+	/* FIXME: gethostbyname() is deprecated in favor of getaddrinfo() */
         h = gethostbyname(host);
 
         if(!h) {

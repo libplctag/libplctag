@@ -18,7 +18,7 @@
 #    USA
 
 
-CFLAGS=/Iutils /I..\lib /MTd /DWIN32=1 
+CFLAGS=/Iutils /I..\lib /MTd /DWIN32=1 /W3
 LIBS=..\vs\libplctag.lib ws2_32.lib
 EXE_NAME=tag_rw.exe
 OBJS=tag_rw.obj utils\pgetopt.obj
@@ -26,7 +26,7 @@ C_SRCS=tag_rw.c utils\pgetopt.c
 H_SRCS=utils\pgetopt.h ..\lib\libplctag.h
 
 $(EXE_NAME): $(C_SRCS) $(H_SRCS)
-	cl $(CFLAGS) /o$(EXE_NAME) $(C_SRCS) $(LIBS)
+	cl $(CFLAGS) /Fe$(EXE_NAME) $(C_SRCS) $(LIBS)
 
 # build application
 tag_rw: $(EXE_NAME)
