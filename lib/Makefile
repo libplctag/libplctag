@@ -23,7 +23,7 @@ ifeq ($(LIBPLC_ROOT),)
 LIBPLC_ROOT = ./
 endif
 
-CC=gcc
+CC?=gcc
 LD=ld
 AR=ar
 INSTALL=install

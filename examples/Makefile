@@ -23,8 +23,8 @@ ifeq ($(LIBPLC_ROOT),)
 LIBPLC_ROOT = ./
 endif
 
-CC=gcc
-CPP=g++
+CC?=gcc
+CXX?=g++
 LD=ld
 AR=ar
 INSTALL=install
@@ -60,7 +60,7 @@ simple: simple.c
 	$(CC) -o simple simple.c $(CFLAGS) $(SHLIBS)
 
 simple_cpp: simple_cpp.cpp
-	$(CPP) -o simple_cpp simple_cpp.cpp $(CFLAGS) $(SHLIBS)
+	$(CXX) -o simple_cpp simple_cpp.cpp $(CFLAGS) $(SHLIBS)
 
 simple_dual: simple_dual.c
 	$(CC) -o simple_dual simple_dual.c $(CFLAGS) $(SHLIBS)
