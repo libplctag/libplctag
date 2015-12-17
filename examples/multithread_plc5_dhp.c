@@ -206,6 +206,10 @@ const char* decode_error(int rc)
             return "PLCTAG_ERR_ABORT";
             break;
 
+        case PLCTAG_ERR_WINSOCK:
+            return "PLCTAG_ERR_WINSOCK";
+            break;
+
         default:
             return "Unknown error.";
             break;

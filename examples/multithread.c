@@ -117,6 +117,7 @@ const char* decode_error(int rc)
 		case PLCTAG_ERR_REMOTE_ERR: return "PLCTAG_ERR_REMOTE_ERR"; break;
 		case PLCTAG_ERR_NOT_FOUND: return "PLCTAG_ERR_NOT_FOUND"; break;
 		case PLCTAG_ERR_ABORT: return "PLCTAG_ERR_ABORT"; break;
+		case PLCTAG_ERR_WINSOCK: return "PLCTAG_ERR_WINSOCK"; break;
 
 		default: return "Unknown error."; break;
 	}
