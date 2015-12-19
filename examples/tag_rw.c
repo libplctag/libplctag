@@ -51,7 +51,8 @@
 
 #ifdef WIN32
 #include <windows.h>
-#define strcasecmp stricmp
+#define strcasecmp _stricmp
+#define strdup _strdup
 #include <pgetopt.h>
 #define getopt pgetopt
 #define optarg poptarg
@@ -62,7 +63,7 @@
 void usage(void)
 {
 	printf( "Usage:\n "
-	        "tag_rw [-l] -t <type> -p <path> [-w <val>] \n"
+	        "tag_rw -t <type> -p <path> [-w <val>] \n"
 	        "  -t <type> - type is one of 'uint8', 'sint8', 'uint16', 'sint16', \n "
 	        "              'uint32', 'sint32', or 'real32'.  The type is the type\n"
 	        "              of the data to be read/written to the named tag.  The\n"
@@ -72,7 +73,8 @@ void usage(void)
 	        "  -w <val>  - The value to write.  Must be formatted appropriately\n"
 	        "              for the data type.\n"
 	        "\n"
-	        "Example: tag_rw -t uint32 -p 'protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=200&name=pcomm_test_dint_array'\n");
+	        "Example: tag_rw -t uint32 -p 'protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=200&name=pcomm_test_dint_array'\n"
+	        "Note: Use double quotes \"\" for the path string in Windows.\n");
 }
 
 
@@ -87,6 +89,55 @@ void my_sleep(int seconds)
 	sleep(seconds);
 }
 #endif
+
+
+const char* decode_error(int rc)
+{
+	switch(rc) {
+		case PLCTAG_STATUS_PENDING: return "PLCTAG_STATUS_PENDING"; break;
+		case PLCTAG_STATUS_OK: return "PLCTAG_STATUS_OK"; break;
+		case PLCTAG_ERR_NULL_PTR: return "PLCTAG_ERR_NULL_PTR"; break;
+		case PLCTAG_ERR_OUT_OF_BOUNDS: return "PLCTAG_ERR_OUT_OF_BOUNDS"; break;
+		case PLCTAG_ERR_NO_MEM: return "PLCTAG_ERR_NO_MEM"; break;
+		case PLCTAG_ERR_LL_ADD: return "PLCTAG_ERR_LL_ADD"; break;
+		case PLCTAG_ERR_BAD_PARAM: return "PLCTAG_ERR_BAD_PARAM"; break;
+		case PLCTAG_ERR_CREATE: return "PLCTAG_ERR_CREATE"; break;
+		case PLCTAG_ERR_NOT_EMPTY: return "PLCTAG_ERR_NOT_EMPTY"; break;
+		case PLCTAG_ERR_OPEN: return "PLCTAG_ERR_OPEN"; break;
+		case PLCTAG_ERR_SET: return "PLCTAG_ERR_SET"; break;
+		case PLCTAG_ERR_WRITE: return "PLCTAG_ERR_WRITE"; break;
+		case PLCTAG_ERR_TIMEOUT: return "PLCTAG_ERR_TIMEOUT"; break;
+		case PLCTAG_ERR_TIMEOUT_ACK: return "PLCTAG_ERR_TIMEOUT_ACK"; break;
+		case PLCTAG_ERR_RETRIES: return "PLCTAG_ERR_RETRIES"; break;
+		case PLCTAG_ERR_READ: return "PLCTAG_ERR_READ"; break;
+		case PLCTAG_ERR_BAD_DATA: return "PLCTAG_ERR_BAD_DATA"; break;
+		case PLCTAG_ERR_ENCODE: return "PLCTAG_ERR_ENCODE"; break;
+		case PLCTAG_ERR_DECODE: return "PLCTAG_ERR_DECODE"; break;
+		case PLCTAG_ERR_UNSUPPORTED: return "PLCTAG_ERR_UNSUPPORTED"; break;
+		case PLCTAG_ERR_TOO_LONG: return "PLCTAG_ERR_TOO_LONG"; break;
+		case PLCTAG_ERR_CLOSE: return "PLCTAG_ERR_CLOSE"; break;
+		case PLCTAG_ERR_NOT_ALLOWED: return "PLCTAG_ERR_NOT_ALLOWED"; break;
+		case PLCTAG_ERR_THREAD: return "PLCTAG_ERR_THREAD"; break;
+		case PLCTAG_ERR_NO_DATA: return "PLCTAG_ERR_NO_DATA"; break;
+		case PLCTAG_ERR_THREAD_JOIN: return "PLCTAG_ERR_THREAD_JOIN"; break;
+		case PLCTAG_ERR_THREAD_CREATE: return "PLCTAG_ERR_THREAD_CREATE"; break;
+		case PLCTAG_ERR_MUTEX_DESTROY: return "PLCTAG_ERR_MUTEX_DESTROY"; break;
+		case PLCTAG_ERR_MUTEX_UNLOCK: return "PLCTAG_ERR_MUTEX_UNLOCK"; break;
+		case PLCTAG_ERR_MUTEX_INIT: return "PLCTAG_ERR_MUTEX_INIT"; break;
+		case PLCTAG_ERR_MUTEX_LOCK: return "PLCTAG_ERR_MUTEX_LOCK"; break;
+		case PLCTAG_ERR_NOT_IMPLEMENTED: return "PLCTAG_ERR_NOT_IMPLEMENTED"; break;
+		case PLCTAG_ERR_BAD_DEVICE: return "PLCTAG_ERR_BAD_DEVICE"; break;
+		case PLCTAG_ERR_BAD_GATEWAY: return "PLCTAG_ERR_BAD_GATEWAY"; break;
+		case PLCTAG_ERR_REMOTE_ERR: return "PLCTAG_ERR_REMOTE_ERR"; break;
+		case PLCTAG_ERR_NOT_FOUND: return "PLCTAG_ERR_NOT_FOUND"; break;
+		case PLCTAG_ERR_ABORT: return "PLCTAG_ERR_ABORT"; break;
+		case PLCTAG_ERR_WINSOCK: return "PLCTAG_ERR_WINSOCK"; break;
+
+		default: return "Unknown error."; break;
+	}
+
+	return "Unknown error.";
+}
 
 
 int main(int argc, char **argv)
@@ -225,7 +276,7 @@ int main(int argc, char **argv)
 	rc = plc_tag_status(tag);
 
 	if(rc != PLCTAG_STATUS_OK) {
-		printf("ERROR: tag creation error, tag status: %d\n",rc);
+		printf("ERROR: tag creation error, tag status: %s\n",decode_error(rc));
 		plc_tag_destroy(tag);
 
 		return 0;
@@ -238,7 +289,7 @@ int main(int argc, char **argv)
 			rc = plc_tag_read(tag, DATA_TIMEOUT);
 
 			if(rc != PLCTAG_STATUS_OK) {
-				printf("ERROR: tag read error, tag status: %d\n",rc);
+				printf("ERROR: tag read error, tag status: %s\n",decode_error(rc));
 				plc_tag_destroy(tag);
 
 				return 0;
@@ -318,7 +369,7 @@ int main(int argc, char **argv)
 			rc = plc_tag_write(tag, DATA_TIMEOUT);
 
 			if(rc != PLCTAG_STATUS_OK) {
-				printf("ERROR: error writing data: %d!\n",rc);
+				printf("ERROR: error writing data: %s!\n",decode_error(rc));
 			} else {
 				printf("Wrote %s\n",write_str);
 			}

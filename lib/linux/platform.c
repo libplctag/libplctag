@@ -67,11 +67,7 @@
  */
 extern void *mem_alloc(int size)
 {
-	void *res = malloc(size);
-
-	if(res) {
-		memset(res, 0, size);
-	}
+	void *res = calloc(size, 1);
 
 	return res;
 }

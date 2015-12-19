@@ -223,7 +223,7 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag)
 {
 	int debug = tag->debug;
 	mutex_p temp_mut;
-	int rc;
+	int rc = PLCTAG_STATUS_OK;
 
 	pdebug(debug, "Starting.");
 

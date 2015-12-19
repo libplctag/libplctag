@@ -424,7 +424,7 @@ int connection_empty_unsafe(ab_connection_p connection)
 
 int connection_is_empty(ab_connection_p connection)
 {
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     critical_block(global_session_mut) {
         rc = connection_empty_unsafe(connection);

@@ -43,6 +43,7 @@
 #include <util/attr.h>
 #include <ab/tag.h>
 #include <ab/session.h>
+#include <ab/eip_cip.h>
 
 
 int allocate_request_slot(ab_tag_p tag);

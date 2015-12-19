@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <stdint.h>
+#include <inttypes.h>
 #include <sys/time.h>
 #include "../lib/libplctag.h"
 
@@ -95,6 +95,7 @@ const char* decode_error(int rc)
 		case PLCTAG_ERR_REMOTE_ERR: return "PLCTAG_ERR_REMOTE_ERR"; break;
 		case PLCTAG_ERR_NOT_FOUND: return "PLCTAG_ERR_NOT_FOUND"; break;
 		case PLCTAG_ERR_ABORT: return "PLCTAG_ERR_ABORT"; break;
+		case PLCTAG_ERR_WINSOCK: return "PLCTAG_ERR_WINSOCK"; break;
 
 		default: return "Unknown error."; break;
 	}
@@ -143,7 +144,7 @@ void thread_func(void *data)
 				
 		end = time_ms();
 		
-		fprintf(stderr,"%ld Thread %d got result %d with return code %s in %dms\n",time_ms(),tid,value,decode_error(rc),(int)(end-start));
+		fprintf(stderr,"%" PRId64 " Thread %d got result %d with return code %s in %dms\n",time_ms(),tid,value,decode_error(rc),(int)(end-start));
 		
 		sleep_ms(10);
 	}

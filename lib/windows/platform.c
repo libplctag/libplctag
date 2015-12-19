@@ -88,11 +88,7 @@ extern "C"
  */
 extern void *mem_alloc(int size)
 {
-	void *res = malloc(size);
-
-	if(res) {
-		memset(res, 0, size);
-	}
+	void *res = calloc(size, 1);
 
 	return res;
 }
@@ -680,21 +676,11 @@ struct sock_t {
  * before use. Does it need to be static?
  */
 
-static BOOL bWinsockInitialized = FALSE;
 static WSADATA wsaData;
 
 static int socket_lib_init(void)
 {
-    if(bWinsockInitialized)
-        return 1;
-
-    if(WSAStartup(MAKEWORD(2,2), &wsaData) != NO_ERROR) {
-        return 0;
-    }
-
-    bWinsockInitialized = TRUE;
-
-    return 1;
+    return WSAStartup(MAKEWORD(2,2), &wsaData) == NO_ERROR;
 }
 
 
@@ -703,8 +689,10 @@ extern int socket_create(sock_p *s)
 {
 	/*pdebug("Starting.");*/
 
-	/* FIXME - check return value! */
-	socket_lib_init();
+	if(!socket_lib_init()) {
+		/*pdebug("error initializing Windows Sockets.");*/
+		return PLCTAG_ERR_WINSOCK;
+	}
 
 	if(!s) {
 		/*pdebug("null socket pointer.");*/
@@ -780,6 +768,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         struct hostent *h=NULL;
 
     	/* not numeric, try DNS */
+	/* FIXME: gethostbyname() is deprecated in favor of getaddrinfo() */
         h = gethostbyname(host);
 
         if(!h) {
@@ -941,6 +930,9 @@ extern int socket_destroy(sock_p *s)
 	mem_free(*s);
 
 	*s = 0;
+
+	if(WSACleanup() != NO_ERROR)
+		return PLCTAG_ERR_WINSOCK;
 
 	return PLCTAG_STATUS_OK;
 }
