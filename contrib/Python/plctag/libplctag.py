@@ -79,7 +79,7 @@ def defineFloatFunc(name, args):
 # to load the compiled libplctag C library from the current environment
 # or LD_LIBRARY path.
 system = platform.system()
-library = "plctag.dll" if system == "Windows" else "libplctag.so"
+library = "libplctag.dll" if system == "Windows" else "libplctag.so"
 lib = ctypes.cdll.LoadLibrary(library)
 
 
