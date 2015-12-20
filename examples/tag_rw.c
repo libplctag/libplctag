@@ -24,15 +24,23 @@
  *                                                                        *
  * 2012-03-14  KRH - Created file.                                        *
  *                                                                        *
- * 2012-07-18  KRH - Updated code for changed library API.				   *
+ * 2012-07-18  KRH - Updated code for changed library API.				  *
+ *                                                                        *
+ * 2015-12-19  Jake - updated code to decode errors and other changes.    *
+ *                                                                        *
+ * 2015-12-20  KRH - removed getopt dependency and wrote direct           *
+ *                   handling of options, fixed includes.                 *
  **************************************************************************/
 
+/* need this for strdup */
+#define POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <stdarg.h>
 #include <string.h>
+#include <strings.h>
 #include <libplctag.h>
 
 
@@ -53,9 +61,6 @@
 #include <windows.h>
 #define strcasecmp _stricmp
 #define strdup _strdup
-#include <pgetopt.h>
-#define getopt pgetopt
-#define optarg poptarg
 #else
 #include <unistd.h>
 #endif
@@ -139,72 +144,89 @@ const char* decode_error(int rc)
 	return "Unknown error.";
 }
 
+static int data_type = 0;
+static char *write_str = NULL;
+static char *path = NULL;
 
-int main(int argc, char **argv)
+void parse_args(int argc, char **argv)
 {
-	plc_tag tag = PLC_TAG_NULL;
-	char *write_str=NULL;
-	int is_write = 0;
-	char *path = NULL;
-	int data_type=0;
-	uint32_t u_val;
-	int32_t i_val;
-	real32_t f_val;
 	int i;
-	int c;
-	int rc;
-	int timeout;
 
 	for (i = 0; i < argc; i++) {
 		printf("Arg[%d]=%s\n", i, argv[i]);
 	}
 
-	while ((c=getopt(argc,argv,"t:w:p:?h"))!=EOF) {
-		switch(c) {
-			case 't':
-				if(!strcasecmp("uint8",optarg)) {
+	i = 1;
+
+    while(i < argc) {
+        if(!strcmp(argv[i],"-t")) {
+            i++; /* get the arg next */
+			if(i < argc) {
+				if(!strcasecmp("uint8",argv[i])) {
 					data_type = PLC_LIB_UINT8;
-				} else if(!strcasecmp("sint8",optarg)) {
+				} else if(!strcasecmp("sint8",argv[i])) {
 					data_type = PLC_LIB_SINT8;
-				} else if(!strcasecmp("uint16",optarg)) {
+				} else if(!strcasecmp("uint16",argv[i])) {
 					data_type = PLC_LIB_UINT16;
-				} else if(!strcasecmp("sint16",optarg)) {
+				} else if(!strcasecmp("sint16",argv[i])) {
 					data_type = PLC_LIB_SINT16;
-				} else if(!strcasecmp("uint32",optarg)) {
+				} else if(!strcasecmp("uint32",argv[i])) {
 					data_type = PLC_LIB_UINT32;
-				} else if(!strcasecmp("sint32",optarg)) {
+				} else if(!strcasecmp("sint32",argv[i])) {
 					data_type = PLC_LIB_SINT32;
-				} else if(!strcasecmp("real32",optarg)) {
+				} else if(!strcasecmp("real32",argv[i])) {
 					data_type = PLC_LIB_REAL32;
 				} else {
-					printf("ERROR: unknown data type: %s\n",optarg);
+					printf("ERROR: unknown data type: %s\n",argv[i]);
 					usage();
 					exit(1);
 				}
-
-				break;
-
-			case 'w':
-				write_str = strdup(optarg);
-				break;
-
-			case 'p':
-				path = strdup(optarg);
-				break;
-
-			case 'h':
-			case '?':
-				usage();
-				exit(0);
-				break;
-
-			default:
-				printf("ERROR: unknown option.\n");
+			} else {
+				printf("ERROR: you must have a value to write after -t\n");
 				usage();
 				exit(1);
-				break;
+			}
+        } else if(!strcmp(argv[i],"-w")) {
+			i++;
+			if(i < argc) {
+				write_str = strdup(argv[i]);
+			} else {
+				printf("ERROR: you must have a value to write after -w\n");
+				usage();
+				exit(1);
+			}
+		} else if(!strcmp(argv[i],"-p")) {
+			i++;
+			if(i < argc) {
+				path = strdup(argv[i]);
+			} else {
+				printf("ERROR: you must have a tag string after -p\n");
+				usage();
+				exit(1);
+			}
+		} else {
+			/* something unexpected */
+			usage();
+			exit(1);
 		}
-	}
+
+		i++;
+    }
+}
+
+
+int main(int argc, char **argv)
+{
+	plc_tag tag = PLC_TAG_NULL;
+	int is_write = 0;
+	uint32_t u_val;
+	int32_t i_val;
+	real32_t f_val;
+	int i;
+	int rc;
+	int timeout;
+
+	parse_args(argc, argv);
 
 	/* check arguments */
 	if(!path || !data_type) {
