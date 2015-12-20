@@ -22,6 +22,7 @@ CC?=gcc
 CXX?=g++
 
 CFLAGS += -fno-strict-aliasing -g -I. -I../lib -fms-extensions -Wall -I/usr/local/include
+CXXFLAGS += $(CFLAGS)
 LIBS = -L../lib -lplctag -lpthread -pthread
 
 TARGETS = async data_dumper simple simple_cpp simple_dual string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_plc5_dhp multithread_cached_read plc5 slc500
@@ -32,7 +33,7 @@ all: $(TARGETS)
 	$(CC) -o $@ $< $(CFLAGS) $(LIBS)
 
 %: %.cpp
-	$(CXX) -o $@ $< $(CFLAGS) $(LIBS)
+	$(CXX) -o $@ $< $(CXXFLAGS) $(LIBS)
 
 clean:
 	rm -rf $(TARGETS) *.o *.so *~ Makefile.depends *.log
