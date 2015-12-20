@@ -81,7 +81,7 @@ void log_data(plc_tag tag)
     static int log_month = 0;
     static int log_day = 0;       
     static FILE *log = NULL;
-    
+    int i = 0;
     char timestamp_buf[128];
     time_t t = time(NULL);
     struct tm *tm_struct;
@@ -111,7 +111,7 @@ void log_data(plc_tag tag)
 
     fprintf(log,"%s",timestamp_buf);
     
-    for(int i=0; i<ELEM_COUNT; i++) {
+    for(i=0; i<ELEM_COUNT; i++) {
         fprintf(log,",%d",plc_tag_get_int32(tag,i*ELEM_SIZE));
     }
     
