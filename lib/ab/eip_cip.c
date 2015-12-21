@@ -726,6 +726,13 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
+		/*
+		 * FIXME
+		 *
+		 * It probably should not be necessary to check for both as setting the type to anything other
+		 * than fragmented is error-prone.
+		 */
+
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
 		    && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
             pdebug(debug, "CIP response reply service unexpected: %d", cip_resp->reply_service);
