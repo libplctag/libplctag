@@ -245,7 +245,7 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 		return 0;
 	}
 
-	*level_byte |= 0x04;
+	*level_byte |= 0x02;
 
 	if(*tmp != ':') {
 		/* bad parse! */
@@ -266,7 +266,7 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 		return 0;
 	}
 
-	*level_byte |= 0x02;
+	*level_byte |= 0x04;
 
 	/* skip to the next number */
 	while(*tmp && !isdigit(*tmp)) {
