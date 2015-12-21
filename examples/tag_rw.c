@@ -40,7 +40,6 @@
 #include <time.h>
 #include <stdarg.h>
 #include <string.h>
-#include <strings.h>
 #include <libplctag.h>
 
 
@@ -63,6 +62,7 @@
 #define strdup _strdup
 #else
 #include <unistd.h>
+#include <strings.h>
 #endif
 
 void usage(void)
