@@ -64,6 +64,8 @@ to use of this library.  This code is licensed under the GNU LGPL.
 Current Status
 ==============
 
+Take a look at the [test page](https://github.com/kyle-github/libplctag/wiki/PLC-Testing-Results "PLC Testing Results") for more on specific PLC models. 
+
 The library has been in production use for several years.  Up to now, the lack of a 1.0 designation was
 due to missing features.  We are now in late beta for 1.0 and will be there as soon as the Windows code
 is rechecked for bit rot.
