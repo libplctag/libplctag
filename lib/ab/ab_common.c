@@ -673,7 +673,7 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req)
     return rc;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 DWORD __stdcall request_handler_func(LPVOID not_used)
 #else
 void* request_handler_func(void* not_used)
@@ -774,7 +774,7 @@ void* request_handler_func(void* not_used)
     thread_stop();
 
     /* FIXME -- this should be factored out as a platform dependency.*/
-#ifdef WIN32
+#ifdef _WIN32
     return (DWORD)0;
 #else
     return NULL;

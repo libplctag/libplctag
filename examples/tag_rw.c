@@ -56,7 +56,7 @@
 #define DATA_TIMEOUT 5000
 
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #define strcasecmp _stricmp
 #define strdup _strdup
@@ -83,7 +83,7 @@ void usage(void)
 }
 
 
-#ifdef WIN32
+#ifdef _WIN32
 void my_sleep(int seconds)
 {
 	Sleep(seconds * 1000);

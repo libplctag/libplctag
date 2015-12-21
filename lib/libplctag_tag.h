@@ -53,7 +53,7 @@
 
 /* helper functions for logging/errors */
 /*LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_code, const char *fmt, ...);
-#if defined(USE_STD_VARARG_MACROS) || defined(WIN32)
+#if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
 #define plc_err(lib,level,e,f,...) \
    plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,__VA_ARGS__)
 #else

@@ -193,7 +193,7 @@ extern int sleep_ms(int ms);
 extern uint64_t time_ms(void);
 
 extern void pdebug_impl(const char *func, int line_num, const char *templ, ...);
-#if defined(USE_STD_VARARG_MACROS) || defined(WIN32)
+#if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
 #define pdebug(d,f,...) \
    do { if(d) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__); } while(0)
 #else
