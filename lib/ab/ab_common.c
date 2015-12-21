@@ -304,6 +304,7 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
 
             break;
 
+		case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
             if(!cip_vtable.abort) {
                 cip_vtable.abort     = (tag_abort_func)ab_tag_abort;
@@ -426,6 +427,8 @@ int check_cpu(ab_tag_p tag, attr attribs)
     if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
         !str_cmp_i(cpu_type, "slc500")) {
         tag->protocol_type = AB_PROTOCOL_PLC;
+    } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
+        tag->protocol_type = AB_PROTOCOL_MLGX800;
     } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
         tag->protocol_type = AB_PROTOCOL_MLGX;
     } else if (!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx") ||
@@ -461,6 +464,7 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
             break;
 
+		case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
             if (!cip_encode_tag_name(tag, name)) {
                 pdebug(debug, "parse of CIP-style tag name %s failed!", name);

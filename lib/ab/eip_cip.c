@@ -402,7 +402,8 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
     embed_start = data;
 
     /* set up the CIP Read request */
-    *data = AB_EIP_CMD_CIP_READ_FRAG;
+	/* FIXME - this is not an accurate way to calculate which read type should be used. */
+    *data = (((tag->elem_count * tag->elem_size) + sizeof(eip_cip_uc_resp) < MAX_EIP_PACKET_SIZE) ? AB_EIP_CMD_CIP_READ : AB_EIP_CMD_CIP_READ_FRAG);
     data++;
 
     /* copy the tag name into the request */
@@ -725,7 +726,8 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)) {
+        if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
+		    && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
             pdebug(debug, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;

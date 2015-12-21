@@ -33,6 +33,9 @@
 #include "libplctag_tag.h"
 #include "platform.h"
 
+
+#define AB_PCCC_
+
 int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag_name_size);
 uint8_t pccc_calculate_bcc(uint8_t *data,int size);
 uint16_t pccc_calculate_crc16(uint8_t *data, int size);

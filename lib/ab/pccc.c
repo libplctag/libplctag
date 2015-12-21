@@ -28,22 +28,18 @@
 #include <libplctag.h>
 #include <libplctag_tag.h>
 #include <platform.h>
+#include <ctype.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>
 
-
-
-
 /*
- * pccc_encode_tag_name()
+ * Old pccc name encoder for LAA tags, but those do not work for MicroLogix.  Use 3-addr form
+ * instead.
  *
- * This takes a PLC5-style tag name like N7:4 and
- * turns it into a logical ASCII address.  These
- * start with a 0 byte, then a "$", then the ASCII
- * name, then another 0 byte.
+ * FIXME - remove this when 4-addr form works.
  */
 
-int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag_name_size)
+int pccc_encode_tag_name_old(uint8_t *data, int *size, const char *name, int max_tag_name_size)
 {
 	*size = 0;
 
@@ -91,6 +87,301 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 	/* terminate with a trailing zero */
 	*data = 0;
 	(*size)++;
+
+	return 1;
+}
+
+static struct {
+	char type_name[4];
+	uint8_t size;
+	uint8_t encoded_type;
+} data_type_info[] = {
+	{{'o',0,0,0}, 2, 0x82}, /* output */
+	{{'i',0,0,0}, 2, 0x83}, /* input */
+	{{'s',0,0,0}, 2, 0x84}, /* status */
+	{{'b',0,0,0}, 2, 0x85}, /* bit */
+	{{'t',0,0,0}, 6, 0x86}, /* timer */
+	{{'c',0,0,0}, 6, 0x87}, /* counter */
+	{{'r',0,0,0}, 6, 0x88}, /* control */
+	{{'n',0,0,0}, 2, 0x89}, /* int */
+	{{'f',0,0,0}, 4, 0x8A}, /* float */
+	{{'s','t',0,0}, 84, 0x8D}, /* string */
+	{{'a',0,0,0}, 2, 0x8E}, /* ASCII char */
+	{{'l',0,0,0}, 4, 0x91}, /* long int */
+	{{'m','g',0,0}, 50, 0x92}, /* MSG */
+	{{'p','d',0,0}, 46, 0x93}, /* PID */
+	{{'p','l','s',0}, 12, 0x94}, /* programmable limit switch */
+	{{0,0,0,0}, 0, 0}
+};
+
+
+static const char *parse_data_type_name(const char *name, uint8_t *encoded_data_type)
+{
+	int index=0;
+	char data_type_str[5]; /* MAGIC, longest one is 3 chars */
+
+	if(!name || !*name) {
+		*encoded_data_type = 0;
+		return NULL;
+	}
+
+	/* skip past whitespace etc. */
+	while(*name == '$' || *name == ' ') {
+		name++;
+	}
+
+	/* copy the data type string */
+	while(isalpha(*name) && index < (sizeof(data_type_str)-1)) {
+		data_type_str[index] = *name;
+		index++;
+		name++;
+	}
+
+	/* null terminate the string */
+	data_type_str[index] = 0;
+
+	//pdebug(1,"data type string=%s",data_type_str);
+
+	/* find the matching type. */
+	index = 0;
+	while(data_type_info[index].size && str_cmp_i(data_type_info[index].type_name, data_type_str)) {
+		index++;
+	}
+
+	/* did we find it? */
+	if(data_type_info[index].type_name == NULL) {
+		/* no we did not. */
+		*encoded_data_type = 0;
+		return NULL;
+	}
+
+	/* yes, we found it */
+	*encoded_data_type = data_type_info[index].encoded_type;
+	return name;
+}
+
+
+/*
+ * convert a string of digits to a number and encode that.  Only numbers as high as 65535 (?) can
+ * be encoded like this.
+ */
+
+static const char *parse_pccc_name_number(const char *name, uint8_t *data, int *size)
+{
+	uint32_t tmp = 0;
+
+	if(!name || !*name || !isdigit(*name)) {
+		return NULL;
+	}
+
+	while(*name && isdigit(*name) && tmp < 65535) {
+		tmp *= (uint32_t)10;
+		tmp += (uint32_t)(*name - '0');
+		name++;
+	}
+
+	if(tmp <= 254) {
+		data[*size] = (uint8_t)tmp;
+		*size = *size + 1;
+	} else {
+		data[*size] = (uint8_t)0xff;
+		data[*size + 1] = (uint8_t)(tmp & 0xff);
+		data[*size + 2] = (uint8_t)((tmp >> 8) & 0xff);
+		*size = *size + 3;
+	}
+
+	return name;
+}
+
+/*
+ * Encode the name as a level encoding.
+ *
+ * Byte Meaning
+ * 0	level flags
+ * 1-3	level one
+ * 1-3	level two
+ * 1-3  level three
+ */
+
+int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag_name_size)
+{
+	const char *tmp = name;
+	uint8_t *level_byte = data;
+
+	*size = 0;
+
+	if(!data || !size || !name) {
+		return 0;
+	}
+
+	if(!strlen(name)) {
+		return 0;
+	}
+
+	if(max_tag_name_size < 10) {
+		return 0;
+	}
+
+	/* get the data type */
+	tmp = name;
+
+	//pdebug(1,"starting to parse name %s",tmp);
+
+	/* skip to the first number */
+	while(*tmp && !isdigit(*tmp)) {
+		//pdebug(1,"skipping character '%c'",*tmp);
+		tmp++;
+	}
+
+	/* allocate space for the level byte */
+	*size = 1;
+
+	/* the next thing is the file number, and we parse that into up to three bytes. */
+	tmp = parse_pccc_name_number(tmp, data, size);
+
+	if(!tmp) {
+		/* oops, bad parse! */
+		*size = 0;
+		return 0;
+	}
+
+	*level_byte |= 0x04;
+
+	if(*tmp != ':') {
+		/* bad parse! */
+		//pdebug(1,"bad parse of name, failed to fine : after data file number.");
+		*size = 0;
+		return 0;
+	}
+
+	/* bump past the : character */
+	++tmp;
+
+	/* now read the element number */
+	tmp = parse_pccc_name_number(tmp, data, size);
+
+	if(!tmp) {
+		/* oops, bad parse! */
+		*size = 0;
+		return 0;
+	}
+
+	*level_byte |= 0x02;
+
+	/* skip to the next number */
+	while(*tmp && !isdigit(*tmp)) {
+		//pdebug(1,"skipping character '%c'",*tmp);
+		tmp++;
+	}
+
+	/* now read the sub-element number */
+	tmp = parse_pccc_name_number(tmp, data, size);
+
+	if(tmp) {
+		/* there was a sub-element */
+		*level_byte |= 0x01;
+	}
+
+	return 1;
+}
+
+
+
+/*
+ * pccc_encode_tag_name()
+ *
+ * This takes a PLC5-style tag name like N7:4 and
+ * turns it into a 3-address form with type etc.
+ *
+ * The format is:
+ * Ta:b:/c
+ *
+ * T = data file: N, F, B, T etc.
+ * a = data file number
+ * b = element number
+ * c = bit number.
+ */
+
+int pccc_encode_tag_name_new_old(uint8_t *data, int *size, const char *name, int max_tag_name_size)
+{
+	const char *tmp = name;
+	uint8_t data_type_encoded=0;
+
+	*size = 0;
+
+	if(!data || !size || !name) {
+		return 0;
+	}
+
+	if(!strlen(name)) {
+		return 0;
+	}
+
+	/* a 3-address form takes:
+	 * 1-3 bytes - data file #
+	 * 1 byte - data type
+	 * 1-3 bytes - element #
+	 * 1-3 bytes - sub-element #
+	 *
+	 * Values that are larger than 254 have a leading 0xFF and then two bytes (little endian) for the value.
+	 */
+
+	if(max_tag_name_size < 10) {
+		return 0;
+	}
+
+	/* get the data type */
+	tmp = name;
+
+	tmp = parse_data_type_name(tmp, &data_type_encoded);
+
+	if(!tmp) {
+		/* oops, bad parse! */
+		*size = 0;
+		return 0;
+	}
+
+	/* the next thing is the file number, and we parse that into up to three bytes. */
+	tmp = parse_pccc_name_number(tmp, data, size);
+
+	if(!tmp) {
+		/* oops, bad parse! */
+		*size = 0;
+		return 0;
+	}
+
+	if(*tmp != ':') {
+		/* bad parse! */
+		*size = 0;
+		return 0;
+	}
+
+	/* bump past the : character */
+	++tmp;
+
+	/* copy in the data type */
+	data[*size] = data_type_encoded;
+	*size = *size + 1;
+
+	/* now read the element number */
+	tmp = parse_pccc_name_number(tmp, data, size);
+
+	if(!tmp) {
+		/* oops, bad parse! */
+		*size = 0;
+		return 0;
+	}
+
+	/* now fill in the sub-element number which is not used */
+	data[*size] = 0;
+	*size = *size + 1;
+
+	/* FIXME - we should be checking the remaining parts of the name.
+	 * In the case that we are trying to read/write a bit, we should be
+	 * parsing the bit.  Since that is not supported, we should be
+	 * returning an error if the bit field is there.
+	 */
+
 
 	return 1;
 }

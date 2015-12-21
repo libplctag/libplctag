@@ -99,6 +99,25 @@ int recv_eip_response_unsafe(ab_session_p session);
 
 
 /* PCCC defs */
+/*
+#define AB_PCCC_DATA_OUTPUT			(0x82)
+#define AB_PCCC_DATA_INPUT			(0x83)
+#define AB_PCCC_DATA_STATUS			(0x84)
+#define AB_PCCC_DATA_BIT			(0x85)
+#define AB_PCCC_DATA_TIMER			(0x86)
+#define AB_PCCC_DATA_COUNTER		(0x87)
+#define AB_PCCC_DATA_CONTROL		(0x88)
+#define AB_PCCC_DATA_INT			(0x89)
+#define AB_PCCC_DATA_FLOAT			(0x8A)
+#define AB_PCCC_DATA_STRING			(0x8D)
+#define AB_PCCC_DATA_ASCII			(0x8E)
+#define AB_PCCC_DATA_LONG			(0x91)
+#define AB_PCCC_DATA_MSG			(0x92)
+#define AB_PCCC_DATA_PID			(0x93)
+#define AB_PCCC_DATA_PLS			(0x94)
+*/
+
+
 #define AB_PCCC_DATA_BIT            1
 #define AB_PCCC_DATA_BIT_STRING     2
 #define AB_PCCC_DATA_BYTE_STRING    3
@@ -180,6 +199,7 @@ int recv_eip_response_unsafe(ab_session_p session);
 #define AB_PROTOCOL_PLC     1
 #define AB_PROTOCOL_MLGX    2
 #define AB_PROTOCOL_LGX     3
+#define AB_PROTOCOL_MLGX800 4
 
 
 /*********************************************************************
@@ -564,11 +584,11 @@ START_PACK typedef struct {
 	/* PCCC Command */
 	uint8_t pccc_command;           /* CMD read, write etc. */
 	uint8_t pccc_status;            /* STS 0x00 in request */
-	uint16_t pccc_seq_num;         /* TNSW transaction/sequence id */
+	uint16_t pccc_seq_num;        	/* TNSW transaction/sequence id */
 	uint8_t pccc_function;          /* FNC sub-function of command */
-	uint16_t pccc_pad;              /* what is this?? */
-	uint16_t pccc_transfer_size;    /* number of words requested */
-	uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
+	uint16_t pccc_offset;           /* offset of this request? */
+	uint16_t pccc_transfer_size;    /* number of elements requested */
+	uint8_t pccc_data[ZLA_SIZE];   	/* send_data for request */
 } END_PACK pccc_dhp_co_req;
 
 

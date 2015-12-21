@@ -176,7 +176,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 	/* point to the end of the struct */
 	data = ((uint8_t *)pccc) + sizeof(pccc_req);
 
-	/* copy LAA tag name into the request */
+	/* copy encoded tag name into the request */
 	mem_copy(data,tag->encoded_name,tag->encoded_name_size);
 	data += tag->encoded_name_size;
 

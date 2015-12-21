@@ -169,20 +169,9 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 	/* point to the end of the struct */
 	data = (req->data) + sizeof(pccc_dhp_co_req);
 
-	/* copy laa into the request */
+	/* copy encoded into the request */
 	mem_copy(data,tag->encoded_name,tag->encoded_name_size);
 	data += tag->encoded_name_size;
-	/*
-
-    *data = 0x06;
-	data++;
-	*data = 0x07;
-	data++;
-	*data = 0x00;
-	data++;
-
-    */
-
 
 	/* we need the count twice? */
 	*((uint16_t*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
@@ -215,7 +204,6 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 	pccc->pccc_seq_num = /*h2le16(conn_seq_id)*/ h2le16((uint16_t)(intptr_t)(tag->connection));
 	pccc->pccc_function = AB_EIP_PCCC_TYPED_READ_FUNC;
 	pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
-	/* FIXME - bytes or INTs? */
 
 	/* get ready to add the request to the queue for this session */
 	req->request_size = data - (req->data);
