@@ -39,7 +39,7 @@ extern "C" {
 #endif
 
 
-#ifdef WIN32
+#ifdef _WIN32
 	#ifdef __cplusplus
 		#define C_FUNC extern "C"
 	#else

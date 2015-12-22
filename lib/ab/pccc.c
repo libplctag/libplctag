@@ -149,7 +149,7 @@ static const char *parse_data_type_name(const char *name, uint8_t *encoded_data_
 	}
 
 	/* did we find it? */
-	if(data_type_info[index].type_name == NULL) {
+	if(data_type_info[index].type_name[0] == 0) {
 		/* no we did not. */
 		*encoded_data_type = 0;
 		return NULL;

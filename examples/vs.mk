@@ -18,12 +18,12 @@
 #    USA
 
 
-CFLAGS=/Iutils /I..\lib /MTd /DWIN32=1 /W3
+CFLAGS=/Iutils /I..\lib /MTd /W3
 LIBS=..\vs\libplctag.lib ws2_32.lib
 EXE_NAME=tag_rw.exe
 OBJS=tag_rw.obj
 C_SRCS=tag_rw.c
-H_SRCS=utils\pgetopt.h ..\lib\libplctag.h
+H_SRCS=..\lib\libplctag.h
 
 $(EXE_NAME): $(C_SRCS) $(H_SRCS)
 	cl $(CFLAGS) /Fe$(EXE_NAME) $(C_SRCS) $(LIBS)

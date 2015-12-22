@@ -40,7 +40,6 @@
 #include <time.h>
 #include <stdarg.h>
 #include <string.h>
-#include <strings.h>
 #include <libplctag.h>
 
 
@@ -57,12 +56,13 @@
 #define DATA_TIMEOUT 5000
 
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #define strcasecmp _stricmp
 #define strdup _strdup
 #else
 #include <unistd.h>
+#include <strings.h>
 #endif
 
 void usage(void)
@@ -83,7 +83,7 @@ void usage(void)
 }
 
 
-#ifdef WIN32
+#ifdef _WIN32
 void my_sleep(int seconds)
 {
 	Sleep(seconds * 1000);
