@@ -32,134 +32,6 @@
 #include <ab/ab_common.h>
 #include <ab/pccc.h>
 
-/*
- * Old pccc name encoder for LAA tags, but those do not work for MicroLogix.  Use 3-addr form
- * instead.
- *
- * FIXME - remove this when 4-addr form works.
- */
-
-int pccc_encode_tag_name_old(uint8_t *data, int *size, const char *name, int max_tag_name_size)
-{
-	*size = 0;
-
-	if(!data || !size || !name) {
-		return 0;
-	}
-
-	if(!strlen(name)) {
-		return 0;
-	}
-
-	/* FIXME - what is the actual PCCC limit?
-	 * the magic constant of 3 is for the leading zero, the $
-	 * and the trailing zero.
-	 */
-	if(str_length(name) > max_tag_name_size-3) {
-		return 0;
-	}
-
-	/* insert the leading null */
-	*data = 0;
-	data++;
-	(*size)++;
-
-	/* peek at the first character of the name,
-	 * if it is not '$', then we need to insert that
-	 * too.
-	 */
-
-	if(name[0] != '$') {
-		*data = '$';
-		data++;
-		(*size)++;
-	}
-
-	/* copy the rest */
-	while(*name) {
-		*data = *name;
-
-		name++;
-		data++;
-		(*size)++;
-	}
-
-	/* terminate with a trailing zero */
-	*data = 0;
-	(*size)++;
-
-	return 1;
-}
-
-static struct {
-	char type_name[4];
-	uint8_t size;
-	uint8_t encoded_type;
-} data_type_info[] = {
-	{{'o',0,0,0}, 2, 0x82}, /* output */
-	{{'i',0,0,0}, 2, 0x83}, /* input */
-	{{'s',0,0,0}, 2, 0x84}, /* status */
-	{{'b',0,0,0}, 2, 0x85}, /* bit */
-	{{'t',0,0,0}, 6, 0x86}, /* timer */
-	{{'c',0,0,0}, 6, 0x87}, /* counter */
-	{{'r',0,0,0}, 6, 0x88}, /* control */
-	{{'n',0,0,0}, 2, 0x89}, /* int */
-	{{'f',0,0,0}, 4, 0x8A}, /* float */
-	{{'s','t',0,0}, 84, 0x8D}, /* string */
-	{{'a',0,0,0}, 2, 0x8E}, /* ASCII char */
-	{{'l',0,0,0}, 4, 0x91}, /* long int */
-	{{'m','g',0,0}, 50, 0x92}, /* MSG */
-	{{'p','d',0,0}, 46, 0x93}, /* PID */
-	{{'p','l','s',0}, 12, 0x94}, /* programmable limit switch */
-	{{0,0,0,0}, 0, 0}
-};
-
-
-static const char *parse_data_type_name(const char *name, uint8_t *encoded_data_type)
-{
-	int index=0;
-	char data_type_str[5]; /* MAGIC, longest one is 3 chars */
-
-	if(!name || !*name) {
-		*encoded_data_type = 0;
-		return NULL;
-	}
-
-	/* skip past whitespace etc. */
-	while(*name == '$' || *name == ' ') {
-		name++;
-	}
-
-	/* copy the data type string */
-	while(isalpha(*name) && index < (sizeof(data_type_str)-1)) {
-		data_type_str[index] = *name;
-		index++;
-		name++;
-	}
-
-	/* null terminate the string */
-	data_type_str[index] = 0;
-
-	//pdebug(1,"data type string=%s",data_type_str);
-
-	/* find the matching type. */
-	index = 0;
-	while(data_type_info[index].size && str_cmp_i(data_type_info[index].type_name, data_type_str)) {
-		index++;
-	}
-
-	/* did we find it? */
-	if(data_type_info[index].type_name[0] == 0) {
-		/* no we did not. */
-		*encoded_data_type = 0;
-		return NULL;
-	}
-
-	/* yes, we found it */
-	*encoded_data_type = data_type_info[index].encoded_type;
-	return name;
-}
-
 
 /*
  * convert a string of digits to a number and encode that.  Only numbers as high as 65535 (?) can
@@ -274,114 +146,36 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 		tmp++;
 	}
 
-	/* now read the sub-element number */
-	tmp = parse_pccc_name_number(tmp, data, size);
-
-	if(tmp) {
-		/* there was a sub-element */
-		*level_byte |= 0x01;
-	}
-
-	return 1;
-}
-
-
-
-/*
- * pccc_encode_tag_name()
- *
- * This takes a PLC5-style tag name like N7:4 and
- * turns it into a 3-address form with type etc.
- *
- * The format is:
- * Ta:b:/c
- *
- * T = data file: N, F, B, T etc.
- * a = data file number
- * b = element number
- * c = bit number.
- */
-
-int pccc_encode_tag_name_new_old(uint8_t *data, int *size, const char *name, int max_tag_name_size)
-{
-	const char *tmp = name;
-	uint8_t data_type_encoded=0;
-
-	*size = 0;
-
-	if(!data || !size || !name) {
-		return 0;
-	}
-
-	if(!strlen(name)) {
-		return 0;
-	}
-
-	/* a 3-address form takes:
-	 * 1-3 bytes - data file #
-	 * 1 byte - data type
-	 * 1-3 bytes - element #
-	 * 1-3 bytes - sub-element #
-	 *
-	 * Values that are larger than 254 have a leading 0xFF and then two bytes (little endian) for the value.
+	/*
+	 * if there is a trailing part, it is something like .ACC, so convert that
+	 * into the third level, sub-element, of the address/name.
 	 */
 
-	if(max_tag_name_size < 10) {
-		return 0;
+	if(strlen(tmp) > 0) {
+		uint8_t sub_element=0;
+
+		/* bump past the / or . character */
+		++tmp;
+
+		/* test the remaining part of the name */
+		if(!str_cmp_i(tmp,"acc")) {
+			sub_element = 2;
+		} else if(!str_cmp_i(tmp,"len")) {
+			sub_element = 1;
+		} else if(!str_cmp_i(tmp, "pos")) {
+			sub_element = 2;
+		} else if(!str_cmp_i(tmp, "pre")) {
+			sub_element = 1;
+		} else {
+			/* FIXME - what to do here? */
+		}
+
+		if(sub_element) {
+			data[*size] = sub_element;
+			*size = *size + 1;
+			*level_byte |= 0x08;
+		}
 	}
-
-	/* get the data type */
-	tmp = name;
-
-	tmp = parse_data_type_name(tmp, &data_type_encoded);
-
-	if(!tmp) {
-		/* oops, bad parse! */
-		*size = 0;
-		return 0;
-	}
-
-	/* the next thing is the file number, and we parse that into up to three bytes. */
-	tmp = parse_pccc_name_number(tmp, data, size);
-
-	if(!tmp) {
-		/* oops, bad parse! */
-		*size = 0;
-		return 0;
-	}
-
-	if(*tmp != ':') {
-		/* bad parse! */
-		*size = 0;
-		return 0;
-	}
-
-	/* bump past the : character */
-	++tmp;
-
-	/* copy in the data type */
-	data[*size] = data_type_encoded;
-	*size = *size + 1;
-
-	/* now read the element number */
-	tmp = parse_pccc_name_number(tmp, data, size);
-
-	if(!tmp) {
-		/* oops, bad parse! */
-		*size = 0;
-		return 0;
-	}
-
-	/* now fill in the sub-element number which is not used */
-	data[*size] = 0;
-	*size = *size + 1;
-
-	/* FIXME - we should be checking the remaining parts of the name.
-	 * In the case that we are trying to read/write a bit, we should be
-	 * parsing the bit.  Since that is not supported, we should be
-	 * returning an error if the bit field is there.
-	 */
-
 
 	return 1;
 }
