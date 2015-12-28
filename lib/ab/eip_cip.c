@@ -429,12 +429,14 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
      * uint8_t reserved/pad (zero)
      * uint8_t[...] path (padded to even number of bytes)
      */
-    *data = (tag->conn_path_size) / 2; /* in 16-bit words */
-    data++;
-    *data = 0; /* reserved/pad */
-    data++;
-    mem_copy(data, tag->conn_path, tag->conn_path_size);
-    data += tag->conn_path_size;
+	if(tag->conn_path_size > 0) {
+		*data = (tag->conn_path_size) / 2; /* in 16-bit words */
+		data++;
+		*data = 0; /* reserved/pad */
+		data++;
+		mem_copy(data, tag->conn_path, tag->conn_path_size);
+		data += tag->conn_path_size;
+	}
 
     /* now we go back and fill in the fields of the static part */
 
