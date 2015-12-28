@@ -140,18 +140,12 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 
 	*level_byte |= 0x04;
 
-	/* skip to the next number */
-	while(*tmp && !isdigit(*tmp)) {
-		//pdebug(1,"skipping character '%c'",*tmp);
-		tmp++;
-	}
-
 	/*
 	 * if there is a trailing part, it is something like .ACC, so convert that
 	 * into the third level, sub-element, of the address/name.
 	 */
 
-	if(strlen(tmp) > 0) {
+	if(strlen(tmp) > 0 && (*tmp == '/' || *tmp == '.')) {
 		uint8_t sub_element=0;
 
 		/* bump past the / or . character */
