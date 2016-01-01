@@ -56,7 +56,7 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
 {
     int debug = attr_get_int(attribs,"debug",0);
     const char* path = attr_get_str(attribs, "path", "");
-    ab_connection_p connection;
+    ab_connection_p connection = AB_CONNECTION_NULL;
     int rc = PLCTAG_STATUS_OK;
     int is_new = 0;
 
