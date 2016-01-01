@@ -21,7 +21,7 @@
 CC?=gcc
 CXX?=g++
 
-CFLAGS += -fno-strict-aliasing -g -I. -I../lib -fms-extensions -Wall -I/usr/local/include
+CFLAGS += -fno-strict-aliasing -g -I. -I../lib -fms-extensions -Wall -I/usr/local/include -O2
 CXXFLAGS += $(CFLAGS)
 LIBS = -L../lib -lplctag -lpthread -pthread
 

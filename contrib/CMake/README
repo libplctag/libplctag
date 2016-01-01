@@ -1,0 +1,7 @@
+Started to write a CMakeLists.txt file for the project.
+
+Currently this works for Linux and will build tag_rw. The version of CMake I was using was generating bad Makefiles when I tried to add all examples for some reason (see line 15).
+
+I tried to get this working on Windows but the MSVC generator is currently broken, as it automatically includes subdirectories, causing problems (it includes both lib/linux and lib/windows), and automatically added files I didn't tell it to build (lib/ab/temp.c).
+
+Hopefully someone else with some better knowledge of CMake can come along and fix this up, as it would be nice to have something that can help us build on all platforms/compilers.

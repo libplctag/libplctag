@@ -40,7 +40,7 @@ DESTDIR=/usr/local/
 libdir=lib
 incdir=include
 
-CFLAGS += -std=c99 -fPIC -fno-strict-aliasing -g -I. -fms-extensions -Wall -I./linux -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L
+CFLAGS += -std=c99 -fPIC -fno-strict-aliasing -g -I. -fms-extensions -Wall -I./linux -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L -O2
 
 TARGETS = $(LIBPLC_LIB_SO)
 

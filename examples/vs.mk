@@ -18,7 +18,7 @@
 #    USA
 
 
-CFLAGS=/Iutils /I..\lib /MTd /W3
+CFLAGS=/Iutils /I..\lib /MTd /W3 /O2
 LIBS=..\vs\libplctag.lib ws2_32.lib
 EXE_NAME=tag_rw.exe
 OBJS=tag_rw.obj
