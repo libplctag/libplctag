@@ -99,19 +99,17 @@ int session_add_connection(ab_session_p session, ab_connection_p connection)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(session->debug, "Starting");
-
     if(session) {
+        pdebug(session->debug, "Starting");
         pdebug(session->debug,"entering critical block %p",global_session_mut);
         critical_block(global_session_mut) {
             rc = session_add_connection_unsafe(session, connection);
         }
         pdebug(session->debug,"leaving critical block %p", global_session_mut);
+        pdebug(session->debug, "Done");
     } else {
         rc = PLCTAG_ERR_NULL_PTR;
     }
-
-    pdebug(session->debug, "Done");
 
     return rc;
 }
@@ -160,19 +158,17 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(session->debug, "Starting");
-
     if(session) {
+        pdebug(session->debug, "Starting");
         pdebug(session->debug,"entering critical block %p", global_session_mut);
         critical_block(global_session_mut) {
             rc = session_remove_connection_unsafe(session, connection);
         }
         pdebug(session->debug,"leaving critical block %p", global_session_mut);
+        pdebug(session->debug, "Done");
     } else {
         rc = PLCTAG_ERR_NULL_PTR;
     }
-
-    pdebug(session->debug, "Done");
 
     return rc;
 }
@@ -259,10 +255,10 @@ int remove_session_unsafe(ab_session_p n)
 {
     ab_session_p tmp;
 
-    pdebug(n->debug, "Starting");
-
     if (!n || !sessions)
         return 0;
+
+    pdebug(n->debug, "Starting");
 
     tmp = sessions;
 
@@ -490,13 +486,13 @@ int session_connect(ab_session_p session, const char* host)
 /* must have the session mutex held here */
 int session_destroy_unsafe(ab_session_p session)
 {
+    if (!session)
+        return 1;
+
     int debug = session->debug;
     ab_request_p req;
 
     pdebug(debug, "Starting.");
-
-    if (!session)
-        return 1;
 
     /* do not destroy the session if there are
      * tags or connections still */

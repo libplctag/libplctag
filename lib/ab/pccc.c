@@ -80,11 +80,11 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 	const char *tmp = name;
 	uint8_t *level_byte = data;
 
-	*size = 0;
-
 	if(!data || !size || !name) {
 		return 0;
 	}
+
+	*size = 0;
 
 	if(!strlen(name)) {
 		return 0;

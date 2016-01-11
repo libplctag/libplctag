@@ -364,15 +364,16 @@ int ab_tag_abort(ab_tag_p tag)
 int ab_tag_destroy(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
+
+    /* already destroyed? */
+    if (!tag)
+        return rc;
+
     ab_connection_p connection = tag->connection;
     ab_session_p session = tag->session;
     int debug = tag->debug;
 
     pdebug(debug, "Starting.");
-
-    /* already destroyed? */
-    if (!tag)
-        return rc;
 
     /*
      * stop any current actions. Note that we

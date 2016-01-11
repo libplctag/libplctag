@@ -340,9 +340,9 @@ int connection_add_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
 int connection_add_tag(ab_connection_p connection, ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-    int debug = connection->debug;
 
     if(connection) {
+        int debug = connection->debug;
         pdebug(debug,"entering critical block %p",global_session_mut);
         critical_block(global_session_mut) {
             rc = connection_add_tag_unsafe(connection, tag);
@@ -396,9 +396,9 @@ int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
 int connection_remove_tag(ab_connection_p connection, ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-    int debug = connection->debug;
 
     if(connection && connection->session) {
+        int debug = connection->debug;
         pdebug(debug,"entering critical block %p",global_session_mut);
         critical_block(global_session_mut) {
             rc = connection_remove_tag_unsafe(connection, tag);
@@ -435,13 +435,13 @@ int connection_is_empty(ab_connection_p connection)
 
 int connection_destroy_unsafe(ab_connection_p connection)
 {
-    int debug = connection->debug;
-
-    pdebug(debug, "Starting.");
-
     if (!connection) {
         return 1;
     }
+
+    int debug = connection->debug;
+
+    pdebug(debug, "Starting.");
 
     /* do not destroy the connection if there are
      * connections still */
