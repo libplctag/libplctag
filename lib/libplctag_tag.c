@@ -120,12 +120,12 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 
 LIB_EXPORT int plc_tag_lock(plc_tag tag)
 {
+	if(!tag || !tag->mut)
+		return PLCTAG_ERR_NULL_PTR;
+
 	int debug = tag->debug;
 
 	pdebug(debug, "Starting.");
-
-	if(!tag || !tag->mut)
-		return PLCTAG_ERR_NULL_PTR;
 
 	/* lock the mutex */
 	tag->status = mutex_lock(tag->mut);
@@ -147,12 +147,12 @@ LIB_EXPORT int plc_tag_lock(plc_tag tag)
 
 LIB_EXPORT int plc_tag_unlock(plc_tag tag)
 {
+	if(!tag || !tag->mut)
+		return PLCTAG_ERR_NULL_PTR;
+
 	int debug = tag->debug;
 
 	pdebug(debug, "Starting.");
-
-	if(!tag || !tag->mut)
-		return PLCTAG_ERR_NULL_PTR;
 
 	/* unlock the mutex */
 	tag->status = mutex_unlock(tag->mut);
@@ -179,12 +179,12 @@ LIB_EXPORT int plc_tag_unlock(plc_tag tag)
 
 LIB_EXPORT int plc_tag_abort(plc_tag tag)
 {
+	if(!tag || !tag->vtable)
+		return PLCTAG_ERR_NULL_PTR;
+
 	int debug = tag->debug;
 
 	pdebug(debug, "Starting.");
-
-	if(!tag || !tag->vtable)
-		return PLCTAG_ERR_NULL_PTR;
 
 	/* clear the status */
 	tag->status = PLCTAG_STATUS_OK;
@@ -221,14 +221,14 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag)
 
 LIB_EXPORT int plc_tag_destroy(plc_tag tag)
 {
+	if(!tag)
+		return PLCTAG_STATUS_OK;
+
 	int debug = tag->debug;
 	mutex_p temp_mut;
 	int rc = PLCTAG_STATUS_OK;
 
 	pdebug(debug, "Starting.");
-
-	if(!tag)
-		return PLCTAG_STATUS_OK;
 
 	/* clear the mutex */
 	if(tag->mut) {
@@ -271,13 +271,13 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag)
 
 LIB_EXPORT int plc_tag_read(plc_tag tag, int timeout)
 {
+	if(!tag)
+		return PLCTAG_ERR_NULL_PTR;
+
 	int debug = tag->debug;
 	int rc;
 
 	pdebug(debug, "Starting.");
-
-	if(!tag)
-		return PLCTAG_ERR_NULL_PTR;
 
 	/* check for null parts */
 	if(!tag->vtable || !tag->vtable->read) {
@@ -406,14 +406,13 @@ LIB_EXPORT int plc_tag_status(plc_tag tag)
 
 LIB_EXPORT int plc_tag_write(plc_tag tag, int timeout)
 {
+	if(!tag)
+		return PLCTAG_ERR_NULL_PTR;
+
 	int debug = tag->debug;
 	int rc;
 
 	pdebug(debug, "Starting.");
-
-	if(!tag) {
-		return PLCTAG_ERR_NULL_PTR;
-	}
 
 	/* we are writing so the tag existing data is stale. */
 	tag->read_cache_expire = (uint64_t)0;
