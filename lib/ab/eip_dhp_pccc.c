@@ -308,13 +308,6 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
 	mem_copy(data,tag->encoded_name,tag->encoded_name_size);
 	data += tag->encoded_name_size;
 
-	/* point to the end of the struct */
-	data = (req->data) + sizeof(pccc_dhp_co_req);
-
-	/* copy laa into the request */
-	mem_copy(data,tag->encoded_name,tag->encoded_name_size);
-	data += tag->encoded_name_size;
-
 	/* What type and size do we have? */
 	if(tag->elem_size != 2 && tag->elem_size != 4) {
 		pdebug(debug,"Unsupported data type size: %d",tag->elem_size);
