@@ -311,11 +311,6 @@ void thread_func(void *data)
         sleep_ms(100+random_min_max(0,100));
     }
 
-    if(tag) {
-        fprintf(stderr,"Thread %d done but tag still not destroyed.\n",tid);
-        plc_tag_destroy(tag);
-    }
-
     fprintf(stderr,"Thread %d completed work.\n",tid);
 
     mark_done(&done[tid]);
