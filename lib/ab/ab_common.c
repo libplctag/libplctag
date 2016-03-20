@@ -725,7 +725,7 @@ void* request_handler_func(void* not_used)
                     if (cur_req->abort_request) {
                         ab_request_p tmp;
 
-                        pdebug(debug,"aborting request %p",cur_req);
+                        /*pdebug(debug,"aborting request %p",cur_req);*/
 
                         /*
                          * is this in the process of being sent?
