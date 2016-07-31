@@ -37,8 +37,8 @@
 #include <util/attr.h>
 
 #define PLCTAG_CANARY (0xACA7CAFE)
-#define PLCTAG_DATA_LITTLE_ENDIAN	(0)
-#define PLCTAG_DATA_BIG_ENDIAN		(1)
+#define PLCTAG_DATA_LITTLE_ENDIAN   (0)
+#define PLCTAG_DATA_BIG_ENDIAN      (1)
 
 
 /*
@@ -73,11 +73,11 @@ typedef int (*tag_write_func)(plc_tag tag);
 
 /* we'll need to set these per protocol type. */
 struct tag_vtable_t {
-	tag_abort_func 			abort;
-	tag_destroy_func 		destroy;
-	tag_read_func			read;
-	tag_status_func 		status;
-	tag_write_func 			write;
+    tag_abort_func          abort;
+    tag_destroy_func        destroy;
+    tag_read_func           read;
+    tag_status_func         status;
+    tag_write_func          write;
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;
@@ -91,17 +91,18 @@ typedef struct tag_vtable_t *tag_vtable_p;
  */
 
 #define TAG_BASE_STRUCT tag_vtable_p vtable; \
-						mutex_p mut; \
-						int status; \
-						int endian; \
-						int debug; \
-						uint64_t read_cache_expire; \
-						uint64_t read_cache_ms; \
-						int size; \
-						uint8_t *data
+                        mutex_p mut; \
+                        int status; \
+                        int endian; \
+                        int debug; \
+                        int tag_id; \
+                        uint64_t read_cache_expire; \
+                        uint64_t read_cache_ms; \
+                        int size; \
+                        uint8_t *data
 
 struct plc_tag_t {
-	TAG_BASE_STRUCT;
+    TAG_BASE_STRUCT;
 };
 
 
