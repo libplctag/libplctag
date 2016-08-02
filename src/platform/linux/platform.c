@@ -47,7 +47,8 @@
 #include <fcntl.h>
 #include <time.h>
 
-#include <libplctag.h>
+#include <lib/libplctag.h>
+#include <util/debug.h>
 
 
 
@@ -778,6 +779,7 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             return PLCTAG_ERR_NO_DATA;
         } else {
+            pdebug(1,"Socket read error: rc=%d", rc);
             return PLCTAG_ERR_READ;
         }
     }
@@ -1066,70 +1068,3 @@ int64_t time_ms(void)
     return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
 }
 
-
-/*
- * Debugging support.
- */
-
-extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
-{
-    va_list va;
-    struct tm t;
-    time_t epoch;
-    char prefix[2048];
-
-    /* build the prefix */
-    /* get the time parts */
-    epoch = time(0);
-
-    /* FIXME - should capture error return! */
-    localtime_r(&epoch,&t);
-
-    /* create the prefix and format for the file entry. */
-    snprintf(prefix, sizeof prefix,"%04d-%02d-%02d %02d:%02d:%02d %s:%d %s\n",
-             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,
-             func,line_num,templ);
-
-    /* print it out. */
-    va_start(va,templ);
-    vfprintf(stderr,prefix,va);
-    va_end(va);
-}
-
-
-
-
-extern void pdebug_dump_bytes_impl(uint8_t *data,int count)
-{
-    int i;
-    int end;
-    char buf[2048];
-
-    snprintf(buf,sizeof buf,"Dumping bytes:\n");
-
-    end = str_length(buf);
-
-    for(i=0; i<count; i++) {
-        if((i%10) == 0) {
-            snprintf(buf+end,sizeof(buf)-end,"%05d",i);
-
-            end = strlen(buf);
-        }
-
-        snprintf(buf+end,sizeof(buf)-end," %02x",data[i]);
-
-        end = strlen(buf);
-
-        if((i%10) == 9) {
-            snprintf(buf+end,sizeof(buf)-end,"\n");
-
-            end = strlen(buf);
-        }
-    }
-
-    /*if( ((i%10)!=9) || (i>=count && (i%10)==9))
-        snprintf(buf+end,sizeof(buf)-end,"\n");*/
-
-    pdebug("%s",buf);
-    fflush(stderr);
-}

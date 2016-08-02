@@ -29,9 +29,9 @@
 
 
 
-#include "libplctag.h"
-#include "libplctag_tag.h"
-#include "platform.h"
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
+#include <platform.h>
 
 
 #define AB_PCCC_

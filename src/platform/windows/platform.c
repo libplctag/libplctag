@@ -50,7 +50,7 @@
 #include <time.h>
 #include <stdio.h>
 
-#include <libplctag.h>
+#include <lib/libplctag.h>
 
 
 /*#ifdef __cplusplus
@@ -88,9 +88,9 @@ extern "C"
  */
 extern void *mem_alloc(int size)
 {
-	void *res = calloc(size, 1);
+    void *res = calloc(size, 1);
 
-	return res;
+    return res;
 }
 
 
@@ -103,9 +103,9 @@ extern void *mem_alloc(int size)
  */
 extern void mem_free(const void *mem)
 {
-	if(mem) {
-		free((void *)mem);
-	}
+    if(mem) {
+        free((void *)mem);
+    }
 }
 
 
@@ -118,7 +118,7 @@ extern void mem_free(const void *mem)
  */
 extern void mem_set(void *d1, int c, int size)
 {
-	memset(d1, c, size);
+    memset(d1, c, size);
 }
 
 
@@ -132,7 +132,7 @@ extern void mem_set(void *d1, int c, int size)
  */
 extern void mem_copy(void *d1, void *d2, int size)
 {
-	memcpy(d1, d2, size);
+    memcpy(d1, d2, size);
 }
 
 
@@ -154,7 +154,7 @@ extern void mem_copy(void *d1, void *d2, int size)
  */
 extern int str_cmp(const char *first, const char *second)
 {
-	return strcmp(first, second);
+    return strcmp(first, second);
 }
 
 
@@ -171,7 +171,7 @@ extern int str_cmp(const char *first, const char *second)
  */
 extern int str_cmp_i(const char *first, const char *second)
 {
-	return _stricmp(first,second);
+    return _stricmp(first,second);
 }
 
 
@@ -183,8 +183,8 @@ extern int str_cmp_i(const char *first, const char *second)
  */
 extern int str_copy(char *dst, const char *src, int size)
 {
-	strncpy_s(dst, size+1, src, size);
-	return 0;
+    strncpy_s(dst, size+1, src, size);
+    return 0;
 }
 
 
@@ -196,11 +196,11 @@ extern int str_copy(char *dst, const char *src, int size)
  */
 extern int str_length(const char *str)
 {
-	if(!str) {
-		return 0;
-	}
+    if(!str) {
+        return 0;
+    }
 
-	return strlen(str);
+    return strlen(str);
 }
 
 
@@ -214,11 +214,11 @@ extern int str_length(const char *str)
  */
 extern char *str_dup(const char *str)
 {
-	if(!str) {
-		return NULL;
-	}
+    if(!str) {
+        return NULL;
+    }
 
-	return _strdup(str);
+    return _strdup(str);
 }
 
 
@@ -232,119 +232,119 @@ extern char *str_dup(const char *str)
  */
 extern int str_to_int(const char *str, int *val)
 {
-	char *endptr;
-	long int tmp_val;
+    char *endptr;
+    long int tmp_val;
 
-	tmp_val = strtol(str,&endptr,0);
+    tmp_val = strtol(str,&endptr,0);
 
-	if (errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-		/*pdebug("strtol returned %ld with errno %d",tmp_val, errno);*/
-		return -1;
-	}
+    if (errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
+        /*pdebug("strtol returned %ld with errno %d",tmp_val, errno);*/
+        return -1;
+    }
 
-	if (endptr == str) {
-		return -1;
-	}
+    if (endptr == str) {
+        return -1;
+    }
 
-	/* FIXME - this will truncate long values. */
-	*val = (int)tmp_val;
+    /* FIXME - this will truncate long values. */
+    *val = (int)tmp_val;
 
-	return 0;
+    return 0;
 }
 
 
 extern int str_to_float(const char *str, float *val)
 {
-	char *endptr;
-	double tmp_val_d;
-	float tmp_val;
+    char *endptr;
+    double tmp_val_d;
+    float tmp_val;
 
-	/* Windows does not have strtof() */
-	tmp_val_d = strtod(str,&endptr);
+    /* Windows does not have strtof() */
+    tmp_val_d = strtod(str,&endptr);
 
-	if (errno == ERANGE && (tmp_val_d == HUGE_VAL || tmp_val_d == -HUGE_VAL || tmp_val_d == (double)0.0)) {
-		return -1;
-	}
+    if (errno == ERANGE && (tmp_val_d == HUGE_VAL || tmp_val_d == -HUGE_VAL || tmp_val_d == (double)0.0)) {
+        return -1;
+    }
 
-	if (endptr == str) {
-		return -1;
-	}
+    if (endptr == str) {
+        return -1;
+    }
 
-	/* FIXME - this will truncate long values. */
-	tmp_val = (float)tmp_val_d;
-	*val = tmp_val;
+    /* FIXME - this will truncate long values. */
+    tmp_val = (float)tmp_val_d;
+    *val = tmp_val;
 
-	return 0;
+    return 0;
 }
 
 
 extern char **str_split(const char *str, const char *sep)
 {
-	int sub_str_count=0;
-	int size = 0;
-	const char *sub;
-	const char *tmp;
-	char **res;
+    int sub_str_count=0;
+    int size = 0;
+    const char *sub;
+    const char *tmp;
+    char **res;
 
-	/* first, count the sub strings */
-	tmp = str;
-	sub = strstr(tmp,sep);
+    /* first, count the sub strings */
+    tmp = str;
+    sub = strstr(tmp,sep);
 
-	while(sub && *sub) {
-		/* separator could be at the front, ignore that. */
-		if(sub != tmp) {
-			sub_str_count++;
-		}
+    while(sub && *sub) {
+        /* separator could be at the front, ignore that. */
+        if(sub != tmp) {
+            sub_str_count++;
+        }
 
-		tmp = sub + str_length(sep);
-		sub = strstr(tmp,sep);
-	}
+        tmp = sub + str_length(sep);
+        sub = strstr(tmp,sep);
+    }
 
-	if(tmp && *tmp && (!sub || !*sub))
-		sub_str_count++;
+    if(tmp && *tmp && (!sub || !*sub))
+        sub_str_count++;
 
-	/* calculate total size for string plus pointers */
-	size = sizeof(char *)*(sub_str_count+1)+str_length(str)+1;
+    /* calculate total size for string plus pointers */
+    size = sizeof(char *)*(sub_str_count+1)+str_length(str)+1;
 
-	/* allocate enough memory */
-	res = (char**)mem_alloc(size);
-	if(!res)
-		return NULL;
+    /* allocate enough memory */
+    res = (char**)mem_alloc(size);
+    if(!res)
+        return NULL;
 
-	/* calculate the beginning of the string */
-	tmp = (char *)res + sizeof(char *)*(sub_str_count+1);
+    /* calculate the beginning of the string */
+    tmp = (char *)res + sizeof(char *)*(sub_str_count+1);
 
-	/* copy the string */
-	str_copy((char *)tmp,str,strlen(str));
+    /* copy the string */
+    str_copy((char *)tmp,str,strlen(str));
 
-	/* set up the pointers */
-	sub_str_count=0;
-	sub = strstr(tmp,sep);
-	while(sub && *sub) {
-		/* separator could be at the front, ignore that. */
-		if(sub != tmp) {
-			/* store the pointer */
-			res[sub_str_count] = (char *)tmp;
+    /* set up the pointers */
+    sub_str_count=0;
+    sub = strstr(tmp,sep);
+    while(sub && *sub) {
+        /* separator could be at the front, ignore that. */
+        if(sub != tmp) {
+            /* store the pointer */
+            res[sub_str_count] = (char *)tmp;
 
-			sub_str_count++;
-		}
+            sub_str_count++;
+        }
 
-		/* zero out the separator chars */
-		mem_set((char*)sub,0,str_length(sep));
+        /* zero out the separator chars */
+        mem_set((char*)sub,0,str_length(sep));
 
-		/* point past the separator (now zero) */
-		tmp = sub + str_length(sep);
+        /* point past the separator (now zero) */
+        tmp = sub + str_length(sep);
 
-		/* find the next separator */
-		sub = strstr(tmp,sep);
-	}
+        /* find the next separator */
+        sub = strstr(tmp,sep);
+    }
 
-	/* if there is a chunk at the end, store it. */
-	if(tmp && *tmp && (!sub || !*sub)) {
-		res[sub_str_count] = (char*)tmp;
-	}
+    /* if there is a chunk at the end, store it. */
+    if(tmp && *tmp && (!sub || !*sub)) {
+        res[sub_str_count] = (char*)tmp;
+    }
 
-	return res;
+    return res;
 }
 
 
@@ -366,37 +366,37 @@ struct plc_thread_t {
  **************************************************************************/
 
 struct mutex_t {
-	HANDLE h_mutex;
-	int initialized;
+    HANDLE h_mutex;
+    int initialized;
 };
 
 
 int mutex_create(mutex_p *m)
 {
-	*m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
-	if(! *m) {
-		/*pdebug("null mutex pointer.");*/
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
+    if(! *m) {
+        /*pdebug("null mutex pointer.");*/
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	/* set up the mutex */
-	(*m)->h_mutex = CreateMutex( 
-							NULL,                   /* default security attributes  */
-							FALSE,                  /* initially not owned          */
-							NULL);                  /* unnamed mutex                */
+    /* set up the mutex */
+    (*m)->h_mutex = CreateMutex(
+                            NULL,                   /* default security attributes  */
+                            FALSE,                  /* initially not owned          */
+                            NULL);                  /* unnamed mutex                */
 
     if(!(*m)->h_mutex) {
-		mem_free(*m);
-		*m = NULL;
-		/*pdebug("Error initializing mutex.");*/
-		return PLCTAG_ERR_MUTEX_INIT;
-	}
+        mem_free(*m);
+        *m = NULL;
+        /*pdebug("Error initializing mutex.");*/
+        return PLCTAG_ERR_MUTEX_INIT;
+    }
 
-	(*m)->initialized = 1;
+    (*m)->initialized = 1;
 
-	/*pdebug("Done.");*/
+    /*pdebug("Done.");*/
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -405,12 +405,12 @@ int mutex_lock(mutex_p m)
 {
     DWORD dwWaitResult;
 
-	//pdebug("Starting");
+    //pdebug("Starting");
 
-	if(!m) {
-		/*pdebug("null mutex pointer.");*/
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!m) {
+        /*pdebug("null mutex pointer.");*/
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     if(!m->initialized) {
         return PLCTAG_ERR_MUTEX_INIT;
@@ -422,53 +422,53 @@ int mutex_lock(mutex_p m)
     while(dwWaitResult != WAIT_OBJECT_0)
         dwWaitResult = WaitForSingleObject(m->h_mutex,INFINITE);
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
 
 int mutex_unlock(mutex_p m)
 {
-	//pdebug("Starting.");
+    //pdebug("Starting.");
 
-	if(!m) {
-		/*pdebug("null mutex pointer.");*/
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!m) {
+        /*pdebug("null mutex pointer.");*/
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     if(!m->initialized) {
         return PLCTAG_ERR_MUTEX_INIT;
     }
 
-	if(!ReleaseMutex(m->h_mutex)) {
-		/*pdebug("error unlocking mutex.");*/
-		return PLCTAG_ERR_MUTEX_UNLOCK;
-	}
+    if(!ReleaseMutex(m->h_mutex)) {
+        /*pdebug("error unlocking mutex.");*/
+        return PLCTAG_ERR_MUTEX_UNLOCK;
+    }
 
-	//pdebug("Done.");
+    //pdebug("Done.");
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
 int mutex_destroy(mutex_p *m)
 {
-	/*pdebug("Starting.");*/
+    /*pdebug("Starting.");*/
 
-	if(!m) {
-		/*pdebug("null mutex pointer.");*/
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!m) {
+        /*pdebug("null mutex pointer.");*/
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	CloseHandle((*m)->h_mutex);
+    CloseHandle((*m)->h_mutex);
 
-	mem_free(*m);
+    mem_free(*m);
 
-	*m = NULL;
+    *m = NULL;
 
-	/*pdebug("Done.");*/
+    /*pdebug("Done.");*/
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -496,45 +496,45 @@ struct thread_t {
 
 extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg)
 {
-	/*pdebug("Starting.");*/
-	int debug = 1;
+    /*pdebug("Starting.");*/
+    int debug = 1;
 
-	if(!t) {
-		//pdebug(debug, "null thread pointer.");
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!t) {
+        //pdebug(debug, "null thread pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	*t = (thread_p)mem_alloc(sizeof(struct thread_t));
+    *t = (thread_p)mem_alloc(sizeof(struct thread_t));
 
-	if(! *t) {
-		/* FIXME - should not be the same error as above. */
-		//pdebug(debug, "null thread pointer.");
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(! *t) {
+        /* FIXME - should not be the same error as above. */
+        //pdebug(debug, "null thread pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	/* create a thread. */
-	(*t)->h_thread = CreateThread( 
+    /* create a thread. */
+    (*t)->h_thread = CreateThread(
                 NULL,                   /* default security attributes */
                 0,                      /* use default stack size      */
-                func,					/* thread function             */
+                func,                   /* thread function             */
                 arg,                    /* argument to thread function */
                 0,                      /* use default creation flags  */
                 NULL);                  /* do not need thread ID       */
 
     if(!(*t)->h_thread) {
-		//pdebug(debug, "error creating thread.");
-		mem_free(*t);
-		*t=NULL;
+        //pdebug(debug, "error creating thread.");
+        mem_free(*t);
+        *t=NULL;
 
         return PLCTAG_ERR_THREAD_CREATE;
     }
 
-	/* mark as initialized */
-	(*t)->initialized = 1;
+    /* mark as initialized */
+    (*t)->initialized = 1;
 
-	/*pdebug("Done.");*/
+    /*pdebug("Done.");*/
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -548,7 +548,7 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
  */
 void thread_stop(void)
 {
-	ExitThread((DWORD)0);
+    ExitThread((DWORD)0);
 }
 
 
@@ -560,23 +560,23 @@ void thread_stop(void)
 
 int thread_join(thread_p t)
 {
-	/*pdebug("Starting.");*/
+    /*pdebug("Starting.");*/
 
-	if(!t) {
-		/*pdebug("null thread pointer.");*/
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!t) {
+        /*pdebug("null thread pointer.");*/
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	/* FIXME - check for uninitialized threads */
+    /* FIXME - check for uninitialized threads */
 
-	if(WaitForSingleObject(t->h_thread, (DWORD)1000)) { /* FIXME - magic timeout */
-		/*pdebug("Error joining thread.");*/
-		return PLCTAG_ERR_THREAD_JOIN;
-	}
+    if(WaitForSingleObject(t->h_thread, (DWORD)1000)) { /* FIXME - magic timeout */
+        /*pdebug("Error joining thread.");*/
+        return PLCTAG_ERR_THREAD_JOIN;
+    }
 
-	/*pdebug("Done.");*/
+    /*pdebug("Done.");*/
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -590,20 +590,20 @@ int thread_join(thread_p t)
  */
 extern int thread_destroy(thread_p *t)
 {
-	/*pdebug("Starting.");*/
+    /*pdebug("Starting.");*/
 
-	if(!t || ! *t) {
-		/*pdebug("null thread pointer.");*/
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!t || ! *t) {
+        /*pdebug("null thread pointer.");*/
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	CloseHandle((*t)->h_thread);
+    CloseHandle((*t)->h_thread);
 
-	mem_free(*t);
+    mem_free(*t);
 
-	*t = NULL;
+    *t = NULL;
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -629,24 +629,24 @@ extern int thread_destroy(thread_p *t)
 
 extern int lock_acquire(lock_t *lock)
 {
-	LONG rc = InterlockedExchange(lock, ATOMIC_LOCK_VAL);
+    LONG rc = InterlockedExchange(lock, ATOMIC_LOCK_VAL);
 
-	if(rc != ATOMIC_LOCK_VAL) {
-		/* we got the lock */
-		/*pdebug("got lock");*/
-		return 1;
-	} else {
-		/* we did not get the lock */
-		/*pdebug("did not get lock");*/
-		return 0;
-	}
+    if(rc != ATOMIC_LOCK_VAL) {
+        /* we got the lock */
+        /*pdebug("got lock");*/
+        return 1;
+    } else {
+        /* we did not get the lock */
+        /*pdebug("did not get lock");*/
+        return 0;
+    }
 }
 
 
 extern void lock_release(lock_t *lock)
 {
-	InterlockedExchange(lock, ATOMIC_UNLOCK_VAL);
-	/*pdebug("released lock");*/
+    InterlockedExchange(lock, ATOMIC_UNLOCK_VAL);
+    /*pdebug("released lock");*/
 }
 
 
@@ -663,16 +663,16 @@ extern void lock_release(lock_t *lock)
 
 
 struct sock_t {
-	int fd;
-	int port;
-	int is_open;
+    int fd;
+    int port;
+    int is_open;
 };
 
 
 #define MAX_IPS (8)
 
 
-/* windows needs to have the Winsock library initialized 
+/* windows needs to have the Winsock library initialized
  * before use. Does it need to be static?
  */
 
@@ -687,43 +687,43 @@ static int socket_lib_init(void)
 
 extern int socket_create(sock_p *s)
 {
-	/*pdebug("Starting.");*/
+    /*pdebug("Starting.");*/
 
-	if(!socket_lib_init()) {
-		/*pdebug("error initializing Windows Sockets.");*/
-		return PLCTAG_ERR_WINSOCK;
-	}
+    if(!socket_lib_init()) {
+        /*pdebug("error initializing Windows Sockets.");*/
+        return PLCTAG_ERR_WINSOCK;
+    }
 
-	if(!s) {
-		/*pdebug("null socket pointer.");*/
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!s) {
+        /*pdebug("null socket pointer.");*/
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	*s = (sock_p)mem_alloc(sizeof(struct sock_t));
+    *s = (sock_p)mem_alloc(sizeof(struct sock_t));
 
-	if(! *s) {
-		/*pdebug("memory allocation failure.");*/
-		return PLCTAG_ERR_NO_MEM;
-	}
+    if(! *s) {
+        /*pdebug("memory allocation failure.");*/
+        return PLCTAG_ERR_NO_MEM;
+    }
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
 
 extern int socket_connect_tcp(sock_p s, const char *host, int port)
 {
-	IN_ADDR ips[MAX_IPS];
-	int num_ips = 0;
-	struct sockaddr_in gw_addr;
+    IN_ADDR ips[MAX_IPS];
+    int num_ips = 0;
+    struct sockaddr_in gw_addr;
     int sock_opt = 1;
-	u_long non_blocking=1;
+    u_long non_blocking=1;
     int i = 0;
     int done = 0;
-	int fd;
+    int fd;
     struct timeval timeout; /* used for timing out connections etc. */
 
-	/*pdebug("Starting.");*/
+    /*pdebug("Starting.");*/
 
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, 0/*IPPROTO_TCP*/);
@@ -738,7 +738,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     sock_opt = 1;
 
     if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
-		closesocket(fd);
+        closesocket(fd);
         /*pdebug("Error setting socket reuse option, errno: %d",errno);*/
         return PLCTAG_ERR_OPEN;
     }
@@ -747,13 +747,13 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     timeout.tv_usec = 0;
 
     if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
-		closesocket(fd);
+        closesocket(fd);
         /*pdebug("Error setting socket receive timeout option, errno: %d",errno);*/
         return PLCTAG_ERR_OPEN;
     }
 
     if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
-		closesocket(fd);
+        closesocket(fd);
         /*pdebug("Error setting socket set timeout option, errno: %d",errno);*/
         return PLCTAG_ERR_OPEN;
     }
@@ -767,8 +767,8 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     } else {
         struct hostent *h=NULL;
 
-    	/* not numeric, try DNS */
-	/* FIXME: gethostbyname() is deprecated in favor of getaddrinfo() */
+        /* not numeric, try DNS */
+    /* FIXME: gethostbyname() is deprecated in favor of getaddrinfo() */
         h = gethostbyname(host);
 
         if(!h) {
@@ -797,7 +797,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     gw_addr.sin_port = htons(port);
 
     do {
-    	int rc;
+        int rc;
         /* try each IP until we run out or get a connection. */
         gw_addr.sin_addr.s_addr = ips[i].S_un.S_addr;
 
@@ -815,7 +815,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     } while(!done && i < num_ips);
 
     if(!done) {
-		closesocket(fd);
+        closesocket(fd);
         /*pdebug("Unable to connect to any gateway host IP address!");*/
         return PLCTAG_ERR_OPEN;
     }
@@ -823,9 +823,9 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     /* FIXME
      * connect() is a little easier to handle in blocking mode, for now
-     * we make the socket non-blocking here, after connect(). 
-	 */
-    
+     * we make the socket non-blocking here, after connect().
+     */
+
     if(ioctlsocket(fd,FIONBIO,&non_blocking)) {
       /*pdebug("Error getting socket options, errno: %d", errno);*/
       closesocket(fd);
@@ -833,11 +833,11 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     }
 
     /* save the values */
-	s->fd = fd;
-	s->port = port;
-	s->is_open = 1;
+    s->fd = fd;
+    s->port = port;
+    s->is_open = 1;
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -852,22 +852,22 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 extern int socket_read(sock_p s, uint8_t *buf, int size)
 {
     int rc;
-	int err;
+    int err;
 
     if(!s || !buf) {
-    	return PLCTAG_ERR_NULL_PTR;
+        return PLCTAG_ERR_NULL_PTR;
     }
 
     /* The socket is non-blocking. */
     rc = recv(s->fd, (char *)buf, size, 0);
-	
+
     if(rc < 0) {
-		err=WSAGetLastError();
-    	if(err == WSAEWOULDBLOCK) {
-    		return PLCTAG_ERR_NO_DATA;
-    	} else {
-    		return PLCTAG_ERR_READ;
-    	}
+        err=WSAGetLastError();
+        if(err == WSAEWOULDBLOCK) {
+            return PLCTAG_ERR_NO_DATA;
+        } else {
+            return PLCTAG_ERR_READ;
+        }
     }
 
     return rc;
@@ -877,22 +877,22 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
 extern int socket_write(sock_p s, uint8_t *buf, int size)
 {
     int rc;
-	int err;
+    int err;
 
     if(!s || !buf) {
-    	return PLCTAG_ERR_NULL_PTR;
+        return PLCTAG_ERR_NULL_PTR;
     }
 
     /* The socket is non-blocking. */
     rc = send(s->fd, (char *)buf, size, MSG_NOSIGNAL);
 
     if(rc < 0) {
-		err=WSAGetLastError();
-    	if(err == WSAEWOULDBLOCK) {
-    		return PLCTAG_ERR_NO_DATA;
-    	} else {
-    		return PLCTAG_ERR_WRITE;
-    	}
+        err=WSAGetLastError();
+        if(err == WSAEWOULDBLOCK) {
+            return PLCTAG_ERR_NO_DATA;
+        } else {
+            return PLCTAG_ERR_WRITE;
+        }
     }
 
     return rc;
@@ -902,39 +902,39 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
 
 extern int socket_close(sock_p s)
 {
-	if(!s)
-		return PLCTAG_ERR_NULL_PTR;
+    if(!s)
+        return PLCTAG_ERR_NULL_PTR;
 
-	if(!s->is_open) {
-		return PLCTAG_STATUS_OK;
-	}
+    if(!s->is_open) {
+        return PLCTAG_STATUS_OK;
+    }
 
-	if(!closesocket(s->fd)) {
-		return PLCTAG_ERR_CLOSE;
-	}
+    if(!closesocket(s->fd)) {
+        return PLCTAG_ERR_CLOSE;
+    }
 
-	s->fd = 0;
-	s->is_open = 0;
+    s->fd = 0;
+    s->is_open = 0;
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
 extern int socket_destroy(sock_p *s)
 {
-	if(!s || !*s)
-		return PLCTAG_ERR_NULL_PTR;
+    if(!s || !*s)
+        return PLCTAG_ERR_NULL_PTR;
 
-	socket_close(*s);
+    socket_close(*s);
 
-	mem_free(*s);
+    mem_free(*s);
 
-	*s = 0;
+    *s = 0;
 
-	if(WSACleanup() != NO_ERROR)
-		return PLCTAG_ERR_WINSOCK;
+    if(WSACleanup() != NO_ERROR)
+        return PLCTAG_ERR_WINSOCK;
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -949,7 +949,7 @@ extern int socket_destroy(sock_p *s)
 
 
 struct serial_port_t {
-	HANDLE hSerialPort;
+    HANDLE hSerialPort;
     COMMCONFIG oldDCBSerialParams;
     COMMTIMEOUTS oldTimeouts;
 };
@@ -957,7 +957,7 @@ struct serial_port_t {
 
 serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int baud_rate, int data_bits, int stop_bits, int parity_type)
 {
-	serial_port_p serial_port;
+    serial_port_p serial_port;
     COMMCONFIG dcbSerialParams;
     COMMTIMEOUTS timeouts;
     HANDLE hSerialPort;
@@ -1006,30 +1006,30 @@ serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int ba
     }
 
 
-	/* data bits */
-	switch(data_bits) {
-		case 5:
-			DATABITS = 5;
-			break;
-			
-		case 6:
-			DATABITS = 6;
-			break;
-			
-		case 7:
-			DATABITS = 7;
-			break;
-		
-		case 8:
-			DATABITS = 8;
-			break;
-			
-		default:
-			/* unsupported number of data bits. */
+    /* data bits */
+    switch(data_bits) {
+        case 5:
+            DATABITS = 5;
+            break;
+
+        case 6:
+            DATABITS = 6;
+            break;
+
+        case 7:
+            DATABITS = 7;
+            break;
+
+        case 8:
+            DATABITS = 8;
+            break;
+
+        default:
+            /* unsupported number of data bits. */
             //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of data bits: %d. Use 5-8.",data_bits);
             return NULL;
-	}
-	
+    }
+
 
     switch(stop_bits) {
          case 1:
@@ -1061,12 +1061,12 @@ serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int ba
     }
 
     /* allocate the structure */
-	serial_port = (serial_port_p)calloc(1,sizeof(struct serial_port_t));
-	
-	if(!serial_port) {
-		//plc_err(lib, PLC_LOG_ERR, PLC_ERR_NO_MEM, "Unable to allocate serial port struct.");
-		return NULL;
-	}
+    serial_port = (serial_port_p)calloc(1,sizeof(struct serial_port_t));
+
+    if(!serial_port) {
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_NO_MEM, "Unable to allocate serial port struct.");
+        return NULL;
+    }
 
     /* open the serial port device */
     hSerialPort = CreateFile(path,
@@ -1142,7 +1142,7 @@ serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int ba
         //plc_err(lib, PLC_LOG_ERR, PLC_ERR_OPEN, "Error getting backup serial port timeouts.",path);
         return NULL;
     }
-	
+
     return serial_port;
 }
 
@@ -1165,9 +1165,9 @@ int plc_lib_close_serial_port(/*plc_lib lib,*/ serial_port_p serial_port)
 
     /* make sure that we do not call this twice. */
     serial_port->hSerialPort = 0;
-	
-	/* free the serial port */
-	free(serial_port);
+
+    /* free the serial port */
+    free(serial_port);
 
     return 1;
 }
@@ -1185,7 +1185,7 @@ int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size)
     if(rc != TRUE)
         return -1;
 
-	return (int)numBytesRead;
+    return (int)numBytesRead;
 }
 
 
@@ -1196,7 +1196,7 @@ int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size
 
     rc = WriteFile(serial_port->hSerialPort,(LPVOID)data,(DWORD)size,&numBytesWritten,NULL);
 
-	return (int)numBytesWritten;
+    return (int)numBytesWritten;
 }
 
 
@@ -1230,84 +1230,84 @@ int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size
 /* little endian */
 extern uint16_t h2le16(uint16_t v)
 {
-	return v;
+    return v;
 }
 
 
 
 extern uint16_t le2h16(uint16_t v)
 {
-	return v;
+    return v;
 }
 
 
 
 extern uint16_t h2be16(uint16_t v)
 {
-	uint8_t bytes[2];
+    uint8_t bytes[2];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
 
-	return ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+    return ((uint32_t)(bytes[0]) << 8)
+           |((uint32_t)(bytes[1]));
 }
 
 
 
 extern uint16_t be2h16(uint16_t v)
 {
-	uint8_t bytes[2];
+    uint8_t bytes[2];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
 
-	return ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+    return ((uint32_t)(bytes[0]) << 8)
+           |((uint32_t)(bytes[1]));
 }
 
 
 
 extern uint32_t h2le32(uint32_t v)
 {
-	return v;
+    return v;
 }
 
 extern uint32_t le2h32(uint32_t v)
 {
-	return v;
+    return v;
 }
 
 
 extern uint32_t h2be32(uint32_t v)
 {
-	uint8_t bytes[4];
+    uint8_t bytes[4];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
-	bytes[2] = ((v >> 16) & 0xFF);
-	bytes[3] = ((v >> 24) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
+    bytes[2] = ((v >> 16) & 0xFF);
+    bytes[3] = ((v >> 24) & 0xFF);
 
-	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+    return ((uint32_t)(bytes[0]) << 24)
+           |((uint32_t)(bytes[1]) << 16)
+           |((uint32_t)(bytes[2]) << 8)
+           |((uint32_t)(bytes[3]));
 }
 
 
 extern uint32_t be2h32(uint32_t v)
 {
-	uint8_t bytes[4];
+    uint8_t bytes[4];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
-	bytes[2] = ((v >> 16) & 0xFF);
-	bytes[3] = ((v >> 24) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
+    bytes[2] = ((v >> 16) & 0xFF);
+    bytes[3] = ((v >> 24) & 0xFF);
 
-	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+    return ((uint32_t)(bytes[0]) << 24)
+           |((uint32_t)(bytes[1]) << 16)
+           |((uint32_t)(bytes[2]) << 8)
+           |((uint32_t)(bytes[3]));
 }
 
 
@@ -1315,36 +1315,36 @@ extern uint32_t be2h32(uint32_t v)
 /* big endian */
 extern uint16_t h2le16(uint16_t v)
 {
-	uint8_t bytes[2];
+    uint8_t bytes[2];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
 
-	return  ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+    return  ((uint32_t)(bytes[0]) << 8)
+           |((uint32_t)(bytes[1]));
 }
 
 
 extern uint16_t le2h16(uint16_t v)
 {
-	uint8_t bytes[2];
+    uint8_t bytes[2];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
 
-	return  ((uint32_t)(bytes[0]) << 8)
-		   |((uint32_t)(bytes[1]));
+    return  ((uint32_t)(bytes[0]) << 8)
+           |((uint32_t)(bytes[1]));
 }
 
 
 extern uint16_t h2be16(uint16_t v)
 {
-	return v;
+    return v;
 }
 
 extern uint16_t be2h16(uint16_t v)
 {
-	return v;
+    return v;
 }
 
 
@@ -1352,43 +1352,43 @@ extern uint16_t be2h16(uint16_t v)
 
 extern uint32_t h2le32(uint32_t v)
 {
-	uint8_t bytes[4];
+    uint8_t bytes[4];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
-	bytes[2] = ((v >> 16) & 0xFF);
-	bytes[3] = ((v >> 24) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
+    bytes[2] = ((v >> 16) & 0xFF);
+    bytes[3] = ((v >> 24) & 0xFF);
 
-	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+    return ((uint32_t)(bytes[0]) << 24)
+           |((uint32_t)(bytes[1]) << 16)
+           |((uint32_t)(bytes[2]) << 8)
+           |((uint32_t)(bytes[3]));
 }
 
 extern uint32_t le2h32(uint32_t v)
 {
-	uint8_t bytes[4];
+    uint8_t bytes[4];
 
-	bytes[0] = (v & 0xFF);
-	bytes[1] = ((v >> 8) & 0xFF);
-	bytes[2] = ((v >> 16) & 0xFF);
-	bytes[3] = ((v >> 24) & 0xFF);
+    bytes[0] = (v & 0xFF);
+    bytes[1] = ((v >> 8) & 0xFF);
+    bytes[2] = ((v >> 16) & 0xFF);
+    bytes[3] = ((v >> 24) & 0xFF);
 
-	return ((uint32_t)(bytes[0]) << 24)
-		   |((uint32_t)(bytes[1]) << 16)
-		   |((uint32_t)(bytes[2]) << 8)
-		   |((uint32_t)(bytes[3]));
+    return ((uint32_t)(bytes[0]) << 24)
+           |((uint32_t)(bytes[1]) << 16)
+           |((uint32_t)(bytes[2]) << 8)
+           |((uint32_t)(bytes[3]));
 }
 
 
 extern uint32_t h2be32(uint32_t v)
 {
-	return v;
+    return v;
 }
 
 extern uint32_t be2h32(uint32_t v)
 {
-	return v;
+    return v;
 }
 
 #endif
@@ -1418,7 +1418,7 @@ int sleep_ms(int ms)
 
 
 
-/* 
+/*
  * time_ms
  *
  * Return current system time in millisecond units.  This is NOT an

@@ -31,10 +31,11 @@
 
 #include <limits.h>
 #include <float.h>
-#include <libplctag.h>
-#include <libplctag_tag.h>
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
 #include <platform.h>
 #include <util/attr.h>
+#include <util/debug.h>
 #include <ab/ab.h>
 
 

@@ -28,8 +28,8 @@
 #ifndef __PLCTAG_AB_AB_COMMON_H__
 #define __PLCTAG_AB_AB_COMMON_H__ 1
 
-#include <libplctag.h>
-#include <libplctag_tag.h>
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
 
 typedef struct ab_tag_t *ab_tag_p;
 #define AB_TAG_NULL ((ab_tag_p)NULL)

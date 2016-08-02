@@ -26,8 +26,8 @@
 
 
 #include <platform.h>
-#include <libplctag.h>
-#include <libplctag_tag.h>
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
 #include <ab/ab.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>
@@ -36,11 +36,12 @@
 #include <ab/eip_cip.h>
 #include <ab/eip_pccc.h>
 #include <ab/eip_dhp_pccc.h>
-#include <util/attr.h>
 #include <ab/session.h>
 #include <ab/connection.h>
 #include <ab/tag.h>
 #include <ab/request.h>
+#include <util/attr.h>
+#include <util/debug.h>
 
 
 /*
@@ -304,7 +305,7 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
 
             break;
 
-		case AB_PROTOCOL_MLGX800:
+        case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
             if(!cip_vtable.abort) {
                 cip_vtable.abort     = (tag_abort_func)ab_tag_abort;
@@ -465,7 +466,7 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
             break;
 
-		case AB_PROTOCOL_MLGX800:
+        case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
             if (!cip_encode_tag_name(tag, name)) {
                 pdebug(debug, "parse of CIP-style tag name %s failed!", name);
@@ -615,7 +616,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
             tmp->request_size = session->recv_offset;
         } /*else {
 
-	        pdebug(debug,"Response for unknown request.");
+            pdebug(debug,"Response for unknown request.");
         }*/
 
         /*
