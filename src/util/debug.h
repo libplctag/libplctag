@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
+ *   Copyright (C) 2016 by OmanTek                                         *
  *   Author Kyle Hayes  kylehayes@omantek.com                              *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -18,23 +18,36 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/**************************************************************************
- * CHANGE LOG                                                             *
- *                                                                        *
- * 2013-11-19  KRH - Created file.                                        *
- **************************************************************************/
+/*
+ * debug.h
+ *
+ *  Created on: August 1, 2016
+ *      Author: Kyle Hayes
+ */
 
-#ifndef __LIBPLCTAG_AB_CIP_H__
-#define __LIBPLCTAG_AB_CIP_H__
+#ifndef __DEBUG_H__
+#define __DEBUG_H__
 
-#include <libplctag.h>
-#include <ab/ab_common.h>
+#define DEBUG_NONE      (0)
+#define DEBUG_ERROR     (1)
+#define DEBUG_WARN      (2)
+#define DEBUG_INFO      (3)
+#define DEBUG_DETAIL    (4)
 
-
-int cip_encode_path(ab_tag_p tag, const char *path);
-char *cip_decode_status(int status);
-int cip_encode_tag_name(ab_tag_p tag,const char *name);
-
-
-
+extern int set_debug_level(int debug_level);
+extern int get_debug_level(void);
+extern void pdebug_impl(const char *func, int line_num, const char *templ, ...);
+#if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
+#define pdebug(d,f,...) \
+   do { if(d <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__); } while(0)
+#else
+#define pdebug(d,f,a...) \
+   do{ if(d <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,##a ); } while(0)
 #endif
+
+extern void pdebug_dump_bytes_impl(uint8_t *data,int count);
+#define pdebug_dump_bytes(dbg, d,c)  do { if(dbg <= get_debug_level()) pdebug_dump_bytes_impl(d,c); } while(0)
+
+
+
+#endif /* __DEBUG_H__ */

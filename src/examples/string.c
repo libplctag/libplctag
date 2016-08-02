@@ -27,8 +27,7 @@
 #else
 #include <unistd.h>
 #endif
-#include "../lib/libplctag.h"
-
+#include <lib/libplctag.h>
 
 /*
  * Read an array of 48 STRINGs.  Note that the actual data size of a string is 88 bytes, not 82+4.
@@ -61,12 +60,12 @@ int main(int argc, char **argv)
 
     /* let the connect succeed we hope */
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-    	sleep(1);
+        sleep(1);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-    	fprintf(stderr,"Error setting up tag internal state.\n");
-    	return 0;
+        fprintf(stderr,"Error setting up tag internal state.\n");
+        return 0;
     }
 
     /* get the data */
@@ -80,16 +79,16 @@ int main(int argc, char **argv)
 
     /* print out the data */
     for(i=0; i < ELEM_COUNT; i++) {
-		int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-		char str[83] = {0};
-		int j;
+        int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+        char str[83] = {0};
+        int j;
 
-		for(j=0; j<str_size; j++) {
-			str[j] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+j+4);
-		}
-		str[j] = (char)0;
+        for(j=0; j<str_size; j++) {
+            str[j] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+j+4);
+        }
+        str[j] = (char)0;
 
-		printf("string %d (%d chars) = '%s'\n",i, str_size, str);
+        printf("string %d (%d chars) = '%s'\n",i, str_size, str);
     }
 
 
@@ -104,16 +103,16 @@ int main(int argc, char **argv)
 
     /* print out the data */
     for(i=0; i < ELEM_COUNT; i++) {
-		int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-		char str[83] = {0};
-		int j;
+        int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+        char str[83] = {0};
+        int j;
 
-		for(j=0; j<str_size; j++) {
-			str[j] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+j+4);
-		}
-		str[j] = (char)0;
+        for(j=0; j<str_size; j++) {
+            str[j] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+j+4);
+        }
+        str[j] = (char)0;
 
-		printf("string %d (%d chars) = '%s'\n",i, str_size, str);
+        printf("string %d (%d chars) = '%s'\n",i, str_size, str);
     }
 
 

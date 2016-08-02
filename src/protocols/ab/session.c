@@ -32,6 +32,8 @@
 #include <ab/connection.h>
 #include <ab/request.h>
 #include <ab/eip.h>
+#include <util/debug.h>
+
 
 /*
  * session_get_new_seq_id_unsafe

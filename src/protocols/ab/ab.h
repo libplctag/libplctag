@@ -21,79 +21,21 @@
 /**************************************************************************
  * CHANGE LOG                                                             *
  *                                                                        *
- * 2015-09-12  KRH - Created file.                                        *
+ * 2012-02-23  KRH - Created file.                                        *
+ * 2012-06-15  KRH - Added DF1 registration function.                     *
  *                                                                        *
  **************************************************************************/
 
-#ifndef __PLCTAG_AB_TAG_H__
-#define __PLCTAG_AB_TAG_H__ 1
-
-#include <libplctag.h>
-#include <libplctag_tag.h>
-#include <ab/ab_common.h>
-#include <ab/session.h>
-#include <ab/connection.h>
-#include <ab/request.h>
-
-#define MAX_TAG_NAME 		(64)
-#define MAX_TAG_TYPE_INFO 	(64)
+#ifndef __LIBPLCTAG_AB_H__
+#define __LIBPLCTAG_AB_H__ 1
 
 
-struct ab_tag_t {
-	/*struct plc_tag_t p_tag;*/
-	TAG_BASE_STRUCT;
-
-	ab_tag_p next;
-	ab_tag_p prev;
-
-	/* how do we talk to this device? */
-	int protocol_type;
-	int use_dhp_direct;
-	uint8_t dhp_src;
-	uint8_t dhp_dest;
-
-	/* pointers back to session */
-	ab_session_p session;
-	int needs_connection;
-	ab_connection_p connection;
-
-	/* this contains the encoded name */
-	uint8_t encoded_name[MAX_TAG_NAME];
-	int encoded_name_size;
-
-	/* the connection IOI path */
-	uint8_t conn_path[MAX_CONN_PATH];
-	uint8_t conn_path_size;
-
-	uint8_t routing_path[MAX_CONN_PATH];
-	uint8_t routing_path_size;
-
-	/* storage for the encoded type. */
-	uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
-	int encoded_type_info_size;
-
-	/* number of elements and size of each in the tag. */
-	int elem_count;
-	int elem_size;
-
-	/* requests */
-	int pre_write_read;
-	int first_read;
-	int num_read_requests; /* number of read requests */
-	int num_write_requests; /* number of write requests */
-	int max_requests; /* how many can we have without reallocating? */
-	int *read_req_sizes;
-	int *write_req_sizes;
-
-	ab_request_p *reqs;
-
-	/* flags for operations */
-	int read_in_progress;
-	int write_in_progress;
-	/*int connect_in_progress;*/
-};
+#include <lib/libplctag.h>
+#include <util/attr.h>
 
 
+
+plc_tag ab_tag_create(attr attribs);
 
 
 #endif

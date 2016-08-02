@@ -28,16 +28,17 @@ set (libplctag_VERSION_MAJOR 1)
 set (libplctag_VERSION_MINOR 9)
 
 # set the main paths.
-set ( lib_SRC_PATH "${PROJECT_SOURCE_DIR}/src/lib" )
-set ( protocol_SRC_PATH "${PROJECT_SOURCE_DIR}/src/lib/protocols" )
+set ( base_SRC_PATH "${PROJECT_SOURCE_DIR}/src" )
+set ( lib_SRC_PATH "${base_SRC_PATH}/lib" )
+set ( protocol_SRC_PATH "${base_SRC_PATH}/protocols" )
 set ( ab_SRC_PATH "${protocol_SRC_PATH}/ab" )
-set ( util_SRC_PATH "${PROJECT_SOURCE_DIR}/src/lib/util" )
-set ( example_SRC_PATH "${PROJECT_SOURCE_DIR}/examples" )
+set ( util_SRC_PATH "${base_SRC_PATH}/util" )
+set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 
 # OS-specific files for the platform code.
 # FIXME - does this work for macOS?
 if (UNIX)
-    set ( platform_SRC_PATH "${PROJECT_SOURCE_DIR}/src/platform/linux" )
+    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/linux" )
 
     # set up the flags for the GCC or CLANG C compiler
     add_definitions(-std=c99)
@@ -50,15 +51,13 @@ if (UNIX)
     add_definitions(-lpthread)
 endif (UNIX)
 if (MSVC)
-    set ( platform_SRC_PATH "${PROJECT_SOURCE_DIR}/src/platform/windows" )
+    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
 endif (MSVC)
 
 # where to find include files.
-include_directories("${lib_SRC_PATH}")
-include_directories("${protocol_SRC_PATH}")
-include_directories("${util_SRC_PATH}")
+include_directories("${base_SRC_PATH}")
 include_directories("${platform_SRC_PATH}")
-
+include_directories("${protocol_SRC_PATH}")
 
 
 # set up the library sources
@@ -74,11 +73,11 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag_tag.c"
                      "${ab_SRC_PATH}/request.c"
                      "${ab_SRC_PATH}/session.c"
                      "${util_SRC_PATH}/attr.c"
+                     "${util_SRC_PATH}/debug.c"
                      "${platform_SRC_PATH}/platform.c" )
 
 # set up the library
 add_library(plctag SHARED ${libplctag_SRCS} )
-
 
 
 # add the examples

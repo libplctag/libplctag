@@ -37,14 +37,16 @@ extern "C"
 */
 #include <errno.h>
 #include <platform.h>
-#include <libplctag.h>
-#include <libplctag_tag.h>
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
 #include <ab/connection.h>
 #include <ab/session.h>
 #include <ab/tag.h>
 #include <ab/eip.h>
 #include <ab/ab.h>
 #include <util/attr.h>
+#include <util/debug.h>
+
 
 /*
  * Shared global data

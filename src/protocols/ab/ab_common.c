@@ -26,8 +26,8 @@
 
 
 #include <platform.h>
-#include <libplctag.h>
-#include <libplctag_tag.h>
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
 #include <ab/ab.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>
@@ -36,11 +36,12 @@
 #include <ab/eip_cip.h>
 #include <ab/eip_pccc.h>
 #include <ab/eip_dhp_pccc.h>
-#include <util/attr.h>
 #include <ab/session.h>
 #include <ab/connection.h>
 #include <ab/tag.h>
 #include <ab/request.h>
+#include <util/attr.h>
+#include <util/debug.h>
 
 
 /*

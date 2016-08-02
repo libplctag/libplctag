@@ -39,7 +39,7 @@ int send_eip_request_unsafe(ab_request_p req)
 {
     int rc;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(req->debug, "Starting.");
 
     /* if we have not already started, then start the send */
     if (!req->send_in_progress) {
@@ -67,7 +67,7 @@ int send_eip_request_unsafe(ab_request_p req)
         encap->encap_options = h2le32(0);
 
         /* display the data */
-        pdebug_dump_bytes(DEBUG_DETAIL, req->data, req->request_size);
+        pdebug_dump_bytes(req->debug, req->data, req->request_size);
 
         req->send_in_progress = 1;
     }
@@ -101,7 +101,7 @@ int send_eip_request_unsafe(ab_request_p req)
         req->recv_in_progress = 0;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(req->debug, "Done.");
 
     return rc;
 }
@@ -115,10 +115,10 @@ int send_eip_request_unsafe(ab_request_p req)
  */
 int recv_eip_response_unsafe(ab_session_p session)
 {
-    uint32_t data_needed = 0;
+    int data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
 
-    /*pdebug(DEBUG_DETAIL,"Starting.");*/
+    /*pdebug(session->debug,"Starting.");*/
 
     /*
      * Determine the amount of data to get.  At a minimum, we
@@ -137,12 +137,12 @@ int recv_eip_response_unsafe(ab_session_p session)
             rc = socket_read(session->sock, session->recv_data + session->recv_offset,
                              data_needed - session->recv_offset);
 
-            /*pdebug(DEBUG_DETAIL,"socket_read rc=%d",rc);*/
+            /*pdebug(session->debug,"socket_read rc=%d",rc);*/
 
             if (rc < 0) {
                 if (rc != PLCTAG_ERR_NO_DATA) {
                     /* error! */
-                    pdebug(DEBUG_WARN,"Error reading socket! rc=%d",rc);
+                    pdebug(session->debug,"Error reading socket! rc=%d",rc);
                     return rc;
                 }
             } else {
@@ -163,11 +163,11 @@ int recv_eip_response_unsafe(ab_session_p session)
         session->resp_seq_id = ((eip_encap_t*)(session->recv_data))->encap_sender_context;
         session->has_response = 1;
 
-        pdebug(DEBUG_DETAIL, "request received all needed data.");
+        pdebug(session->debug, "request received all needed data.");
 
         /*
         if(session->resp_seq_id == 0) {
-                pdebug(DEBUG_DETAIL,"Got zero response ID");
+                pdebug(debug,"Got zero response ID");
         }
         */
     }

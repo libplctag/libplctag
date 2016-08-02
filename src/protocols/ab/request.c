@@ -30,6 +30,8 @@
 #include <ab/request.h>
 #include <platform.h>
 #include <ab/session.h>
+#include <util/debug.h>
+
 
 /*
  * request_create
@@ -41,19 +43,19 @@
  */
 int request_create(ab_request_p* req)
 {
-	int rc = PLCTAG_STATUS_OK;
-	ab_request_p res;
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p res;
 
-	res = (ab_request_p)mem_alloc(sizeof(struct ab_request_t));
+    res = (ab_request_p)mem_alloc(sizeof(struct ab_request_t));
 
-	if (!res) {
-		*req = NULL;
-		rc = PLCTAG_ERR_NO_MEM;
-	} else {
-		*req = res;
-	}
+    if (!res) {
+        *req = NULL;
+        rc = PLCTAG_ERR_NO_MEM;
+    } else {
+        *req = res;
+    }
 
-	return rc;
+    return rc;
 }
 
 /*
@@ -63,32 +65,32 @@ int request_create(ab_request_p* req)
  */
 int request_add_unsafe(ab_session_p sess, ab_request_p req)
 {
-	int rc = PLCTAG_STATUS_OK;
-	ab_request_p cur, prev;
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p cur, prev;
 
     pdebug(sess->debug, "Starting.");
 
-	/* make sure the request points to the session */
-	req->session = sess;
+    /* make sure the request points to the session */
+    req->session = sess;
 
-	/* we add the request to the end of the list. */
-	cur = sess->requests;
-	prev = NULL;
+    /* we add the request to the end of the list. */
+    cur = sess->requests;
+    prev = NULL;
 
-	while (cur) {
-		prev = cur;
-		cur = cur->next;
-	}
+    while (cur) {
+        prev = cur;
+        cur = cur->next;
+    }
 
-	if (!prev) {
-		sess->requests = req;
-	} else {
-		prev->next = req;
-	}
+    if (!prev) {
+        sess->requests = req;
+    } else {
+        prev->next = req;
+    }
 
     pdebug(sess->debug, "Done.");
 
-	return rc;
+    return rc;
 }
 
 /*
@@ -98,17 +100,17 @@ int request_add_unsafe(ab_session_p sess, ab_request_p req)
  */
 int request_add(ab_session_p sess, ab_request_p req)
 {
-	int rc = PLCTAG_STATUS_OK;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(sess->debug, "Starting. sess=%p, req=%p",sess, req);
 
-	critical_block(global_session_mut) {
-		rc = request_add_unsafe(sess, req);
-	}
+    critical_block(global_session_mut) {
+        rc = request_add_unsafe(sess, req);
+    }
 
     pdebug(sess->debug, "Done.");
 
-	return rc;
+    return rc;
 }
 
 /*
@@ -118,38 +120,38 @@ int request_add(ab_session_p sess, ab_request_p req)
  */
 int request_remove_unsafe(ab_session_p sess, ab_request_p req)
 {
-	int rc = PLCTAG_STATUS_OK;
-	ab_request_p cur, prev;
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p cur, prev;
 
-	if(sess == NULL || req == NULL) {
-		return rc;
-	}
+    if(sess == NULL || req == NULL) {
+        return rc;
+    }
 
     pdebug(sess->debug, "Starting.");
 
-	/* find the request and remove it from the list. */
-	cur = sess->requests;
-	prev = NULL;
+    /* find the request and remove it from the list. */
+    cur = sess->requests;
+    prev = NULL;
 
-	while (cur && cur != req) {
-		prev = cur;
-		cur = cur->next;
-	}
+    while (cur && cur != req) {
+        prev = cur;
+        cur = cur->next;
+    }
 
-	if (cur == req) {
-		if (!prev) {
-			sess->requests = cur->next;
-		} else {
-			prev->next = cur->next;
-		}
-	} /* else not found */
+    if (cur == req) {
+        if (!prev) {
+            sess->requests = cur->next;
+        } else {
+            prev->next = cur->next;
+        }
+    } /* else not found */
 
-	req->next = NULL;
-	req->session = NULL;
+    req->next = NULL;
+    req->session = NULL;
 
     pdebug(sess->debug, "Done.");
 
-	return rc;
+    return rc;
 }
 
 /*
@@ -159,21 +161,21 @@ int request_remove_unsafe(ab_session_p sess, ab_request_p req)
  */
 int request_remove(ab_session_p sess, ab_request_p req)
 {
-	int rc = PLCTAG_STATUS_OK;
+    int rc = PLCTAG_STATUS_OK;
 
-	if(sess == NULL || req == NULL) {
-		return rc;
-	}
+    if(sess == NULL || req == NULL) {
+        return rc;
+    }
 
     pdebug(sess->debug, "Starting.");
 
-	critical_block(global_session_mut) {
-		rc = request_remove_unsafe(sess, req);
-	}
+    critical_block(global_session_mut) {
+        rc = request_remove_unsafe(sess, req);
+    }
 
     pdebug(sess->debug, "Done.");
 
-	return rc;
+    return rc;
 }
 
 /*
@@ -183,24 +185,24 @@ int request_remove(ab_session_p sess, ab_request_p req)
  */
 int request_destroy_unsafe(ab_request_p* req_pp)
 {
-	ab_request_p r;
+    ab_request_p r;
     int debug;
 
-	if(req_pp && *req_pp) {
-		r = *req_pp;
+    if(req_pp && *req_pp) {
+        r = *req_pp;
 
         debug = r->debug;
 
         pdebug(debug, "Starting.");
 
-		request_remove_unsafe(r->session, r);
-		mem_free(r);
-		*req_pp = NULL;
+        request_remove_unsafe(r->session, r);
+        mem_free(r);
+        *req_pp = NULL;
 
         pdebug(debug, "Done.");
-	}
+    }
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -210,5 +212,5 @@ int request_destroy(ab_request_p* req_pp)
         request_destroy_unsafe(req_pp);
     }
 
-	return PLCTAG_STATUS_OK;
+    return PLCTAG_STATUS_OK;
 }

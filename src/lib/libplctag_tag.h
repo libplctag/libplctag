@@ -32,7 +32,7 @@
 
 
 
-#include "libplctag.h"
+#include <lib/libplctag.h>
 #include <platform.h>
 #include <util/attr.h>
 

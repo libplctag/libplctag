@@ -29,21 +29,22 @@
  *                                                                        *
  * 2012-06-20  KRH - change plc_err() calls for new error API.            *
  *                                                                        *
- * 2012-12-19	KRH - Start refactoring for threaded API and attributes.   *
+ * 2012-12-19   KRH - Start refactoring for threaded API and attributes.   *
  *                                                                        *
  **************************************************************************/
 
 #include <ctype.h>
 #include <platform.h>
-#include <libplctag.h>
-#include <libplctag_tag.h>
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
 #include <ab/eip.h>
 #include <ab/ab_common.h>
 #include <ab/cip.h>
-#include <util/attr.h>
 #include <ab/tag.h>
 #include <ab/session.h>
 #include <ab/eip_cip.h>
+#include <util/attr.h>
+#include <util/debug.h>
 
 
 int allocate_request_slot(ab_tag_p tag);
@@ -428,14 +429,14 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
      * uint8_t reserved/pad (zero)
      * uint8_t[...] path (padded to even number of bytes)
      */
-	if(tag->conn_path_size > 0) {
-		*data = (tag->conn_path_size) / 2; /* in 16-bit words */
-		data++;
-		*data = 0; /* reserved/pad */
-		data++;
-		mem_copy(data, tag->conn_path, tag->conn_path_size);
-		data += tag->conn_path_size;
-	}
+    if(tag->conn_path_size > 0) {
+        *data = (tag->conn_path_size) / 2; /* in 16-bit words */
+        data++;
+        *data = 0; /* reserved/pad */
+        data++;
+        mem_copy(data, tag->conn_path, tag->conn_path_size);
+        data += tag->conn_path_size;
+    }
 
     /* now we go back and fill in the fields of the static part */
 
@@ -727,15 +728,15 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-		/*
-		 * FIXME
-		 *
-		 * It probably should not be necessary to check for both as setting the type to anything other
-		 * than fragmented is error-prone.
-		 */
+        /*
+         * FIXME
+         *
+         * It probably should not be necessary to check for both as setting the type to anything other
+         * than fragmented is error-prone.
+         */
 
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
-		    && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
             pdebug(debug, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -795,10 +796,10 @@ static int check_read_status(ab_tag_p tag)
             /* this is an aggregate type of some sort, the type info is variable length */
             int type_length =
                 *(data + 1) + 2; /*
-	                                                                   * MAGIC
-	                                                                   * add 2 to get the total length including
-	                                                                   * the type byte and the length byte.
-	                                                                   */
+                                                                       * MAGIC
+                                                                       * add 2 to get the total length including
+                                                                       * the type byte and the length byte.
+                                                                       */
 
             /* check for extra long types */
             if (type_length > MAX_TAG_TYPE_INFO) {
@@ -898,15 +899,15 @@ static int check_read_status(ab_tag_p tag)
             // tmp_rc = request_remove(tag->session, req);
 
             // if(tmp_rc != PLCTAG_STATUS_OK) {
-            //	pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
+            //  pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
             //
-            //	/* since we could not remove it, maybe the thread can. */
-            //	req->abort_request = 1;
+            //  /* since we could not remove it, maybe the thread can. */
+            //  req->abort_request = 1;
             //
-            //	rc = tmp_rc;
+            //  rc = tmp_rc;
             //} else {
-            //	/* free up the request resources */
-            //	request_destroy(&req);
+            //  /* free up the request resources */
+            //  request_destroy(&req);
             //}
 
             ///* mark it as freed */
@@ -1017,26 +1018,26 @@ static int check_write_status(ab_tag_p tag)
          * IO thread do the clean up.
      */
     // for(i = 0; i < tag->num_write_requests; i++) {
-    //	int tmp_rc;
+    //  int tmp_rc;
 
-    //	req = tag->reqs[i];
+    //  req = tag->reqs[i];
 
-    //	tmp_rc = request_remove(tag->session, req);
+    //  tmp_rc = request_remove(tag->session, req);
 
-    //	if(tmp_rc != PLCTAG_STATUS_OK) {
-    //		pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
+    //  if(tmp_rc != PLCTAG_STATUS_OK) {
+    //      pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
 
-    //		/* since we could not remove it, maybe the thread can. */
-    //		req->abort_request = 1;
+    //      /* since we could not remove it, maybe the thread can. */
+    //      req->abort_request = 1;
 
-    //		rc = tmp_rc;
-    //	} else {
-    //		/* free up the request resources */
-    //		request_destroy(&req);
-    //	}
+    //      rc = tmp_rc;
+    //  } else {
+    //      /* free up the request resources */
+    //      request_destroy(&req);
+    //  }
 
-    //	/* mark it as freed */
-    //	tag->reqs[i] = NULL;
+    //  /* mark it as freed */
+    //  tag->reqs[i] = NULL;
     //}
 
     /* this triggers the clean up */

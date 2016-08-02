@@ -21,21 +21,20 @@
 /**************************************************************************
  * CHANGE LOG                                                             *
  *                                                                        *
- * 2012-02-23  KRH - Created file.                                        *
- * 2012-06-15  KRH - Added DF1 registration function.                     *
- *                                                                        *
+ * 2013-11-19  KRH - Created file.                                        *
  **************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_H__
-#define __LIBPLCTAG_AB_H__ 1
+#ifndef __LIBPLCTAG_AB_CIP_H__
+#define __LIBPLCTAG_AB_CIP_H__
+
+#include <lib/libplctag.h>
+#include <ab/ab_common.h>
 
 
-#include <libplctag.h>
-#include <util/attr.h>
+int cip_encode_path(ab_tag_p tag, const char *path);
+char *cip_decode_status(int status);
+int cip_encode_tag_name(ab_tag_p tag,const char *name);
 
-
-
-plc_tag ab_tag_create(attr attribs);
 
 
 #endif
