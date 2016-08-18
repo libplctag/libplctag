@@ -118,9 +118,8 @@ int eip_cip_tag_read_start(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     int i;
     int byte_offset = 0;
-    int debug = tag->debug;
 
-    pdebug(debug, "Starting");
+    pdebug(DEBUG_INFO, "Starting");
 
     /* is this the first read? */
     if (tag->first_read) {
@@ -154,7 +153,7 @@ int eip_cip_tag_read_start(ab_tag_p tag)
             byte_offset += tag->read_req_sizes[i];
         }
 
-        pdebug(debug, "First read tag->num_read_requests=%d, byte_offset=%d.", tag->num_read_requests, byte_offset);
+        pdebug(DEBUG_DETAIL, "First read tag->num_read_requests=%d, byte_offset=%d.", tag->num_read_requests, byte_offset);
 
         /* i is the index of the first new request */
         rc = build_read_request(tag, i, byte_offset);
@@ -186,7 +185,7 @@ int eip_cip_tag_read_start(ab_tag_p tag)
     /* the read is now pending */
     tag->status = PLCTAG_STATUS_PENDING;
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -205,9 +204,8 @@ int eip_cip_tag_write_start(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     int i;
     int byte_offset = 0;
-    int debug = tag->debug;
 
-    pdebug(debug, "Starting");
+    pdebug(DEBUG_INFO, "Starting");
 
     /*
      * if the tag has not been read yet, read it.
@@ -217,7 +215,7 @@ int eip_cip_tag_write_start(ab_tag_p tag)
      */
 
     if (tag->first_read) {
-        pdebug(debug, "No read has completed yet, doing pre-read to get type information.");
+        pdebug(DEBUG_DETAIL, "No read has completed yet, doing pre-read to get type information.");
 
         tag->pre_write_read = 1;
 
@@ -255,7 +253,7 @@ int eip_cip_tag_write_start(ab_tag_p tag)
     tag->write_in_progress = 1;
     tag->status = PLCTAG_STATUS_PENDING;
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -271,14 +269,13 @@ int allocate_request_slot(ab_tag_p tag)
     ab_request_p* old_reqs;
     int i;
     int old_max = tag->max_requests;
-    int debug = tag->debug;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* bump up the number of allowed requests */
     tag->max_requests += DEFAULT_MAX_REQUESTS;
 
-    pdebug(debug, "setting max_requests = %d", tag->max_requests);
+    pdebug(DEBUG_DETAIL, "setting max_requests = %d", tag->max_requests);
 
     /* (re)allocate the read size array */
     old_sizes = tag->read_req_sizes;
@@ -336,6 +333,8 @@ int allocate_request_slot(ab_tag_p tag)
         mem_free(old_reqs);
     }
 
+    pdebug(DEBUG_DETAIL, "Done.");
+
     return PLCTAG_STATUS_OK;
 }
 
@@ -369,21 +368,18 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
     uint8_t* data;
     uint8_t* embed_start, *embed_end;
     ab_request_p req = NULL;
-    int debug = tag->debug;
     int rc;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
     rc = request_create(&req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(debug, "Unable to get new request.  rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         tag->status = rc;
         return rc;
     }
-
-    req->debug = debug;
 
     /* point the request struct at the buffer */
     cip = (eip_cip_uc_req*)(req->data);
@@ -478,7 +474,7 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
     rc = request_add(tag->session, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(debug, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
         request_destroy(&req);
         tag->status = rc;
         return rc;
@@ -487,7 +483,7 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
     /* save the request for later */
     tag->reqs[slot] = req;
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -495,25 +491,21 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
 int build_write_request(ab_tag_p tag, int slot, int byte_offset)
 {
     int rc = PLCTAG_STATUS_OK;
-    int debug = tag->debug;
     eip_cip_uc_req* cip;
     uint8_t* data;
     uint8_t* embed_start, *embed_end;
     ab_request_p req = NULL;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
     rc = request_create(&req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(debug, "Unable to get new request.  rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         tag->status = rc;
         return rc;
     }
-
-    /* set debug flag on the request too */
-    req->debug = tag->debug;
 
     cip = (eip_cip_uc_req*)(req->data);
 
@@ -628,13 +620,11 @@ int build_write_request(ab_tag_p tag, int slot, int byte_offset)
     /* mark it as ready to send */
     req->send_request = 1;
 
-    req->debug = tag->debug;
-
     /* add the request to the session's list. */
     rc = request_add(tag->session, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(debug, "Unable to lock add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to lock add request to session! rc=%d", rc);
         plc_tag_abort((plc_tag)tag);
         request_destroy(&req);
         tag->status = rc;
@@ -644,7 +634,7 @@ int build_write_request(ab_tag_p tag, int slot, int byte_offset)
     /* save the request for later */
     tag->reqs[slot] = req;
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -667,7 +657,8 @@ static int check_read_status(ab_tag_p tag)
     int i;
     ab_request_p req;
     int byte_offset = 0;
-    int debug = tag->debug;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* is there an outstanding request? */
     if (!tag->reqs) {
@@ -704,7 +695,7 @@ static int check_read_status(ab_tag_p tag)
 
         req->processed = 1;
 
-        pdebug(debug, "processing request %d", i);
+        pdebug(DEBUG_DETAIL, "processing request %d", i);
 
         /* point to the data */
         cip_resp = (eip_cip_uc_resp*)(req->data);
@@ -717,13 +708,13 @@ static int check_read_status(ab_tag_p tag)
 
         /* check the status */
         if (le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-            pdebug(debug, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
+            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if (le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(debug, "EIP command failed, response code: %d", cip_resp->encap_status);
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", cip_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -737,14 +728,14 @@ static int check_read_status(ab_tag_p tag)
 
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
             && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
-            pdebug(debug, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+            pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(debug, "CIP read failed with status: %d", cip_resp->status);
-            pdebug(debug, cip_decode_status(cip_resp->status));
+            pdebug(DEBUG_WARN, "CIP read failed with status: %d", cip_resp->status);
+            pdebug(DEBUG_WARN, cip_decode_status(cip_resp->status));
 
             switch (cip_resp->status) {
                 case 0x04: /* FIXME - should be defined constants */
@@ -763,7 +754,7 @@ static int check_read_status(ab_tag_p tag)
         }
 
         /* the first byte of the response is a type byte. */
-        pdebug(debug, "type byte = %d (%x)", (int)*data, (int)*data);
+        pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
 
         /*
          * AB has a relatively complicated scheme for data typing.  The type is
@@ -803,7 +794,7 @@ static int check_read_status(ab_tag_p tag)
 
             /* check for extra long types */
             if (type_length > MAX_TAG_TYPE_INFO) {
-                pdebug(debug, "Read data type info is too long (%d)!", type_length);
+                pdebug(DEBUG_WARN, "Read data type info is too long (%d)!", type_length);
                 rc = PLCTAG_ERR_TOO_LONG;
                 break;
             }
@@ -816,14 +807,14 @@ static int check_read_status(ab_tag_p tag)
 
             data += type_length;
         } else {
-            pdebug(debug, "Unsupported data type returned, type byte=%d", *data);
+            pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=%d", *data);
             rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
         /* copy data into the tag. */
         if ((byte_offset + (data_end - data)) > tag->size) {
-            pdebug(debug,
+            pdebug(DEBUG_WARN,
                    "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
                    byte_offset + (int)(data_end - data),
                    tag->size);
@@ -831,7 +822,7 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        pdebug(debug, "Got %d bytes of data", (data_end - data));
+        pdebug(DEBUG_DETAIL, "Got %d bytes of data", (data_end - data));
 
         /*
          * copy the data, but only if this is not
@@ -869,10 +860,10 @@ static int check_read_status(ab_tag_p tag)
             /* no, not yet */
             if (tag->first_read) {
                 /* call read start again to get the next piece */
-                pdebug(debug, "calling ab_rag_read_cip_start_unsafe() to get the next chunk.");
+                pdebug(DEBUG_DETAIL, "calling ab_rag_read_cip_start_unsafe() to get the next chunk.");
                 rc = eip_cip_tag_read_start(tag);
             } else {
-                pdebug(debug, "Insufficient data read for tag!");
+                pdebug(DEBUG_WARN, "Insufficient data read for tag!");
                 ab_tag_abort(tag);
                 rc = PLCTAG_ERR_READ;
             }
@@ -899,7 +890,7 @@ static int check_read_status(ab_tag_p tag)
             // tmp_rc = request_remove(tag->session, req);
 
             // if(tmp_rc != PLCTAG_STATUS_OK) {
-            //  pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
+            //  pdebug(DEBUG_WARN,"Unable to remove the request from the list! rc=%d",rc);
             //
             //  /* since we could not remove it, maybe the thread can. */
             //  req->abort_request = 1;
@@ -916,7 +907,7 @@ static int check_read_status(ab_tag_p tag)
 
             /* if this is a pre-read for a write, then pass off the the write routine */
             if (tag->pre_write_read) {
-                pdebug(debug, "Restarting write call now.");
+                pdebug(DEBUG_DETAIL, "Restarting write call now.");
 
                 tag->pre_write_read = 0;
                 rc = eip_cip_tag_write_start(tag);
@@ -924,12 +915,12 @@ static int check_read_status(ab_tag_p tag)
         }
     } else {
         /* error ! */
-        pdebug(debug, "Error received!");
+        pdebug(DEBUG_WARN, "Error received!");
     }
 
     tag->status = rc;
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -947,18 +938,25 @@ static int check_write_status(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     int i;
     ab_request_p req;
-    int debug = tag->debug;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* is there an outstanding request? */
     if (!tag->reqs) {
         tag->write_in_progress = 0;
         tag->status = PLCTAG_ERR_NULL_PTR;
+
+        pdebug(DEBUG_INFO, "No outstanding request!");
+
         return PLCTAG_ERR_NULL_PTR;
     }
 
     for (i = 0; i < tag->num_write_requests; i++) {
         if (tag->reqs[i] && !tag->reqs[i]->resp_received) {
             tag->status = PLCTAG_STATUS_PENDING;
+
+            pdebug(DEBUG_DETAIL, "Request still in progress.");
+
             return PLCTAG_STATUS_PENDING;
         }
     }
@@ -982,13 +980,13 @@ static int check_write_status(ab_tag_p tag)
         cip_resp = (eip_cip_uc_resp*)(req->data);
 
         if (le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-            pdebug(debug, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
+            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if (le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(debug, "EIP command failed, response code: %d", cip_resp->encap_status);
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", cip_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -998,14 +996,14 @@ static int check_write_status(ab_tag_p tag)
                          (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK));
 
         if (cip_resp->reply_service != reply_service) {
-            pdebug(debug, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+            pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(debug, "CIP read failed with status: %d", cip_resp->status);
-            pdebug(debug, cip_decode_status(cip_resp->status));
+            pdebug(DEBUG_WARN, "CIP read failed with status: %d", cip_resp->status);
+            pdebug(DEBUG_WARN, cip_decode_status(cip_resp->status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -1025,7 +1023,7 @@ static int check_write_status(ab_tag_p tag)
     //  tmp_rc = request_remove(tag->session, req);
 
     //  if(tmp_rc != PLCTAG_STATUS_OK) {
-    //      pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
+    //      pdebug(DEBUG_WARN,"Unable to remove the request from the list! rc=%d",rc);
 
     //      /* since we could not remove it, maybe the thread can. */
     //      req->abort_request = 1;
@@ -1046,7 +1044,7 @@ static int check_write_status(ab_tag_p tag)
     tag->write_in_progress = 0;
     tag->status = rc;
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -1059,12 +1057,11 @@ int calculate_write_sizes(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     int i;
     int byte_offset;
-    int debug = tag->debug;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if (tag->num_write_requests > 0) {
-        pdebug(debug, "Early termination, write sizes already calculated.");
+        pdebug(DEBUG_DETAIL, "Early termination, write sizes already calculated.");
         return rc;
     }
 
@@ -1084,7 +1081,7 @@ int calculate_write_sizes(ab_tag_p tag)
     data_per_packet &= 0xFFFFFFFC;
 
     if (data_per_packet <= 0) {
-        pdebug(debug,
+        pdebug(DEBUG_WARN,
                "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!",
                overhead,
                MAX_EIP_PACKET_SIZE);
@@ -1094,7 +1091,7 @@ int calculate_write_sizes(ab_tag_p tag)
 
     num_reqs = (tag->size + (data_per_packet - 1)) / data_per_packet;
 
-    pdebug(debug, "We need %d requests.", num_reqs);
+    pdebug(DEBUG_DETAIL, "We need %d requests.", num_reqs);
 
     byte_offset = 0;
 
@@ -1110,14 +1107,14 @@ int calculate_write_sizes(ab_tag_p tag)
                 tag->write_req_sizes[i] = (tag->size - byte_offset);
             }
 
-            pdebug(debug, "Request %d is of size %d.", i, tag->write_req_sizes[i]);
+            pdebug(DEBUG_DETAIL, "Request %d is of size %d.", i, tag->write_req_sizes[i]);
 
             /* update the byte offset for the next packet */
             byte_offset += tag->write_req_sizes[i];
         }
     }
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }

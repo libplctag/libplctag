@@ -29,7 +29,7 @@
 #ifndef __AB_AB_COMMON_H__
 #define __AB_AB_COMMON_H__
 
-#define MAX_CONN_PATH 		(128)
+#define MAX_CONN_PATH       (128)
 
 
 #include <platform.h>
@@ -65,7 +65,6 @@ struct ab_connection_t {
 
     int connect_in_progress;
     int status;
-    int debug;
 
     ab_tag_p tags;
 };

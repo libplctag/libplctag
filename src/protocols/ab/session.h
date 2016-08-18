@@ -31,49 +31,48 @@
 #include <ab/ab_common.h>
 #include <ab/request.h>
 
-#define MAX_SESSION_HOST 	(128)
+#define MAX_SESSION_HOST    (128)
 
 struct ab_session_t {
-	ab_session_p next;
-	ab_session_p prev;
+    ab_session_p next;
+    ab_session_p prev;
 
-	/* gateway connection related info */
-	char host[MAX_SESSION_HOST];
-	int port;
-	sock_p sock;
-	int is_connected;
-	int status;
-	int debug;
+    /* gateway connection related info */
+    char host[MAX_SESSION_HOST];
+    int port;
+    sock_p sock;
+    int is_connected;
+    int status;
 
-	/* registration info */
-	uint32_t session_handle;
+    /* registration info */
+    uint32_t session_handle;
 
-	/* Sequence ID for requests. */
-	uint64_t session_seq_id;
+    /* Sequence ID for requests. */
+    uint64_t session_seq_id;
 
-	/* current request being sent, only one at a time */
-	ab_request_p current_request;
+    /* current request being sent, only one at a time */
+    ab_request_p current_request;
 
-	/* list of outstanding requests for this session */
-	ab_request_p requests;
+    /* list of outstanding requests for this session */
+    ab_request_p requests;
 
-	/* counter for number of messages in flight */
-	int num_reqs_in_flight;
+    /* counter for number of messages in flight */
+    int num_reqs_in_flight;
 
-	/* data for receiving messages */
-	uint64_t resp_seq_id;
-	int has_response;
-	int recv_offset;
-	uint8_t recv_data[MAX_REQ_RESP_SIZE];
+    /* data for receiving messages */
+    uint64_t resp_seq_id;
+    int has_response;
+    int recv_offset;
+    uint8_t recv_data[MAX_REQ_RESP_SIZE];
 
-	/*int recv_size;*/
+    /*int recv_size;*/
 
-	/* tags for this session */
-	ab_tag_p tags;
+    /* tags for this session */
+    ab_tag_p tags;
 
-	/* connections for this session */
-	ab_connection_p connections;
-	uint32_t conn_serial_number; /* id for the next connection */
+    /* connections for this session */
+    ab_connection_p connections;
+    uint32_t conn_serial_number; /* id for the next connection */
 };
 
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
@@ -93,7 +92,7 @@ int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag);
 int session_add_tag(ab_session_p session, ab_tag_p tag);
 int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag);
 int session_remove_tag(ab_session_p session, ab_tag_p tag);
-ab_session_p session_create_unsafe(int debug, const char* host, int gw_port);
+ab_session_p session_create_unsafe(const char* host, int gw_port);
 int session_connect(ab_session_p session, const char *host);
 int session_destroy_unsafe(ab_session_p session);
 int session_destroy(ab_session_p session);
