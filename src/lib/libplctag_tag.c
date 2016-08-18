@@ -40,11 +40,14 @@
 
 
 
-static int setup_tag_map_mutex(int debug);
 static plc_tag map_id_to_tag(int tag_id);
 static int allocate_new_tag_to_id_mapping(plc_tag tag);
 static int release_tag_to_id_mapping(plc_tag tag);
+static int setup_global_mutex();
 
+
+mutex_p global_library_mutex = NULL;
+static lock_t global_library_mutex_lock = LOCK_INIT;
 
 
 /**************************************************************************
@@ -66,6 +69,11 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     attr attribs = NULL;
     int rc = PLCTAG_STATUS_OK;
 
+    /* setup a global mutex that all other code can use as a guard. */
+    if(setup_global_mutex() != PLCTAG_STATUS_OK) {
+        return PLC_TAG_NULL;
+    }
+
     if(!attrib_str || !str_length(attrib_str)) {
         return PLC_TAG_NULL;
     }
@@ -76,14 +84,8 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
         return PLC_TAG_NULL;
     }
 
-    /* make sure that we have a mutex for the mapping table. */
-    rc = setup_tag_map_mutex(attr_get_int(attribs,"debug",0));
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(attr_get_int(attribs,"debug",0),"Unable to set up mutex for tag ID mapping!");
-        attr_destroy(attribs);
-        return PLC_TAG_NULL;
-    }
+    /* set debug level */
+    set_debug_level(attr_get_int(attribs, "debug", DEBUG_NONE));
 
     /*
      * create the tag, this is protocol specific.
@@ -149,17 +151,17 @@ LIB_EXPORT int plc_tag_lock(plc_tag tag_id)
 {
     plc_tag tag = map_id_to_tag((int)(intptr_t)tag_id);
 
-    if(!tag || !tag->mut)
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag || !tag->mut) {
+        pdebug(DEBUG_WARN,"Tag is missing or mutex is already cleaned up!");
         return PLCTAG_ERR_NULL_PTR;
-
-    int debug = tag->debug;
-
-    pdebug(debug, "Starting.");
+    }
 
     /* lock the mutex */
     tag->status = mutex_lock(tag->mut);
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return tag->status;
 }
@@ -178,17 +180,17 @@ LIB_EXPORT int plc_tag_unlock(plc_tag tag_id)
 {
     plc_tag tag = map_id_to_tag((int)(intptr_t)tag_id);
 
-    if(!tag || !tag->mut)
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag || !tag->mut) {
+        pdebug(DEBUG_WARN,"Tag is missing or mutex is already cleaned up!");
         return PLCTAG_ERR_NULL_PTR;
-
-    int debug = tag->debug;
-
-    pdebug(debug, "Starting.");
+    }
 
     /* unlock the mutex */
     tag->status = mutex_unlock(tag->mut);
 
-    pdebug(debug,"Done.");
+    pdebug(DEBUG_INFO,"Done.");
 
     return tag->status;
 }
@@ -212,12 +214,12 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag_id)
 {
     plc_tag tag = map_id_to_tag((int)(intptr_t)tag_id);
 
-    if(!tag || !tag->vtable)
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag || !tag->vtable) {
+        pdebug(DEBUG_WARN,"Tag is missing or vtable is missing!");
         return PLCTAG_ERR_NULL_PTR;
-
-    int debug = tag->debug;
-
-    pdebug(debug, "Starting.");
+    }
 
     /* clear the status */
     tag->status = PLCTAG_STATUS_OK;
@@ -226,7 +228,7 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag_id)
     tag->read_cache_expire = (uint64_t)0;
 
     if(!tag->vtable->abort) {
-        pdebug(debug,"Tag does not have a abort function!");
+        pdebug(DEBUG_WARN,"Tag does not have a abort function!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -255,16 +257,15 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag_id)
 LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
 {
     plc_tag tag = map_id_to_tag((int)(intptr_t)tag_id);
-
-    if(!tag) {
-        return PLCTAG_STATUS_OK;
-    }
-
-    int debug = tag->debug;
     mutex_p temp_mut;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag || !tag->vtable) {
+        pdebug(DEBUG_WARN,"Tag is missing or vtable is missing!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     /* clear the mutex */
     if(tag->mut) {
@@ -275,7 +276,7 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
             release_tag_to_id_mapping(tag);
 
             if(!tag->vtable || !tag->vtable->destroy) {
-                pdebug(debug, "tag destructor not defined!");
+                pdebug(DEBUG_ERROR, "tag destructor not defined!");
                 tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
                 return PLCTAG_ERR_NOT_IMPLEMENTED;
             }
@@ -290,6 +291,8 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
 
         mutex_destroy(&temp_mut);
     }
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -310,27 +313,25 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
 LIB_EXPORT int plc_tag_read(plc_tag tag_id, int timeout)
 {
     plc_tag tag = map_id_to_tag((int)(intptr_t)tag_id);
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
 
     if(!tag) {
+        pdebug(DEBUG_WARN,"Tag is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    int debug = tag->debug;
-    int rc;
-
-    pdebug(debug, "Starting.");
-
     /* check for null parts */
     if(!tag->vtable || !tag->vtable->read) {
-        pdebug(debug, "Tag does not have a read function!");
+        pdebug(DEBUG_WARN, "Tag does not have a read function!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
 
-
     /* check read cache, if not expired, return existing data. */
     if(tag->read_cache_expire > time_ms()) {
-        pdebug(debug, "Returning cached data.");
+        pdebug(DEBUG_INFO, "Returning cached data.");
         tag->status = PLCTAG_STATUS_OK;
         return tag->status;
     }
@@ -338,14 +339,14 @@ LIB_EXPORT int plc_tag_read(plc_tag tag_id, int timeout)
     /* the protocol implementation does not do the timeout. */
     rc = tag->vtable->read(tag);
 
-    /* set up the cache time */
-    if(tag->read_cache_ms) {
-        tag->read_cache_expire = time_ms() + tag->read_cache_ms;
-    }
-
     /* if error, return now */
     if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
         return rc;
+    }
+
+    /* set up the cache time */
+    if(tag->read_cache_ms) {
+        tag->read_cache_expire = time_ms() + tag->read_cache_ms;
     }
 
     /*
@@ -382,10 +383,10 @@ LIB_EXPORT int plc_tag_read(plc_tag tag_id, int timeout)
             rc = PLCTAG_ERR_TIMEOUT;
         }
 
-        pdebug(debug,"elapsed time %ldms",(time_ms()-start_time));
+        pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
     }
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return rc;
 }
@@ -408,19 +409,21 @@ LIB_EXPORT int plc_tag_status(plc_tag tag_id)
 {
     plc_tag tag = map_id_to_tag((int)(intptr_t)tag_id);
 
-    /*pdebug("Starting.");*/
+    /* commented out due to too much output. */
+    /*pdebug(DEBUG_INFO,"Starting.");*/
 
     if(!tag) {
+        pdebug(DEBUG_WARN, "Tag is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!tag->vtable || !tag->vtable->status) {
         if(tag->status) {
-            pdebug(tag->debug, "tag status not ok!");
+            pdebug(DEBUG_WARN, "tag status not ok!");
             return tag->status;
         }
 
-        pdebug(tag->debug, "tag status accessor not defined!");
+        pdebug(DEBUG_ERROR, "tag status accessor not defined!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -451,22 +454,21 @@ LIB_EXPORT int plc_tag_status(plc_tag tag_id)
 LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
 {
     plc_tag tag = map_id_to_tag((int)(intptr_t)tag_id);
-
-    if(!tag) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    int debug = tag->debug;
     int rc;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag is NULL!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     /* we are writing so the tag existing data is stale. */
     tag->read_cache_expire = (uint64_t)0;
 
     /* check the vtable */
     if(!tag->vtable || !tag->vtable->write) {
-        pdebug(debug, "Tag does not have a write function!");
+        pdebug(DEBUG_WARN, "Tag does not have a write function!");
         tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
@@ -475,8 +477,10 @@ LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
     rc = tag->vtable->write(tag);
 
     /* if error, return now */
-    if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK)
+    if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Response from write command is not OK!");
         return rc;
+    }
 
     /*
      * if there is a timeout, then loop until we get
@@ -506,13 +510,14 @@ LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
          * Abort the operation and set the status to show the timeout.
          */
         if(rc == PLCTAG_STATUS_PENDING) {
+            pdebug(DEBUG_WARN, "Write operation timed out.");
             plc_tag_abort(tag);
             tag->status = PLCTAG_ERR_TIMEOUT;
             rc = PLCTAG_ERR_TIMEOUT;
         }
     }
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return rc;
 }
@@ -1234,45 +1239,8 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
 #define MAX_TAG_IDS (982451683)  /* a big prime */
 static int next_tag_id = MAX_TAGS;
 static plc_tag tag_map[MAX_TAGS] = {0,};
-static mutex_p tag_map_mutex = NULL;
-static lock_t tag_map_mutex_lock = LOCK_INIT;
 
 
-
-/*
- * setup_tag_map_mutex
- *
- * check to see if the tag map mutex is set up.  If not, do an atomic
- * lock and set it up.
- */
-static int setup_tag_map_mutex(int debug)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    /* loop until we get the lock flag */
-    while (!lock_acquire((lock_t*)&tag_map_mutex_lock)) {
-        sleep_ms(1);
-    }
-
-    /*
-     * FIXME - this is still a race condition on some processors.
-     * Replace with a CAS loop.
-     */
-
-    /* first see if the mutex is there. */
-    if (!tag_map_mutex) {
-        rc = mutex_create((mutex_p*)&tag_map_mutex);
-
-        if (rc != PLCTAG_STATUS_OK) {
-            pdebug(debug, "Unable to create global tag mutex!");
-        }
-    }
-
-    /* we hold the lock, so clear it.*/
-    lock_release((lock_t*)&tag_map_mutex_lock);
-
-    return rc;
-}
 
 
 
@@ -1282,7 +1250,7 @@ static int allocate_new_tag_to_id_mapping(plc_tag tag)
     int entry_offset = 1;
     int actual_index = 0;
 
-    critical_block(tag_map_mutex) {
+    critical_block(global_library_mutex) {
         for(entry_offset = 1; entry_offset < MAX_TAGS; entry_offset++)  {
             actual_index = ((next_tag_id + entry_offset) % MAX_TAG_IDS) % MAX_TAGS;
 
@@ -1311,7 +1279,7 @@ static plc_tag map_id_to_tag(int tag_id)
 {
     plc_tag result = NULL;
 
-    critical_block(tag_map_mutex) {
+    critical_block(global_library_mutex) {
         int tag_id = (int)(intptr_t)(tag_id);
         result = tag_map[tag_id % MAX_TAGS];
     }
@@ -1336,7 +1304,7 @@ static int release_tag_to_id_mapping(plc_tag tag)
 
     map_index = tag->tag_id % MAX_TAGS;
 
-    critical_block(tag_map_mutex) {
+    critical_block(global_library_mutex) {
         /* find the actual slot and check if it is the right tag */
         if(!tag_map[map_index] || tag_map[map_index] != tag) {
             rc = PLCTAG_ERR_NOT_FOUND;
@@ -1344,6 +1312,32 @@ static int release_tag_to_id_mapping(plc_tag tag)
             tag_map[map_index] = NULL;
         }
     }
+
+    return rc;
+}
+
+
+
+static int setup_global_mutex(void)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    /* loop until we get the lock flag */
+    while (!lock_acquire((lock_t*)&global_library_mutex_lock)) {
+        sleep_ms(1);
+    }
+
+    /* first see if the mutex is there. */
+    if (!global_library_mutex) {
+        rc = mutex_create((mutex_p*)&global_library_mutex);
+
+        if (rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
+        }
+    }
+
+    /* we hold the lock, so clear it.*/
+    lock_release((lock_t*)&global_library_mutex_lock);
 
     return rc;
 }

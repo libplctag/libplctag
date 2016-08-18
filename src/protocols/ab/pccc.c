@@ -98,11 +98,11 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
     /* get the data type */
     tmp = name;
 
-    //pdebug(1,"starting to parse name %s",tmp);
+    //pdebug(DEBUG_DETAIL,"starting to parse name %s",tmp);
 
     /* skip to the first number */
     while(*tmp && !isdigit(*tmp)) {
-        //pdebug(1,"skipping character '%c'",*tmp);
+        //pdebug(DEBUG_DETAIL,"skipping character '%c'",*tmp);
         tmp++;
     }
 
@@ -122,7 +122,7 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 
     if(*tmp != ':') {
         /* bad parse! */
-        //pdebug(1,"bad parse of name, failed to fine : after data file number.");
+        pdebug(DEBUG_WARN,"bad parse of name, failed to fine : after data file number.");
         *size = 0;
         return 0;
     }

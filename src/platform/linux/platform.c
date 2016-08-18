@@ -216,7 +216,7 @@ extern int str_to_int(const char *str, int *val)
     tmp_val = strtol(str,&endptr,0);
 
     if (errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-        /*pdebug("strtol returned %ld with errno %d",tmp_val, errno);*/
+        pdebug(DEBUG_WARN,"strtol returned %ld with errno %d",tmp_val, errno);
         return -1;
     }
 
@@ -340,25 +340,25 @@ struct mutex_t {
 
 int mutex_create(mutex_p *m)
 {
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
 
     if(! *m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_ERROR,"null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(pthread_mutex_init(&((*m)->p_mutex),NULL)) {
         mem_free(*m);
         *m = NULL;
-        /*pdebug("Error initializing mutex.");*/
+        pdebug(DEBUG_ERROR,"Error initializing mutex.");
         return PLCTAG_ERR_MUTEX_INIT;
     }
 
     (*m)->initialized = 1;
 
-    /*pdebug("Done.");*/
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -366,10 +366,10 @@ int mutex_create(mutex_p *m)
 
 int mutex_lock(mutex_p m)
 {
-    /*pdebug(1,"locking mutex %p",m);*/
+    /*pdebug(DEBUG_DETAIL,"locking mutex %p",m);*/
 
     if(!m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -378,11 +378,11 @@ int mutex_lock(mutex_p m)
     }
 
     if(pthread_mutex_lock(&(m->p_mutex))) {
-        /*pdebug("error locking mutex.");*/
+        pdebug(DEBUG_WARN, "error locking mutex.");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
-    //pdebug("Done.");
+    /*pdebug(DEBU_DETAIL,"Done.");*/
 
     return PLCTAG_STATUS_OK;
 }
@@ -391,10 +391,10 @@ int mutex_lock(mutex_p m)
 
 int mutex_unlock(mutex_p m)
 {
-    /*pdebug(1, "unlocking mutex %p",m);*/
+    /*pdebug(DEBUG_DETAIL, "unlocking mutex %p",m);*/
 
     if(!m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_WARN,"null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -403,11 +403,11 @@ int mutex_unlock(mutex_p m)
     }
 
     if(pthread_mutex_unlock(&(m->p_mutex))) {
-        /*pdebug("error unlocking mutex.");*/
+        pdebug(DEBUG_WARN, "error unlocking mutex.");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    //pdebug("Done.");
+    /* pdebug(DEBUG_DETAIL,"Done."); */
 
     return PLCTAG_STATUS_OK;
 }
@@ -415,15 +415,15 @@ int mutex_unlock(mutex_p m)
 
 int mutex_destroy(mutex_p *m)
 {
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(pthread_mutex_destroy(&((*m)->p_mutex))) {
-        /*pdebug("error while attempting to destroy mutex.");*/
+        pdebug(DEBUG_WARN, "error while attempting to destroy mutex.");
         return PLCTAG_ERR_MUTEX_DESTROY;
     }
 
@@ -431,7 +431,7 @@ int mutex_destroy(mutex_p *m)
 
     *m = NULL;
 
-    /*pdebug("Done.");*/
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -462,27 +462,27 @@ struct thread_t {
 
 extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg)
 {
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!t) {
-        /*pdebug("null thread pointer.");*/
+        pdebug(DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     *t = (thread_p)mem_alloc(sizeof(struct thread_t));
 
     if(! *t) {
-        /*pdebug("null thread pointer.");*/
+        pdebug(DEBUG_ERROR, "Failed to allocate memory for thread.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* create a pthread.  0 means success. */
     if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
-        /*pdebug("error creating thread.");*/
+        pdebug(DEBUG_ERROR, "error creating thread.");
         return PLCTAG_ERR_THREAD_CREATE;
     }
 
-    /*pdebug("Done.");*/
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -510,19 +510,19 @@ int thread_join(thread_p t)
 {
     void *unused;
 
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!t) {
-        /*pdebug("null thread pointer.");*/
+        pdebug(DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(pthread_join(t->p_thread,&unused)) {
-        /*pdebug("Error joining thread.");*/
+        pdebug(DEBUG_ERROR, "Error joining thread.");
         return PLCTAG_ERR_THREAD_JOIN;
     }
 
-    /*pdebug("Done.");*/
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -535,16 +535,18 @@ int thread_join(thread_p t)
  */
 extern int thread_destroy(thread_p *t)
 {
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!t || ! *t) {
-        /*pdebug("null thread pointer.");*/
+        pdebug(DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     mem_free(*t);
 
     *t = NULL;
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -608,19 +610,21 @@ struct sock_t {
 
 extern int socket_create(sock_p *s)
 {
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!s) {
-        /*pdebug("null socket pointer.");*/
+        pdebug(DEBUG_WARN, "null socket pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     *s = (sock_p)mem_alloc(sizeof(struct sock_t));
 
     if(! *s) {
-        /*pdebug("memory allocation failure.");*/
+        pdebug(DEBUG_ERROR, "Failed to allocate memory for socket.");
         return PLCTAG_ERR_NO_MEM;
     }
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -638,14 +642,14 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     int flags;
     struct timeval timeout; /* used for timing out connections etc. */
 
-    /*pdebug(1,"Starting.");*/
+    pdebug(DEBUG_DETAIL,"Starting.");
 
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     /* check for errors */
     if(fd < 0) {
-        /*pdebug(1,"Socket creation failed, errno: %d",errno);*/
+        pdebug(DEBUG_ERROR,"Socket creation failed, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -654,7 +658,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
         close(fd);
-        /*pdebug("Error setting socket reuse option, errno: %d",errno);*/
+        pdebug(DEBUG_ERROR, "Error setting socket reuse option, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -663,13 +667,13 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
         close(fd);
-        /*pdebug("Error setting socket receive timeout option, errno: %d",errno);*/
+        pdebug(DEBUG_ERROR,"Error setting socket receive timeout option, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
 
     if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
         close(fd);
-        /*pdebug("Error setting socket set timeout option, errno: %d",errno);*/
+        pdebug(DEBUG_ERROR, "Error setting socket set timeout option, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -677,7 +681,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     /* try a numeric IP address conversion first. */
     if(inet_pton(AF_INET,host,(struct in_addr *)ips) > 0) {
-        /*pdebug("Found numeric IP address: %s",host);*/
+        pdebug(DEBUG_DETAIL, "Found numeric IP address: %s",host);
         num_ips = 1;
     } else {
         struct hostent *h=NULL;
@@ -686,7 +690,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         h = gethostbyname(host);
 
         if(!h) {
-            /*pdebug("Call to gethostbyname() failed, errno: %d!", errno);*/
+            pdebug(DEBUG_ERROR, "Call to gethostbyname() failed, errno: %d!", errno);
             return PLCTAG_ERR_OPEN;
         }
 
@@ -715,22 +719,22 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         /* try each IP until we run out or get a connection. */
         gw_addr.sin_addr.s_addr = ips[i];
 
-        /*pdebug("Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));*/
+        pdebug(DEBUG_DETAIL, "Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));
 
         rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
 
         if( rc == 0) {
-            /*pdebug("Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));*/
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));
             done = 1;
         } else {
-            /*pdebug("Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);*/
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);
             i++;
         }
     } while(!done && i < num_ips);
 
     if(!done) {
         close(fd);
-        /*pdebug("Unable to connect to any gateway host IP address!");*/
+        pdebug(DEBUG_ERROR, "Unable to connect to any gateway host IP address!");
         return PLCTAG_ERR_OPEN;
     }
 
@@ -741,7 +745,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     flags=fcntl(fd,F_GETFL,0);
 
     if(flags<0) {
-        /*pdebug("Error getting socket options, errno: %d", errno);*/
+        pdebug(DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
         close(fd);
         return PLCTAG_ERR_OPEN;
     }
@@ -749,7 +753,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     flags |= O_NONBLOCK;
 
     if(fcntl(fd,F_SETFL,flags)<0) {
-        /*pdebug("Error setting socket to non-blocking, errno: %d", errno);*/
+        pdebug(DEBUG_ERROR, "Error setting socket to non-blocking, errno: %d", errno);
         close(fd);
         return PLCTAG_ERR_OPEN;
     }
@@ -757,6 +761,8 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     /* save the values */
     s->fd = fd;
     s->port = port;
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -779,7 +785,7 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             return PLCTAG_ERR_NO_DATA;
         } else {
-            pdebug(1,"Socket read error: rc=%d", rc);
+            pdebug(DEBUG_WARN,"Socket read error: rc=%d, errno=%d", rc, errno);
             return PLCTAG_ERR_READ;
         }
     }

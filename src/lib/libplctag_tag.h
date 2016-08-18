@@ -40,28 +40,7 @@
 #define PLCTAG_DATA_LITTLE_ENDIAN   (0)
 #define PLCTAG_DATA_BIG_ENDIAN      (1)
 
-
-/*
- * plc_err
- *
- * Use this routine to dump errors into the logs yourself.  Note
- * that it is a macro and thus the line number and function
- * will only be those of the C code.  If you use a wrapper around
- * this, you may want to call the underlying plc_err_impl
- * routine directly.
- */
-
-/* helper functions for logging/errors */
-/*LIB_EXPORT void plc_err_impl(int level, const char *func, int line_num, int err_code, const char *fmt, ...);
-#if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
-#define plc_err(lib,level,e,f,...) \
-   plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,__VA_ARGS__)
-#else
-#define plc_err(lib,level,e,f,a...) \
-   plc_err_impl(lib,level,__PRETTY_FUNCTION__,__LINE__,e,f,##a )
-#endif
-*/
-
+extern mutex_p global_library_mutex;
 
 
 /* define tag operation functions */
@@ -94,7 +73,6 @@ typedef struct tag_vtable_t *tag_vtable_p;
                         mutex_p mut; \
                         int status; \
                         int endian; \
-                        int debug; \
                         int tag_id; \
                         uint64_t read_cache_expire; \
                         uint64_t read_cache_ms; \

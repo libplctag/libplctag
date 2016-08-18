@@ -39,10 +39,10 @@ extern int get_debug_level(void);
 extern void pdebug_impl(const char *func, int line_num, const char *templ, ...);
 #if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
 #define pdebug(d,f,...) \
-   do { if(d <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__); } while(0)
+   do { if((d) <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__); } while(0)
 #else
 #define pdebug(d,f,a...) \
-   do{ if(d <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,##a ); } while(0)
+   do{ if((d) <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__, f, ##a ); } while(0)
 #endif
 
 extern void pdebug_dump_bytes_impl(uint8_t *data,int count);

@@ -129,7 +129,6 @@ ab_connection_p connection_create_unsafe(int debug, const char* path, ab_session
         return NULL;
     }
 
-    connection->debug = debug;
     connection->session = session;
     connection->conn_seq_num = 1 /*(uint16_t)(intptr_t)(connection)*/;
     connection->orig_connection_id = ++session->conn_serial_number;
@@ -150,26 +149,25 @@ ab_connection_p connection_create_unsafe(int debug, const char* path, ab_session
 
 int connection_perform_forward_open(ab_connection_p connection)
 {
-    int debug = connection->debug;
     ab_request_p req;
     uint64_t timeout_time;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
     rc = request_create(&req);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(debug,"Unable to get new request.  rc=%d",rc);
+            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
             rc = 0;
             break;
         }
 
         /* send the ForwardOpen command to the PLC */
         if((rc = send_forward_open_req(connection, req)) != PLCTAG_STATUS_OK) {
-            pdebug(connection->debug,"Unable to send ForwardOpen packet!");
+            pdebug(DEBUG_WARN,"Unable to send ForwardOpen packet!");
             break;
         }
 
@@ -182,14 +180,14 @@ int connection_perform_forward_open(ab_connection_p connection)
 
         /* timeout? */
         if(!req->resp_received) {
-            pdebug(debug,"Timed out waiting for ForwardOpen response!");
+            pdebug(DEBUG_WARN,"Timed out waiting for ForwardOpen response!");
             rc = PLCTAG_ERR_TIMEOUT_ACK;
             break;
         }
 
         /* wait for the ForwardOpen response. */
         if((rc = recv_forward_open_resp(connection, req)) != PLCTAG_STATUS_OK) {
-            pdebug(debug,"Unable to use ForwardOpen response!");
+            pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -201,7 +199,7 @@ int connection_perform_forward_open(ab_connection_p connection)
         request_destroy(&req);
     }
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -212,11 +210,8 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     eip_forward_open_request_t *fo;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
-    int debug = connection->debug;
 
-    pdebug(debug,"Starting");
-
-    req->debug = debug;
+    pdebug(DEBUG_INFO,"Starting");
 
     fo = (eip_forward_open_request_t*)(req->data);
 
@@ -276,7 +271,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     /* add the request to the session's list. */
     rc = request_add(connection->session, req);
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return rc;
 }
@@ -286,27 +281,26 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
 {
     eip_forward_open_response_t *fo_resp;
     int rc = PLCTAG_STATUS_OK;
-    int debug = connection->debug;
 
-    pdebug(debug,"Starting");
+    pdebug(DEBUG_INFO,"Starting");
 
     fo_resp = (eip_forward_open_response_t*)(req->data);
 
     do {
         if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-            pdebug(debug,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
+            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h16(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(debug,"EIP command failed, response code: %d",fo_resp->encap_status);
+            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(debug,"Forward Open command failed, response code: %d",fo_resp->general_status);
+            pdebug(DEBUG_WARN,"Forward Open command failed, response code: %d",fo_resp->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -315,25 +309,25 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
         connection->targ_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
         connection->is_connected = 1;
 
-        pdebug(debug,"Connection set up succeeded.");
+        pdebug(DEBUG_DETAIL,"Connection set up succeeded.");
 
         connection->status = PLCTAG_STATUS_OK;
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    pdebug(debug,"Done.");
+    pdebug(DEBUG_INFO,"Done.");
 
     return rc;
 }
 
 int connection_add_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
 {
-    pdebug(connection->debug, "Starting");
+    pdebug(DEBUG_DETAIL, "Starting");
 
     tag->next = connection->tags;
     connection->tags = tag;
 
-    pdebug(connection->debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -343,17 +337,18 @@ int connection_add_tag(ab_connection_p connection, ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_INFO, "Starting.");
+
     if(connection) {
-        int debug = connection->debug;
-        pdebug(debug,"entering critical block %p",global_session_mut);
         critical_block(global_session_mut) {
             rc = connection_add_tag_unsafe(connection, tag);
         }
-        pdebug(debug,"leaving critical block %p",global_session_mut);
-
     } else {
+        pdebug(DEBUG_WARN, "Connection ptr is null!");
         rc = PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -362,8 +357,9 @@ int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
 {
     ab_tag_p cur;
     ab_tag_p prev;
-    int debug = tag->debug;
     int rc;
+
+    pdebug(DEBUG_INFO, "Starting.");
 
     cur = connection->tags;
     prev = NULL;
@@ -388,9 +384,11 @@ int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
     }
 
     if (connection_empty_unsafe(connection)) {
-        pdebug(debug, "destroying connection");
+        pdebug(DEBUG_DETAIL, "destroying connection");
         connection_destroy_unsafe(connection);
     }
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -399,16 +397,18 @@ int connection_remove_tag(ab_connection_p connection, ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_INFO, "Starting.");
+
     if(connection && connection->session) {
-        int debug = connection->debug;
-        pdebug(debug,"entering critical block %p",global_session_mut);
         critical_block(global_session_mut) {
             rc = connection_remove_tag_unsafe(connection, tag);
         }
-        pdebug(debug,"leaving critical block %p",global_session_mut);
     } else {
+        pdebug(DEBUG_WARN, "Connection or session ptr is null!");
         rc = PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -437,18 +437,16 @@ int connection_is_empty(ab_connection_p connection)
 
 int connection_destroy_unsafe(ab_connection_p connection)
 {
+    pdebug(DEBUG_INFO, "Starting.");
+
     if (!connection) {
         return 1;
     }
 
-    int debug = connection->debug;
-
-    pdebug(debug, "Starting.");
-
     /* do not destroy the connection if there are
      * connections still */
     if (connection->tags) {
-        pdebug(debug, "Attempt to destroy connection while open tags exist!");
+        pdebug(DEBUG_WARN, "Attempt to destroy connection while open tags exist!");
         return 0;
     }
 
@@ -461,39 +459,38 @@ int connection_destroy_unsafe(ab_connection_p connection)
 
     mem_free(connection);
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return 1;
 }
 
 int connection_close(ab_connection_p connection)
 {
-    int debug = connection->debug;
     ab_request_p req;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
     rc = request_create(&req);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(debug,"Unable to get new request.  rc=%d",rc);
+            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
             rc = 0;
             break;
         }
 
         /* send the ForwardClose command to the PLC */
         if((rc = send_forward_close_req(connection, req)) != PLCTAG_STATUS_OK) {
-            pdebug(connection->debug,"Unable to send ForwardClose packet!");
+            pdebug(DEBUG_WARN,"Unable to send ForwardClose packet!");
             break;
         }
     } while(0);
 
     connection->status = rc;
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -504,11 +501,8 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
     eip_forward_close_req_t *fo;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
-    int debug = connection->debug;
 
-    pdebug(debug,"Starting");
-
-    req->debug = debug;
+    pdebug(DEBUG_INFO,"Starting");
 
     fo = (eip_forward_close_req_t*)(req->data);
 
@@ -561,7 +555,7 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
     /* add the request to the session's list. */
     rc = request_add_unsafe(connection->session, req);
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return rc;
 }

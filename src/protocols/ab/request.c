@@ -68,7 +68,7 @@ int request_add_unsafe(ab_session_p sess, ab_request_p req)
     int rc = PLCTAG_STATUS_OK;
     ab_request_p cur, prev;
 
-    pdebug(sess->debug, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* make sure the request points to the session */
     req->session = sess;
@@ -88,7 +88,7 @@ int request_add_unsafe(ab_session_p sess, ab_request_p req)
         prev->next = req;
     }
 
-    pdebug(sess->debug, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -102,13 +102,13 @@ int request_add(ab_session_p sess, ab_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(sess->debug, "Starting. sess=%p, req=%p",sess, req);
+    pdebug(DEBUG_DETAIL, "Starting. sess=%p, req=%p", sess, req);
 
     critical_block(global_session_mut) {
         rc = request_add_unsafe(sess, req);
     }
 
-    pdebug(sess->debug, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -123,11 +123,11 @@ int request_remove_unsafe(ab_session_p sess, ab_request_p req)
     int rc = PLCTAG_STATUS_OK;
     ab_request_p cur, prev;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     if(sess == NULL || req == NULL) {
         return rc;
     }
-
-    pdebug(sess->debug, "Starting.");
 
     /* find the request and remove it from the list. */
     cur = sess->requests;
@@ -149,7 +149,7 @@ int request_remove_unsafe(ab_session_p sess, ab_request_p req)
     req->next = NULL;
     req->session = NULL;
 
-    pdebug(sess->debug, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -163,17 +163,17 @@ int request_remove(ab_session_p sess, ab_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     if(sess == NULL || req == NULL) {
         return rc;
     }
-
-    pdebug(sess->debug, "Starting.");
 
     critical_block(global_session_mut) {
         rc = request_remove_unsafe(sess, req);
     }
 
-    pdebug(sess->debug, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -186,21 +186,21 @@ int request_remove(ab_session_p sess, ab_request_p req)
 int request_destroy_unsafe(ab_request_p* req_pp)
 {
     ab_request_p r;
-    int debug;
+    /* int debug; */
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(req_pp && *req_pp) {
         r = *req_pp;
 
-        debug = r->debug;
-
-        pdebug(debug, "Starting.");
+        /* debug = r->debug; */
 
         request_remove_unsafe(r->session, r);
         mem_free(r);
         *req_pp = NULL;
-
-        pdebug(debug, "Done.");
     }
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }

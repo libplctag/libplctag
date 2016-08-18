@@ -35,6 +35,10 @@
 #include <util/debug.h>
 
 
+
+ab_session_p session_create_unsafe(const char* host, int gw_port);
+
+
 /*
  * session_get_new_seq_id_unsafe
  *
@@ -60,11 +64,11 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
 {
     uint16_t res = 0;
 
-    pdebug(sess->debug, "entering critical block %p",global_session_mut);
+    pdebug(DEBUG_DETAIL, "entering critical block %p",global_session_mut);
     critical_block(global_session_mut) {
         res = (uint16_t)session_get_new_seq_id_unsafe(sess);
     }
-    pdebug(sess->debug, "leaving critical block %p", global_session_mut);
+    pdebug(DEBUG_DETAIL, "leaving critical block %p", global_session_mut);
 
     return res;
 }
@@ -86,13 +90,13 @@ ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,cons
 
 int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection)
 {
-    pdebug(session->debug, "Starting");
+    pdebug(DEBUG_DETAIL, "Starting");
 
     /* add the connection to the list in the session */
     connection->next = session->connections;
     session->connections = connection;
 
-    pdebug(session->debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -101,17 +105,18 @@ int session_add_connection(ab_session_p session, ab_connection_p connection)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Starting");
+
     if(session) {
-        pdebug(session->debug, "Starting");
-        pdebug(session->debug,"entering critical block %p",global_session_mut);
         critical_block(global_session_mut) {
             rc = session_add_connection_unsafe(session, connection);
         }
-        pdebug(session->debug,"leaving critical block %p", global_session_mut);
-        pdebug(session->debug, "Done");
     } else {
+        pdebug(DEBUG_WARN, "Session ptr is null!");
         rc = PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_DETAIL, "Done");
 
     return rc;
 }
@@ -121,10 +126,10 @@ int session_remove_connection_unsafe(ab_session_p session, ab_connection_p conne
 {
     ab_connection_p cur;
     ab_connection_p prev;
-    int debug = session->debug;
+    /* int debug = session->debug; */
     int rc;
 
-    pdebug(debug, "Starting");
+    pdebug(DEBUG_DETAIL, "Starting");
 
     cur = session->connections;
     prev = NULL;
@@ -147,11 +152,11 @@ int session_remove_connection_unsafe(ab_session_p session, ab_connection_p conne
     }
 
     if (session_is_empty(session)) {
-        pdebug(debug, "destroying session");
+        pdebug(DEBUG_DETAIL, "destroying session");
         session_destroy_unsafe(session);
     }
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return rc;
 }
@@ -160,17 +165,17 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Starting");
+
     if(session) {
-        pdebug(session->debug, "Starting");
-        pdebug(session->debug,"entering critical block %p", global_session_mut);
         critical_block(global_session_mut) {
             rc = session_remove_connection_unsafe(session, connection);
         }
-        pdebug(session->debug,"leaving critical block %p", global_session_mut);
-        pdebug(session->debug, "Done");
     } else {
         rc = PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_DETAIL, "Done");
 
     return rc;
 }
@@ -178,16 +183,15 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
 
 int find_or_create_session(ab_session_p *tag_session, attr attribs)
 {
-    int debug = attr_get_int(attribs,"debug",0);
+    /*int debug = attr_get_int(attribs,"debug",0);*/
     const char* session_gw = attr_get_str(attribs, "gateway", "");
     int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
     ab_session_p session = AB_SESSION_NULL;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(debug, "Starting");
+    pdebug(DEBUG_DETAIL, "Starting");
 
-    pdebug(debug,"entering critical block %p", global_session_mut);
     critical_block(global_session_mut) {
         /* if we are to share sessions, then look for an existing one. */
         if (shared_session) {
@@ -198,33 +202,33 @@ int find_or_create_session(ab_session_p *tag_session, attr attribs)
         }
 
         if (session == AB_SESSION_NULL) {
-            pdebug(debug,"Creating new session.");
-            session = session_create_unsafe(debug, session_gw, session_gw_port);
+            pdebug(DEBUG_DETAIL,"Creating new session.");
+            session = session_create_unsafe(session_gw, session_gw_port);
 
             if (session == AB_SESSION_NULL) {
-                pdebug(debug, "unable to create or find a session!");
+                pdebug(DEBUG_WARN, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             }
         } else {
-            pdebug(debug,"Reusing existing session.");
+            pdebug(DEBUG_DETAIL,"Reusing existing session.");
         }
     }
-    pdebug(debug, "leaving critical block %p", global_session_mut);
 
     /* store it into the tag */
     *tag_session = session;
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return rc;
 }
 
 int add_session_unsafe(ab_session_p n)
 {
-    if (!n)
-        return PLCTAG_ERR_NULL_PTR;
+    pdebug(DEBUG_DETAIL, "Starting");
 
-    pdebug(n->debug, "Starting");
+    if (!n) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     n->prev = NULL;
     n->next = sessions;
@@ -235,7 +239,7 @@ int add_session_unsafe(ab_session_p n)
 
     sessions = n;
 
-    pdebug(n->debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -244,11 +248,13 @@ int add_session(ab_session_p s)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(s->debug, "entering critical block %p", global_session_mut);
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     critical_block(global_session_mut) {
         rc = add_session_unsafe(s);
     }
-    pdebug(s->debug, "leaving critical block %p", global_session_mut);
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -257,10 +263,11 @@ int remove_session_unsafe(ab_session_p n)
 {
     ab_session_p tmp;
 
-    if (!n || !sessions)
-        return 0;
+    pdebug(DEBUG_DETAIL, "Starting");
 
-    pdebug(n->debug, "Starting");
+    if (!n || !sessions) {
+        return 0;
+    }
 
     tmp = sessions;
 
@@ -268,6 +275,7 @@ int remove_session_unsafe(ab_session_p n)
         tmp = tmp->next;
 
     if (!tmp || tmp != n) {
+        pdebug(DEBUG_WARN, "Session not found!");
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -284,7 +292,7 @@ int remove_session_unsafe(ab_session_p n)
     n->next = NULL;
     n->prev = NULL;
 
-    pdebug(n->debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -293,11 +301,13 @@ int remove_session(ab_session_p s)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(s->debug, "entering critical block %p", global_session_mut);
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     critical_block(global_session_mut) {
         rc = remove_session_unsafe(s);
     }
-    pdebug(s->debug, "leaving critical block %p", global_session_mut);
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
@@ -322,12 +332,12 @@ ab_session_p find_session_by_host_unsafe(const char* t)
 /* not threadsafe */
 int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag)
 {
-    pdebug(session->debug, "Starting");
+    pdebug(DEBUG_DETAIL, "Starting");
 
     tag->next = session->tags;
     session->tags = tag;
 
-    pdebug(session->debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -336,15 +346,19 @@ int session_add_tag(ab_session_p session, ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     if(session) {
-        pdebug(session->debug, "entering critical block %p", global_session_mut);
         critical_block(global_session_mut) {
             rc = session_add_tag_unsafe(session, tag);
         }
-        pdebug(session->debug, "leaving critical block %p", global_session_mut);
     } else {
+        pdebug(DEBUG_WARN, "Session pointer is null!");
+
         rc = PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_DETAIL,"Done.");
 
     return rc;
 }
@@ -353,9 +367,8 @@ int session_add_tag(ab_session_p session, ab_tag_p tag)
 int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
 {
     ab_tag_p tmp, prev;
-    int debug = session->debug;
 
-    pdebug(debug, "Starting");
+    pdebug(DEBUG_DETAIL, "Starting");
 
     tmp = session->tags;
     prev = NULL;
@@ -378,7 +391,7 @@ int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
         session_destroy_unsafe(session);
     }
 
-    pdebug(debug, "Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -387,47 +400,48 @@ int session_remove_tag(ab_session_p session, ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     if(session) {
-        int debug = session->debug;
-        pdebug(debug, "entering critical block %p", global_session_mut);
         critical_block(global_session_mut) {
             rc = session_remove_tag_unsafe(session, tag);
         }
-        pdebug(debug, "leaving critical block %p", global_session_mut);
     } else {
+        pdebug(DEBUG_WARN, "Session ptr is null!");
+
         rc = PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
 
-ab_session_p session_create_unsafe(int debug, const char* host, int gw_port)
+ab_session_p session_create_unsafe(const char* host, int gw_port)
 {
     ab_session_p session = AB_SESSION_NULL;
 
-    pdebug(debug, "Starting");
+    pdebug(DEBUG_INFO, "Starting");
 
     session = (ab_session_p)mem_alloc(sizeof(struct ab_session_t));
 
     if (!session) {
-        pdebug(debug, "Error allocating new session.");
+        pdebug(DEBUG_WARN, "Error allocating new session.");
         return AB_SESSION_NULL;
     }
-
-    session->debug = debug;
 
     str_copy(session->host, host, MAX_SESSION_HOST);
 
     /* we must connect to the gateway and register */
     if (!session_connect(session, host)) {
         mem_free(session);
-        pdebug(debug, "session connect failed!");
+        pdebug(DEBUG_WARN, "session connect failed!");
         return AB_SESSION_NULL;
     }
 
     if (!session_register(session)) {
         session_destroy_unsafe(session);
-        pdebug(debug, "session registration failed!");
+        pdebug(DEBUG_WARN, "session registration failed!");
         return AB_SESSION_NULL;
     }
 
@@ -443,7 +457,7 @@ ab_session_p session_create_unsafe(int debug, const char* host, int gw_port)
     /* add the new session to the list. */
     add_session_unsafe(session);
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return session;
 }
@@ -458,29 +472,28 @@ ab_session_p session_create_unsafe(int debug, const char* host, int gw_port)
 int session_connect(ab_session_p session, const char* host)
 {
     int rc;
-    int debug = session->debug;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* Open a socket for communication with the gateway. */
     rc = socket_create(&(session->sock));
 
     if (rc) {
-        pdebug(debug, "Unable to create socket for session!");
+        pdebug(DEBUG_WARN, "Unable to create socket for session!");
         return 0;
     }
 
     rc = socket_connect_tcp(session->sock, host, AB_EIP_DEFAULT_PORT);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(debug, "Unable to connect socket for session!");
+        pdebug(DEBUG_WARN, "Unable to connect socket for session!");
         return 0;
     }
 
     /* everything is OK.  We have a TCP stream open to a gateway. */
     session->is_connected = 1;
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return 1;
 }
@@ -488,18 +501,20 @@ int session_connect(ab_session_p session, const char* host)
 /* must have the session mutex held here */
 int session_destroy_unsafe(ab_session_p session)
 {
-    if (!session)
-        return 1;
-
-    int debug = session->debug;
     ab_request_p req;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if (!session) {
+        pdebug(DEBUG_WARN, "Session ptr is null!");
+
+        return 1;
+    }
 
     /* do not destroy the session if there are
      * tags or connections still */
     if(!session_is_empty(session)) {
-        pdebug(debug, "Attempt to destroy session while open tags or connections exist!");
+        pdebug(DEBUG_WARN, "Attempt to destroy session while open tags or connections exist!");
         return 0;
     }
 
@@ -527,7 +542,7 @@ int session_destroy_unsafe(ab_session_p session)
 
     mem_free(session);
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return 1;
 }
@@ -536,11 +551,13 @@ int session_destroy(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(session->debug, "entering critical block %p", global_session_mut);
+    pdebug(DEBUG_INFO, "Starting.");
+
     critical_block(global_session_mut) {
         rc = session_destroy_unsafe(session);
     }
-    pdebug(session->debug, "leaving critical block %p", global_session_mut);
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -552,14 +569,13 @@ int session_is_empty(ab_session_p session)
 
 int session_register(ab_session_p session)
 {
-    int debug = session->debug;
     eip_session_reg_req* req;
     eip_encap_t* resp;
     int rc;
     int data_size = 0;
     uint64_t timeout_time;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /*
      * clear the session data.
@@ -594,14 +610,14 @@ int session_register(ab_session_p session)
     session->recv_offset = 0;
     timeout_time = time_ms() + 5000; /* MAGIC */
 
-    pdebug(debug, "sending data:");
-    pdebug_dump_bytes(debug, session->recv_data, data_size);
+    pdebug(DEBUG_INFO, "sending data:");
+    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, data_size);
 
     while (timeout_time > time_ms() && session->recv_offset < data_size) {
         rc = socket_write(session->sock, session->recv_data + session->recv_offset, data_size - session->recv_offset);
 
         if (rc < 0) {
-            pdebug(debug, "Unable to send session registration packet! rc=%d", rc);
+            pdebug(DEBUG_WARN, "Unable to send session registration packet! rc=%d", rc);
             session->recv_offset = 0;
             return rc;
         }
@@ -616,7 +632,6 @@ int session_register(ab_session_p session)
 
     if (session->recv_offset != data_size) {
         session->recv_offset = 0;
-        ;
         return PLCTAG_ERR_TIMEOUT;
     }
 
@@ -636,13 +651,12 @@ int session_register(ab_session_p session)
         }
 
         if (session->recv_offset < data_size) {
-            rc =
-                socket_read(session->sock, session->recv_data + session->recv_offset, data_size - session->recv_offset);
+            rc = socket_read(session->sock, session->recv_data + session->recv_offset, data_size - session->recv_offset);
 
             if (rc < 0) {
                 if (rc != PLCTAG_ERR_NO_DATA) {
                     /* error! */
-                    pdebug(debug, "Error reading socket! rc=%d", rc);
+                    pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
                     return rc;
                 }
             } else {
@@ -672,20 +686,20 @@ int session_register(ab_session_p session)
     /* set the offset back to zero for the next packet */
     session->recv_offset = 0;
 
-    pdebug(debug, "received response:");
-    pdebug_dump_bytes(debug, session->recv_data, data_size);
+    pdebug(DEBUG_INFO, "received response:");
+    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, data_size);
 
     /* encap header is at the start of the buffer */
     resp = (eip_encap_t*)(session->recv_data);
 
     /* check the response status */
     if (le2h16(resp->encap_command) != AB_EIP_REGISTER_SESSION) {
-        pdebug(debug, "EIP unexpected response packet type: %d!", resp->encap_command);
+        pdebug(DEBUG_WARN, "EIP unexpected response packet type: %d!", resp->encap_command);
         return PLCTAG_ERR_BAD_DATA;
     }
 
     if (le2h16(resp->encap_status) != AB_EIP_OK) {
-        pdebug(debug, "EIP command failed, response code: %d", resp->encap_status);
+        pdebug(DEBUG_WARN, "EIP command failed, response code: %d", resp->encap_status);
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -694,7 +708,7 @@ int session_register(ab_session_p session)
      */
     session->session_handle = resp->encap_session_handle; /* opaque to us */
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return 1;
 }
