@@ -81,7 +81,7 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag);
 int setup_session_mutex(void);
 
 
-plc_tag ab_tag_create(attr attribs)
+plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path;
@@ -91,7 +91,7 @@ plc_tag ab_tag_create(attr attribs)
 
     if(setup_session_mutex() != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Failed to create main session mutex!");
-        return PLC_TAG_NULL;
+        return PLC_TAG_P_NULL;
     }
 
     /*
@@ -103,7 +103,7 @@ plc_tag ab_tag_create(attr attribs)
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Unable to allocate memory for AB EIP tag!");
-        return PLC_TAG_NULL;
+        return PLC_TAG_P_NULL;
     }
 
     /*
@@ -113,7 +113,7 @@ plc_tag ab_tag_create(attr attribs)
      */
     if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
         tag->status = PLCTAG_ERR_BAD_DEVICE;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     /* AB PLCs are little endian. */
@@ -127,14 +127,14 @@ plc_tag ab_tag_create(attr attribs)
     if(tag->size == 0) {
         /* failure! Need data_size! */
         tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     tag->data = (uint8_t*)mem_alloc(tag->size);
 
     if(tag->data == NULL) {
         tag->status = PLCTAG_ERR_NO_MEM;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     /* get the connection path, punt if there is not one and we have a Logix-class PLC. */
@@ -142,7 +142,7 @@ plc_tag ab_tag_create(attr attribs)
 
     if(path == NULL && tag->protocol_type == AB_PROTOCOL_LGX) {
         tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     tag->first_read = 1;
@@ -169,7 +169,7 @@ plc_tag ab_tag_create(attr attribs)
         pdebug(DEBUG_INFO,"leaving critical block %p",global_session_mut);
 
         if(tag->status != PLCTAG_STATUS_OK) {
-            return (plc_tag)tag;
+            return (plc_tag_p)tag;
         }
     }
 
@@ -187,7 +187,7 @@ plc_tag ab_tag_create(attr attribs)
     if(path && cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Unable to convert links strings to binary path!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     /* handle the strange LGX->DH+->PLC5 case */
@@ -204,7 +204,7 @@ plc_tag ab_tag_create(attr attribs)
     if(!tag->vtable) {
         pdebug(DEBUG_INFO,"Unable to set tag vtable!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     /*
@@ -215,14 +215,14 @@ plc_tag ab_tag_create(attr attribs)
     if(find_or_create_session(&tag->session, attribs) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Unable to create session!");
         tag->status = PLCTAG_ERR_BAD_GATEWAY;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     if(tag->needs_connection) {
         /* Find or create a connection.*/
         if((tag->status = find_or_create_connection(tag, tag->session, attribs)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_INFO,"Unable to create connection! Status=%d",tag->status);
-            return (plc_tag)tag;
+            return (plc_tag_p)tag;
         }
 
         /* tag is a connected tag */
@@ -238,12 +238,12 @@ plc_tag ab_tag_create(attr attribs)
     if(check_tag_name(tag, attr_get_str(attribs,"name","NONE")) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Bad tag name!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag)tag;
+        return (plc_tag_p)tag;
     }
 
     pdebug(DEBUG_INFO,"Done.");
 
-    return (plc_tag)tag;
+    return (plc_tag_p)tag;
 }
 
 
@@ -376,7 +376,7 @@ int ab_tag_destroy(ab_tag_p tag)
      * want to use the thread-safe version here.  We
      * do lock a mutex later, but a different one.
      */
-    plc_tag_abort((plc_tag)tag);
+    plc_tag_abort_mapped((plc_tag_p)tag);
 
     /* tags are stored in different locations depending on the type. */
     if(connection) {

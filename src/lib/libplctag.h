@@ -60,7 +60,7 @@ typedef float real32_t;
 
 
 /* opaque type definitions */
-typedef struct plc_tag_t *plc_tag;
+typedef struct plc_tag_dummy *plc_tag;
 #define PLC_TAG_NULL ((plc_tag)NULL)
 
 
