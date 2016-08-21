@@ -283,6 +283,8 @@ int main(int argc, char **argv)
     /* create the tag */
     tag = plc_tag_create(path);
 
+    printf("INFO: Got tag %p\n", tag);
+
     if(!tag) {
         printf("ERROR: error creating tag!\n");
 
@@ -297,6 +299,8 @@ int main(int argc, char **argv)
 
     rc = plc_tag_status(tag);
 
+    printf("INFO: tag status %d\n", rc);
+
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: tag creation error, tag status: %s\n",decode_error(rc));
         plc_tag_destroy(tag);
@@ -307,6 +311,8 @@ int main(int argc, char **argv)
     do {
         if(!is_write) {
             int index = 0;
+
+            printf("INFO: reading tag %p\n", tag);
 
             rc = plc_tag_read(tag, DATA_TIMEOUT);
 

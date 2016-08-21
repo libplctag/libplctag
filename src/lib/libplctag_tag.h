@@ -42,13 +42,15 @@
 
 extern mutex_p global_library_mutex;
 
+typedef struct plc_tag_t *plc_tag_p;
+
 
 /* define tag operation functions */
-typedef int (*tag_abort_func)(plc_tag tag);
-typedef int (*tag_destroy_func)(plc_tag tag);
-typedef int (*tag_read_func)(plc_tag);
-typedef int (*tag_status_func)(plc_tag);
-typedef int (*tag_write_func)(plc_tag tag);
+typedef int (*tag_abort_func)(plc_tag_p tag);
+typedef int (*tag_destroy_func)(plc_tag_p tag);
+typedef int (*tag_read_func)(plc_tag_p tag);
+typedef int (*tag_status_func)(plc_tag_p tag);
+typedef int (*tag_write_func)(plc_tag_p tag);
 
 /* we'll need to set these per protocol type. */
 struct tag_vtable_t {
@@ -79,11 +81,21 @@ typedef struct tag_vtable_t *tag_vtable_p;
                         int size; \
                         uint8_t *data
 
+struct plc_tag_dummy {
+    int tag_id;
+};
+
 struct plc_tag_t {
     TAG_BASE_STRUCT;
 };
 
+#define PLC_TAG_P_NULL ((plc_tag_p)0)
 
+
+/* the following may need to be used where the tag is already mapped or is not yet mapped */
+extern int plc_tag_abort_mapped(plc_tag_p tag);
+extern int plc_tag_destroy_mapped(plc_tag_p tag);
+extern int plc_tag_status_mapped(plc_tag_p tag);
 
 
 

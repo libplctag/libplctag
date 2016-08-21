@@ -35,7 +35,7 @@
 
 
 
-plc_tag ab_tag_create(attr attribs);
+plc_tag_p ab_tag_create(attr attribs);
 
 
 #endif
