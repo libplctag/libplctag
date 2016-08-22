@@ -88,9 +88,50 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
     } else if(is_new) {
         /* only do this if this is a new connection. */
 
-        /* copy path data from the tag */
-        mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
-        connection->conn_path_size = tag->conn_path_size;
+        /*
+         * Determine the right param for the connection.
+         * This sets up the packet size, among other things.
+         */
+        switch(tag->protocol_type) {
+            case AB_PROTOCOL_PLC:
+            case AB_PROTOCOL_MLGX:
+                connection->conn_params = AB_EIP_PLC5_PARAM;
+                break;
+
+            case AB_PROTOCOL_LGX:
+                connection->conn_params = AB_EIP_LGX_PARAM;
+                break;
+
+            case AB_PROTOCOL_MLGX800:
+                connection->conn_params = AB_EIP_LGX_PARAM;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN,"Unknown protocol/cpu type!");
+                return PLCTAG_ERR_BAD_PARAM;
+                break;
+        }
+
+
+        /* copy path data from the tag, if any */
+        if(tag->conn_path_size > 0) {
+            mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
+            connection->conn_path_size = tag->conn_path_size;
+        }
+
+        /* now copy in the connection manager info */
+        connection->conn_path[connection->conn_path_size] = 0x20; /* class */
+        connection->conn_path[connection->conn_path_size+1] = 0x02; /* Message Router */
+        connection->conn_path[connection->conn_path_size+2] = 0x24; /* instance */
+        connection->conn_path[connection->conn_path_size+3] = 0x01; /* instance #1 */
+        connection->conn_path_size += 4;
+
+
+        pdebug(DEBUG_DETAIL,"conn path size = %d", connection->conn_path_size);
+
+        for(int j=0; j < connection->conn_path_size; j++) {
+            pdebug(DEBUG_DETAIL,"conn_path[%d] = %x", j, connection->conn_path[j]);
+        }
 
         /* do the ForwardOpen call to set up the session */
         if((rc = connection_perform_forward_open(connection)) != PLCTAG_STATUS_OK) {
@@ -253,9 +294,9 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params = h2le16(AB_EIP_PLC5_PARAM); /* FIXME - must be based on PLC type. what kind of PLC we are targetting, PLC5 */
+    fo->orig_to_targ_conn_params = h2le16(connection->conn_params); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params = h2le16(AB_EIP_PLC5_PARAM); /* FIXME - must be based on PLC type. We are pretending to be a LGX. */
+    fo->targ_to_orig_conn_params = h2le16(connection->conn_params); /* packet size and some other things, based on protocol/cpu type */
     fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
 

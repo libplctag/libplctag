@@ -298,20 +298,21 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
         tag->mut = NULL;
 
         critical_block(temp_mut) {
+            pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
             release_tag_to_id_mapping(tag);
 
             if(!tag->vtable || !tag->vtable->destroy) {
                 pdebug(DEBUG_ERROR, "tag destructor not defined!");
                 tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-                return PLCTAG_ERR_NOT_IMPLEMENTED;
+                rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+            } else {
+                /*
+                 * It is the responsibility of the destroy
+                 * function to free all memory associated with
+                 * the tag.
+                 */
+                rc = tag->vtable->destroy(tag);
             }
-
-            /*
-             * It is the responsibility of the destroy
-             * function to free all memory associated with
-             * the tag.
-             */
-            rc = tag->vtable->destroy(tag);
         }
 
         mutex_destroy(&temp_mut);
@@ -1365,7 +1366,10 @@ static int release_tag_to_id_mapping(plc_tag_p tag)
     int map_index = 0;
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Starting");
+
     if(!tag || tag->tag_id == 0) {
+        pdebug(DEBUG_WARN, "Tag null or tag ID is zero.");
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -1374,11 +1378,14 @@ static int release_tag_to_id_mapping(plc_tag_p tag)
     critical_block(global_library_mutex) {
         /* find the actual slot and check if it is the right tag */
         if(!tag_map[map_index] || tag_map[map_index] != tag) {
+            pdebug(DEBUG_WARN, "Tag not found or entry is already clear.");
             rc = PLCTAG_ERR_NOT_FOUND;
         } else {
-            tag_map[map_index] = NULL;
+            tag_map[map_index] = (plc_tag_p)(intptr_t)0;
         }
     }
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
