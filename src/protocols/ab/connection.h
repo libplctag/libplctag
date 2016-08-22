@@ -73,7 +73,7 @@ struct ab_connection_t {
 
 int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs);
 ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
-ab_connection_p connection_create_unsafe(int debug, const char* path, ab_session_p session);
+ab_connection_p connection_create_unsafe(const char* path, ab_session_p session);
 int connection_perform_forward_open(ab_connection_p connection);
 int send_forward_open_req(ab_connection_p connection, ab_request_p req);
 int recv_forward_open_resp(ab_connection_p connection, ab_request_p req);
