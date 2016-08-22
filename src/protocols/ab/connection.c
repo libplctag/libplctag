@@ -56,36 +56,33 @@ extern "C"
 
 int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
 {
-    int debug = attr_get_int(attribs,"debug",0);
     const char* path = attr_get_str(attribs, "path", "");
     ab_connection_p connection = AB_CONNECTION_NULL;
     int rc = PLCTAG_STATUS_OK;
     int is_new = 0;
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* lock the session while this is happening because we do not
      * want a race condition where two tags try to create the same
      * connection at the same time.
      */
 
-    pdebug(debug,"entering critical block %p",global_session_mut);
     critical_block(global_session_mut) {
         connection = session_find_connection_by_path_unsafe(session, path);
 
         if (connection == AB_CONNECTION_NULL) {
-            connection = connection_create_unsafe(debug, path, session);
+            connection = connection_create_unsafe(path, session);
             is_new = 1;
         } else {
             /* found a connection, nothing more to do. */
-            pdebug(debug, "find_or_create_connection() reusing existing connection.");
+            pdebug(DEBUG_INFO, "find_or_create_connection() reusing existing connection.");
             rc = PLCTAG_STATUS_OK;
         }
     }
-    pdebug(debug,"leaving critical block %p",global_session_mut);
 
     if (connection == AB_CONNECTION_NULL) {
-        pdebug(debug, "unable to create or find a connection!");
+        pdebug(DEBUG_ERROR, "unable to create or find a connection!");
         rc = PLCTAG_ERR_BAD_GATEWAY;
         return rc;
     } else if(is_new) {
@@ -97,7 +94,7 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
 
         /* do the ForwardOpen call to set up the session */
         if((rc = connection_perform_forward_open(connection)) != PLCTAG_STATUS_OK) {
-            pdebug(debug, "Unable to perform ForwardOpen to set up connection with PLC!");
+            pdebug(DEBUG_WARN, "Unable to perform ForwardOpen to set up connection with PLC!");
 
             /*critical_block(global_session_mut) {
                 connection_destroy_unsafe(connection);
@@ -111,21 +108,21 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
 
     tag->connection = connection;
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
 
 
 /* not thread safe! */
-ab_connection_p connection_create_unsafe(int debug, const char* path, ab_session_p session)
+ab_connection_p connection_create_unsafe(const char* path, ab_session_p session)
 {
     ab_connection_p connection = (ab_connection_p)mem_alloc(sizeof(struct ab_connection_t));
 
-    pdebug(debug, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     if (!connection) {
-        pdebug(debug, "Unable to allocate new connection!");
+        pdebug(DEBUG_ERROR, "Unable to allocate new connection!");
         return NULL;
     }
 
@@ -140,7 +137,7 @@ ab_connection_p connection_create_unsafe(int debug, const char* path, ab_session
     /* add the connection to the session */
     session_add_connection_unsafe(session, connection);
 
-    pdebug(debug, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return connection;
 }
