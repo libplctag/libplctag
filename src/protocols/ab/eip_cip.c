@@ -364,10 +364,11 @@ int allocate_write_request_slot(ab_tag_p tag)
 
 int build_read_request(ab_tag_p tag, int slot, int byte_offset)
 {
-    eip_cip_uc_req* cip;
+    eip_cip_co_req* cip;
     uint8_t* data;
-    uint8_t* embed_start, *embed_end;
+    //uint8_t* embed_start, *embed_end;
     ab_request_p req = NULL;
+    uint16_t conn_seq_id = 0;
     int rc;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -382,10 +383,10 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
     }
 
     /* point the request struct at the buffer */
-    cip = (eip_cip_uc_req*)(req->data);
+    cip = (eip_cip_co_req*)(req->data);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_uc_req);
+    data = (req->data) + sizeof(eip_cip_co_req);
 
     /*
      * set up the embedded CIP read packet
@@ -396,7 +397,7 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
      * uint16_t # of elements to read
      */
 
-    embed_start = data;
+    //embed_start = data;
 
     /* set up the CIP Read request */
     *data = AB_EIP_CMD_CIP_READ_FRAG;
@@ -415,57 +416,37 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
     data += sizeof(uint32_t);
 
     /* mark the end of the embedded packet */
-    embed_end = data;
+    //embed_end = data;
 
-    /* Now copy in the routing information for the embedded message */
-    /*
-     * routing information.  Format:
-     *
-     * uint8_t path_size in 16-bit words
-     * uint8_t reserved/pad (zero)
-     * uint8_t[...] path (padded to even number of bytes)
-     */
-    if(tag->conn_path_size > 0) {
-        *data = (tag->conn_path_size) / 2; /* in 16-bit words */
-        data++;
-        *data = 0; /* reserved/pad */
-        data++;
-        mem_copy(data, tag->conn_path, tag->conn_path_size);
-        data += tag->conn_path_size;
+
+    /* get a new connection sequence id */
+    critical_block(global_session_mut) {
+        conn_seq_id = tag->connection->conn_seq_num++;
     }
 
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* ALWAYS 0x0070 Unconnected Send*/
+    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
-    cip->cpf_udi_item_length = h2le16(data - (uint8_t*)(&cip->cm_service_code)); /* REQ: fill in with length of remaining data. */
+    cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
+    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
+    cip->cpf_targ_conn_id = h2le32(tag->connection->orig_connection_id);
+    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&cip->cpf_conn_seq_num)); /* REQ: fill in with length of remaining data. */
 
-    /* CM Service Request - Connection Manager */
-    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                         /* class */
-    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                         /* instance */
-    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
-
-    /* Unconnected send needs timeout information */
-    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = src_secs_per_tick * src_timeout_ticks */
-
-    /* size of embedded packet */
-    cip->uc_cmd_length = h2le16(embed_end - embed_start);
+    /* we need the connection sequence ID for this packet */
+    cip->cpf_conn_seq_num = h2le16(conn_seq_id);
 
     /* set the size of the request */
     req->request_size = data - (req->data);
+    req->conn_id = tag->connection->targ_connection_id;
+    req->conn_seq = conn_seq_id;
 
     /* mark it as ready to send */
     req->send_request = 1;
@@ -491,9 +472,10 @@ int build_read_request(ab_tag_p tag, int slot, int byte_offset)
 int build_write_request(ab_tag_p tag, int slot, int byte_offset)
 {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_req* cip;
+    eip_cip_co_req* cip;
+    uint16_t conn_seq_id = 0;
     uint8_t* data;
-    uint8_t* embed_start, *embed_end;
+    //uint8_t* embed_start, *embed_end;
     ab_request_p req = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -507,10 +489,10 @@ int build_write_request(ab_tag_p tag, int slot, int byte_offset)
         return rc;
     }
 
-    cip = (eip_cip_uc_req*)(req->data);
+    cip = (eip_cip_co_req*)(req->data);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_cip_uc_req);
+    data = (req->data) + sizeof(eip_cip_co_req);
 
     /*
      * set up the embedded CIP read packet
@@ -523,7 +505,7 @@ int build_write_request(ab_tag_p tag, int slot, int byte_offset)
      * data to write
      */
 
-    embed_start = data;
+    //embed_start = data;
 
     /*
      * set up the CIP Read request type.
@@ -569,53 +551,36 @@ int build_write_request(ab_tag_p tag, int slot, int byte_offset)
     }
 
     /* mark the end of the embedded packet */
-    embed_end = data;
+    //embed_end = data;
 
-    /*
-     * after the embedded packet, we need to tell the message router
-     * how to get to the target device.
-     */
+    /* get a new connection sequence id */
+    critical_block(global_session_mut) {
+        conn_seq_id = tag->connection->conn_seq_num++;
+    }
 
-    /* Now copy in the routing information for the embedded message */
-    *data = (tag->conn_path_size) / 2; /* in 16-bit words */
-    data++;
-    *data = 0;
-    data++;
-    mem_copy(data, tag->conn_path, tag->conn_path_size);
-    data += tag->conn_path_size;
-
-    /* now fill in the rest of the structure. */
+    /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* ALWAYS 0x006F Unconnected Send*/
+    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
-    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
-    cip->cpf_udi_item_length = h2le16(data - (uint8_t*)(&(cip->cm_service_code))); /* REQ: fill in with length of remaining data. */
+    cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
+    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
+    cip->cpf_targ_conn_id = h2le32(tag->connection->orig_connection_id);
+    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&cip->cpf_conn_seq_num)); /* REQ: fill in with length of remaining data. */
 
-    /* CM Service Request - Connection Manager */
-    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                         /* class */
-    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                         /* instance */
-    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
-
-    /* Unconnected send needs timeout information */
-    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
-    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
-
-    /* size of embedded packet */
-    cip->uc_cmd_length = h2le16(embed_end - embed_start);
+    /* we need the connection sequence ID for this packet */
+    cip->cpf_conn_seq_num = h2le16(conn_seq_id);
 
     /* set the size of the request */
     req->request_size = data - (req->data);
+    req->conn_id = tag->connection->targ_connection_id;
+    req->conn_seq = conn_seq_id;
 
     /* mark it as ready to send */
     req->send_request = 1;
@@ -651,7 +616,7 @@ int build_write_request(ab_tag_p tag, int slot, int byte_offset)
 static int check_read_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_uc_resp* cip_resp;
+    eip_cip_co_resp* cip_resp;
     uint8_t* data;
     uint8_t* data_end;
     int i;
@@ -698,16 +663,16 @@ static int check_read_status(ab_tag_p tag)
         pdebug(DEBUG_DETAIL, "processing request %d", i);
 
         /* point to the data */
-        cip_resp = (eip_cip_uc_resp*)(req->data);
+        cip_resp = (eip_cip_co_resp*)(req->data);
 
         /* point to the start of the data */
-        data = (req->data) + sizeof(eip_cip_uc_resp);
+        data = (req->data) + sizeof(eip_cip_co_resp);
 
         /* point the end of the data */
         data_end = (req->data + cip_resp->encap_length + sizeof(eip_encap_t));
 
         /* check the status */
-        if (le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+        if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -934,7 +899,7 @@ static int check_read_status(ab_tag_p tag)
 
 static int check_write_status(ab_tag_p tag)
 {
-    eip_cip_uc_resp* cip_resp;
+    eip_cip_co_resp* cip_resp;
     int rc = PLCTAG_STATUS_OK;
     int i;
     ab_request_p req;
@@ -977,9 +942,9 @@ static int check_write_status(ab_tag_p tag)
         }
 
         /* point to the data */
-        cip_resp = (eip_cip_uc_resp*)(req->data);
+        cip_resp = (eip_cip_co_resp*)(req->data);
 
-        if (le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+        if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -1066,7 +1031,7 @@ int calculate_write_sizes(ab_tag_p tag)
     }
 
     /* if we are here, then we have all the type data etc. */
-    overhead = sizeof(eip_cip_uc_req)        /* base packet size */
+    overhead = sizeof(eip_cip_co_req)        /* base packet size */
                + 1                           /* service request, one byte */
                + tag->encoded_name_size      /* full encoded name */
                + tag->encoded_type_info_size /* encoded type size */

@@ -62,6 +62,7 @@ struct ab_connection_t {
     int use_dhp_direct;
     uint8_t dhp_src;
     uint8_t dhp_dest;
+    uint16_t conn_params;
 
     int connect_in_progress;
     int status;

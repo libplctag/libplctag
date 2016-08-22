@@ -216,12 +216,25 @@ int cip_encode_path(ab_tag_p tag, const char *path)
 char *cip_decode_status(int status)
 {
     switch(status) {
+        case 0x01:
+            /* FIXME - this should handle the extended error codes */
+            return "Connection error!";
+            break;
+
+        case 0x02:
+            return "Insufficient resources!";
+            break;
+
+        case 0x03:
+            return "Value invalid!"; /* huh? */
+            break;
+
         case 0x04:
-            return "Bad or indecipherable IOI!";
+            return "Bad or indecipherable IOI or tag not found!";
             break;
 
         case 0x05:
-            return "Unknown tag or item!";
+            return "Unknown destination, tag or item!";
             break;
 
         case 0x06:
