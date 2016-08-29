@@ -91,6 +91,7 @@ set ( example_PROGRAMS async
                        simple
                        simple_dual
                        slc500
+                       stress_test
                        string
                        toggle_bool
                        write_string
