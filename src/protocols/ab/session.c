@@ -33,6 +33,8 @@
 #include <ab/request.h>
 #include <ab/eip.h>
 #include <util/debug.h>
+#include <stdlib.h>
+#include <time.h>
 
 
 
@@ -420,6 +422,8 @@ int session_remove_tag(ab_session_p session, ab_tag_p tag)
 ab_session_p session_create_unsafe(const char* host, int gw_port)
 {
     ab_session_p session = AB_SESSION_NULL;
+    static volatile uint32_t srand_setup = 0;
+    static volatile uint32_t connection_id = 0;
 
     pdebug(DEBUG_INFO, "Starting");
 
@@ -445,14 +449,29 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
         return AB_SESSION_NULL;
     }
 
+    /* check for ID set up */
+    if(srand_setup == 0) {
+        srand((time_t)time_ms());
+        srand_setup = 1;
+    }
+
+    if(connection_id == 0) {
+        connection_id = rand();
+    }
+
+    session->session_seq_id =  rand();
+
     /*
-     * We assume that we are running in a threaded environment,
-     * so every session will have a different address.
+     * Why is connection_id global?  Because it looks like the PLC might
+     * be treating it globally.  I am seeing ForwardOpen errors that seem
+     * to be because of duplicate connection IDs even though the session
+     * was closed.
      *
-     * FIXME - is this needed?
+     * So, this is more or less unique across all invocations of the library.
+     * FIXME - this could collide.  The probability is low, but it could happen
+     * as there are only 32 bit.
      */
-    session->session_seq_id = (uint64_t)(intptr_t)(session);
-    session->conn_serial_number = (uint32_t)(intptr_t)(session) + (uint32_t)42; /* MAGIC */
+    session->conn_serial_number = ++connection_id;
 
     /* add the new session to the list. */
     add_session_unsafe(session);

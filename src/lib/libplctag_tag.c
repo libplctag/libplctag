@@ -108,6 +108,8 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 
         tag->read_cache_expire = (uint64_t)0;
         tag->read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
+    } else {
+        pdebug(DEBUG_WARN, "Tag creation failed, skipping mutex creation and other generic setup.");
     }
 
     /*
