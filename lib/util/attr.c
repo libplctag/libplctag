@@ -33,13 +33,13 @@
 
 
 struct attr_entry_t {
-	attr_entry next;
-	char *name;
-	char *val;
+    attr_entry next;
+    char *name;
+    char *val;
 };
 
 struct attr_t {
-	attr_entry head;
+    attr_entry head;
 };
 
 
@@ -55,25 +55,25 @@ struct attr_t {
 
 attr_entry find_entry(attr a, const char *name)
 {
-	attr_entry e;
+    attr_entry e;
 
-	if(!a)
-		return NULL;
+    if(!a)
+        return NULL;
 
-	e = a->head;
+    e = a->head;
 
-	if(!e)
-		return NULL;
+    if(!e)
+        return NULL;
 
-	while(e) {
-		if(str_cmp(e->name, name) == 0) {
-			return e;
-		}
+    while(e) {
+        if(str_cmp(e->name, name) == 0) {
+            return e;
+        }
 
-		e = e->next;
-	}
+        e = e->next;
+    }
 
-	return NULL;
+    return NULL;
 }
 
 
@@ -84,7 +84,7 @@ attr_entry find_entry(attr a, const char *name)
  */
 extern attr attr_create()
 {
-	return (attr)mem_alloc(sizeof(struct attr_t));
+    return (attr)mem_alloc(sizeof(struct attr_t));
 }
 
 
@@ -108,75 +108,75 @@ extern attr attr_create()
  */
 extern attr attr_create_from_str(const char *attr_str)
 {
-	char *tmp;
-	char *cur;
-	char *name;
-	char *val;
-	attr res = NULL;
+    char *tmp;
+    char *cur;
+    char *name;
+    char *val;
+    attr res = NULL;
 
-	if(!str_length(attr_str)) {
-		return NULL;
-	}
+    if(!str_length(attr_str)) {
+        return NULL;
+    }
 
-	/* make a copy for a destructive read. */
-	tmp = str_dup(attr_str);
-	if(!tmp) {
-		return NULL;
-	}
+    /* make a copy for a destructive read. */
+    tmp = str_dup(attr_str);
+    if(!tmp) {
+        return NULL;
+    }
 
-	res = attr_create();
+    res = attr_create();
 
-	if(!res) {
-		mem_free(tmp);
-		return NULL;
-	}
+    if(!res) {
+        mem_free(tmp);
+        return NULL;
+    }
 
-	/*
-	 * walk the pointer along the input and copy the
-	 * names and values along the way.
-	 */
-	cur = tmp;
-	while(*cur) {
-		/* read the name */
-		name = cur;
-		while(*cur && *cur != '=')
-			cur++;
+    /*
+     * walk the pointer along the input and copy the
+     * names and values along the way.
+     */
+    cur = tmp;
+    while(*cur) {
+        /* read the name */
+        name = cur;
+        while(*cur && *cur != '=')
+            cur++;
 
-		/* did we run off the end of the string?
-		 * That is an error because we need to have a value.
-		 */
-		if(*cur == 0) {
-			if(res) attr_destroy(res);
-			mem_free(tmp);
-			return NULL;
-		}
+        /* did we run off the end of the string?
+         * That is an error because we need to have a value.
+         */
+        if(*cur == 0) {
+            if(res) attr_destroy(res);
+            mem_free(tmp);
+            return NULL;
+        }
 
-		/* terminate the name string */
-		*cur = 0;
+        /* terminate the name string */
+        *cur = 0;
 
-		/* read the value */
-		cur++;
-		val = cur;
+        /* read the value */
+        cur++;
+        val = cur;
 
-		while(*cur && *cur != '&')
-			cur++;
+        while(*cur && *cur != '&')
+            cur++;
 
-		/* we do not care if we ran off the end, much. */
-		if(*cur) {
-			*cur = 0;
-			cur++;
-		}
+        /* we do not care if we ran off the end, much. */
+        if(*cur) {
+            *cur = 0;
+            cur++;
+        }
 
-		if(attr_set_str(res, name, val)) {
-			if(res) attr_destroy(res);
-			mem_free(tmp);
-			return NULL;
-		}
-	}
+        if(attr_set_str(res, name, val)) {
+            if(res) attr_destroy(res);
+            mem_free(tmp);
+            return NULL;
+        }
+    }
 
-	mem_free(tmp);
+    mem_free(tmp);
 
-	return res;
+    return res;
 }
 
 
@@ -190,84 +190,84 @@ extern attr attr_create_from_str(const char *attr_str)
  */
 extern int attr_set_str(attr attrs, const char *name, const char *val)
 {
-	attr_entry e;
+    attr_entry e;
 
-	if(!attrs) {
-		return 1;
-	}
+    if(!attrs) {
+        return 1;
+    }
 
-	/* does the entry exist? */
-	e = find_entry(attrs, name);
+    /* does the entry exist? */
+    e = find_entry(attrs, name);
 
-	/* if we had a match, then delete the existing value and add in the
-	 * new one.
-	 *
-	 * If we had no match, then e is NULL and we need to create a new one.
-	 */
-	if(e) {
-		/* we had a match, free any existing value */
-		if(e->val) {
-			mem_free(e->val);
-		}
+    /* if we had a match, then delete the existing value and add in the
+     * new one.
+     *
+     * If we had no match, then e is NULL and we need to create a new one.
+     */
+    if(e) {
+        /* we had a match, free any existing value */
+        if(e->val) {
+            mem_free(e->val);
+        }
 
-		/* set up the new value */
-		e->val = str_dup(val);
-		if(!e->val) {
-			/* oops! */
-			return 1;
-		}
-	} else {
-		/* no match, need a new entry */
-		e = (attr_entry)mem_alloc(sizeof(struct attr_entry_t));
+        /* set up the new value */
+        e->val = str_dup(val);
+        if(!e->val) {
+            /* oops! */
+            return 1;
+        }
+    } else {
+        /* no match, need a new entry */
+        e = (attr_entry)mem_alloc(sizeof(struct attr_entry_t));
 
-		if(e) {
-			e->name = str_dup(name);
+        if(e) {
+            e->name = str_dup(name);
 
-			if(!e->name) {
-				mem_free(e);
-				return 1;
-			}
+            if(!e->name) {
+                mem_free(e);
+                return 1;
+            }
 
-			e->val = str_dup(val);
+            e->val = str_dup(val);
 
-			if(!e->val) {
-				mem_free(e->name);
-				mem_free(e);
-				return 1;
-			}
+            if(!e->val) {
+                mem_free(e->name);
+                mem_free(e);
+                return 1;
+            }
 
-			/* link it in the list */
-			e->next = attrs->head;
-			attrs->head = e;
-		} else {
-			/* allocation failed */
-			return 1;
-		}
-	}
+            /* link it in the list */
+            e->next = attrs->head;
+            attrs->head = e;
+        } else {
+            /* allocation failed */
+            return 1;
+        }
+    }
 
-	return 0;
+    return 0;
 }
 
 
 
 extern int attr_set_int(attr attrs, const char *name, int val)
 {
-	char buf[64];
+    char buf[64];
 
-	snprintf(buf, sizeof buf, "%d", val);
+    snprintf(buf, sizeof buf, "%d", val);
 
-	return attr_set_str(attrs, name, buf);
+    return attr_set_str(attrs, name, buf);
 }
 
 
 
 extern int attr_set_float(attr attrs, const char *name, float val)
 {
-	char buf[64];
+    char buf[64];
 
-	snprintf(buf, sizeof buf, "%f", val);
+    snprintf(buf, sizeof buf, "%f", val);
 
-	return attr_set_str(attrs, name, buf);
+    return attr_set_str(attrs, name, buf);
 }
 
 
@@ -282,109 +282,111 @@ extern int attr_set_float(attr attrs, const char *name, float val)
  */
 extern const char *attr_get_str(attr attrs, const char *name, const char *def)
 {
-	attr_entry e;
+    attr_entry e;
 
-	if(!attrs) {
-		return def;
-	}
+    if(!attrs) {
+        return def;
+    }
 
-	e = find_entry(attrs, name);
+    e = find_entry(attrs, name);
 
-	if(e) {
-		return e->val;
-	} else {
-		return def;
-	}
+    if(e) {
+        return e->val;
+    } else {
+        return def;
+    }
 }
 
 
 extern int attr_get_int(attr attrs, const char *name, int def)
 {
-	int res;
-	int rc;
+    int res;
+    int rc;
 
-	const char *str_val = attr_get_str(attrs,name, NULL);
+    const char *str_val = attr_get_str(attrs,name, NULL);
 
-	if(!str_val) {
-		return def;
-	}
+    if(!str_val) {
+        return def;
+    }
 
-	rc = str_to_int(str_val, &res);
+    rc = str_to_int(str_val, &res);
 
-	if(rc) {
-		/* format error? */
-		return def;
-	} else {
-		return res;
-	}
+    if(rc) {
+        /* format error? */
+        return def;
+    } else {
+        return res;
+    }
 }
 
 
 extern float attr_get_float(attr attrs, const char *name, float def)
 {
-	float res;
-	int rc;
+    float res;
+    int rc;
 
-	const char *str_val = attr_get_str(attrs,name, NULL);
+    const char *str_val = attr_get_str(attrs,name, NULL);
 
-	if(!str_val) {
-		return def;
-	}
+    if(!str_val) {
+        return def;
+    }
 
-	rc = str_to_float(str_val, &res);
+    rc = str_to_float(str_val, &res);
 
-	if(rc) {
-		/* format error? */
-		return def;
-	} else {
-		return res;
-	}
+    if(rc) {
+        /* format error? */
+        return def;
+    } else {
+        return res;
+    }
 }
 
 
 extern int attr_remove(attr attrs, const char *name)
 {
-	attr_entry e, p;
+    attr_entry e, p;
 
-	if(!attrs)
-		return 0;
+    if(!attrs)
+        return 0;
 
-	e = attrs->head;
+    e = attrs->head;
 
-	/* no such entry, return */
-	if(!e)
-		return 0;
+    /* no such entry, return */
+    if(!e)
+        return 0;
 
-	/* loop to find the entry */
-	p = NULL;
+    /* loop to find the entry */
+    p = NULL;
 
-	while(e) {
-		if(str_cmp(e->name, name) == 0) {
-			break;
-		}
+    while(e) {
+        if(str_cmp(e->name, name) == 0) {
+            break;
+        }
 
-		p = e;
-		e = e->next;
-	}
+        p = e;
+        e = e->next;
+    }
 
-	/* unlink the node */
-	if(!p) {
-		attrs->head = e->next;
-	} else {
-		p->next = e->next;
-	}
+    if(e) {
+        /* unlink the node */
+        if(!p) {
+            attrs->head = e->next;
+        } else {
+            p->next = e->next;
+        }
 
-	if(e->name) {
-		mem_free(e->name);
-	}
+        if(e->name) {
+            mem_free(e->name);
+        }
 
-	if(e->val) {
-		mem_free(e->val);
-	}
+        if(e->val) {
+            mem_free(e->val);
+        }
 
-	mem_free(e);
+        mem_free(e);
+    } /* else not found */
 
-	return 0;
+    return 0;
 }
 
 
@@ -395,29 +397,29 @@ extern int attr_remove(attr attrs, const char *name)
  */
 extern void attr_destroy(attr a)
 {
-	attr_entry e, p;
+    attr_entry e, p;
 
-	if(!a)
-		return;
+    if(!a)
+        return;
 
-	e = a->head;
+    e = a->head;
 
-	/* walk down the entry list and free as we go. */
-	while(e) {
-		if(e->name) {
-			mem_free(e->name);
-		}
+    /* walk down the entry list and free as we go. */
+    while(e) {
+        if(e->name) {
+            mem_free(e->name);
+        }
 
-		if(e->val) {
-			mem_free(e->val);
-		}
+        if(e->val) {
+            mem_free(e->val);
+        }
 
-		p = e;
-		e = e->next;
+        p = e;
+        e = e->next;
 
-		mem_free(p);
-	}
+        mem_free(p);
+    }
 
-	mem_free(a);
+    mem_free(a);
 }
 

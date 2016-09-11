@@ -304,7 +304,7 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
 
             break;
 
-		case AB_PROTOCOL_MLGX800:
+        case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
             if(!cip_vtable.abort) {
                 cip_vtable.abort     = (tag_abort_func)ab_tag_abort;
@@ -465,7 +465,7 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
             break;
 
-		case AB_PROTOCOL_MLGX800:
+        case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
             if (!cip_encode_tag_name(tag, name)) {
                 pdebug(debug, "parse of CIP-style tag name %s failed!", name);
@@ -551,7 +551,8 @@ int session_check_incoming_data_unsafe(ab_session_p session)
 
         if (rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
             /* error! */
-            /* FIXME */
+            pdebug(session->debug,"Error receiving an EIP packet! rc=%d",rc);
+            return rc;
         }
     }
 
@@ -615,7 +616,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
             tmp->request_size = session->recv_offset;
         } /*else {
 
-	        pdebug(debug,"Response for unknown request.");
+            pdebug(debug,"Response for unknown request.");
         }*/
 
         /*
@@ -658,7 +659,7 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req)
         /* is the request done? */
         if (req->send_request) {
             /* not done, try sending more */
-            send_eip_request_unsafe(req);
+            rc = send_eip_request_unsafe(req);
             /* FIXME - handle return code! */
         } else {
             /*
@@ -680,14 +681,14 @@ DWORD __stdcall request_handler_func(LPVOID not_used)
 void* request_handler_func(void* not_used)
 #endif
 {
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
     ab_session_p cur_sess;
     int debug = 0;
 
     while (1) {
         /* we need the mutex */
         if (global_session_mut == NULL) {
-            pdebug(debug, "tag_mutex is NULL!");
+            pdebug(debug, "global_session_mut is NULL!");
             break;
         }
 
@@ -712,51 +713,55 @@ void* request_handler_func(void* not_used)
                 if (rc != PLCTAG_STATUS_OK) {
                     pdebug(debug, "Error when checking for incoming session data! %d", rc);
                     /* FIXME - do something useful with this error */
-                }
 
-                /* loop over the requests in the session */
-                cur_req = cur_sess->requests;
-                prev_req = NULL;
+                    /* skip this session */
+                } else {
+                    /* loop over the requests in the session */
+                    cur_req = cur_sess->requests;
+                    prev_req = NULL;
 
-                /*pdebug(debug,"checking outstanding requests.");*/
+                    /*pdebug(debug,"checking outstanding requests.");*/
 
-                while (cur_req) {
-                    /* check for abort before anything else. */
-                    if (cur_req->abort_request) {
-                        ab_request_p tmp;
+                    while (cur_req) {
+                        /* check for abort before anything else. */
+                        if (cur_req->abort_request) {
+                            ab_request_p tmp;
 
-                        /*pdebug(debug,"aborting request %p",cur_req);*/
+                            /*pdebug(debug,"aborting request %p",cur_req);*/
 
-                        /*
-                         * is this in the process of being sent?
-                         * if so, abort the abort because otherwise we would send
-                         * a partial packet and cause all kinds of problems.
-                         * FIXME
-                         */
-                        if (cur_sess->current_request != cur_req) {
-                            if (prev_req) {
-                                prev_req->next = cur_req->next;
-                            } else {
-                                /* cur is head of list */
-                                cur_sess->requests = cur_req->next;
+                            /*
+                             * is this in the process of being sent?
+                             * if so, abort the abort because otherwise we would send
+                             * a partial packet and cause all kinds of problems.
+                             * FIXME
+                             */
+                            if (cur_sess->current_request != cur_req) {
+                                if (prev_req) {
+                                    prev_req->next = cur_req->next;
+                                } else {
+                                    /* cur is head of list */
+                                    cur_sess->requests = cur_req->next;
+                                }
+
+                                tmp = cur_req;
+                                cur_req = cur_req->next;
+
+                                /* free the the request */
+                                request_destroy_unsafe(&tmp);
+
+                                continue;
                             }
-
-                            tmp = cur_req;
-                            cur_req = cur_req->next;
-
-                            /* free the the request */
-                            request_destroy_unsafe(&tmp);
-
-                            continue;
                         }
+
+                        rc = request_check_outgoing_data_unsafe(cur_sess, cur_req);
+
+                        /* FIXME: a failed return code indicates, generally, that the socket write failed. */
+
+                        /* move to the next request */
+                        prev_req = cur_req;
+                        cur_req = cur_req->next;
                     }
-
-                    rc = request_check_outgoing_data_unsafe(cur_sess, cur_req);
-
-                    /* move to the next request */
-                    prev_req = cur_req;
-                    cur_req = cur_req->next;
-                }
+                } /* end of else when rc == PLCTAG_STATUS_OK */
 
                 /*  move to the next session */
                 /*pdebug(debug,"cur_sess=%p, cur_sess->next=%p",cur_sess, cur_sess->next);*/

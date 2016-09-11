@@ -36,73 +36,75 @@
 /* this must be called with the session mutex held */
 int send_eip_request_unsafe(ab_request_p req)
 {
-	int rc;
+    int rc;
 
-	pdebug(req->debug, "Starting.");
+    pdebug(req->debug, "Starting.");
 
-	/* if we have not already started, then start the send */
-	if (!req->send_in_progress) {
-		eip_encap_t* encap = (eip_encap_t*)(req->data);
-		int payload_size = req->request_size - sizeof(eip_encap_t);
+    /* if we have not already started, then start the send */
+    if (!req->send_in_progress) {
+        eip_encap_t* encap = (eip_encap_t*)(req->data);
+        int payload_size = req->request_size - sizeof(eip_encap_t);
 
 
-		/* set up the session sequence ID for this transaction */
-		if(encap->encap_command == h2le16(AB_EIP_READ_RR_DATA)) {
-			uint64_t session_seq_id;
+        /* set up the session sequence ID for this transaction */
+        if(encap->encap_command == h2le16(AB_EIP_READ_RR_DATA)) {
+            uint64_t session_seq_id;
 
             session_seq_id = req->session->session_seq_id++;
 
-			req->session_seq_id = session_seq_id;
-			encap->encap_sender_context = session_seq_id; /* link up the request seq ID and the packet seq ID */
-		}
+            req->session_seq_id = session_seq_id;
+            encap->encap_sender_context = session_seq_id; /* link up the request seq ID and the packet seq ID */
+        }
 
-		/* set up the rest of the request */
-		req->current_offset = 0; /* nothing written yet */
+        /* set up the rest of the request */
+        req->current_offset = 0; /* nothing written yet */
 
-		/* fill in the header fields. */
-		encap->encap_length = h2le16(payload_size);
-		encap->encap_session_handle = req->session->session_handle;
-		encap->encap_status = h2le32(0);
-		encap->encap_options = h2le32(0);
+        /* fill in the header fields. */
+        encap->encap_length = h2le16(payload_size);
+        encap->encap_session_handle = req->session->session_handle;
+        encap->encap_status = h2le32(0);
+        encap->encap_options = h2le32(0);
 
-		/* display the data */
-		pdebug_dump_bytes(req->debug, req->data, req->request_size);
+        /* display the data */
+        pdebug_dump_bytes(req->debug, req->data, req->request_size);
 
-		req->send_in_progress = 1;
-	}
+        req->send_in_progress = 1;
+    }
 
-	/* send the packet */
-	rc = socket_write(req->session->sock, req->data + req->current_offset, req->request_size - req->current_offset);
+    /* send the packet */
+    rc = socket_write(req->session->sock, req->data + req->current_offset, req->request_size - req->current_offset);
 
-	if (rc >= 0) {
-		req->current_offset += rc;
+    if (rc >= 0) {
+        req->current_offset += rc;
 
-		/* are we done? */
-		if (req->current_offset >= req->request_size) {
-			req->send_request = 0;
-			req->send_in_progress = 0;
-			req->current_offset = 0;
+        /* are we done? */
+        if (req->current_offset >= req->request_size) {
+            req->send_request = 0;
+            req->send_in_progress = 0;
+            req->current_offset = 0;
 
-			/* set this request up for a receive action */
-			if(req->abort_after_send) {
-				req->abort_request = 1; /* for one shots */
-			} else {
-				req->recv_in_progress = 1;
-			}
-		}
+            /* set this request up for a receive action */
+            if(req->abort_after_send) {
+                req->abort_request = 1; /* for one shots */
+            } else {
+                req->recv_in_progress = 1;
+            }
+        }
 
-		rc = PLCTAG_STATUS_OK;
-	} else {
-		/* oops, error of some sort. */
-		req->status = rc;
-		req->send_request = 0;
-		req->send_in_progress = 0;
-		req->recv_in_progress = 0;
-	}
+        rc = PLCTAG_STATUS_OK;
+    } else {
+        rc = PLCTAG_ERR_WRITE;
 
-	pdebug(req->debug, "Done.");
+        /* oops, error of some sort. */
+        req->status = rc;
+        req->send_request = 0;
+        req->send_in_progress = 0;
+        req->recv_in_progress = 0;
+    }
 
-	return rc;
+    pdebug(req->debug, "Done.");
+
+    return rc;
 }
 
 /*
@@ -114,62 +116,62 @@ int send_eip_request_unsafe(ab_request_p req)
  */
 int recv_eip_response_unsafe(ab_session_p session)
 {
-	int data_needed = 0;
-	int rc = PLCTAG_STATUS_OK;
+    int data_needed = 0;
+    int rc = PLCTAG_STATUS_OK;
 
-	/*pdebug(session->debug,"Starting.");*/
+    /*pdebug(session->debug,"Starting.");*/
 
-	/*
-	 * Determine the amount of data to get.  At a minimum, we
-	 * need to get an encap header.  This will determine
-	 * whether we need to get more data or not.
-	 */
-	if (session->recv_offset < sizeof(eip_encap_t)) {
-		data_needed = sizeof(eip_encap_t);
-	} else {
-		data_needed = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
-	}
+    /*
+     * Determine the amount of data to get.  At a minimum, we
+     * need to get an encap header.  This will determine
+     * whether we need to get more data or not.
+     */
+    if (session->recv_offset < sizeof(eip_encap_t)) {
+        data_needed = sizeof(eip_encap_t);
+    } else {
+        data_needed = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
+    }
 
-	if (session->recv_offset < data_needed) {
-		/* read everything we can */
-		do {
-			rc = socket_read(session->sock, session->recv_data + session->recv_offset,
-			                 data_needed - session->recv_offset);
+    if (session->recv_offset < data_needed) {
+        /* read everything we can */
+        do {
+            rc = socket_read(session->sock, session->recv_data + session->recv_offset,
+                             data_needed - session->recv_offset);
 
-			/*pdebug(session->debug,"socket_read rc=%d",rc);*/
+            /*pdebug(session->debug,"socket_read rc=%d",rc);*/
 
-			if (rc < 0) {
-				if (rc != PLCTAG_ERR_NO_DATA) {
-					/* error! */
-					pdebug(session->debug,"Error reading socket! rc=%d",rc);
-					return rc;
-				}
-			} else {
-				session->recv_offset += rc;
+            if (rc < 0) {
+                if (rc != PLCTAG_ERR_NO_DATA) {
+                    /* error! */
+                    pdebug(session->debug,"Error reading socket! rc=%d",rc);
+                    return rc;
+                }
+            } else {
+                session->recv_offset += rc;
 
-				/*pdebug_dump_bytes(session->debug, session->recv_data, session->recv_offset);*/
+                /*pdebug_dump_bytes(session->debug, session->recv_data, session->recv_offset);*/
 
-				/* recalculate the amount of data needed if we have just completed the read of an encap header */
-				if (session->recv_offset >= sizeof(eip_encap_t)) {
-					data_needed = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
-				}
-			}
-		} while (rc > 0 && session->recv_offset < data_needed);
-	}
+                /* recalculate the amount of data needed if we have just completed the read of an encap header */
+                if (session->recv_offset >= sizeof(eip_encap_t)) {
+                    data_needed = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
+                }
+            }
+        } while (rc > 0 && session->recv_offset < data_needed);
+    }
 
-	/* did we get all the data? */
-	if (session->recv_offset >= data_needed) {
-		session->resp_seq_id = ((eip_encap_t*)(session->recv_data))->encap_sender_context;
-		session->has_response = 1;
+    /* did we get all the data? */
+    if (session->recv_offset >= data_needed) {
+        session->resp_seq_id = ((eip_encap_t*)(session->recv_data))->encap_sender_context;
+        session->has_response = 1;
 
-		pdebug(session->debug, "request received all needed data.");
+        pdebug(session->debug, "request received all needed data.");
 
-		/*
-		if(session->resp_seq_id == 0) {
-		        pdebug(debug,"Got zero response ID");
-		}
-		*/
-	}
+        /*
+        if(session->resp_seq_id == 0) {
+                pdebug(debug,"Got zero response ID");
+        }
+        */
+    }
 
-	return rc;
+    return rc;
 }
