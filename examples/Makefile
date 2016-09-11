@@ -25,7 +25,7 @@ CFLAGS += -fno-strict-aliasing -g -I. -I../lib -fms-extensions -Wall -I/usr/loca
 CXXFLAGS += $(CFLAGS)
 LIBS = -L../lib -lplctag -lpthread -pthread
 
-TARGETS = async data_dumper simple simple_cpp simple_dual string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_plc5_dhp multithread_cached_read plc5 slc500
+TARGETS = async data_dumper simple simple_cpp simple_dual string toggle_bool write_string tag_rw multithread multithread_plc5 multithread_plc5_dhp multithread_cached_read plc5 slc500 stress_test
 
 all: $(TARGETS)
 	
