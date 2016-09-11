@@ -139,14 +139,14 @@ int session_remove_connection_unsafe(ab_session_p session, ab_connection_p conne
             session->connections = cur->next;
         }
 
+        if (session_is_empty(session)) {
+            pdebug(debug, "destroying session");
+            session_destroy_unsafe(session);
+        }
+
         rc = PLCTAG_STATUS_OK;
     } else {
         rc = PLCTAG_ERR_NOT_FOUND;
-    }
-
-    if (session_is_empty(session)) {
-        pdebug(debug, "destroying session");
-        session_destroy_unsafe(session);
     }
 
     pdebug(debug, "Done");
