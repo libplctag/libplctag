@@ -24,7 +24,7 @@
 #include "../lib/libplctag.h"
 
 
-#define TAG_PATH "protocol=ab_eip&gateway=192.168.1.42&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=myDINTArray"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=TestDINTArray[0]&debug=4"
 #define ELEM_COUNT 10
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 5000
@@ -48,12 +48,12 @@ int main(int argc, char **argv)
 
     /* let the connect succeed we hope */
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-    	sleep(1);
+        sleep(1);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-    	fprintf(stderr,"Error setting up tag internal state.\n");
-    	return 0;
+        fprintf(stderr,"Error setting up tag internal state.\n");
+        return 0;
     }
 
     /* get the data */
@@ -72,13 +72,13 @@ int main(int argc, char **argv)
 
     /* now test a write */
     for(i=0; i < ELEM_COUNT; i++) {
-    	int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+        int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
 
-    	val = val+1;
+        val = val+1;
 
-    	fprintf(stderr,"Setting element %d to %d\n",i,val);
+        fprintf(stderr,"Setting element %d to %d\n",i,val);
 
-    	plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
+        plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
