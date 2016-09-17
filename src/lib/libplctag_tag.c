@@ -76,7 +76,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
         return PLC_TAG_NULL;
     }
 
-    if(!attrib_str || !str_length(attrib_str)) {
+    if(!attrib_str || str_length(attrib_str) == 0) {
         return PLC_TAG_NULL;
     }
 
@@ -102,12 +102,25 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
      * the only place it can be without making every protocol type do this automatically.
      */
     if(tag && tag->status == PLCTAG_STATUS_OK) {
-        rc = mutex_create(&tag->mut);
+        int read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
 
-        tag->status = rc;
+        if(read_cache_ms < 0) {
+            pdebug(DEBUG_WARN, "read_cache_ms value must be positive, using zero.");
+            read_cache_ms = 0;
+        }
+
 
         tag->read_cache_expire = (uint64_t)0;
-        tag->read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
+        tag->read_cache_ms = (uint64_t)read_cache_ms;
+
+        /* create tag mutex */
+        rc = mutex_create(&tag->mut);
+
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_ERROR, "Unable to create tag mutex!");
+        }
+
+        tag->status = rc;
     } else {
         pdebug(DEBUG_WARN, "Tag creation failed, skipping mutex creation and other generic setup.");
     }
