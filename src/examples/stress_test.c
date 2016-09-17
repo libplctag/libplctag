@@ -205,7 +205,7 @@ void serial_test(void *data)
 
         fprintf(stderr,"Test %d got result %d with return code %s in %dms\n",tid,value,decode_error(rc),(int)(end-start));
 
-        sleep_ms(1);
+        //sleep_ms(1);
     }
 
     fprintf(stderr, "Test %d terminating.\n", tid);

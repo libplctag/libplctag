@@ -809,7 +809,8 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             return PLCTAG_ERR_NO_DATA;
         } else {
-            return PLCTAG_ERR_READ;
+            pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+            return PLCTAG_ERR_WRITE;
         }
     }
 
