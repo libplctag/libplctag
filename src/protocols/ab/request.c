@@ -70,6 +70,11 @@ int request_add_unsafe(ab_session_p sess, ab_request_p req)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
+    if(!sess) {
+        pdebug(DEBUG_WARN, "Session is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     /* make sure the request points to the session */
     req->session = sess;
 

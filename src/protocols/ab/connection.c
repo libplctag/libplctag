@@ -52,6 +52,7 @@ extern "C"
  * Shared global data
  */
 
+static int recv_forward_close_resp(ab_connection_p connection, ab_request_p req);
 
 
 int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
@@ -71,7 +72,8 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
     critical_block(global_session_mut) {
         connection = session_find_connection_by_path_unsafe(session, path);
 
-        if (connection == AB_CONNECTION_NULL) {
+        /* if we find one but it is in the process of disconnection, create a new one */
+        if (connection == AB_CONNECTION_NULL || connection->disconnect_in_progress) {
             connection = connection_create_unsafe(path, session);
             is_new = 1;
         } else {
@@ -223,7 +225,7 @@ int connection_perform_forward_open(ab_connection_p connection)
             break;
         }
 
-        /* wait for the ForwardOpen response. */
+        /* check for the ForwardOpen response. */
         if((rc = recv_forward_open_resp(connection, req)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -289,6 +291,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
     fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id or the other machines? */
     fo->targ_to_orig_conn_id = h2le32(connection->orig_connection_id); /* connection id in the other direction. */
+    /* this might need to be globally unique */
     fo->conn_serial_number = h2le16((uint16_t)(intptr_t)(connection)); /* our connection SEQUENCE number. */
     fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
@@ -358,6 +361,11 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
     return rc;
 }
 
+
+
+
+
+
 int connection_add_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
 {
     pdebug(DEBUG_DETAIL, "Starting");
@@ -422,8 +430,9 @@ int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
     }
 
     if (connection_empty_unsafe(connection)) {
-        pdebug(DEBUG_DETAIL, "destroying connection");
-        connection_destroy_unsafe(connection);
+        connection->disconnect_in_progress = 1;
+    } else {
+        pdebug(DEBUG_DETAIL, "connection not empty.  Not destroying.");
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -440,6 +449,16 @@ int connection_remove_tag(ab_connection_p connection, ab_tag_p tag)
     if(connection && connection->session) {
         critical_block(global_session_mut) {
             rc = connection_remove_tag_unsafe(connection, tag);
+        }
+
+        /* don't block the mutex, check to see if we need to destroy the connection. */
+        if(connection_is_empty(connection) && connection->disconnect_in_progress) {
+            pdebug(DEBUG_INFO,"Closing connection.");
+            connection_close(connection);
+
+            critical_block(global_session_mut) {
+                connection_destroy_unsafe(connection);
+            }
         }
     } else {
         pdebug(DEBUG_WARN, "Connection or session ptr is null!");
@@ -488,10 +507,6 @@ int connection_destroy_unsafe(ab_connection_p connection)
         return 0;
     }
 
-    if (connection_close(connection)) {
-        return 0;
-    }
-
     /* call the mutex protected version */
     session_remove_connection_unsafe(connection->session, connection);
 
@@ -505,6 +520,7 @@ int connection_destroy_unsafe(ab_connection_p connection)
 int connection_close(ab_connection_p connection)
 {
     ab_request_p req;
+    uint64_t timeout_time = 0L;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -524,9 +540,35 @@ int connection_close(ab_connection_p connection)
             pdebug(DEBUG_WARN,"Unable to send ForwardClose packet!");
             break;
         }
+
+        /* wait for a response */
+        timeout_time = time_ms() + 5000; /* MAGIC five seconds */
+
+        while (timeout_time > time_ms() && !req->resp_received) {
+            sleep_ms(1);
+        }
+
+        /* timeout? */
+        if(!req->resp_received) {
+            pdebug(DEBUG_WARN,"Timed out waiting for ForwardClose response!");
+            rc = PLCTAG_ERR_TIMEOUT_ACK;
+            break;
+        }
+
+        /* check for the ForwardClose response. */
+        if((rc = recv_forward_close_resp(connection, req)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to use ForwardClose response!");
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
     } while(0);
 
     connection->status = rc;
+
+    if(req) {
+        request_destroy(&req);
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -588,12 +630,54 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
 
     /* mark it as ready to send */
     req->send_request = 1;
-    req->abort_after_send = 1; /* don't return to us.*/
+    /*req->abort_after_send = 1;*/ /* don't return to us.*/
 
     /* add the request to the session's list. */
-    rc = request_add_unsafe(connection->session, req);
+    rc = request_add(connection->session, req);
 
     pdebug(DEBUG_INFO, "Done");
 
     return rc;
 }
+
+
+
+int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
+{
+    eip_forward_close_resp_t *fo_resp;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO,"Starting");
+
+    fo_resp = (eip_forward_close_resp_t*)(req->data);
+
+    do {
+        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
+        if(le2h16(fo_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
+        if(fo_resp->general_status != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"Forward Close command failed, response code: %d",fo_resp->general_status);
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL,"Connection close succeeded.");
+
+        connection->status = PLCTAG_STATUS_OK;
+        rc = PLCTAG_STATUS_OK;
+    } while(0);
+
+    pdebug(DEBUG_INFO,"Done.");
+
+    return rc;
+}
+

@@ -525,7 +525,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
      * see if we can get some data.
      */
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    /*pdebug(DEBUG_DETAIL, "Starting.");*/
 
     if (!session->has_response) {
         rc = recv_eip_response_unsafe(session);
@@ -569,8 +569,8 @@ int session_check_incoming_data_unsafe(ab_session_p session)
             if (encap->encap_command == AB_EIP_CONNECTED_SEND) {
                 eip_cip_co_generic_response* resp = (eip_cip_co_generic_response*)(session->recv_data);
 
-                /*pdebug(DEBUG_DETAIL,"resp->cpf_targ_conn_id(%x) = tmp->conn_id(%x), resp->cpf_conn_seq_num(%x) = tmp->conn_seq(%u)",
-                       resp->cpf_targ_conn_id,      tmp->conn_id,     resp->cpf_conn_seq_num,      tmp->conn_seq);*/
+                pdebug(DEBUG_DETAIL,"Connected response: resp->cpf_targ_conn_id(%x) = tmp->conn_id(%x), resp->cpf_conn_seq_num(%x) = tmp->conn_seq(%u)",
+                       resp->cpf_targ_conn_id,      tmp->conn_id,     resp->cpf_conn_seq_num,      tmp->conn_seq);
 
                 if (resp->cpf_targ_conn_id == tmp->conn_id && resp->cpf_conn_seq_num == tmp->conn_seq) {
                     break;
@@ -580,7 +580,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
                  * If we are not using a connected message, then the session context is meaningful and we can switch on that.
                  */
 
-                /*pdebug(DEBUG_DETAIL,"encap->encap_sender_context=%lu tmp->session_seq_id=%lu",encap->encap_sender_context,tmp->session_seq_id);*/
+                pdebug(DEBUG_DETAIL,"Unconnected Response: encap->encap_sender_context=%lu tmp->session_seq_id=%lu",encap->encap_sender_context,tmp->session_seq_id);
 
                 if (encap->encap_sender_context != 0 && encap->encap_sender_context == tmp->session_seq_id) {
                     break;
@@ -618,7 +618,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
         session->has_response = 0;
     }
 
-    pdebug(DEBUG_DETAIL, "Done");
+    /*pdebug(DEBUG_DETAIL, "Done");*/
 
     return rc;
 }
