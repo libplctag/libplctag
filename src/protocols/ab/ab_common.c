@@ -191,7 +191,7 @@ plc_tag_p ab_tag_create(attr attribs)
     }
 
     /* handle the strange LGX->DH+->PLC5 case, and LGX-type systems. */
-    if(tag->use_dhp_direct || tag->protocol_type == AB_PROTOCOL_MLGX800 || tag->protocol_type == AB_PROTOCOL_LGX) {
+    if(tag->use_dhp_direct || tag->protocol_type == AB_PROTOCOL_MLGX800) {
         /* this type of tag must use connected mode. */
         tag->needs_connection = 1;
     }
