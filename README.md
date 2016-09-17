@@ -3,7 +3,7 @@ libplctag
 
 This library for Linux, Mac OSX (seems to work) and Windows (not heavily tested) provides a means of accessing PLCs to read and write simple data.
 
-Status: 1.0
+Status: 1.5
 
 
 WARNING - DISCLAIMER
