@@ -23,9 +23,9 @@ cmake_minimum_required (VERSION 2.8)
 # this is the root libplctag project
 project (libplctag_project)
 
-# the project is version 1.9
+# the project is version 1.5
 set (libplctag_VERSION_MAJOR 1)
-set (libplctag_VERSION_MINOR 9)
+set (libplctag_VERSION_MINOR 5)
 
 # set the main paths.
 set ( base_SRC_PATH "${PROJECT_SOURCE_DIR}/src" )
@@ -39,8 +39,13 @@ set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 # FIXME - does this work for macOS?
 if (UNIX)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/linux" )
+elseif (WINDOWS)
+    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
+endif()
 
-    # set up the flags for the GCC or CLANG C compiler
+# C compiler specific settings
+if ("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
+    # using Clang
     add_definitions(-std=c99)
     add_definitions(-Wall)
     add_definitions(-fms-extensions)
@@ -49,10 +54,55 @@ if (UNIX)
     add_definitions(-D_POSIX_C_SOURCE=200809L)
     add_definitions(-fPIC)
     add_definitions(-lpthread)
-endif (UNIX)
-if (MSVC)
-    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
-endif (MSVC)
+elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
+    # using GCC
+    add_definitions(-std=c99)
+    add_definitions(-Wall)
+    add_definitions(-fms-extensions)
+    add_definitions(-fno-strict-aliasing)
+    add_definitions(-D__USE_POSIX=1)
+    add_definitions(-D_POSIX_C_SOURCE=200809L)
+    add_definitions(-fPIC)
+    add_definitions(-lpthread)
+elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "Intel")
+    # using Intel C/C++
+    # FIXME!
+elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "MSVC")
+    # using Visual Studio C/C++
+    #add_definitions(/MDd)
+    add_definitions(/c)
+    add_definitions(/DLIBPLCTAGDLL_EXPORTS=1)
+    add_definitions(/W3)
+endif()
+
+# C++ compiler settings
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    # using Clang
+    add_definitions(-Wall)
+    add_definitions(-fms-extensions)
+    add_definitions(-fno-strict-aliasing)
+    add_definitions(-D__USE_POSIX=1)
+    add_definitions(-D_POSIX_C_SOURCE=200809L)
+    add_definitions(-fPIC)
+    add_definitions(-lpthread)
+elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    # using GCC
+    add_definitions(-Wall)
+    add_definitions(-fms-extensions)
+    add_definitions(-fno-strict-aliasing)
+    add_definitions(-D__USE_POSIX=1)
+    add_definitions(-D_POSIX_C_SOURCE=200809L)
+    add_definitions(-fPIC)
+    add_definitions(-lpthread)
+elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    # using Intel C++
+    # FIXME!
+elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+    # using Visual Studio C++
+    #add_definitions(/MDd)
+    add_definitions(/DLIBPLCTAGDLL_EXPORTS=1)
+    add_definitions(/W3)
+endif()
 
 # where to find include files.
 include_directories("${base_SRC_PATH}")
@@ -81,7 +131,9 @@ add_library(plctag SHARED ${libplctag_SRCS} )
 
 
 # add the examples
-set ( example_PROGRAMS async
+
+if (UNIX)
+    set ( example_PROGRAMS async
                        data_dumper
                        multithread
                        multithread_cached_read
@@ -97,16 +149,29 @@ set ( example_PROGRAMS async
                        write_string
                        tag_rw )
 
+    set ( example_LIBRARIES plctag pthread )
+elseif(WINDOWS)
+    set ( example_PROGRAMS async
+                       data_dumper
+                       plc5
+                       simple
+                       simple_dual
+                       slc500
+                       string
+                       toggle_bool
+                       write_string
+                       tag_rw )
+    set ( example_LIBRARIES plctag )
+endif()
+
 foreach ( example ${example_PROGRAMS} )
     add_executable( ${example} "${example_SRC_PATH}/${example}.c" )
-    target_link_libraries(${example} plctag pthread )
+    target_link_libraries(${example} ${example_LIBRARIES} )
 endforeach(example)
 
 # different because it is C++
 add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" )
-target_link_libraries (simple_cpp plctag pthread )
-#target_link_libraries(simple_cpp "${CMAKE_THREAD_LIBS_INIT}" )
-
+target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
 # for installation
 install(TARGETS plctag DESTINATION lib)
