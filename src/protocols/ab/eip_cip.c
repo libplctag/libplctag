@@ -749,7 +749,7 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to lock add request to session! rc=%d", rc);
-        plc_tag_abort((plc_tag)tag);
+        ab_tag_abort(tag);
         request_destroy(&req);
         tag->status = rc;
         return rc;
@@ -902,7 +902,7 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to lock add request to session! rc=%d", rc);
-        plc_tag_abort((plc_tag)tag);
+        ab_tag_abort(tag);
         request_destroy(&req);
         tag->status = rc;
         return rc;
