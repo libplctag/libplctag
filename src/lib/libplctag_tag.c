@@ -29,6 +29,9 @@
  *                                                                        *
  **************************************************************************/
 
+
+#define LIBPLCTAGDLL_EXPORTS 1
+
 #include <limits.h>
 #include <float.h>
 #include <lib/libplctag.h>
@@ -55,6 +58,65 @@ static lock_t global_library_mutex_lock = LOCK_INIT;
 /**************************************************************************
  ***************************  API Functions  ******************************
  **************************************************************************/
+
+
+/*
+ * plc_tag_decode_error()
+ *
+ * This takes an integer error value and turns it into a printable string.
+ *
+ * FIXME - this should produce better errors than this!
+ */
+
+
+
+LIB_EXPORT const char* plc_tag_decode_error(int rc)
+{
+    switch(rc) {
+        case PLCTAG_STATUS_PENDING: return "PLCTAG_STATUS_PENDING"; break;
+        case PLCTAG_STATUS_OK: return "PLCTAG_STATUS_OK"; break;
+        case PLCTAG_ERR_NULL_PTR: return "PLCTAG_ERR_NULL_PTR"; break;
+        case PLCTAG_ERR_OUT_OF_BOUNDS: return "PLCTAG_ERR_OUT_OF_BOUNDS"; break;
+        case PLCTAG_ERR_NO_MEM: return "PLCTAG_ERR_NO_MEM"; break;
+        case PLCTAG_ERR_LL_ADD: return "PLCTAG_ERR_LL_ADD"; break;
+        case PLCTAG_ERR_BAD_PARAM: return "PLCTAG_ERR_BAD_PARAM"; break;
+        case PLCTAG_ERR_CREATE: return "PLCTAG_ERR_CREATE"; break;
+        case PLCTAG_ERR_NOT_EMPTY: return "PLCTAG_ERR_NOT_EMPTY"; break;
+        case PLCTAG_ERR_OPEN: return "PLCTAG_ERR_OPEN"; break;
+        case PLCTAG_ERR_SET: return "PLCTAG_ERR_SET"; break;
+        case PLCTAG_ERR_WRITE: return "PLCTAG_ERR_WRITE"; break;
+        case PLCTAG_ERR_TIMEOUT: return "PLCTAG_ERR_TIMEOUT"; break;
+        case PLCTAG_ERR_TIMEOUT_ACK: return "PLCTAG_ERR_TIMEOUT_ACK"; break;
+        case PLCTAG_ERR_RETRIES: return "PLCTAG_ERR_RETRIES"; break;
+        case PLCTAG_ERR_READ: return "PLCTAG_ERR_READ"; break;
+        case PLCTAG_ERR_BAD_DATA: return "PLCTAG_ERR_BAD_DATA"; break;
+        case PLCTAG_ERR_ENCODE: return "PLCTAG_ERR_ENCODE"; break;
+        case PLCTAG_ERR_DECODE: return "PLCTAG_ERR_DECODE"; break;
+        case PLCTAG_ERR_UNSUPPORTED: return "PLCTAG_ERR_UNSUPPORTED"; break;
+        case PLCTAG_ERR_TOO_LONG: return "PLCTAG_ERR_TOO_LONG"; break;
+        case PLCTAG_ERR_CLOSE: return "PLCTAG_ERR_CLOSE"; break;
+        case PLCTAG_ERR_NOT_ALLOWED: return "PLCTAG_ERR_NOT_ALLOWED"; break;
+        case PLCTAG_ERR_THREAD: return "PLCTAG_ERR_THREAD"; break;
+        case PLCTAG_ERR_NO_DATA: return "PLCTAG_ERR_NO_DATA"; break;
+        case PLCTAG_ERR_THREAD_JOIN: return "PLCTAG_ERR_THREAD_JOIN"; break;
+        case PLCTAG_ERR_THREAD_CREATE: return "PLCTAG_ERR_THREAD_CREATE"; break;
+        case PLCTAG_ERR_MUTEX_DESTROY: return "PLCTAG_ERR_MUTEX_DESTROY"; break;
+        case PLCTAG_ERR_MUTEX_UNLOCK: return "PLCTAG_ERR_MUTEX_UNLOCK"; break;
+        case PLCTAG_ERR_MUTEX_INIT: return "PLCTAG_ERR_MUTEX_INIT"; break;
+        case PLCTAG_ERR_MUTEX_LOCK: return "PLCTAG_ERR_MUTEX_LOCK"; break;
+        case PLCTAG_ERR_NOT_IMPLEMENTED: return "PLCTAG_ERR_NOT_IMPLEMENTED"; break;
+        case PLCTAG_ERR_BAD_DEVICE: return "PLCTAG_ERR_BAD_DEVICE"; break;
+        case PLCTAG_ERR_BAD_GATEWAY: return "PLCTAG_ERR_BAD_GATEWAY"; break;
+        case PLCTAG_ERR_REMOTE_ERR: return "PLCTAG_ERR_REMOTE_ERR"; break;
+        case PLCTAG_ERR_NOT_FOUND: return "PLCTAG_ERR_NOT_FOUND"; break;
+        case PLCTAG_ERR_ABORT: return "PLCTAG_ERR_ABORT"; break;
+        case PLCTAG_ERR_WINSOCK: return "PLCTAG_ERR_WINSOCK"; break;
+
+        default: return "Unknown error."; break;
+    }
+
+    return "Unknown error.";
+}
 
 
 
