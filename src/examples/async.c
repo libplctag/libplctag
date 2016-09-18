@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "../lib/libplctag.h"
+#include "utils.h"
 
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=pcomm_test_dint_array[%d]"
@@ -37,65 +38,65 @@
 
 int main(int argc, char **argv)
 {
-	plc_tag tag[NUM_TAGS];
-	int rc;
-	int i;
+    plc_tag tag[NUM_TAGS];
+    int rc;
+    int i;
 
-	/* create the tags */
-	for(i=0; i< NUM_TAGS; i++) {
-		char tmp_tag_path[256] = {0,};
-		snprintf(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
-		tag[i]  = plc_tag_create(tmp_tag_path);
+    /* create the tags */
+    for(i=0; i< NUM_TAGS; i++) {
+        char tmp_tag_path[256] = {0,};
+        snprintf(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
+        tag[i]  = plc_tag_create(tmp_tag_path);
 
-		if(!tag[i]) {
-			fprintf(stderr,"Error: could not create tag %d\n",i);
-		}
-	}
+        if(!tag[i]) {
+            fprintf(stderr,"Error: could not create tag %d\n",i);
+        }
+    }
 
-	/* let the connect complete */
-	fprintf(stderr,"Sleeping to let the connect complete.\n");
-	sleep(1);
+    /* let the connect complete */
+    fprintf(stderr,"Sleeping to let the connect complete.\n");
+    sleep_ms(1000);
 
-	for(i=0; i < NUM_TAGS; i++) {
-		/* called to update the status in the tag. */
-		plc_tag_status(tag[i]);
-	}
+    for(i=0; i < NUM_TAGS; i++) {
+        /* called to update the status in the tag. */
+        plc_tag_status(tag[i]);
+    }
 
-	/* get the data */
-	for(i=0; i < NUM_TAGS; i++) {
-		rc = plc_tag_read(tag[i], 0);
+    /* get the data */
+    for(i=0; i < NUM_TAGS; i++) {
+        rc = plc_tag_read(tag[i], 0);
 
-		if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-			fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
+        if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+            fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
 
-			return 0;
-		}
-	}
+            return 0;
+        }
+    }
 
-	/* sleeping to let the reads complete */
-	fprintf(stderr,"Sleeping to let the reads complete.\n");
-	sleep(2);
-
-
-	/* get any data we can */
-	for(i=0; i < NUM_TAGS; i++) {
-		rc = plc_tag_status(tag[i]);
-
-		if(rc == PLCTAG_STATUS_PENDING) {
-			fprintf(stderr,"Tag %d is still pending.\n",i);
-		} else if(rc != PLCTAG_STATUS_OK) {
-			fprintf(stderr,"Tag %d status error! %d\n",i,rc);
-		} else {
-			/* read complete! */
-			fprintf(stderr,"Tag %d data[0]=%d\n",i,plc_tag_get_int32(tag[i],0));
-		}
-	}
+    /* sleeping to let the reads complete */
+    fprintf(stderr,"Sleeping to let the reads complete.\n");
+    sleep_ms(2000);
 
 
-	/* we are done */
-	for(i=0; i < NUM_TAGS; i++) {
-		plc_tag_destroy(tag[i]);
-	}
+    /* get any data we can */
+    for(i=0; i < NUM_TAGS; i++) {
+        rc = plc_tag_status(tag[i]);
 
-	return 0;
+        if(rc == PLCTAG_STATUS_PENDING) {
+            fprintf(stderr,"Tag %d is still pending.\n",i);
+        } else if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"Tag %d status error! %d: %s\n",i,rc, plc_tag_decode_error(rc));
+        } else {
+            /* read complete! */
+            fprintf(stderr,"Tag %d data[0]=%d\n",i,plc_tag_get_int32(tag[i],0));
+        }
+    }
+
+
+    /* we are done */
+    for(i=0; i < NUM_TAGS; i++) {
+        plc_tag_destroy(tag[i]);
+    }
+
+    return 0;
 }

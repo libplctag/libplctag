@@ -21,13 +21,9 @@
 
 
 #include <stdio.h>
-#ifdef _WIN32
 #include <stdlib.h>
-#define sleep _sleep
-#else
-#include <unistd.h>
-#endif
-#include <lib/libplctag.h>
+#include "../lib/libplctag.h"
+#include "utils.h"
 
 /*
  * Read an array of 48 STRINGs.  Note that the actual data size of a string is 88 bytes, not 82+4.
@@ -54,17 +50,16 @@ int main(int argc, char **argv)
     /* everything OK? */
     if(!tag) {
         fprintf(stderr,"ERROR: Could not create tag!\n");
-
         return 0;
     }
 
     /* let the connect succeed we hope */
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep(1);
+        sleep_ms(100);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state.\n");
+        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
         return 0;
     }
 
@@ -72,8 +67,7 @@ int main(int argc, char **argv)
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         return 0;
     }
 
@@ -90,32 +84,6 @@ int main(int argc, char **argv)
 
         printf("string %d (%d chars) = '%s'\n",i, str_size, str);
     }
-
-
-    /* do it again. */
-    rc = plc_tag_read(tag, DATA_TIMEOUT);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
-        return 0;
-    }
-
-    /* print out the data */
-    for(i=0; i < ELEM_COUNT; i++) {
-        int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-        char str[83] = {0};
-        int j;
-
-        for(j=0; j<str_size; j++) {
-            str[j] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+j+4);
-        }
-        str[j] = (char)0;
-
-        printf("string %d (%d chars) = '%s'\n",i, str_size, str);
-    }
-
-
 
     /* we are done */
     plc_tag_destroy(tag);

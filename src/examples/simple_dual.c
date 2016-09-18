@@ -20,8 +20,8 @@
 
 
 #include <stdio.h>
-#include <unistd.h>
 #include "../lib/libplctag.h"
+#include "utils.h"
 
 /*
  * This tests the use of simultaneous connected (DH+ to a PLC) and unconnected messages (to an LGX).  The first
@@ -59,15 +59,16 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    sleep(1);
+    /* wait for tags to finish setting up */
+    sleep_ms(1000);
 
     if(plc_tag_status(tag1) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state.\n");
+        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag1)));
         return 0;
     }
 
     if(plc_tag_status(tag2) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state.\n");
+        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag2)));
         return 0;
     }
 
@@ -76,31 +77,29 @@ int main(int argc, char **argv)
     rc1 = plc_tag_read(tag1, 0);
 
     if(rc1 != PLCTAG_STATUS_OK && rc1 != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc1);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc1, plc_tag_decode_error(rc1));
         return 0;
     }
 
     if(rc2 != PLCTAG_STATUS_OK && rc2 != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc2);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc2, plc_tag_decode_error(rc2));
         return 0;
     }
 
     /* let the reads complete */
-    sleep(1);
+    sleep_ms(1000);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);
 
     if(rc1 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the tag 1 data! Got error code %d\n",rc1);
+        fprintf(stderr,"ERROR: Unable to read the tag 1 data! Got error code %d: %s\n",rc1, plc_tag_decode_error(rc1));
 
         return 0;
     }
 
     if(rc2 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the tag 2 data! Got error code %d\n",rc2);
+        fprintf(stderr,"ERROR: Unable to read the tag 2 data! Got error code %d: %s\n",rc2, plc_tag_decode_error(rc2));
 
         return 0;
     }
@@ -118,11 +117,11 @@ int main(int argc, char **argv)
     /* we are done, clean up tag 2 first */
     plc_tag_destroy(tag2);
 
-    sleep(1);
+    sleep_ms(1000);
 
     plc_tag_destroy(tag1);
 
-    sleep(1);
+    sleep_ms(1000);
 
     return 0;
 }

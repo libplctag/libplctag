@@ -20,8 +20,8 @@
 
 
 #include <stdio.h>
-#include <unistd.h>
 #include "../lib/libplctag.h"
+#include "utils.h"
 
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=TestDINTArray[0]&debug=4"
@@ -48,11 +48,11 @@ int main(int argc, char **argv)
 
     /* let the connect succeed we hope */
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep(1);
+        sleep_ms(100);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state.\n");
+        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
         return 0;
     }
 
@@ -60,8 +60,7 @@ int main(int argc, char **argv)
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         return 0;
     }
 
@@ -84,8 +83,7 @@ int main(int argc, char **argv)
     rc = plc_tag_write(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         return 0;
     }
 
@@ -94,8 +92,7 @@ int main(int argc, char **argv)
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         return 0;
     }
 
