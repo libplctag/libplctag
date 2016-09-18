@@ -39,72 +39,84 @@ extern "C" {
 #endif
 
 
-#ifdef _WIN32
-    #ifdef __cplusplus
-        #define C_FUNC extern "C"
+    #ifdef _WIN32
+        #ifdef __cplusplus
+            #define C_FUNC extern "C"
+        #else
+            #define C_FUNC
+        #endif
+        #ifdef LIBPLCTAGDLL_EXPORTS
+            #define LIB_EXPORT __declspec(dllexport)
+        #else
+            #define LIB_EXPORT __declspec(dllimport)
+        #endif
     #else
-        #define C_FUNC
+        #define LIB_EXPORT extern
     #endif
-    #ifdef LIBPLCTAGDLL_EXPORTS
-        #define LIB_EXPORT __declspec(dllexport)
-    #else
-        #define LIB_EXPORT __declspec(dllimport)
-    #endif
-#else
-    #define LIB_EXPORT extern
-#endif
 
 
-/* WARNING THIS IS MACHINE/COMPILER DEPENDENT!!!! */
-typedef float real32_t;
+    /* WARNING THIS IS MACHINE/COMPILER DEPENDENT!!!! */
+    typedef float real32_t;
 
 
-/* opaque type definitions */
-typedef struct plc_tag_dummy *plc_tag;
-#define PLC_TAG_NULL ((plc_tag)NULL)
+    /* opaque type definitions */
+    typedef struct plc_tag_dummy *plc_tag;
+
+    #define PLC_TAG_NULL ((plc_tag)NULL)
 
 
 
-/* library internal status. */
-#define PLCTAG_STATUS_PENDING       (1)
-#define PLCTAG_STATUS_OK            (0)
+    /* library internal status. */
+    #define PLCTAG_STATUS_PENDING       (1)
+    #define PLCTAG_STATUS_OK            (0)
 
-#define PLCTAG_ERR_NULL_PTR         (-1)
-#define PLCTAG_ERR_OUT_OF_BOUNDS    (-2)
-#define PLCTAG_ERR_NO_MEM           (-3)
-#define PLCTAG_ERR_LL_ADD           (-4)
-#define PLCTAG_ERR_BAD_PARAM        (-5)
-#define PLCTAG_ERR_CREATE           (-6)
-#define PLCTAG_ERR_NOT_EMPTY        (-7)
-#define PLCTAG_ERR_OPEN             (-8)
-#define PLCTAG_ERR_SET              (-9)
-#define PLCTAG_ERR_WRITE            (-10)
-#define PLCTAG_ERR_TIMEOUT          (-11)
-#define PLCTAG_ERR_TIMEOUT_ACK      (-12)
-#define PLCTAG_ERR_RETRIES          (-13)
-#define PLCTAG_ERR_READ             (-14)
-#define PLCTAG_ERR_BAD_DATA         (-15)
-#define PLCTAG_ERR_ENCODE           (-16)
-#define PLCTAG_ERR_DECODE           (-17)
-#define PLCTAG_ERR_UNSUPPORTED      (-18)
-#define PLCTAG_ERR_TOO_LONG         (-19)
-#define PLCTAG_ERR_CLOSE            (-20)
-#define PLCTAG_ERR_NOT_ALLOWED      (-21)
-#define PLCTAG_ERR_THREAD           (-22)
-#define PLCTAG_ERR_NO_DATA          (-23)
-#define PLCTAG_ERR_THREAD_JOIN      (-24)
-#define PLCTAG_ERR_THREAD_CREATE    (-25)
-#define PLCTAG_ERR_MUTEX_DESTROY    (-26)
-#define PLCTAG_ERR_MUTEX_UNLOCK     (-27)
-#define PLCTAG_ERR_MUTEX_INIT       (-28)
-#define PLCTAG_ERR_MUTEX_LOCK       (-29)
-#define PLCTAG_ERR_NOT_IMPLEMENTED  (-30)
-#define PLCTAG_ERR_BAD_DEVICE       (-31)
-#define PLCTAG_ERR_BAD_GATEWAY      (-32)
-#define PLCTAG_ERR_REMOTE_ERR       (-33)
-#define PLCTAG_ERR_NOT_FOUND        (-34)
-#define PLCTAG_ERR_ABORT            (-35)
-#define PLCTAG_ERR_WINSOCK          (-36)
+    #define PLCTAG_ERR_NULL_PTR         (-1)
+    #define PLCTAG_ERR_OUT_OF_BOUNDS    (-2)
+    #define PLCTAG_ERR_NO_MEM           (-3)
+    #define PLCTAG_ERR_LL_ADD           (-4)
+    #define PLCTAG_ERR_BAD_PARAM        (-5)
+    #define PLCTAG_ERR_CREATE           (-6)
+    #define PLCTAG_ERR_NOT_EMPTY        (-7)
+    #define PLCTAG_ERR_OPEN             (-8)
+    #define PLCTAG_ERR_SET              (-9)
+    #define PLCTAG_ERR_WRITE            (-10)
+    #define PLCTAG_ERR_TIMEOUT          (-11)
+    #define PLCTAG_ERR_TIMEOUT_ACK      (-12)
+    #define PLCTAG_ERR_RETRIES          (-13)
+    #define PLCTAG_ERR_READ             (-14)
+    #define PLCTAG_ERR_BAD_DATA         (-15)
+    #define PLCTAG_ERR_ENCODE           (-16)
+    #define PLCTAG_ERR_DECODE           (-17)
+    #define PLCTAG_ERR_UNSUPPORTED      (-18)
+    #define PLCTAG_ERR_TOO_LONG         (-19)
+    #define PLCTAG_ERR_CLOSE            (-20)
+    #define PLCTAG_ERR_NOT_ALLOWED      (-21)
+    #define PLCTAG_ERR_THREAD           (-22)
+    #define PLCTAG_ERR_NO_DATA          (-23)
+    #define PLCTAG_ERR_THREAD_JOIN      (-24)
+    #define PLCTAG_ERR_THREAD_CREATE    (-25)
+    #define PLCTAG_ERR_MUTEX_DESTROY    (-26)
+    #define PLCTAG_ERR_MUTEX_UNLOCK     (-27)
+    #define PLCTAG_ERR_MUTEX_INIT       (-28)
+    #define PLCTAG_ERR_MUTEX_LOCK       (-29)
+    #define PLCTAG_ERR_NOT_IMPLEMENTED  (-30)
+    #define PLCTAG_ERR_BAD_DEVICE       (-31)
+    #define PLCTAG_ERR_BAD_GATEWAY      (-32)
+    #define PLCTAG_ERR_REMOTE_ERR       (-33)
+    #define PLCTAG_ERR_NOT_FOUND        (-34)
+    #define PLCTAG_ERR_ABORT            (-35)
+    #define PLCTAG_ERR_WINSOCK          (-36)
+
+
+
+    /*
+     * helper function for errors.
+     *
+     * This takes one of the above errors and turns it into a const char * suitable
+     * for printing.
+     */
+
+    LIB_EXPORT const char *plc_tag_decode_error(int err);
 
 
 
