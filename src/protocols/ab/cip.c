@@ -37,8 +37,65 @@
 #include <util/debug.h>
 
 
+/*
+ * match_dhp_node()
+ *
+ * Match a string with the format c:d:d where c is a single character and d is a number.
+ */
 
+int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *dest_node)
+{
+	const char **segments = string_split(dhp_str, ":");
+	const char *segment;
+	int temp_src;
+	int temp_dest;
 
+	if(!segments) {
+		return 0;
+	}
+
+	segment = *segments;
+
+	if (!segment) {
+		mem_free(segments);
+		return 0;
+	}
+
+	/* check the first character to determine the channel to use */
+	switch (*segment) {
+		case 'a':
+		case 'A':
+		case '2':
+			*dhp_channel = 1;
+			break;
+
+		case 'b':
+		case 'B':
+		case '3':
+			*dhp_channel = 2;
+			break;
+
+		default:
+			mem_free(segments);
+			return 0;
+			break;
+	}
+
+    /* now read the next part*/
+	segments++;
+	segment = *segment;
+
+	if (!segment) {
+		mem_free(segments);
+		return 0;
+	}
+
+	if (!string_to_int(segment, &temp_src)) {
+		mem_free(segments);
+		return 0;
+	}
+
+}
 
 /*
  * cip_encode_path()
@@ -57,7 +114,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
     int link_index=0;
     int last_is_dhp=0;
     int has_dhp=0;
-    char dhp_channel=0;
+    unsigned int dhp_channel=0; /*changed type from char to appease Visual Studio */
     int src_addr=0, dest_addr=0;
     int tmp=0;
     char **links=NULL;

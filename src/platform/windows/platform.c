@@ -768,7 +768,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         struct hostent *h=NULL;
 
         /* not numeric, try DNS */
-    /* FIXME: gethostbyname() is deprecated in favor of getaddrinfo() */
+		/* FIXME: gethostbyname() is deprecated in favor of getaddrinfo() */
         h = gethostbyname(host);
 
         if(!h) {
@@ -1443,7 +1443,14 @@ uint64_t time_ms(void)
 }
 
 
+struct tm *localtime_r(const time_t *timep, struct tm *result)
+{
+	time_t t = *timep;
 
+	localtime_s(result, &t);
+
+	return result;
+}
 
 
 
