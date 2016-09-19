@@ -87,7 +87,7 @@ extern "C"
 
 #define __PRETTY_FUNCTION__ __FUNCTION__
 
-#define snprintf sprintf_s
+
 
 
 /* memory functions/defs */
@@ -188,15 +188,14 @@ extern uint32_t le2h32(uint32_t v);
 extern uint32_t h2be32(uint32_t v);
 extern uint32_t be2h32(uint32_t v);
 
-/* misc functions */
+/* time functions */
 extern int sleep_ms(int ms);
 extern uint64_t time_ms(void);
+extern struct tm *localtime_r(const time_t *timep, struct tm *result);
 
-
-/* fudge a few functions */
-#define sprintf sprintf_s
-
-
+/* some functions can be simply replaced */
+#define snprintf sprintf_s
+#define sscanf sscanf_s
 
 
 /*#ifdef __cplusplus
