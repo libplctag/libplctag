@@ -39,12 +39,16 @@ set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 # FIXME - does this work for macOS?
 if (UNIX)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/linux" )
-elseif (WINDOWS)
+elseif (WIN32)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
 endif()
 
+MESSAGE("platform_SRC_PATH=${platform_SRC_PATH}")
+MESSAGE("CMAKE_C_COMPILER_ID=${CMAKE_C_COMPILER_ID}")
+MESSAGE("CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}")
+
 # C compiler specific settings
-if ("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
+if (CMAKE_C_COMPILER_ID STREQUAL 'Clang')
     # using Clang
     add_definitions(-std=c99)
     add_definitions(-Wall)
@@ -54,7 +58,7 @@ if ("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
     add_definitions(-D_POSIX_C_SOURCE=200809L)
     add_definitions(-fPIC)
     add_definitions(-lpthread)
-elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
+elseif (CMAKE_C_COMPILER_ID STREQUAL 'GNU')
     # using GCC
     add_definitions(-std=c99)
     add_definitions(-Wall)
@@ -64,10 +68,10 @@ elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
     add_definitions(-D_POSIX_C_SOURCE=200809L)
     add_definitions(-fPIC)
     add_definitions(-lpthread)
-elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "Intel")
+elseif (CMAKE_C_COMPILER_ID STREQUAL 'Intel')
     # using Intel C/C++
     # FIXME!
-elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "MSVC")
+elseif (CMAKE_C_COMPILER_ID STREQUAL 'MSVC')
     # using Visual Studio C/C++
     #add_definitions(/MDd)
     add_definitions(/c)
@@ -76,7 +80,7 @@ elseif ("${CMAKE_C_COMPILER_ID}" STREQUAL "MSVC")
 endif()
 
 # C++ compiler settings
-if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+if (CMAKE_CXX_COMPILER_ID STREQUAL 'Clang')
     # using Clang
     add_definitions(-Wall)
     add_definitions(-fms-extensions)
@@ -85,7 +89,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     add_definitions(-D_POSIX_C_SOURCE=200809L)
     add_definitions(-fPIC)
     add_definitions(-lpthread)
-elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL 'GNU')
     # using GCC
     add_definitions(-Wall)
     add_definitions(-fms-extensions)
@@ -94,10 +98,10 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     add_definitions(-D_POSIX_C_SOURCE=200809L)
     add_definitions(-fPIC)
     add_definitions(-lpthread)
-elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL 'Intel')
     # using Intel C++
     # FIXME!
-elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL 'MSVC')
     # using Visual Studio C++
     #add_definitions(/MDd)
     add_definitions(/DLIBPLCTAGDLL_EXPORTS=1)
@@ -129,48 +133,53 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag_tag.c"
 # set up the library
 add_library(plctag SHARED ${libplctag_SRCS} )
 
+# Windows need to link the library to the WINSOCK library
+if (WIN32)
+    target_link_libraries(plctag ws2_32)
+endif()
 
 # add the examples
-
 if (UNIX)
     set ( example_PROGRAMS async
-                       data_dumper
-                       multithread
-                       multithread_cached_read
-                       multithread_plc5
-                       multithread_plc5_dhp
-                       plc5
-                       simple
-                       simple_dual
-                       slc500
-                       stress_test
-                       string
-                       toggle_bool
-                       write_string
-                       tag_rw )
+                           data_dumper
+                           multithread
+                           multithread_cached_read
+                           multithread_plc5
+                           multithread_plc5_dhp
+                           plc5
+                           simple
+                           simple_dual
+                           slc500
+                           stress_test
+                           string
+                           toggle_bool
+                           write_string
+                           tag_rw )
 
+    set ( example_PROG_UTIL utils_posix.c)
     set ( example_LIBRARIES plctag pthread )
-elseif(WINDOWS)
+elseif(WIN32)
     set ( example_PROGRAMS async
-                       data_dumper
-                       plc5
-                       simple
-                       simple_dual
-                       slc500
-                       string
-                       toggle_bool
-                       write_string
-                       tag_rw )
-    set ( example_LIBRARIES plctag )
+                           plc5
+                           simple
+                           simple_dual
+                           slc500
+                           string
+                           toggle_bool
+                           write_string
+                           tag_rw )
+
+    set ( example_PROG_UTIL utils_windows.c)
+    set ( example_LIBRARIES plctag ws2_32 )
 endif()
 
 foreach ( example ${example_PROGRAMS} )
-    add_executable( ${example} "${example_SRC_PATH}/${example}.c" )
+    add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" )
     target_link_libraries(${example} ${example_LIBRARIES} )
 endforeach(example)
 
 # different because it is C++
-add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" )
+add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" )
 target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
 # for installation

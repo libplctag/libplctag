@@ -26,51 +26,12 @@
 #include <sys/select.h>
 #include <stdlib.h>
 #include "../lib/libplctag.h"
-
+#include "utils.h"
 
 #define TAG_PATH "protocol=ab_eip&gateway=192.168.1.7&path=1,0&cpu=LGX&elem_size=4&elem_count=125&name=LogData"
 #define ELEM_COUNT 125
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 5000
-
-
-/* 
- * copy some functions from platform.c for this test.
- */
-
-
-/*
- * sleep_ms
- *
- * Sleep the passed number of milliseconds.  Note that signals
- * will cause this to terminate early!  Check the time before
- * you assume that the total time has passed.
- */
-int sleep_ms(int ms)
-{
-	struct timeval tv;
-
-	tv.tv_sec = ms/1000;
-	tv.tv_usec = (ms % 1000)*1000;
-
-	return select(0,NULL,NULL,NULL, &tv);
-}
-
-
-/*
- * time_ms
- *
- * Return the current epoch time in milliseconds.
- */
-int64_t time_ms(void)
-{
-	struct timeval tv;
-
-	gettimeofday(&tv,NULL);
-
-	return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
-}
-
 
 
 
@@ -79,17 +40,17 @@ void log_data(plc_tag tag)
 {
     static int log_year = 0;
     static int log_month = 0;
-    static int log_day = 0;       
+    static int log_day = 0;
     static FILE *log = NULL;
     int i = 0;
     char timestamp_buf[128];
     time_t t = time(NULL);
     struct tm *tm_struct;
-    
+
     tm_struct = localtime(&t);
-    
+
     /* do we need to open the file?*/
-    if(log_year != tm_struct->tm_year 
+    if(log_year != tm_struct->tm_year
        || log_month != tm_struct->tm_mon
        || log_day != tm_struct->tm_mday) {
 
@@ -98,25 +59,25 @@ void log_data(plc_tag tag)
         log_year = tm_struct->tm_year;
         log_month = tm_struct->tm_mon;
         log_day = tm_struct->tm_mday;
-        
+
         snprintf(log_file_name, sizeof(log_file_name),"log-%04d-%02d-%02d.log", 1900+log_year, log_month, log_day);
         if(log) {
             fclose(log);
         }
-        
+
         log = fopen(log_file_name,"a");
     }
-    
+
     strftime(timestamp_buf, sizeof(timestamp_buf), "%Y/%m/%d %H:%M:%S", tm_struct);
 
     fprintf(log,"%s",timestamp_buf);
-    
+
     for(i=0; i<ELEM_COUNT; i++) {
         fprintf(log,",%d",plc_tag_get_int32(tag,i*ELEM_SIZE));
     }
-    
+
     fprintf(log,"\n");
-    
+
     fflush(log);
 }
 
@@ -127,16 +88,16 @@ int main(int argc, char **argv)
     plc_tag tag = PLC_TAG_NULL;
     int rc;
     int delay = 200; /* ms */
-    
+
     if(argc>1) {
         delay = atoi(argv[1]);
     }
-    
+
     if(delay < 30) {
         fprintf(stderr,"ERROR: delay too small!\n");
         return 1;
     }
-    
+
 
     /* create the tag */
     tag = plc_tag_create(TAG_PATH);
@@ -150,14 +111,14 @@ int main(int argc, char **argv)
 
     /* let the connect succeed we hope */
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-    	sleep(1);
+        sleep(1);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-    	fprintf(stderr,"Error setting up tag internal state.\n");
-    	return 0;
+        fprintf(stderr,"Error setting up tag internal state.\n");
+        return 0;
     }
-    
+
     rc = plc_tag_read(tag, 1000);
 
     while(1) {
@@ -165,13 +126,13 @@ int main(int argc, char **argv)
         rc = plc_tag_read(tag, 0);
 
         sleep_ms(delay);
-        
+
         if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
             fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
 
             return 0;
         }
-        
+
         log_data(tag);
     }
 

@@ -23,12 +23,12 @@
   *                                                                        *
   * 2012-07-05  KRH - Created file.                                        *
   *                                                                        *
-  * 2012-07-25  KRH - Updates for new thread API.						   *
+  * 2012-07-25  KRH - Updates for new thread API.                          *
   *                                                                        *
-  * 2013-12-23	KRH - re-port to Windows via VS2012.                       *
+  * 2013-12-23  KRH - re-port to Windows via VS2012.                       *
   *                                                                        *
   **************************************************************************/
-  
+
 /***************************************************************************
  ****************************** WINDOWS ************************************
  **************************************************************************/
@@ -79,7 +79,7 @@ extern "C"
 #define END_PACK __pragma( pack(pop) )
 
 /* VS C++ uses foo[] to denote a zero length array. */
-#define ZLA_SIZE	0
+#define ZLA_SIZE    0
 
 /* export definitions. */
 
@@ -87,7 +87,7 @@ extern "C"
 
 #define __PRETTY_FUNCTION__ __FUNCTION__
 
-#define snprintf sprintf_s
+
 
 
 /* memory functions/defs */
@@ -188,23 +188,14 @@ extern uint32_t le2h32(uint32_t v);
 extern uint32_t h2be32(uint32_t v);
 extern uint32_t be2h32(uint32_t v);
 
-/* misc functions */
+/* time functions */
 extern int sleep_ms(int ms);
 extern uint64_t time_ms(void);
+extern struct tm *localtime_r(const time_t *timep, struct tm *result);
 
-extern void pdebug_impl(const char *func, int line_num, const char *templ, ...);
-#if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
-#define pdebug(d,f,...) \
-   do { if(d) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__); } while(0)
-#else
-#define pdebug(d,f,a...) \
-   do{ if(d) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,##a ); } while(0)
-#endif
-
-extern void pdebug_dump_bytes_impl(uint8_t *data,int count);
-#define pdebug_dump_bytes(dbg, d,c)  do { if(dbg) pdebug_dump_bytes_impl(d,c); } while(0)
-
-
+/* some functions can be simply replaced */
+#define snprintf sprintf_s
+#define sscanf sscanf_s
 
 
 /*#ifdef __cplusplus
