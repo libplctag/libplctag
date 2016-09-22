@@ -11,7 +11,7 @@
 #define ELEM_SIZE 2
 #define DATA_TIMEOUT 5000
 
-
+#define MAX_THREADS (10)
 
 /*
  * This test program creates a lot of threads that read the same tag in
@@ -24,7 +24,7 @@
  * We use this as a stress test for thread mutex locking and memory leaks.
  */
 
-volatile int done[300] = {0,};
+volatile int done[MAX_THREADS] = {0,};
 
 
 
@@ -62,7 +62,7 @@ int random_min_max(int min, int max)
 
 
 
-void thread_func(void *data)
+void *thread_func(void *data)
 {
     int tid = (int)(intptr_t)data;
     int rc;
@@ -123,29 +123,26 @@ void thread_func(void *data)
 
     mark_done(&done[tid]);
 
-    return;
+    return NULL;
 }
 
 
 int main(int argc, char **argv)
 {
-    pthread_t thread;
+    pthread_t thread[MAX_THREADS];
     int num_threads;
     int total_done = 0;
     int tid;
 
-    /*if(argc != 2) {
+    if(argc != 2) {
         fprintf(stderr,"ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n",argc);
         return 0;
     }
 
     num_threads = (int)strtol(argv[1],NULL, 10);
-     */
 
-    num_threads = 5;
-
-    if(num_threads < 1 || num_threads > 300) {
-        fprintf(stderr,"ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",num_threads, argv[1]);
+    if(num_threads < 1 || num_threads > MAX_THREADS) {
+        fprintf(stderr,"ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 10)!\n",num_threads, argv[1]);
         return 0;
     }
 
@@ -154,11 +151,11 @@ int main(int argc, char **argv)
     fprintf(stderr,"Creating %d threads.\n",num_threads);
 
     for(tid = 0; tid < num_threads; tid++) {
-        pthread_create(&thread, NULL, (void *) &thread_func, (void *)(intptr_t)tid);
+        pthread_create(&thread[tid], NULL, &thread_func, (void *)(intptr_t)tid);
     }
 
     while(total_done != num_threads) {
-        sleep(1);
+        sleep_ms(100);
         total_done = 0;
 
         for(tid=0; tid<num_threads; tid++) {

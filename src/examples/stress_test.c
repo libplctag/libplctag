@@ -84,7 +84,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
  * Thread function.  Just read until killed.
  */
 
-void serial_test(void *data)
+void *serial_test(void *data)
 {
     int tid = (int)(intptr_t)data;
     static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
@@ -103,7 +103,7 @@ void serial_test(void *data)
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr,"Test %d, Error creating tag!  Terminating test...\n", tid);
             done = 1;
-            return;
+            return NULL;
         }
 
         rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -133,18 +133,20 @@ void serial_test(void *data)
     }
 
     fprintf(stderr, "Test %d terminating.\n", tid);
+
+    return NULL;
 }
 
 
 int main(int argc, char **argv)
 {
     pthread_t serial_test_thread;
-    uint64_t start_time;
-    uint64_t end_time;
+    int64_t start_time;
+    int64_t end_time;
 
     /* create the test threads */
     fprintf(stderr, "Creating serial test thread (Test #1).\n");
-    pthread_create(&serial_test_thread, NULL, (void *) &serial_test, (void *)(intptr_t)1);
+    pthread_create(&serial_test_thread, NULL, &serial_test, (void *)(intptr_t)1);
 
     start_time = time_ms();
     end_time = start_time + 5000;

@@ -12,6 +12,7 @@
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 500
 
+#define MAX_THREADS (300)
 
 
 /*
@@ -31,7 +32,7 @@ plc_tag tag;
  * Thread function.  Just read until killed.
  */
 
-void thread_func(void *data)
+void *thread_func(void *data)
 {
     int tid = (int)(intptr_t)data;
     int rc;
@@ -70,13 +71,16 @@ void thread_func(void *data)
 
         sleep_ms(10);
     }
+
+    return NULL;
 }
 
 
 int main(int argc, char **argv)
 {
-    pthread_t thread;
+    pthread_t thread[MAX_THREADS];
     int num_threads;
+    int thread_id = 0;
 
     if(argc != 2) {
         fprintf(stderr,"ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n",argc);
@@ -85,7 +89,7 @@ int main(int argc, char **argv)
 
     num_threads = (int)strtol(argv[1],NULL, 10);
 
-    if(num_threads < 1 || num_threads > 300) {
+    if(num_threads < 1 || num_threads > MAX_THREADS) {
         fprintf(stderr,"ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",num_threads, argv[1]);
         return 0;
     }
@@ -115,8 +119,8 @@ int main(int argc, char **argv)
 
     fprintf(stderr,"Creating %d threads.\n",num_threads);
 
-    while(num_threads--) {
-        pthread_create(&thread, NULL, (void *) &thread_func, (void *)(intptr_t)num_threads);
+    for(thread_id=0; thread_id < num_threads; thread_id++) {
+        pthread_create(&thread[thread_id], NULL, &thread_func, (void *)(intptr_t)thread_id);
     }
 
     /* wait until ^C */
