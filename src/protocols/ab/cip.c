@@ -37,64 +37,101 @@
 #include <util/debug.h>
 
 
-/*
- * match_dhp_node()
+int match_channel(const char **p, int *dhp_channel)
+{
+    switch(**p) {
+        case 'A':
+        case 'a':
+        case '2':
+            *dhp_channel = 1;
+            *p = *p + 1;
+            return 1;
+            break;
+        case 'B':
+        case 'b':
+        case '3':
+            *dhp_channel = 2;
+            *p = *p + 1;
+            return 1;
+            break;
+
+        default:
+            return 0;
+            break;
+    }
+
+    return 0;
+}
+
+
+int match_colon(const char **p)
+{
+    if(**p == ':') {
+        *p = *p + 1;
+        return 1;
+    }
+
+    return 0;
+}
+
+
+int match_int(const char **p, int *val)
+{
+    int result = 0;
+    int digits = 3;
+
+    if(! (**p >= '0' && **p <= '9')) {
+        return 0;
+    }
+
+    while(**p >= '0' && **p <= '9' && digits > 0) {
+        result = (result * 10) + (**p - '0');
+        *p = *p + 1;
+        digits--;
+    }
+
+    *val = result;
+
+    return 1;
+}
+
+
+
+/* match_dhp_node()
  *
  * Match a string with the format c:d:d where c is a single character and d is a number.
  */
 
 int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *dest_node)
 {
-	const char **segments = string_split(dhp_str, ":");
-	const char *segment;
-	int temp_src;
-	int temp_dest;
+    const char *p = dhp_str;
 
-	if(!segments) {
-		return 0;
-	}
+    if(!match_channel(&p, dhp_channel)) {
+        return 0;
+    }
 
-	segment = *segments;
+    if(!match_colon(&p)) {
+        return 0;
+    }
 
-	if (!segment) {
-		mem_free(segments);
-		return 0;
-	}
+    /* we have seen enough to commit to this being a DHP node. */
 
-	/* check the first character to determine the channel to use */
-	switch (*segment) {
-		case 'a':
-		case 'A':
-		case '2':
-			*dhp_channel = 1;
-			break;
+    if(!match_int(&p, src_node)) {
+        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected source address!");
+        return 0;
+    }
 
-		case 'b':
-		case 'B':
-		case '3':
-			*dhp_channel = 2;
-			break;
+    if(!match_colon(&p)) {
+        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected colon!");
+        return 0;
+    }
 
-		default:
-			mem_free(segments);
-			return 0;
-			break;
-	}
+    if(!match_int(&p, dest_node)) {
+        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected destination address!");
+        return 0;
+    }
 
-    /* now read the next part*/
-	segments++;
-	segment = *segment;
-
-	if (!segment) {
-		mem_free(segments);
-		return 0;
-	}
-
-	if (!string_to_int(segment, &temp_src)) {
-		mem_free(segments);
-		return 0;
-	}
-
+    return 1;
 }
 
 /*
@@ -114,7 +151,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
     int link_index=0;
     int last_is_dhp=0;
     int has_dhp=0;
-    unsigned int dhp_channel=0; /*changed type from char to appease Visual Studio */
+    int dhp_channel=0;
     int src_addr=0, dest_addr=0;
     int tmp=0;
     char **links=NULL;
@@ -132,30 +169,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
     link = links[link_index];
 
     while(link && ioi_size < (MAX_CONN_PATH-2)) {   /* MAGIC -2 to allow for padding */
-        if(sscanf(link,"%c:%d:%d",&dhp_channel,&src_addr,&dest_addr) == 3) {
-            /* DHP link */
-            switch(dhp_channel) {
-                case 'a':
-                case 'A':
-                case '2':
-                    dhp_channel = 1;
-                    break;
-
-                case 'b':
-                case 'B':
-                case '3':
-                    dhp_channel = 2;
-                    break;
-
-                default:
-
-                    /* unknown port! */
-                    if(links) mem_free(links);
-
-                    return PLCTAG_ERR_BAD_PARAM;
-                    break;
-            }
-
+        if(match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr) == 5) {
             last_is_dhp = 1;
             has_dhp = 1;
         } else {
