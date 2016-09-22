@@ -43,76 +43,50 @@ elseif (WIN32)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
 endif()
 
-MESSAGE("platform_SRC_PATH=${platform_SRC_PATH}")
-MESSAGE("CMAKE_C_COMPILER_ID=${CMAKE_C_COMPILER_ID}")
-MESSAGE("CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}")
-
-# C compiler specific settings
-if (CMAKE_C_COMPILER_ID STREQUAL 'Clang')
-    # using Clang
-    add_definitions(-std=c99)
-    add_definitions(-Wall)
-    add_definitions(-fms-extensions)
-    add_definitions(-fno-strict-aliasing)
-    add_definitions(-D__USE_POSIX=1)
-    add_definitions(-D_POSIX_C_SOURCE=200809L)
-    add_definitions(-fPIC)
-    add_definitions(-lpthread)
-elseif (CMAKE_C_COMPILER_ID STREQUAL 'GNU')
-    # using GCC
-    add_definitions(-std=c99)
-    add_definitions(-Wall)
-    add_definitions(-fms-extensions)
-    add_definitions(-fno-strict-aliasing)
-    add_definitions(-D__USE_POSIX=1)
-    add_definitions(-D_POSIX_C_SOURCE=200809L)
-    add_definitions(-fPIC)
-    add_definitions(-lpthread)
-elseif (CMAKE_C_COMPILER_ID STREQUAL 'Intel')
-    # using Intel C/C++
-    # FIXME!
-elseif (CMAKE_C_COMPILER_ID STREQUAL 'MSVC')
-    # using Visual Studio C/C++
-    #add_definitions(/MDd)
-    add_definitions(/c)
-    add_definitions(/DLIBPLCTAGDLL_EXPORTS=1)
-    add_definitions(/W3)
-endif()
-
-# C++ compiler settings
-if (CMAKE_CXX_COMPILER_ID STREQUAL 'Clang')
-    # using Clang
-    add_definitions(-Wall)
-    add_definitions(-fms-extensions)
-    add_definitions(-fno-strict-aliasing)
-    add_definitions(-D__USE_POSIX=1)
-    add_definitions(-D_POSIX_C_SOURCE=200809L)
-    add_definitions(-fPIC)
-    add_definitions(-lpthread)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL 'GNU')
-    # using GCC
-    add_definitions(-Wall)
-    add_definitions(-fms-extensions)
-    add_definitions(-fno-strict-aliasing)
-    add_definitions(-D__USE_POSIX=1)
-    add_definitions(-D_POSIX_C_SOURCE=200809L)
-    add_definitions(-fPIC)
-    add_definitions(-lpthread)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL 'Intel')
-    # using Intel C++
-    # FIXME!
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL 'MSVC')
-    # using Visual Studio C++
-    #add_definitions(/MDd)
-    add_definitions(/DLIBPLCTAGDLL_EXPORTS=1)
-    add_definitions(/W3)
-endif()
 
 # where to find include files.
 include_directories("${base_SRC_PATH}")
 include_directories("${platform_SRC_PATH}")
 include_directories("${protocol_SRC_PATH}")
 
+
+MESSAGE("base_SRC_PATH=${base_SRC_PATH}")
+MESSAGE("platform_SRC_PATH=${platform_SRC_PATH}")
+MESSAGE("protocol_SRC_PATH=${protocol_SRC_PATH}")
+
+MESSAGE("CMAKE_C_COMPILER_ID=${CMAKE_C_COMPILER_ID}")
+MESSAGE("CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}")
+
+
+# C compiler specific settings
+if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
+    # using Clang
+    set(BASE_FLAGS "${CMAKE_C_FLAGS} -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L -Wall -pedantic -Wextra")
+elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    # using GCC
+    set(BASE_FLAGS "${CMAKE_C_FLAGS} -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L -Wall -pedantic -Wextra")
+elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
+    # using Intel C/C++
+    MESSAGE("Intel C compiler not supported!")
+elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    # using Visual Studio C/C++
+    set(BASE_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
+    # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
+endif()
+
+
+MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
+
+if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    set(BASE_C_FLAGS "${BASE_FLAGS} /c")
+else()
+    set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99")
+endif()
+
+set(BASE_CXX_FLAGS "${BASE_FLAGS}")
+
+MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
+MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
 # set up the library sources
 set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag_tag.c"
@@ -130,10 +104,15 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag_tag.c"
                      "${util_SRC_PATH}/debug.c"
                      "${platform_SRC_PATH}/platform.c" )
 
+# set the compiler flags
+FOREACH( lib_src ${libplctag_SRCS} )
+    set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
+ENDFOREACH()
+
 # set up the library
 add_library(plctag SHARED ${libplctag_SRCS} )
 
-# Windows need to link the library to the WINSOCK library
+# Windows needs to link the library to the WINSOCK library
 if (WIN32)
     target_link_libraries(plctag ws2_32)
 endif()
@@ -174,11 +153,13 @@ elseif(WIN32)
 endif()
 
 foreach ( example ${example_PROGRAMS} )
+    set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
     add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" )
     target_link_libraries(${example} ${example_LIBRARIES} )
 endforeach(example)
 
-# different because it is C++
+# simple.cpp is different because it is C++
+set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
 add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" )
 target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
