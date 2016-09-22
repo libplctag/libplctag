@@ -478,8 +478,8 @@ LIB_EXPORT int plc_tag_read(plc_tag tag_id, int timeout)
      * an error or we timeout.
      */
     if(timeout) {
-        uint64_t timeout_time = timeout + time_ms();
-        uint64_t start_time = time_ms();
+        int64_t timeout_time = timeout + time_ms();
+        int64_t start_time = time_ms();
 
         while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
             rc = plc_tag_status_mapped(tag);
@@ -627,7 +627,7 @@ LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
      * an error or we timeout.
      */
     if(timeout) {
-        uint64_t timeout_time = timeout + time_ms();
+        int64_t timeout_time = timeout + time_ms();
 
         while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
             rc = plc_tag_status_mapped(tag);

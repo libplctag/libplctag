@@ -62,7 +62,7 @@ struct ab_session_t {
     /* data for receiving messages */
     uint64_t resp_seq_id;
     int has_response;
-    int recv_offset;
+    uint32_t recv_offset;
     uint8_t recv_data[MAX_REQ_RESP_SIZE];
 
     /*int recv_size;*/

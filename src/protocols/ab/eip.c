@@ -115,7 +115,7 @@ int send_eip_request_unsafe(ab_request_p req)
  */
 int recv_eip_response_unsafe(ab_session_p session)
 {
-    int data_needed = 0;
+    uint32_t data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
 
     /*pdebug(DEBUG_DETAIL,"Starting.");*/

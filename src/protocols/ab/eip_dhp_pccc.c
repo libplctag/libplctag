@@ -441,6 +441,10 @@ static int check_read_status(ab_tag_p tag)
     do {
         resp = (pccc_dhp_co_resp*)(req->data);
 
+        /* point to the start of the data */
+        data = (uint8_t *)resp + sizeof(*resp);
+
+        /* point to the end of the data */
         data_end = (req->data + resp->encap_length + sizeof(eip_encap_t));
 
         if( le2h16(resp->encap_command) != AB_EIP_CONNECTED_SEND) {
@@ -456,14 +460,13 @@ static int check_read_status(ab_tag_p tag)
         }
 
         if(resp->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"PCCC error: %d - %s", resp->pccc_data[0], pccc_decode_error(resp->pccc_data[0]));
+            /* data points to the byte following the header */
+            pdebug(DEBUG_WARN,"PCCC error: %d - %s", *data, pccc_decode_error(*data));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
-        /* point to the start of the data */
-        data = &resp->pccc_data[0];
-
+        /* all status is good, try to decode the data type */
         if(!(data = pccc_decode_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
             pdebug(DEBUG_WARN,"Unable to decode PCCC response data type and data size!");
             rc = PLCTAG_ERR_BAD_DATA;
@@ -516,6 +519,7 @@ static int check_read_status(ab_tag_p tag)
 static int check_write_status(ab_tag_p tag)
 {
     pccc_dhp_co_resp *pccc_resp;
+    uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
 
@@ -546,6 +550,9 @@ static int check_write_status(ab_tag_p tag)
     do {
         pccc_resp = (pccc_dhp_co_resp*)(req->data);
 
+        /* point data just past the header */
+        data = (uint8_t *)pccc_resp + sizeof(*pccc_resp);
+
         /* check the response status */
         if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
             pdebug(DEBUG_WARN,"EIP unexpected response packet type: %d!",pccc_resp->encap_command);
@@ -560,7 +567,7 @@ static int check_write_status(ab_tag_p tag)
         }
 
         if(pccc_resp->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"PCCC error: %d - %s", pccc_resp->pccc_data[0], pccc_decode_error(pccc_resp->pccc_data[0]));
+            pdebug(DEBUG_WARN,"PCCC error: %d - %s", *data, pccc_decode_error(*data));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
