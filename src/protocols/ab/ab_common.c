@@ -671,6 +671,9 @@ void* request_handler_func(void* not_used)
     int rc;
     ab_session_p cur_sess;
 
+    /* garbage code to stop compiler from whining about unused variables */
+    pdebug(DEBUG_NONE,"Starting with arg %p",not_used);
+
     while (1) {
         /* we need the mutex */
         if (global_session_mut == NULL) {

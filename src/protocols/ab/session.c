@@ -591,8 +591,8 @@ int session_register(ab_session_p session)
     eip_session_reg_req* req;
     eip_encap_t* resp;
     int rc;
-    int data_size = 0;
-    uint64_t timeout_time;
+    uint32_t data_size = 0;
+    int64_t timeout_time;
 
     pdebug(DEBUG_INFO, "Starting.");
 

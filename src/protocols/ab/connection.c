@@ -190,7 +190,7 @@ ab_connection_p connection_create_unsafe(const char* path, ab_session_p session)
 int connection_perform_forward_open(ab_connection_p connection)
 {
     ab_request_p req;
-    uint64_t timeout_time;
+    int64_t timeout_time;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -520,7 +520,7 @@ int connection_destroy_unsafe(ab_connection_p connection)
 int connection_close(ab_connection_p connection)
 {
     ab_request_p req;
-    uint64_t timeout_time = 0L;
+    int64_t timeout_time = 0L;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
