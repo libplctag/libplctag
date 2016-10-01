@@ -51,6 +51,7 @@
 #include <stdio.h>
 
 #include <lib/libplctag.h>
+#include <util/debug.h>
 
 
 /*#ifdef __cplusplus
@@ -687,24 +688,26 @@ static int socket_lib_init(void)
 
 extern int socket_create(sock_p *s)
 {
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!socket_lib_init()) {
-        /*pdebug("error initializing Windows Sockets.");*/
+        pdebug(DEBUG_WARN,"error initializing Windows Sockets.");
         return PLCTAG_ERR_WINSOCK;
     }
 
     if(!s) {
-        /*pdebug("null socket pointer.");*/
+        pdebug(DEBUG_WARN, "null socket pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     *s = (sock_p)mem_alloc(sizeof(struct sock_t));
 
     if(! *s) {
-        /*pdebug("memory allocation failure.");*/
+        pdebug(DEBUG_ERROR, "Unable to allocate memory for socket!");
         return PLCTAG_ERR_NO_MEM;
     }
+
+	pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -723,7 +726,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     int fd;
     struct timeval timeout; /* used for timing out connections etc. */
 
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, 0/*IPPROTO_TCP*/);
@@ -739,7 +742,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
         closesocket(fd);
-        /*pdebug("Error setting socket reuse option, errno: %d",errno);*/
+        pdebug(DEBUG_WARN,"Error setting socket reuse option, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -748,13 +751,13 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
         closesocket(fd);
-        /*pdebug("Error setting socket receive timeout option, errno: %d",errno);*/
+        pdebug(DEBUG_WARN,"Error setting socket receive timeout option, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
 
     if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
         closesocket(fd);
-        /*pdebug("Error setting socket set timeout option, errno: %d",errno);*/
+        pdebug(DEBUG_WARN,"Error setting socket set timeout option, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -762,26 +765,35 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     /* try a numeric IP address conversion first. */
     if(inet_pton(AF_INET,host,(struct in_addr *)ips) > 0) {
-        /*pdebug("Found numeric IP address: %s",host);*/
+        pdebug(DEBUG_DETAIL, "Found numeric IP address: %s", host);
         num_ips = 1;
     } else {
-        struct hostent *h=NULL;
+		struct addrinfo hints;
+		struct addrinfo *res = NULL;
+		int rc = 0;
 
-        /* not numeric, try DNS */
-		/* FIXME: gethostbyname() is deprecated in favor of getaddrinfo() */
-        h = gethostbyname(host);
+		mem_set(&ips, 0, sizeof(ips));
+		mem_set(&hints, 0, sizeof(hints));
 
-        if(!h) {
-            /*pdebug("Call to gethostbyname() failed, errno: %d!", errno);*/
-            return PLCTAG_ERR_OPEN;
-        }
+		hints.ai_socktype = SOCK_STREAM; /* TCP */
+		hints.ai_family = AF_INET; /* IP V4 only */
 
-        /* copy the IP list */
-        for(num_ips = 0; h->h_addr_list[num_ips] && num_ips < MAX_IPS; num_ips++) {
-            ips[num_ips] = *((IN_ADDR *)h->h_addr_list[num_ips]);
-        }
+		if ((rc = getaddrinfo(host, NULL, &hints, &res)) != 0) {
+			pdebug(DEBUG_WARN, "Error looking up PLC IP address %s, error = %d\n", host, rc);
 
-        free(h);
+			if (res) {
+				freeaddrinfo(res);
+			}
+
+			return PLCTAG_ERR_BAD_GATEWAY;
+		}
+
+		for (num_ips = 0; res && num_ips < MAX_IPS; num_ips++) {
+			ips[num_ips].s_addr = ((struct sockaddr_in *)(res->ai_addr))->sin_addr.s_addr;
+			res = res->ai_next;
+		}
+
+		freeaddrinfo(res);
     }
 
 
@@ -799,24 +811,28 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     do {
         int rc;
         /* try each IP until we run out or get a connection. */
-        gw_addr.sin_addr.s_addr = ips[i].S_un.S_addr;
+        gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
-        /*pdebug("Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));*/
+        /*pdebug(DEBUG_DETAIL,"Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));*/
 
         rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
 
         if( rc == 0) {
-            /*pdebug("Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));*/
+            /* Windows MSVC does not like inet_ntoa(), not safe.
+			 * pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));
+			 */
             done = 1;
         } else {
-            /*pdebug("Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);*/
+            /* MSVC does not like inet_ntoa(), not safe.
+			 * pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);
+			 */
             i++;
         }
     } while(!done && i < num_ips);
 
     if(!done) {
         closesocket(fd);
-        /*pdebug("Unable to connect to any gateway host IP address!");*/
+        pdebug(DEBUG_WARN,"Unable to connect to any gateway host IP address!");
         return PLCTAG_ERR_OPEN;
     }
 
@@ -836,6 +852,8 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     s->fd = fd;
     s->port = port;
     s->is_open = 1;
+
+	pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -1425,15 +1443,15 @@ int sleep_ms(int ms)
  * Unix epoch time.  Windows uses a different epoch starting 1/1/1601.
  */
 
-uint64_t time_ms(void)
+int64_t time_ms(void)
 {
     FILETIME ft;
-    uint64_t res;
+    int64_t res;
 
     GetSystemTimeAsFileTime(&ft);
 
     /* calculate time as 100ns increments since Jan 1, 1601. */
-    res = (uint64_t)(ft.dwLowDateTime) + ((uint64_t)(ft.dwHighDateTime) << 32);
+    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
 
     /* get time in ms */
 

@@ -190,12 +190,11 @@ extern uint32_t be2h32(uint32_t v);
 
 /* time functions */
 extern int sleep_ms(int ms);
-extern uint64_t time_ms(void);
+extern int64_t time_ms(void);
 extern struct tm *localtime_r(const time_t *timep, struct tm *result);
 
 /* some functions can be simply replaced */
 #define snprintf sprintf_s
-#define sscanf sscanf_s
 
 
 /*#ifdef __cplusplus
