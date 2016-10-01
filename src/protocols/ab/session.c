@@ -427,6 +427,8 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
 
     pdebug(DEBUG_INFO, "Starting");
 
+    pdebug(DEBUG_DETAIL, "Warning: not using passed port %d", gw_port);
+
     session = (ab_session_p)mem_alloc(sizeof(struct ab_session_t));
 
     if (!session) {
@@ -451,7 +453,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
 
     /* check for ID set up */
     if(srand_setup == 0) {
-        srand((time_t)time_ms());
+        srand((unsigned int)time_ms());
         srand_setup = 1;
     }
 
