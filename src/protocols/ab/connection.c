@@ -90,6 +90,19 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
     } else if(is_new) {
         /* only do this if this is a new connection. */
 
+        /* only do this if this is a new connection. */
+
+        /* copy path data from the tag */
+        mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
+        connection->conn_path_size = tag->conn_path_size;
+
+        /* now copy in the connection manager info */
+        //connection->conn_path[connection->conn_path_size] = 0x20; /* class */
+        //connection->conn_path[connection->conn_path_size+1] = 0x02; /* Message Router */
+        //connection->conn_path[connection->conn_path_size+2] = 0x24; /* instance */
+        //connection->conn_path[connection->conn_path_size+3] = 0x01; /* instance #1 */
+        //connection->conn_path_size += 4;
+
         /*
          * Determine the right param for the connection.
          * This sets up the packet size, among other things.
@@ -114,21 +127,6 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
                 break;
         }
 
-
-        /* copy path data from the tag, if any */
-        if(tag->conn_path_size > 0) {
-            mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
-            connection->conn_path_size = tag->conn_path_size;
-        }
-
-        /* now copy in the connection manager info */
-        connection->conn_path[connection->conn_path_size] = 0x20; /* class */
-        connection->conn_path[connection->conn_path_size+1] = 0x02; /* Message Router */
-        connection->conn_path[connection->conn_path_size+2] = 0x24; /* instance */
-        connection->conn_path[connection->conn_path_size+3] = 0x01; /* instance #1 */
-        connection->conn_path_size += 4;
-
-
         pdebug(DEBUG_DETAIL,"conn path size = %d", connection->conn_path_size);
 
         for(int j=0; j < connection->conn_path_size; j++) {
@@ -139,13 +137,7 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
         if((rc = connection_perform_forward_open(connection)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to perform ForwardOpen to set up connection with PLC!");
 
-            /*critical_block(global_session_mut) {
-                connection_destroy_unsafe(connection);
-            }
-
-            tag->connection = NULL;
-
-            return rc;*/
+            /* FIXME - what to do here? */
         }
     }
 
