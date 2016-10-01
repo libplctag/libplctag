@@ -87,40 +87,29 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
 
 
 
-
+#define COLUMNS (10)
 
 extern void pdebug_dump_bytes_impl(uint8_t *data,int count)
 {
-    int i;
-    int end;
-    char buf[2048];
+    int max_row, row, column, offset;
 
-    snprintf(buf,sizeof buf,"Dumping bytes:\n");
+    /* determine the number of rows we will need to print. */
+    max_row = (count  + (COLUMNS - 1))/COLUMNS;
 
-    end = str_length(buf);
+    fprintf(stderr,"Dumping bytes:\n");
 
-    for(i=0; i<count; i++) {
-        if((i%10) == 0) {
-            snprintf(buf+end,sizeof(buf)-end,"%05d",i);
+    for(row = 0; row < max_row; row++) {
+        offset = (row * COLUMNS);
 
-            end = strlen(buf);
+        fprintf(stderr,"%05d", offset);
+
+        for(column = 0; column < COLUMNS && offset < count; column++) {
+            offset = (row * COLUMNS) + column;
+            fprintf(stderr, " %02x", data[offset]);
         }
 
-        snprintf(buf+end,sizeof(buf)-end," %02x",data[i]);
-
-        end = strlen(buf);
-
-        if((i%10) == 9) {
-            snprintf(buf+end,sizeof(buf)-end,"\n");
-
-            end = strlen(buf);
-        }
+        fprintf(stderr,"\n");
     }
-
-    /*if( ((i%10)!=9) || (i>=count && (i%10)==9))
-        snprintf(buf+end,sizeof(buf)-end,"\n");*/
-
-    fprintf(stderr,"%s",buf);
 
     fflush(stderr);
 }
