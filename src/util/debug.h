@@ -47,7 +47,7 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...);
 */
 
 #define pdebug(d,...) \
-   do { if((d) && (d) <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__, __LINE__, __VA_ARGS__); } while(0)
+   do { if((d) && (d) <= get_debug_level()) pdebug_impl(__func__, __LINE__, __VA_ARGS__); } while(0)
 
 extern void pdebug_dump_bytes_impl(uint8_t *data,int count);
 #define pdebug_dump_bytes(dbg, d,c)  do { if((dbg) && (dbg) <= get_debug_level()) pdebug_dump_bytes_impl(d,c); } while(0)
