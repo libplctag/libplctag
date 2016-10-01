@@ -18,7 +18,10 @@
 #    USA
 #
 
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 3.1)
+
+# prevent expansion of quoted things that could be variables in if()
+cmake_policy(SET CMP0054 NEW)
 
 # this is the root libplctag project
 project (libplctag_project)
@@ -89,20 +92,37 @@ MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
 MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
 # set up the library sources
-set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag_tag.c"
+set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag.h"
+                     "${lib_SRC_PATH}/libplctag_tag.c"
+                     "${lib_SRC_PATH}/libplctag_tag.h"
+                     "${ab_SRC_PATH}/ab.h"
                      "${ab_SRC_PATH}/ab_common.c"
+					 "${ab_SRC_PATH}/ab_common.h"
                      "${ab_SRC_PATH}/cip.c"
+                     "${ab_SRC_PATH}/cip.h"
                      "${ab_SRC_PATH}/connection.c"
+                     "${ab_SRC_PATH}/connection.h"
                      "${ab_SRC_PATH}/eip.c"
+                     "${ab_SRC_PATH}/eip.h"
                      "${ab_SRC_PATH}/eip_cip.c"
+                     "${ab_SRC_PATH}/eip_cip.h"
                      "${ab_SRC_PATH}/eip_dhp_pccc.c"
+                     "${ab_SRC_PATH}/eip_dhp_pccc.h"
                      "${ab_SRC_PATH}/eip_pccc.c"
+                     "${ab_SRC_PATH}/eip_pccc.h"
                      "${ab_SRC_PATH}/pccc.c"
+                     "${ab_SRC_PATH}/pccc.h"
                      "${ab_SRC_PATH}/request.c"
+                     "${ab_SRC_PATH}/request.h"
                      "${ab_SRC_PATH}/session.c"
+                     "${ab_SRC_PATH}/session.h"
+                     "${ab_SRC_PATH}/tag.h"
                      "${util_SRC_PATH}/attr.c"
+                     "${util_SRC_PATH}/attr.h"
                      "${util_SRC_PATH}/debug.c"
-                     "${platform_SRC_PATH}/platform.c" )
+                     "${util_SRC_PATH}/debug.h"
+                     "${platform_SRC_PATH}/platform.c"
+                     "${platform_SRC_PATH}/platform.h" )
 
 # set the compiler flags
 FOREACH( lib_src ${libplctag_SRCS} )
@@ -154,13 +174,13 @@ endif()
 
 foreach ( example ${example_PROGRAMS} )
     set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
-    add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" )
+    add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
     target_link_libraries(${example} ${example_LIBRARIES} )
 endforeach(example)
 
 # simple.cpp is different because it is C++
 set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
-add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" )
+add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
 # for installation
