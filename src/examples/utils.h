@@ -46,6 +46,11 @@ extern int64_t time_ms(void);
 }
 #endif
 
+#ifdef _WIN32
+#define sscanf_platform sscanf_s
+#else
+#define sscanf_platform sscanf
+#endif
 
 #endif
 
