@@ -22,14 +22,11 @@
 
 #include "utils.h"
 
-#define _WINSOCKAPI_
-#include <windows.h>
-#include <Winsock2.h>
-#include <Ws2tcpip.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 /*
  * This file contains useful utilities for the sample programs.
@@ -57,20 +54,19 @@ int sleep_ms(int ms)
  * Unix epoch time.  Windows uses a different epoch starting 1/1/1601.
  */
 
-uint64_t time_ms(void)
+int64_t time_ms(void)
 {
     FILETIME ft;
-    uint64_t res;
+    int64_t res;
 
     GetSystemTimeAsFileTime(&ft);
 
     /* calculate time as 100ns increments since Jan 1, 1601. */
-    res = (uint64_t)(ft.dwLowDateTime) + ((uint64_t)(ft.dwHighDateTime) << 32);
+    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
 
     /* get time in ms */
     res = res / 10000;
 
     return  res;
 }
-
 

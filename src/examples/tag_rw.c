@@ -176,7 +176,7 @@ int main(int argc, char **argv)
             case PLC_LIB_UINT8:
             case PLC_LIB_UINT16:
             case PLC_LIB_UINT32:
-                if(sscanf(write_str,"%u",&u_val) != 1) {
+                if(sscanf_platform(write_str,"%u",&u_val) != 1) {
                     printf("ERROR: bad format for unsigned integer for write value.\n");
                     usage();
                     exit(1);
@@ -187,7 +187,7 @@ int main(int argc, char **argv)
             case PLC_LIB_SINT8:
             case PLC_LIB_SINT16:
             case PLC_LIB_SINT32:
-                if(sscanf(write_str,"%d",&i_val) != 1) {
+                if(sscanf_platform(write_str,"%d",&i_val) != 1) {
                     printf("ERROR: bad format for signed integer for write value.\n");
                     usage();
                     exit(1);
@@ -196,7 +196,7 @@ int main(int argc, char **argv)
                 break;
 
             case PLC_LIB_REAL32:
-                if(sscanf(write_str,"%f",&f_val) != 1) {
+                if(sscanf_platform(write_str,"%f",&f_val) != 1) {
                     printf("ERROR: bad format for 32-bit floating point for write value.\n");
                     usage();
                     exit(1);

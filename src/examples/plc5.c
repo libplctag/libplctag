@@ -53,7 +53,7 @@ int main(int argc, char **argv)
     for(i=0; i < ELEM_COUNT; i++) {
         float val = plc_tag_get_float32(tag,(i*ELEM_SIZE));
 
-        val = val+1.5;
+        val = val+1.5f;
 
         fprintf(stderr,"Setting element %d to %f\n",i,val);
 
