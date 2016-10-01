@@ -107,10 +107,12 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
     const char *p = dhp_str;
 
     if(!match_channel(&p, dhp_channel)) {
+        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
         return 0;
     }
 
     if(!match_colon(&p)) {
+        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected : in route.");
         return 0;
     }
 
@@ -130,6 +132,8 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
         pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected destination address!");
         return 0;
     }
+
+    pdebug(DEBUG_DETAIL, "parsed DH+ connection string %s as channel %d, source node %d and destination node %d", dhp_str, *dhp_channel, *src_node, *dest_node);
 
     return 1;
 }
@@ -169,11 +173,13 @@ int cip_encode_path(ab_tag_p tag, const char *path)
     link = links[link_index];
 
     while(link && ioi_size < (MAX_CONN_PATH-2)) {   /* MAGIC -2 to allow for padding */
-        if(match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr) == 5) {
+        if(match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr)) {
+            pdebug(DEBUG_DETAIL,"Found DH+ routing, need connection. Conn path length=%d",ioi_size);
             last_is_dhp = 1;
             has_dhp = 1;
         } else {
             last_is_dhp = 0;
+            has_dhp = 0;
 
             if(str_to_int(link, &tmp) != 0) {
                 if(links) mem_free(links);
@@ -187,6 +193,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
 
             data++;
             ioi_size++;
+            pdebug(DEBUG_DETAIL,"Found regular routing. Conn path length=%d",ioi_size);
         }
 
         /* FIXME - handle case where IP address is in path */
@@ -237,14 +244,22 @@ int cip_encode_path(ab_tag_p tag, const char *path)
         tag->dhp_dest = dest_addr;
         tag->use_dhp_direct = 1;
     } else if(!has_dhp) {
-        /* we can do a generic path to the router
-         * object in the PLC.
-         */
-        tag->routing_path[0] = 0x20;
-        tag->routing_path[1] = 0x02; /* router ? */
-        tag->routing_path[2] = 0x24;
-        tag->routing_path[3] = 0x01;
-        tag->routing_path_size = 4;
+        if(tag->needs_connection) {
+            /*
+             * we do a generic path to the router
+             * object in the PLC.  But only if the PLC is
+             * one that needs a connection.  For instance a
+             * Micro850 needs to work in connected mode.
+             */
+            *data = 0x20;   /* class */
+            data++;
+            *data = 0x02;   /* message router class */
+            data++;
+            *data = 0x24;   /* instance */
+            data++;
+            *data = 0x01;   /* message router class instance #1 */
+            ioi_size += 4;
+        }
 
         tag->dhp_src  = 0;
         tag->dhp_dest = 0;
@@ -267,6 +282,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
      * This pads out the path to a multiple of 16-bit
      * words.
      */
+     pdebug(DEBUG_DETAIL,"ioi_size before %d", ioi_size);
     if(ioi_size & 0x01) {
         *data = 0;
         ioi_size++;

@@ -67,7 +67,7 @@ int send_eip_request_unsafe(ab_request_p req)
         encap->encap_options = h2le32(0);
 
         /* display the data */
-        pdebug_dump_bytes(req->debug, req->data, req->request_size);
+        pdebug_dump_bytes(DEBUG_DETAIL, req->data, req->request_size);
 
         req->send_in_progress = 1;
     }

@@ -31,7 +31,7 @@
 #include <ab/ab_common.h>
 
 
-#define MAX_REQ_RESP_SIZE	(768) /* enough? */
+#define MAX_REQ_RESP_SIZE   (768) /* enough? */
 
 /*
  * this structure contains data necessary to set up a request and hold
@@ -39,35 +39,34 @@
  */
 
 struct ab_request_t {
-	ab_request_p next; 	/* for linked list */
+    ab_request_p next;  /* for linked list */
 
-	int req_id; 		/* which request is this for the tag? */
-	int data_size; 		/* how many bytes did we get? */
+    int req_id;         /* which request is this for the tag? */
+    int data_size;      /* how many bytes did we get? */
 
-	/* flags for communicating with background thread */
-	int send_request;
-	int send_in_progress;
-	int resp_received;
-	int recv_in_progress;
-	int abort_request;
-	int abort_after_send; /* for one shot packets */
+    /* flags for communicating with background thread */
+    int send_request;
+    int send_in_progress;
+    int resp_received;
+    int recv_in_progress;
+    int abort_request;
+    int abort_after_send; /* for one shot packets */
 
-	int status;
-	int debug;
+    int status;
 
-	/* used when processing a response */
-	int processed;
+    /* used when processing a response */
+    int processed;
 
-	ab_session_p session;
+    ab_session_p session;
 
-	uint64_t session_seq_id;
-	uint32_t conn_id;
-	uint16_t conn_seq;
+    uint64_t session_seq_id;
+    uint32_t conn_id;
+    uint16_t conn_seq;
 
-	/* used by the background thread for incrementally getting data */
-	int current_offset;
-	int request_size; /* total bytes, not just data */
-	uint8_t data[MAX_REQ_RESP_SIZE];
+    /* used by the background thread for incrementally getting data */
+    int current_offset;
+    int request_size; /* total bytes, not just data */
+    uint8_t data[MAX_REQ_RESP_SIZE];
 };
 
 

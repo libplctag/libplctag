@@ -173,6 +173,13 @@ plc_tag_p ab_tag_create(attr attribs)
         }
     }
 
+    /* some kinds of tag need a connection and we know right away */
+    if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
+        /* this type of tag must use connected mode. */
+        tag->needs_connection = 1;
+    }
+
+
     /* start parsing the parts of the tag. */
 
     /*
@@ -190,9 +197,17 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
-    /* handle the strange LGX->DH+->PLC5 case, and LGX-type systems. */
-    if(tag->use_dhp_direct || tag->protocol_type == AB_PROTOCOL_MLGX800) {
-        /* this type of tag must use connected mode. */
+    /*
+     * handle the strange LGX->DH+->PLC5 case.
+     *
+     * This is separate from the check above of the PLC type.  The reason is
+     * that we do not know whether we need a connection or not until we parse
+     * the path element.  If we are doing a DH+ routing via a Logix chassis,
+     * then we need to be in connected mode.  Even if the PLC that we want
+     * to talk to is one that supports non-connected mode.
+     */
+    if(tag->use_dhp_direct) {
+        /* this is a bit of a cheat.   The logic should be fixed up to combine with the check above.*/
         tag->needs_connection = 1;
     }
 
@@ -744,6 +759,11 @@ void* request_handler_func(void* not_used)
                     rc = request_check_outgoing_data_unsafe(cur_sess, cur_req);
 
                     /* move to the next request */
+
+                    /*
+                     * FIXME - this cannot be right.  If the current request's data is
+                     * not all pushed at once, we should not be going to the next request.
+                     */
                     prev_req = cur_req;
                     cur_req = cur_req->next;
                 }
