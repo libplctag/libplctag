@@ -87,12 +87,13 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 void *serial_test(void *data)
 {
     int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[0]";
     int32_t value;
     uint64_t start;
     uint64_t end;
     plc_tag tag = PLC_TAG_NULL;
     int rc = PLCTAG_STATUS_OK;
+    int iteration = 1;
 
     while(!done) {
         /* capture the starting time */
@@ -127,9 +128,14 @@ void *serial_test(void *data)
 
         end = time_ms();
 
-        fprintf(stderr,"Test %d got result %d with return code %s in %dms\n",tid,value,plc_tag_decode_error(rc),(int)(end-start));
+        fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
-        //sleep_ms(1);
+        if(iteration >= 500) {
+            iteration = 1;
+            sleep_ms(5000);
+        }
+
+        iteration++;
     }
 
     fprintf(stderr, "Test %d terminating.\n", tid);
@@ -138,18 +144,22 @@ void *serial_test(void *data)
 }
 
 
+#define MAX_THREADS (10)
+
 int main(int argc, char **argv)
 {
-    pthread_t serial_test_thread;
+    pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
 
     /* create the test threads */
-    fprintf(stderr, "Creating serial test thread (Test #1).\n");
-    pthread_create(&serial_test_thread, NULL, &serial_test, (void *)(intptr_t)1);
+    for(int tid=0; tid < MAX_THREADS; tid++) {
+        fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
+        pthread_create(&threads[tid], NULL, &serial_test, (void *)(intptr_t)tid);
+    }
 
     start_time = time_ms();
-    end_time = start_time + 5000;
+    end_time = start_time + 600000;
 
     while(!done && time_ms() < end_time) {
         sleep_ms(100);
@@ -157,7 +167,9 @@ int main(int argc, char **argv)
 
     done = 1;
 
-    pthread_join(serial_test_thread, NULL);
+    for(int tid=0; tid < MAX_THREADS; tid++) {
+        pthread_join(threads[tid], NULL);
+    }
 
     fprintf(stderr, "All tests done.\n");
 
