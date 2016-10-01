@@ -138,7 +138,7 @@ int main(int argc, char **argv)
 
     /* test pre-read by writing first */
     for(i=0; i<ARRAY_2_DIM_SIZE; i++) {
-        sprintf(str,"string value for element %d", i);
+        snprintf(str,sizeof(str), "string value for element %d", i);
         update_string(tag, i, str);
     }
 
