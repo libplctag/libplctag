@@ -464,6 +464,8 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
 {
     pdebug(DEBUG_DETAIL, "Starting.");
 
+    pdebug(DEBUG_DETAIL, "Warning: ignoring stacksize (%d) parameter.", stacksize);
+
     if(!t) {
         pdebug(DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
@@ -632,7 +634,7 @@ extern int socket_create(sock_p *s)
 
 extern int socket_connect_tcp(sock_p s, const char *host, int port)
 {
-    in_addr_t ips[MAX_IPS];
+    struct in_addr ips[MAX_IPS];
     int num_ips = 0;
     struct sockaddr_in gw_addr;
     int sock_opt = 1;
@@ -684,22 +686,32 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         pdebug(DEBUG_DETAIL, "Found numeric IP address: %s",host);
         num_ips = 1;
     } else {
-        struct hostent *h=NULL;
+        struct addrinfo hints;
+        struct addrinfo *res=NULL;
+        int rc = 0;
 
-        /* not numeric, try DNS */
-        h = gethostbyname(host);
+        mem_set(&ips, 0, sizeof(ips));
+        mem_set(&hints, 0, sizeof(hints));
 
-        if(!h) {
-            pdebug(DEBUG_ERROR, "Call to gethostbyname() failed, errno: %d!", errno);
-            return PLCTAG_ERR_OPEN;
+        hints.ai_socktype = SOCK_STREAM; /* TCP */
+        hints.ai_family = AF_INET; /* IP V4 only */
+
+        if ((rc = getaddrinfo(host, NULL, &hints, &res)) != 0) {
+            pdebug(DEBUG_WARN,"Error looking up PLC IP address %s, error = %d\n", host, rc);
+
+            if(res) {
+                freeaddrinfo(res);
+            }
+
+            return PLCTAG_ERR_BAD_GATEWAY;
         }
 
-        /* copy the IP list */
-        for(num_ips = 0; h->h_addr_list[num_ips] && num_ips < MAX_IPS; num_ips++) {
-            ips[num_ips] = *((in_addr_t *)h->h_addr_list[num_ips]);
+        for(num_ips = 0; res && num_ips < MAX_IPS; num_ips++) {
+            ips[num_ips].s_addr = ((struct sockaddr_in *)(res->ai_addr))->sin_addr.s_addr;
+            res = res->ai_next;
         }
 
-        free(h);
+        freeaddrinfo(res);
     }
 
 
@@ -717,7 +729,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     do {
         int rc;
         /* try each IP until we run out or get a connection. */
-        gw_addr.sin_addr.s_addr = ips[i];
+        gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
         pdebug(DEBUG_DETAIL, "Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));
 
