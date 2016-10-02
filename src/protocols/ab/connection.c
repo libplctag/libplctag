@@ -96,13 +96,6 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
         mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
         connection->conn_path_size = tag->conn_path_size;
 
-        /* now copy in the connection manager info */
-        //connection->conn_path[connection->conn_path_size] = 0x20; /* class */
-        //connection->conn_path[connection->conn_path_size+1] = 0x02; /* Message Router */
-        //connection->conn_path[connection->conn_path_size+2] = 0x24; /* instance */
-        //connection->conn_path[connection->conn_path_size+3] = 0x01; /* instance #1 */
-        //connection->conn_path_size += 4;
-
         /*
          * Determine the right param for the connection.
          * This sets up the packet size, among other things.
