@@ -130,7 +130,7 @@ void *serial_test(void *data)
 
         fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
-        if(iteration >= 500) {
+        if(iteration >= 1500) {
             iteration = 1;
             sleep_ms(5000);
         }
@@ -159,7 +159,7 @@ int main(int argc, char **argv)
     }
 
     start_time = time_ms();
-    end_time = start_time + 600000;
+    end_time = start_time + (12 * 60 * 60 * 1000); /* 12 hours */
 
     while(!done && time_ms() < end_time) {
         sleep_ms(100);
