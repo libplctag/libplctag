@@ -35,7 +35,7 @@
 #define NUM_TAGS 150
 #define DATA_TIMEOUT 5000
 
-int main(int argc, char **argv)
+int main()
 {
     plc_tag tag[NUM_TAGS];
     int rc;

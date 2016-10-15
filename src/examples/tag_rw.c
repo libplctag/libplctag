@@ -217,7 +217,7 @@ int main(int argc, char **argv)
     /* create the tag */
     tag = plc_tag_create(path);
 
-    printf("INFO: Got tag %p\n", tag);
+    printf("INFO: Got tag %p\n", (void *)tag);
 
     if(!tag) {
         printf("ERROR: error creating tag!\n");
@@ -247,7 +247,7 @@ int main(int argc, char **argv)
         if(!is_write) {
             int index = 0;
 
-            printf("INFO: reading tag %p\n", tag);
+            printf("INFO: reading tag %p\n", (void *)tag);
 
             rc = plc_tag_read(tag, DATA_TIMEOUT);
 

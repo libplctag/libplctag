@@ -112,7 +112,7 @@ void update_string(plc_tag tag, int i, char *str)
     plc_tag_set_int32(tag, base_offset, str_len);
 
     /* copy the data */
-    for(str_index=0; str_index<str_len; str_index++) {
+    for(str_index=0; str_index < str_len && str_index < STRING_DATA_SIZE; str_index++) {
         plc_tag_set_uint8(tag,base_offset + 4 + str_index, str[str_index]);
     }
 
@@ -124,7 +124,7 @@ void update_string(plc_tag tag, int i, char *str)
 
 
 
-int main(int argc, char **argv)
+int main()
 {
     int i;
     char str[STRING_DATA_SIZE] = {0};

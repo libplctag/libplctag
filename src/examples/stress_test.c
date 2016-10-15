@@ -146,7 +146,7 @@ void *serial_test(void *data)
 
 #define MAX_THREADS (10)
 
-int main(int argc, char **argv)
+int main()
 {
     pthread_t threads[MAX_THREADS];
     int64_t start_time;
