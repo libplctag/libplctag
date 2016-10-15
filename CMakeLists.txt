@@ -18,10 +18,12 @@
 #    USA
 #
 
-cmake_minimum_required (VERSION 3.1)
+cmake_minimum_required (VERSION 2.8)
 
 # prevent expansion of quoted things that could be variables in if()
-cmake_policy(SET CMP0054 NEW)
+if(${CMAKE_VERSION} VERSION_GREATER 3.1)
+    cmake_policy(SET CMP0054 NEW)
+endif()
 
 # this is the root libplctag project
 project (libplctag_project)
@@ -97,7 +99,7 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag.h"
                      "${lib_SRC_PATH}/libplctag_tag.h"
                      "${ab_SRC_PATH}/ab.h"
                      "${ab_SRC_PATH}/ab_common.c"
-					 "${ab_SRC_PATH}/ab_common.h"
+                     "${ab_SRC_PATH}/ab_common.h"
                      "${ab_SRC_PATH}/cip.c"
                      "${ab_SRC_PATH}/cip.h"
                      "${ab_SRC_PATH}/connection.c"
