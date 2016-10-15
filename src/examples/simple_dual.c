@@ -35,7 +35,7 @@
 #define DATA_TIMEOUT 5000
 
 
-int main(int argc, char **argv)
+int main()
 {
     plc_tag tag1 = PLC_TAG_NULL;
     plc_tag tag2 = PLC_TAG_NULL;
