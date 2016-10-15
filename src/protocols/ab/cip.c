@@ -145,10 +145,16 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
  *
  * This function takes a path string of comma separated components that are numbers or
  * colon-separated triples that designate a DHP connection.  It converts the path
- * into a path segment in the passed ag.
+ * into a path segment in the passed tag.
  *
  * If the protocol type is for a PLC5 series and the last hop in the path is
  * DH+, then we need to set up a different message routing path.
+ *
+ * Note that it is possible that the path passed is null.  That is OK for Micro850,
+ * for example.  In that case, we still need to put the message routing info at
+ * the end.
+ *
+ * FIXME - This should be factored out into a separate function.
  */
 
 int cip_encode_path(ab_tag_p tag, const char *path)
@@ -165,7 +171,9 @@ int cip_encode_path(ab_tag_p tag, const char *path)
     uint8_t *data = tag->conn_path;
 
     /* split the path */
-    links = str_split(path,",");
+    if(path) {
+        links = str_split(path,",");
+    }
 
     if(links != NULL) {
         /* work along each string. */

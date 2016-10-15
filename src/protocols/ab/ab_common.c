@@ -191,7 +191,7 @@ plc_tag_p ab_tag_create(attr attribs)
      *
      * Skip this if we don't have a path.
      */
-    if(path && cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
+    if(cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Unable to convert links strings to binary path!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
