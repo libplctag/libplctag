@@ -181,7 +181,7 @@ foreach ( example ${example_PROGRAMS} )
 endforeach(example)
 
 # simple.cpp is different because it is C++
-set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
+set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS ${BASE_CXX_FLAGS})
 add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
