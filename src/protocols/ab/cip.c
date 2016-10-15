@@ -37,7 +37,7 @@
 #include <util/debug.h>
 
 
-int match_channel(const char **p, int *dhp_channel)
+static int match_channel(const char **p, int *dhp_channel)
 {
     switch(**p) {
         case 'A':
@@ -64,7 +64,7 @@ int match_channel(const char **p, int *dhp_channel)
 }
 
 
-int match_colon(const char **p)
+static int match_colon(const char **p)
 {
     if(**p == ':') {
         *p = *p + 1;
@@ -75,7 +75,7 @@ int match_colon(const char **p)
 }
 
 
-int match_int(const char **p, int *val)
+static int match_int(const char **p, int *val)
 {
     int result = 0;
     int digits = 3;
@@ -89,6 +89,8 @@ int match_int(const char **p, int *val)
         *p = *p + 1;
         digits--;
     }
+
+    /* FIXME - what is the maximum DH+ ID we can have? 255? */
 
     *val = result;
 
@@ -125,12 +127,12 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
 
     if(!match_colon(&p)) {
         pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected colon!");
-        return 0;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     if(!match_int(&p, dest_node)) {
         pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected destination address!");
-        return 0;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     pdebug(DEBUG_DETAIL, "parsed DH+ connection string %s as channel %d, source node %d and destination node %d", dhp_str, *dhp_channel, *src_node, *dest_node);
@@ -165,49 +167,54 @@ int cip_encode_path(ab_tag_p tag, const char *path)
     /* split the path */
     links = str_split(path,",");
 
-    if(links == NULL) {
-        return PLCTAG_ERR_BAD_PARAM;
-    }
+    if(links != NULL) {
+        /* work along each string. */
+        link = links[link_index];
 
-    /* work along each string. */
-    link = links[link_index];
-
-    while(link && ioi_size < (MAX_CONN_PATH-2)) {   /* MAGIC -2 to allow for padding */
-        if(match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr)) {
-            pdebug(DEBUG_DETAIL,"Found DH+ routing, need connection. Conn path length=%d",ioi_size);
-            last_is_dhp = 1;
-            has_dhp = 1;
-        } else {
-            last_is_dhp = 0;
-            has_dhp = 0;
-
-            if(str_to_int(link, &tmp) != 0) {
+        while(link && ioi_size < (MAX_CONN_PATH-2)) {   /* MAGIC -2 to allow for padding */
+            int rc = match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr);
+            if(rc > 0) {
+                /* we matched a DH+ route node */
+                pdebug(DEBUG_DETAIL,"Found DH+ routing, need connection. Conn path length=%d",ioi_size);
+                last_is_dhp = 1;
+                has_dhp = 1;
+            } else if (rc < 0) {
+                /* matched part of a DH+ node, but then failed.  Syntax error. */
+                pdebug(DEBUG_WARN, "Syntax error in DH+ route path.");
                 if(links) mem_free(links);
-
                 return PLCTAG_ERR_BAD_PARAM;
+            } else {
+                /* did not match a DH+ route node, but no error. */
+                last_is_dhp = 0;
+                has_dhp = 0;
+
+                if(str_to_int(link, &tmp) != 0) {
+                    /* syntax error */
+                    pdebug(DEBUG_WARN, "Syntax error in path, expected number!");
+                    if(links) mem_free(links);
+                    return PLCTAG_ERR_BAD_PARAM;
+                }
+
+                *data = tmp;
+
+                /*printf("convert_links() link(%d)=%s (%d)\n",i,*links,tmp);*/
+
+                data++;
+                ioi_size++;
+                pdebug(DEBUG_DETAIL,"Found regular routing. Conn path length=%d",ioi_size);
             }
+            /* FIXME - handle case where IP address is in path */
 
-            *data = tmp;
-
-            /*printf("convert_links() link(%d)=%s (%d)\n",i,*links,tmp);*/
-
-            data++;
-            ioi_size++;
-            pdebug(DEBUG_DETAIL,"Found regular routing. Conn path length=%d",ioi_size);
+            link_index++;
+            link = links[link_index];
         }
 
-        /* FIXME - handle case where IP address is in path */
-
-        link_index++;
-        link = links[link_index];
+        /* we do not need the split string anymore. */
+        if(links) {
+            mem_free(links);
+            links = NULL;
+        }
     }
-
-    /* we do not need the split string anymore. */
-    if(links) {
-        mem_free(links);
-        links = NULL;
-    }
-
 
     /* Add to the path based on the protocol type and
       * whether the last part is DH+.  Only some combinations of
