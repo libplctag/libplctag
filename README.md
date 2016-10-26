@@ -3,8 +3,10 @@ libplctag
 
 This library for Linux and Windows (not heavily tested) provides a means of accessing PLCs to read and write simple data.
 
-Stable Version: 1.0
-Current Beta Version: 1.5
+Stable Version: 1.5
+
+Old Stable Version: 1.0
+
 Future Version: 2.0
 
 WARNING - DISCLAIMER
