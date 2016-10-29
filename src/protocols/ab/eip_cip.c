@@ -1156,35 +1156,6 @@ static int check_read_status_connected(ab_tag_p tag)
             /* have the IO thread take care of the request buffers */
             ab_tag_abort(tag);
 
-            /* Now remove the requests from the session's request list. */
-
-            /* FIXME - this functionality has been removed to simplify
-             * this case.  All deallocation of requests is done by the
-             * IO thread now.  The abort call above handles this.
-             */
-            // for(i = 0; i < tag->num_read_requests; i++) {
-            // int tmp_rc;
-
-            // req = tag->reqs[i];
-
-            // tmp_rc = request_remove(tag->session, req);
-
-            // if(tmp_rc != PLCTAG_STATUS_OK) {
-            //  pdebug(DEBUG_WARN,"Unable to remove the request from the list! rc=%d",rc);
-            //
-            //  /* since we could not remove it, maybe the thread can. */
-            //  req->abort_request = 1;
-            //
-            //  rc = tmp_rc;
-            //} else {
-            //  /* free up the request resources */
-            //  request_destroy(&req);
-            //}
-
-            ///* mark it as freed */
-            // tag->reqs[i] = NULL;
-            //}
-
             /* if this is a pre-read for a write, then pass off the the write routine */
             if (tag->pre_write_read) {
                 pdebug(DEBUG_DETAIL, "Restarting write call now.");
@@ -1218,6 +1189,11 @@ static int check_read_status_unconnected(ab_tag_p tag)
     int byte_offset = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     /* is there an outstanding request? */
     if (!tag->reqs) {
@@ -1345,11 +1321,11 @@ static int check_read_status_unconnected(ab_tag_p tag)
                    (*data) == AB_CIP_DATA_FULL_STRUCT || (*data) == AB_CIP_DATA_FULL_ARRAY) {
             /* this is an aggregate type of some sort, the type info is variable length */
             int type_length =
-                *(data + 1) + 2; /*
-                                                                       * MAGIC
-                                                                       * add 2 to get the total length including
-                                                                       * the type byte and the length byte.
-                                                                       */
+                *(data + 1) + 2;  /*
+                                   * MAGIC
+                                   * add 2 to get the total length including
+                                   * the type byte and the length byte.
+                                   */
 
             /* check for extra long types */
             if (type_length > MAX_TAG_TYPE_INFO) {
@@ -1377,6 +1353,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
                    "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
                    byte_offset + (int)(data_end - data),
                    tag->size);
+            pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", (int)byte_offset, (int)(data_end - data));
             rc = PLCTAG_ERR_TOO_LONG;
             break;
         }
@@ -1435,35 +1412,6 @@ static int check_read_status_unconnected(ab_tag_p tag)
             /* have the IO thread take care of the request buffers */
             ab_tag_abort(tag);
 
-            /* Now remove the requests from the session's request list. */
-
-            /* FIXME - this functionality has been removed to simplify
-             * this case.  All deallocation of requests is done by the
-             * IO thread now.  The abort call above handles this.
-             */
-            // for(i = 0; i < tag->num_read_requests; i++) {
-            // int tmp_rc;
-
-            // req = tag->reqs[i];
-
-            // tmp_rc = request_remove(tag->session, req);
-
-            // if(tmp_rc != PLCTAG_STATUS_OK) {
-            //  pdebug(debug,"Unable to remove the request from the list! rc=%d",rc);
-            //
-            //  /* since we could not remove it, maybe the thread can. */
-            //  req->abort_request = 1;
-            //
-            //  rc = tmp_rc;
-            //} else {
-            //  /* free up the request resources */
-            //  request_destroy(&req);
-            //}
-
-            ///* mark it as freed */
-            // tag->reqs[i] = NULL;
-            //}
-
             /* if this is a pre-read for a write, then pass off the the write routine */
             if (tag->pre_write_read) {
                 pdebug(DEBUG_INFO, "Restarting write call now.");
@@ -1501,6 +1449,11 @@ static int check_write_status_connected(ab_tag_p tag)
     ab_request_p req;
 
     pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     /* is there an outstanding request? */
     if (!tag->reqs) {
@@ -1569,35 +1522,6 @@ static int check_write_status_connected(ab_tag_p tag)
             break;
         }
     }
-
-    /*
-     * Now remove the requests from the session's request list.
-         *
-         * FIXME - this has been removed in favor of making the
-         * IO thread do the clean up.
-     */
-    // for(i = 0; i < tag->num_write_requests; i++) {
-    //  int tmp_rc;
-
-    //  req = tag->reqs[i];
-
-    //  tmp_rc = request_remove(tag->session, req);
-
-    //  if(tmp_rc != PLCTAG_STATUS_OK) {
-    //      pdebug(DEBUG_WARN,"Unable to remove the request from the list! rc=%d",rc);
-
-    //      /* since we could not remove it, maybe the thread can. */
-    //      req->abort_request = 1;
-
-    //      rc = tmp_rc;
-    //  } else {
-    //      /* free up the request resources */
-    //      request_destroy(&req);
-    //  }
-
-    //  /* mark it as freed */
-    //  tag->reqs[i] = NULL;
-    //}
 
     /* this triggers the clean up */
     ab_tag_abort(tag);
