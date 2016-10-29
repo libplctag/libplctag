@@ -149,6 +149,8 @@ extern void thread_stop(void);
 extern int thread_join(thread_p t);
 extern int thread_destroy(thread_p *t);
 
+#define THREAD_LOCAL __declspec(thread)
+
 /* atomic operations */
 typedef volatile long int lock_t;
 
