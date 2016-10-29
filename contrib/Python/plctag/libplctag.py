@@ -97,7 +97,7 @@ plcTagWrite   = defineIntFunc(lib.plc_tag_write, [ctypes.c_void_p, ctypes.c_int]
 
 # Create the tag data accessor functions below:
 
-plcTagGetSize = defineIntFunc(lib.plc_tag_get_size, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetSize = defineIntFunc(lib.plc_tag_get_size, [ctypes.c_void_p])
 
 
 # Create the 32-bit tag data accessors
