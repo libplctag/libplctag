@@ -98,6 +98,8 @@ extern void thread_stop(void) __attribute__((noreturn));
 extern int thread_join(thread_p t);
 extern int thread_destroy(thread_p *t);
 
+#define THREAD_LOCAL __thread
+
 /* atomic operations */
 typedef int lock_t;
 
