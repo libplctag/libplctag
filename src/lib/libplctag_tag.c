@@ -533,7 +533,11 @@ LIB_EXPORT int plc_tag_read(plc_tag tag_id, int timeout)
 
 int plc_tag_status_mapped(plc_tag_p tag)
 {
-     /* pdebug(DEBUG_DETAIL, "Starting."); */
+    /* pdebug(DEBUG_DETAIL, "Starting."); */
+    if(!tag) {
+        pdebug(DEBUG_ERROR,"Null tag passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     if(!tag->vtable || !tag->vtable->status) {
         if(tag->status) {
@@ -1364,73 +1368,118 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
  ****************************************************************************************************/
 
 
-#define MAX_TAGS (16384)
-#define MAX_TAG_IDS (982451683)  /* a big prime */
-static int next_tag_id = MAX_TAGS;
-static plc_tag_p tag_map[MAX_TAGS] = {0,};
+#define TAG_ID_MASK (0xFFFFFFF)
+//#define MAX_TAG_IDS (TAG_ID_MASK + 1)
+#define TAG_INDEX_MASK (0x3F) /* DEBUG */
+#define MAX_TAG_ENTRIES (TAG_INDEX_MASK + 1)
+#define TAG_ID_ERROR INT_MIN
+
+//#define MAX_TAGS (16384)
+//#define MAX_TAG_IDS (MAX_TAGS << 10)  /* a lot of possible tag IDs */
+
+static int next_tag_id = MAX_TAG_ENTRIES;
+static plc_tag_p tag_map[MAX_TAG_ENTRIES + 1] = {0,};
 
 
+static inline int tag_id_inc(int id)
+{
+    if(id <= 0 || id == TAG_ID_ERROR) {
+        pdebug(DEBUG_ERROR, "Incoming ID is not valid! Got %d",id);
+        return TAG_ID_ERROR;
+    }
 
+    id = (id + 1) & TAG_ID_MASK;
 
+    if(id == 0) {
+        id = 1; /* skip zero intentionally! Can't return an ID of zero because it looks like a NULL pointer */
+    }
+
+    return id;
+}
+
+static inline int to_tag_index(int id)
+{
+    if(id <= 0 || id == TAG_ID_ERROR) {
+        pdebug(DEBUG_ERROR, "Incoming ID is not valid! Got %d",id);
+        return TAG_ID_ERROR;
+    }
+    return (id & TAG_INDEX_MASK);
+}
 
 
 static int allocate_new_tag_to_id_mapping(plc_tag_p tag)
 {
-    int entry_offset = 1;
-    int actual_index = 0;
-
-    pdebug(DEBUG_DETAIL,"Starting.");
+    int new_id = next_tag_id;
+    int index = 0;
+    int found = 0;
 
     critical_block(global_library_mutex) {
-        for(entry_offset = 1; entry_offset < MAX_TAGS; entry_offset++)  {
-            actual_index = ((next_tag_id + entry_offset) % MAX_TAG_IDS) % MAX_TAGS;
+        for(int count=1; count < MAX_TAG_ENTRIES && new_id != TAG_ID_ERROR; count++) {
+            new_id = tag_id_inc(new_id);
 
-            pdebug(DEBUG_DETAIL,"Trying index %d", actual_index);
+            /* everything OK? */
+            if(new_id == TAG_ID_ERROR) break;
 
-            /* remember to skip 0.  On most machines it maps to null */
-            if(actual_index != 0 && !tag_map[actual_index]) {
-                /* found an empty slot */
-                next_tag_id = (next_tag_id + entry_offset) % MAX_TAG_IDS;
-                tag_map[actual_index] = tag;
-                tag->tag_id = next_tag_id;
+            index = to_tag_index(new_id);
 
-                pdebug(DEBUG_DETAIL, "Using index %d for tag %p", next_tag_id, tag);
-
+            /* is the slot empty? */
+            if(index != TAG_ID_ERROR && !tag_map[index]) {
+                next_tag_id = new_id;
+                tag->tag_id = new_id;
+                tag_map[index] = tag;
+                found = 1;
                 break;
             }
+
+            if(index == TAG_ID_ERROR) break;
         }
     }
 
-    if(entry_offset >= MAX_TAGS) {
-        /* no entries left in map table! */
-        pdebug(DEBUG_ERROR, "Unable to map tag, no slots left!");
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    if(found) {
+        return new_id;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    if(index != TAG_ID_ERROR) {
+        pdebug(DEBUG_ERROR, "Unable to find empty mapping slot!");
+        return PLCTAG_ERR_NO_MEM; /* not really the right error, but close */
+    }
 
-    return next_tag_id;
+    /* this did not work */
+    return PLCTAG_ERR_NOT_ALLOWED;
 }
+
+
 
 
 static plc_tag_p map_id_to_tag(plc_tag tag_id_ptr)
 {
     plc_tag_p result = NULL;
     int tag_id = (int)(intptr_t)tag_id_ptr;
+    int index = to_tag_index(tag_id);
+    int result_tag_id;
 
     pdebug(DEBUG_DETAIL, "Starting");
 
-    critical_block(global_library_mutex) {
-        result = tag_map[tag_id % MAX_TAGS];
-
-        pdebug(DEBUG_DETAIL, "Tag id %d maps to tag %p", tag_id, result);
+    if(index == TAG_ID_ERROR) {
+        pdebug(DEBUG_ERROR,"Bad tag ID passed! %d", tag_id);
+        return (plc_tag_p)0;
     }
 
-    if(result && result->tag_id == tag_id) {
+    critical_block(global_library_mutex) {
+        result = tag_map[index];
+        if(result) {
+            result_tag_id = result->tag_id;
+        } else {
+            result_tag_id = -1;
+        }
+    }
+
+    if(result && result_tag_id == tag_id) {
+        pdebug(DEBUG_WARN, "Correct mapping for id %d found with tag %p", tag_id, result);
         return result;
     }
 
-    pdebug(DEBUG_WARN, "No mapping or incorrect mapping.");
+    pdebug(DEBUG_ERROR, "Tag id %d maps to tag %p with id %d", tag_id, result, result_tag_id);
 
     /* either nothing was there or it is the wrong tag. */
     return (plc_tag_p)0;
@@ -1445,18 +1494,24 @@ static int release_tag_to_id_mapping(plc_tag_p tag)
     pdebug(DEBUG_DETAIL, "Starting");
 
     if(!tag || tag->tag_id == 0) {
-        pdebug(DEBUG_WARN, "Tag null or tag ID is zero.");
+        pdebug(DEBUG_ERROR, "Tag null or tag ID is zero.");
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    map_index = tag->tag_id % MAX_TAGS;
+    map_index = to_tag_index(tag->tag_id);
+
+    if(map_index == TAG_ID_ERROR) {
+        pdebug(DEBUG_ERROR,"Bad tag ID %d!", tag->tag_id);
+        return PLCTAG_ERR_BAD_DATA;
+    }
 
     critical_block(global_library_mutex) {
         /* find the actual slot and check if it is the right tag */
         if(!tag_map[map_index] || tag_map[map_index] != tag) {
-            pdebug(DEBUG_WARN, "Tag not found or entry is already clear.");
+            pdebug(DEBUG_ERROR, "Tag not found or entry is already clear.");
             rc = PLCTAG_ERR_NOT_FOUND;
         } else {
+            pdebug(DEBUG_ERROR,"Releasing tag %p(%d) at location %d",tag, tag->tag_id, map_index);
             tag_map[map_index] = (plc_tag_p)(intptr_t)0;
         }
     }
