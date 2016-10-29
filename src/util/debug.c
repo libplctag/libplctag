@@ -59,24 +59,50 @@ extern int get_debug_level(void)
     return debug_level;
 }
 
+
+static lock_t thread_num_lock = LOCK_INIT;
+static volatile uint32_t thread_num = 1;
+
+static THREAD_LOCAL uint32_t this_thread_num = 0;
+
+
+static uint32_t get_thread_id()
+{
+    if(!this_thread_num) {
+        while(!lock_acquire(&thread_num_lock)) { } /* FIXME - this could hang! just keep trying */
+            this_thread_num = thread_num;
+            thread_num++;
+        lock_release(&thread_num_lock);
+    }
+
+    return this_thread_num;
+}
+
+
 extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
 {
     va_list va;
     struct tm t;
     time_t epoch;
+    int64_t epoch_ms;
+    int remainder_ms;
     char prefix[2048];
 
     /* build the prefix */
+
     /* get the time parts */
-    epoch = time(0);
+    epoch_ms = time_ms();
+    epoch = epoch_ms/1000;
+    remainder_ms = (int)(epoch_ms % 1000);
 
     /* FIXME - should capture error return! */
     localtime_r(&epoch,&t);
 
     /* create the prefix and format for the file entry. */
-    snprintf(prefix, sizeof prefix,"%04d-%02d-%02d %02d:%02d:%02d %s:%d %s\n",
-             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,
-             func,line_num,templ);
+    snprintf(prefix, sizeof prefix,"thread(%04u) %04d-%02d-%02d %02d:%02d:%02d.%03d %s:%d %s\n",
+             get_thread_id(),
+             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms,
+             func, line_num, templ);
 
     /* print it out. */
     va_start(va,templ);
