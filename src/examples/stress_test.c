@@ -144,14 +144,14 @@ void *serial_test(void *data)
 }
 
 
-#define MAX_THREADS (30)
+#define MAX_THREADS (40)
 
 int main(int argc, char **argv)
 {
     pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
-    int64_t minutes = 12 * 60;  /* default 12 hours */
+    int64_t minutes = 1 * 60;  /* default 1 hours */
 
     if(argc>1) {
         minutes = atoi(argv[1]);
