@@ -141,7 +141,7 @@ int session_remove_connection_unsafe(ab_session_p session, ab_connection_p conne
         cur = cur->next;
     }
 
-    if (cur == connection) {
+    if (cur && cur == connection) {
         if (prev) {
             prev->next = cur->next;
         } else {
