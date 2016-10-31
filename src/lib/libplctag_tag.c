@@ -1370,7 +1370,7 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
 
 #define TAG_ID_MASK (0xFFFFFFF)
 //#define MAX_TAG_IDS (TAG_ID_MASK + 1)
-#define TAG_INDEX_MASK (0x3F) /* DEBUG */
+#define TAG_INDEX_MASK (0x3FFF) /* DEBUG */
 #define MAX_TAG_ENTRIES (TAG_INDEX_MASK + 1)
 #define TAG_ID_ERROR INT_MIN
 
@@ -1475,11 +1475,11 @@ static plc_tag_p map_id_to_tag(plc_tag tag_id_ptr)
     }
 
     if(result && result_tag_id == tag_id) {
-        pdebug(DEBUG_WARN, "Correct mapping for id %d found with tag %p", tag_id, result);
+        pdebug(DEBUG_DETAIL, "Correct mapping for id %d found with tag %p", tag_id, result);
         return result;
     }
 
-    pdebug(DEBUG_ERROR, "Tag id %d maps to tag %p with id %d", tag_id, result, result_tag_id);
+    pdebug(DEBUG_WARN, "Not found, tag id %d maps to tag %p with id %d", tag_id, result, result_tag_id);
 
     /* either nothing was there or it is the wrong tag. */
     return (plc_tag_p)0;
@@ -1508,10 +1508,10 @@ static int release_tag_to_id_mapping(plc_tag_p tag)
     critical_block(global_library_mutex) {
         /* find the actual slot and check if it is the right tag */
         if(!tag_map[map_index] || tag_map[map_index] != tag) {
-            pdebug(DEBUG_ERROR, "Tag not found or entry is already clear.");
+            pdebug(DEBUG_WARN, "Tag not found or entry is already clear.");
             rc = PLCTAG_ERR_NOT_FOUND;
         } else {
-            pdebug(DEBUG_ERROR,"Releasing tag %p(%d) at location %d",tag, tag->tag_id, map_index);
+            pdebug(DEBUG_DETAIL,"Releasing tag %p(%d) at location %d",tag, tag->tag_id, map_index);
             tag_map[map_index] = (plc_tag_p)(intptr_t)0;
         }
     }
