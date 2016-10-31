@@ -32,13 +32,18 @@ Make a work directory in which you want to check out the code.
 $ git clone https://github.com/kyle-github/libplctag.git
 ```
 
+Or you can download one of the releases directly from GitHub.
+
+
 ## Build the Make build files
 
 
-Go into the project build directory
+Go into the project build directory (the build directory may not already exist)/
 
 ```
-$ cd libplctag/build
+$ cd libplctag
+$ mkdir -p build
+$ cd build
 ```
 
 Run cmake
@@ -79,7 +84,7 @@ you do not need to do that step.
 
 ## Install MS Visual Studio
 
-Testing was done using Visual Studio Express 2015 on Windows 7 SP1 (not terribly up to date).
+Testing was done using Visual Studio Community Edition 2015 on Windows 7 SP1 (not terribly up to date).
 
 __WARNING__ Microsoft Visual Studio versions earlier than 2013 do not support C99!  There are C99 constructs in the code.  If you have Visual Studio
 2012 or earlier, the code will not compile!
@@ -105,7 +110,9 @@ Any contributions to the instructions here greatly appreciated!
 
 ## Open a Developer command prompt
 
-Open a Developer Command Prompt (usually Start Menu > Visual Studio 20xx > Visual Studio Tools > Developer Command Prompt for VS20xx).
+
+
+(I am not sure you need to do this, it looks like you do not if you have CMake properly installed.) Open a Developer Command Prompt (usually Start Menu > Visual Studio 20xx > Visual Studio Tools > Developer Command Prompt for VS20xx).
 
 This is required because there are a lot of special paths that need to be set up for Visual Studio and CMake to find the compilers, include files etc.
 
