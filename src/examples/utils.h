@@ -25,9 +25,12 @@
     #include <windows.h>
     #define strcasecmp _stricmp
     #define strdup _strdup
+	#define snprintf sprintf_s
+	#define sscanf_platform sscanf_s
 #else
     #include <unistd.h>
     #include <strings.h>
+	#define sscanf_platform sscanf
 #endif
 
 
@@ -44,12 +47,6 @@ extern int64_t time_ms(void);
 
 #ifdef __cplusplus
 }
-#endif
-
-#ifdef _WIN32
-#define sscanf_platform sscanf_s
-#else
-#define sscanf_platform sscanf
 #endif
 
 #endif
