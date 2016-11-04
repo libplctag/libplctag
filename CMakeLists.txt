@@ -32,6 +32,21 @@ project (libplctag_project)
 set (libplctag_VERSION_MAJOR 1)
 set (libplctag_VERSION_MINOR 5)
 
+
+message("MSVC = ${MSVC}")
+if(MSVC)
+	message("CMAKE generator: ${CMAKE_GENERATOR}")
+	message("CMAKE generator version: ${MSVC_VERSION}")
+	
+	if(${MSVC_VERSION} EQUAL 1800)
+		set(COMPILE_AS_C 0)
+	else()
+		set(COMPILE_AS_C 1)
+	endif()
+endif()
+	
+
+
 # set the main paths.
 set ( base_SRC_PATH "${PROJECT_SOURCE_DIR}/src" )
 set ( lib_SRC_PATH "${base_SRC_PATH}/lib" )
@@ -83,7 +98,14 @@ endif()
 MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
 
 if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-    set(BASE_C_FLAGS "${BASE_FLAGS} /c")
+	# MSVC 2012 can compile the library as C++, but not C
+	if(COMPILE_AS_C)
+		message("MSVC can handle C99, compiling code as C")
+		set(BASE_C_FLAGS "${BASE_FLAGS} /c")
+	else()
+		message("MSVC cannot handle C99, compiling code as C++")
+		set(BASE_C_FLAGS "${BASE_FLAGS}")
+	endif()
 else()
     set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99")
 endif()
