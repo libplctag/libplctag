@@ -109,12 +109,12 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
     const char *p = dhp_str;
 
     if(!match_channel(&p, dhp_channel)) {
-        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
+        pdebug(DEBUG_INFO, "Bad syntax in DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
         return 0;
     }
 
     if(!match_colon(&p)) {
-        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected : in route.");
+        pdebug(DEBUG_INFO, "Bad syntax in DH+ route.  Expected : in route.");
         return 0;
     }
 

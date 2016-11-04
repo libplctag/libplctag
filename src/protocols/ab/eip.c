@@ -39,7 +39,7 @@ int send_eip_request_unsafe(ab_request_p req)
 {
     int rc;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* if we have not already started, then start the send */
     if (!req->send_in_progress) {
@@ -67,7 +67,8 @@ int send_eip_request_unsafe(ab_request_p req)
         encap->encap_options = h2le32(0);
 
         /* display the data */
-        pdebug_dump_bytes(DEBUG_DETAIL, req->data, req->request_size);
+        pdebug(DEBUG_INFO,"Sending packet of size %d",req->request_size);
+        pdebug_dump_bytes(DEBUG_INFO, req->data, req->request_size);
 
         req->send_in_progress = 1;
     }
@@ -101,7 +102,7 @@ int send_eip_request_unsafe(ab_request_p req)
         req->recv_in_progress = 0;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
