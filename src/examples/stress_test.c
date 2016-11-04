@@ -87,7 +87,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 void *serial_test(void *data)
 {
     int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=1";
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
     int32_t value;
     uint64_t start;
     uint64_t end;
