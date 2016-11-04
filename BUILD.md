@@ -98,7 +98,7 @@ Install the compilers first!  CMake gets unhappy when it cannot find the compile
 ## Install CMake for Windows
 
 Go to the cmake web site and download the installer.  Install cmake.  __NOTE__ install CMake so that it is usable either by all users or the current user.  The default is to 
-not install it directly for any user!
+not install it directly for any user! (Thanks to Nate Miller for pointing this out!)
 
 ## Install Git
 
