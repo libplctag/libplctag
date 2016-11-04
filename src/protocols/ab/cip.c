@@ -541,10 +541,10 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
     /* word_count is in units of 16-bit integers, do not
      * count the word_count value itself.
      */
-    *word_count = ((dp - data)-1)/2;
+    *word_count = (uint8_t)((dp - data)-1)/2;
 
     /* store the size of the whole result */
-    tag->encoded_name_size = dp - data;
+    tag->encoded_name_size = (int)(dp - data);
 
     return 1;
 }
