@@ -69,15 +69,24 @@ int eip_pccc_tag_status(ab_tag_p tag)
         return rc;
     }
 
-    /*
-     * If the session is not completely set up,
-     * mark this tag as pending.
+    /* We need to treat the session and connection statuses
+     * as async because we might not be the thread creating those
+     * objects.  In that case, we propagate the status back up
+     * to the tag.
      */
-    if(tag->session) {
-        if(!tag->session->is_connected) {
-            tag->status = PLCTAG_STATUS_PENDING;
+    if (tag->session) {
+        int session_rc = tag->session->status;
+        int connection_rc = PLCTAG_STATUS_OK;
+
+        if(tag->connection) {
+            connection_rc = tag->connection->status;
+        }
+
+        /* propagate the status up. */
+        if(session_rc != PLCTAG_STATUS_OK) {
+            tag->status = session_rc;
         } else {
-            tag->status = PLCTAG_STATUS_OK;
+            tag->status = connection_rc;
         }
     }
 

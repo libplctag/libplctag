@@ -87,7 +87,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 void *serial_test(void *data)
 {
     int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
     int32_t value;
     uint64_t start;
     uint64_t end;
@@ -130,7 +130,7 @@ void *serial_test(void *data)
 
         fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
-        if(iteration >= 1000) {
+        if(iteration >= 100) {
             iteration = 1;
             sleep_ms(5000);
         }

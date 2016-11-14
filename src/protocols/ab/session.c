@@ -39,6 +39,7 @@
 
 
 ab_session_p session_create_unsafe(const char* host, int gw_port);
+int session_init(ab_session_p session);
 
 
 /*
@@ -189,6 +190,7 @@ int find_or_create_session(ab_session_p *tag_session, attr attribs)
     const char* session_gw = attr_get_str(attribs, "gateway", "");
     int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
     ab_session_p session = AB_SESSION_NULL;
+    int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
 
@@ -210,10 +212,24 @@ int find_or_create_session(ab_session_p *tag_session, attr attribs)
             if (session == AB_SESSION_NULL) {
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
+            } else {
+                new_session = 1;
             }
         } else {
             pdebug(DEBUG_DETAIL,"Reusing existing session.");
         }
+    }
+
+    /*
+     * do this OUTSIDE the mutex in order to let other threads not block if
+     * the session creation process blocks.
+     */
+
+    if(new_session) {
+        rc = session_init(session);
+
+        /* save the status */
+        session->status = rc;
     }
 
     /* store it into the tag */
@@ -438,18 +454,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
 
     str_copy(session->host, host, MAX_SESSION_HOST);
 
-    /* we must connect to the gateway and register */
-    if (!session_connect(session, host)) {
-        mem_free(session);
-        pdebug(DEBUG_WARN, "session connect failed!");
-        return AB_SESSION_NULL;
-    }
-
-    if (!session_register(session)) {
-        session_destroy_unsafe(session);
-        pdebug(DEBUG_WARN, "session registration failed!");
-        return AB_SESSION_NULL;
-    }
+    session->status = PLCTAG_STATUS_PENDING;
 
     /* check for ID set up */
     if(srand_setup == 0) {
@@ -471,28 +476,58 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
      *
      * So, this is more or less unique across all invocations of the library.
      * FIXME - this could collide.  The probability is low, but it could happen
-     * as there are only 32 bit.
+     * as there are only 32 bits.
      */
     session->conn_serial_number = ++connection_id;
 
     /* add the new session to the list. */
     add_session_unsafe(session);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_INFO, "Done");
 
     return session;
 }
 
+
 /*
- * ab_session_connect()
+ * session_init
  *
- * Connect to the host/port passed via TCP.  Set all the relevant fields in
- * the passed session object.
+ * This calls several blocking methods and so must not keep the main mutex
+ * locked during them.
+ */
+int session_init(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* we must connect to the gateway and register */
+    if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+        session_destroy(session);
+        pdebug(DEBUG_WARN, "session connect failed!");
+        return rc;
+    }
+
+    if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+        session_destroy(session);
+        pdebug(DEBUG_WARN, "session registration failed!");
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+/*
+ * session_connect()
+ *
+ * Connect to the host/port passed via TCP.
  */
 
-int session_connect(ab_session_p session, const char* host)
+int session_connect(ab_session_p session)
 {
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -504,11 +539,11 @@ int session_connect(ab_session_p session, const char* host)
         return 0;
     }
 
-    rc = socket_connect_tcp(session->sock, host, AB_EIP_DEFAULT_PORT);
+    rc = socket_connect_tcp(session->sock, session->host, AB_EIP_DEFAULT_PORT);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to connect socket for session!");
-        return 0;
+        return rc;
     }
 
     /* everything is OK.  We have a TCP stream open to a gateway. */
@@ -516,7 +551,7 @@ int session_connect(ab_session_p session, const char* host)
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return 1;
+    return rc;
 }
 
 /* must have the session mutex held here */
@@ -539,15 +574,8 @@ int session_destroy_unsafe(ab_session_p session)
         return 0;
     }
 
-    /* this is a best effort attempt */
-    session_unregister(session);
-
-    /* close the socket. */
-    if (session->is_connected) {
-        socket_close(session->sock);
-        socket_destroy(&(session->sock));
-        session->is_connected = 0;
-    }
+    /* unregister and close the socket. */
+    session_unregister_unsafe(session);
 
     /* need the mutex-protected version */
     remove_session_unsafe(session);
@@ -592,7 +620,7 @@ int session_register(ab_session_p session)
 {
     eip_session_reg_req* req;
     eip_encap_t* resp;
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
     uint32_t data_size = 0;
     int64_t timeout_time;
 
@@ -724,23 +752,26 @@ int session_register(ab_session_p session)
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* after all that, save the session handle, we will
+    /*
+     * after all that, save the session handle, we will
      * use it in future packets.
      */
     session->session_handle = resp->encap_session_handle; /* opaque to us */
+    session->registered = 1;
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return 1;
+    return PLCTAG_STATUS_OK;
 }
 
-int session_unregister(ab_session_p session)
+int session_unregister_unsafe(ab_session_p session)
 {
     if (session->sock) {
+        session->is_connected = 0;
+        session->registered = 0;
         socket_close(session->sock);
         socket_destroy(&(session->sock));
         session->sock = NULL;
-        session->is_connected = 0;
     }
 
     return PLCTAG_STATUS_OK;

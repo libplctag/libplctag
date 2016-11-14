@@ -235,7 +235,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     if(tag->needs_connection) {
         /* Find or create a connection.*/
-        if((tag->status = find_or_create_connection(tag, tag->session, attribs)) != PLCTAG_STATUS_OK) {
+        if((tag->status = find_or_create_connection(tag, attribs)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_INFO,"Unable to create connection! Status=%d",tag->status);
             return (plc_tag_p)tag;
         }
@@ -710,6 +710,12 @@ void* request_handler_func(void* not_used)
             while (cur_sess) {
                 ab_request_p cur_req;
                 ab_request_p prev_req;
+
+                if(!cur_sess->registered) {
+                    /* skip this session, it is not ready yet. */
+                    cur_sess = cur_sess->next;
+                    continue;
+                }
 
                 /* check for incoming data. */
                 rc = session_check_incoming_data_unsafe(cur_sess);

@@ -46,6 +46,7 @@ struct ab_session_t {
 
     /* registration info */
     uint32_t session_handle;
+    int registered;
 
     /* Sequence ID for requests. */
     uint64_t session_seq_id;
@@ -93,11 +94,12 @@ int session_add_tag(ab_session_p session, ab_tag_p tag);
 int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag);
 int session_remove_tag(ab_session_p session, ab_tag_p tag);
 ab_session_p session_create_unsafe(const char* host, int gw_port);
-int session_connect(ab_session_p session, const char *host);
+int session_init(ab_session_p session);
+int session_connect(ab_session_p session);
 int session_destroy_unsafe(ab_session_p session);
 int session_destroy(ab_session_p session);
 int session_is_empty(ab_session_p session);
 int session_register(ab_session_p session);
-int session_unregister(ab_session_p session);
+int session_unregister_unsafe(ab_session_p session);
 
 #endif

@@ -55,7 +55,7 @@ extern "C"
 static int recv_forward_close_resp(ab_connection_p connection, ab_request_p req);
 
 
-int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
+int find_or_create_connection(ab_tag_p tag, attr attribs)
 {
     const char* path = attr_get_str(attribs, "path", "");
     ab_connection_p connection = AB_CONNECTION_NULL;
@@ -70,11 +70,11 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
      */
 
     critical_block(global_session_mut) {
-        connection = session_find_connection_by_path_unsafe(session, path);
+        connection = session_find_connection_by_path_unsafe(tag->session, path);
 
         /* if we find one but it is in the process of disconnection, create a new one */
         if (connection == AB_CONNECTION_NULL || connection->disconnect_in_progress) {
-            connection = connection_create_unsafe(path, session);
+            connection = connection_create_unsafe(path, tag);
             is_new = 1;
         } else {
             /* found a connection, nothing more to do. */
@@ -88,45 +88,7 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
         rc = PLCTAG_ERR_BAD_GATEWAY;
         return rc;
     } else if(is_new) {
-        /* only do this if this is a new connection. */
-
-        /* only do this if this is a new connection. */
-
-        /* copy path data from the tag */
-        mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
-        connection->conn_path_size = tag->conn_path_size;
-
-        /*
-         * Determine the right param for the connection.
-         * This sets up the packet size, among other things.
-         */
-        switch(tag->protocol_type) {
-            case AB_PROTOCOL_PLC:
-            case AB_PROTOCOL_MLGX:
-                connection->conn_params = AB_EIP_PLC5_PARAM;
-                break;
-
-            case AB_PROTOCOL_LGX:
-                connection->conn_params = AB_EIP_LGX_PARAM;
-                break;
-
-            case AB_PROTOCOL_MLGX800:
-                connection->conn_params = AB_EIP_LGX_PARAM;
-                break;
-
-            default:
-                pdebug(DEBUG_WARN,"Unknown protocol/cpu type!");
-                return PLCTAG_ERR_BAD_PARAM;
-                break;
-        }
-
-        pdebug(DEBUG_DETAIL,"conn path size = %d", connection->conn_path_size);
-
-        for(int j=0; j < connection->conn_path_size; j++) {
-            pdebug(DEBUG_DETAIL,"conn_path[%d] = %x", j, connection->conn_path[j]);
-        }
-
-        /* do the ForwardOpen call to set up the session */
+        /* do the ForwardOpen call to set up the connection */
         if((rc = connection_perform_forward_open(connection)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to perform ForwardOpen to set up connection with PLC!");
 
@@ -143,7 +105,7 @@ int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs)
 
 
 /* not thread safe! */
-ab_connection_p connection_create_unsafe(const char* path, ab_session_p session)
+ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag)
 {
     ab_connection_p connection = (ab_connection_p)mem_alloc(sizeof(struct ab_connection_t));
 
@@ -154,16 +116,48 @@ ab_connection_p connection_create_unsafe(const char* path, ab_session_p session)
         return NULL;
     }
 
-    connection->session = session;
+    connection->session = tag->session;
     connection->conn_seq_num = 1 /*(uint16_t)(intptr_t)(connection)*/;
-    connection->orig_connection_id = ++session->conn_serial_number;
+    connection->orig_connection_id = ++(connection->session->conn_serial_number);
     connection->status = PLCTAG_STATUS_PENDING;
 
     /* copy the path for later */
     str_copy(&connection->path[0], path, MAX_CONN_PATH);
 
+    /* copy path data from the tag */
+    mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
+    connection->conn_path_size = tag->conn_path_size;
+
+    /*
+     * Determine the right param for the connection.
+     * This sets up the packet size, among other things.
+     */
+    switch(tag->protocol_type) {
+        case AB_PROTOCOL_PLC:
+        case AB_PROTOCOL_MLGX:
+            connection->conn_params = AB_EIP_PLC5_PARAM;
+            break;
+
+        case AB_PROTOCOL_LGX:
+        case AB_PROTOCOL_MLGX800:
+            connection->conn_params = AB_EIP_LGX_PARAM;
+            break;
+
+        default:
+            pdebug(DEBUG_WARN,"Unknown protocol/cpu type!");
+            mem_free(connection);
+            return NULL;
+            break;
+    }
+
+    pdebug(DEBUG_DETAIL,"conn path size = %d", connection->conn_path_size);
+
+    for(int j=0; j < connection->conn_path_size; j++) {
+        pdebug(DEBUG_DETAIL,"conn_path[%d] = %x", j, connection->conn_path[j]);
+    }
+
     /* add the connection to the session */
-    session_add_connection_unsafe(session, connection);
+    session_add_connection_unsafe(connection->session, connection);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -626,7 +620,6 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
 }
 
 
-
 int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
 {
     eip_forward_close_resp_t *fo_resp;
@@ -665,4 +658,3 @@ int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
 
     return rc;
 }
-

@@ -70,29 +70,24 @@ int eip_dhp_pccc_tag_status(ab_tag_p tag)
     }
 
     /*
-     * if the session we are using is not yet connected,
-     * then return PENDING and let the tag that started
-     * the connection finish it.
-     *
-     * FIXME - if the tag that started the connection
-     * fails to connect or is aborted/destroyed, then the
-     * connection will never be created.
+     * We need to treat the session and connection statuses
+     * as async because we might not be the thread creating those
+     * objects.  In that case, we propagate the status back up
+     * to the tag.
      */
-    if(tag->session) {
-        if(!tag->session->is_connected) {
-            tag->status = PLCTAG_STATUS_PENDING;
-            return tag->status;
-        } else {
-            tag->status = PLCTAG_STATUS_OK;
-        }
-    }
+    if (tag->session) {
+        int session_rc = tag->session->status;
+        int connection_rc = PLCTAG_STATUS_OK;
 
-    if(tag->connection) {
-        if(tag->connection->status != PLCTAG_STATUS_OK) {
-            tag->status = tag->connection->status;
-            return tag->status;
+        if(tag->connection) {
+            connection_rc = tag->connection->status;
+        }
+
+        /* propagate the status up. */
+        if(session_rc != PLCTAG_STATUS_OK) {
+            tag->status = session_rc;
         } else {
-            tag->status = PLCTAG_STATUS_OK;
+            tag->status = connection_rc;
         }
     }
 
