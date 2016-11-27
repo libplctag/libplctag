@@ -61,6 +61,7 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
     ab_connection_p connection = AB_CONNECTION_NULL;
     int rc = PLCTAG_STATUS_OK;
     int is_new = 0;
+    int shared_connection = attr_get_int(attribs, "share_connection", 1); /* share the session by default. */
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -70,17 +71,27 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
      */
 
     critical_block(global_session_mut) {
-        connection = session_find_connection_by_path_unsafe(tag->session, path);
+		if(shared_connection) {
+			connection = session_find_connection_by_path_unsafe(tag->session, path);
+		} else {
+			connection = AB_CONNECTION_NULL;
+		}
 
-        /* if we find one but it is in the process of disconnection, create a new one */
-        if (connection == AB_CONNECTION_NULL || connection->disconnect_in_progress) {
-            connection = connection_create_unsafe(path, tag);
-            is_new = 1;
-        } else {
-            /* found a connection, nothing more to do. */
-            pdebug(DEBUG_INFO, "find_or_create_connection() reusing existing connection.");
-            rc = PLCTAG_STATUS_OK;
-        }
+		/* if we find one but it is in the process of disconnection, create a new one */
+		if (connection == AB_CONNECTION_NULL || connection->disconnect_in_progress) {
+			connection = connection_create_unsafe(path, tag, shared_connection);
+			is_new = 1;
+			
+			if(shared_connection) {
+				pdebug(DEBUG_INFO, "Creating new connection.");
+			} else {
+				pdebug(DEBUG_INFO, "Creating new exclusive connection.");
+			}
+		} else {
+			/* found a connection, nothing more to do. */
+			pdebug(DEBUG_INFO, "find_or_create_connection() reusing existing connection.");
+			rc = PLCTAG_STATUS_OK;
+		}
     }
 
     if (connection == AB_CONNECTION_NULL) {
@@ -105,7 +116,7 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
 
 
 /* not thread safe! */
-ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag)
+ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int shared)
 {
     ab_connection_p connection = (ab_connection_p)mem_alloc(sizeof(struct ab_connection_t));
 
@@ -120,6 +131,7 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag)
     connection->conn_seq_num = 1 /*(uint16_t)(intptr_t)(connection)*/;
     connection->orig_connection_id = ++(connection->session->conn_serial_number);
     connection->status = PLCTAG_STATUS_PENDING;
+    connection->exclusive = !shared;
 
     /* copy the path for later */
     str_copy(&connection->path[0], path, MAX_CONN_PATH);
@@ -268,7 +280,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     /* Forward Open Params */
     fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
     fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
-    fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id or the other machines? */
+    fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(connection->orig_connection_id); /* connection id in the other direction. */
     /* this might need to be globally unique */
     fo->conn_serial_number = h2le16((uint16_t)(intptr_t)(connection)); /* our connection SEQUENCE number. */
@@ -287,6 +299,13 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
 
     /* mark it as ready to send */
     req->send_request = 1;
+    
+    /* 
+     * make sure the session serializes this with respect to other 
+     * control packets.  Apparently, the connection manager has no
+     * buffers.
+     */
+    req->serial_request = 1;
 
     /* add the request to the session's list. */
     rc = request_add(connection->session, req);
@@ -325,9 +344,11 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
             break;
         }
 
-        connection->orig_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
-        connection->targ_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
+        connection->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
+        connection->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
         connection->is_connected = 1;
+        
+        pdebug(DEBUG_INFO,"ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x",connection->orig_connection_id, connection->targ_connection_id);
 
         pdebug(DEBUG_DETAIL,"Connection set up succeeded.");
 
@@ -610,6 +631,13 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
     /* mark it as ready to send */
     req->send_request = 1;
     /*req->abort_after_send = 1;*/ /* don't return to us.*/
+    
+    /* 
+     * make sure the session serializes this with respect to other 
+     * control packets.  Apparently, the connection manager has no
+     * buffers.
+     */
+    req->serial_request = 1;
 
     /* add the request to the session's list. */
     rc = request_add(connection->session, req);
@@ -657,4 +685,47 @@ int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
     pdebug(DEBUG_INFO,"Done.");
 
     return rc;
+}
+
+
+int mark_connection_for_request(ab_request_p request)
+{
+	int rc = PLCTAG_STATUS_OK;
+	
+	if(!request) {
+		return PLCTAG_ERR_NULL_PTR;
+	}
+	
+	if(!request->connection) {
+		return PLCTAG_STATUS_OK;
+	}
+
+	/* mark the connection as in use. */
+	request->connection->request_in_flight = 1;
+	request->connection->seq_in_flight = request->connection->conn_seq_num;
+
+	return rc;
+}
+
+
+int clear_connection_for_request(ab_request_p request) 
+{
+	int rc = PLCTAG_STATUS_OK;
+	
+	if(request->connection) {
+		ab_connection_p connection = request->connection;
+
+		if(connection->request_in_flight) {
+			if(connection->seq_in_flight == request->conn_seq) {
+				pdebug(DEBUG_INFO, "Clearing connection in flight flags for packet sequence ID %d", request->conn_seq);
+				connection->request_in_flight = 0;
+			} else {
+				pdebug(DEBUG_INFO, "Mismatch between request sequence ID %d and connection packet sequence ID %d", request->conn_seq, connection->seq_in_flight);
+			}
+		} else {
+			pdebug(DEBUG_INFO,"No packet in flight.");
+		}
+	}
+	
+	return rc;
 }

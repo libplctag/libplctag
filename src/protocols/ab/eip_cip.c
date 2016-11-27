@@ -72,9 +72,9 @@ int calculate_write_sizes(ab_tag_p tag);
  */
 int eip_cip_tag_status(ab_tag_p tag)
 {
+	int rc = PLCTAG_STATUS_OK;
+	
     if (tag->read_in_progress) {
-        int rc = PLCTAG_STATUS_OK;
-
         if(tag->connection) {
             rc = check_read_status_connected(tag);
         } else {
@@ -87,8 +87,6 @@ int eip_cip_tag_status(ab_tag_p tag)
     }
 
     if (tag->write_in_progress) {
-        int rc = PLCTAG_STATUS_OK;
-
         if(tag->connection) {
             rc = check_write_status_connected(tag);
         } else {
@@ -99,6 +97,7 @@ int eip_cip_tag_status(ab_tag_p tag)
 
         return rc;
     }
+
     /* We need to treat the session and connection statuses
      * as async because we might not be the thread creating those
      * objects.  In that case, we propagate the status back up
@@ -114,13 +113,17 @@ int eip_cip_tag_status(ab_tag_p tag)
 
         /* propagate the status up. */
         if(session_rc != PLCTAG_STATUS_OK) {
-            tag->status = session_rc;
+            rc = session_rc;
+        } else if(connection_rc != PLCTAG_STATUS_OK){
+            rc = connection_rc;
         } else {
-            tag->status = connection_rc;
-        }
-    }
+			rc = tag->status;
+		}
 
-    return tag->status;
+        tag->status = rc;
+	}
+	
+    return rc;
 }
 
 /*
@@ -395,12 +398,10 @@ int allocate_write_request_slot(ab_tag_p tag)
 
 int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
 {
-    eip_cip_co_req* cip;
-    uint8_t* data;
-    //uint8_t* embed_start, *embed_end;
+    eip_cip_co_req* cip = NULL;
+    uint8_t* data = NULL;
     ab_request_p req = NULL;
-    uint16_t conn_seq_id = 0;
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -446,15 +447,6 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
     *((uint32_t*)data) = h2le32(byte_offset);
     data += sizeof(uint32_t);
 
-    /* mark the end of the embedded packet */
-    //embed_end = data;
-
-
-    /* get a new connection sequence id */
-    critical_block(global_session_mut) {
-        conn_seq_id = tag->connection->conn_seq_num++;
-    }
-
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
@@ -467,20 +459,20 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
     cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
     cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
-    cip->cpf_targ_conn_id = h2le32(tag->connection->orig_connection_id);
     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&cip->cpf_conn_seq_num)); /* REQ: fill in with length of remaining data. */
 
-    /* we need the connection sequence ID for this packet */
-    cip->cpf_conn_seq_num = h2le16(conn_seq_id);
-
     /* set the size of the request */
     req->request_size = data - (req->data);
-    req->conn_id = tag->connection->targ_connection_id;
-    req->conn_seq = conn_seq_id;
+
+    /* store the connection */
+    req->connection = tag->connection;
 
     /* mark it as ready to send */
     req->send_request = 1;
+    
+    /* this request is connected, so it needs the session exclusively */
+    req->serial_request = 1;
 
     /* add the request to the session's list. */
     rc = request_add(tag->session, req);
@@ -634,10 +626,8 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
 {
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_req* cip;
-    uint16_t conn_seq_id = 0;
-    uint8_t* data;
-    //uint8_t* embed_start, *embed_end;
+    eip_cip_co_req* cip = NULL;
+    uint8_t* data = NULL;
     ab_request_p req = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -712,14 +702,6 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
         data++;
     }
 
-    /* mark the end of the embedded packet */
-    //embed_end = data;
-
-    /* get a new connection sequence id */
-    critical_block(global_session_mut) {
-        conn_seq_id = tag->connection->conn_seq_num++;
-    }
-
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
@@ -732,20 +714,17 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
     cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
     cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
-    cip->cpf_targ_conn_id = h2le32(tag->connection->orig_connection_id);
     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&cip->cpf_conn_seq_num)); /* REQ: fill in with length of remaining data. */
 
-    /* we need the connection sequence ID for this packet */
-    cip->cpf_conn_seq_num = h2le16(conn_seq_id);
-
     /* set the size of the request */
     req->request_size = data - (req->data);
-    req->conn_id = tag->connection->targ_connection_id;
-    req->conn_seq = conn_seq_id;
 
     /* mark it as ready to send */
     req->send_request = 1;
+    
+    /* store the connection */
+    req->connection = tag->connection;
 
     /* add the request to the session's list. */
     rc = request_add(tag->session, req);
@@ -899,6 +878,9 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     /* mark it as ready to send */
     req->send_request = 1;
+
+    /* this request is connected, so it needs the session exclusively */
+    req->serial_request = 1;
 
     /* add the request to the session's list. */
     rc = request_add(tag->session, req);

@@ -132,6 +132,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     int tag_id = PLCTAG_ERR_OUT_OF_BOUNDS;
     attr attribs = NULL;
     int rc = PLCTAG_STATUS_OK;
+    int read_cache_ms = 0;
 
     /* setup a global mutex that all other code can use as a guard. */
     if(setup_global_mutex() != PLCTAG_STATUS_OK) {
@@ -163,28 +164,35 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
      * FIXME - this really should be here???  Maybe not?  But, this is
      * the only place it can be without making every protocol type do this automatically.
      */
-    if(tag && tag->status == PLCTAG_STATUS_OK) {
-        int read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
-
-        if(read_cache_ms < 0) {
-            pdebug(DEBUG_WARN, "read_cache_ms value must be positive, using zero.");
-            read_cache_ms = 0;
-        }
-
-        tag->read_cache_expire = (uint64_t)0;
-        tag->read_cache_ms = (uint64_t)read_cache_ms;
-
-        /* create tag mutex */
-        rc = mutex_create(&tag->mut);
-
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to create tag mutex!");
-        }
-
-        tag->status = rc;
-    } else {
+    if(!tag) {
         pdebug(DEBUG_WARN, "Tag creation failed, skipping mutex creation and other generic setup.");
+        attr_destroy(attribs);
+        return PLC_TAG_NULL;
     }
+	
+	/* set up the read cache config. */	
+	read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
+
+	if(read_cache_ms < 0) {
+		pdebug(DEBUG_WARN, "read_cache_ms value must be positive, using zero.");
+		read_cache_ms = 0;
+	}
+
+	tag->read_cache_expire = (uint64_t)0;
+	tag->read_cache_ms = (uint64_t)read_cache_ms;
+
+	/* create tag mutex */
+	rc = mutex_create(&tag->mut);
+
+	if(rc != PLCTAG_STATUS_OK) {
+		pdebug(DEBUG_ERROR, "Unable to create tag mutex!");
+		
+		/* this is fatal! */
+		attr_destroy(attribs);
+		plc_tag_destroy_mapped(tag);
+	}
+
+	tag->status = rc;
 
     /*
      * Release memory for attributes
@@ -355,7 +363,7 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag_id)
 
 int plc_tag_destroy_mapped(plc_tag_p tag)
 {
-    mutex_p temp_mut;
+	mutex_p tmp_mutex;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -365,34 +373,39 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    /* if we have a mutex, use it. */
+    if(tag->mut) {
+		/* we need to hang onto the mutex for later. */
+		tmp_mutex = tag->mut;
+		rc = mutex_lock(tmp_mutex);
+    } 
+
+	/* first, unmap the tag. */
+	pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
+	release_tag_to_id_mapping(tag);
+
     /* abort anything in flight */
     rc = plc_tag_abort_mapped(tag);
 
-    /* clear the mutex */
-    if(tag->mut) {
-        temp_mut = tag->mut;
-        tag->mut = NULL;
+	/* call the destructor */
+	if(!tag->vtable || !tag->vtable->destroy) {
+		pdebug(DEBUG_ERROR, "tag destructor not defined!");
+		tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
+		rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+	} else {
+		/*
+		 * It is the responsibility of the destroy
+		 * function to free all memory associated with
+		 * the tag.
+		 */
+		rc = tag->vtable->destroy(tag);
+	}
 
-        critical_block(temp_mut) {
-            pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
-            release_tag_to_id_mapping(tag);
-
-            if(!tag->vtable || !tag->vtable->destroy) {
-                pdebug(DEBUG_ERROR, "tag destructor not defined!");
-                tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-                rc = PLCTAG_ERR_NOT_IMPLEMENTED;
-            } else {
-                /*
-                 * It is the responsibility of the destroy
-                 * function to free all memory associated with
-                 * the tag.
-                 */
-                rc = tag->vtable->destroy(tag);
-            }
-        }
-
-        mutex_destroy(&temp_mut);
-    }
+	/* free the mutex if we had one. */
+	if(tmp_mutex) {
+		rc = mutex_unlock(tmp_mutex);
+		mutex_destroy(&tmp_mutex);
+	}
 
     pdebug(DEBUG_INFO, "Done.");
 

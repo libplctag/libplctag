@@ -51,6 +51,7 @@ struct ab_request_t {
     int recv_in_progress;
     int abort_request;
     int abort_after_send; /* for one shot packets */
+    int serial_request; /* serialize this packet with respect to other serialized packets. */
 
     int status;
 
@@ -58,10 +59,15 @@ struct ab_request_t {
     int processed;
 
     ab_session_p session;
+    ab_connection_p connection;
 
     uint64_t session_seq_id;
     uint32_t conn_id;
     uint16_t conn_seq;
+    
+    /* time stamps for rate calculations */
+    int64_t time_sent;
+    int send_count;
 
     /* used by the background thread for incrementally getting data */
     int current_offset;

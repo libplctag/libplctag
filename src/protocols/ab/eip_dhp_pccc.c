@@ -85,12 +85,16 @@ int eip_dhp_pccc_tag_status(ab_tag_p tag)
 
         /* propagate the status up. */
         if(session_rc != PLCTAG_STATUS_OK) {
-            tag->status = session_rc;
+            rc = session_rc;
+        } else if(connection_rc != PLCTAG_STATUS_OK){
+            rc = connection_rc;
         } else {
-            tag->status = connection_rc;
-        }
-    }
+			rc = tag->status;
+		}
 
+        tag->status = rc;
+	}
+	
     return rc;
 }
 
@@ -108,7 +112,6 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     int data_per_packet;
     int overhead;
     int rc = PLCTAG_STATUS_OK;
-    uint16_t conn_seq_id = 0;
     ab_request_p req;
 
     pdebug(DEBUG_INFO,"Starting");
@@ -152,11 +155,6 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
         return rc;
     }
 
-    /* get a new connection sequence id */
-    critical_block(global_session_mut) {
-        conn_seq_id = tag->connection->conn_seq_num++;
-    }
-
     pccc = (pccc_dhp_co_req*)(req->data);
 
     /* point to the end of the struct */
@@ -180,10 +178,8 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     pccc->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
     pccc->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
     pccc->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4 ? */
-    pccc->cpf_targ_conn_id = h2le32(tag->connection->orig_connection_id);
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&(pccc->cpf_conn_seq_num)));/* REQ: fill in with length of remaining data. */
-    pccc->cpf_conn_seq_num = h2le16(conn_seq_id);
 
     /* DH+ Routing */
     pccc->dest_link = 0;
@@ -200,9 +196,15 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 
     /* get ready to add the request to the queue for this session */
     req->request_size = data - (req->data);
+
+    /* store the connection */
+    req->connection = tag->connection;
+
+    /* this request is connected, so it needs the session exclusively */
+    req->serial_request = 1;
+
+	/* mark the request ready for sending */
     req->send_request = 1;
-    req->conn_id = tag->connection->targ_connection_id;
-    req->conn_seq = conn_seq_id;
 
     /* add the request to the session's list. */
     rc = request_add(tag->session, req);
@@ -240,7 +242,6 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
     int data_per_packet = 0;
     int overhead = 0;
     int rc = PLCTAG_STATUS_OK;
-    uint16_t conn_seq_id = 0;
     ab_request_p req;
 
     pdebug(DEBUG_INFO,"Starting");
@@ -282,11 +283,6 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         tag->status = rc;
         return rc;
-    }
-
-    /* get a new connection sequence id */
-    critical_block(global_session_mut) {
-        conn_seq_id = tag->connection->conn_seq_num++;
     }
 
     pccc = (pccc_dhp_co_req*)(req->data);
@@ -354,10 +350,8 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
     pccc->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
     pccc->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
     pccc->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4 ? */
-    pccc->cpf_targ_conn_id = h2le32(tag->connection->orig_connection_id);
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&(pccc->cpf_conn_seq_num)));/* REQ: fill in with length of remaining data. */
-    pccc->cpf_conn_seq_num = h2le16(conn_seq_id);
 
     /* DH+ Routing */
     pccc->dest_link = 0;
@@ -374,9 +368,15 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
 
     /* get ready to add the request to the queue for this session */
     req->request_size = data - (req->data);
+    
+    /* store the connection */
+    req->connection = tag->connection;
+
+	/* ready the request for sending */
     req->send_request = 1;
-    req->conn_id = tag->connection->targ_connection_id;
-    req->conn_seq = conn_seq_id;
+
+    /* this request is connected, so it needs the session exclusively */
+    req->serial_request = 1;
 
     /* add the request to the session's list. */
     rc = request_add(tag->session, req);

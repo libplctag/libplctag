@@ -33,6 +33,21 @@
 
 #define MAX_SESSION_HOST    (128)
 
+/* the following are in microseconds*/
+#define SESSION_DEFAULT_PACKET_INTERVAL (5000)
+#define SESSION_MAX_PACKET_INTERVAL (100000)
+#define SESSION_MIN_PACKET_INTERVAL (3000)
+#define SESSION_PACKET_LOSS_INTERVAL_INC (5000)
+#define SESSION_PACKET_RECEIVE_INTERVAL_DEC (1000)
+
+
+/* resend interval in milliseconds*/
+#define SESSION_DEFAULT_RESEND_INTERVAL_MS (50)
+#define SESSION_MIN_RESEND_INTERVAL  (10)
+
+
+#define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
+
 struct ab_session_t {
     ab_session_p next;
     ab_session_p prev;
@@ -59,6 +74,17 @@ struct ab_session_t {
 
     /* counter for number of messages in flight */
     int num_reqs_in_flight;
+    int64_t next_packet_time_us;
+    int64_t next_packet_interval_us;
+    int64_t retry_interval;
+    
+    /* short cumulative period for calculating round trip time. */
+    int64_t round_trip_samples[SESSION_NUM_ROUND_TRIP_SAMPLES];
+    int round_trip_sample_index;
+    
+    /* serialization control */
+    int serial_request_in_flight;
+    uint64_t serial_seq_in_flight;
 
     /* data for receiving messages */
     uint64_t resp_seq_id;
@@ -101,5 +127,7 @@ int session_destroy(ab_session_p session);
 int session_is_empty(ab_session_p session);
 int session_register(ab_session_p session);
 int session_unregister_unsafe(ab_session_p session);
+int mark_session_for_request(ab_request_p request);
+int clear_session_for_request(ab_request_p request);
 
 #endif

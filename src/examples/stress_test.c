@@ -31,7 +31,7 @@
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[%d]&debug=3"
 
-#define DATA_TIMEOUT 500
+#define DATA_TIMEOUT 1500
 
 
 
@@ -45,6 +45,8 @@
 
 /* global to cheat on passing it to threads. */
 volatile int done = 0;
+
+volatile int test_flags = 0;
 
 
 
@@ -80,15 +82,11 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 
 
 
-/*
- * Thread function.  Just read until killed.
- */
-
-void *serial_test(void *data)
+void *test_dhp(void *data)
 {
     int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
-    int32_t value;
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N7:0&debug=3";
+    int16_t value;
     uint64_t start;
     uint64_t end;
     plc_tag tag = PLC_TAG_NULL;
@@ -112,13 +110,13 @@ void *serial_test(void *data)
         if(rc != PLCTAG_STATUS_OK) {
             done = 1;
         } else {
-            value = plc_tag_get_int32(tag,0);
+            value = plc_tag_get_int16(tag,0);
 
             /* increment the value, keep it in bounds of 0-499 */
-            value = (value >= (int32_t)500 ? (int32_t)0 : value + (int32_t)1);
+            value = (value >= (int16_t)500 ? (int16_t)0 : value + (int16_t)1);
 
             /* yes, we should be checking this return value too... */
-            plc_tag_set_int32(tag, 0, value);
+            plc_tag_set_int16(tag, 0, value);
 
             /* write the value */
             rc = plc_tag_write(tag, DATA_TIMEOUT);
@@ -130,11 +128,11 @@ void *serial_test(void *data)
 
         fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
-        if(iteration >= 100) {
+/*        if(iteration >= 100) {
             iteration = 1;
             sleep_ms(5000);
         }
-
+*/
         iteration++;
     }
 
@@ -144,27 +142,153 @@ void *serial_test(void *data)
 }
 
 
-#define MAX_THREADS (40)
+
+void *test_cip(void *data)
+{
+    int tid = (int)(intptr_t)data;
+    static const char *tag_str_no_connect = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
+    static const char *tag_str_connect_shared = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
+    static const char *tag_str_connect_not_shared = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=micro800&share_session=0&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
+	const char * tag_str = NULL;
+    int32_t value;
+    uint64_t start;
+    uint64_t end;
+    plc_tag tag = PLC_TAG_NULL;
+    int rc = PLCTAG_STATUS_OK;
+    int iteration = 1;
+    int no_destroy = 0;
+    
+	switch(test_flags) {
+		case 0:
+			tag_str = tag_str_no_connect;
+			no_destroy = 1;
+			fprintf(stderr,"Test %d, testing unconnected CIP, do not destroy tag each cycle.\n", tid);
+			break;
+		case 1:
+			tag_str = tag_str_connect_shared;
+			fprintf(stderr,"Test %d, testing connected CIP, shared connections, do not destroy tag each cycle.\n", tid);
+			no_destroy = 1;
+			break;
+		case 2:
+			tag_str = tag_str_connect_not_shared;
+			fprintf(stderr,"Test %d, testing connected CIP, do not share connections, do not destroy tag each cycle.\n", tid);
+			no_destroy = 1;
+			break;
+		case 10:
+			tag_str = tag_str_no_connect;
+			no_destroy = 0;
+			fprintf(stderr,"Test %d, testing unconnected CIP, recreate and destroy tag each cycle.\n", tid);
+			break;
+		case 11:
+			tag_str = tag_str_connect_shared;
+			fprintf(stderr,"Test %d, testing connected CIP, shared connections, recreate and destroy tag each cycle.\n", tid);
+			no_destroy = 0;
+			break;
+		case 12:
+			tag_str = tag_str_connect_not_shared;
+			fprintf(stderr,"Test %d, testing connected CIP, do not share connections, recreate and destroy tag each cycle.\n", tid);
+			no_destroy = 0;
+			break;
+		default:
+			fprintf(stderr,"Illegal test type, pick 0-2\n");
+			done = 1;
+			return NULL;
+			break;
+	}
+
+	if(no_destroy) {
+        rc = open_tag(&tag, tag_str);
+
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"Thread %d, Error creating tag!  Terminating test...\n", tid);
+            done = 1;
+            return NULL;
+        }		
+	}
+
+    while(!done) {
+        /* capture the starting time */
+        start = time_ms();
+
+		if(!no_destroy) {
+			rc = open_tag(&tag, tag_str);
+
+			if(rc != PLCTAG_STATUS_OK) {
+				fprintf(stderr,"Thread %d, Error creating tag!  Terminating test...\n", tid);
+				done = 1;
+				return NULL;
+			}		
+		}
+
+        rc = plc_tag_read(tag, DATA_TIMEOUT);
+
+        if(rc != PLCTAG_STATUS_OK) {
+            done = 1;
+        } else {
+            value = plc_tag_get_int32(tag,0);
+
+            /* increment the value, keep it in bounds of 0-499 */
+            value = (value >= (int32_t)500 ? (int32_t)0 : value + (int32_t)1);
+
+            /* yes, we should be checking this return value too... */
+            plc_tag_set_int32(tag, 0, value);
+
+            /* write the value */
+            rc = plc_tag_write(tag, DATA_TIMEOUT);
+        }
+        
+        if(!no_destroy) {
+			plc_tag_destroy(tag);
+		}
+
+        end = time_ms();
+
+        fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
+
+/*        if(iteration >= 100) {
+            iteration = 1;
+            sleep_ms(5000);
+        }
+*/
+        iteration++;
+    }
+
+    if(no_destroy) {
+		plc_tag_destroy(tag);
+	}
+
+    fprintf(stderr, "Test %d terminating.\n", tid);
+
+    return NULL;
+}
+
+
+#define MAX_THREADS (100)
 
 int main(int argc, char **argv)
 {
     pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
-    int64_t minutes = 1 * 60;  /* default 1 hours */
-
-    if(argc>1) {
-        minutes = atoi(argv[1]);
-    }
+    int64_t seconds = 10;  /* default 10 seconds */
+    int num_threads = 0;
+    
+    if(argc>2) {
+		num_threads = atoi(argv[1]);
+        test_flags = atoi(argv[2]);
+    } else {
+		fprintf(stderr,"Usage: stress_test <num threads> <test type>\n");
+		return 0;
+	}
 
     /* create the test threads */
-    for(int tid=0; tid < MAX_THREADS; tid++) {
+    for(int tid=0; tid < num_threads; tid++) {
         fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
-        pthread_create(&threads[tid], NULL, &serial_test, (void *)(intptr_t)tid);
+        pthread_create(&threads[tid], NULL, &test_cip, (void *)(intptr_t)tid);
     }
 
     start_time = time_ms();
-    end_time = start_time + (minutes * 60 * 1000);
+    end_time = start_time + (seconds * 1000);
 
     while(!done && time_ms() < end_time) {
         sleep_ms(100);
@@ -172,7 +296,7 @@ int main(int argc, char **argv)
 
     done = 1;
 
-    for(int tid=0; tid < MAX_THREADS; tid++) {
+    for(int tid=0; tid < num_threads; tid++) {
         pthread_join(threads[tid], NULL);
     }
 

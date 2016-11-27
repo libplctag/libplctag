@@ -76,13 +76,39 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
     return res;
 }
 
+
+static int connection_is_usable(ab_connection_p connection)
+{
+	if(!connection) {
+		return 0;
+	}
+	
+	if(connection->exclusive) {
+		return 0;
+	}
+	
+	if(connection->disconnect_in_progress) {
+		return 0;
+	}
+	
+	return 1;
+}
+
+
+
 ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path)
 {
     ab_connection_p connection;
 
     connection = session->connections;
 
-    while (connection && str_cmp_i(connection->path, path) != 0) {
+	/* 
+	 * there are a lot of conditions.
+	 * We do not want to use connections that are in the process of shutting down.
+	 * We do not want to use connections that are used exclusively by one tag.
+	 * We want to use connections that have the same path as the tag.
+	 */
+    while (connection && !connection_is_usable(connection) && str_cmp_i(connection->path, path) != 0) {
         connection = connection->next;
     }
 
@@ -480,6 +506,15 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
      */
     session->conn_serial_number = ++connection_id;
 
+    /* set up the packet interval to a reasonable default */
+    session->next_packet_interval_us = SESSION_DEFAULT_PACKET_INTERVAL;
+    
+    /* set up packet round trip information */
+    for(int index=0; index < SESSION_NUM_ROUND_TRIP_SAMPLES; index++) {
+		session->round_trip_samples[index] = SESSION_DEFAULT_RESEND_INTERVAL_MS;
+	}
+	session->retry_interval = SESSION_DEFAULT_RESEND_INTERVAL_MS;
+
     /* add the new session to the list. */
     add_session_unsafe(session);
 
@@ -776,3 +811,54 @@ int session_unregister_unsafe(ab_session_p session)
 
     return PLCTAG_STATUS_OK;
 }
+
+
+
+int mark_session_for_request(ab_request_p request)
+{
+	int rc = PLCTAG_STATUS_OK;
+	
+	if(!request) {
+		return PLCTAG_ERR_NULL_PTR;
+	}
+
+	if(!request->session) {
+		return PLCTAG_ERR_NULL_PTR;
+	}
+
+	/* if the packet is not requesting serialization, do not do any */
+	if(!request->serial_request) {
+		return PLCTAG_STATUS_OK;
+	}
+
+	/* mark the session as in use. */
+	pdebug(DEBUG_INFO,"Setting session in flight flags for session sequence ID %llx",request->session->session_seq_id);
+	request->session->serial_request_in_flight = 1;
+	request->session->serial_seq_in_flight = request->session->session_seq_id;
+
+	return rc;
+}
+
+
+int clear_session_for_request(ab_request_p request) 
+{
+	int rc = PLCTAG_STATUS_OK;
+	
+	if(request->session) {
+		ab_session_p session = request->session;
+
+		if(session->serial_request_in_flight) {
+			if(session->serial_seq_in_flight == request->session_seq_id) {
+				pdebug(DEBUG_INFO, "Clearing session in flight flags for packet sequence ID %llx", request->session_seq_id);
+				session->serial_request_in_flight = 0;
+			} else {
+				pdebug(DEBUG_INFO, "Mismatch between request session sequence ID %llx and session sequence ID %llx", request->session_seq_id, session->serial_seq_in_flight);
+			}
+		} else {
+			pdebug(DEBUG_INFO,"No packet in flight.");
+		}
+	}
+	
+	return rc;
+}
+

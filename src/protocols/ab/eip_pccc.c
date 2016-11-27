@@ -53,8 +53,10 @@ static int check_write_status(ab_tag_p tag);
  */
 int eip_pccc_tag_status(ab_tag_p tag)
 {
+	int rc = PLCTAG_STATUS_OK;
+	
     if(tag->read_in_progress) {
-        int rc = check_read_status(tag);
+        rc = check_read_status(tag);
 
         tag->status = rc;
 
@@ -62,7 +64,7 @@ int eip_pccc_tag_status(ab_tag_p tag)
     }
 
     if(tag->write_in_progress) {
-        int rc = check_write_status(tag);
+        rc = check_write_status(tag);
 
         tag->status = rc;
 
@@ -84,13 +86,17 @@ int eip_pccc_tag_status(ab_tag_p tag)
 
         /* propagate the status up. */
         if(session_rc != PLCTAG_STATUS_OK) {
-            tag->status = session_rc;
+            rc = session_rc;
+        } else if(connection_rc != PLCTAG_STATUS_OK){
+            rc = connection_rc;
         } else {
-            tag->status = connection_rc;
-        }
-    }
+			rc = tag->status;
+		}
 
-    return tag->status;
+        tag->status = rc;
+	}
+	
+    return rc;
 }
 
 

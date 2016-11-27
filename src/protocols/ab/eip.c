@@ -29,9 +29,9 @@
 #include <platform.h>
 #include <ab/eip.h>
 #include <ab/session.h>
+#include <ab/connection.h>
 #include <ab/request.h>
 #include <util/debug.h>
-
 
 
 /* this must be called with the session mutex held */
@@ -46,15 +46,33 @@ int send_eip_request_unsafe(ab_request_p req)
         eip_encap_t* encap = (eip_encap_t*)(req->data);
         int payload_size = req->request_size - sizeof(eip_encap_t);
 
-
         /* set up the session sequence ID for this transaction */
         if(encap->encap_command == h2le16(AB_EIP_READ_RR_DATA)) {
-            uint64_t session_seq_id;
+			/* get new ID */
+			req->session->session_seq_id++;
+			
+            req->session_seq_id = req->session->session_seq_id;
+            encap->encap_sender_context = req->session->session_seq_id; /* link up the request seq ID and the packet seq ID */
+            
+            /* mark the session as being used if this is a serialized packet */
+            mark_session_for_request(req);
 
-            session_seq_id = req->session->session_seq_id++;
+            pdebug(DEBUG_INFO,"Sending unconnected packet with session sequence ID %llx",req->session->session_seq_id);
+        } else {
+            eip_cip_co_req *conn_req = (eip_cip_co_req*)(req->data);
+            
+            /* set up the connection information */
+            conn_req->cpf_targ_conn_id = h2le32(req->connection->targ_connection_id);
+            req->conn_id = req->connection->orig_connection_id;
 
-            req->session_seq_id = session_seq_id;
-            encap->encap_sender_context = session_seq_id; /* link up the request seq ID and the packet seq ID */
+            req->connection->conn_seq_num++;
+            conn_req->cpf_conn_seq_num = h2le16(req->connection->conn_seq_num);
+            req->conn_seq = req->connection->conn_seq_num;  
+            
+            /* mark the connection as being used. */
+			mark_connection_for_request(req);
+			
+            pdebug(DEBUG_INFO,"Sending connected packet with connection ID %x and sequence ID %u(%x)",req->conn_id, req->conn_seq, req->conn_seq);
         }
 
         /* set up the rest of the request */
@@ -84,6 +102,9 @@ int send_eip_request_unsafe(ab_request_p req)
             req->send_request = 0;
             req->send_in_progress = 0;
             req->current_offset = 0;
+            
+            req->time_sent = time_ms();
+            req->send_count++;
 
             /* set this request up for a receive action */
             if(req->abort_after_send) {
@@ -118,6 +139,11 @@ int recv_eip_response_unsafe(ab_session_p session)
 {
     uint32_t data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
+    
+    /* skip the rest if we already have a packet waiting in the session buffer. */
+    if(session->has_response) {
+		return PLCTAG_STATUS_OK;
+	}
 
     /*pdebug(DEBUG_DETAIL,"Starting.");*/
 
@@ -126,11 +152,9 @@ int recv_eip_response_unsafe(ab_session_p session)
      * need to get an encap header.  This will determine
      * whether we need to get more data or not.
      */
-    if (session->recv_offset < sizeof(eip_encap_t)) {
-        data_needed = sizeof(eip_encap_t);
-    } else {
-        data_needed = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
-    }
+    data_needed = (session->recv_offset < sizeof(eip_encap_t)) ? 
+											sizeof(eip_encap_t) : 
+											sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
 
     if (session->recv_offset < data_needed) {
         /* read everything we can */
@@ -164,13 +188,17 @@ int recv_eip_response_unsafe(ab_session_p session)
         session->resp_seq_id = ((eip_encap_t*)(session->recv_data))->encap_sender_context;
         session->has_response = 1;
 
+        rc = PLCTAG_STATUS_OK;
+
         pdebug(DEBUG_DETAIL, "request received all needed data.");
 
-        /*
-        if(session->resp_seq_id == 0) {
-                pdebug(DEBUG_DETAIL,"Got zero response ID");
+        if(((eip_encap_t*)(session->recv_data))->encap_command == h2le16(AB_EIP_READ_RR_DATA)) {
+            eip_encap_t *encap = (eip_encap_t*)(session->recv_data);
+            pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
+        } else {
+            eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->recv_data);
+            pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
         }
-        */
     }
 
     return rc;
