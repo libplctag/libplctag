@@ -116,8 +116,13 @@ int eip_cip_tag_status(ab_tag_p tag)
             rc = session_rc;
         } else if(connection_rc != PLCTAG_STATUS_OK){
             rc = connection_rc;
-        } else {
-			rc = tag->status;
+        } 
+        
+        /* clear pending. */
+        if(rc == PLCTAG_STATUS_OK && tag->status == PLCTAG_STATUS_PENDING){
+			rc = PLCTAG_STATUS_OK;
+		} else {
+			rc = 
 		}
 
         tag->status = rc;

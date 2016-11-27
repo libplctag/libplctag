@@ -53,8 +53,10 @@ volatile int test_flags = 0;
 static int open_tag(plc_tag *tag, const char *tag_str)
 {
     int rc = PLCTAG_STATUS_OK;
+    int64_t start_time;
 
     /* create the tag */
+    start_time = time_ms();
     *tag = plc_tag_create(tag_str);
 
     /* everything OK? */
@@ -66,7 +68,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
     }
 
     /* let the connect succeed we hope */
-    while((rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
+    while((start_time + 2000) > time_ms() && (rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
         sleep_ms(10);
     }
 
@@ -200,7 +202,7 @@ void *test_cip(void *data)
         rc = open_tag(&tag, tag_str);
 
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Thread %d, Error creating tag!  Terminating test...\n", tid);
+            fprintf(stderr,"Test %d, Error creating tag!  Terminating test...\n", tid);
             done = 1;
             return NULL;
         }		
@@ -214,7 +216,7 @@ void *test_cip(void *data)
 			rc = open_tag(&tag, tag_str);
 
 			if(rc != PLCTAG_STATUS_OK) {
-				fprintf(stderr,"Thread %d, Error creating tag!  Terminating test...\n", tid);
+				fprintf(stderr,"Test %d, Error (%s) creating tag!  Terminating test...\n", tid, plc_tag_decode_error(rc));
 				done = 1;
 				return NULL;
 			}		
@@ -223,6 +225,7 @@ void *test_cip(void *data)
         rc = plc_tag_read(tag, DATA_TIMEOUT);
 
         if(rc != PLCTAG_STATUS_OK) {
+			fprintf(stderr,"Test %d, terminating test, read resulted in error %s\n", tid, plc_tag_decode_error(rc));
             done = 1;
         } else {
             value = plc_tag_get_int32(tag,0);
@@ -235,6 +238,11 @@ void *test_cip(void *data)
 
             /* write the value */
             rc = plc_tag_write(tag, DATA_TIMEOUT);
+            
+            if(rc != PLCTAG_STATUS_OK) {
+				fprintf(stderr,"Test %d, terminating test, write resulted in error %s\n", tid, plc_tag_decode_error(rc));
+				done = 1;
+			}
         }
         
         if(!no_destroy) {
@@ -243,7 +251,7 @@ void *test_cip(void *data)
 
         end = time_ms();
 
-        fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
+        fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
 /*        if(iteration >= 100) {
             iteration = 1;
@@ -293,6 +301,12 @@ int main(int argc, char **argv)
     while(!done && time_ms() < end_time) {
         sleep_ms(100);
     }
+    
+    if(done) {
+		fprintf(stderr,"Test FAILED!\n");
+	} else {
+		fprintf(stderr,"Test SUCCEEDED!\n");
+	}
 
     done = 1;
 
@@ -300,7 +314,7 @@ int main(int argc, char **argv)
         pthread_join(threads[tid], NULL);
     }
 
-    fprintf(stderr, "All tests done.\n");
+    fprintf(stderr, "All test threads terminated.\n");
 
     return 0;
 }
