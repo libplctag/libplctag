@@ -149,9 +149,9 @@ void *test_cip(void *data)
 {
     int tid = (int)(intptr_t)data;
     static const char *tag_str_no_connect = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
-    static const char *tag_str_connect_shared = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
+    static const char *tag_str_connect_shared = "protocol=ab_eip&gateway=10.206.1.40&path=1,0&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
     static const char *tag_str_connect_not_shared = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=micro800&share_session=0&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=3";
-	const char * tag_str = NULL;
+    const char * tag_str = NULL;
     int32_t value;
     uint64_t start;
     uint64_t end;
@@ -159,73 +159,73 @@ void *test_cip(void *data)
     int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
     int no_destroy = 0;
-    
-	switch(test_flags) {
-		case 0:
-			tag_str = tag_str_no_connect;
-			no_destroy = 1;
-			fprintf(stderr,"Test %d, testing unconnected CIP, do not destroy tag each cycle.\n", tid);
-			break;
-		case 1:
-			tag_str = tag_str_connect_shared;
-			fprintf(stderr,"Test %d, testing connected CIP, shared connections, do not destroy tag each cycle.\n", tid);
-			no_destroy = 1;
-			break;
-		case 2:
-			tag_str = tag_str_connect_not_shared;
-			fprintf(stderr,"Test %d, testing connected CIP, do not share connections, do not destroy tag each cycle.\n", tid);
-			no_destroy = 1;
-			break;
-		case 10:
-			tag_str = tag_str_no_connect;
-			no_destroy = 0;
-			fprintf(stderr,"Test %d, testing unconnected CIP, recreate and destroy tag each cycle.\n", tid);
-			break;
-		case 11:
-			tag_str = tag_str_connect_shared;
-			fprintf(stderr,"Test %d, testing connected CIP, shared connections, recreate and destroy tag each cycle.\n", tid);
-			no_destroy = 0;
-			break;
-		case 12:
-			tag_str = tag_str_connect_not_shared;
-			fprintf(stderr,"Test %d, testing connected CIP, do not share connections, recreate and destroy tag each cycle.\n", tid);
-			no_destroy = 0;
-			break;
-		default:
-			fprintf(stderr,"Illegal test type, pick 0-2\n");
-			done = 1;
-			return NULL;
-			break;
-	}
 
-	if(no_destroy) {
+    switch(test_flags) {
+        case 0:
+            tag_str = tag_str_no_connect;
+            no_destroy = 1;
+            fprintf(stderr,"Test %d, testing unconnected CIP, do not destroy tag each cycle.\n", tid);
+            break;
+        case 1:
+            tag_str = tag_str_connect_shared;
+            fprintf(stderr,"Test %d, testing connected CIP, shared connections, do not destroy tag each cycle.\n", tid);
+            no_destroy = 1;
+            break;
+        case 2:
+            tag_str = tag_str_connect_not_shared;
+            fprintf(stderr,"Test %d, testing connected CIP, do not share connections, do not destroy tag each cycle.\n", tid);
+            no_destroy = 1;
+            break;
+        case 10:
+            tag_str = tag_str_no_connect;
+            no_destroy = 0;
+            fprintf(stderr,"Test %d, testing unconnected CIP, recreate and destroy tag each cycle.\n", tid);
+            break;
+        case 11:
+            tag_str = tag_str_connect_shared;
+            fprintf(stderr,"Test %d, testing connected CIP, shared connections, recreate and destroy tag each cycle.\n", tid);
+            no_destroy = 0;
+            break;
+        case 12:
+            tag_str = tag_str_connect_not_shared;
+            fprintf(stderr,"Test %d, testing connected CIP, do not share connections, recreate and destroy tag each cycle.\n", tid);
+            no_destroy = 0;
+            break;
+        default:
+            fprintf(stderr,"Illegal test type, pick 0-2\n");
+            done = 1;
+            return NULL;
+            break;
+    }
+
+    if(no_destroy) {
         rc = open_tag(&tag, tag_str);
 
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr,"Test %d, Error creating tag!  Terminating test...\n", tid);
             done = 1;
             return NULL;
-        }		
-	}
+        }
+    }
 
     while(!done) {
         /* capture the starting time */
         start = time_ms();
 
-		if(!no_destroy) {
-			rc = open_tag(&tag, tag_str);
+        if(!no_destroy) {
+            rc = open_tag(&tag, tag_str);
 
-			if(rc != PLCTAG_STATUS_OK) {
-				fprintf(stderr,"Test %d, Error (%s) creating tag!  Terminating test...\n", tid, plc_tag_decode_error(rc));
-				done = 1;
-				return NULL;
-			}		
-		}
+            if(rc != PLCTAG_STATUS_OK) {
+                fprintf(stderr,"Test %d, Error (%s) creating tag!  Terminating test...\n", tid, plc_tag_decode_error(rc));
+                done = 1;
+                return NULL;
+            }
+        }
 
         rc = plc_tag_read(tag, DATA_TIMEOUT);
 
         if(rc != PLCTAG_STATUS_OK) {
-			fprintf(stderr,"Test %d, terminating test, read resulted in error %s\n", tid, plc_tag_decode_error(rc));
+            fprintf(stderr,"Test %d, terminating test, read resulted in error %s\n", tid, plc_tag_decode_error(rc));
             done = 1;
         } else {
             value = plc_tag_get_int32(tag,0);
@@ -238,16 +238,16 @@ void *test_cip(void *data)
 
             /* write the value */
             rc = plc_tag_write(tag, DATA_TIMEOUT);
-            
+
             if(rc != PLCTAG_STATUS_OK) {
-				fprintf(stderr,"Test %d, terminating test, write resulted in error %s\n", tid, plc_tag_decode_error(rc));
-				done = 1;
-			}
+                fprintf(stderr,"Test %d, terminating test, write resulted in error %s\n", tid, plc_tag_decode_error(rc));
+                done = 1;
+            }
         }
-        
+
         if(!no_destroy) {
-			plc_tag_destroy(tag);
-		}
+            plc_tag_destroy(tag);
+        }
 
         end = time_ms();
 
@@ -262,8 +262,8 @@ void *test_cip(void *data)
     }
 
     if(no_destroy) {
-		plc_tag_destroy(tag);
-	}
+        plc_tag_destroy(tag);
+    }
 
     fprintf(stderr, "Test %d terminating.\n", tid);
 
@@ -280,14 +280,14 @@ int main(int argc, char **argv)
     int64_t end_time;
     int64_t seconds = 10;  /* default 10 seconds */
     int num_threads = 0;
-    
+
     if(argc>2) {
-		num_threads = atoi(argv[1]);
+        num_threads = atoi(argv[1]);
         test_flags = atoi(argv[2]);
     } else {
-		fprintf(stderr,"Usage: stress_test <num threads> <test type>\n");
-		return 0;
-	}
+        fprintf(stderr,"Usage: stress_test <num threads> <test type>\n");
+        return 0;
+    }
 
     /* create the test threads */
     for(int tid=0; tid < num_threads; tid++) {
@@ -301,12 +301,12 @@ int main(int argc, char **argv)
     while(!done && time_ms() < end_time) {
         sleep_ms(100);
     }
-    
+
     if(done) {
-		fprintf(stderr,"Test FAILED!\n");
-	} else {
-		fprintf(stderr,"Test SUCCEEDED!\n");
-	}
+        fprintf(stderr,"Test FAILED!\n");
+    } else {
+        fprintf(stderr,"Test SUCCEEDED!\n");
+    }
 
     done = 1;
 

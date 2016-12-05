@@ -169,30 +169,31 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
         attr_destroy(attribs);
         return PLC_TAG_NULL;
     }
-	
-	/* set up the read cache config. */	
-	read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
 
-	if(read_cache_ms < 0) {
-		pdebug(DEBUG_WARN, "read_cache_ms value must be positive, using zero.");
-		read_cache_ms = 0;
-	}
+    /* set up the read cache config. */
+    read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
 
-	tag->read_cache_expire = (uint64_t)0;
-	tag->read_cache_ms = (uint64_t)read_cache_ms;
+    if(read_cache_ms < 0) {
+        pdebug(DEBUG_WARN, "read_cache_ms value must be positive, using zero.");
+        read_cache_ms = 0;
+    }
 
-	/* create tag mutex */
-	rc = mutex_create(&tag->mut);
+    tag->read_cache_expire = (uint64_t)0;
+    tag->read_cache_ms = (uint64_t)read_cache_ms;
 
-	if(rc != PLCTAG_STATUS_OK) {
-		pdebug(DEBUG_ERROR, "Unable to create tag mutex!");
-		
-		/* this is fatal! */
-		attr_destroy(attribs);
-		plc_tag_destroy_mapped(tag);
-	}
+    /* create tag mutex */
+    rc = mutex_create(&tag->mut);
 
-	tag->status = rc;
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create tag mutex!");
+
+        /* this is fatal! */
+        attr_destroy(attribs);
+        plc_tag_destroy_mapped(tag);
+    }
+
+    /* everything was good with the tag set up. */
+    tag->status = PLCTAG_STATUS_OK;
 
     /*
      * Release memory for attributes
@@ -239,6 +240,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 
 LIB_EXPORT int plc_tag_lock(plc_tag tag_id)
 {
+    int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = map_id_to_tag(tag_id);
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -249,11 +251,11 @@ LIB_EXPORT int plc_tag_lock(plc_tag tag_id)
     }
 
     /* lock the mutex */
-    tag->status = mutex_lock(tag->mut);
+    rc = mutex_lock(tag->mut);
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return tag->status;
+    return rc;
 }
 
 
@@ -268,6 +270,7 @@ LIB_EXPORT int plc_tag_lock(plc_tag tag_id)
 
 LIB_EXPORT int plc_tag_unlock(plc_tag tag_id)
 {
+    int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = map_id_to_tag(tag_id);
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -278,11 +281,11 @@ LIB_EXPORT int plc_tag_unlock(plc_tag tag_id)
     }
 
     /* unlock the mutex */
-    tag->status = mutex_unlock(tag->mut);
+    rc = mutex_unlock(tag->mut);
 
     pdebug(DEBUG_INFO,"Done.");
 
-    return tag->status;
+    return rc;
 }
 
 
@@ -305,15 +308,11 @@ int plc_tag_abort_mapped(plc_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* clear the status */
-    tag->status = PLCTAG_STATUS_OK;
-
     /* who knows what state the tag data is in.  */
     tag->read_cache_expire = (uint64_t)0;
 
     if(!tag->vtable || !tag->vtable->abort) {
         pdebug(DEBUG_WARN,"Tag does not have a abort function!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
 
@@ -363,7 +362,7 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag_id)
 
 int plc_tag_destroy_mapped(plc_tag_p tag)
 {
-	mutex_p tmp_mutex;
+    mutex_p tmp_mutex;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -375,37 +374,36 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
 
     /* if we have a mutex, use it. */
     if(tag->mut) {
-		/* we need to hang onto the mutex for later. */
-		tmp_mutex = tag->mut;
-		rc = mutex_lock(tmp_mutex);
-    } 
+        /* we need to hang onto the mutex for later. */
+        tmp_mutex = tag->mut;
+        rc = mutex_lock(tmp_mutex);
+    }
 
-	/* first, unmap the tag. */
-	pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
-	release_tag_to_id_mapping(tag);
+    /* first, unmap the tag. */
+    pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
+    release_tag_to_id_mapping(tag);
 
     /* abort anything in flight */
     rc = plc_tag_abort_mapped(tag);
 
-	/* call the destructor */
-	if(!tag->vtable || !tag->vtable->destroy) {
-		pdebug(DEBUG_ERROR, "tag destructor not defined!");
-		tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
-		rc = PLCTAG_ERR_NOT_IMPLEMENTED;
-	} else {
-		/*
-		 * It is the responsibility of the destroy
-		 * function to free all memory associated with
-		 * the tag.
-		 */
-		rc = tag->vtable->destroy(tag);
-	}
+    /* call the destructor */
+    if(!tag->vtable || !tag->vtable->destroy) {
+        pdebug(DEBUG_ERROR, "tag destructor not defined!");
+        rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+    } else {
+        /*
+         * It is the responsibility of the destroy
+         * function to free all memory associated with
+         * the tag.
+         */
+        rc = tag->vtable->destroy(tag);
+    }
 
-	/* free the mutex if we had one. */
-	if(tmp_mutex) {
-		rc = mutex_unlock(tmp_mutex);
-		mutex_destroy(&tmp_mutex);
-	}
+    /* free the mutex if we had one. */
+    if(tmp_mutex) {
+        rc = mutex_unlock(tmp_mutex);
+        mutex_destroy(&tmp_mutex);
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -462,15 +460,13 @@ LIB_EXPORT int plc_tag_read(plc_tag tag_id, int timeout)
     /* check for null parts */
     if(!tag->vtable || !tag->vtable->read) {
         pdebug(DEBUG_WARN, "Tag does not have a read function!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
 
     /* check read cache, if not expired, return existing data. */
     if(tag->read_cache_expire > time_ms()) {
         pdebug(DEBUG_INFO, "Returning cached data.");
-        tag->status = PLCTAG_STATUS_OK;
-        return tag->status;
+        return PLCTAG_STATUS_OK;
     }
 
     /* the protocol implementation does not do the timeout. */
@@ -516,7 +512,6 @@ LIB_EXPORT int plc_tag_read(plc_tag tag_id, int timeout)
          */
         if(rc == PLCTAG_STATUS_PENDING) {
             plc_tag_abort_mapped(tag);
-            tag->status = PLCTAG_ERR_TIMEOUT;
             rc = PLCTAG_ERR_TIMEOUT;
         }
 
@@ -553,18 +548,9 @@ int plc_tag_status_mapped(plc_tag_p tag)
     }
 
     if(!tag->vtable || !tag->vtable->status) {
-        if(tag->status) {
-            pdebug(DEBUG_WARN, "tag status not ok!");
-            return tag->status;
-        }
-
         pdebug(DEBUG_ERROR, "tag status accessor not defined!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
-
-    /* clear the status */
-    /*tag->status = PLCTAG_STATUS_OK;*/
 
     return tag->vtable->status(tag);
 }
@@ -611,7 +597,7 @@ LIB_EXPORT int plc_tag_status(plc_tag tag_id)
 LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
 {
     plc_tag_p tag = map_id_to_tag(tag_id);
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -626,7 +612,6 @@ LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
     /* check the vtable */
     if(!tag->vtable || !tag->vtable->write) {
         pdebug(DEBUG_WARN, "Tag does not have a write function!");
-        tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
         return PLCTAG_ERR_NOT_IMPLEMENTED;
     }
 
@@ -669,7 +654,6 @@ LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
         if(rc == PLCTAG_STATUS_PENDING) {
             pdebug(DEBUG_WARN, "Write operation timed out.");
             plc_tag_abort_mapped(tag);
-            tag->status = PLCTAG_ERR_TIMEOUT;
             rc = PLCTAG_ERR_TIMEOUT;
         }
     }
@@ -694,6 +678,7 @@ LIB_EXPORT int plc_tag_get_size(plc_tag tag_id)
     plc_tag_p tag = map_id_to_tag(tag_id);
 
     if(!tag) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -706,28 +691,29 @@ LIB_EXPORT int plc_tag_get_size(plc_tag tag_id)
 LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag tag_id, int offset)
 {
     plc_tag_p tag = map_id_to_tag(tag_id);
-
     uint32_t res = UINT32_MAX;
 
     /* is there a tag? */
     if(!tag) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return res;
     }
 
     /* is the tag ready for this operation? */
     if(plc_tag_status_mapped(tag) != PLCTAG_STATUS_OK && plc_tag_status_mapped(tag) != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag not in good state!");
         return res;
     }
 
     /* is there data? */
     if(!tag->data) {
-        tag->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag has no data!");
         return res;
     }
 
     /* is there enough data */
-    if((offset < 0) || (offset + 3 >= tag->size)) { /*MAGIC*/
-        tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(uint32_t)) > tag->size)) {
+        pdebug(DEBUG_WARN,"Data offset out of bounds.");
         return res;
     }
 
@@ -744,8 +730,6 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag tag_id, int offset)
               ((uint32_t)(tag->data[offset+3]));
     }
 
-    tag->status = PLCTAG_STATUS_OK;
-
     return res;
 }
 
@@ -754,11 +738,11 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag tag_id, int offset)
 LIB_EXPORT int plc_tag_set_uint32(plc_tag tag_id, int offset, uint32_t val)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -766,18 +750,19 @@ LIB_EXPORT int plc_tag_set_uint32(plc_tag tag_id, int offset, uint32_t val)
 
     /* is the tag ready for this operation? */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is in a bad state!");
         return rc;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag has no data!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* is there enough data space to write the value? */
-    if((offset < 0) || (offset + 3 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(uint32_t)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset out of bounds!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -794,15 +779,8 @@ LIB_EXPORT int plc_tag_set_uint32(plc_tag tag_id, int offset, uint32_t val)
         t->data[offset]   = (uint8_t)((val >> 24) & 0xFF);
     }
 
-    t->status = PLCTAG_STATUS_OK;
-
     return PLCTAG_STATUS_OK;
 }
-
-
-
-
-
 
 
 
@@ -810,28 +788,32 @@ LIB_EXPORT int plc_tag_set_uint32(plc_tag tag_id, int offset, uint32_t val)
 LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag tag_id, int offset)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-
+    int rc = PLCTAG_STATUS_OK;
     int32_t res = INT32_MIN;
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return res;
     }
 
+    rc = plc_tag_status_mapped(t);
+
     /* is the tag ready for this operation? */
-    if(plc_tag_status_mapped(t) != PLCTAG_STATUS_OK && plc_tag_status_mapped(t) != PLCTAG_ERR_OUT_OF_BOUNDS) {
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a good state.");
         return res;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag has no data!");
         return res;
     }
 
     /* is there enough data */
-    if((offset < 0) || (offset + 3 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(int32_t)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return res;
     }
 
@@ -848,8 +830,6 @@ LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag tag_id, int offset)
                         ((uint32_t)(t->data[offset+3])));
     }
 
-    t->status = PLCTAG_STATUS_OK;
-
     return res;
 }
 
@@ -858,32 +838,32 @@ LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag tag_id, int offset)
 LIB_EXPORT int plc_tag_set_int32(plc_tag tag_id, int offset, int32_t ival)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-
-    int rc;
-
+    int rc = PLCTAG_STATUS_OK;
     uint32_t val = (uint32_t)(ival);
 
     /* is there a tag? */
     if(!t) {
-        return -1;
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
     rc = plc_tag_status_mapped(t);
 
     /* is the tag ready for this operation? */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a good state!");
         return rc;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag has no data!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* is there enough data space to write the value? */
-    if((offset < 0) || (offset + 3 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(int32_t)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -900,8 +880,6 @@ LIB_EXPORT int plc_tag_set_int32(plc_tag tag_id, int offset, int32_t ival)
         t->data[offset]   = (uint8_t)((val >> 24) & 0xFF);
     }
 
-    t->status = PLCTAG_STATUS_OK;
-
     return PLCTAG_STATUS_OK;
 }
 
@@ -916,28 +894,32 @@ LIB_EXPORT int plc_tag_set_int32(plc_tag tag_id, int offset, int32_t ival)
 LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag tag_id, int offset)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-
     uint16_t res = UINT16_MAX;
+    int rc = PLCTAG_STATUS_OK;
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return res;
     }
 
+    rc = plc_tag_status_mapped(t);
+
     /* is the tag ready for this operation? */
-    if(plc_tag_status_mapped(t) != PLCTAG_STATUS_OK && plc_tag_status_mapped(t) != PLCTAG_ERR_OUT_OF_BOUNDS) {
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a good state!");
         return res;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag has no data!");
         return res;
     }
 
     /* is there enough data */
-    if((offset < 0) || (offset + 1 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(uint16_t)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return res;
     }
 
@@ -950,8 +932,6 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag tag_id, int offset)
               ((uint16_t)(t->data[offset+3]));
     }
 
-    t->status = PLCTAG_STATUS_OK;
-
     return res;
 }
 
@@ -961,10 +941,11 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag tag_id, int offset)
 LIB_EXPORT int plc_tag_set_uint16(plc_tag tag_id, int offset, uint16_t val)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -972,18 +953,19 @@ LIB_EXPORT int plc_tag_set_uint16(plc_tag tag_id, int offset, uint16_t val)
 
     /* is the tag ready for this operation? */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a functional state.");
         return rc;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* is there enough data space to write the value? */
-    if((offset < 0) || (offset + 1 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(uint16_t)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -995,8 +977,6 @@ LIB_EXPORT int plc_tag_set_uint16(plc_tag tag_id, int offset, uint16_t val)
         t->data[offset+1] = (uint8_t)(val & 0xFF);
         t->data[offset]   = (uint8_t)((val >> 8) & 0xFF);
     }
-
-    t->status = PLCTAG_STATUS_OK;
 
     return PLCTAG_STATUS_OK;
 }
@@ -1017,23 +997,25 @@ LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag tag_id, int offset)
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return res;
     }
 
     /* is the tag ready for this operation? */
     if(plc_tag_status_mapped(t) != PLCTAG_STATUS_OK && plc_tag_status_mapped(t) != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN, "Tag is not in a functional state!");
         return res;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return res;
     }
 
     /* is there enough data */
-    if((offset < 0) || (offset + 1 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(int16_t)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return res;
     }
 
@@ -1046,8 +1028,6 @@ LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag tag_id, int offset)
                         ((uint16_t)(t->data[offset+3])));
     }
 
-    t->status = PLCTAG_STATUS_OK;
-
     return res;
 }
 
@@ -1057,12 +1037,13 @@ LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag tag_id, int offset)
 LIB_EXPORT int plc_tag_set_int16(plc_tag tag_id, int offset, int16_t ival)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     uint16_t val = (uint16_t)ival;
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -1070,18 +1051,19 @@ LIB_EXPORT int plc_tag_set_int16(plc_tag tag_id, int offset, int16_t ival)
 
     /* is the tag ready for this operation? */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
-        return rc;
+        pdebug(DEBUG_WARN,"Tag is not in a functional state!");
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* is there enough data space to write the value? */
-    if((offset < 0) || (offset + 1 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(int16_t)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -1093,8 +1075,6 @@ LIB_EXPORT int plc_tag_set_int16(plc_tag tag_id, int offset, int16_t ival)
         t->data[offset+1] = (uint8_t)(val & 0xFF);
         t->data[offset]   = (uint8_t)((val >> 8) & 0xFF);
     }
-
-    t->status = PLCTAG_STATUS_OK;
 
     return PLCTAG_STATUS_OK;
 }
@@ -1114,29 +1094,30 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(plc_tag tag_id, int offset)
     uint8_t res = UINT8_MAX;
 
     /* is there a tag? */
-    if(!t)
+    if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return res;
+    }
 
     /* is the tag ready for this operation? */
     if(plc_tag_status_mapped(t) != PLCTAG_STATUS_OK && plc_tag_status_mapped(t) != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a functional state!");
         return res;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return res;
     }
 
     /* is there enough data */
-    if((offset < 0) || (offset >= t->size)) {
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return res;
     }
 
     res = t->data[offset];
-
-    t->status = PLCTAG_STATUS_OK;
 
     return res;
 }
@@ -1147,34 +1128,35 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(plc_tag tag_id, int offset)
 LIB_EXPORT int plc_tag_set_uint8(plc_tag tag_id, int offset, uint8_t val)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     /* is there a tag? */
-    if(!t)
+    if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
+    }
 
     rc = plc_tag_status_mapped(t);
 
     /* is the tag ready for this operation? */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a functional state!");
         return rc;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* is there enough data space to write the value? */
-    if((offset < 0) || (offset >= t->size)) {
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset > t->size)) {
+        pdebug(DEBUG_WARN,"Offset it out of bounds!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
     t->data[offset] = val;
-
-    t->status = PLCTAG_STATUS_OK;
 
     return PLCTAG_STATUS_OK;
 }
@@ -1190,29 +1172,29 @@ LIB_EXPORT int8_t plc_tag_get_int8(plc_tag tag_id, int offset)
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return res;
     }
 
     /* is the tag ready for this operation? */
     if(plc_tag_status_mapped(t) != PLCTAG_STATUS_OK && plc_tag_status_mapped(t) != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a functional state!");
         return res;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return res;
     }
 
     /* is there enough data */
-    if((offset < 0) || (offset >= t->size)) {
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return res;
     }
 
     res = (int8_t)(t->data[offset]);
-
-    t->status = PLCTAG_STATUS_OK;
 
     return res;
 }
@@ -1223,10 +1205,11 @@ LIB_EXPORT int8_t plc_tag_get_int8(plc_tag tag_id, int offset)
 LIB_EXPORT int plc_tag_set_int8(plc_tag tag_id, int offset, int8_t val)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -1234,24 +1217,23 @@ LIB_EXPORT int plc_tag_set_int8(plc_tag tag_id, int offset, int8_t val)
 
     /* is the tag ready for this operation? */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a functional state!");
         return rc;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* is there enough data space to write the value? */
-    if((offset < 0) || (offset >= t->size)) {
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
     t->data[offset] = (uint8_t)val;
-
-    t->status = PLCTAG_STATUS_OK;
 
     return PLCTAG_STATUS_OK;
 }
@@ -1265,11 +1247,6 @@ LIB_EXPORT int plc_tag_set_int8(plc_tag tag_id, int offset, int8_t val)
 
 
 
-/*
- * FIXME FIXME FIXME
- *
- * This is not portable!
- */
 LIB_EXPORT float plc_tag_get_float32(plc_tag tag_id, int offset)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
@@ -1278,24 +1255,26 @@ LIB_EXPORT float plc_tag_get_float32(plc_tag tag_id, int offset)
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return res;
     }
 
     /* is the tag ready for this operation? */
     if(plc_tag_status_mapped(t) != PLCTAG_STATUS_OK && plc_tag_status_mapped(t) != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a functional state!");
         return res;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return res;
     }
 
     /* is there enough data */
-    if((offset < 0) || (offset + 3 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-        return res;
+    if((offset < 0) || (offset + ((int)sizeof(res)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
     /* check whether data is little endian or big endian */
@@ -1311,29 +1290,27 @@ LIB_EXPORT float plc_tag_get_float32(plc_tag tag_id, int offset)
                ((uint32_t)(t->data[offset+3]));
     }
 
-    t->status = PLCTAG_STATUS_OK;
+    /* copy the data */
+    mem_copy(&res,&ures,sizeof(res));
 
-    /* FIXME - this is not portable! */
-    return *((float *)(&ures));
+    return res;
 }
 
 
 
 
-/*
- * FIXME FIXME FIXME
- *
- * This is not portable!
- */
 LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
 {
     plc_tag_p t = map_id_to_tag(tag_id);
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
+    uint32_t val = 0;
 
-    uint32_t val = *((uint32_t *)(&fval));
+    /* copy the data */
+    mem_copy(&val, &fval, sizeof(val));
 
     /* is there a tag? */
     if(!t) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -1341,18 +1318,19 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
 
     /* is the tag ready for this operation? */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_OUT_OF_BOUNDS) {
+        pdebug(DEBUG_WARN,"Tag is not in a functional state!");
         return rc;
     }
 
     /* is there data? */
     if(!t->data) {
-        t->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Tag data pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* is there enough data space to write the value? */
-    if((offset < 0) || (offset + 3 >= t->size)) { /*MAGIC*/
-        t->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+    if((offset < 0) || (offset + ((int)sizeof(val)) > t->size)) {
+        pdebug(DEBUG_WARN,"Offset is out of bounds!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -1369,8 +1347,6 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
         t->data[offset]   = (uint8_t)((val >> 24) & 0xFF);
     }
 
-    t->status = PLCTAG_STATUS_OK;
-
     return PLCTAG_STATUS_OK;
 }
 
@@ -1382,13 +1358,10 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
 
 
 #define TAG_ID_MASK (0xFFFFFFF)
-//#define MAX_TAG_IDS (TAG_ID_MASK + 1)
-#define TAG_INDEX_MASK (0x3FFF) /* DEBUG */
+#define TAG_INDEX_MASK (0x3FFF)
 #define MAX_TAG_ENTRIES (TAG_INDEX_MASK + 1)
 #define TAG_ID_ERROR INT_MIN
 
-//#define MAX_TAGS (16384)
-//#define MAX_TAG_IDS (MAX_TAGS << 10)  /* a lot of possible tag IDs */
 
 static int next_tag_id = MAX_TAG_ENTRIES;
 static plc_tag_p tag_map[MAX_TAG_ENTRIES + 1] = {0,};

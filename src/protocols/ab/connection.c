@@ -71,27 +71,27 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
      */
 
     critical_block(global_session_mut) {
-		if(shared_connection) {
-			connection = session_find_connection_by_path_unsafe(tag->session, path);
-		} else {
-			connection = AB_CONNECTION_NULL;
-		}
+        if(shared_connection) {
+            connection = session_find_connection_by_path_unsafe(tag->session, path);
+        } else {
+            connection = AB_CONNECTION_NULL;
+        }
 
-		/* if we find one but it is in the process of disconnection, create a new one */
-		if (connection == AB_CONNECTION_NULL || connection->disconnect_in_progress) {
-			connection = connection_create_unsafe(path, tag, shared_connection);
-			is_new = 1;
-			
-			if(shared_connection) {
-				pdebug(DEBUG_INFO, "Creating new connection.");
-			} else {
-				pdebug(DEBUG_INFO, "Creating new exclusive connection.");
-			}
-		} else {
-			/* found a connection, nothing more to do. */
-			pdebug(DEBUG_INFO, "find_or_create_connection() reusing existing connection.");
-			rc = PLCTAG_STATUS_OK;
-		}
+        /* if we find one but it is in the process of disconnection, create a new one */
+        if (connection == AB_CONNECTION_NULL) {
+            connection = connection_create_unsafe(path, tag, shared_connection);
+            is_new = 1;
+
+            if(shared_connection) {
+                pdebug(DEBUG_INFO, "Creating new connection.");
+            } else {
+                pdebug(DEBUG_INFO, "Creating new exclusive connection.");
+            }
+        } else {
+            /* found a connection, nothing more to do. */
+            pdebug(DEBUG_INFO, "find_or_create_connection() reusing existing connection.");
+            rc = PLCTAG_STATUS_OK;
+        }
     }
 
     if (connection == AB_CONNECTION_NULL) {
@@ -103,7 +103,7 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
         if((rc = connection_perform_forward_open(connection)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to perform ForwardOpen to set up connection with PLC!");
 
-            /* FIXME - what to do here? */
+            tag->status = rc;
         }
     }
 
@@ -299,9 +299,9 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
 
     /* mark it as ready to send */
     req->send_request = 1;
-    
-    /* 
-     * make sure the session serializes this with respect to other 
+
+    /*
+     * make sure the session serializes this with respect to other
      * control packets.  Apparently, the connection manager has no
      * buffers.
      */
@@ -347,7 +347,7 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
         connection->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
         connection->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
         connection->is_connected = 1;
-        
+
         pdebug(DEBUG_INFO,"ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x",connection->orig_connection_id, connection->targ_connection_id);
 
         pdebug(DEBUG_DETAIL,"Connection set up succeeded.");
@@ -631,9 +631,9 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
     /* mark it as ready to send */
     req->send_request = 1;
     /*req->abort_after_send = 1;*/ /* don't return to us.*/
-    
-    /* 
-     * make sure the session serializes this with respect to other 
+
+    /*
+     * make sure the session serializes this with respect to other
      * control packets.  Apparently, the connection manager has no
      * buffers.
      */
@@ -690,42 +690,42 @@ int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
 
 int mark_connection_for_request(ab_request_p request)
 {
-	int rc = PLCTAG_STATUS_OK;
-	
-	if(!request) {
-		return PLCTAG_ERR_NULL_PTR;
-	}
-	
-	if(!request->connection) {
-		return PLCTAG_STATUS_OK;
-	}
+    int rc = PLCTAG_STATUS_OK;
 
-	/* mark the connection as in use. */
-	request->connection->request_in_flight = 1;
-	request->connection->seq_in_flight = request->connection->conn_seq_num;
+    if(!request) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	return rc;
+    if(!request->connection) {
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* mark the connection as in use. */
+    request->connection->request_in_flight = 1;
+    request->connection->seq_in_flight = request->connection->conn_seq_num;
+
+    return rc;
 }
 
 
-int clear_connection_for_request(ab_request_p request) 
+int clear_connection_for_request(ab_request_p request)
 {
-	int rc = PLCTAG_STATUS_OK;
-	
-	if(request->connection) {
-		ab_connection_p connection = request->connection;
+    int rc = PLCTAG_STATUS_OK;
 
-		if(connection->request_in_flight) {
-			if(connection->seq_in_flight == request->conn_seq) {
-				pdebug(DEBUG_INFO, "Clearing connection in flight flags for packet sequence ID %d", request->conn_seq);
-				connection->request_in_flight = 0;
-			} else {
-				pdebug(DEBUG_INFO, "Mismatch between request sequence ID %d and connection packet sequence ID %d", request->conn_seq, connection->seq_in_flight);
-			}
-		} else {
-			pdebug(DEBUG_INFO,"No packet in flight.");
-		}
-	}
-	
-	return rc;
+    if(request->connection) {
+        ab_connection_p connection = request->connection;
+
+        if(connection->request_in_flight) {
+            if(connection->seq_in_flight == request->conn_seq) {
+                pdebug(DEBUG_INFO, "Clearing connection in flight flags for packet sequence ID %d", request->conn_seq);
+                connection->request_in_flight = 0;
+            } else {
+                pdebug(DEBUG_INFO, "Mismatch between request sequence ID %d and connection packet sequence ID %d", request->conn_seq, connection->seq_in_flight);
+            }
+        } else {
+            pdebug(DEBUG_INFO,"No packet in flight.");
+        }
+    }
+
+    return rc;
 }
