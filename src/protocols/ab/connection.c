@@ -691,6 +691,7 @@ int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
 int mark_connection_for_request(ab_request_p request)
 {
     int rc = PLCTAG_STATUS_OK;
+    int index = 0;
 
     if(!request) {
         return PLCTAG_ERR_NULL_PTR;
@@ -699,10 +700,21 @@ int mark_connection_for_request(ab_request_p request)
     if(!request->connection) {
         return PLCTAG_STATUS_OK;
     }
+    
+    /* FIXME DEBUG - remove! */
+    //return PLCTAG_STATUS_OK;
 
     /* mark the connection as in use. */
-    request->connection->request_in_flight = 1;
-    request->connection->seq_in_flight = request->connection->conn_seq_num;
+    for(index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
+		if(!request->connection->request_in_flight[index]) {
+			request->connection->request_in_flight[index] = 1;
+			request->connection->seq_in_flight[index] = request->connection->conn_seq_num;
+			pdebug(DEBUG_INFO,"Found empty connection slot at position %d",index);
+			return rc;
+		} else {
+			pdebug(DEBUG_INFO,"Slot %d already marked.",index);
+		}
+	}
 
     return rc;
 }
@@ -714,17 +726,23 @@ int clear_connection_for_request(ab_request_p request)
 
     if(request->connection) {
         ab_connection_p connection = request->connection;
+        int index = 0;
+        int found = 0;
 
-        if(connection->request_in_flight) {
-            if(connection->seq_in_flight == request->conn_seq) {
-                pdebug(DEBUG_INFO, "Clearing connection in flight flags for packet sequence ID %d", request->conn_seq);
-                connection->request_in_flight = 0;
-            } else {
-                pdebug(DEBUG_INFO, "Mismatch between request sequence ID %d and connection packet sequence ID %d", request->conn_seq, connection->seq_in_flight);
-            }
-        } else {
-            pdebug(DEBUG_INFO,"No packet in flight.");
-        }
+		for(index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
+			if(connection->request_in_flight[index]) {
+				if(connection->seq_in_flight[index] == request->conn_seq) {
+					pdebug(DEBUG_INFO, "Clearing connection in flight flag for packet sequence ID %d", request->conn_seq);
+					connection->request_in_flight[index] = 0;
+					found = 1;
+					break;
+				} 
+			} 
+		}
+		
+		if(!found) {
+			pdebug(DEBUG_INFO,"Packet with sequence ID %d not found in flight.", request->conn_seq);
+		}
     }
 
     return rc;

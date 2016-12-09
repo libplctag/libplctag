@@ -567,9 +567,9 @@ static void update_resend_samples(ab_session_p session, int64_t round_trip_time)
         round_trip_sum += session->round_trip_samples[index];
     }
 
-    /* round up. */
+    /* round up and double */
     round_trip_avg = (round_trip_sum + (SESSION_NUM_ROUND_TRIP_SAMPLES/2))/SESSION_NUM_ROUND_TRIP_SAMPLES;
-    session->retry_interval = (round_trip_avg < SESSION_MIN_RESEND_INTERVAL ? SESSION_MIN_RESEND_INTERVAL : round_trip_avg);
+    session->retry_interval = 3 * (round_trip_avg < SESSION_MIN_RESEND_INTERVAL ? SESSION_MIN_RESEND_INTERVAL : round_trip_avg);
 
     pdebug(DEBUG_INFO,"Packet round trip time %lld, running average round trip time is %lld",round_trip_time, session->retry_interval);
 }
@@ -584,12 +584,13 @@ static void receive_response(ab_session_p session, ab_request_p request)
      * a packet once in a while.
      */
 
-    session->next_packet_interval_us -= SESSION_PACKET_RECEIVE_INTERVAL_DEC;
+    /*session->next_packet_interval_us -= SESSION_PACKET_RECEIVE_INTERVAL_DEC;
     if(session->next_packet_interval_us < SESSION_MIN_PACKET_INTERVAL) {
         session->next_packet_interval_us = SESSION_MIN_PACKET_INTERVAL;
     }
     pdebug(DEBUG_INFO,"Packet received, so decreasing packet interval to %lldus", session->next_packet_interval_us);
-
+	*/
+	
     pdebug(DEBUG_INFO,"Packet sent initially %dms ago and was sent %d times",(int)(time_ms() - request->time_sent), request->send_count);
 
     update_resend_samples(session, time_ms() - request->time_sent);
@@ -618,7 +619,7 @@ static void handle_resend(ab_session_p session, ab_request_p request)
     eip_encap_t *encap = (eip_encap_t*)(&request->data[0]);
 
 
-    if (encap->encap_command == le2h16(AB_EIP_CONNECTED_SEND)) {
+    //if (encap->encap_command == le2h16(AB_EIP_CONNECTED_SEND)) {
         pdebug(DEBUG_INFO,"Requeuing connected request connection %d sequence ID %d.", request->conn_id,request->conn_seq);
 
         request->recv_in_progress = 0;
@@ -628,20 +629,22 @@ static void handle_resend(ab_session_p session, ab_request_p request)
          * Change the packet interval.  We lost a packet, so we should
          * back off a bit.
          */
+        /*
         session->next_packet_interval_us += SESSION_PACKET_LOSS_INTERVAL_INC;
         if(session->next_packet_interval_us > SESSION_MAX_PACKET_INTERVAL) {
             session->next_packet_interval_us = SESSION_MAX_PACKET_INTERVAL;
         }
+        */
         /* delay the next packet directly */
-        session->next_packet_time_us += session->next_packet_interval_us;
+        //session->next_packet_time_us += session->next_packet_interval_us;
 
         /* make sure that we clear this packet from the session if we need to. */
-        clear_session_for_request(request);
+        //clear_session_for_request(request);
 
-        pdebug(DEBUG_INFO,"packet lost, so increasing packet interval to %lldus", session->next_packet_interval_us);
-    } else {
-        pdebug(DEBUG_INFO,"Not requeuing unconnected request session sequence %llx", request->session_seq_id);
-    }
+        //pdebug(DEBUG_INFO,"packet lost, so increasing packet interval to %lldus", session->next_packet_interval_us);
+    //} else {
+        //pdebug(DEBUG_INFO,"Not requeuing unconnected request session sequence %llx", request->session_seq_id);
+    //}
 }
 
 
@@ -674,6 +677,8 @@ int ok_to_resend(ab_session_p session, ab_request_p request)
     if((request->time_sent + session->retry_interval) > time_ms()) {
         return 0;
     }
+    
+    pdebug(DEBUG_INFO,"Request waited %lldms, need to resend.",(time_ms() - request->time_sent));
 
     return 1;
 }
@@ -697,9 +702,9 @@ int process_response_packet(ab_session_p session)
          * then resend it.  Requests are processed in order (maybe?).  The ones closest to the
          * head of the list are the oldest, so we process them in ascending time order.
          */
-        if(ok_to_resend(session, request)) {
+        /*if(ok_to_resend(session, request)) {
             handle_resend(session, request);
-        }
+        }*/
 
         request = request->next;
     }
@@ -757,14 +762,14 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p reques
      * Check to see if we can send something.
      */
 
-    if(!session->current_request && request->send_request && session->next_packet_time_us < (time_ms() * 1000)) {
+    if(!session->current_request && request->send_request /*&& session->next_packet_time_us < (time_ms() * 1000)*/) {
         /* nothing being sent and this request is outstanding */
         session->current_request = request;
-        session->next_packet_time_us = (time_ms()*1000) + session->next_packet_interval_us;
+        //session->next_packet_time_us = (time_ms()*1000) + session->next_packet_interval_us;
 
         pdebug(DEBUG_INFO,"request->send_request=%d",request->send_request);
-        pdebug(DEBUG_INFO,"session->next_packet_time_us=%lld and time=%lld",session->next_packet_time_us, (time_ms()*1000));
-        pdebug(DEBUG_INFO,"Setting up request for sending, next packet in %lldus",(session->next_packet_time_us - (time_ms()*1000)));
+       // pdebug(DEBUG_INFO,"session->next_packet_time_us=%lld and time=%lld",session->next_packet_time_us, (time_ms()*1000));
+        //pdebug(DEBUG_INFO,"Setting up request for sending, next packet in %lldus",(session->next_packet_time_us - (time_ms()*1000)));
 
         if(request->send_count == 0) {
             request->time_sent = time_ms();
@@ -839,45 +844,83 @@ static int ready_to_send(ab_request_p request)
      * if this is a connected request type, then check the connection
      * to make sure that we do not have a packet in flight.
      *
-     * Only allow one at a time until we figure out the packet loss problem.
+     * Only allow a few at a time until we figure out the packet loss problem.
      */
-    if(request->connection && request->connection->request_in_flight) {
-        return 0;
+    if(request->connection) {
+		for(int index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
+			if(!request->connection->request_in_flight[index]) {
+				pdebug(DEBUG_INFO,"Found open slot at %d",index);
+				return 1;
+			} else {
+				pdebug(DEBUG_INFO,"Slot %d is full.",index);
+			}
+		}
+		
+		pdebug(DEBUG_INFO,"No open slots to send.");
+	
+		return 0;
     }
-
+    
+    /* not a connected message, so OK to send. */
     return 1;
+}
+
+
+static int handle_abort_request(ab_request_p request)
+{
+	int rc = PLCTAG_STATUS_OK;
+	
+	/* clear any in flight markers. */
+	clear_connection_for_request(request);
+	clear_session_for_request(request);
+
+	rc = request_remove_unsafe(request->session,request);
+
+	request_destroy_unsafe(&request);
+
+	return rc;
 }
 
 static int session_check_outgoing_data_unsafe(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p request = session->requests;
+    int requests_in_flight = 0;
 
     /* loop over the requests and process them one at a time. */
     while(request && rc == PLCTAG_STATUS_OK) {
         if(request->abort_request) {
-            ab_request_p old_request = request;
-
-            /* clear any in flight markers. */
-            clear_connection_for_request(old_request);
-            clear_session_for_request(old_request);
+			ab_request_p old_request = request;
 
             /* skip to the next one */
             request = request->next;
 
-            rc = request_remove_unsafe(session,old_request);
-
-            request_destroy_unsafe(&old_request);
-
+			rc = handle_abort_request(old_request);
+			
             continue;
         }
-
-        /* is there a request ready to send and can we send? */
-        if(request->send_request && ready_to_send(request)) {
-            session->next_packet_time_us += session->next_packet_interval_us;
-            session->current_request = request;
+        
+        /* check resending */
+        if(ok_to_resend(session, request)) {
+            handle_resend(session, request);
         }
 
+		/* count requests in flight */
+        if(request->recv_in_progress && request->serial_request) {
+			requests_in_flight++;
+		}
+
+		pdebug(DEBUG_INFO,"%d requests in flight.", requests_in_flight);
+
+        /* is there a request ready to send and can we send? */
+        if(!session->current_request && request->send_request && /*ready_to_send(request)*/ requests_in_flight < SESSION_MAX_REQUESTS_IN_FLIGHT) {
+            //session->next_packet_time_us += session->next_packet_interval_us;
+            pdebug(DEBUG_INFO,"Readying packet to send.");
+            session->current_request = request;
+            requests_in_flight++;
+			pdebug(DEBUG_INFO,"sending packet, so %d requests in flight.", requests_in_flight);
+        }
+        
         /* call this often to make sure we get the data out. */
         rc = session_send_current_request(session);
 

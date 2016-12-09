@@ -38,6 +38,7 @@
 #include <ab/session.h>
 #include <ab/tag.h>
 
+#define CONNECTION_MAX_IN_FLIGHT (7)
 
 struct ab_connection_t {
     ab_connection_p next;
@@ -71,8 +72,8 @@ struct ab_connection_t {
     int status;
     
     /* flag to avoid packet loss */
-    int request_in_flight;
-    uint16_t seq_in_flight;
+    int request_in_flight[CONNECTION_MAX_IN_FLIGHT];
+    uint16_t seq_in_flight[CONNECTION_MAX_IN_FLIGHT];
 
     ab_tag_p tags;
 };

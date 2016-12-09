@@ -48,6 +48,8 @@
 
 #define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
 
+#define SESSION_MAX_REQUESTS_IN_FLIGHT (1)
+
 struct ab_session_t {
     ab_session_p next;
     ab_session_p prev;
@@ -74,8 +76,9 @@ struct ab_session_t {
 
     /* counter for number of messages in flight */
     int num_reqs_in_flight;
-    int64_t next_packet_time_us;
-    int64_t next_packet_interval_us;
+    //int64_t next_packet_time_us;
+    //int64_t next_packet_interval_us;
+    
     int64_t retry_interval;
     
     /* short cumulative period for calculating round trip time. */

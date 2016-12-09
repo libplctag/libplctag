@@ -532,7 +532,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
     session->conn_serial_number = ++connection_id;
 
     /* set up the packet interval to a reasonable default */
-    session->next_packet_interval_us = SESSION_DEFAULT_PACKET_INTERVAL;
+    //session->next_packet_interval_us = SESSION_DEFAULT_PACKET_INTERVAL;
 
     /* set up packet round trip information */
     for(int index=0; index < SESSION_NUM_ROUND_TRIP_SAMPLES; index++) {
@@ -855,6 +855,9 @@ int mark_session_for_request(ab_request_p request)
     if(!request->serial_request) {
         return PLCTAG_STATUS_OK;
     }
+    
+    /* FIXME DEBUG - remove! */
+    return PLCTAG_STATUS_OK;
 
     /* mark the session as in use. */
     pdebug(DEBUG_INFO,"Setting session in flight flags for session sequence ID %llx",request->session->session_seq_id);
