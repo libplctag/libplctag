@@ -567,6 +567,7 @@ int connection_close(ab_connection_p connection)
     connection->status = rc;
 
     if(req) {
+		request_remove(connection->session,req);
         request_destroy(&req);
     }
 
