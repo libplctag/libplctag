@@ -52,7 +52,17 @@ static int setup_global_mutex();
 
 
 mutex_p global_library_mutex = NULL;
-static lock_t global_library_mutex_lock = LOCK_INIT;
+
+/*
+ * Initialize the library.  This is called in a threadsafe manner and
+ * only called once.
+ */
+
+int lib_init(void)
+{
+    return setup_global_mutex();
+}
+
 
 
 /**************************************************************************
@@ -135,7 +145,11 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     int read_cache_ms = 0;
 
     /* setup a global mutex that all other code can use as a guard. */
-    if(setup_global_mutex() != PLCTAG_STATUS_OK) {
+    //if(setup_global_mutex() != PLCTAG_STATUS_OK) {
+    //    return PLC_TAG_NULL;
+    //}
+
+    if(initalize_modules() != PLCTAG_STATUS_OK) {
         return PLC_TAG_NULL;
     }
 
@@ -1514,9 +1528,11 @@ static int setup_global_mutex(void)
     int rc = PLCTAG_STATUS_OK;
 
     /* loop until we get the lock flag */
-    while (!lock_acquire((lock_t*)&global_library_mutex_lock)) {
-        sleep_ms(1);
-    }
+    //while (!lock_acquire((lock_t*)&global_library_mutex_lock)) {
+    //    sleep_ms(1);
+    //}
+
+    pdebug(DEBUG_INFO,"Initializing library global mutex.");
 
     /* first see if the mutex is there. */
     if (!global_library_mutex) {
@@ -1528,7 +1544,7 @@ static int setup_global_mutex(void)
     }
 
     /* we hold the lock, so clear it.*/
-    lock_release((lock_t*)&global_library_mutex_lock);
+    //lock_release((lock_t*)&global_library_mutex_lock);
 
     return rc;
 }

@@ -31,6 +31,7 @@
 #include <platform.h>
 #include <ab/session.h>
 #include <util/debug.h>
+#include <util/refcount.h>
 
 
 /*
@@ -52,6 +53,7 @@ int request_create(ab_request_p* req)
         *req = NULL;
         rc = PLCTAG_ERR_NO_MEM;
     } else {
+        res->rc = refcount_init(1, global_session_mut, res, request_destroy);
         *req = res;
     }
 
@@ -92,6 +94,9 @@ int request_add_unsafe(ab_session_p sess, ab_request_p req)
     } else {
         prev->next = req;
     }
+
+    /* update the session's refcount as we point to it. */
+    session_acquire_unsafe(sess);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -153,6 +158,9 @@ int request_remove_unsafe(ab_session_p sess, ab_request_p req)
 
     req->next = NULL;
     req->session = NULL;
+
+    /* release the session refcount */
+    session_release_unsafe(sess);
 
     pdebug(DEBUG_DETAIL, "Done.");
 

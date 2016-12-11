@@ -52,10 +52,32 @@ extern "C"
  * Shared global data
  */
 
+static ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
+static ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int shared);
+static int connection_perform_forward_open(ab_connection_p connection);
+static int send_forward_open_req(ab_connection_p connection, ab_request_p req);
+static int recv_forward_open_resp(ab_connection_p connection, ab_request_p req);
+static int connection_add_tag_unsafe(ab_connection_p connection, ab_tag_p tag);
+static int connection_add_tag(ab_connection_p connection, ab_tag_p tag);
+static int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag);
+static int connection_remove_tag(ab_connection_p connection, ab_tag_p tag);
+static int connection_empty_unsafe(ab_connection_p connection);
+static int connection_is_empty(ab_connection_p connection);
+//static int connection_destroy_unsafe(ab_connection_p connection);
+static void connection_destroy(void *connection);
+static int connection_close(ab_connection_p connection);
+static int send_forward_close_req(ab_connection_p connection, ab_request_p req);
 static int recv_forward_close_resp(ab_connection_p connection, ab_request_p req);
 
 
-int find_or_create_connection(ab_tag_p tag, attr attribs)
+/*
+ * EXTERNAL functions
+ *
+ */
+
+
+
+int connection_find_or_create(ab_tag_p tag, attr attribs)
 {
     const char* path = attr_get_str(attribs, "path", "");
     ab_connection_p connection = AB_CONNECTION_NULL;
@@ -89,7 +111,7 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
             }
         } else {
             /* found a connection, nothing more to do. */
-            pdebug(DEBUG_INFO, "find_or_create_connection() reusing existing connection.");
+            pdebug(DEBUG_INFO, "connection_find_or_create() reusing existing connection.");
             rc = PLCTAG_STATUS_OK;
         }
     }
@@ -102,8 +124,6 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
         /* do the ForwardOpen call to set up the connection */
         if((rc = connection_perform_forward_open(connection)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to perform ForwardOpen to set up connection with PLC!");
-
-            tag->status = rc;
         }
     }
 
@@ -114,6 +134,23 @@ int find_or_create_connection(ab_tag_p tag, attr attribs)
     return rc;
 }
 
+
+int connection_release(ab_connection_p connection)
+{
+    return refcount_release(&connection->rc);
+}
+
+
+
+
+
+
+
+
+
+/*
+ * INTERNAL helper functions.
+ */
 
 /* not thread safe! */
 ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int shared)
@@ -132,6 +169,9 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int sha
     connection->orig_connection_id = ++(connection->session->conn_serial_number);
     connection->status = PLCTAG_STATUS_PENDING;
     connection->exclusive = !shared;
+
+    /* connection is going to be referenced, so set refcount up. */
+    connection->rc = refcount_init(1,global_session_mut, connection, connection_destroy);
 
     /* copy the path for later */
     str_copy(&connection->path[0], path, MAX_CONN_PATH);
@@ -227,7 +267,9 @@ int connection_perform_forward_open(ab_connection_p connection)
     connection->status = rc;
 
     if(req) {
-        request_destroy(&req);
+        request_release(req);
+        req = NULL;
+        //request_destroy(&req);
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -440,35 +482,40 @@ int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
     return rc;
 }
 
-int connection_remove_tag(ab_connection_p connection, ab_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
+//int connection_remove_tag(ab_connection_p connection, ab_tag_p tag)
+//{
+    //int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    //pdebug(DEBUG_INFO, "Starting.");
 
-    if(connection && connection->session) {
-        critical_block(global_session_mut) {
-            rc = connection_remove_tag_unsafe(connection, tag);
-        }
+    //if(connection && connection->session) {
+        //critical_block(global_session_mut) {
+            //rc = connection_remove_tag_unsafe(connection, tag);
+        //}
 
-        /* don't block the mutex, check to see if we need to destroy the connection. */
-        if(connection_is_empty(connection) && connection->disconnect_in_progress) {
-            pdebug(DEBUG_INFO,"Closing connection.");
-            connection_close(connection);
+        ///* release the connection */
+        //connection_release(connection);
 
-            critical_block(global_session_mut) {
-                connection_destroy_unsafe(connection);
-            }
-        }
-    } else {
-        pdebug(DEBUG_WARN, "Connection or session ptr is null!");
-        rc = PLCTAG_ERR_NULL_PTR;
-    }
+        ///* don't block the mutex, check to see if we need to destroy the connection. */
+        ///*
+        //if(connection_is_empty(connection) && connection->disconnect_in_progress) {
+            //pdebug(DEBUG_INFO,"Closing connection.");
+            //connection_close(connection);
 
-    pdebug(DEBUG_INFO, "Done.");
+            //critical_block(global_session_mut) {
+                //connection_destroy_unsafe(connection);
+            //}
+        //}
+        //*/
+    //} else {
+        //pdebug(DEBUG_WARN, "Connection or session ptr is null!");
+        //rc = PLCTAG_ERR_NULL_PTR;
+    //}
 
-    return rc;
-}
+    //pdebug(DEBUG_INFO, "Done.");
+
+    //return rc;
+//}
 
 
 int connection_empty_unsafe(ab_connection_p connection)
@@ -492,30 +539,56 @@ int connection_is_empty(ab_connection_p connection)
     return rc;
 }
 
-int connection_destroy_unsafe(ab_connection_p connection)
+void connection_destroy(void *connection_arg)
 {
+    ab_connection_p connection = connection_arg;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     if (!connection) {
-        return 1;
+        pdebug(DEBUG_WARN,"Connection destructor called with null pointer!");
+        return;
     }
 
     /* do not destroy the connection if there are
      * connections still */
+
+    /* removed due to refcount code
     if (connection->tags) {
         pdebug(DEBUG_WARN, "Attempt to destroy connection while open tags exist!");
         return 0;
     }
+    */
 
-    /* call the mutex protected version */
-    session_remove_connection_unsafe(connection->session, connection);
+    /* clean up connection with the PLC, ignore return code, we can't do anything about it. */
+    connection_close(connection);
 
+    /* make sure the session does not reference the connection */
+    session_remove_connection(connection->session, connection);
+    session_release(connection->session);
+
+    /* do final clean up */
     mem_free(connection);
 
     pdebug(DEBUG_INFO, "Done.");
 
     return 1;
 }
+
+/*
+ * This should never be called directly.  It should only be called
+ * as a result of the reference count hitting zero.
+ */
+/* not called due to refcount code
+void connection_destroy(void conn_arg)
+{
+    ab_connection_p connection = conn_arg;
+
+    critical_block(global_session_mut) {
+        connection_destroy_unsafe(connection);
+    }
+}
+*/
 
 int connection_close(ab_connection_p connection)
 {
@@ -567,7 +640,7 @@ int connection_close(ab_connection_p connection)
     connection->status = rc;
 
     if(req) {
-		request_remove(connection->session,req);
+        request_remove(connection->session,req);
         request_destroy(&req);
     }
 
@@ -701,21 +774,21 @@ int mark_connection_for_request(ab_request_p request)
     if(!request->connection) {
         return PLCTAG_STATUS_OK;
     }
-    
+
     /* FIXME DEBUG - remove! */
     //return PLCTAG_STATUS_OK;
 
     /* mark the connection as in use. */
     for(index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
-		if(!request->connection->request_in_flight[index]) {
-			request->connection->request_in_flight[index] = 1;
-			request->connection->seq_in_flight[index] = request->connection->conn_seq_num;
-			pdebug(DEBUG_INFO,"Found empty connection slot at position %d",index);
-			return rc;
-		} else {
-			pdebug(DEBUG_INFO,"Slot %d already marked.",index);
-		}
-	}
+        if(!request->connection->request_in_flight[index]) {
+            request->connection->request_in_flight[index] = 1;
+            request->connection->seq_in_flight[index] = request->connection->conn_seq_num;
+            pdebug(DEBUG_INFO,"Found empty connection slot at position %d",index);
+            return rc;
+        } else {
+            pdebug(DEBUG_INFO,"Slot %d already marked.",index);
+        }
+    }
 
     return rc;
 }
@@ -730,20 +803,20 @@ int clear_connection_for_request(ab_request_p request)
         int index = 0;
         int found = 0;
 
-		for(index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
-			if(connection->request_in_flight[index]) {
-				if(connection->seq_in_flight[index] == request->conn_seq) {
-					pdebug(DEBUG_INFO, "Clearing connection in flight flag for packet sequence ID %d", request->conn_seq);
-					connection->request_in_flight[index] = 0;
-					found = 1;
-					break;
-				} 
-			} 
-		}
-		
-		if(!found) {
-			pdebug(DEBUG_INFO,"Packet with sequence ID %d not found in flight.", request->conn_seq);
-		}
+        for(index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
+            if(connection->request_in_flight[index]) {
+                if(connection->seq_in_flight[index] == request->conn_seq) {
+                    pdebug(DEBUG_INFO, "Clearing connection in flight flag for packet sequence ID %d", request->conn_seq);
+                    connection->request_in_flight[index] = 0;
+                    found = 1;
+                    break;
+                }
+            }
+        }
+
+        if(!found) {
+            pdebug(DEBUG_INFO,"Packet with sequence ID %d not found in flight.", request->conn_seq);
+        }
     }
 
     return rc;

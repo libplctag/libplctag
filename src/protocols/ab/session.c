@@ -38,8 +38,25 @@
 
 
 
-ab_session_p session_create_unsafe(const char* host, int gw_port);
-int session_init(ab_session_p session);
+int add_session_unsafe(ab_session_p n);
+int add_session(ab_session_p s);
+int remove_session_unsafe(ab_session_p n);
+int remove_session(ab_session_p s);
+ab_session_p find_session_by_host_unsafe(const char  *t);
+int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection);
+int session_add_connection(ab_session_p session, ab_connection_p connection);
+int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection);
+int session_remove_connection(ab_session_p session, ab_connection_p connection);
+int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag);
+int session_add_tag(ab_session_p session, ab_tag_p tag);
+int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag);
+int session_remove_tag(ab_session_p session, ab_tag_p tag);
+int session_connect(ab_session_p session);
+int session_destroy_unsafe(ab_session_p session);
+void session_destroy(void *session);
+int session_is_empty(ab_session_p session);
+int session_register(ab_session_p session);
+int session_unregister_unsafe(ab_session_p session);
 
 
 /*
@@ -112,6 +129,11 @@ ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,cons
         connection = connection->next;
     }
 
+    /* add to the ref count since we found an existing one. */
+    if(connection) {
+        connection_acquire(connection);
+    }
+
     return connection;
 }
 
@@ -180,10 +202,12 @@ int session_remove_connection_unsafe(ab_session_p session, ab_connection_p conne
         rc = PLCTAG_ERR_NOT_FOUND;
     }
 
+    /* removed due to refcount code
     if (session_is_empty(session)) {
         pdebug(DEBUG_DETAIL, "destroying session");
         session_destroy_unsafe(session);
     }
+    */
 
     pdebug(DEBUG_DETAIL, "Done");
 
@@ -210,7 +234,7 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
 }
 
 
-int find_or_create_session(ab_session_p *tag_session, attr attribs)
+int session_find_or_create(ab_session_p *tag_session, attr attribs)
 {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char* session_gw = attr_get_str(attribs, "gateway", "");
@@ -256,7 +280,8 @@ int find_or_create_session(ab_session_p *tag_session, attr attribs)
 
         if(rc != PLCTAG_STATUS_OK) {
             /* failed to set up the session! */
-            session_destroy(session);
+            //session_destroy(session);
+            session_release(session);
             session = AB_SESSION_NULL;
         } else {
             /* save the status */
@@ -395,6 +420,11 @@ ab_session_p find_session_by_host_unsafe(const char* t)
         return (ab_session_p)NULL;
     }
 
+    if(tmp) {
+        /* found the session, so increase the ref count. */
+        refcount_acquire(tmp->rc);
+    }
+
     return tmp;
 }
 
@@ -456,9 +486,11 @@ int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
     }
 
     /* if the session is empty, get rid of it. */
+    /* removed due to refcount code
     if(session_is_empty(session)) {
         session_destroy_unsafe(session);
     }
+    */
 
     pdebug(DEBUG_DETAIL, "Done");
 
@@ -540,6 +572,9 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
     }
     session->retry_interval = SESSION_DEFAULT_RESEND_INTERVAL_MS;
 
+    /* set up the ref count */
+    session->rc = refcount_init(1, session, session_destroy);
+
     /* add the new session to the list. */
     add_session_unsafe(session);
 
@@ -615,8 +650,9 @@ int session_connect(ab_session_p session)
 }
 
 /* must have the session mutex held here */
-int session_destroy_unsafe(ab_session_p session)
+void session_destroy(void *session_arg)
 {
+    ab_session_p session = session_arg;
     ab_request_p req;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -624,15 +660,18 @@ int session_destroy_unsafe(ab_session_p session)
     if (!session) {
         pdebug(DEBUG_WARN, "Session ptr is null!");
 
-        return 1;
+        return;
     }
 
     /* do not destroy the session if there are
      * tags or connections still */
+     /* removed due to refcount code
+      *
     if(!session_is_empty(session)) {
         pdebug(DEBUG_WARN, "Attempt to destroy session while open tags or connections exist!");
         return 0;
     }
+    */
 
     /* unregister and close the socket. */
     session_unregister_unsafe(session);
@@ -653,11 +692,13 @@ int session_destroy_unsafe(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return 1;
+    return;
 }
 
-int session_destroy(ab_session_p session)
+/* should not be called any more
+void session_destroy(void *session_arg)
 {
+    ab_session_p session = session_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -670,6 +711,7 @@ int session_destroy(ab_session_p session)
 
     return rc;
 }
+*/
 
 int session_is_empty(ab_session_p session)
 {
@@ -855,7 +897,7 @@ int mark_session_for_request(ab_request_p request)
     if(!request->serial_request) {
         return PLCTAG_STATUS_OK;
     }
-    
+
     /* FIXME DEBUG - remove! */
     return PLCTAG_STATUS_OK;
 
@@ -890,3 +932,12 @@ int clear_session_for_request(ab_request_p request)
     return rc;
 }
 
+
+int session_release(ab_session_p session)
+{
+    if(!session) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    return refcount_release(&session->rc);
+}

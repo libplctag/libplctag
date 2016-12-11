@@ -35,16 +35,16 @@ set (libplctag_VERSION_MINOR 5)
 
 message("MSVC = ${MSVC}")
 if(MSVC)
-	message("CMAKE generator: ${CMAKE_GENERATOR}")
-	message("CMAKE generator version: ${MSVC_VERSION}")
-	
-	if(${MSVC_VERSION} EQUAL 1800)
-		set(COMPILE_AS_C 0)
-	else()
-		set(COMPILE_AS_C 1)
-	endif()
+    message("CMAKE generator: ${CMAKE_GENERATOR}")
+    message("CMAKE generator version: ${MSVC_VERSION}")
+
+    if(${MSVC_VERSION} EQUAL 1800)
+        set(COMPILE_AS_C 0)
+    else()
+        set(COMPILE_AS_C 1)
+    endif()
 endif()
-	
+
 
 
 # set the main paths.
@@ -98,14 +98,14 @@ endif()
 MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
 
 if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-	# MSVC 2012 can compile the library as C++, but not C
-	if(COMPILE_AS_C)
-		message("MSVC can handle C99, compiling code as C")
-		set(BASE_C_FLAGS "${BASE_FLAGS} /c")
-	else()
-		message("MSVC cannot handle C99, compiling code as C++")
-		set(BASE_C_FLAGS "${BASE_FLAGS}")
-	endif()
+    # MSVC 2012 can compile the library as C++, but not C
+    if(COMPILE_AS_C)
+        message("MSVC can handle C99, compiling code as C")
+        set(BASE_C_FLAGS "${BASE_FLAGS} /c")
+    else()
+        message("MSVC cannot handle C99, compiling code as C++")
+        set(BASE_C_FLAGS "${BASE_FLAGS}")
+    endif()
 else()
     set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99")
 endif()
@@ -116,7 +116,9 @@ MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
 MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
 # set up the library sources
-set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag.h"
+set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
+                     "${lib_SRC_PATH}/init.h"
+                     "${lib_SRC_PATH}/libplctag.h"
                      "${lib_SRC_PATH}/libplctag_tag.c"
                      "${lib_SRC_PATH}/libplctag_tag.h"
                      "${ab_SRC_PATH}/ab.h"
@@ -145,6 +147,8 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/libplctag.h"
                      "${util_SRC_PATH}/attr.h"
                      "${util_SRC_PATH}/debug.c"
                      "${util_SRC_PATH}/debug.h"
+                     "${util_SRC_PATH}/refcount.c"
+                     "${util_SRC_PATH}/refcount.h"
                      "${platform_SRC_PATH}/platform.c"
                      "${platform_SRC_PATH}/platform.h" )
 

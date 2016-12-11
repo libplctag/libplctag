@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2016 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -18,24 +18,40 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/**************************************************************************
- * CHANGE LOG                                                             *
- *                                                                        *
- * 2012-02-23  KRH - Created file.                                        *
- * 2012-06-15  KRH - Added DF1 registration function.                     *
- *                                                                        *
- **************************************************************************/
-
-#ifndef __LIBPLCTAG_AB_H__
-#define __LIBPLCTAG_AB_H__ 1
+#include <libplctag.h>
+#include <platform.h>
+#include <init.h>
+#include <libplctag_tag.h>
+#include <ab/ab.h>
 
 
-#include <lib/libplctag.h>
-#include <util/attr.h>
+static lock_t library_initialization_lock = LOCK_INIT;
+static volatile int library_initialized = 0;
 
+int initialize_modules(void)
+{
+    int rc = PLCTAG_STATUS_OK;
 
-int ab_init();
-plc_tag_p ab_tag_create(attr attribs);
+    /* loop until we get the lock flag */
+    while (!lock_acquire((lock_t*)&library_initialization_lock)) {
+        sleep_ms(1);
+    }
 
+    if(!library_initialized) {
+        pebug(DEBUG_INFO,"Initialized library modules.");
+        rc = lib_init();
 
-#endif
+        if(rc == PLCTAG_STATUS_OK) {
+            rc = ab_init();
+        }
+
+        library_initialized = 1;
+        pdebug(DEBUG_INFO,"Done initializing library modules.");
+    }
+
+    /* we hold the lock, so clear it.*/
+    lock_release((lock_t*)&library_initialization_lock);
+
+    return rc;
+}
+

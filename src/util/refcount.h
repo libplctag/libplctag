@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2016 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -18,24 +18,19 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/**************************************************************************
- * CHANGE LOG                                                             *
- *                                                                        *
- * 2012-02-23  KRH - Created file.                                        *
- * 2012-06-15  KRH - Added DF1 registration function.                     *
- *                                                                        *
- **************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_H__
-#define __LIBPLCTAG_AB_H__ 1
+#ifndef __UTIL__REFCOUNT_H__
+#define __UTIL__REFCOUNT_H__ 1
+
+#include <platform.h>
 
 
-#include <lib/libplctag.h>
-#include <util/attr.h>
+typedef struct refcount refcount;
 
 
-int ab_init();
-plc_tag_p ab_tag_create(attr attribs);
+extern refcount refcount_init(int count, void *data, void (*delete_func)(void *data));
+extern int refcount_acquire(refcount *rc);
+extern int refcount_release(refcount *rc);
 
 
 #endif

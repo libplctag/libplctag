@@ -78,7 +78,39 @@ struct tag_vtable_t plc_dhp_vtable /*= { ab_tag_abort, ab_tag_destroy, eip_dhp_p
 int session_check_incoming_data_unsafe(ab_session_p session);
 int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req);
 tag_vtable_p set_tag_vtable(ab_tag_p tag);
-int setup_session_mutex(void);
+//int setup_session_mutex(void);
+
+
+/*
+ * Public functions.
+ */
+
+
+int ab_init(void)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO,"Initializing AB protocol library.");
+
+    rc = mutex_create((mutex_p*)&global_session_mut);
+
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
+        return rc;
+    }
+
+    rc = thread_create((thread_p*)&io_handler_thread,request_handler_func, 32*1024, NULL);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO,"Unable to create request handler thread!");
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO,"Finished initializing AB protocol library.");
+
+    return rc;
+}
+
 
 
 plc_tag_p ab_tag_create(attr attribs)
@@ -89,10 +121,10 @@ plc_tag_p ab_tag_create(attr attribs)
 
     pdebug(DEBUG_INFO,"Starting.");
 
-    if(setup_session_mutex() != PLCTAG_STATUS_OK) {
+    /*if(setup_session_mutex() != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Failed to create main session mutex!");
         return PLC_TAG_P_NULL;
-    }
+    }*/
 
     /*
      * allocate memory for the new tag.  Do this first so that
@@ -112,6 +144,7 @@ plc_tag_p ab_tag_create(attr attribs)
      * This determines the protocol type.
      */
     if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"CPU type not valid or missing.");
         tag->status = PLCTAG_ERR_BAD_DEVICE;
         return (plc_tag_p)tag;
     }
@@ -134,6 +167,7 @@ plc_tag_p ab_tag_create(attr attribs)
     tag->data = (uint8_t*)mem_alloc(tag->size);
 
     if(tag->data == NULL) {
+        pdebug(DEBUG_WARN,"Unable to allocate tag data!");
         tag->status = PLCTAG_ERR_NO_MEM;
         return (plc_tag_p)tag;
     }
@@ -142,6 +176,7 @@ plc_tag_p ab_tag_create(attr attribs)
     path = attr_get_str(attribs,"path",NULL);
 
     if(path == NULL && tag->protocol_type == AB_PROTOCOL_LGX) {
+        pdebug(DEBUG_WARN,"Unable to find or determine base wire protocol type!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
     }
@@ -153,26 +188,26 @@ plc_tag_p ab_tag_create(attr attribs)
      * we need to check to see if library initialization has been done.
      */
 
-    if(!io_handler_thread) {
-        pdebug(DEBUG_INFO,"entering critical block %p",global_session_mut);
-        critical_block(global_session_mut) {
-            /* check again because the state could have changed */
-            if(!io_handler_thread) {
-                rc = thread_create((thread_p*)&io_handler_thread,request_handler_func, 32*1024, NULL);
-
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_INFO,"Unable to create request handler thread!");
-                    tag->status = rc;
-                    break;
-                }
-            }
-        }
-        pdebug(DEBUG_INFO,"leaving critical block %p",global_session_mut);
-
-        if(tag->status != PLCTAG_STATUS_OK) {
-            return (plc_tag_p)tag;
-        }
-    }
+    //if(!io_handler_thread) {
+    //    pdebug(DEBUG_INFO,"entering critical block %p",global_session_mut);
+    //    critical_block(global_session_mut) {
+    //        /* check again because the state could have changed */
+    //       if(!io_handler_thread) {
+    //            rc = thread_create((thread_p*)&io_handler_thread,request_handler_func, 32*1024, NULL);
+    //
+    //            if(rc != PLCTAG_STATUS_OK) {
+    //                pdebug(DEBUG_INFO,"Unable to create request handler thread!");
+    //                tag->status = rc;
+    //                break;
+    //            }
+    //        }
+    //    }
+    //    pdebug(DEBUG_INFO,"leaving critical block %p",global_session_mut);
+    //
+    //    if(tag->status != PLCTAG_STATUS_OK) {
+    //        return (plc_tag_p)tag;
+    //    }
+    //}
 
     /* some kinds of tag need a connection and we know right away */
     if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
@@ -193,7 +228,7 @@ plc_tag_p ab_tag_create(attr attribs)
      * Skip this if we don't have a path.
      */
     if(cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO,"Unable to convert links strings to binary path!");
+        pdebug(DEBUG_INFO,"Unable to convert path links strings to binary path!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
     }
@@ -228,7 +263,7 @@ plc_tag_p ab_tag_create(attr attribs)
      *
      * All tags need sessions.  They are the TCP connection to the gateway PLC.
      */
-    if(find_or_create_session(&tag->session, attribs) != PLCTAG_STATUS_OK) {
+    if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Unable to create session!");
         tag->status = PLCTAG_ERR_BAD_GATEWAY;
         return (plc_tag_p)tag;
@@ -236,21 +271,23 @@ plc_tag_p ab_tag_create(attr attribs)
 
     if(tag->needs_connection) {
         /* Find or create a connection.*/
-        if((tag->status = find_or_create_connection(tag, attribs)) != PLCTAG_STATUS_OK) {
+        if((tag->status = connection_find_or_create(tag, attribs)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_INFO,"Unable to create connection! Status=%d",tag->status);
         }
 
-        /* tag is a connected tag */
-        connection_add_tag(tag->connection, tag);
-    } else {
+        /* set up the links between the tag and the connection. */
+        //connection_add_tag(tag->connection, tag);
+    } /*
+    else {
         session_add_tag(tag->session, tag);
     }
+    */
 
     /*
      * check the tag name, this is protocol specific.
      */
 
-    if(check_tag_name(tag, attr_get_str(attribs,"name","NONE")) != PLCTAG_STATUS_OK) {
+    if(check_tag_name(tag, attr_get_str(attribs,"name",NULL)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Bad tag name!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
@@ -364,66 +401,77 @@ int ab_tag_abort(ab_tag_p tag)
 /*
  * ab_tag_destroy
  *
- * This is not completely thread-safe.  Two threads could hit this at
- * once.  It will safely remove outstanding requests, but that is about
- * it.  If two threads hit this at the same time, at least a double-free
- * will result.
+ * This blocks on the global library mutex.  This should
+ * be fixed to allow for more parallelism.  For now, safety is
+ * the primary concern.
  */
 
 int ab_tag_destroy(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab_connection_p connection = NULL;
-    ab_session_p session = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* already destroyed? */
-    if (!tag) {
-        return rc;
+    /* FIXME - this is going to serialize everything. */
+    critical_block(global_library_mutex) {
+        ab_connection_p connection = NULL;
+        ab_session_p session = NULL;
+
+        /* already destroyed? */
+        if (!tag) {
+            pdebug(DEBUG_WARN,"Tag pointer is null!");
+            rc = PLCTAG_ERR_NULL_PTR;
+            break;
+        }
+
+        connection = tag->connection;
+        session = tag->session;
+
+        /*
+         * stop any current actions. Note that we
+         * want to use the thread-safe version here.  We
+         * do lock a mutex later, but a different one.
+         */
+        plc_tag_abort_mapped((plc_tag_p)tag);
+
+        /* tags are stored in different locations depending on the type. */
+        if(connection) {
+            pdebug(DEBUG_DETAIL, "Removing tag from connection.");
+            connection_release(connection);
+            tag->connection = NULL;
+            //connection_remove_tag(connection, tag);
+        } else {
+            pdebug(DEBUG_DETAIL, "Removing tag from session.");
+            session_release(session);
+            tag->session = NULL;
+            //session_remove_tag(session, tag);
+        }
+
+        if (tag->reqs) {
+            mem_free(tag->reqs);
+            tag->reqs = NULL;
+        }
+
+        if (tag->read_req_sizes) {
+            mem_free(tag->read_req_sizes);
+            tag->read_req_sizes = NULL;
+        }
+
+        if (tag->write_req_sizes) {
+            mem_free(tag->write_req_sizes);
+            tag->write_req_sizes = NULL;
+        }
+
+        if (tag->data) {
+            mem_free(tag->data);
+            tag->data = NULL;
+        }
+
+        /* release memory */
+        mem_free(tag);
+
+        pdebug(DEBUG_INFO,"Finished releasing all tag resources.");
     }
-
-    connection = tag->connection;
-    session = tag->session;
-
-    /*
-     * stop any current actions. Note that we
-     * want to use the thread-safe version here.  We
-     * do lock a mutex later, but a different one.
-     */
-    plc_tag_abort_mapped((plc_tag_p)tag);
-
-    /* tags are stored in different locations depending on the type. */
-    if(connection) {
-        pdebug(DEBUG_DETAIL, "Removing tag from connection.");
-        connection_remove_tag(connection, tag);
-    } else {
-        pdebug(DEBUG_DETAIL, "Removing tag from session.");
-        session_remove_tag(session, tag);
-    }
-
-    if (tag->reqs) {
-        mem_free(tag->reqs);
-        tag->reqs = NULL;
-    }
-
-    if (tag->read_req_sizes) {
-        mem_free(tag->read_req_sizes);
-        tag->read_req_sizes = NULL;
-    }
-
-    if (tag->write_req_sizes) {
-        mem_free(tag->write_req_sizes);
-        tag->write_req_sizes = NULL;
-    }
-
-    if (tag->data) {
-        mem_free(tag->data);
-        tag->data = NULL;
-    }
-
-    /* release memory */
-    mem_free(tag);
 
     pdebug(DEBUG_INFO, "done");
 
@@ -458,7 +506,7 @@ int check_cpu(ab_tag_p tag, attr attribs)
 
 int check_tag_name(ab_tag_p tag, const char* name)
 {
-    if (str_cmp(name, "NONE") == 0) {
+    if (!name) {
         pdebug(DEBUG_WARN,"No tag name parameter found!");
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -589,8 +637,8 @@ static void receive_response(ab_session_p session, ab_request_p request)
         session->next_packet_interval_us = SESSION_MIN_PACKET_INTERVAL;
     }
     pdebug(DEBUG_INFO,"Packet received, so decreasing packet interval to %lldus", session->next_packet_interval_us);
-	*/
-	
+    */
+
     pdebug(DEBUG_INFO,"Packet sent initially %dms ago and was sent %d times",(int)(time_ms() - request->time_sent), request->send_count);
 
     update_resend_samples(session, time_ms() - request->time_sent);
@@ -677,7 +725,7 @@ int ok_to_resend(ab_session_p session, ab_request_p request)
     if((request->time_sent + session->retry_interval) > time_ms()) {
         return 0;
     }
-    
+
     pdebug(DEBUG_INFO,"Request waited %lldms, need to resend.",(time_ms() - request->time_sent));
 
     return 1;
@@ -847,20 +895,20 @@ static int ready_to_send(ab_request_p request)
      * Only allow a few at a time until we figure out the packet loss problem.
      */
     if(request->connection) {
-		for(int index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
-			if(!request->connection->request_in_flight[index]) {
-				pdebug(DEBUG_INFO,"Found open slot at %d",index);
-				return 1;
-			} else {
-				pdebug(DEBUG_INFO,"Slot %d is full.",index);
-			}
-		}
-		
-		pdebug(DEBUG_INFO,"No open slots to send.");
-	
-		return 0;
+        for(int index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
+            if(!request->connection->request_in_flight[index]) {
+                pdebug(DEBUG_INFO,"Found open slot at %d",index);
+                return 1;
+            } else {
+                pdebug(DEBUG_INFO,"Slot %d is full.",index);
+            }
+        }
+
+        pdebug(DEBUG_INFO,"No open slots to send.");
+
+        return 0;
     }
-    
+
     /* not a connected message, so OK to send. */
     return 1;
 }
@@ -868,17 +916,17 @@ static int ready_to_send(ab_request_p request)
 
 static int handle_abort_request(ab_request_p request)
 {
-	int rc = PLCTAG_STATUS_OK;
-	
-	/* clear any in flight markers. */
-	clear_connection_for_request(request);
-	clear_session_for_request(request);
+    int rc = PLCTAG_STATUS_OK;
 
-	rc = request_remove_unsafe(request->session,request);
+    /* clear any in flight markers. */
+    clear_connection_for_request(request);
+    clear_session_for_request(request);
 
-	request_destroy_unsafe(&request);
+    rc = request_remove_unsafe(request->session,request);
 
-	return rc;
+    request_destroy_unsafe(&request);
+
+    return rc;
 }
 
 static int session_check_outgoing_data_unsafe(ab_session_p session)
@@ -890,27 +938,27 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
     /* loop over the requests and process them one at a time. */
     while(request && rc == PLCTAG_STATUS_OK) {
         if(request->abort_request) {
-			ab_request_p old_request = request;
+            ab_request_p old_request = request;
 
             /* skip to the next one */
             request = request->next;
 
-			rc = handle_abort_request(old_request);
-			
+            rc = handle_abort_request(old_request);
+
             continue;
         }
-        
+
         /* check resending */
         if(ok_to_resend(session, request)) {
             handle_resend(session, request);
         }
 
-		/* count requests in flight */
+        /* count requests in flight */
         if(request->recv_in_progress && request->serial_request) {
-			requests_in_flight++;
-		}
+            requests_in_flight++;
+        }
 
-		pdebug(DEBUG_INFO,"%d requests in flight.", requests_in_flight);
+        pdebug(DEBUG_INFO,"%d requests in flight.", requests_in_flight);
 
         /* is there a request ready to send and can we send? */
         if(!session->current_request && request->send_request && /*ready_to_send(request)*/ requests_in_flight < SESSION_MAX_REQUESTS_IN_FLIGHT) {
@@ -918,9 +966,9 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
             pdebug(DEBUG_INFO,"Readying packet to send.");
             session->current_request = request;
             requests_in_flight++;
-			pdebug(DEBUG_INFO,"sending packet, so %d requests in flight.", requests_in_flight);
+            pdebug(DEBUG_INFO,"sending packet, so %d requests in flight.", requests_in_flight);
         }
-        
+
         /* call this often to make sure we get the data out. */
         rc = session_send_current_request(session);
 
