@@ -19,24 +19,19 @@
  ***************************************************************************/
 
 
+#include <lib/libplctag.h>
 #include <platform.h>
-$include <util/refcount.h>
+#include <util/refcount.h>
+#include <util/debug.h>
 
 
-struct refcount {
-    int count;
-    lock_t lock;
-    void *data;
-    void (*delete_func)(void *data);
-};
 
-
-extern refcount refcount_init(int count, void *data, void (*delete_func)(void *data))
+refcount refcount_init(int count, void *data, void (*delete_func)(void *data))
 {
     refcount rc;
 
     rc.count = count;
-    rc.lock = INIT_LOCK;
+    rc.lock = LOCK_INIT;
     rc.data = data;
     rc.delete_func = delete_func;
 
@@ -44,7 +39,7 @@ extern refcount refcount_init(int count, void *data, void (*delete_func)(void *d
 }
 
 /* must be called with a mutex held! */
-extern int refcount_acquire(refcount *rc)
+int refcount_acquire(refcount *rc)
 {
     int count;
 
@@ -69,7 +64,7 @@ extern int refcount_acquire(refcount *rc)
 }
 
 
-extern int refcount_release(refcount *rc)
+int refcount_release(refcount *rc)
 {
     int count;
 
@@ -83,6 +78,11 @@ extern int refcount_release(refcount *rc)
     }
 
     rc->count--;
+    
+    if(rc->count < 0) {
+		rc->count = 0;
+	}
+	
     count = rc->count;
 
     /* release the lock so that other things can get to it. */
@@ -94,11 +94,29 @@ extern int refcount_release(refcount *rc)
         pdebug(DEBUG_INFO,"Calling destructor function.");
 
         rc->delete_func(rc->data);
-
-        /* do not return negatives, those are errors. */
-        count = 0;
     }
 
     return count;
+}
+
+int refcount_get_count(refcount *rc)
+{
+    int count;
+
+    if(!rc) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* loop until we get the lock */
+    while (!lock_acquire(&rc->lock)) {
+        ; /* do nothing, just spin */
+    }
+
+    count = rc->count;
+
+    /* release the lock so that other things can get to it. */
+    lock_release(&rc->lock);
+
+	return count;
 }
 

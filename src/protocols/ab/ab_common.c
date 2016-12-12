@@ -68,10 +68,10 @@ volatile thread_p io_handler_thread = NULL;
 
 
 /* vtables for different kinds of tags */
-struct tag_vtable_t default_vtable /*= { NULL, ab_tag_destroy, NULL, NULL }*/;
-struct tag_vtable_t cip_vtable /*= { ab_tag_abort, ab_tag_destroy, eip_cip_tag_read_start, eip_cip_tag_status, eip_cip_tag_write_start }*/;
-struct tag_vtable_t plc_vtable /*= { ab_tag_abort, ab_tag_destroy, eip_pccc_tag_read_start, eip_pccc_tag_status, eip_pccc_tag_write_start }*/;
-struct tag_vtable_t plc_dhp_vtable /*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
+struct tag_vtable_t default_vtable = {0}/*= { NULL, ab_tag_destroy, NULL, NULL }*/;
+struct tag_vtable_t cip_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_cip_tag_read_start, eip_cip_tag_status, eip_cip_tag_write_start }*/;
+struct tag_vtable_t plc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_pccc_tag_read_start, eip_pccc_tag_status, eip_pccc_tag_write_start }*/;
+struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
 
 
 /* forward declarations*/
@@ -92,6 +92,28 @@ int ab_init(void)
 
     pdebug(DEBUG_INFO,"Initializing AB protocol library.");
 
+    /* set up the vtables. */
+    default_vtable.destroy	= (tag_destroy_func)ab_tag_destroy;
+    
+	plc_dhp_vtable.abort    = (tag_abort_func)ab_tag_abort;
+	plc_dhp_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
+	plc_dhp_vtable.read     = (tag_read_func)eip_dhp_pccc_tag_read_start;
+	plc_dhp_vtable.status   = (tag_status_func)eip_dhp_pccc_tag_status;
+	plc_dhp_vtable.write    = (tag_write_func)eip_dhp_pccc_tag_write_start;
+
+	plc_vtable.abort     	= (tag_abort_func)ab_tag_abort;
+	plc_vtable.destroy   	= (tag_destroy_func)ab_tag_destroy;
+	plc_vtable.read      	= (tag_read_func)eip_pccc_tag_read_start;
+	plc_vtable.status    	= (tag_status_func)eip_pccc_tag_status;
+	plc_vtable.write     	= (tag_write_func)eip_pccc_tag_write_start;
+
+	cip_vtable.abort     	= (tag_abort_func)ab_tag_abort;
+	cip_vtable.destroy   	= (tag_destroy_func)ab_tag_destroy;
+	cip_vtable.read      	= (tag_read_func)eip_cip_tag_read_start;
+	cip_vtable.status    	= (tag_status_func)eip_cip_tag_status;
+	cip_vtable.write     	= (tag_write_func)eip_cip_tag_write_start;
+
+	/* this is a mutex used to synchronize most activities in this protocol */
     rc = mutex_create((mutex_p*)&global_session_mut);
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -99,6 +121,7 @@ int ab_init(void)
         return rc;
     }
 
+	/* create the background IO handler thread */
     rc = thread_create((thread_p*)&io_handler_thread,request_handler_func, 32*1024, NULL);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -117,7 +140,7 @@ plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path;
-    int rc;
+    //~ int rc;
 
     pdebug(DEBUG_INFO,"Starting.");
 
@@ -314,23 +337,23 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
     switch(tag->protocol_type) {
         case AB_PROTOCOL_PLC:
             if(tag->use_dhp_direct) {
-                if(!plc_dhp_vtable.abort) {
-                    plc_dhp_vtable.abort     = (tag_abort_func)ab_tag_abort;
-                    plc_dhp_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
-                    plc_dhp_vtable.read      = (tag_read_func)eip_dhp_pccc_tag_read_start;
-                    plc_dhp_vtable.status    = (tag_status_func)eip_dhp_pccc_tag_status;
-                    plc_dhp_vtable.write     = (tag_write_func)eip_dhp_pccc_tag_write_start;
-                }
+                //~ if(!plc_dhp_vtable.abort) {
+                    //~ plc_dhp_vtable.abort     = (tag_abort_func)ab_tag_abort;
+                    //~ plc_dhp_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
+                    //~ plc_dhp_vtable.read      = (tag_read_func)eip_dhp_pccc_tag_read_start;
+                    //~ plc_dhp_vtable.status    = (tag_status_func)eip_dhp_pccc_tag_status;
+                    //~ plc_dhp_vtable.write     = (tag_write_func)eip_dhp_pccc_tag_write_start;
+                //~ }
 
                 return &plc_dhp_vtable;
             } else {
-                if(!plc_vtable.abort) {
-                    plc_vtable.abort     = (tag_abort_func)ab_tag_abort;
-                    plc_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
-                    plc_vtable.read      = (tag_read_func)eip_pccc_tag_read_start;
-                    plc_vtable.status    = (tag_status_func)eip_pccc_tag_status;
-                    plc_vtable.write     = (tag_write_func)eip_pccc_tag_write_start;
-                }
+                //~ if(!plc_vtable.abort) {
+                    //~ plc_vtable.abort     = (tag_abort_func)ab_tag_abort;
+                    //~ plc_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
+                    //~ plc_vtable.read      = (tag_read_func)eip_pccc_tag_read_start;
+                    //~ plc_vtable.status    = (tag_status_func)eip_pccc_tag_status;
+                    //~ plc_vtable.write     = (tag_write_func)eip_pccc_tag_write_start;
+                //~ }
 
                 return &plc_vtable;
             }
@@ -338,13 +361,13 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
             break;
 
         case AB_PROTOCOL_MLGX:
-            if(!plc_vtable.abort) {
-                plc_vtable.abort     = (tag_abort_func)ab_tag_abort;
-                plc_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
-                plc_vtable.read      = (tag_read_func)eip_pccc_tag_read_start;
-                plc_vtable.status    = (tag_status_func)eip_pccc_tag_status;
-                plc_vtable.write     = (tag_write_func)eip_pccc_tag_write_start;
-            }
+            //~ if(!plc_vtable.abort) {
+                //~ plc_vtable.abort     = (tag_abort_func)ab_tag_abort;
+                //~ plc_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
+                //~ plc_vtable.read      = (tag_read_func)eip_pccc_tag_read_start;
+                //~ plc_vtable.status    = (tag_status_func)eip_pccc_tag_status;
+                //~ plc_vtable.write     = (tag_write_func)eip_pccc_tag_write_start;
+            //~ }
 
             return &plc_vtable;
 
@@ -352,13 +375,13 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
 
         case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
-            if(!cip_vtable.abort) {
-                cip_vtable.abort     = (tag_abort_func)ab_tag_abort;
-                cip_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
-                cip_vtable.read      = (tag_read_func)eip_cip_tag_read_start;
-                cip_vtable.status    = (tag_status_func)eip_cip_tag_status;
-                cip_vtable.write     = (tag_write_func)eip_cip_tag_write_start;
-            }
+            //~ if(!cip_vtable.abort) {
+                //~ cip_vtable.abort     = (tag_abort_func)ab_tag_abort;
+                //~ cip_vtable.destroy   = (tag_destroy_func)ab_tag_destroy;
+                //~ cip_vtable.read      = (tag_read_func)eip_cip_tag_read_start;
+                //~ cip_vtable.status    = (tag_status_func)eip_cip_tag_status;
+                //~ cip_vtable.write     = (tag_write_func)eip_cip_tag_write_start;
+            //~ }
 
             return &cip_vtable;
 
@@ -387,7 +410,13 @@ int ab_tag_abort(ab_tag_p tag)
 
     for (i = 0; i < tag->max_requests; i++) {
         if (tag->reqs && tag->reqs[i]) {
+			/* if any activity is still happening, signal the IO thread to kill the request */
             tag->reqs[i]->abort_request = 1;
+            
+            /* release our hold on the request */
+            request_release(tag->reqs[i]);
+            
+            /* we are not holding on to this anymore */
             tag->reqs[i] = NULL;
         }
     }
@@ -413,7 +442,7 @@ int ab_tag_destroy(ab_tag_p tag)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* FIXME - this is going to serialize everything. */
-    critical_block(global_library_mutex) {
+    //critical_block(global_library_mutex) {
         ab_connection_p connection = NULL;
         ab_session_p session = NULL;
 
@@ -421,7 +450,8 @@ int ab_tag_destroy(ab_tag_p tag)
         if (!tag) {
             pdebug(DEBUG_WARN,"Tag pointer is null!");
             rc = PLCTAG_ERR_NULL_PTR;
-            break;
+            //~ break;
+            return rc;
         }
 
         connection = tag->connection;
@@ -432,6 +462,7 @@ int ab_tag_destroy(ab_tag_p tag)
          * want to use the thread-safe version here.  We
          * do lock a mutex later, but a different one.
          */
+        /* remove - this is already called by the main library code. */
         plc_tag_abort_mapped((plc_tag_p)tag);
 
         /* tags are stored in different locations depending on the type. */
@@ -440,7 +471,9 @@ int ab_tag_destroy(ab_tag_p tag)
             connection_release(connection);
             tag->connection = NULL;
             //connection_remove_tag(connection, tag);
-        } else {
+        } 
+        
+        if(session) {
             pdebug(DEBUG_DETAIL, "Removing tag from session.");
             session_release(session);
             tag->session = NULL;
@@ -471,7 +504,7 @@ int ab_tag_destroy(ab_tag_p tag)
         mem_free(tag);
 
         pdebug(DEBUG_INFO,"Finished releasing all tag resources.");
-    }
+    //}
 
     pdebug(DEBUG_INFO, "done");
 
@@ -657,43 +690,43 @@ static void receive_response(ab_session_p session, ab_request_p request)
     request->recv_in_progress = 0;
 
     /* mark the connection as available if we need to */
-    clear_connection_for_request(request);
-    clear_session_for_request(request);
+    //~ clear_connection_for_request(request);
+    //~ clear_session_for_request(request);
 }
 
 
-static void handle_resend(ab_session_p session, ab_request_p request)
-{
-    eip_encap_t *encap = (eip_encap_t*)(&request->data[0]);
+//~ static void handle_resend(ab_session_p session, ab_request_p request)
+//~ {
+    //~ eip_encap_t *encap = (eip_encap_t*)(&request->data[0]);
 
 
-    //if (encap->encap_command == le2h16(AB_EIP_CONNECTED_SEND)) {
-        pdebug(DEBUG_INFO,"Requeuing connected request connection %d sequence ID %d.", request->conn_id,request->conn_seq);
+    //~ //if (encap->encap_command == le2h16(AB_EIP_CONNECTED_SEND)) {
+        //~ pdebug(DEBUG_INFO,"Requeuing connected request connection %d sequence ID %d.", request->conn_id,request->conn_seq);
 
-        request->recv_in_progress = 0;
-        request->send_request = 1;
+        //~ request->recv_in_progress = 0;
+        //~ request->send_request = 1;
 
-        /*
-         * Change the packet interval.  We lost a packet, so we should
-         * back off a bit.
-         */
-        /*
-        session->next_packet_interval_us += SESSION_PACKET_LOSS_INTERVAL_INC;
-        if(session->next_packet_interval_us > SESSION_MAX_PACKET_INTERVAL) {
-            session->next_packet_interval_us = SESSION_MAX_PACKET_INTERVAL;
-        }
-        */
-        /* delay the next packet directly */
-        //session->next_packet_time_us += session->next_packet_interval_us;
+        //~ /*
+         //~ * Change the packet interval.  We lost a packet, so we should
+         //~ * back off a bit.
+         //~ */
+        //~ /*
+        //~ session->next_packet_interval_us += SESSION_PACKET_LOSS_INTERVAL_INC;
+        //~ if(session->next_packet_interval_us > SESSION_MAX_PACKET_INTERVAL) {
+            //~ session->next_packet_interval_us = SESSION_MAX_PACKET_INTERVAL;
+        //~ }
+        //~ */
+        //~ /* delay the next packet directly */
+        //~ //session->next_packet_time_us += session->next_packet_interval_us;
 
-        /* make sure that we clear this packet from the session if we need to. */
-        //clear_session_for_request(request);
+        //~ /* make sure that we clear this packet from the session if we need to. */
+        //~ //clear_session_for_request(request);
 
-        //pdebug(DEBUG_INFO,"packet lost, so increasing packet interval to %lldus", session->next_packet_interval_us);
-    //} else {
-        //pdebug(DEBUG_INFO,"Not requeuing unconnected request session sequence %llx", request->session_seq_id);
-    //}
-}
+        //~ //pdebug(DEBUG_INFO,"packet lost, so increasing packet interval to %lldus", session->next_packet_interval_us);
+    //~ //} else {
+        //~ //pdebug(DEBUG_INFO,"Not requeuing unconnected request session sequence %llx", request->session_seq_id);
+    //~ //}
+//~ }
 
 
 int ok_to_resend(ab_session_p session, ab_request_p request)
@@ -876,58 +909,59 @@ static int session_send_current_request(ab_session_p session)
  * Check to see if the session should send a request to the PLC.
  * This implements the checks for throttling.
  */
-static int ready_to_send(ab_request_p request)
-{
-    /* is there already a request being sent? */
-    if(request->session->current_request) {
-        return 0;
-    }
+//~ static int ready_to_send(ab_request_p request)
+//~ {
+    //~ /* is there already a request being sent? */
+    //~ if(request->session->current_request) {
+        //~ return 0;
+    //~ }
 
-    /* is this a serialized packet?  If so, are we already sending one? */
-    if(request->serial_request && request->session->serial_request_in_flight) {
-        return 0;
-    }
+    //~ /* is this a serialized packet?  If so, are we already sending one? */
+    //~ if(request->serial_request && request->session->serial_request_in_flight) {
+        //~ return 0;
+    //~ }
 
-    /*
-     * if this is a connected request type, then check the connection
-     * to make sure that we do not have a packet in flight.
-     *
-     * Only allow a few at a time until we figure out the packet loss problem.
-     */
-    if(request->connection) {
-        for(int index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
-            if(!request->connection->request_in_flight[index]) {
-                pdebug(DEBUG_INFO,"Found open slot at %d",index);
-                return 1;
-            } else {
-                pdebug(DEBUG_INFO,"Slot %d is full.",index);
-            }
-        }
+    //~ /*
+     //~ * if this is a connected request type, then check the connection
+     //~ * to make sure that we do not have a packet in flight.
+     //~ *
+     //~ * Only allow a few at a time until we figure out the packet loss problem.
+     //~ */
+    //~ if(request->connection) {
+        //~ for(int index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
+            //~ if(!request->connection->request_in_flight[index]) {
+                //~ pdebug(DEBUG_INFO,"Found open slot at %d",index);
+                //~ return 1;
+            //~ } else {
+                //~ pdebug(DEBUG_INFO,"Slot %d is full.",index);
+            //~ }
+        //~ }
 
-        pdebug(DEBUG_INFO,"No open slots to send.");
+        //~ pdebug(DEBUG_INFO,"No open slots to send.");
 
-        return 0;
-    }
+        //~ return 0;
+    //~ }
 
-    /* not a connected message, so OK to send. */
-    return 1;
-}
+    //~ /* not a connected message, so OK to send. */
+    //~ return 1;
+//~ }
 
 
-static int handle_abort_request(ab_request_p request)
-{
-    int rc = PLCTAG_STATUS_OK;
+//~ static int handle_abort_request(ab_request_p request)
+//~ {
+    //~ int rc = PLCTAG_STATUS_OK;
 
-    /* clear any in flight markers. */
-    clear_connection_for_request(request);
-    clear_session_for_request(request);
+    //~ /* clear any in flight markers. */
+    //~ clear_connection_for_request(request);
+    //~ clear_session_for_request(request);
 
-    rc = request_remove_unsafe(request->session,request);
+    //~ rc = session_remove_request_unsafe(request->session,request);
 
-    request_destroy_unsafe(&request);
+    //~ //request_destroy_unsafe(&request);
+    //~ request_release(request);
 
-    return rc;
-}
+    //~ return rc;
+//~ }
 
 static int session_check_outgoing_data_unsafe(ab_session_p session)
 {
@@ -943,14 +977,22 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
             /* skip to the next one */
             request = request->next;
 
-            rc = handle_abort_request(old_request);
+            //~ rc = handle_abort_request(old_request);
+			rc = session_remove_request_unsafe(session,old_request);
+
+			//request_destroy_unsafe(&old_request);
+			//~ request_release(old_request);
 
             continue;
         }
 
         /* check resending */
         if(ok_to_resend(session, request)) {
-            handle_resend(session, request);
+            //~ handle_resend(session, request);
+			pdebug(DEBUG_INFO,"Requeuing connected request connection %d sequence ID %d.", request->conn_id,request->conn_seq);
+
+			request->recv_in_progress = 0;
+			request->send_request = 1;
         }
 
         /* count requests in flight */

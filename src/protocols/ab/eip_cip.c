@@ -499,11 +499,13 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
     req->serial_request = 1;
 
     /* add the request to the session's list. */
-    rc = request_add(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        request_destroy(&req);
+        ab_tag_abort(tag);
+        //~ request_destroy(&req);
+        request_release(req);
         return rc;
     }
 
@@ -625,11 +627,13 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     req->send_request = 1;
 
     /* add the request to the session's list. */
-    rc = request_add(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to add request to session! rc=%d", rc);
-        request_destroy(&req);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        ab_tag_abort(tag);
+        //~ request_destroy(&req);
+        request_release(req);
         return rc;
     }
 
@@ -745,12 +749,13 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
     req->connection = tag->connection;
 
     /* add the request to the session's list. */
-    rc = request_add(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to lock add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
         ab_tag_abort(tag);
-        request_destroy(&req);
+        //~ request_destroy(&req);
+        request_release(req);
         return rc;
     }
 
@@ -899,12 +904,13 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     req->serial_request = 1;
 
     /* add the request to the session's list. */
-    rc = request_add(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
         ab_tag_abort(tag);
-        request_destroy(&req);
+        //~ request_destroy(&req);
+        request_release(req);
         return rc;
     }
 

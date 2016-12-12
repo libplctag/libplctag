@@ -55,7 +55,7 @@ int send_eip_request_unsafe(ab_request_p req)
             encap->encap_sender_context = req->session->session_seq_id; /* link up the request seq ID and the packet seq ID */
             
             /* mark the session as being used if this is a serialized packet */
-            mark_session_for_request(req);
+            //~ mark_session_for_request(req);
 
             pdebug(DEBUG_INFO,"Sending unconnected packet with session sequence ID %llx",req->session->session_seq_id);
         } else {
@@ -70,7 +70,7 @@ int send_eip_request_unsafe(ab_request_p req)
             req->conn_seq = req->connection->conn_seq_num;  
             
             /* mark the connection as being used. */
-			mark_connection_for_request(req);
+			//~ mark_connection_for_request(req);
 			
             pdebug(DEBUG_INFO,"Sending connected packet with connection ID %x and sequence ID %u(%x)",req->conn_id, req->conn_seq, req->conn_seq);
         }

@@ -18,12 +18,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <libplctag.h>
+#include <lib/libplctag.h>
+#include <lib/libplctag_tag.h>
 #include <platform.h>
-#include <init.h>
-#include <libplctag_tag.h>
+#include <util/debug.h>
 #include <ab/ab.h>
-
 
 static lock_t library_initialization_lock = LOCK_INIT;
 static volatile int library_initialized = 0;
@@ -38,7 +37,7 @@ int initialize_modules(void)
     }
 
     if(!library_initialized) {
-        pebug(DEBUG_INFO,"Initialized library modules.");
+        pdebug(DEBUG_INFO,"Initialized library modules.");
         rc = lib_init();
 
         if(rc == PLCTAG_STATUS_OK) {

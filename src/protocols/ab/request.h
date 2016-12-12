@@ -29,6 +29,7 @@
 #define __PLCTAG_AB_REQUEST_H__ 1
 
 #include <ab/ab_common.h>
+#include <util/refcount.h>
 
 
 #define MAX_REQ_RESP_SIZE   (768) /* enough? */
@@ -57,6 +58,9 @@ struct ab_request_t {
 
     /* used when processing a response */
     int processed;
+    
+    /* reference count information */
+    refcount rc;
 
     ab_session_p session;
     ab_connection_p connection;
@@ -80,12 +84,10 @@ struct ab_request_t {
 
 
 int request_create(ab_request_p *req);
-int request_add_unsafe(ab_session_p sess, ab_request_p req);
-int request_add(ab_session_p sess, ab_request_p req);
-int request_remove_unsafe(ab_session_p sess, ab_request_p req);
-int request_remove(ab_session_p sess, ab_request_p req);
-int request_destroy_unsafe(ab_request_p* req_pp);
-int request_destroy(ab_request_p *req);
+int request_acquire(ab_request_p req);
+int request_release(ab_request_p req);
+//~ int request_destroy_unsafe(ab_request_p* req_pp);
+//~ int request_destroy(ab_request_p *req);
 
 
 

@@ -25,12 +25,21 @@
 #include <platform.h>
 
 
+struct refcount {
+    int count;
+    lock_t lock;
+    void *data;
+    void (*delete_func)(void *data);
+};
+
+
 typedef struct refcount refcount;
 
 
 extern refcount refcount_init(int count, void *data, void (*delete_func)(void *data));
 extern int refcount_acquire(refcount *rc);
 extern int refcount_release(refcount *rc);
+extern int refcount_get_count(refcount *rc);
 
 
 #endif

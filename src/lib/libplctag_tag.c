@@ -36,6 +36,7 @@
 #include <float.h>
 #include <lib/libplctag.h>
 #include <lib/libplctag_tag.h>
+#include <lib/init.h>
 #include <platform.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -149,7 +150,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     //    return PLC_TAG_NULL;
     //}
 
-    if(initalize_modules() != PLCTAG_STATUS_OK) {
+    if(initialize_modules() != PLCTAG_STATUS_OK) {
         return PLC_TAG_NULL;
     }
 
@@ -376,7 +377,7 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag_id)
 
 int plc_tag_destroy_mapped(plc_tag_p tag)
 {
-    mutex_p tmp_mutex;
+    //mutex_p tmp_mutex;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -386,14 +387,25 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* if we have a mutex, use it. */
-    if(tag->mut) {
-        /* we need to hang onto the mutex for later. */
-        tmp_mutex = tag->mut;
-        rc = mutex_lock(tmp_mutex);
-    }
+    ///* if we have a mutex, use it. */
+    //if(tag->mut) {
+        ///* we need to hang onto the mutex for later. */
+        //tmp_mutex = tag->mut;
+        //rc = mutex_lock(tmp_mutex);
+    //}
+    mutex_destroy(&tag->mut);
 
-    /* first, unmap the tag. */
+    /* 
+     * first, unmap the tag.  
+     * 
+     * This might be called from something other than plc_tag_destroy, so
+     * do not make assumptions that this was already done.  However, it is
+     * required that if this is called directly, then it must always be
+     * the case that the tag has not been handed to the library client!
+     * 
+     * If that happens, then it is possible that two threads could try to
+     * delete the same tag at the same time.
+     */
     pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
     release_tag_to_id_mapping(tag);
 
@@ -413,11 +425,12 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
         rc = tag->vtable->destroy(tag);
     }
 
-    /* free the mutex if we had one. */
-    if(tmp_mutex) {
-        rc = mutex_unlock(tmp_mutex);
-        mutex_destroy(&tmp_mutex);
-    }
+    ///* free the mutex if we had one. */
+    //if(tmp_mutex) {
+        //rc = mutex_unlock(tmp_mutex);
+        //mutex_destroy(&tmp_mutex);
+    //}
+    
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -431,11 +444,24 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+	/* is the tag still valid? */
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag is null or not mapped!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
+	/*
+	 * We get the tag mapping, then we remove it.  If it is
+	 * already removed (due to simultaneous calls by threads
+	 * to the library), then we skip to the end.
+	 */
+    
+    rc = release_tag_to_id_mapping(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+		return rc;
+	}
+
+	/* the tag was still mapped, so destroy it. */
     rc = plc_tag_destroy_mapped(tag);
 
     pdebug(DEBUG_INFO, "Done.");

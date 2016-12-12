@@ -87,6 +87,7 @@ struct ab_connection_t {
 
 extern int connection_find_or_create(ab_tag_p tag, attr attribs);
 //extern int connection_acquire(ab_connection_p connection);
+extern int connection_acquire(ab_connection_p connection);
 extern int connection_release(ab_connection_p connection);
 
 

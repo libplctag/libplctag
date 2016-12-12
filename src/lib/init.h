@@ -22,6 +22,6 @@
 #define __LIB_INIT_H__ 1
 
 
-extern initialize_modules(void);
+extern int initialize_modules(void);
 
 #endif
