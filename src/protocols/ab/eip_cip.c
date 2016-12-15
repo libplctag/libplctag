@@ -43,6 +43,7 @@
 #include <ab/tag.h>
 #include <ab/session.h>
 #include <ab/eip_cip.h>
+#include <ab/error_codes.h>
 #include <util/attr.h>
 #include <util/debug.h>
 
@@ -1019,8 +1020,8 @@ static int check_read_status_connected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: %d", cip_resp->status);
-            pdebug(DEBUG_WARN, cip_decode_status(cip_resp->status));
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
+            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
 
             switch (cip_resp->status) {
                 case 0x04: /* FIXME - should be defined constants */
@@ -1271,8 +1272,8 @@ static int check_read_status_unconnected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: %d", cip_resp->status);
-            pdebug(DEBUG_WARN, cip_decode_status(cip_resp->status));
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
+            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
 
             switch (cip_resp->status) {
                 case 0x04: /* FIXME - should be defined constants */
