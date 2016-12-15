@@ -68,6 +68,8 @@ int request_acquire(ab_request_p req)
 		return PLCTAG_ERR_NULL_PTR;
 	}
 	
+	pdebug(DEBUG_INFO,"Acquiring request.");
+	
 	return refcount_acquire(&req->rc);
 }
 
@@ -77,6 +79,8 @@ int request_release(ab_request_p req)
 	if(!req) {
 		return PLCTAG_ERR_NULL_PTR;
 	}
+	
+	pdebug(DEBUG_INFO,"Releasing request.");
 	
 	return refcount_release(&req->rc);
 }

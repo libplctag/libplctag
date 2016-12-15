@@ -141,6 +141,8 @@ int connection_acquire(ab_connection_p connection)
 		return PLCTAG_ERR_NULL_PTR;
 	}
 	
+	pdebug(DEBUG_INFO,"Acquire connection.");
+	
     return refcount_acquire(&connection->rc);
 }
 
@@ -149,6 +151,8 @@ int connection_release(ab_connection_p connection)
 	if(!connection) {
 		return PLCTAG_ERR_NULL_PTR;
 	}
+
+	pdebug(DEBUG_INFO,"Release connection.");
 	
     return refcount_release(&connection->rc);
 }

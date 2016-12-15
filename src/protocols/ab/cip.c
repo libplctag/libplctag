@@ -315,61 +315,61 @@ int cip_encode_path(ab_tag_p tag, const char *path)
 
 
 
-char *cip_decode_status(int status)
-{
-    switch(status) {
-        case 0x01:
-            /* FIXME - this should handle the extended error codes */
-            return "Connection error!";
-            break;
+//~ char *cip_decode_status(int status)
+//~ {
+    //~ switch(status) {
+        //~ case 0x01:
+            //~ /* FIXME - this should handle the extended error codes */
+            //~ return "Connection error!";
+            //~ break;
 
-        case 0x02:
-            return "Insufficient resources!";
-            break;
+        //~ case 0x02:
+            //~ return "Insufficient resources!";
+            //~ break;
 
-        case 0x03:
-            return "Value invalid!"; /* huh? */
-            break;
+        //~ case 0x03:
+            //~ return "Value invalid!"; /* huh? */
+            //~ break;
 
-        case 0x04:
-            return "Bad or indecipherable IOI or tag not found!";
-            break;
+        //~ case 0x04:
+            //~ return "Bad or indecipherable IOI or tag not found!";
+            //~ break;
 
-        case 0x05:
-            return "Unknown destination, tag or item!";
-            break;
+        //~ case 0x05:
+            //~ return "Unknown destination, tag or item!";
+            //~ break;
 
-        case 0x06:
-            return "Response too large, partial data transfered!";
-            break;
+        //~ case 0x06:
+            //~ return "Response too large, partial data transfered!";
+            //~ break;
 
-        case 0x0A:
-            return "Error processing attributes!";
-            break;
+        //~ case 0x0A:
+            //~ return "Error processing attributes!";
+            //~ break;
 
-        case 0x13:
-            return "Insufficient data/params to process request!";
-            break;
+        //~ case 0x13:
+            //~ return "Insufficient data/params to process request!";
+            //~ break;
 
-        case 0x1C:
-            return "Insufficient attributes to process request!";
-            break;
+        //~ case 0x1C:
+            //~ return "Insufficient attributes to process request!";
+            //~ break;
 
-        case 0x26:
-            return "IOI word length does not match IOI length processed!";
-            break;
+        //~ case 0x26:
+            //~ return "IOI word length does not match IOI length processed!";
+            //~ break;
 
-        case 0xFF:
+        //~ case 0xFF:
 
-            /* extended status */
+            //~ /* extended status */
 
-        default:
-            return "Unknown error status.";
-            break;
-    }
+        //~ default:
+            //~ return "Unknown error status.";
+            //~ break;
+    //~ }
 
-    return "Unknown error status.";
-}
+    //~ return "Unknown error status.";
+//~ }
 
 
 

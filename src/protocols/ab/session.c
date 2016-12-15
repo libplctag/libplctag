@@ -704,7 +704,7 @@ void session_destroy(void *session_arg)
 		while(req) {
 			session_remove_request_unsafe(session, req);
 			//~ request_destroy_unsafe(&req);
-			request_release(req);
+			//request_release(req);
 			req = session->requests;
 		}
 
@@ -1096,6 +1096,8 @@ int session_acquire(ab_session_p session)
     if(!session) {
         return PLCTAG_ERR_NULL_PTR;
     }
+    
+    pdebug(DEBUG_INFO,"Acquire session.");
 
     return refcount_acquire(&session->rc);
 }
@@ -1106,6 +1108,8 @@ int session_release(ab_session_p session)
     if(!session) {
         return PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_INFO,"Release session.");
 
     return refcount_release(&session->rc);
 }

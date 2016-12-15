@@ -1510,8 +1510,8 @@ static int check_write_status_connected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: %d", cip_resp->status);
-            pdebug(DEBUG_WARN, cip_decode_status(cip_resp->status));
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
+            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -1591,8 +1591,8 @@ int check_write_status_unconnected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: %d", cip_resp->status);
-            pdebug(DEBUG_WARN, cip_decode_status(cip_resp->status));
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
+            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
