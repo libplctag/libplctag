@@ -225,11 +225,10 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    timeout = 500;
+    timeout = time_ms() + 500;
 
-    while(timeout>0 && plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
+    while(timeout>time_ms() && plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
         sleep_ms(100);
-        timeout -= 100;
     }
 
     rc = plc_tag_status(tag);

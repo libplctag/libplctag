@@ -117,7 +117,10 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
 }
 
 
-extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
+static const char *debug_level_name[DEBUG_END] = {"NONE","ERROR","WARN","INFO","DETAIL"};
+
+
+extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...)
 {
     va_list va;
     char output[2048];
@@ -132,7 +135,7 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
 	}
 
     /* create the output string template */
-    snprintf(output, sizeof(output),"%s %s:%d %s\n",prefix, func, line_num, templ);
+    snprintf(output, sizeof(output),"%s %s %s:%d %s\n",prefix, debug_level_name[debug_level], func, line_num, templ);
 
 	/* make sure it is zero terminated */
 	output[sizeof(output)-1] = 0;
@@ -148,7 +151,7 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
 
 #define COLUMNS (10)
 
-extern void pdebug_dump_bytes_impl(const char *func, int line_num, uint8_t *data,int count)
+extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
 {
     int max_row, row, column, offset;
     char prefix[48]; /* MAGIC */
@@ -170,7 +173,7 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, uint8_t *data
         offset = (row * COLUMNS);
         
         /* print the prefix and address */
-        row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s:%d %05d ", prefix, func, line_num, offset);
+        row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s %s:%d %05d", prefix, debug_level_name[debug_level], func, line_num, offset);
         
         for(column = 0; column < COLUMNS && offset < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;

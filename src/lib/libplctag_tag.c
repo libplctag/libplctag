@@ -238,7 +238,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     }
 
     /* everything was good with the tag set up. */
-    tag->status = PLCTAG_STATUS_OK;
+    //~ tag->status = PLCTAG_STATUS_OK;
 
     /*
      * Release memory for attributes

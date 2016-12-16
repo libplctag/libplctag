@@ -186,12 +186,20 @@ plc_tag_p ab_tag_create(attr attribs)
         pdebug(DEBUG_ERROR,"Unable to allocate memory for AB EIP tag!");
         return PLC_TAG_P_NULL;
     }
+    
+    /* 
+     * we got far enough to allocate memory, set the default vtable up
+     * in case we need to abort later.
+     */
+     
+    tag->vtable = &default_vtable;
 
     /*
      * check the CPU type.
      *
      * This determines the protocol type.
      */
+     
     if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"CPU type not valid or missing.");
         tag->status = PLCTAG_ERR_BAD_DEVICE;
@@ -322,6 +330,7 @@ plc_tag_p ab_tag_create(attr attribs)
         /* Find or create a connection.*/
         if((tag->status = connection_find_or_create(tag, attribs)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_INFO,"Unable to create connection! Status=%d",tag->status);
+            return (plc_tag_p)tag;
         }
 
         /* set up the links between the tag and the connection. */
