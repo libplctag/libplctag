@@ -28,6 +28,21 @@ struct error_code_entry {
 	const char *long_desc;
 };
 
+
+/*
+ * This information was constructed after finding a few online resources.  Most of it comes from publically published manuals for other products.
+ * Sources include:
+ * 	Kepware
+ *  aboutplcs.com (Productivity 3000 manual)
+ *  Allen-Bradley
+ *  and others I have long since lost track of.
+ *
+ * Most probably comes from aboutplcs.com.
+ * 
+ * The copyright on these entries that of their respective owners.  Used here under assumption of Fair Use.
+ */
+
+
 static struct error_code_entry error_code_table[] = {
 	{0x01, 0x0100, "Connection In Use/Duplicate Forward Open", "A connection is already established from the target device sending a Forward Open request or the target device has sent multiple forward open request. This could be caused by poor network traffic. Check the cabling, switches and connections."},
     {0x01, 0x0103, "Transport Class/Trigger Combination not supported", "The Transport class and trigger combination is not supported. The Productivity Suite CPU only supports Class 1 and Class 3 transports and triggers: Change of State and Cyclic."},
@@ -105,20 +120,49 @@ static struct error_code_entry error_code_table[] = {
 	{0x03, -1, "Parameter value invalid.", ""},
     {0x04, -1, "IOI could not be deciphered or tag does not exist.", "The path segment identifier or the segment syntax was not understood by the target device."},
     {0x05, -1, "Path Destination Error", "The Class, Instance or Attribute value specified in the Unconnected Explicit Message request is incorrect or not supported in the Target device. Check the manufacturer's documentation for the correct codes to use."},
-	{0x06, -1, "Data requested would not fit in response packet.", ""},	
+	{0x06, -1, "Data requested would not fit in response packet.", "The data to be read/written needs to be broken up into multiple packets.0x070000 Connection lost: The messaging connection was lost."},
+	{0x07, -1, "Connection lost", "The messaging connection was lost."},
 	{0x08, -1, "Unsupported service.", ""},
     {0x09, -1, "Error in Data Segment", "This error code is returned when an error is encountered in the Data segment portion of a Forward Open message. The Extended Status value is the offset in the Data segment where the error was encountered."},
+	{0x0A, -1, "Attribute list error", "An attribute in the Get_Attribute_List or Set_Attribute_List response has a non-zero status."},
+	{0x0B, -1, "Already in requested mode/state", "The object is already in the mode/state being requested by the service."},
     {0x0C, -1, "Object State Error", "This error is returned from the Target device when the current state of the Object requested does not allow it to be returned. The current state can be specified in the Optional Extended Error status field."},
+	{0x0D, -1, "Object already exists.", "The requested instance of object to be created already exists."},
+	{0x0E, -1, "Attribute not settable", "A request to modify non-modifiable attribute was received."},
 	{0x0F, -1, "Permission denied.", ""},
     {0x10, -1, "Device State Error", "This error is returned from the Target device when the current state of the Device requested does not allow it to be returned. The current state can be specified in the Optional Extended Error status field. Check your configured connections points for other Client devices using this same connection."},
+	{0x11, -1, "Reply data too large", "The data to be transmitted in the response buffer is larger than the allocated response buffer."},
+	{0x12, -1, "Fragmentation of a primitive value", "The service specified an operation that is going to fragment a primitive data value. For example, trying to send a 2 byte value to a REAL data type (4 byte)."},
     {0x13, -1, "Not Enough Data", "Not enough data was supplied in the service request specified."},
+	{0x14, -1, "Attribute not supported.", "The attribute specified in the request is not supported."},
     {0x15, -1, "Too Much Data", "Too much data was supplied in the service request specified."},
-	{0x26, -1, "The number of IOI words specified does not match IOI word count.", ""},
+	{0x16, -1, "Object does not exist.", "The object specified does not exist in the device."},
+	{0x17, -1, "Service fragmentation sequence not in progress.", "The fragmentation sequence for this service is not currently active for this data."},
+	{0x18, -1, "No stored attribute data.", "The attribute data of this object was no saved prior to the requested service."},
+	{0x19, -1, "Store operation failure.", "The attribute data of this object was not saved due to a failure during the attempt."},
+	{0x1A, -1, "Routing failure, request packet too large.", "The service request packet was too large for transmission on a network in the path to the destination."},
+	{0x1B, -1, "Routing failure, response packet too large.", "The service reponse packet was too large for transmission on a network in the path from the destination."},
+	{0x1C, -1, "Missing attribute list entry data.", "The service did not supply an attribute in a list of attributes that was needed by the service to perform the requested behavior."},
+	{0x1D, -1, "Invalid attribute value list.", "The service is returning the list of attributes supplied with status information for those attributes that were invalid."},
+	{0x20, -1, "Invalid parameter.", "A parameter associated with the request was invalid. This code is used when a parameter does meet the requirements defined in an Application Object specification."},
+	{0x21, -1, "Write-once value or medium already written.", "An attempt was made to write to a write-once-medium that has already been written or to modify a value that cannot be change once established."},
+	{0x22, -1, "Invalid Reply Received", "An invalid reply is received (example: service code sent doesn't match service code received.)."},
+	{0x25, -1, "Key failure in path", "The key segment was included as the first segment in the path does not match the destination module."},
+	{0x26, -1, "The number of IOI words specified does not match IOI word count.", "Check the tag length against what was sent."},
+	{0x27, -1, "Unexpected attribute in list", "An attempt was made to set an attribute that is not able to be set at this time."},
+	{0x28, -1, "Invalid Member ID.", "The Member ID specified in the request does not exist in the specified Class/Instance/Attribute."},
+	{0x29, -1, "Member not writable.", "A request to modify a non-modifiable member was received."},
 	{0xFF, 0x2104, "Address is out of range.",""},
 	{0xFF, 0x2105, "Attempt to access beyond the end of the data object.", ""},
 	{0xFF, 0x2107, "The data type is invalid or not supported.", ""},
 	{-1, -1, "Unknown error code.", "Unknown error code."} };
 	
+
+
+
+
+
+
 
 
 const char *decode_cip_error(uint8_t *data, int short_or_long)
