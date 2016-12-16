@@ -49,7 +49,15 @@
 
 #define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
 
-#define SESSION_MAX_REQUESTS_IN_FLIGHT (1)
+/* 
+ * after experimentation, it looks like 2 about the best
+ * balance between packet loss and overall throughput.
+ * 
+ * This gives fairly close to the maximum throughput, but only
+ * about 10% resent packets.
+ */
+
+#define SESSION_MAX_REQUESTS_IN_FLIGHT (2)
 
 struct ab_session_t {
     ab_session_p next;
