@@ -18,6 +18,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdlib.h>
 #include <lib/libplctag.h>
 #include <lib/libplctag_tag.h>
 #include <platform.h>
@@ -26,6 +27,14 @@
 
 static lock_t library_initialization_lock = LOCK_INIT;
 static volatile int library_initialized = 0;
+
+
+void destroy_modules(void)
+{
+	ab_teardown();
+	
+	lib_teardown();
+}
 
 int initialize_modules(void)
 {
@@ -45,6 +54,10 @@ int initialize_modules(void)
         }
 
         library_initialized = 1;
+        
+        /* hook the destructor */
+        atexit(destroy_modules);        
+        
         pdebug(DEBUG_INFO,"Done initializing library modules.");
     }
 

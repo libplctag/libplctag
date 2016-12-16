@@ -55,6 +55,8 @@ volatile mutex_p global_session_mut = NULL;
 /* request/response handling thread */
 volatile thread_p io_handler_thread = NULL;
 
+volatile int library_terminating = 0;
+
 
 
 /*
@@ -80,6 +82,7 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req);
 tag_vtable_p set_tag_vtable(ab_tag_p tag);
 //int setup_session_mutex(void);
 
+/* declare this so that the library initializer can pass it to atexit() */
 
 /*
  * Public functions.
@@ -128,10 +131,33 @@ int ab_init(void)
         pdebug(DEBUG_INFO,"Unable to create request handler thread!");
         return rc;
     }
+    
 
     pdebug(DEBUG_INFO,"Finished initializing AB protocol library.");
 
     return rc;
+}
+
+/*
+ * called when the whole program is going to terminate.
+ */
+void ab_teardown(void)
+{
+	pdebug(DEBUG_INFO,"Releasing global AB protocol resources.");
+	
+	pdebug(DEBUG_INFO,"Terminating IO thread.");
+	/* kill the IO thread first. */
+	library_terminating = 1;
+	
+	/* wait for the thread to die */
+	thread_join(io_handler_thread);
+	thread_destroy((thread_p*)&io_handler_thread);
+	
+	pdebug(DEBUG_INFO,"Freeing global session mutex.");
+	/* clean up the mutex */
+	mutex_destroy((mutex_p*)&global_session_mut);
+	
+	pdebug(DEBUG_INFO,"Done.");
 }
 
 
@@ -1046,6 +1072,9 @@ static void process_session_tasks_unsafe(ab_session_p session)
     }
 }
 
+
+
+
 #ifdef _WIN32
 DWORD __stdcall request_handler_func(LPVOID not_used)
 #else
@@ -1057,7 +1086,7 @@ void* request_handler_func(void* not_used)
     /* garbage code to stop compiler from whining about unused variables */
     pdebug(DEBUG_NONE,"Starting with arg %p",not_used);
 
-    while (1) {
+    while (!library_terminating) {
         /* we need the mutex */
         if (global_session_mut == NULL) {
             pdebug(DEBUG_ERROR, "global_session_mut is NULL!");

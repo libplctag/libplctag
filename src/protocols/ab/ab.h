@@ -33,7 +33,7 @@
 #include <lib/libplctag.h>
 #include <util/attr.h>
 
-
+void ab_teardown(void);
 int ab_init();
 plc_tag_p ab_tag_create(attr attribs);
 

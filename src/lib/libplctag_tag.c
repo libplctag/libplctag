@@ -47,7 +47,7 @@
 static plc_tag_p map_id_to_tag(plc_tag tag_id);
 static int allocate_new_tag_to_id_mapping(plc_tag_p tag);
 static int release_tag_to_id_mapping(plc_tag_p tag);
-static int setup_global_mutex();
+//~ static int setup_global_mutex();
 
 
 
@@ -61,7 +61,37 @@ mutex_p global_library_mutex = NULL;
 
 int lib_init(void)
 {
-    return setup_global_mutex();
+	int rc = PLCTAG_STATUS_OK;
+	
+	pdebug(DEBUG_INFO,"Setting up global library data.");
+	
+	pdebug(DEBUG_INFO,"Initializing library global mutex.");
+
+    /* first see if the mutex is there. */
+    if (!global_library_mutex) {
+        rc = mutex_create((mutex_p*)&global_library_mutex);
+
+        if (rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
+        }
+    }
+    
+    pdebug(DEBUG_INFO,"Done.");
+
+    return rc;
+}
+
+void lib_teardown(void)
+{
+	pdebug(DEBUG_INFO,"Tearing down library.");
+	
+	pdebug(DEBUG_INFO,"Destroying global library mutex.");
+	if(global_library_mutex) {
+		mutex_destroy(&global_library_mutex);
+	}
+	
+	
+	pdebug(DEBUG_INFO,"Done.");
 }
 
 
@@ -1549,31 +1579,31 @@ static int release_tag_to_id_mapping(plc_tag_p tag)
 
 
 
-static int setup_global_mutex(void)
-{
-    int rc = PLCTAG_STATUS_OK;
+//~ static int setup_global_mutex(void)
+//~ {
+    //~ int rc = PLCTAG_STATUS_OK;
 
-    /* loop until we get the lock flag */
-    //while (!lock_acquire((lock_t*)&global_library_mutex_lock)) {
-    //    sleep_ms(1);
-    //}
+    //~ /* loop until we get the lock flag */
+    //~ //while (!lock_acquire((lock_t*)&global_library_mutex_lock)) {
+    //~ //    sleep_ms(1);
+    //~ //}
 
-    pdebug(DEBUG_INFO,"Initializing library global mutex.");
+    //~ pdebug(DEBUG_INFO,"Initializing library global mutex.");
 
-    /* first see if the mutex is there. */
-    if (!global_library_mutex) {
-        rc = mutex_create((mutex_p*)&global_library_mutex);
+    //~ /* first see if the mutex is there. */
+    //~ if (!global_library_mutex) {
+        //~ rc = mutex_create((mutex_p*)&global_library_mutex);
 
-        if (rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
-        }
-    }
+        //~ if (rc != PLCTAG_STATUS_OK) {
+            //~ pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
+        //~ }
+    //~ }
 
-    /* we hold the lock, so clear it.*/
-    //lock_release((lock_t*)&global_library_mutex_lock);
+    //~ /* we hold the lock, so clear it.*/
+    //~ //lock_release((lock_t*)&global_library_mutex_lock);
 
-    return rc;
-}
+    //~ return rc;
+//~ }
 
 
 
