@@ -222,9 +222,8 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort(tag);
-        //~ request_destroy(&req);
-        request_release(req);
+		request_release(req);
+		tag->reqs[0] = NULL;
         return rc;
     }
 
@@ -341,8 +340,12 @@ static int check_read_status(ab_tag_p tag)
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* get rid of the request now */
-    ab_tag_abort(tag);
+    /* clean up the request */
+	session_remove_request(tag->session, req);
+	request_release(req);
+	tag->reqs[0] = NULL;
+	
+	tag->read_in_progress = 0;
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -514,9 +517,8 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort(tag);
-        //~ request_destroy(&req);
-        request_release(req);
+		request_release(req);
+		tag->reqs[0] = NULL;
         return rc;
    }
 
@@ -595,8 +597,12 @@ static int check_write_status(ab_tag_p tag)
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* let the IO thread free the memory. */
-    ab_tag_abort(tag);
+    /* clean up the request */
+	session_remove_request(tag->session, req);
+	request_release(req);
+	tag->reqs[0] = NULL;
+	
+	tag->write_in_progress = 0;
 
     pdebug(DEBUG_WARN,"Done.");
 

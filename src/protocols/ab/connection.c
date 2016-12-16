@@ -366,6 +366,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
      * buffers.
      */
     req->serial_request = 1;
+    req->no_resend = 1; /* do not resend this, leads to problems.*/
 
     /* add the request to the session's list. */
     rc = session_add_request(connection->session, req);

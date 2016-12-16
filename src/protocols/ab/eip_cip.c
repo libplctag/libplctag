@@ -504,9 +504,8 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort(tag);
-        //~ request_destroy(&req);
-        request_release(req);
+		request_release(req);
+		tag->reqs[slot] = NULL;
         return rc;
     }
 
@@ -632,9 +631,8 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort(tag);
-        //~ request_destroy(&req);
-        request_release(req);
+		request_release(req);
+		tag->reqs[slot] = NULL;
         return rc;
     }
 
@@ -754,9 +752,8 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort(tag);
-        //~ request_destroy(&req);
-        request_release(req);
+		request_release(req);
+		tag->reqs[slot] = NULL;
         return rc;
     }
 
@@ -909,9 +906,8 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        ab_tag_abort(tag);
-        //~ request_destroy(&req);
-        request_release(req);
+		request_release(req);
+		tag->reqs[slot] = NULL;
         return rc;
     }
 

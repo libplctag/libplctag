@@ -52,6 +52,7 @@ struct ab_request_t {
     int recv_in_progress;
     int abort_request;
     int abort_after_send; /* for one shot packets */
+    int no_resend; /* do not resend if this is set. */
     int serial_request; /* serialize this packet with respect to other serialized packets. */
 
     int status;

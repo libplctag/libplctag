@@ -783,6 +783,11 @@ int ok_to_resend(ab_session_p session, ab_request_p request)
     if(request->resp_received) {
         return 0;
     }
+    
+    /* does it want a resend? */
+    if(request->no_resend) {
+		return 0;
+	}
 
     /* was the request aborted or should it be aborted? */
     if(request->abort_request || request->abort_after_send) {
@@ -1035,7 +1040,7 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
             requests_in_flight++;
         }
 
-        pdebug(DEBUG_INFO,"%d requests in flight.", requests_in_flight);
+        pdebug(DEBUG_DETAIL,"%d requests in flight.", requests_in_flight);
 
         /* is there a request ready to send and can we send? */
         if(!session->current_request && request->send_request && /*ready_to_send(request)*/ requests_in_flight < SESSION_MAX_REQUESTS_IN_FLIGHT) {
