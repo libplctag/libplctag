@@ -50,14 +50,11 @@
 #define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
 
 /* 
- * after experimentation, it looks like 2 about the best
- * balance between packet loss and overall throughput.
- * 
- * This gives fairly close to the maximum throughput, but only
- * about 10% resent packets.
+ * the queue depth depends on the type of the request.
  */
 
-#define SESSION_MAX_REQUESTS_IN_FLIGHT (2)
+#define SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT (2)
+#define SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT (8)
 
 struct ab_session_t {
     ab_session_p next;
@@ -95,8 +92,8 @@ struct ab_session_t {
     int round_trip_sample_index;
 
     /* serialization control */
-    int serial_request_in_flight;
-    uint64_t serial_seq_in_flight;
+    //~ int serial_request_in_flight;
+    //~ uint64_t serial_seq_in_flight;
 
     /* data for receiving messages */
     uint64_t resp_seq_id;

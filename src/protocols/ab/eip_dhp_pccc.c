@@ -199,7 +199,7 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     req->connection = tag->connection;
 
     /* this request is connected, so it needs the session exclusively */
-    req->serial_request = 1;
+    req->connected_request = 1;
 
     /* mark the request ready for sending */
     req->send_request = 1;
@@ -370,7 +370,7 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
     req->send_request = 1;
 
     /* this request is connected, so it needs the session exclusively */
-    req->serial_request = 1;
+    req->connected_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);

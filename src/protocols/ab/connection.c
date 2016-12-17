@@ -365,7 +365,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
      * control packets.  Apparently, the connection manager has no
      * buffers.
      */
-    req->serial_request = 1;
+    req->connected_request = 1;
     req->no_resend = 1; /* do not resend this, leads to problems.*/
 
     /* add the request to the session's list. */
@@ -751,7 +751,7 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
      * control packets.  Apparently, the connection manager has no
      * buffers.
      */
-    req->serial_request = 1;
+    req->connected_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(connection->session, req);

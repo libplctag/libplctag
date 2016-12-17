@@ -915,7 +915,7 @@ int session_unregister_unsafe(ab_session_p session)
     //~ }
 
     //~ /* if the packet is not requesting serialization, do not do any */
-    //~ if(!request->serial_request) {
+    //~ if(!request->connected_request) {
         //~ return PLCTAG_STATUS_OK;
     //~ }
 
@@ -924,7 +924,7 @@ int session_unregister_unsafe(ab_session_p session)
 
     //~ /* mark the session as in use. */
     //~ pdebug(DEBUG_INFO,"Setting session in flight flags for session sequence ID %llx",request->session->session_seq_id);
-    //~ request->session->serial_request_in_flight = 1;
+    //~ request->session->connected_request_in_flight = 1;
     //~ request->session->serial_seq_in_flight = request->session->session_seq_id;
 
     //~ return rc;
@@ -938,10 +938,10 @@ int session_unregister_unsafe(ab_session_p session)
     //~ if(request->session) {
         //~ ab_session_p session = request->session;
 
-        //~ if(session->serial_request_in_flight) {
+        //~ if(session->connected_request_in_flight) {
             //~ if(session->serial_seq_in_flight == request->session_seq_id) {
                 //~ pdebug(DEBUG_INFO, "Clearing session in flight flags for packet sequence ID %llx", request->session_seq_id);
-                //~ session->serial_request_in_flight = 0;
+                //~ session->connected_request_in_flight = 0;
             //~ } else {
                 //~ pdebug(DEBUG_INFO, "Mismatch between request session sequence ID %llx and session sequence ID %llx", request->session_seq_id, session->serial_seq_in_flight);
             //~ }
@@ -963,8 +963,9 @@ int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p cur, prev;
-
-    pdebug(DEBUG_DETAIL, "Starting.");
+    int total_requests = 0;
+    
+    pdebug(DEBUG_INFO, "Starting.");
 
     if(!sess) {
         pdebug(DEBUG_WARN, "Session is null!");
@@ -981,6 +982,7 @@ int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
     while (cur) {
         prev = cur;
         cur = cur->next;
+        total_requests++;
     }
 
     if (!prev) {
@@ -991,8 +993,10 @@ int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
 
     /* update the request's refcount as we point to it. */
     request_acquire(req);
+    
+    pdebug(DEBUG_INFO,"Total requests in the queue: %d",total_requests);
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }

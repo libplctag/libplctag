@@ -957,7 +957,7 @@ static int session_send_current_request(ab_session_p session)
     //~ }
 
     //~ /* is this a serialized packet?  If so, are we already sending one? */
-    //~ if(request->serial_request && request->session->serial_request_in_flight) {
+    //~ if(request->connected_request && request->session->connected_request_in_flight) {
         //~ return 0;
     //~ }
 
@@ -1007,7 +1007,8 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p request = session->requests;
-    int requests_in_flight = 0;
+    int connected_requests_in_flight = 0;
+    int unconnected_requests_in_flight = 0;
 
     /* loop over the requests and process them one at a time. */
     while(request && rc == PLCTAG_STATUS_OK) {
@@ -1029,7 +1030,11 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
         /* check resending */
         if(ok_to_resend(session, request)) {
             //~ handle_resend(session, request);
-            pdebug(DEBUG_INFO,"Requeuing connected request connection %d sequence ID %d.", request->conn_id,request->conn_seq);
+            if(request->connected_request) {
+				pdebug(DEBUG_INFO,"Requeuing connected request.");
+			} else {
+				pdebug(DEBUG_INFO,"Requeuing unconnected request.");				
+			}
 
             request->recv_in_progress = 0;
             request->send_request = 1;
@@ -1037,18 +1042,39 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
 
         /* count requests in flight */
         if(request->recv_in_progress) {
-            requests_in_flight++;
+			if(request->connected_request) {
+				connected_requests_in_flight++;
+				pdebug(DEBUG_INFO,"%d connected requests in flight.", connected_requests_in_flight);
+			} else {
+				unconnected_requests_in_flight++;
+				pdebug(DEBUG_INFO,"%d unconnected requests in flight.", unconnected_requests_in_flight);
+			}
         }
 
-        pdebug(DEBUG_INFO,"%d requests in flight.", requests_in_flight);
 
         /* is there a request ready to send and can we send? */
-        if(!session->current_request && request->send_request && /*ready_to_send(request)*/ requests_in_flight < SESSION_MAX_REQUESTS_IN_FLIGHT) {
-            //session->next_packet_time_us += session->next_packet_interval_us;
-            pdebug(DEBUG_INFO,"Readying packet to send.");
-            session->current_request = request;
-            //~ requests_in_flight++;
-            //~ pdebug(DEBUG_INFO,"sending packet, so %d requests in flight.", requests_in_flight);
+        if(!session->current_request && request->send_request) {
+			if(request->connected_request) {
+				if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
+					pdebug(DEBUG_INFO,"Readying connected packet to send.");
+
+					session->current_request = request;
+
+					connected_requests_in_flight++;
+					
+					pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
+				}
+			} else {
+				if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
+					pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
+
+					session->current_request = request;
+
+					unconnected_requests_in_flight++;
+					
+					pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
+				}
+			}
         }
 
         /* call this often to make sure we get the data out. */

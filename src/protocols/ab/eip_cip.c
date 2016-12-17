@@ -497,7 +497,7 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
     req->send_request = 1;
 
     /* this request is connected, so it needs the session exclusively */
-    req->serial_request = 1;
+    req->connected_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -746,6 +746,9 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
 
     /* store the connection */
     req->connection = tag->connection;
+    
+    /* mark the request as a connected request */
+    req->connected_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -897,9 +900,6 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     /* mark it as ready to send */
     req->send_request = 1;
-
-    /* this request is connected, so it needs the session exclusively */
-    req->serial_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
