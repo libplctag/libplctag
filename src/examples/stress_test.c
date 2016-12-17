@@ -278,7 +278,7 @@ int main(int argc, char **argv)
     pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
-    int64_t seconds = 10;  /* default 10 seconds */
+    int64_t seconds = 3600;  /* default 1 hour */
     int num_threads = 0;
 
     if(argc>2) {
@@ -290,7 +290,7 @@ int main(int argc, char **argv)
     }
 
     /* create the test threads */
-    for(int tid=0; tid < num_threads; tid++) {
+    for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
         fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
         pthread_create(&threads[tid], NULL, &test_cip, (void *)(intptr_t)tid);
     }
@@ -310,7 +310,7 @@ int main(int argc, char **argv)
 
     done = 1;
 
-    for(int tid=0; tid < num_threads; tid++) {
+    for(int tid=0; tid < num_threads && tid < MAX_THREADS; tid++) {
         pthread_join(threads[tid], NULL);
     }
 
