@@ -261,7 +261,7 @@ int connection_perform_forward_open(ab_connection_p connection)
         }
 
         /* wait for a response */
-        timeout_time = time_ms() + 5000; /* MAGIC five seconds */
+        timeout_time = time_ms() + 1500; /* MAGIC 1.5 seconds */
 
         while (timeout_time > time_ms() && !req->resp_received) {
             sleep_ms(1);
@@ -655,7 +655,7 @@ int connection_close(ab_connection_p connection)
         }
 
         /* wait for a response */
-        timeout_time = time_ms() + 5000; /* MAGIC five seconds */
+        timeout_time = time_ms() + 1500; /* MAGIC 1.5 seconds */
 
         while (timeout_time > time_ms() && !req->resp_received) {
             sleep_ms(1);
