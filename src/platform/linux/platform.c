@@ -643,6 +643,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     int fd;
     int flags;
     struct timeval timeout; /* used for timing out connections etc. */
+    struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
@@ -678,6 +679,16 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         pdebug(DEBUG_ERROR, "Error setting socket set timeout option, errno: %d",errno);
         return PLCTAG_ERR_OPEN;
     }
+
+	/* only wait two seconds. */
+	so_linger.l_onoff = 1;
+    so_linger.l_linger = 2;
+
+	if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
+		close(fd);
+		pdebug(DEBUG_ERROR,"Error setting socket close linger option, errno: %d",errno);
+		return PLCTAG_ERR_OPEN;
+	}
 
     /* figure out what address we are connecting to. */
 
