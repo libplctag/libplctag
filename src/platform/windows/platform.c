@@ -767,7 +767,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     so_linger.l_linger = 0;
 
 	if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
-		close(fd);
+		closesocket(fd);
 		pdebug(DEBUG_ERROR,"Error setting socket close linger option, errno: %d",errno);
 		return PLCTAG_ERR_OPEN;
 	}

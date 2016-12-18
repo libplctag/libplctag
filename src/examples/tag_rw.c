@@ -158,7 +158,7 @@ int main(int argc, char **argv)
     real32_t f_val;
     int i;
     int rc;
-    int timeout;
+    int64_t timeout;
 
     parse_args(argc, argv);
 

@@ -196,7 +196,7 @@ extern int64_t time_ms(void);
 extern struct tm *localtime_r(const time_t *timep, struct tm *result);
 
 /* some functions can be simply replaced */
-#define snprintf sprintf_s
+#define snprintf_platform sprintf_s
 
 
 /*#ifdef __cplusplus

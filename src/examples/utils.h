@@ -25,11 +25,12 @@
     #include <windows.h>
     #define strcasecmp _stricmp
     #define strdup _strdup
-	#define snprintf sprintf_s
+	#define snprintf_platform sprintf_s
 	#define sscanf_platform sscanf_s
 #else
     #include <unistd.h>
     #include <strings.h>
+	#define snprintf_platform snprintf
 	#define sscanf_platform sscanf
 #endif
 

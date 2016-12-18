@@ -44,7 +44,7 @@ int main()
     /* create the tags */
     for(i=0; i< NUM_TAGS; i++) {
         char tmp_tag_path[256] = {0,};
-        snprintf(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
+        snprintf_platform(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
         tag[i]  = plc_tag_create(tmp_tag_path);
 
         if(!tag[i]) {
