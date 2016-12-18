@@ -143,6 +143,6 @@ extern uint32_t be2h32(uint32_t v);
 extern int sleep_ms(int ms);
 extern int64_t time_ms(void);
 
-
+#define snprintf_platform snprintf
 
 #endif /* _PLATFORM_H_ */

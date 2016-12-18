@@ -109,12 +109,12 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
     const char *p = dhp_str;
 
     if(!match_channel(&p, dhp_channel)) {
-        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
+        pdebug(DEBUG_INFO, "Bad syntax in DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
         return 0;
     }
 
     if(!match_colon(&p)) {
-        pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected : in route.");
+        pdebug(DEBUG_INFO, "Bad syntax in DH+ route.  Expected : in route.");
         return 0;
     }
 
@@ -315,61 +315,61 @@ int cip_encode_path(ab_tag_p tag, const char *path)
 
 
 
-char *cip_decode_status(int status)
-{
-    switch(status) {
-        case 0x01:
-            /* FIXME - this should handle the extended error codes */
-            return "Connection error!";
-            break;
+//~ char *cip_decode_status(int status)
+//~ {
+    //~ switch(status) {
+        //~ case 0x01:
+            //~ /* FIXME - this should handle the extended error codes */
+            //~ return "Connection error!";
+            //~ break;
 
-        case 0x02:
-            return "Insufficient resources!";
-            break;
+        //~ case 0x02:
+            //~ return "Insufficient resources!";
+            //~ break;
 
-        case 0x03:
-            return "Value invalid!"; /* huh? */
-            break;
+        //~ case 0x03:
+            //~ return "Value invalid!"; /* huh? */
+            //~ break;
 
-        case 0x04:
-            return "Bad or indecipherable IOI or tag not found!";
-            break;
+        //~ case 0x04:
+            //~ return "Bad or indecipherable IOI or tag not found!";
+            //~ break;
 
-        case 0x05:
-            return "Unknown destination, tag or item!";
-            break;
+        //~ case 0x05:
+            //~ return "Unknown destination, tag or item!";
+            //~ break;
 
-        case 0x06:
-            return "Response too large, partial data transfered!";
-            break;
+        //~ case 0x06:
+            //~ return "Response too large, partial data transfered!";
+            //~ break;
 
-        case 0x0A:
-            return "Error processing attributes!";
-            break;
+        //~ case 0x0A:
+            //~ return "Error processing attributes!";
+            //~ break;
 
-        case 0x13:
-            return "Insufficient data/params to process request!";
-            break;
+        //~ case 0x13:
+            //~ return "Insufficient data/params to process request!";
+            //~ break;
 
-        case 0x1C:
-            return "Insufficient attributes to process request!";
-            break;
+        //~ case 0x1C:
+            //~ return "Insufficient attributes to process request!";
+            //~ break;
 
-        case 0x26:
-            return "IOI word length does not match IOI length processed!";
-            break;
+        //~ case 0x26:
+            //~ return "IOI word length does not match IOI length processed!";
+            //~ break;
 
-        case 0xFF:
+        //~ case 0xFF:
 
-            /* extended status */
+            //~ /* extended status */
 
-        default:
-            return "Unknown error status.";
-            break;
-    }
+        //~ default:
+            //~ return "Unknown error status.";
+            //~ break;
+    //~ }
 
-    return "Unknown error status.";
-}
+    //~ return "Unknown error status.";
+//~ }
 
 
 
@@ -541,10 +541,10 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
     /* word_count is in units of 16-bit integers, do not
      * count the word_count value itself.
      */
-    *word_count = ((dp - data)-1)/2;
+    *word_count = (uint8_t)((dp - data)-1)/2;
 
     /* store the size of the whole result */
-    tag->encoded_name_size = dp - data;
+    tag->encoded_name_size = (int)(dp - data);
 
     return 1;
 }

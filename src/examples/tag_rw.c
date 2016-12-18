@@ -158,7 +158,7 @@ int main(int argc, char **argv)
     real32_t f_val;
     int i;
     int rc;
-    int timeout;
+    int64_t timeout;
 
     parse_args(argc, argv);
 
@@ -225,11 +225,10 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    timeout = 500;
+    timeout = time_ms() + 500;
 
-    while(timeout>0 && plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
+    while(timeout>time_ms() && plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
         sleep_ms(100);
-        timeout -= 100;
     }
 
     rc = plc_tag_status(tag);

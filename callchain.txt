@@ -1,0 +1,26 @@
+
+Create flow:
+
+plc_tag_create
+    ab_tag_create
+        session_find_or_create
+            <session mutex>
+                find_session_by_host_unsafe
+                    refcount_acquire
+                session_create_unsafe
+                    refcount_init
+            <end session mutex>
+            session_init
+            session_release
+                refcount_release
+        connection_find_or_create
+            <session mutex>
+                session_find_connection_by_path_unsafe
+                    connection_acquire
+                connection_create_unsafe
+                    refcount_init
+            <end session mutex>
+            connection_perform_forward_open
+                request_release
+
+

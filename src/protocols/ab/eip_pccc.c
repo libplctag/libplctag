@@ -53,35 +53,49 @@ static int check_write_status(ab_tag_p tag);
  */
 int eip_pccc_tag_status(ab_tag_p tag)
 {
+    int rc = PLCTAG_STATUS_OK;
+    int session_rc = PLCTAG_STATUS_OK;
+    int connection_rc = PLCTAG_STATUS_OK;
+
     if(tag->read_in_progress) {
-        int rc = check_read_status(tag);
-
-        tag->status = rc;
-
-        return rc;
+        return check_read_status(tag);
     }
 
     if(tag->write_in_progress) {
-        int rc = check_write_status(tag);
-
-        tag->status = rc;
-
-        return rc;
+        return check_write_status(tag);
     }
 
-    /*
-     * If the session is not completely set up,
-     * mark this tag as pending.
-     */
-    if(tag->session) {
-        if(!tag->session->is_connected) {
-            tag->status = PLCTAG_STATUS_PENDING;
+    /* propagate the status up */
+    if (tag->session) {
+        session_rc = tag->session->status;
+    } else {
+        /* this is not OK.  This is fatal! */
+        session_rc = PLCTAG_ERR_CREATE;
+    }
+
+    if(tag->needs_connection) {
+        if(tag->connection) {
+            connection_rc = tag->connection->status;
         } else {
-            tag->status = PLCTAG_STATUS_OK;
+            /* fatal! */
+            connection_rc = PLCTAG_ERR_CREATE;
         }
+    } else {
+        connection_rc = PLCTAG_STATUS_OK;
     }
 
-    return tag->status;
+    /* now collect the status.  Highest level wins. */
+    rc = session_rc;
+
+    if(rc == PLCTAG_STATUS_OK) {
+        rc = connection_rc;
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        rc = tag->status;
+    }
+
+    return rc;
 }
 
 
@@ -114,14 +128,12 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
-        tag->status = PLCTAG_ERR_TOO_LONG;
-        return tag->status;
+        return PLCTAG_ERR_TOO_LONG;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_WARN,"PCCC requests cannot be fragmented.  Too much data requested.");
-        tag->status = PLCTAG_ERR_TOO_LONG;
-        return tag->status;
+        return PLCTAG_ERR_TOO_LONG;
     }
 
     if(!tag->reqs) {
@@ -132,8 +144,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
         if(!tag->reqs) {
             pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-            tag->status = PLCTAG_ERR_NO_MEM;
-            return tag->status;
+            return PLCTAG_ERR_NO_MEM;
         }
     }
 
@@ -142,7 +153,6 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-        tag->status = rc;
         return rc;
     }
 
@@ -208,12 +218,12 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     req->send_request = 1;
 
     /* add the request to the session's list. */
-    rc = request_add(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to lock add request to session! rc=%d",rc);
-        request_destroy(&req);
-        tag->status = rc;
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+		request_release(req);
+		tag->reqs[0] = NULL;
         return rc;
     }
 
@@ -222,8 +232,6 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     req = NULL;
 
     tag->read_in_progress = 1;
-
-    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -258,14 +266,13 @@ static int check_read_status(ab_tag_p tag)
     /* is there an outstanding request? */
     if(!tag->reqs || !(tag->reqs[0])) {
         tag->read_in_progress = 0;
-        tag->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Read in progress but no requests in flight!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     req = tag->reqs[0];
 
     if(!req->resp_received) {
-        tag->status = PLCTAG_STATUS_PENDING;
         return PLCTAG_STATUS_PENDING;
     }
 
@@ -333,10 +340,12 @@ static int check_read_status(ab_tag_p tag)
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* get rid of the request now */
-    ab_tag_abort(tag);
-
-    tag->status = rc;
+    /* clean up the request */
+	session_remove_request(tag->session, req);
+	request_release(req);
+	tag->reqs[0] = NULL;
+	
+	tag->read_in_progress = 0;
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -373,14 +382,12 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
-        tag->status = PLCTAG_ERR_TOO_LONG;
-        return tag->status;
+        return PLCTAG_ERR_TOO_LONG;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_WARN,"PCCC requests cannot be fragmented.  Too much data requested.");
-        tag->status = PLCTAG_ERR_TOO_LONG;
-        return tag->status;
+        return PLCTAG_ERR_TOO_LONG;
     }
 
 
@@ -393,8 +400,7 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
         if(!tag->reqs) {
             pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-            tag->status = PLCTAG_ERR_NO_MEM;
-            return tag->status;
+            return PLCTAG_ERR_NO_MEM;
         }
     }
 
@@ -403,7 +409,6 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-        tag->status = rc;
         return rc;
     }
 
@@ -422,8 +427,8 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     /* What type and size do we have? */
     if(tag->elem_size != 2 && tag->elem_size != 4) {
         pdebug(DEBUG_WARN,"Unsupported data type size: %d",tag->elem_size);
-        request_destroy(&req);
-        tag->status = PLCTAG_ERR_NOT_ALLOWED;
+        //~ request_destroy(&req);
+        request_release(req);
         return PLCTAG_ERR_NOT_ALLOWED;
     }
 
@@ -437,15 +442,15 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
      */
     if(!(element_def_size = pccc_encode_dt_byte(element_def,sizeof(element_def),pccc_data_type,tag->elem_size))) {
         pdebug(DEBUG_WARN,"Unable to encode PCCC request array element data type and size fields!");
-        request_destroy(&req);
-        tag->status = PLCTAG_ERR_ENCODE;
+        //~ request_destroy(&req);
+        request_release(req);
         return PLCTAG_ERR_ENCODE;
     }
 
     if(!(array_def_size = pccc_encode_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY,element_def_size + tag->size))) {
         pdebug(DEBUG_WARN,"Unable to encode PCCC request data type and size fields!");
-        request_destroy(&req);
-        tag->status = PLCTAG_ERR_ENCODE;
+        //~ request_destroy(&req);
+        request_release(req);
         return PLCTAG_ERR_ENCODE;
     }
 
@@ -508,21 +513,20 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     req->conn_seq = conn_seq_id;
 
     /* add the request to the session's list. */
-    rc = request_add(tag->session, req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to add request to session! rc=%d",rc);
-        request_destroy(&req);
-        tag->status = rc;
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+		request_release(req);
+		tag->reqs[0] = NULL;
         return rc;
-    }
+   }
 
     /* save the request for later */
     tag->reqs[0] = req;
 
     /* the write is now pending */
     tag->write_in_progress = 1;
-    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -548,14 +552,13 @@ static int check_write_status(ab_tag_p tag)
     /* is there an outstanding request? */
     if(!tag->reqs || !(tag->reqs[0]) ) {
         tag->write_in_progress = 0;
-        tag->status = PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN,"Write in progress but not requests in flight!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     req = tag->reqs[0];
 
     if(!req->resp_received) {
-        tag->status = PLCTAG_STATUS_PENDING;
         return PLCTAG_STATUS_PENDING;
     }
 
@@ -591,14 +594,15 @@ static int check_write_status(ab_tag_p tag)
             break;
         }
 
-        tag->status = PLCTAG_STATUS_OK;
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* let the IO thread free the memory. */
-    ab_tag_abort(tag);
-
-    tag->status = rc;
+    /* clean up the request */
+	session_remove_request(tag->session, req);
+	request_release(req);
+	tag->reqs[0] = NULL;
+	
+	tag->write_in_progress = 0;
 
     pdebug(DEBUG_WARN,"Done.");
 

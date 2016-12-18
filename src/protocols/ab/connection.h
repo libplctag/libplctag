@@ -35,9 +35,15 @@
 #include <platform.h>
 #include <ab/ab_common.h>
 #include <util/attr.h>
+#include <util/refcount.h>
 #include <ab/session.h>
 #include <ab/tag.h>
 
+
+#define CONNECTION_SETUP_TIMEOUT (1500)
+#define CONNECTION_TEARDOWN_TIMEOUT (1500)
+
+#define CONNECTION_MAX_IN_FLIGHT (7)
 
 struct ab_connection_t {
     ab_connection_p next;
@@ -46,7 +52,6 @@ struct ab_connection_t {
 
     ab_session_p session;
 
-    int is_connected;
     uint32_t targ_connection_id; /* the ID the target uses for this connection. */
     uint32_t orig_connection_id; /* the ID we use for this connection */
     uint16_t packet;
@@ -64,31 +69,30 @@ struct ab_connection_t {
     uint8_t dhp_dest;
     uint16_t conn_params;
 
+    /* useful status */
+    int is_connected;
     int connect_in_progress;
     int disconnect_in_progress;
+    int exclusive;
     int status;
 
-    ab_tag_p tags;
+    /* flag to avoid packet loss */
+    //int request_in_flight[CONNECTION_MAX_IN_FLIGHT];
+    //uint16_t seq_in_flight[CONNECTION_MAX_IN_FLIGHT];
+
+    /* maintain a ref count. */
+    refcount rc;
+
+    /* list of tags that belong to this connection */
+    //ab_tag_p tags;
 };
 
 
 
-int find_or_create_connection(ab_tag_p tag, ab_session_p session, attr attribs);
-ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
-ab_connection_p connection_create_unsafe(const char* path, ab_session_p session);
-int connection_perform_forward_open(ab_connection_p connection);
-int send_forward_open_req(ab_connection_p connection, ab_request_p req);
-int recv_forward_open_resp(ab_connection_p connection, ab_request_p req);
-int connection_add_tag_unsafe(ab_connection_p connection, ab_tag_p tag);
-int connection_add_tag(ab_connection_p connection, ab_tag_p tag);
-int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag);
-int connection_remove_tag(ab_connection_p connection, ab_tag_p tag);
-int connection_empty_unsafe(ab_connection_p connection);
-int connection_is_empty(ab_connection_p connection);
-int connection_destroy_unsafe(ab_connection_p connection);
-int connection_close(ab_connection_p connection);
-int send_forward_close_req(ab_connection_p connection, ab_request_p req);
-
+extern int connection_find_or_create(ab_tag_p tag, attr attribs);
+//extern int connection_acquire(ab_connection_p connection);
+extern int connection_acquire(ab_connection_p connection);
+extern int connection_release(ab_connection_p connection);
 
 
 

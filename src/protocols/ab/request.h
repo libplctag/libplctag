@@ -29,6 +29,7 @@
 #define __PLCTAG_AB_REQUEST_H__ 1
 
 #include <ab/ab_common.h>
+#include <util/refcount.h>
 
 
 #define MAX_REQ_RESP_SIZE   (768) /* enough? */
@@ -51,17 +52,27 @@ struct ab_request_t {
     int recv_in_progress;
     int abort_request;
     int abort_after_send; /* for one shot packets */
+    int no_resend; /* do not resend if this is set. */
+    int connected_request; /* serialize this packet with respect to other serialized packets. */
 
     int status;
 
     /* used when processing a response */
     int processed;
+    
+    /* reference count information */
+    refcount rc;
 
     ab_session_p session;
+    ab_connection_p connection;
 
     uint64_t session_seq_id;
     uint32_t conn_id;
     uint16_t conn_seq;
+    
+    /* time stamps for rate calculations */
+    int64_t time_sent;
+    int send_count;
 
     /* used by the background thread for incrementally getting data */
     int current_offset;
@@ -74,12 +85,10 @@ struct ab_request_t {
 
 
 int request_create(ab_request_p *req);
-int request_add_unsafe(ab_session_p sess, ab_request_p req);
-int request_add(ab_session_p sess, ab_request_p req);
-int request_remove_unsafe(ab_session_p sess, ab_request_p req);
-int request_remove(ab_session_p sess, ab_request_p req);
-int request_destroy_unsafe(ab_request_p* req_pp);
-int request_destroy(ab_request_p *req);
+int request_acquire(ab_request_p req);
+int request_release(ab_request_p req);
+//~ int request_destroy_unsafe(ab_request_p* req_pp);
+//~ int request_destroy(ab_request_p *req);
 
 
 

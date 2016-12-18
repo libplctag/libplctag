@@ -93,6 +93,8 @@ struct plc_tag_t {
 
 
 /* the following may need to be used where the tag is already mapped or is not yet mapped */
+extern int lib_init(void);
+extern void lib_teardown(void);
 extern int plc_tag_abort_mapped(plc_tag_p tag);
 extern int plc_tag_destroy_mapped(plc_tag_p tag);
 extern int plc_tag_status_mapped(plc_tag_p tag);

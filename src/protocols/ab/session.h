@@ -30,8 +30,33 @@
 
 #include <ab/ab_common.h>
 #include <ab/request.h>
+#include <util/refcount.h>
 
 #define MAX_SESSION_HOST    (128)
+
+/* the following are in microseconds*/
+#define SESSION_DEFAULT_PACKET_INTERVAL (5000)
+#define SESSION_MAX_PACKET_INTERVAL (100000)
+#define SESSION_MIN_PACKET_INTERVAL (3000)
+#define SESSION_PACKET_LOSS_INTERVAL_INC (5000)
+#define SESSION_PACKET_RECEIVE_INTERVAL_DEC (1000)
+
+
+/* resend interval in milliseconds*/
+#define SESSION_DEFAULT_RESEND_INTERVAL_MS (50)
+#define SESSION_MIN_RESEND_INTERVAL  (10)
+
+#define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
+
+/* how long to wait for session registration before timing out. In milliseconds. */
+#define SESSION_REGISTRATION_TIMEOUT (1500)
+
+/* 
+ * the queue depth depends on the type of the request.
+ */
+
+#define SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT (2)
+#define SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT (8)
 
 struct ab_session_t {
     ab_session_p next;
@@ -46,6 +71,7 @@ struct ab_session_t {
 
     /* registration info */
     uint32_t session_handle;
+    int registered;
 
     /* Sequence ID for requests. */
     uint64_t session_seq_id;
@@ -58,6 +84,18 @@ struct ab_session_t {
 
     /* counter for number of messages in flight */
     int num_reqs_in_flight;
+    //int64_t next_packet_time_us;
+    //int64_t next_packet_interval_us;
+
+    int64_t retry_interval;
+
+    /* short cumulative period for calculating round trip time. */
+    int64_t round_trip_samples[SESSION_NUM_ROUND_TRIP_SAMPLES];
+    int round_trip_sample_index;
+
+    /* serialization control */
+    //~ int serial_request_in_flight;
+    //~ uint64_t serial_seq_in_flight;
 
     /* data for receiving messages */
     uint64_t resp_seq_id;
@@ -70,6 +108,9 @@ struct ab_session_t {
     /* tags for this session */
     ab_tag_p tags;
 
+    /* ref count for session */
+    refcount rc;
+
     /* connections for this session */
     ab_connection_p connections;
     uint32_t conn_serial_number; /* id for the next connection */
@@ -78,26 +119,18 @@ struct ab_session_t {
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
 uint64_t session_get_new_seq_id(ab_session_p sess);
 
-int find_or_create_session(ab_session_p *session, attr attribs);
-int add_session_unsafe(ab_session_p n);
-int add_session(ab_session_p s);
-int remove_session_unsafe(ab_session_p n);
-int remove_session(ab_session_p s);
-ab_session_p find_session_by_host_unsafe(const char  *t);
-int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection);
-int session_add_connection(ab_session_p session, ab_connection_p connection);
-int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection);
-int session_remove_connection(ab_session_p session, ab_connection_p connection);
-int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag);
-int session_add_tag(ab_session_p session, ab_tag_p tag);
-int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag);
-int session_remove_tag(ab_session_p session, ab_tag_p tag);
-ab_session_p session_create_unsafe(const char* host, int gw_port);
-int session_connect(ab_session_p session, const char *host);
-int session_destroy_unsafe(ab_session_p session);
-int session_destroy(ab_session_p session);
-int session_is_empty(ab_session_p session);
-int session_register(ab_session_p session);
-int session_unregister(ab_session_p session);
+extern int session_find_or_create(ab_session_p *session, attr attribs);
+ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
+extern int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection);
+extern int session_add_connection(ab_session_p session, ab_connection_p connection);
+extern int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection);
+extern int session_remove_connection(ab_session_p session, ab_connection_p connection);
+extern int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
+extern int session_add_request(ab_session_p sess, ab_request_p req);
+extern int session_remove_request_unsafe(ab_session_p sess, ab_request_p req);
+extern int session_remove_request(ab_session_p sess, ab_request_p req);
+extern int session_acquire(ab_session_p session);
+extern int session_release(ab_session_p session);
+
 
 #endif

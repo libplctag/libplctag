@@ -32,7 +32,7 @@
 
 
 int cip_encode_path(ab_tag_p tag, const char *path);
-char *cip_decode_status(int status);
+//~ char *cip_decode_status(int status);
 int cip_encode_tag_name(ab_tag_p tag,const char *name);
 
 

@@ -78,15 +78,18 @@ static uint32_t get_thread_id()
     return this_thread_num;
 }
 
-
-extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
+static int make_prefix(char *prefix_buf, int prefix_buf_size) 
 {
-    va_list va;
-    struct tm t;
+	struct tm t;
     time_t epoch;
     int64_t epoch_ms;
     int remainder_ms;
-    char prefix[2048];
+    int rc;
+    
+    /* make sure we have room, MAGIC */
+    if(prefix_buf_size < 37) {
+		return 0;
+	}
 
     /* build the prefix */
 
@@ -99,14 +102,47 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
     localtime_r(&epoch,&t);
 
     /* create the prefix and format for the file entry. */
-    snprintf(prefix, sizeof prefix,"thread(%04u) %04d-%02d-%02d %02d:%02d:%02d.%03d %s:%d %s\n",
+    rc = snprintf(prefix_buf, prefix_buf_size,"thread(%04u) %04d-%02d-%02d %02d:%02d:%02d.%03d",
              get_thread_id(),
-             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms,
-             func, line_num, templ);
+             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms);
+             
+    /* enforce zero string termination */
+    if(rc > 1 && rc < prefix_buf_size) {
+		prefix_buf[rc] = 0;
+	} else {
+		prefix_buf[prefix_buf_size - 1] = 0;
+	}
+
+	return rc;
+}
+
+
+static const char *debug_level_name[DEBUG_END] = {"NONE","ERROR","WARN","INFO","DETAIL"};
+
+
+extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...)
+{
+    va_list va;
+    char output[2048];
+    char prefix[48]; /* MAGIC */
+	int prefix_size;
+	
+    /* build the prefix */
+    prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
+    
+    if(prefix_size <= 0) {
+		return;
+	}
+
+    /* create the output string template */
+    snprintf(output, sizeof(output),"%s %s %s:%d %s\n",prefix, debug_level_name[debug_level], func, line_num, templ);
+
+	/* make sure it is zero terminated */
+	output[sizeof(output)-1] = 0;
 
     /* print it out. */
     va_start(va,templ);
-    vfprintf(stderr,prefix,va);
+    vfprintf(stderr,output,va);
     va_end(va);
 }
 
@@ -115,27 +151,41 @@ extern void pdebug_impl(const char *func, int line_num, const char *templ, ...)
 
 #define COLUMNS (10)
 
-extern void pdebug_dump_bytes_impl(uint8_t *data,int count)
+extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
 {
     int max_row, row, column, offset;
+    char prefix[48]; /* MAGIC */
+	int prefix_size;
+	char row_buf[300]; /* MAGIC */
+	int row_offset;
+
+    /* build the prefix */
+    prefix_size = make_prefix(prefix,(int)sizeof(prefix));
+    
+    if(prefix_size <= 0) {
+		return;
+	}
 
     /* determine the number of rows we will need to print. */
     max_row = (count  + (COLUMNS - 1))/COLUMNS;
 
-    fprintf(stderr,"Dumping bytes:\n");
-
     for(row = 0; row < max_row; row++) {
         offset = (row * COLUMNS);
-
-        fprintf(stderr,"%05d", offset);
-
-        for(column = 0; column < COLUMNS && offset < count; column++) {
+        
+        /* print the prefix and address */
+        row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s %s:%d %05d", prefix, debug_level_name[debug_level], func, line_num, offset);
+        
+        for(column = 0; column < COLUMNS && offset < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
-            fprintf(stderr, " %02x", data[offset]);
+            row_offset += snprintf(&row_buf[row_offset], sizeof(row_buf) - row_offset, " %02x", data[offset]);
         }
 
-        fprintf(stderr,"\n");
+		/* terminate the row string*/
+        row_buf[sizeof(row_buf)-1] = 0; /* just in case */
+        
+        /* output it, finally */
+        fprintf(stderr,"%s\n",row_buf);
     }
 
-    fflush(stderr);
+    /*fflush(stderr);*/
 }

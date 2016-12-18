@@ -37,8 +37,23 @@
 #include <time.h>
 
 
-
-ab_session_p session_create_unsafe(const char* host, int gw_port);
+static ab_session_p session_create_unsafe(const char* host, int gw_port);
+static int session_init(ab_session_p session);
+static int add_session_unsafe(ab_session_p n);
+//~ static int add_session(ab_session_p s);
+static int remove_session_unsafe(ab_session_p n);
+//~ static int remove_session(ab_session_p s);
+static ab_session_p find_session_by_host_unsafe(const char  *t);
+//~ static int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag);
+//~ static int session_add_tag(ab_session_p session, ab_tag_p tag);
+//~ static int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag);
+//~ static int session_remove_tag(ab_session_p session, ab_tag_p tag);
+static int session_connect(ab_session_p session);
+//~ static int session_destroy_unsafe(ab_session_p session);
+static void session_destroy(void *session);
+//~ static int session_is_empty(ab_session_p session);
+static int session_register(ab_session_p session);
+static int session_unregister_unsafe(ab_session_p session);
 
 
 /*
@@ -75,14 +90,45 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
     return res;
 }
 
+
+static int connection_is_usable(ab_connection_p connection)
+{
+    if(!connection) {
+        return 0;
+    }
+
+    if(connection->exclusive) {
+        return 0;
+    }
+
+    if(connection->disconnect_in_progress) {
+        return 0;
+    }
+
+    return 1;
+}
+
+
+
 ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path)
 {
     ab_connection_p connection;
 
     connection = session->connections;
 
-    while (connection && str_cmp_i(connection->path, path) != 0) {
+    /*
+     * there are a lot of conditions.
+     * We do not want to use connections that are in the process of shutting down.
+     * We do not want to use connections that are used exclusively by one tag.
+     * We want to use connections that have the same path as the tag.
+     */
+    while (connection && !connection_is_usable(connection) && str_cmp_i(connection->path, path) != 0) {
         connection = connection->next;
+    }
+
+    /* add to the ref count since we found an existing one. */
+    if(connection) {
+        connection_acquire(connection);
     }
 
     return connection;
@@ -153,10 +199,12 @@ int session_remove_connection_unsafe(ab_session_p session, ab_connection_p conne
         rc = PLCTAG_ERR_NOT_FOUND;
     }
 
+    /* removed due to refcount code
     if (session_is_empty(session)) {
         pdebug(DEBUG_DETAIL, "destroying session");
         session_destroy_unsafe(session);
     }
+    */
 
     pdebug(DEBUG_DETAIL, "Done");
 
@@ -183,12 +231,13 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
 }
 
 
-int find_or_create_session(ab_session_p *tag_session, attr attribs)
+int session_find_or_create(ab_session_p *tag_session, attr attribs)
 {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char* session_gw = attr_get_str(attribs, "gateway", "");
     int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
     ab_session_p session = AB_SESSION_NULL;
+    int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
 
@@ -210,9 +259,30 @@ int find_or_create_session(ab_session_p *tag_session, attr attribs)
             if (session == AB_SESSION_NULL) {
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
+            } else {
+                new_session = 1;
             }
         } else {
             pdebug(DEBUG_DETAIL,"Reusing existing session.");
+        }
+    }
+
+    /*
+     * do this OUTSIDE the mutex in order to let other threads not block if
+     * the session creation process blocks.
+     */
+
+    if(new_session) {
+        rc = session_init(session);
+
+        if(rc != PLCTAG_STATUS_OK) {
+            /* failed to set up the session! */
+            //session_destroy(session);
+            session_release(session);
+            session = AB_SESSION_NULL;
+        } else {
+            /* save the status */
+            session->status = rc;
         }
     }
 
@@ -314,13 +384,32 @@ int remove_session(ab_session_p s)
     return rc;
 }
 
+
+static int session_match_valid(const char *host, ab_session_p session)
+{
+    if(!session) {
+        return 0;
+    }
+
+    if(session->status !=  PLCTAG_STATUS_OK && session->status != PLCTAG_STATUS_PENDING) {
+        return 0;
+    }
+
+    if(str_cmp_i(host,session->host)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+
 ab_session_p find_session_by_host_unsafe(const char* t)
 {
     ab_session_p tmp;
 
     tmp = sessions;
 
-    while (tmp && str_cmp_i(tmp->host, t)) {
+    while (tmp && !session_match_valid(t, tmp)) {
         tmp = tmp->next;
     }
 
@@ -328,96 +417,103 @@ ab_session_p find_session_by_host_unsafe(const char* t)
         return (ab_session_p)NULL;
     }
 
+    if(tmp) {
+        /* found the session, so increase the ref count. */
+        refcount_acquire(&tmp->rc);
+    }
+
     return tmp;
 }
 
-/* not threadsafe */
-int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag)
-{
-    pdebug(DEBUG_DETAIL, "Starting");
+//~ /* not threadsafe */
+//~ int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag)
+//~ {
+    //~ pdebug(DEBUG_DETAIL, "Starting");
 
-    tag->next = session->tags;
-    session->tags = tag;
+    //~ tag->next = session->tags;
+    //~ session->tags = tag;
 
-    pdebug(DEBUG_DETAIL, "Done");
+    //~ pdebug(DEBUG_DETAIL, "Done");
 
-    return PLCTAG_STATUS_OK;
-}
+    //~ return PLCTAG_STATUS_OK;
+//~ }
 
-int session_add_tag(ab_session_p session, ab_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
+//~ int session_add_tag(ab_session_p session, ab_tag_p tag)
+//~ {
+    //~ int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    //~ pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(session) {
-        critical_block(global_session_mut) {
-            rc = session_add_tag_unsafe(session, tag);
-        }
-    } else {
-        pdebug(DEBUG_WARN, "Session pointer is null!");
+    //~ if(session) {
+        //~ critical_block(global_session_mut) {
+            //~ rc = session_add_tag_unsafe(session, tag);
+        //~ }
+    //~ } else {
+        //~ pdebug(DEBUG_WARN, "Session pointer is null!");
 
-        rc = PLCTAG_ERR_NULL_PTR;
-    }
+        //~ rc = PLCTAG_ERR_NULL_PTR;
+    //~ }
 
-    pdebug(DEBUG_DETAIL,"Done.");
+    //~ pdebug(DEBUG_DETAIL,"Done.");
 
-    return rc;
-}
+    //~ return rc;
+//~ }
 
-/* not threadsafe */
-int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
-{
-    ab_tag_p tmp, prev;
+//~ /* not threadsafe */
+//~ int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
+//~ {
+    //~ ab_tag_p tmp, prev;
 
-    pdebug(DEBUG_DETAIL, "Starting");
+    //~ pdebug(DEBUG_DETAIL, "Starting");
 
-    tmp = session->tags;
-    prev = NULL;
+    //~ tmp = session->tags;
+    //~ prev = NULL;
 
-    while (tmp && tmp != tag) {
-        prev = tmp;
-        tmp = tmp->next;
-    }
+    //~ while (tmp && tmp != tag) {
+        //~ prev = tmp;
+        //~ tmp = tmp->next;
+    //~ }
 
-    if (tmp) {
-        if (!prev) {
-            session->tags = tmp->next;
-        } else {
-            prev->next = tmp->next;
-        }
-    }
+    //~ if (tmp) {
+        //~ if (!prev) {
+            //~ session->tags = tmp->next;
+        //~ } else {
+            //~ prev->next = tmp->next;
+        //~ }
+    //~ }
 
-    /* if the session is empty, get rid of it. */
-    if(session_is_empty(session)) {
-        session_destroy_unsafe(session);
-    }
+    //~ /* if the session is empty, get rid of it. */
+    //~ /* removed due to refcount code
+    //~ if(session_is_empty(session)) {
+        //~ session_destroy_unsafe(session);
+    //~ }
+    //~ */
 
-    pdebug(DEBUG_DETAIL, "Done");
+    //~ pdebug(DEBUG_DETAIL, "Done");
 
-    return PLCTAG_STATUS_OK;
-}
+    //~ return PLCTAG_STATUS_OK;
+//~ }
 
-int session_remove_tag(ab_session_p session, ab_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
+//~ int session_remove_tag(ab_session_p session, ab_tag_p tag)
+//~ {
+    //~ int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    //~ pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(session) {
-        critical_block(global_session_mut) {
-            rc = session_remove_tag_unsafe(session, tag);
-        }
-    } else {
-        pdebug(DEBUG_WARN, "Session ptr is null!");
+    //~ if(session) {
+        //~ critical_block(global_session_mut) {
+            //~ rc = session_remove_tag_unsafe(session, tag);
+        //~ }
+    //~ } else {
+        //~ pdebug(DEBUG_WARN, "Session ptr is null!");
 
-        rc = PLCTAG_ERR_NULL_PTR;
-    }
+        //~ rc = PLCTAG_ERR_NULL_PTR;
+    //~ }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    //~ pdebug(DEBUG_DETAIL, "Done.");
 
-    return rc;
-}
+    //~ return rc;
+//~ }
 
 ab_session_p session_create_unsafe(const char* host, int gw_port)
 {
@@ -438,18 +534,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
 
     str_copy(session->host, host, MAX_SESSION_HOST);
 
-    /* we must connect to the gateway and register */
-    if (!session_connect(session, host)) {
-        mem_free(session);
-        pdebug(DEBUG_WARN, "session connect failed!");
-        return AB_SESSION_NULL;
-    }
-
-    if (!session_register(session)) {
-        session_destroy_unsafe(session);
-        pdebug(DEBUG_WARN, "session registration failed!");
-        return AB_SESSION_NULL;
-    }
+    session->status = PLCTAG_STATUS_PENDING;
 
     /* check for ID set up */
     if(srand_setup == 0) {
@@ -471,28 +556,70 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
      *
      * So, this is more or less unique across all invocations of the library.
      * FIXME - this could collide.  The probability is low, but it could happen
-     * as there are only 32 bit.
+     * as there are only 32 bits.
      */
     session->conn_serial_number = ++connection_id;
+
+    /* set up the packet interval to a reasonable default */
+    //session->next_packet_interval_us = SESSION_DEFAULT_PACKET_INTERVAL;
+
+    /* set up packet round trip information */
+    for(int index=0; index < SESSION_NUM_ROUND_TRIP_SAMPLES; index++) {
+        session->round_trip_samples[index] = SESSION_DEFAULT_RESEND_INTERVAL_MS;
+    }
+    session->retry_interval = SESSION_DEFAULT_RESEND_INTERVAL_MS;
+
+    /* set up the ref count */
+    session->rc = refcount_init(1, session, session_destroy);
 
     /* add the new session to the list. */
     add_session_unsafe(session);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_INFO, "Done");
 
     return session;
 }
 
+
 /*
- * ab_session_connect()
+ * session_init
  *
- * Connect to the host/port passed via TCP.  Set all the relevant fields in
- * the passed session object.
+ * This calls several blocking methods and so must not keep the main mutex
+ * locked during them.
+ */
+int session_init(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* we must connect to the gateway and register */
+    if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "session connect failed!");
+        session->status = rc;
+        return rc;
+    }
+
+    if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "session registration failed!");
+        session->status = rc;
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+/*
+ * session_connect()
+ *
+ * Connect to the host/port passed via TCP.
  */
 
-int session_connect(ab_session_p session, const char* host)
+int session_connect(ab_session_p session)
 {
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -504,11 +631,11 @@ int session_connect(ab_session_p session, const char* host)
         return 0;
     }
 
-    rc = socket_connect_tcp(session->sock, host, AB_EIP_DEFAULT_PORT);
+    rc = socket_connect_tcp(session->sock, session->host, AB_EIP_DEFAULT_PORT);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to connect socket for session!");
-        return 0;
+        return rc;
     }
 
     /* everything is OK.  We have a TCP stream open to a gateway. */
@@ -516,60 +643,83 @@ int session_connect(ab_session_p session, const char* host)
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return 1;
+    return rc;
 }
 
 /* must have the session mutex held here */
-int session_destroy_unsafe(ab_session_p session)
+void session_destroy(void *session_arg)
 {
-    ab_request_p req;
+    ab_session_p session = session_arg;
+    int really_destroy = 1;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     if (!session) {
         pdebug(DEBUG_WARN, "Session ptr is null!");
 
-        return 1;
+        return;
     }
 
     /* do not destroy the session if there are
      * tags or connections still */
+     /* removed due to refcount code
+      *
     if(!session_is_empty(session)) {
         pdebug(DEBUG_WARN, "Attempt to destroy session while open tags or connections exist!");
         return 0;
     }
+    */
 
-    /* this is a best effort attempt */
-    session_unregister(session);
+	/*
+	 * Work around the race condition here.  Another thread could have looked up the
+	 * session before this thread got to this point, but after this thread saw the 
+	 * session's ref count go to zero.  So, we need to check again after preventing
+	 * other threads from getting a reference.
+	 */
+	 
+	critical_block(global_session_mut) {
+		if(refcount_get_count(&session->rc) > 0) {
+			pdebug(DEBUG_WARN,"Another thread got a reference to this session before it could be deleted.  Aborting deletion");
+			really_destroy = 0;
+			break;
+		}
+		
+		/* still good, so remove the session from the list so no one else can reference it. */
+		remove_session_unsafe(session);
+	}
+	
+	/* 
+	 * if we are really destroying the session then we know that this is
+	 * the last reference.  So, we can use the unsafe variants.
+	 */
+	if(really_destroy) {
+		ab_request_p req;
 
-    /* close the socket. */
-    if (session->is_connected) {
-        socket_close(session->sock);
-        socket_destroy(&(session->sock));
-        session->is_connected = 0;
-    }
+		/* unregister and close the socket. */
+		session_unregister_unsafe(session);
 
-    /* need the mutex-protected version */
-    remove_session_unsafe(session);
+		/* remove any remaining requests, they are dead */
+		req = session->requests;
 
-    /* remove any remaining requests, they are dead */
-    req = session->requests;
+		while(req) {
+			session_remove_request_unsafe(session, req);
+			//~ request_destroy_unsafe(&req);
+			//request_release(req);
+			req = session->requests;
+		}
 
-    while(req) {
-        request_remove_unsafe(session, req);
-        request_destroy_unsafe(&req);
-        req = session->requests;
-    }
-
-    mem_free(session);
+		mem_free(session);
+	}
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return 1;
+    return;
 }
 
-int session_destroy(ab_session_p session)
+/* should not be called any more
+void session_destroy(void *session_arg)
 {
+    ab_session_p session = session_arg;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -582,17 +732,18 @@ int session_destroy(ab_session_p session)
 
     return rc;
 }
+*/
 
-int session_is_empty(ab_session_p session)
-{
-    return (session->tags == NULL) && (session->connections == NULL);
-}
+//~ int session_is_empty(ab_session_p session)
+//~ {
+    //~ return (session->tags == NULL) && (session->connections == NULL);
+//~ }
 
 int session_register(ab_session_p session)
 {
     eip_session_reg_req* req;
     eip_encap_t* resp;
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
     uint32_t data_size = 0;
     int64_t timeout_time;
 
@@ -629,7 +780,7 @@ int session_register(ab_session_p session)
     /* send registration to the gateway */
     data_size = sizeof(eip_session_reg_req);
     session->recv_offset = 0;
-    timeout_time = time_ms() + 5000; /* MAGIC */
+    timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
 
     pdebug(DEBUG_INFO, "sending data:");
     pdebug_dump_bytes(DEBUG_INFO, session->recv_data, data_size);
@@ -724,24 +875,245 @@ int session_register(ab_session_p session)
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
-    /* after all that, save the session handle, we will
+    /*
+     * after all that, save the session handle, we will
      * use it in future packets.
      */
     session->session_handle = resp->encap_session_handle; /* opaque to us */
+    session->registered = 1;
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return 1;
+    return PLCTAG_STATUS_OK;
 }
 
-int session_unregister(ab_session_p session)
+int session_unregister_unsafe(ab_session_p session)
 {
     if (session->sock) {
+        session->is_connected = 0;
+        session->registered = 0;
         socket_close(session->sock);
         socket_destroy(&(session->sock));
         session->sock = NULL;
-        session->is_connected = 0;
     }
 
     return PLCTAG_STATUS_OK;
+}
+
+
+
+//~ int mark_session_for_request(ab_request_p request)
+//~ {
+    //~ int rc = PLCTAG_STATUS_OK;
+
+    //~ if(!request) {
+        //~ return PLCTAG_ERR_NULL_PTR;
+    //~ }
+
+    //~ if(!request->session) {
+        //~ return PLCTAG_ERR_NULL_PTR;
+    //~ }
+
+    //~ /* if the packet is not requesting serialization, do not do any */
+    //~ if(!request->connected_request) {
+        //~ return PLCTAG_STATUS_OK;
+    //~ }
+
+    //~ /* FIXME DEBUG - remove! */
+    //~ return PLCTAG_STATUS_OK;
+
+    //~ /* mark the session as in use. */
+    //~ pdebug(DEBUG_INFO,"Setting session in flight flags for session sequence ID %llx",request->session->session_seq_id);
+    //~ request->session->connected_request_in_flight = 1;
+    //~ request->session->serial_seq_in_flight = request->session->session_seq_id;
+
+    //~ return rc;
+//~ }
+
+
+//~ int clear_session_for_request(ab_request_p request)
+//~ {
+    //~ int rc = PLCTAG_STATUS_OK;
+
+    //~ if(request->session) {
+        //~ ab_session_p session = request->session;
+
+        //~ if(session->connected_request_in_flight) {
+            //~ if(session->serial_seq_in_flight == request->session_seq_id) {
+                //~ pdebug(DEBUG_INFO, "Clearing session in flight flags for packet sequence ID %llx", request->session_seq_id);
+                //~ session->connected_request_in_flight = 0;
+            //~ } else {
+                //~ pdebug(DEBUG_INFO, "Mismatch between request session sequence ID %llx and session sequence ID %llx", request->session_seq_id, session->serial_seq_in_flight);
+            //~ }
+        //~ } else {
+            //~ pdebug(DEBUG_INFO,"No packet in flight.");
+        //~ }
+    //~ }
+
+    //~ return rc;
+//~ }
+
+
+/*
+ * session_add_request_unsafe
+ *
+ * You must hold the mutex before calling this!
+ */
+int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p cur, prev;
+    int total_requests = 0;
+    
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!sess) {
+        pdebug(DEBUG_WARN, "Session is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* make sure the request points to the session */
+    req->session = sess;
+
+    /* we add the request to the end of the list. */
+    cur = sess->requests;
+    prev = NULL;
+
+    while (cur) {
+        prev = cur;
+        cur = cur->next;
+        total_requests++;
+    }
+
+    if (!prev) {
+        sess->requests = req;
+    } else {
+        prev->next = req;
+    }
+
+    /* update the request's refcount as we point to it. */
+    request_acquire(req);
+    
+    pdebug(DEBUG_INFO,"Total requests in the queue: %d",total_requests);
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+/*
+ * session_add_request
+ *
+ * This is a thread-safe version of the above routine.
+ */
+int session_add_request(ab_session_p sess, ab_request_p req)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting. sess=%p, req=%p", sess, req);
+
+    critical_block(global_session_mut) {
+        rc = session_add_request_unsafe(sess, req);
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+/*
+ * session_remove_request_unsafe
+ *
+ * You must hold the mutex before calling this!
+ */
+int session_remove_request_unsafe(ab_session_p sess, ab_request_p req)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p cur, prev;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(sess == NULL || req == NULL) {
+        return rc;
+    }
+
+    /* find the request and remove it from the list. */
+    cur = sess->requests;
+    prev = NULL;
+
+    while (cur && cur != req) {
+        prev = cur;
+        cur = cur->next;
+    }
+
+    if (cur == req) {
+        if (!prev) {
+            sess->requests = cur->next;
+        } else {
+            prev->next = cur->next;
+        }
+    } /* else not found */
+
+    req->next = NULL;
+    req->session = NULL;
+
+    /* release the request refcount */
+    request_release(req);
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+/*
+ * session_remove_request
+ *
+ * This is a thread-safe version of the above routine.
+ */
+int session_remove_request(ab_session_p sess, ab_request_p req)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(sess == NULL || req == NULL) {
+        return rc;
+    }
+
+    critical_block(global_session_mut) {
+        rc = session_remove_request_unsafe(sess, req);
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+
+int session_acquire(ab_session_p session)
+{
+    if(!session) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+    
+    pdebug(DEBUG_INFO,"Acquire session.");
+
+    return refcount_acquire(&session->rc);
+}
+
+
+int session_release(ab_session_p session)
+{
+    if(!session) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO,"Release session.");
+
+    return refcount_release(&session->rc);
 }
