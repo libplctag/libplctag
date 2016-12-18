@@ -762,9 +762,9 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         return PLCTAG_ERR_OPEN;
     }
 
-	/* only wait two seconds. */
+	/* abort the connection on close. */
 	so_linger.l_onoff = 1;
-    so_linger.l_linger = 2;
+    so_linger.l_linger = 0;
 
 	if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
 		close(fd);
