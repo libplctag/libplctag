@@ -46,8 +46,10 @@
 #define SESSION_DEFAULT_RESEND_INTERVAL_MS (50)
 #define SESSION_MIN_RESEND_INTERVAL  (10)
 
-
 #define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
+
+/* how long to wait for session registration before timing out. In milliseconds. */
+#define SESSION_REGISTRATION_TIMEOUT (1500)
 
 /* 
  * the queue depth depends on the type of the request.

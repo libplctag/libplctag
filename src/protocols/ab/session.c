@@ -780,7 +780,7 @@ int session_register(ab_session_p session)
     /* send registration to the gateway */
     data_size = sizeof(eip_session_reg_req);
     session->recv_offset = 0;
-    timeout_time = time_ms() + 5000; /* MAGIC */
+    timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
 
     pdebug(DEBUG_INFO, "sending data:");
     pdebug_dump_bytes(DEBUG_INFO, session->recv_data, data_size);

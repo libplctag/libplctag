@@ -39,6 +39,10 @@
 #include <ab/session.h>
 #include <ab/tag.h>
 
+
+#define CONNECTION_SETUP_TIMEOUT (1500)
+#define CONNECTION_TEARDOWN_TIMEOUT (1500)
+
 #define CONNECTION_MAX_IN_FLIGHT (7)
 
 struct ab_connection_t {
