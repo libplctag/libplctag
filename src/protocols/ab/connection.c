@@ -317,8 +317,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
 
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length =
-        h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
 
     /* CPF parts */
@@ -326,8 +325,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
     fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length =
-        h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
+    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
     fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request */
@@ -711,8 +709,7 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
 
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length =
-        h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
 
     /* CPF parts */
@@ -720,8 +717,7 @@ int send_forward_close_req(ab_connection_p connection, ab_request_p req)
     fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
     fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length =
-        h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
+    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
     fo->cm_service_code = AB_EIP_CMD_FORWARD_CLOSE;/* 0x4E Forward Close Request */

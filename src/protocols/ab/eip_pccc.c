@@ -283,7 +283,7 @@ static int check_read_status(ab_tag_p tag)
         /* point to the start of the data */
         data = (uint8_t *)pccc + sizeof(*pccc);
 
-        data_end = (req->data + pccc->encap_length + sizeof(eip_encap_t));
+        data_end = (req->data + le2h16(pccc->encap_length) + sizeof(eip_encap_t));
 
         if(le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",pccc->encap_command);

@@ -813,13 +813,13 @@ int session_register(ab_session_p session)
     session->recv_offset = 0;
     mem_set(session->recv_data, 0, MAX_REQ_RESP_SIZE);
 
-    timeout_time = time_ms() + 5000; /* MAGIC */
+    timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT; 
 
     while (timeout_time > time_ms()) {
         if (session->recv_offset < sizeof(eip_encap_t)) {
             data_size = sizeof(eip_encap_t);
         } else {
-            data_size = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
+            data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
         }
 
         if (session->recv_offset < data_size) {
@@ -836,7 +836,7 @@ int session_register(ab_session_p session)
 
                 /* recalculate the amount of data needed if we have just completed the read of an encap header */
                 if (session->recv_offset >= sizeof(eip_encap_t)) {
-                    data_size = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
+                    data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
                 }
             }
         }

@@ -986,7 +986,7 @@ static int check_read_status_connected(ab_tag_p tag)
         data = (req->data) + sizeof(eip_cip_co_resp);
 
         /* point the end of the data */
-        data_end = (req->data + cip_resp->encap_length + sizeof(eip_encap_t));
+        data_end = (req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap_t));
 
         /* check the status */
         if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
@@ -1238,7 +1238,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
         data = (req->data) + sizeof(eip_cip_uc_resp);
 
         /* point the end of the data */
-        data_end = (req->data + cip_resp->encap_length + sizeof(eip_encap_t));
+        data_end = (req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap_t));
 
         /* check the status */
         if (le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {

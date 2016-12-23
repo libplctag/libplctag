@@ -154,7 +154,7 @@ int recv_eip_response_unsafe(ab_session_p session)
      */
     data_needed = (session->recv_offset < sizeof(eip_encap_t)) ? 
 											sizeof(eip_encap_t) : 
-											sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
+											sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
 
     if (session->recv_offset < data_needed) {
         /* read everything we can */
@@ -177,7 +177,7 @@ int recv_eip_response_unsafe(ab_session_p session)
 
                 /* recalculate the amount of data needed if we have just completed the read of an encap header */
                 if (session->recv_offset >= sizeof(eip_encap_t)) {
-                    data_needed = sizeof(eip_encap_t) + ((eip_encap_t*)(session->recv_data))->encap_length;
+                    data_needed = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
                 }
             }
         } while (rc > 0 && session->recv_offset < data_needed);
