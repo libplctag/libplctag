@@ -885,6 +885,9 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p reques
 
     if(!session->current_request && request->send_request /*&& session->next_packet_time_us < (time_ms() * 1000)*/) {
         /* nothing being sent and this request is outstanding */
+
+        /* refcount++ since we are storing a pointer */
+        request_acquire(request);
         session->current_request = request;
         //session->next_packet_time_us = (time_ms()*1000) + session->next_packet_interval_us;
 
@@ -911,6 +914,8 @@ int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p reques
              * done in some manner, remove it from the session to let
              * another request get sent.
              */
+            /* we need to release the request since we are removing a pointer to it. */
+            request_release(session->current_request);
             session->current_request = NULL;
         }
     }
@@ -939,6 +944,8 @@ static int session_send_current_request(ab_session_p session)
 
     /* if we are done, then clean up */
     if(!session->current_request->send_in_progress) {
+        /* release the refcount on the request, we are not referencing it anymore */
+        request_release(session->current_request);
         session->current_request = NULL;
     }
 
@@ -1031,10 +1038,10 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
         if(ok_to_resend(session, request)) {
             //~ handle_resend(session, request);
             if(request->connected_request) {
-				pdebug(DEBUG_INFO,"Requeuing connected request.");
-			} else {
-				pdebug(DEBUG_INFO,"Requeuing unconnected request.");				
-			}
+                pdebug(DEBUG_INFO,"Requeuing connected request.");
+            } else {
+                pdebug(DEBUG_INFO,"Requeuing unconnected request.");
+            }
 
             request->recv_in_progress = 0;
             request->send_request = 1;
@@ -1042,39 +1049,43 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
 
         /* count requests in flight */
         if(request->recv_in_progress) {
-			if(request->connected_request) {
-				connected_requests_in_flight++;
-				pdebug(DEBUG_INFO,"%d connected requests in flight.", connected_requests_in_flight);
-			} else {
-				unconnected_requests_in_flight++;
-				pdebug(DEBUG_INFO,"%d unconnected requests in flight.", unconnected_requests_in_flight);
-			}
+            if(request->connected_request) {
+                connected_requests_in_flight++;
+                pdebug(DEBUG_INFO,"%d connected requests in flight.", connected_requests_in_flight);
+            } else {
+                unconnected_requests_in_flight++;
+                pdebug(DEBUG_INFO,"%d unconnected requests in flight.", unconnected_requests_in_flight);
+            }
         }
 
 
         /* is there a request ready to send and can we send? */
         if(!session->current_request && request->send_request) {
-			if(request->connected_request) {
-				if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
-					pdebug(DEBUG_INFO,"Readying connected packet to send.");
+            if(request->connected_request) {
+                if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
+                    pdebug(DEBUG_INFO,"Readying connected packet to send.");
 
-					session->current_request = request;
+                    /* increment the refcount since we are storing a pointer to the request */
+                    request_acquire(request);
+                    session->current_request = request;
 
-					connected_requests_in_flight++;
-					
-					pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
-				}
-			} else {
-				if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
-					pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
+                    connected_requests_in_flight++;
 
-					session->current_request = request;
+                    pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
+                }
+            } else {
+                if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
+                    pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
 
-					unconnected_requests_in_flight++;
-					
-					pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
-				}
-			}
+                    /* increment the refcount since we are storing a pointer to the request */
+                    request_acquire(request);
+                    session->current_request = request;
+
+                    unconnected_requests_in_flight++;
+
+                    pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
+                }
+            }
         }
 
         /* call this often to make sure we get the data out. */
@@ -1086,6 +1097,7 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
 
     return rc;
 }
+
 
 static void process_session_tasks_unsafe(ab_session_p session)
 {
