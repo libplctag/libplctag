@@ -31,9 +31,7 @@
 #define TAG_PATH "protocol=ab_eip&gateway=192.168.1.7&path=1,0&cpu=LGX&elem_size=4&elem_count=125&name=LogData"
 #define ELEM_COUNT 125
 #define ELEM_SIZE 4
-#define DATA_TIMEOUT 5000
-
-
+#define DATA_TIMEOUT 1000
 
 
 void log_data(plc_tag tag)
@@ -98,28 +96,17 @@ int main(int argc, char **argv)
         return 1;
     }
 
-
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-
+    if(tag < 0) {
+        fprintf(stderr,"ERROR: Could not create tag! error %s\n", plc_tag_decode_error(tag));
         return 0;
     }
 
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep(1);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state.\n");
-        return 0;
-    }
-
-    rc = plc_tag_read(tag, 1000);
+    /* read once to get the data set up */
+    rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     while(1) {
         /* get the data */

@@ -59,10 +59,10 @@ extern "C" {
     typedef float real32_t;
 
 
-    /* opaque type definitions */
-    typedef struct plc_tag_dummy *plc_tag;
+    /* handy type definitions */
+    typedef int32_t plc_tag;
 
-    #define PLC_TAG_NULL ((plc_tag)NULL)
+    #define PLC_TAG_NULL ((plc_tag)0)
 
 
 
@@ -137,11 +137,16 @@ extern "C" {
      * value pair "protocol=XXX" where XXX is one of the supported protocol
      * types.
      *
-     * An opaque pointer is returned on success.  NULL is returned on allocation
-     * failure.  Other failures will set the tag status.
+     * An opaque integer (32-bit, signed handle is returned on success.  A negative number
+     * indicates an error.  A positive number indicates success.   A zero return is not
+     * used.
+     *
+     * The timeout works as for the other operations that could block.   Passing a timeout
+     * of zero will cause the function to return as soon as possible even if the tag is
+     * not yet fully set up.
      */
 
-    LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str);
+    LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str, int timeout);
 
 
     /*

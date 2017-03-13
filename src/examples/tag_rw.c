@@ -158,7 +158,6 @@ int main(int argc, char **argv)
     real32_t f_val;
     int i;
     int rc;
-    int64_t timeout;
 
     parse_args(argc, argv);
 
@@ -215,30 +214,10 @@ int main(int argc, char **argv)
     }
 
     /* create the tag */
-    tag = plc_tag_create(path);
+    tag = plc_tag_create(path, DATA_TIMEOUT);
 
-    printf("INFO: Got tag %p\n", (void *)tag);
-
-    if(!tag) {
-        printf("ERROR: error creating tag!\n");
-
-        return 0;
-    }
-
-    timeout = time_ms() + 500;
-
-    while(timeout>time_ms() && plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(100);
-    }
-
-    rc = plc_tag_status(tag);
-
-    printf("INFO: tag status %d\n", rc);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("ERROR: tag creation error, tag status: %s\n",plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
-
+    if(tag < 0) {
+        printf("ERROR: tag creation error, tag status: %s\n",plc_tag_decode_error(tag));
         return 0;
     }
 
@@ -246,14 +225,11 @@ int main(int argc, char **argv)
         if(!is_write) {
             int index = 0;
 
-            printf("INFO: reading tag %p\n", (void *)tag);
-
             rc = plc_tag_read(tag, DATA_TIMEOUT);
 
             if(rc != PLCTAG_STATUS_OK) {
                 printf("ERROR: tag read error, tag status: %s\n",plc_tag_decode_error(rc));
                 plc_tag_destroy(tag);
-
                 return 0;
             }
 
@@ -346,7 +322,7 @@ int main(int argc, char **argv)
         free(path);
     }
 
-    if(tag) {
+    if(tag > 0) {
         plc_tag_destroy(tag);
     }
 

@@ -6,7 +6,7 @@
 #define TAG_PATH "protocol=ab_eip&gateway=192.168.1.42&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=myDINTArray"
 #define ELEM_COUNT 10
 #define ELEM_SIZE 4
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT 1000
 
 /*
  * There really isn't much to this example other than it being compiled
@@ -22,22 +22,11 @@ int main()
     int i;
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-
-        return 0;
-    }
-
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(100);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+    if(tag < 0) {
+        fprintf(stderr,"ERROR: Could not create tag! error %s\n", plc_tag_decode_error(tag));
         return 0;
     }
 

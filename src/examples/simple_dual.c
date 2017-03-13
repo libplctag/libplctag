@@ -32,7 +32,7 @@
 
 #define TAG_PATH1 "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=TestDINTArray&debug=1"
 #define TAG_PATH2 "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=4&elem_size=4&name=F8:0&debug=1"
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT 1000
 
 
 int main()
@@ -43,24 +43,22 @@ int main()
     int i;
 
     /* create the tag */
-    tag1 = plc_tag_create(TAG_PATH1);
-    tag2 = plc_tag_create(TAG_PATH2);
+    tag1 = plc_tag_create(TAG_PATH1, 0);
+    tag2 = plc_tag_create(TAG_PATH2, 0);
 
     /* everything OK? */
-    if(!tag1) {
-        fprintf(stderr,"ERROR: Could not create tag1!\n");
-
+    if(tag1 < 0) {
+        fprintf(stderr,"ERROR: Could not create tag1! error %s\n", plc_tag_decode_error(tag1));
         return 0;
     }
 
-    if(!tag2) {
-        fprintf(stderr,"ERROR: Could not create tag2!\n");
-
+    if(tag2 < 0) {
+        fprintf(stderr,"ERROR: Could not create tag2! error %s\n", plc_tag_decode_error(tag2));
         return 0;
     }
 
     /* wait for tags to finish setting up */
-    sleep_ms(1000);
+    sleep_ms(DATA_TIMEOUT);
 
     if(plc_tag_status(tag1) != PLCTAG_STATUS_OK) {
         fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag1)));
@@ -87,7 +85,7 @@ int main()
     }
 
     /* let the reads complete */
-    sleep_ms(1000);
+    sleep_ms(DATA_TIMEOUT);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);

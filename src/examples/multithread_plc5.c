@@ -9,7 +9,7 @@
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.28&cpu=PLC5&elem_size=4&elem_count=1&name=F8:10"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 4
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT 1000
 
 #define MAX_THREADS (300)
 
@@ -96,7 +96,6 @@ int main(int argc, char **argv)
         return 0;
     }
 
-
     num_threads = (int)strtol(argv[1],NULL, 10);
 
     if(num_threads < 1 || num_threads > MAX_THREADS) {
@@ -105,22 +104,11 @@ int main(int argc, char **argv)
     }
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-
-        return 0;
-    }
-
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(100);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+    if(tag < 0) {
+        fprintf(stderr,"ERROR: Could not create tag! error %s\n", plc_tag_decode_error(tag));
         return 0;
     }
 

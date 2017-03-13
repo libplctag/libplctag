@@ -49,41 +49,6 @@ volatile int done = 0;
 volatile int test_flags = 0;
 
 
-
-static int open_tag(plc_tag *tag, const char *tag_str)
-{
-    int rc = PLCTAG_STATUS_OK;
-    int64_t start_time;
-
-    /* create the tag */
-    start_time = time_ms();
-    *tag = plc_tag_create(tag_str);
-
-    /* everything OK? */
-    if(! *tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-        return PLCTAG_ERR_CREATE;
-    } else {
-        fprintf(stderr, "INFO: Tag created with status %s\n", plc_tag_decode_error(plc_tag_status(*tag)));
-    }
-
-    /* let the connect succeed we hope */
-    while((start_time + 2000) > time_ms() && (rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(10);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error %s setting up tag internal state.\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(*tag);
-        *tag = (plc_tag)0;
-        return rc;
-    }
-
-    return rc;
-}
-
-
-
 void *test_dhp(void *data)
 {
     int tid = (int)(intptr_t)data;
@@ -99,10 +64,10 @@ void *test_dhp(void *data)
         /* capture the starting time */
         start = time_ms();
 
-        rc = open_tag(&tag, tag_str);
+        tag = plc_tag_create(tag_str, DATA_TIMEOUT);
 
-        if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Test %d, Error creating tag!  Terminating test...\n", tid);
+        if(tag < 0) {
+            fprintf(stderr,"Test %d, Error creating tag, (%s)!  Terminating test...\n", tid, plc_tag_decode_error(tag));
             done = 1;
             return NULL;
         }
@@ -199,10 +164,10 @@ void *test_cip(void *data)
     }
 
     if(no_destroy) {
-        rc = open_tag(&tag, tag_str);
+        tag = plc_tag_create(tag_str, DATA_TIMEOUT);
 
-        if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Test %d, Error creating tag!  Terminating test...\n", tid);
+        if(tag < 0) {
+            fprintf(stderr,"Test %d, Error creating tag (%s)!  Terminating test...\n", tid, plc_tag_decode_error(tag));
             done = 1;
             return NULL;
         }
@@ -213,10 +178,10 @@ void *test_cip(void *data)
         start = time_ms();
 
         if(!no_destroy) {
-            rc = open_tag(&tag, tag_str);
+            tag = plc_tag_create(tag_str, DATA_TIMEOUT);
 
-            if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr,"Test %d, Error (%s) creating tag!  Terminating test...\n", tid, plc_tag_decode_error(rc));
+            if(tag < 0) {
+                fprintf(stderr,"Test %d, Error (%s) creating tag!  Terminating test...\n", tid, plc_tag_decode_error(tag));
                 done = 1;
                 return NULL;
             }

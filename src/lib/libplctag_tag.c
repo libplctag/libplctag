@@ -61,11 +61,11 @@ mutex_p global_library_mutex = NULL;
 
 int lib_init(void)
 {
-	int rc = PLCTAG_STATUS_OK;
-	
-	pdebug(DEBUG_INFO,"Setting up global library data.");
-	
-	pdebug(DEBUG_INFO,"Initializing library global mutex.");
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO,"Setting up global library data.");
+
+    pdebug(DEBUG_INFO,"Initializing library global mutex.");
 
     /* first see if the mutex is there. */
     if (!global_library_mutex) {
@@ -75,7 +75,7 @@ int lib_init(void)
             pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
         }
     }
-    
+
     pdebug(DEBUG_INFO,"Done.");
 
     return rc;
@@ -83,15 +83,15 @@ int lib_init(void)
 
 void lib_teardown(void)
 {
-	pdebug(DEBUG_INFO,"Tearing down library.");
-	
-	pdebug(DEBUG_INFO,"Destroying global library mutex.");
-	if(global_library_mutex) {
-		mutex_destroy(&global_library_mutex);
-	}
-	
-	
-	pdebug(DEBUG_INFO,"Done.");
+    pdebug(DEBUG_INFO,"Tearing down library.");
+
+    pdebug(DEBUG_INFO,"Destroying global library mutex.");
+    if(global_library_mutex) {
+        mutex_destroy(&global_library_mutex);
+    }
+
+
+    pdebug(DEBUG_INFO,"Done.");
 }
 
 
@@ -167,10 +167,10 @@ LIB_EXPORT const char* plc_tag_decode_error(int rc)
  * This is where the dispatch occurs to the protocol specific implementation.
  */
 
-LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
+LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str, int timeout)
 {
     plc_tag_p tag = PLC_TAG_P_NULL;
-    int tag_id = PLCTAG_ERR_OUT_OF_BOUNDS;
+    plc_tag tag_id = PLCTAG_ERR_OUT_OF_BOUNDS;
     attr attribs = NULL;
     int rc = PLCTAG_STATUS_OK;
     int read_cache_ms = 0;
@@ -260,12 +260,56 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
         /* need to destroy the tag because we allocated memory etc. */
         plc_tag_destroy_mapped(tag);
 
-        return PLC_TAG_NULL;
+        return tag_id;
     }
 
-    pdebug(DEBUG_INFO, "Returning mapped tag %p", (plc_tag)(intptr_t)tag_id);
+    /*
+     * if there is a timeout, then loop until we get
+     * an error or we timeout.
+     */
+    if(timeout>0) {
+        int64_t timeout_time = timeout + time_ms();
+        rc = plc_tag_status_mapped(tag);
 
-    return (plc_tag)(intptr_t)tag_id;
+        while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
+            rc = plc_tag_status_mapped(tag);
+
+            /*
+             * terminate early and do not wait again if the
+             * async operations are done.
+             */
+            if(rc != PLCTAG_STATUS_PENDING) {
+                break;
+            }
+
+            sleep_ms(5); /* MAGIC */
+        }
+
+        /*
+         * if we dropped out of the while loop but the status is
+         * still pending, then we timed out.
+         *
+         * The create failed, so now we need to punt.
+         */
+        if(rc == PLCTAG_STATUS_PENDING) {
+            pdebug(DEBUG_WARN, "Create operation timed out.");
+            rc = PLCTAG_ERR_TIMEOUT;
+        }
+    } else {
+        /* not waiting and no errors yet, so carry on. */
+        rc = PLCTAG_STATUS_OK;
+    }
+
+    /* if everything did not go OK, then close the tag. */
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Tag creation failed.");
+        plc_tag_destroy_mapped(tag);
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO, "Returning mapped tag %d", tag_id);
+
+    return tag_id;
 }
 
 
@@ -400,9 +444,11 @@ LIB_EXPORT int plc_tag_abort(plc_tag tag_id)
  * Remove all implementation specific details about a tag and clear its
  * memory.
  *
- * FIXME - this leaves a dangling pointer.  Should we take the address
- * of the tag pointer as an arg and zero out the pointer?  That may not be
- * as portable.
+ * FIXME - this can block while connections close etc.   This needs to
+ * be modified to mark the tag as destroyed and let the back-end deal
+ * with the delays.  As the tag is being destroyed, there is not really
+ * any point in having a timeout here.   Instead, this routine should
+ * never block.
  */
 
 int plc_tag_destroy_mapped(plc_tag_p tag)
@@ -412,32 +458,25 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    if(!tag->vtable) {
+    if(!tag || !tag->vtable) {
         pdebug(DEBUG_WARN,"Tag vtable is missing!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    ///* if we have a mutex, use it. */
-    //if(tag->mut) {
-        ///* we need to hang onto the mutex for later. */
-        //tmp_mutex = tag->mut;
-        //rc = mutex_lock(tmp_mutex);
-    //}
-    mutex_destroy(&tag->mut);
+    /*
+     * FIXME - should the mutex be destroyed first or the tag
+     * removed from the mapping table?  It seems like the mapping
+     * should be removed first.
+     */
 
-    /* 
-     * first, unmap the tag.  
-     * 
-     * This might be called from something other than plc_tag_destroy, so
-     * do not make assumptions that this was already done.  However, it is
-     * required that if this is called directly, then it must always be
-     * the case that the tag has not been handed to the library client!
-     * 
-     * If that happens, then it is possible that two threads could try to
-     * delete the same tag at the same time.
+    /*
+     * first, unmap the tag.
      */
     pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
     release_tag_to_id_mapping(tag);
+
+    /* destroy the mutex, not needed now */
+    mutex_destroy(&tag->mut);
 
     /* abort anything in flight */
     rc = plc_tag_abort_mapped(tag);
@@ -455,13 +494,6 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
         rc = tag->vtable->destroy(tag);
     }
 
-    ///* free the mutex if we had one. */
-    //if(tmp_mutex) {
-        //rc = mutex_unlock(tmp_mutex);
-        //mutex_destroy(&tmp_mutex);
-    //}
-    
-
     pdebug(DEBUG_INFO, "Done.");
 
     return rc;
@@ -474,24 +506,24 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-	/* is the tag still valid? */
+    /* is the tag still valid? */
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag is null or not mapped!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-	/*
-	 * We get the tag mapping, then we remove it.  If it is
-	 * already removed (due to simultaneous calls by threads
-	 * to the library), then we skip to the end.
-	 */
-    
+    /*
+     * We get the tag mapping, then we remove it.  If it is
+     * already removed (due to simultaneous calls by threads
+     * to the library), then we skip to the end.
+     */
+
     rc = release_tag_to_id_mapping(tag);
     if(rc != PLCTAG_STATUS_OK) {
-		return rc;
-	}
+        return rc;
+    }
 
-	/* the tag was still mapped, so destroy it. */
+    /* the tag was still mapped, so destroy it. */
     rc = plc_tag_destroy_mapped(tag);
 
     pdebug(DEBUG_INFO, "Done.");
@@ -1507,10 +1539,9 @@ static int allocate_new_tag_to_id_mapping(plc_tag_p tag)
 
 
 
-static plc_tag_p map_id_to_tag(plc_tag tag_id_ptr)
+static plc_tag_p map_id_to_tag(plc_tag tag_id)
 {
     plc_tag_p result = NULL;
-    int tag_id = (int)(intptr_t)tag_id_ptr;
     int index = to_tag_index(tag_id);
     int result_tag_id;
 
@@ -1538,7 +1569,7 @@ static plc_tag_p map_id_to_tag(plc_tag tag_id_ptr)
     pdebug(DEBUG_WARN, "Not found, tag id %d maps to tag %p with id %d", tag_id, result, result_tag_id);
 
     /* either nothing was there or it is the wrong tag. */
-    return (plc_tag_p)0;
+    return NULL;
 }
 
 

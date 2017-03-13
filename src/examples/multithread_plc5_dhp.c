@@ -9,7 +9,7 @@
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N7:0&debug=4"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 2
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT 1000
 
 #define MAX_THREADS (10)
 
@@ -75,16 +75,10 @@ void *thread_func(void *data)
     while(iterations>0) {
         int loops = 10+random_min_max(0,20);
 
-        tag = plc_tag_create(TAG_PATH);
+        tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
-        /* let the connect succeed we hope */
-        while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-            sleep_ms(100);
-        }
-
-        if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Thread %d Error creating tag: %s\n", tid, plc_tag_decode_error(plc_tag_status(tag)));
-            plc_tag_destroy(tag);
+        if(tag < 0) {
+            fprintf(stderr,"Thread %d Error creating tag: %s\n", tid, plc_tag_decode_error(tag));
             iterations--;
             continue;
         }
@@ -114,7 +108,7 @@ void *thread_func(void *data)
         }
 
         plc_tag_destroy(tag);
-        tag = NULL;
+        tag = PLC_TAG_NULL;
 
         sleep_ms(100+random_min_max(0,100));
     }

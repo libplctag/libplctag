@@ -33,7 +33,7 @@
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=pcomm_test_dint_array[%d]"
 #define NUM_TAGS 150
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT 1000
 
 int main()
 {
@@ -45,7 +45,7 @@ int main()
     for(i=0; i< NUM_TAGS; i++) {
         char tmp_tag_path[256] = {0,};
         snprintf_platform(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
-        tag[i]  = plc_tag_create(tmp_tag_path);
+        tag[i] = plc_tag_create(tmp_tag_path, 0);
 
         if(!tag[i]) {
             fprintf(stderr,"Error: could not create tag %d\n",i);
