@@ -145,6 +145,9 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${ab_SRC_PATH}/session.c"
                      "${ab_SRC_PATH}/session.h"
                      "${ab_SRC_PATH}/tag.h"
+                     "${protocol_SRC_PATH}/system/system.c"
+                     "${protocol_SRC_PATH}/system/system.h"
+                     "${protocol_SRC_PATH}/system/tag.h"
                      "${util_SRC_PATH}/attr.c"
                      "${util_SRC_PATH}/attr.h"
                      "${util_SRC_PATH}/debug.c"
@@ -181,6 +184,7 @@ if (UNIX)
                            slc500
                            stress_test
                            string
+                           test_special
                            toggle_bool
                            write_string
                            tag_rw )
@@ -194,6 +198,7 @@ elseif(WIN32)
                            simple_dual
                            slc500
                            string
+                           test_special
                            toggle_bool
                            write_string
                            tag_rw )

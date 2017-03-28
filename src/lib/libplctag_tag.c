@@ -61,11 +61,11 @@ mutex_p global_library_mutex = NULL;
 
 int lib_init(void)
 {
-	int rc = PLCTAG_STATUS_OK;
-	
-	pdebug(DEBUG_INFO,"Setting up global library data.");
-	
-	pdebug(DEBUG_INFO,"Initializing library global mutex.");
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO,"Setting up global library data.");
+
+    pdebug(DEBUG_INFO,"Initializing library global mutex.");
 
     /* first see if the mutex is there. */
     if (!global_library_mutex) {
@@ -75,7 +75,7 @@ int lib_init(void)
             pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
         }
     }
-    
+
     pdebug(DEBUG_INFO,"Done.");
 
     return rc;
@@ -83,15 +83,15 @@ int lib_init(void)
 
 void lib_teardown(void)
 {
-	pdebug(DEBUG_INFO,"Tearing down library.");
-	
-	pdebug(DEBUG_INFO,"Destroying global library mutex.");
-	if(global_library_mutex) {
-		mutex_destroy(&global_library_mutex);
-	}
-	
-	
-	pdebug(DEBUG_INFO,"Done.");
+    pdebug(DEBUG_INFO,"Tearing down library.");
+
+    pdebug(DEBUG_INFO,"Destroying global library mutex.");
+    if(global_library_mutex) {
+        mutex_destroy(&global_library_mutex);
+    }
+
+
+    pdebug(DEBUG_INFO,"Done.");
 }
 
 
@@ -174,6 +174,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     attr attribs = NULL;
     int rc = PLCTAG_STATUS_OK;
     int read_cache_ms = 0;
+    tag_create_function tag_constructor;
 
     /* setup a global mutex that all other code can use as a guard. */
     //if(setup_global_mutex() != PLCTAG_STATUS_OK) {
@@ -203,7 +204,15 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
      * If this routine wants to keep the attributes around, it needs
      * to clone them.
      */
-    tag = ab_tag_create(attribs);
+    tag_constructor = find_tag_create_func(attribs);
+
+    if(!tag_constructor) {
+        pdebug(DEBUG_WARN,"Tag creation failed, no tag constructor found for tag type!");
+        attr_destroy(attribs);
+        return PLC_TAG_NULL;
+    }
+
+    tag = tag_constructor(attribs);
 
     /*
      * FIXME - this really should be here???  Maybe not?  But, this is
@@ -425,14 +434,14 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
     //}
     mutex_destroy(&tag->mut);
 
-    /* 
-     * first, unmap the tag.  
-     * 
+    /*
+     * first, unmap the tag.
+     *
      * This might be called from something other than plc_tag_destroy, so
      * do not make assumptions that this was already done.  However, it is
      * required that if this is called directly, then it must always be
      * the case that the tag has not been handed to the library client!
-     * 
+     *
      * If that happens, then it is possible that two threads could try to
      * delete the same tag at the same time.
      */
@@ -460,7 +469,7 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
         //rc = mutex_unlock(tmp_mutex);
         //mutex_destroy(&tmp_mutex);
     //}
-    
+
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -474,24 +483,24 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-	/* is the tag still valid? */
+    /* is the tag still valid? */
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag is null or not mapped!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-	/*
-	 * We get the tag mapping, then we remove it.  If it is
-	 * already removed (due to simultaneous calls by threads
-	 * to the library), then we skip to the end.
-	 */
-    
+    /*
+     * We get the tag mapping, then we remove it.  If it is
+     * already removed (due to simultaneous calls by threads
+     * to the library), then we skip to the end.
+     */
+
     rc = release_tag_to_id_mapping(tag);
     if(rc != PLCTAG_STATUS_OK) {
-		return rc;
-	}
+        return rc;
+    }
 
-	/* the tag was still mapped, so destroy it. */
+    /* the tag was still mapped, so destroy it. */
     rc = plc_tag_destroy_mapped(tag);
 
     pdebug(DEBUG_INFO, "Done.");

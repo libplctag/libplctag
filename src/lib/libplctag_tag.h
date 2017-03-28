@@ -52,13 +52,15 @@ typedef int (*tag_read_func)(plc_tag_p tag);
 typedef int (*tag_status_func)(plc_tag_p tag);
 typedef int (*tag_write_func)(plc_tag_p tag);
 
+typedef int (*tag_vtable_func)(plc_tag_p tag);
+
 /* we'll need to set these per protocol type. */
 struct tag_vtable_t {
-    tag_abort_func          abort;
-    tag_destroy_func        destroy;
-    tag_read_func           read;
-    tag_status_func         status;
-    tag_write_func          write;
+    tag_vtable_func abort;
+    tag_vtable_func destroy;
+    tag_vtable_func read;
+    tag_vtable_func status;
+    tag_vtable_func write;
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;
