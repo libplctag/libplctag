@@ -12,11 +12,22 @@ import com.sun.jna.NativeLibrary;
 import com.sun.jna.Pointer;
 import com.sun.jna.PointerType;
 
+/*
+ * Tag
+ *
+ * This class represents a tag in a PLC.
+ *
+ * The attribute string is something similar to:
+ *
+ * protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=secondCounter
+ */
+
 public class Tag implements Library {
     // static native library stuff
     public static final String JNA_LIBRARY_NAME = "plctag";
     public static final NativeLibrary JNA_NATIVE_LIB = NativeLibrary.getInstance(Tag.JNA_LIBRARY_NAME);
     static {
+        //System.out.println("trying to register with JNA for native library");
         Native.register(Tag.JNA_LIBRARY_NAME);
     }
 
@@ -60,6 +71,7 @@ public class Tag implements Library {
     public static final int PLCTAG_ERR_NOT_FOUND = (int)(-34);
     public static final int PLCTAG_ERR_ABORT = (int)(-35);
     public static final int PLCTAG_ERR_WINSOCK = (int)(-36);
+
 
     public static final int PLCTAG_ERR_RECONNECTING = (int)(-100);
 
@@ -106,9 +118,14 @@ public class Tag implements Library {
         retryThread.start();
     }
 
-    private int retryMS;
+    private long retryMS;
     private String attributeString;
+    private int timeout;
     private long nextRetry;
+    private long lastAccess;
+    private int autoCloseDelay;
+    private boolean isClosed;
+    private Lock lock = new ReentrantLock();
 
     // the wrapped tag
     private int tag;
@@ -122,66 +139,104 @@ public class Tag implements Library {
      */
 
 
-    public static Tag create(String attributes) {
-        Tag tmp = new Tag(attributes);
+     public Tag(String attributes, int timeout) {
+        this.retryMS = 0;
+        this.attributeString = attributes;
+        this.timeout = timeout;
+        this.nextRetry = 0L;
+        this.lastAccess = System.currentTimeMillis();
+        this.autoCloseDelay = 0;
 
-        if(tmp.tag < 0) {
-            return null;
-        } else {
+        /* try to open the tag */
+        this.tag = Tag.plc_tag_create(attributes, timeout);
+
+        /* good result? */
+        if(this.tag > Tag.PLCTAG_STATUS_OK) {
+            isClosed = false;
+
+            /* put the tag into the retry list. */
             synchronized(retryTags) {
-                retryTags.add(new WeakReference<Tag>(tmp));
+                retryTags.add(new WeakReference<Tag>(this));
             }
-
-            return tmp;
+        } else {
+            isClosed = true;
         }
     }
 
+    public String getAttributes() {
+        return attributeString;
+    }
 
     public void setRetryTime(int newRetryMS) {
         retryMS = newRetryMS;
     }
 
-
+    public long getLastAccess() {
+        return this.lastAccess;
+    }
 
     public int close() {
         int rc = Tag.PLCTAG_ERR_NULL_PTR;
 
-        if(tag != null)
+        lock.lock();
+        if(tag > Tag.PLCTAG_STATUS_OK) {
             rc = Tag.plc_tag_destroy(tag);
+        } /* otherwise the tag is already destroyed */
 
         // make sure no one uses this again.
-        tag = null;
+        tag = 0;
+        isClosed = true;
+        lock.unlock();
 
         return rc;
     }
 
 
     public int size() {
-        if(tag != null)
-            return checkResponse(Tag.plc_tag_get_size(tag));
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_get_size(tag);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            /* bad tag, failed in creation */
+            return checkResponse(tag);
+        }
     }
 
     public int read(int timeout) {
-        if(tag != null)
-            return checkResponse(Tag.plc_tag_read(tag, timeout));
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            this.lastAccess = System.currentTimeMillis();
+            lock.lock();
+            int rc = Tag.plc_tag_read(tag, timeout);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
 
     public int status() {
-        if(tag > 0)
-            return checkResponse(Tag.plc_tag_status(tag));
-        else
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_status(tag);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
             return checkResponse(tag);
+        }
     }
 
     public int write(int timeout) {
-        if(tag > 0)
-            return checkResponse(Tag.plc_tag_write(tag, timeout));
-        else
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            this.lastAccess = System.currentTimeMillis();
+            lock.lock();
+            int rc = Tag.plc_tag_write(tag, timeout);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
             return checkResponse(tag);
+        }
     }
 
 
@@ -189,100 +244,142 @@ public class Tag implements Library {
 
     /* data routines */
     public int getUInt32(int offset) {
-        return Tag.plc_tag_get_uint32(tag, offset);
+        lock.lock();
+        int val = Tag.plc_tag_get_uint32(tag, offset);
+        lock.unlock();
+        return val;
     }
 
     public int setUInt32(int offset, int val) {
-        if(tag != null)
-            return Tag.plc_tag_set_uint32(tag, offset, val);
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_set_uint32(tag, offset, val);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
 
 
 
     public int getInt32(int offset) {
-        return Tag.plc_tag_get_int32(tag, offset);
+        lock.lock();
+        int val = Tag.plc_tag_get_int32(tag, offset);
+        lock.unlock();
+        return val;
     }
 
     public int setInt32(int offset, int val) {
-        if(tag != null)
-            return Tag.plc_tag_set_int32(tag, offset, val);
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_set_int32(tag, offset, val);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
 
 
 
     public int getUInt16(int offset) {
-        return Tag.plc_tag_get_uint16(tag, offset);
+        lock.lock();
+        int val = Tag.plc_tag_get_uint16(tag, offset);
+        lock.unlock();
+        return val;
     }
 
     public int setUInt16(int offset, int val) {
-        if(tag != null)
-            return Tag.plc_tag_set_uint16(tag, offset, (short)val);
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_set_uint16(tag, offset, (short)val);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
 
 
 
     public int getInt16(int offset) {
-        return Tag.plc_tag_get_int16(tag, offset);
+        lock.lock();
+        int val = Tag.plc_tag_get_int16(tag, offset);
+        lock.unlock();
+        return val;
     }
 
     public int setInt16(int offset, int val) {
-        if(tag != null)
-            return Tag.plc_tag_set_int16(tag, offset, (short)val);
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_set_int16(tag, offset, (short)val);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
 
 
 
     public int getUInt8(int offset) {
-        return Tag.plc_tag_get_uint8(tag, offset);
+        lock.lock();
+        int val = Tag.plc_tag_get_uint8(tag, offset);
+        lock.unlock();
+        return val;
     }
 
     public int setUInt8(int offset, int val) {
-        if(tag != null)
-            return Tag.plc_tag_set_uint8(tag, offset, (byte)val);
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_set_uint8(tag, offset, (byte)val);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
 
 
 
     public int getInt8(int offset) {
-        return Tag.plc_tag_get_int8(tag, offset);
+        lock.lock();
+        int val = Tag.plc_tag_get_int8(tag, offset);
+        lock.unlock();
+        return val;
     }
 
     public int setInt8(int offset, int val) {
-        if(tag != null)
-            return Tag.plc_tag_set_int8(tag, offset, (byte)val);
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_set_int8(tag, offset, (byte)val);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
 
 
 
     public float getFloat32(int offset) {
-        return Tag.plc_tag_get_float32(tag, offset);
+        lock.lock();
+        float val = Tag.plc_tag_get_float32(tag, offset);
+        lock.unlock();
+        return val;
     }
 
     public int setFloat32(int offset, float val) {
-        if(tag != null)
-            return Tag.plc_tag_set_float32(tag, offset, val);
-        else
-            return checkResponse(Tag.PLCTAG_ERR_NULL_PTR);
+        if(tag > Tag.PLCTAG_STATUS_OK) {
+            lock.lock();
+            int rc = Tag.plc_tag_set_float32(tag, offset, val);
+            lock.unlock();
+            return checkResponse(rc);
+        } else {
+            return checkResponse(tag);
+        }
     }
-
-
-
-
-
-
-
 
     /**
      * The following are the wrapped native functions of the C library.
@@ -293,7 +390,7 @@ public class Tag implements Library {
      * Original signature : <code>plc_tag plc_tag_create(const char*)</code><br>
      * <i>native declaration : line 75</i>
      */
-    private static native int plc_tag_create(String attrib_str);
+    private static native Tag.plc_tag plc_tag_create(String attrib_str);
 
     /**
      * plc_tag_abort
@@ -310,7 +407,7 @@ public class Tag implements Library {
      * Original signature : <code>int plc_tag_abort(plc_tag)</code>
      * <i>native declaration : line 98</i>
      */
-    private static native int plc_tag_abort(int tag);
+    private static native int plc_tag_abort(Tag.plc_tag tag);
 
     /**
      * plc_tag_destroy
@@ -323,7 +420,7 @@ public class Tag implements Library {
      * Original signature : <code>int plc_tag_destroy(plc_tag)</code>
      * <i>native declaration : line 111</i>
      */
-    private static native int plc_tag_destroy(int tag);
+    private static native int plc_tag_destroy(Tag.plc_tag tag);
 
     /**
      * plc_tag_read
@@ -339,7 +436,7 @@ public class Tag implements Library {
      * Original signature : <code>int plc_tag_read(plc_tag, int)</code>
      * <i>native declaration : line 128</i>
      */
-    private static native int plc_tag_read(int tag, int timeout);
+    private static native int plc_tag_read(Tag.plc_tag tag, int timeout);
 
     /**
      * plc_tag_status
@@ -353,7 +450,7 @@ public class Tag implements Library {
      * Original signature : <code>int plc_tag_status(plc_tag)</code>
      * <i>native declaration : line 142</i>
      */
-    private static native int plc_tag_status(int tag);
+    private static native int plc_tag_status(Tag.plc_tag tag);
 
     /**
      * plc_tag_write
@@ -370,7 +467,7 @@ public class Tag implements Library {
      * Original signature : <code>int plc_tag_write(plc_tag, int)</code>
      * <i>native declaration : line 160</i>
      */
-    private static native int plc_tag_write(int tag, int timeout);
+    private static native int plc_tag_write(Tag.plc_tag tag, int timeout);
 
     /**
      * plc_tag_get_size
@@ -381,7 +478,7 @@ public class Tag implements Library {
      * Original signature : <code>int plc_tag_get_size(plc_tag)</code>
      * <i>native declaration : line 169</i>
      */
-    private static native int plc_tag_get_size(int tag);
+    private static native int plc_tag_get_size(Tag.plc_tag tag);
 
     /**
      * plc_tag_get_uint32
@@ -392,85 +489,97 @@ public class Tag implements Library {
      * Original signature : <code>uint32_t plc_tag_get_uint32(plc_tag, int)</code>
      * <i>native declaration : line 171</i>
      */
-    private static native int plc_tag_get_uint32(int tag, int offset);
+    private static native int plc_tag_get_uint32(Tag.plc_tag tag, int offset);
 
     /**
      * Original signature : <code>int plc_tag_set_uint32(plc_tag, int, uint32_t)</code>
      * <i>native declaration : line 172</i>
      */
-    private static native int plc_tag_set_uint32(int tag, int offset, int val);
+    private static native int plc_tag_set_uint32(Tag.plc_tag tag, int offset, int val);
 
     /**
      * Original signature : <code>int32_t plc_tag_get_int32(plc_tag, int)</code>
      * <i>native declaration : line 174</i>
      */
-    private static native int plc_tag_get_int32(int tag, int offset);
+    private static native int plc_tag_get_int32(Tag.plc_tag tag, int offset);
 
     /**
      * Original signature : <code>int plc_tag_set_int32(plc_tag, int, int32_t)</code>
      * <i>native declaration : line 175</i>
      */
-    private static native int plc_tag_set_int32(int plc_tag1, int offset, int val);
+    private static native int plc_tag_set_int32(Tag.plc_tag plc_tag1, int offset, int val);
 
     /**
      * Original signature : <code>uint16_t plc_tag_get_uint16(plc_tag, int)</code>
      * <i>native declaration : line 178</i>
      */
-    private static native short plc_tag_get_uint16(int tag, int offset);
+    private static native short plc_tag_get_uint16(Tag.plc_tag tag, int offset);
 
     /**
      * Original signature : <code>int plc_tag_set_uint16(plc_tag, int, uint16_t)</code>
      * <i>native declaration : line 179</i>
      */
-    private static native int plc_tag_set_uint16(int tag, int offset, short val);
+    private static native int plc_tag_set_uint16(Tag.plc_tag tag, int offset, short val);
 
     /**
      * Original signature : <code>int16_t plc_tag_get_int16(plc_tag, int)</code>
      * <i>native declaration : line 181</i>
      */
-    private static native short plc_tag_get_int16(int tag, int offset);
+    private static native short plc_tag_get_int16(Tag.plc_tag tag, int offset);
 
     /**
      * Original signature : <code>int plc_tag_set_int16(plc_tag, int, int16_t)</code>
      * <i>native declaration : line 182</i>
      */
-    private static native int plc_tag_set_int16(int plc_tag1, int offset, short val);
+    private static native int plc_tag_set_int16(Tag.plc_tag plc_tag1, int offset, short val);
 
     /**
      * Original signature : <code>uint8_t plc_tag_get_uint8(plc_tag, int)</code>
      * <i>native declaration : line 185</i>
      */
-    private static native byte plc_tag_get_uint8(int tag, int offset);
+    private static native byte plc_tag_get_uint8(Tag.plc_tag tag, int offset);
 
     /**
      * Original signature : <code>int plc_tag_set_uint8(plc_tag, int, uint8_t)</code>
      * <i>native declaration : line 186</i>
      */
-    private static native int plc_tag_set_uint8(int tag, int offset, byte val);
+    private static native int plc_tag_set_uint8(Tag.plc_tag tag, int offset, byte val);
 
     /**
      * Original signature : <code>int8_t plc_tag_get_int8(plc_tag, int)</code>
      * <i>native declaration : line 188</i>
      */
-    private static native byte plc_tag_get_int8(int tag, int offset);
+    private static native byte plc_tag_get_int8(Tag.plc_tag tag, int offset);
 
     /**
      * Original signature : <code>int plc_tag_set_int8(plc_tag, int, int8_t)</code>
      * <i>native declaration : line 189</i>
      */
-    private static native int plc_tag_set_int8(int plc_tag1, int offset, byte val);
+    private static native int plc_tag_set_int8(Tag.plc_tag plc_tag1, int offset, byte val);
 
     /**
      * Original signature : <code>float plc_tag_get_float32(plc_tag, int)</code>
      * <i>native declaration : line 192</i>
      */
-    private static native float plc_tag_get_float32(int tag, int offset);
+    private static native float plc_tag_get_float32(Tag.plc_tag tag, int offset);
 
     /**
      * Original signature : <code>int plc_tag_set_float32(plc_tag, int, float)</code>
      * <i>native declaration : line 193</i>
      */
-    private static native int plc_tag_set_float32(int tag, int offset, float val);
+    private static native int plc_tag_set_float32(Tag.plc_tag tag, int offset, float val);
+
+    /*
+     * wrapper for the plc_tag opaque pointer.
+     */
+    public static class plc_tag extends PointerType {
+        public plc_tag(Pointer address) {
+            super(address);
+        }
+        public plc_tag() {
+            super();
+        }
+    }
 
 
     /*
@@ -485,21 +594,21 @@ public class Tag implements Library {
 
     private Tag(String attrs) {
         attributeString = attrs;
-
         retryMS = 0;
-
         nextRetry = 0;
-
         createTag();
     }
 
 
     private void createTag() {
+        lock.lock();
         tag = Tag.plc_tag_create(attributeString);
 
-        if(tag < 0) {
-            /* error creating tag! */
+        /* how to check for NULL? */
+        if(tag == null || tag.getPointer().equals(Pointer.NULL)) {
+            tag = null;
         }
+        lock.unlock();
     }
 
     private int checkResponse(int rc) {
@@ -511,7 +620,7 @@ public class Tag implements Library {
                 nextRetry = System.currentTimeMillis() + retryMS;
             }
 
-            return PLCTAG_ERR_RECONNECTING;
+            return Tag.PLCTAG_ERR_RECONNECTING;
         } else {
             nextRetry = 0;
             return rc;
@@ -541,7 +650,7 @@ public class Tag implements Library {
      * tag's memory, eventually.
      */
     protected void finalize() {
-        if(tag != 0) {
+        if(tag > Tag.PLCTAG_STATUS_OK) {
             close();
         }
     }

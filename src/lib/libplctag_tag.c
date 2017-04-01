@@ -174,6 +174,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str, int timeout)
     attr attribs = NULL;
     int rc = PLCTAG_STATUS_OK;
     int read_cache_ms = 0;
+    tag_create_function tag_constructor;
 
     /* setup a global mutex that all other code can use as a guard. */
     //if(setup_global_mutex() != PLCTAG_STATUS_OK) {
@@ -203,7 +204,15 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str, int timeout)
      * If this routine wants to keep the attributes around, it needs
      * to clone them.
      */
-    tag = ab_tag_create(attribs);
+    tag_constructor = find_tag_create_func(attribs);
+
+    if(!tag_constructor) {
+        pdebug(DEBUG_WARN,"Tag creation failed, no tag constructor found for tag type!");
+        attr_destroy(attribs);
+        return PLC_TAG_NULL;
+    }
+
+    tag = tag_constructor(attribs);
 
     /*
      * FIXME - this really should be here???  Maybe not?  But, this is
@@ -471,6 +480,14 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
 
     /*
      * first, unmap the tag.
+     *
+     * This might be called from something other than plc_tag_destroy, so
+     * do not make assumptions that this was already done.  However, it is
+     * required that if this is called directly, then it must always be
+     * the case that the tag has not been handed to the library client!
+     *
+     * If that happens, then it is possible that two threads could try to
+     * delete the same tag at the same time.
      */
     pdebug(DEBUG_DETAIL, "Releasing tag mapping.");
     release_tag_to_id_mapping(tag);

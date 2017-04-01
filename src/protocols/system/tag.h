@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2016 by Kyle Hayes                                      *
+ *   Copyright (C) 2017 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -18,17 +18,26 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIB_INIT_H__
-#define __LIB_INIT_H__ 1
-
+#ifndef __PROTOCOL_SYSTEM_TAG_H__
+#define __PROTOCOL_SYSTEM_TAG_H__ 1
 
 #include <util/attr.h>
+#include <util/debug.h>
+#include <platform.h>
+#include <lib/libplctag_tag.h>
 
-extern int initialize_modules(void);
+#define MAX_SYSTEM_TAG_NAME (20)
+#define MAX_SYSTEM_TAG_SIZE (30)
 
-typedef plc_tag_p (*tag_create_function)(attr attributes);
-extern tag_create_function find_tag_create_func(attr attributes);
+struct system_tag_t {
+    /*struct plc_tag_t p_tag;*/
+    TAG_BASE_STRUCT;
 
-extern const char *VERSION;
+    char name[MAX_SYSTEM_TAG_NAME];
+    uint8_t backing_data[MAX_SYSTEM_TAG_SIZE];
+};
+
+typedef struct system_tag_t *system_tag_p;
+
 
 #endif

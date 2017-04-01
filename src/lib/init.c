@@ -22,19 +22,128 @@
 #include <lib/libplctag.h>
 #include <lib/libplctag_tag.h>
 #include <platform.h>
+#include <util/attr.h>
 #include <util/debug.h>
 #include <ab/ab.h>
+#include <system/system.h>
+#include <lib/init.h>
+
+
+/*
+ * The version string.
+ */
+
+const char *VERSION="1.5.4";
+
+
+
+/*
+ * The following maps attributes to the tag creation functions.
+ */
+
+
+struct {
+    const char *protocol;
+    const char *make;
+    const char *family;
+    const char *model;
+    const tag_create_function tag_constructor;
+} tag_type_map[] = {
+    /* System tags */
+    {NULL, "system", "library", NULL, system_tag_create},
+    /* Allen-Bradley PLCs */
+    {"ab-eip", NULL, NULL, NULL, ab_tag_create},
+    {"ab_eip", NULL, NULL, NULL, ab_tag_create}
+};
 
 static lock_t library_initialization_lock = LOCK_INIT;
 static volatile int library_initialized = 0;
 
 
+/*
+ * find_tag_create_func()
+ *
+ * Find an appropriate tag creation function.  This scans through the array
+ * above to find a matching tag creation type.  The first match is returned.
+ * A passed set of options will match when all non-null entries in the list
+ * match.  This means that matches must be ordered from most to least general.
+ *
+ * Note that the protocol is used if it exists otherwise, the make family and
+ * model will be used.
+ */
+
+tag_create_function find_tag_create_func(attr attributes)
+{
+    int i = 0;
+    const char *protocol = attr_get_str(attributes, "protocol", NULL);
+    const char *make = attr_get_str(attributes, "make", attr_get_str(attributes, "manufacturer", NULL));
+    const char *family = attr_get_str(attributes, "family", NULL);
+    const char *model = attr_get_str(attributes, "model", NULL);
+    int num_entries = (sizeof(tag_type_map)/sizeof(tag_type_map[0]));
+
+    /* if protocol is set, then use it to match. */
+    if(protocol && str_length(protocol) > 0) {
+        for(i=0; i < num_entries; i++) {
+            if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0) {
+                pdebug(DEBUG_INFO,"Matched protocol=%s", protocol);
+                return tag_type_map[i].tag_constructor;
+            }
+        }
+    } else {
+        /* match make/family/model */
+        for(i=0; i < num_entries; i++) {
+            if(tag_type_map[i].make && make && str_cmp_i(tag_type_map[i].make, make) == 0) {
+                pdebug(DEBUG_INFO,"Matched make=%s",make);
+                if(tag_type_map[i].family) {
+                    if(family && str_cmp_i(tag_type_map[i].family, family) == 0) {
+                        pdebug(DEBUG_INFO, "Matched make=%s family=%s", make, family);
+                        if(tag_type_map[i].model) {
+                            if(model && str_cmp_i(tag_type_map[i].model, model) == 0) {
+                                pdebug(DEBUG_INFO, "Matched make=%s family=%s model=%s", make, family, model);
+                                return tag_type_map[i].tag_constructor;
+                            }
+                        } else {
+                            /* matches until a NULL */
+                            pdebug(DEBUG_INFO, "Matched make=%s family=%s model=NULL", make, family);
+                            return tag_type_map[i].tag_constructor;
+                        }
+                    }
+                } else {
+                    /* matched until a NULL, so we matched */
+                    pdebug(DEBUG_INFO, "Matched make=%s family=NULL model=NULL", make);
+                    return tag_type_map[i].tag_constructor;
+                }
+            }
+        }
+    }
+
+    /* no match */
+    return NULL;
+}
+
+
+/*
+ * destroy_modules() is called when the main process exits.
+ *
+ * Modify this for any PLC/protocol that needs to have something
+ * torn down at the end.
+ */
+
 void destroy_modules(void)
 {
-	ab_teardown();
-	
-	lib_teardown();
+    ab_teardown();
+
+    lib_teardown();
 }
+
+
+
+/*
+ * initialize_modules() is called the first time any kind of tag is
+ * created.  It will be called before the tag creation routines are
+ * run.
+ */
+
 
 int initialize_modules(void)
 {
@@ -54,10 +163,10 @@ int initialize_modules(void)
         }
 
         library_initialized = 1;
-        
+
         /* hook the destructor */
-        atexit(destroy_modules);        
-        
+        atexit(destroy_modules);
+
         pdebug(DEBUG_INFO,"Done initializing library modules.");
     }
 

@@ -38,6 +38,8 @@
 extern "C" {
 #endif
 
+/* version 2.0.0 */
+
 
     #ifdef _WIN32
         #ifdef __cplusplus

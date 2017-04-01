@@ -166,14 +166,8 @@ plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path;
-    //~ int rc;
 
     pdebug(DEBUG_INFO,"Starting.");
-
-    /*if(setup_session_mutex() != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR,"Failed to create main session mutex!");
-        return PLC_TAG_P_NULL;
-    }*/
 
     /*
      * allocate memory for the new tag.  Do this first so that
