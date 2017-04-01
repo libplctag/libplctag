@@ -33,7 +33,7 @@ void test_version(void)
 
     fprintf(stderr,"Testing version tag.\n");
 
-    tag = plc_tag_create("make=system&family=library&name=version&debug=4");
+    tag = plc_tag_create("make=system&family=library&name=version&debug=4", 0);
 
     if(!tag) {
         fprintf(stderr,"ERROR: Could not create tag!\n");
@@ -60,7 +60,7 @@ void test_debug(void)
 
     fprintf(stderr,"Testing debug tag.\n");
 
-    tag = plc_tag_create("make=system&family=library&name=debug&debug=4");
+    tag = plc_tag_create("make=system&family=library&name=debug&debug=4", 0);
 
     if(!tag) {
         fprintf(stderr,"ERROR: Could not create tag!\n");
