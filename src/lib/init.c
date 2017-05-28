@@ -149,10 +149,6 @@ int initialize_modules(void)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    /* DEBUG FIXME */
-    set_debug_level(4);
-
-
     /* loop until we get the lock flag */
     while (!lock_acquire((lock_t*)&library_initialization_lock)) {
         sleep_ms(1);
