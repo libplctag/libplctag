@@ -341,7 +341,7 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-	session_remove_request(tag->session, req);
+	//session_remove_request(tag->session, req);
 	request_release(req);
 	tag->reqs[0] = NULL;
 	
@@ -598,7 +598,7 @@ static int check_write_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-	session_remove_request(tag->session, req);
+	//session_remove_request(tag->session, req);
 	request_release(req);
 	tag->reqs[0] = NULL;
 	

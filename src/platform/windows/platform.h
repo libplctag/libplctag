@@ -99,7 +99,7 @@ extern void mem_copy(void *d1, void *d2, int size);
 /* string functions/defs */
 extern int str_cmp(const char *first, const char *second);
 extern int str_cmp_i(const char *first, const char *second);
-extern int str_copy(char *dst, const char *src, int size);
+extern int str_copy(char *dst, int dst_size, const char *src);
 extern int str_length(const char *str);
 extern char *str_dup(const char *str);
 extern int str_to_int(const char *str, int *val);

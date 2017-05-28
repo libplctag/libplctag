@@ -159,9 +159,9 @@ extern int str_cmp_i(const char *first, const char *second)
  *
  * Returns
  */
-extern int str_copy(char *dst, const char *src, int size)
+extern int str_copy(char *dst, int dst_size, const char *src)
 {
-    strncpy(dst,src,size);
+    strncpy(dst, src, dst_size);
     return 0;
 }
 
@@ -290,8 +290,8 @@ extern char **str_split(const char *str, const char *sep)
     /* calculate the beginning of the string */
     tmp = (char *)res + sizeof(char *)*(sub_str_count+1);
 
-    /* copy the string */
-    str_copy((char *)tmp,str,strlen(str));
+    /* copy the string into the new buffer past the first part with the array of char pointers. */
+    str_copy((char *)tmp, (size - ((char*)tmp - (char*)res)), str);
 
     /* set up the pointers */
     sub_str_count=0;
@@ -680,15 +680,15 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         return PLCTAG_ERR_OPEN;
     }
 
-	/* abort the connection immediately upon close. */
-	so_linger.l_onoff = 1;
+    /* abort the connection immediately upon close. */
+    so_linger.l_onoff = 1;
     so_linger.l_linger = 0;
 
-	if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
-		close(fd);
-		pdebug(DEBUG_ERROR,"Error setting socket close linger option, errno: %d",errno);
-		return PLCTAG_ERR_OPEN;
-	}
+    if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
+        close(fd);
+        pdebug(DEBUG_ERROR,"Error setting socket close linger option, errno: %d",errno);
+        return PLCTAG_ERR_OPEN;
+    }
 
     /* figure out what address we are connecting to. */
 

@@ -125,7 +125,7 @@ int ab_init(void)
     }
 
     /* create the background IO handler thread */
-    rc = thread_create((thread_p*)&io_handler_thread,request_handler_func, 32*1024, NULL);
+    rc = thread_create((thread_p*)&io_handler_thread, request_handler_func, 32*1024, NULL);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Unable to create request handler thread!");
@@ -181,6 +181,9 @@ plc_tag_p ab_tag_create(attr attribs)
         return PLC_TAG_P_NULL;
     }
 
+
+    pdebug(DEBUG_DETAIL, "tag=%p", tag);
+
     /*
      * we got far enough to allocate memory, set the default vtable up
      * in case we need to abort later.
@@ -234,38 +237,11 @@ plc_tag_p ab_tag_create(attr attribs)
 
     tag->first_read = 1;
 
-    /*
-     * Since there is no explicit init function for the library (perhaps an error),
-     * we need to check to see if library initialization has been done.
-     */
-
-    //if(!io_handler_thread) {
-    //    pdebug(DEBUG_INFO,"entering critical block %p",global_session_mut);
-    //    critical_block(global_session_mut) {
-    //        /* check again because the state could have changed */
-    //       if(!io_handler_thread) {
-    //            rc = thread_create((thread_p*)&io_handler_thread,request_handler_func, 32*1024, NULL);
-    //
-    //            if(rc != PLCTAG_STATUS_OK) {
-    //                pdebug(DEBUG_INFO,"Unable to create request handler thread!");
-    //                tag->status = rc;
-    //                break;
-    //            }
-    //        }
-    //    }
-    //    pdebug(DEBUG_INFO,"leaving critical block %p",global_session_mut);
-    //
-    //    if(tag->status != PLCTAG_STATUS_OK) {
-    //        return (plc_tag_p)tag;
-    //    }
-    //}
-
     /* some kinds of tag need a connection and we know right away */
     if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
         /* this type of tag must use connected mode. */
         tag->needs_connection = 1;
     }
-
 
     /* start parsing the parts of the tag. */
 
@@ -319,6 +295,8 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->status = PLCTAG_ERR_BAD_GATEWAY;
         return (plc_tag_p)tag;
     }
+
+    pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
 
     if(tag->needs_connection) {
         /* Find or create a connection.*/
@@ -686,7 +664,7 @@ static void update_resend_samples(ab_session_p session, int64_t round_trip_time)
 
 
 
-static void receive_response(ab_session_p session, ab_request_p request)
+static void receive_response_unsafe(ab_session_p session, ab_request_p request)
 {
     /*
      * We received a packet.  Modify the packet interval downword slightly
@@ -718,44 +696,11 @@ static void receive_response(ab_session_p session, ab_request_p request)
     request->send_request = 0;
     request->recv_in_progress = 0;
 
-    /* mark the connection as available if we need to */
-    //~ clear_connection_for_request(request);
-    //~ clear_session_for_request(request);
+    /* clear the request from the session as it is done. Note we hold the mutex here. */
+    session_remove_request_unsafe(session, request);
 }
 
 
-//~ static void handle_resend(ab_session_p session, ab_request_p request)
-//~ {
-    //~ eip_encap_t *encap = (eip_encap_t*)(&request->data[0]);
-
-
-    //~ //if (encap->encap_command == le2h16(AB_EIP_CONNECTED_SEND)) {
-        //~ pdebug(DEBUG_INFO,"Requeuing connected request connection %d sequence ID %d.", request->conn_id,request->conn_seq);
-
-        //~ request->recv_in_progress = 0;
-        //~ request->send_request = 1;
-
-        //~ /*
-         //~ * Change the packet interval.  We lost a packet, so we should
-         //~ * back off a bit.
-         //~ */
-        //~ /*
-        //~ session->next_packet_interval_us += SESSION_PACKET_LOSS_INTERVAL_INC;
-        //~ if(session->next_packet_interval_us > SESSION_MAX_PACKET_INTERVAL) {
-            //~ session->next_packet_interval_us = SESSION_MAX_PACKET_INTERVAL;
-        //~ }
-        //~ */
-        //~ /* delay the next packet directly */
-        //~ //session->next_packet_time_us += session->next_packet_interval_us;
-
-        //~ /* make sure that we clear this packet from the session if we need to. */
-        //~ //clear_session_for_request(request);
-
-        //~ //pdebug(DEBUG_INFO,"packet lost, so increasing packet interval to %lldus", session->next_packet_interval_us);
-    //~ //} else {
-        //~ //pdebug(DEBUG_INFO,"Not requeuing unconnected request session sequence %llx", request->session_seq_id);
-    //~ //}
-//~ }
 
 
 int ok_to_resend(ab_session_p session, ab_request_p request)
@@ -798,7 +743,7 @@ int ok_to_resend(ab_session_p session, ab_request_p request)
     return 1;
 }
 
-int process_response_packet(ab_session_p session)
+int process_response_packet_unsafe(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
     eip_cip_co_resp *response = (eip_cip_co_resp*)(&session->recv_data[0]);
@@ -806,22 +751,14 @@ int process_response_packet(ab_session_p session)
 
     /* find the request for which there is a response pending. */
     while(request) {
+        /* need to get the next request now because we might be removing it in receive_response_unsafe */
+        ab_request_p next_req = request->next;
+
         if(match_request_and_response(request, response)) {
-            receive_response(session, request);
+            receive_response_unsafe(session, request);
         }
 
-        /*
-         * resend logic.
-         *
-         * If we see a request that has been sent, but has not received a response yet,
-         * then resend it.  Requests are processed in order (maybe?).  The ones closest to the
-         * head of the list are the oldest, so we process them in ascending time order.
-         */
-        /*if(ok_to_resend(session, request)) {
-            handle_resend(session, request);
-        }*/
-
-        request = request->next;
+        request = next_req;
     }
 
     return rc;
@@ -845,7 +782,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
 
         /* did we get a packet? */
         if(rc == PLCTAG_STATUS_OK && session->has_response) {
-            rc = process_response_packet(session);
+            rc = process_response_packet_unsafe(session);
 
             /* reset the session's buffer */
             mem_set(session->recv_data, 0, MAX_REQ_RESP_SIZE);
@@ -1097,6 +1034,9 @@ static void process_session_tasks_unsafe(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Checking for things to do with session %p", session);
+
+
     if(!session->registered) {
         return;
     }
@@ -1130,7 +1070,7 @@ void* request_handler_func(void* not_used)
     ab_session_p cur_sess;
 
     /* garbage code to stop compiler from whining about unused variables */
-    pdebug(DEBUG_NONE,"Starting with arg %p",not_used);
+    pdebug(DEBUG_DETAIL,"Starting with arg %p",not_used);
 
     while (!library_terminating) {
         /* we need the mutex */

@@ -80,7 +80,7 @@ plc_tag_p system_tag_create(attr attribs)
     tag->vtable = &system_tag_vtable;
 
     /* get the name and copy it */
-    str_copy(tag->name, name, (int)(sizeof(tag->name)));
+    str_copy(tag->name, MAX_SYSTEM_TAG_NAME, name);
 
     /* point data at the backing store. */
     tag->data = &tag->backing_data[0];
@@ -130,7 +130,7 @@ static int system_tag_read(plc_tag_p ptag)
 
     if(str_cmp_i(&tag->name[0],"version") == 0) {
         pdebug(DEBUG_DETAIL,"Version is %s",VERSION);
-        str_copy((char *)(&tag->data[0]), VERSION, str_length(VERSION));
+        str_copy((char *)(&tag->data[0]), MAX_SYSTEM_TAG_SIZE , VERSION);
         tag->data[str_length(VERSION)] = 0;
         return PLCTAG_STATUS_OK;
     }

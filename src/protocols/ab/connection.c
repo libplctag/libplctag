@@ -181,7 +181,7 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int sha
         return NULL;
     }
 
-    connection->session = tag->session;
+	connection->session = tag->session;
     connection->conn_seq_num = 1 /*(uint16_t)(intptr_t)(connection)*/;
     connection->orig_connection_id = ++(connection->session->conn_serial_number);
     connection->status = PLCTAG_STATUS_PENDING;
@@ -191,7 +191,7 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int sha
     connection->rc = refcount_init(1, connection, connection_destroy);
 
     /* copy the path for later */
-    str_copy(&connection->path[0], path, MAX_CONN_PATH);
+    str_copy(&connection->path[0], MAX_CONN_PATH, path);
 
     /* copy path data from the tag */
     mem_copy(connection->conn_path, tag->conn_path, tag->conn_path_size);
@@ -285,7 +285,7 @@ int connection_perform_forward_open(ab_connection_p connection)
     connection->status = rc;
 
     if(req) {
-		session_remove_request(connection->session,req);
+		//session_remove_request(connection->session,req);
         request_release(req);
         //request_destroy(&req);
     }
@@ -425,137 +425,6 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
 
 
 
-//~ int connection_add_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
-//~ {
-    //~ pdebug(DEBUG_DETAIL, "Starting");
-
-    //~ tag->next = connection->tags;
-    //~ connection->tags = tag;
-
-    //~ pdebug(DEBUG_DETAIL, "Done");
-
-    //~ return PLCTAG_STATUS_OK;
-//~ }
-
-
-//~ int connection_add_tag(ab_connection_p connection, ab_tag_p tag)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ pdebug(DEBUG_INFO, "Starting.");
-
-    //~ if(connection) {
-        //~ critical_block(global_session_mut) {
-            //~ rc = connection_add_tag_unsafe(connection, tag);
-        //~ }
-    //~ } else {
-        //~ pdebug(DEBUG_WARN, "Connection ptr is null!");
-        //~ rc = PLCTAG_ERR_NULL_PTR;
-    //~ }
-
-    //~ pdebug(DEBUG_INFO, "Done.");
-
-    //~ return rc;
-//~ }
-
-//~ int connection_remove_tag_unsafe(ab_connection_p connection, ab_tag_p tag)
-//~ {
-    //~ ab_tag_p cur;
-    //~ ab_tag_p prev;
-    //~ int rc;
-
-    //~ pdebug(DEBUG_INFO, "Starting.");
-
-    //~ cur = connection->tags;
-    //~ prev = NULL;
-
-    //~ while (cur && cur != tag) {
-        //~ prev = cur;
-        //~ cur = cur->next;
-    //~ }
-
-    //~ if (cur == tag) {
-        //~ if (prev) {
-            //~ prev->next = cur->next;
-        //~ } else {
-            //~ connection->tags = cur->next;
-        //~ }
-
-        //~ tag->connection = NULL;
-
-        //~ rc = PLCTAG_STATUS_OK;
-    //~ } else {
-        //~ rc = PLCTAG_ERR_NOT_FOUND;
-    //~ }
-
-    //~ if (connection_empty_unsafe(connection)) {
-        //~ connection->disconnect_in_progress = 1;
-    //~ } else {
-        //~ pdebug(DEBUG_DETAIL, "connection not empty.  Not destroying.");
-    //~ }
-
-    //~ pdebug(DEBUG_INFO, "Done.");
-
-    //~ return rc;
-//~ }
-
-//int connection_remove_tag(ab_connection_p connection, ab_tag_p tag)
-//{
-    //int rc = PLCTAG_STATUS_OK;
-
-    //pdebug(DEBUG_INFO, "Starting.");
-
-    //if(connection && connection->session) {
-        //critical_block(global_session_mut) {
-            //rc = connection_remove_tag_unsafe(connection, tag);
-        //}
-
-        ///* release the connection */
-        //connection_release(connection);
-
-        ///* don't block the mutex, check to see if we need to destroy the connection. */
-        ///*
-        //if(connection_is_empty(connection) && connection->disconnect_in_progress) {
-            //pdebug(DEBUG_INFO,"Closing connection.");
-            //connection_close(connection);
-
-            //critical_block(global_session_mut) {
-                //connection_destroy_unsafe(connection);
-            //}
-        //}
-        //*/
-    //} else {
-        //pdebug(DEBUG_WARN, "Connection or session ptr is null!");
-        //rc = PLCTAG_ERR_NULL_PTR;
-    //}
-
-    //pdebug(DEBUG_INFO, "Done.");
-
-    //return rc;
-//}
-
-
-//~ int connection_empty_unsafe(ab_connection_p connection)
-//~ {
-    //~ if(!connection) {
-        //~ return 1;
-    //~ }
-
-    //~ return (connection->tags == NULL);
-//~ }
-
-
-//~ int connection_is_empty(ab_connection_p connection)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ critical_block(global_session_mut) {
-        //~ rc = connection_empty_unsafe(connection);
-    //~ }
-
-    //~ return rc;
-//~ }
-
 void connection_destroy(void *connection_arg)
 {
     ab_connection_p connection = connection_arg;
@@ -678,7 +547,7 @@ int connection_close(ab_connection_p connection)
     connection->status = rc;
 
     if(req) {
-        session_remove_request(connection->session,req);
+        //session_remove_request(connection->session,req);
         request_release(req);
     }
 

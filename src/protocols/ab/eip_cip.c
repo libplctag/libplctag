@@ -1069,10 +1069,10 @@ static int check_read_status_connected(ab_tag_p tag)
             /* this is an aggregate type of some sort, the type info is variable length */
             int type_length =
                 *(data + 1) + 2; /*
-                                                                       * MAGIC
-                                                                       * add 2 to get the total length including
-                                                                       * the type byte and the length byte.
-                                                                       */
+                                    * MAGIC
+                                    * add 2 to get the total length including
+                                    * the type byte and the length byte.
+                                    */
 
             /* check for extra long types */
             if (type_length > MAX_TAG_TYPE_INFO) {

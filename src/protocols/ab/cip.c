@@ -297,7 +297,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
      * This pads out the path to a multiple of 16-bit
      * words.
      */
-     pdebug(DEBUG_DETAIL,"ioi_size before %d", ioi_size);
+    pdebug(DEBUG_DETAIL,"ioi_size before %d", ioi_size);
     if(ioi_size & 0x01) {
         *data = 0;
         ioi_size++;

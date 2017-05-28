@@ -182,9 +182,17 @@ extern int str_cmp_i(const char *first, const char *second)
  *
  * Returns
  */
-extern int str_copy(char *dst, const char *src, int size)
+extern int str_copy(char *dst, int dst_size, const char *src)
 {
-    strncpy_s(dst, size+1, src, size);
+	int rc;
+
+	if (!src) {
+		return PLCTAG_ERR_NULL_PTR;
+	}
+
+	/* FIXME - if there is not enough room, truncate the string. */
+    strncpy_s(dst, dst_size, src, _TRUNCATE);
+
     return 0;
 }
 
@@ -315,8 +323,8 @@ extern char **str_split(const char *str, const char *sep)
     /* calculate the beginning of the string */
     tmp = (char *)res + sizeof(char *)*(sub_str_count+1);
 
-    /* copy the string */
-    str_copy((char *)tmp,str,strlen(str));
+    /* copy the string into the new buffer past the first part with the array of char pointers. */
+    str_copy((char *)tmp, (size - ((char*)tmp - (char*)res)), str);
 
     /* set up the pointers */
     sub_str_count=0;
@@ -707,7 +715,7 @@ extern int socket_create(sock_p *s)
         return PLCTAG_ERR_NO_MEM;
     }
 
-	pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -762,15 +770,15 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         return PLCTAG_ERR_OPEN;
     }
 
-	/* abort the connection on close. */
-	so_linger.l_onoff = 1;
+    /* abort the connection on close. */
+    so_linger.l_onoff = 1;
     so_linger.l_linger = 0;
 
-	if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
-		closesocket(fd);
-		pdebug(DEBUG_ERROR,"Error setting socket close linger option, errno: %d",errno);
-		return PLCTAG_ERR_OPEN;
-	}
+    if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
+        closesocket(fd);
+        pdebug(DEBUG_ERROR,"Error setting socket close linger option, errno: %d",errno);
+        return PLCTAG_ERR_OPEN;
+    }
 
     /* figure out what address we are connecting to. */
 
@@ -779,32 +787,32 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         pdebug(DEBUG_DETAIL, "Found numeric IP address: %s", host);
         num_ips = 1;
     } else {
-		struct addrinfo hints;
-		struct addrinfo *res = NULL;
-		int rc = 0;
+        struct addrinfo hints;
+        struct addrinfo *res = NULL;
+        int rc = 0;
 
-		mem_set(&ips, 0, sizeof(ips));
-		mem_set(&hints, 0, sizeof(hints));
+        mem_set(&ips, 0, sizeof(ips));
+        mem_set(&hints, 0, sizeof(hints));
 
-		hints.ai_socktype = SOCK_STREAM; /* TCP */
-		hints.ai_family = AF_INET; /* IP V4 only */
+        hints.ai_socktype = SOCK_STREAM; /* TCP */
+        hints.ai_family = AF_INET; /* IP V4 only */
 
-		if ((rc = getaddrinfo(host, NULL, &hints, &res)) != 0) {
-			pdebug(DEBUG_WARN, "Error looking up PLC IP address %s, error = %d\n", host, rc);
+        if ((rc = getaddrinfo(host, NULL, &hints, &res)) != 0) {
+            pdebug(DEBUG_WARN, "Error looking up PLC IP address %s, error = %d\n", host, rc);
 
-			if (res) {
-				freeaddrinfo(res);
-			}
+            if (res) {
+                freeaddrinfo(res);
+            }
 
-			return PLCTAG_ERR_BAD_GATEWAY;
-		}
+            return PLCTAG_ERR_BAD_GATEWAY;
+        }
 
-		for (num_ips = 0; res && num_ips < MAX_IPS; num_ips++) {
-			ips[num_ips].s_addr = ((struct sockaddr_in *)(res->ai_addr))->sin_addr.s_addr;
-			res = res->ai_next;
-		}
+        for (num_ips = 0; res && num_ips < MAX_IPS; num_ips++) {
+            ips[num_ips].s_addr = ((struct sockaddr_in *)(res->ai_addr))->sin_addr.s_addr;
+            res = res->ai_next;
+        }
 
-		freeaddrinfo(res);
+        freeaddrinfo(res);
     }
 
 
@@ -830,13 +838,13 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
         if( rc == 0) {
             /* Windows MSVC does not like inet_ntoa(), not safe.
-			 * pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));
-			 */
+             * pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));
+             */
             done = 1;
         } else {
             /* MSVC does not like inet_ntoa(), not safe.
-			 * pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);
-			 */
+             * pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);
+             */
             i++;
         }
     } while(!done && i < num_ips);
@@ -864,7 +872,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     s->port = port;
     s->is_open = 1;
 
-	pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -895,6 +903,7 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
         if(err == WSAEWOULDBLOCK) {
             return PLCTAG_ERR_NO_DATA;
         } else {
+            pdebug(DEBUG_WARN,"socket read error rc=%d, errno=%d", rc, err);
             return PLCTAG_ERR_READ;
         }
     }
@@ -920,6 +929,7 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
         if(err == WSAEWOULDBLOCK) {
             return PLCTAG_ERR_NO_DATA;
         } else {
+            pdebug(DEBUG_WARN,"socket write error rc=%d, errno=%d", rc, err);
             return PLCTAG_ERR_WRITE;
         }
     }
@@ -1474,11 +1484,11 @@ int64_t time_ms(void)
 
 struct tm *localtime_r(const time_t *timep, struct tm *result)
 {
-	time_t t = *timep;
+    time_t t = *timep;
 
-	localtime_s(result, &t);
+    localtime_s(result, &t);
 
-	return result;
+    return result;
 }
 
 
