@@ -243,7 +243,7 @@ int main(int argc, char **argv)
     pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
-    int64_t seconds = 3600;  /* default 1 hour */
+    int64_t seconds = 30;  /* default 1 hour */
     int num_threads = 0;
 
     if(argc>2) {
