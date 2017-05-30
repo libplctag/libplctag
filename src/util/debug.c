@@ -144,6 +144,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     va_start(va,templ);
     vfprintf(stderr,output,va);
     va_end(va);
+	fflush(stdout);
 }
 
 
