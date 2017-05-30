@@ -81,11 +81,11 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
 {
     uint16_t res = 0;
 
-    pdebug(DEBUG_DETAIL, "entering critical block %p",global_session_mut);
+    //pdebug(DEBUG_DETAIL, "entering critical block %p",global_session_mut);
     critical_block(global_session_mut) {
         res = (uint16_t)session_get_new_seq_id_unsafe(sess);
     }
-    pdebug(DEBUG_DETAIL, "leaving critical block %p", global_session_mut);
+    //pdebug(DEBUG_DETAIL, "leaving critical block %p", global_session_mut);
 
     return res;
 }
@@ -140,7 +140,7 @@ int session_add_connection_unsafe(ab_session_p session, ab_connection_p connecti
 {
     pdebug(DEBUG_DETAIL, "Starting");
 
-    /* add the connection to the list in the session */
+	/* add the connection to the list in the session */
     connection->next = session->connections;
     session->connections = connection;
 
@@ -155,7 +155,7 @@ int session_add_connection(ab_session_p session, ab_connection_p connection)
 
     pdebug(DEBUG_DETAIL, "Starting");
 
-    if(session) {
+	if(session) {
         critical_block(global_session_mut) {
             rc = session_add_connection_unsafe(session, connection);
         }
@@ -199,13 +199,6 @@ int session_remove_connection_unsafe(ab_session_p session, ab_connection_p conne
         rc = PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* removed due to refcount code
-    if (session_is_empty(session)) {
-        pdebug(DEBUG_DETAIL, "destroying session");
-        session_destroy_unsafe(session);
-    }
-    */
-
     pdebug(DEBUG_DETAIL, "Done");
 
     return rc;
@@ -217,7 +210,7 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
 
     pdebug(DEBUG_DETAIL, "Starting");
 
-    if(session) {
+	if(session) {
         critical_block(global_session_mut) {
             rc = session_remove_connection_unsafe(session, connection);
         }
@@ -322,7 +315,7 @@ int add_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    critical_block(global_session_mut) {
+	critical_block(global_session_mut) {
         rc = add_session_unsafe(s);
     }
 
@@ -375,7 +368,7 @@ int remove_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    critical_block(global_session_mut) {
+	critical_block(global_session_mut) {
         rc = remove_session_unsafe(s);
     }
 
@@ -387,7 +380,7 @@ int remove_session(ab_session_p s)
 
 static int session_match_valid(const char *host, ab_session_p session)
 {
-    if(!session) {
+	if(!session) {
         return 0;
     }
 
@@ -425,95 +418,7 @@ ab_session_p find_session_by_host_unsafe(const char* t)
     return tmp;
 }
 
-//~ /* not threadsafe */
-//~ int session_add_tag_unsafe(ab_session_p session, ab_tag_p tag)
-//~ {
-    //~ pdebug(DEBUG_DETAIL, "Starting");
 
-    //~ tag->next = session->tags;
-    //~ session->tags = tag;
-
-    //~ pdebug(DEBUG_DETAIL, "Done");
-
-    //~ return PLCTAG_STATUS_OK;
-//~ }
-
-//~ int session_add_tag(ab_session_p session, ab_tag_p tag)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ pdebug(DEBUG_DETAIL, "Starting.");
-
-    //~ if(session) {
-        //~ critical_block(global_session_mut) {
-            //~ rc = session_add_tag_unsafe(session, tag);
-        //~ }
-    //~ } else {
-        //~ pdebug(DEBUG_WARN, "Session pointer is null!");
-
-        //~ rc = PLCTAG_ERR_NULL_PTR;
-    //~ }
-
-    //~ pdebug(DEBUG_DETAIL,"Done.");
-
-    //~ return rc;
-//~ }
-
-//~ /* not threadsafe */
-//~ int session_remove_tag_unsafe(ab_session_p session, ab_tag_p tag)
-//~ {
-    //~ ab_tag_p tmp, prev;
-
-    //~ pdebug(DEBUG_DETAIL, "Starting");
-
-    //~ tmp = session->tags;
-    //~ prev = NULL;
-
-    //~ while (tmp && tmp != tag) {
-        //~ prev = tmp;
-        //~ tmp = tmp->next;
-    //~ }
-
-    //~ if (tmp) {
-        //~ if (!prev) {
-            //~ session->tags = tmp->next;
-        //~ } else {
-            //~ prev->next = tmp->next;
-        //~ }
-    //~ }
-
-    //~ /* if the session is empty, get rid of it. */
-    //~ /* removed due to refcount code
-    //~ if(session_is_empty(session)) {
-        //~ session_destroy_unsafe(session);
-    //~ }
-    //~ */
-
-    //~ pdebug(DEBUG_DETAIL, "Done");
-
-    //~ return PLCTAG_STATUS_OK;
-//~ }
-
-//~ int session_remove_tag(ab_session_p session, ab_tag_p tag)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ pdebug(DEBUG_DETAIL, "Starting.");
-
-    //~ if(session) {
-        //~ critical_block(global_session_mut) {
-            //~ rc = session_remove_tag_unsafe(session, tag);
-        //~ }
-    //~ } else {
-        //~ pdebug(DEBUG_WARN, "Session ptr is null!");
-
-        //~ rc = PLCTAG_ERR_NULL_PTR;
-    //~ }
-
-    //~ pdebug(DEBUG_DETAIL, "Done.");
-
-    //~ return rc;
-//~ }
 
 ab_session_p session_create_unsafe(const char* host, int gw_port)
 {
@@ -532,7 +437,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
         return AB_SESSION_NULL;
     }
 
-    str_copy(session->host, host, MAX_SESSION_HOST);
+	str_copy(session->host, MAX_SESSION_HOST, host);
 
     session->status = PLCTAG_STATUS_PENDING;
 
@@ -572,6 +477,9 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
     /* set up the ref count */
     session->rc = refcount_init(1, session, session_destroy);
 
+	/* FIXME */
+	pdebug(DEBUG_DETAIL, "Refcount is now %d", session->rc.count);
+
     /* add the new session to the list. */
     add_session_unsafe(session);
 
@@ -593,7 +501,7 @@ int session_init(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* we must connect to the gateway and register */
+	/* we must connect to the gateway and register */
     if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "session connect failed!");
         session->status = rc;
@@ -623,7 +531,7 @@ int session_connect(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* Open a socket for communication with the gateway. */
+	/* Open a socket for communication with the gateway. */
     rc = socket_create(&(session->sock));
 
     if (rc) {
@@ -654,7 +562,7 @@ void session_destroy(void *session_arg)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    if (!session) {
+	if (!session) {
         pdebug(DEBUG_WARN, "Session ptr is null!");
 
         return;
@@ -716,28 +624,6 @@ void session_destroy(void *session_arg)
     return;
 }
 
-/* should not be called any more
-void session_destroy(void *session_arg)
-{
-    ab_session_p session = session_arg;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    critical_block(global_session_mut) {
-        rc = session_destroy_unsafe(session);
-    }
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return rc;
-}
-*/
-
-//~ int session_is_empty(ab_session_p session)
-//~ {
-    //~ return (session->tags == NULL) && (session->connections == NULL);
-//~ }
 
 int session_register(ab_session_p session)
 {
@@ -749,7 +635,7 @@ int session_register(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /*
+	/*
      * clear the session data.
      *
      * We use the receiving buffer because we do not have a request and nothing can
@@ -902,58 +788,6 @@ int session_unregister_unsafe(ab_session_p session)
 
 
 
-//~ int mark_session_for_request(ab_request_p request)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ if(!request) {
-        //~ return PLCTAG_ERR_NULL_PTR;
-    //~ }
-
-    //~ if(!request->session) {
-        //~ return PLCTAG_ERR_NULL_PTR;
-    //~ }
-
-    //~ /* if the packet is not requesting serialization, do not do any */
-    //~ if(!request->connected_request) {
-        //~ return PLCTAG_STATUS_OK;
-    //~ }
-
-    //~ /* FIXME DEBUG - remove! */
-    //~ return PLCTAG_STATUS_OK;
-
-    //~ /* mark the session as in use. */
-    //~ pdebug(DEBUG_INFO,"Setting session in flight flags for session sequence ID %llx",request->session->session_seq_id);
-    //~ request->session->connected_request_in_flight = 1;
-    //~ request->session->serial_seq_in_flight = request->session->session_seq_id;
-
-    //~ return rc;
-//~ }
-
-
-//~ int clear_session_for_request(ab_request_p request)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ if(request->session) {
-        //~ ab_session_p session = request->session;
-
-        //~ if(session->connected_request_in_flight) {
-            //~ if(session->serial_seq_in_flight == request->session_seq_id) {
-                //~ pdebug(DEBUG_INFO, "Clearing session in flight flags for packet sequence ID %llx", request->session_seq_id);
-                //~ session->connected_request_in_flight = 0;
-            //~ } else {
-                //~ pdebug(DEBUG_INFO, "Mismatch between request session sequence ID %llx and session sequence ID %llx", request->session_seq_id, session->serial_seq_in_flight);
-            //~ }
-        //~ } else {
-            //~ pdebug(DEBUG_INFO,"No packet in flight.");
-        //~ }
-    //~ }
-
-    //~ return rc;
-//~ }
-
-
 /*
  * session_add_request_unsafe
  *
@@ -1077,9 +911,9 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.  session=%p, req=%p", sess, req);
 
-    if(sess == NULL || req == NULL) {
+	if(sess == NULL || req == NULL) {
         return rc;
     }
 
@@ -1097,23 +931,23 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
 
 int session_acquire(ab_session_p session)
 {
-    if(!session) {
+	pdebug(DEBUG_INFO, "Acquire session=%p", session);
+
+	if(!session) {
         return PLCTAG_ERR_NULL_PTR;
     }
     
-    pdebug(DEBUG_INFO,"Acquire session.");
-
     return refcount_acquire(&session->rc);
 }
 
 
 int session_release(ab_session_p session)
 {
-    if(!session) {
+	pdebug(DEBUG_DETAIL, "Release session=%p", session);
+
+	if(!session) {
         return PLCTAG_ERR_NULL_PTR;
     }
-
-    pdebug(DEBUG_INFO,"Release session.");
 
     return refcount_release(&session->rc);
 }

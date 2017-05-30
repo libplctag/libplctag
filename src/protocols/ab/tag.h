@@ -28,15 +28,18 @@
 #ifndef __PLCTAG_AB_TAG_H__
 #define __PLCTAG_AB_TAG_H__ 1
 
+/* do these first */
+#define MAX_TAG_NAME        (64)
+#define MAX_TAG_TYPE_INFO   (64)
+#define MAX_CONN_PATH		(128)
+
+/* they are used in some of these includes */
 #include <lib/libplctag.h>
 #include <lib/libplctag_tag.h>
 #include <ab/ab_common.h>
 #include <ab/session.h>
 #include <ab/connection.h>
 #include <ab/request.h>
-
-#define MAX_TAG_NAME        (64)
-#define MAX_TAG_TYPE_INFO   (64)
 
 
 struct ab_tag_t {

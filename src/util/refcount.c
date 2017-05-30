@@ -30,6 +30,8 @@ refcount refcount_init(int count, void *data, void (*delete_func)(void *data))
 {
     refcount rc;
 
+	pdebug(DEBUG_INFO, "Initializing refcount struct with count=%d", count);
+
     rc.count = count;
     rc.lock = LOCK_INIT;
     rc.data = data;

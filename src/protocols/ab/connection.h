@@ -29,8 +29,6 @@
 #ifndef __AB_AB_COMMON_H__
 #define __AB_AB_COMMON_H__
 
-#define MAX_CONN_PATH       (128)
-
 
 #include <platform.h>
 #include <ab/ab_common.h>
