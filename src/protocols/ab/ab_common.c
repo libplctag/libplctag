@@ -67,6 +67,8 @@ volatile int library_terminating = 0;
  */
 
 
+#define DEFAULT_NUM_RETRIES (5)
+#define DEFAULT_RETRY_INTERVAL (300)
 
 
 /* vtables for different kinds of tags */
@@ -166,6 +168,8 @@ plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path;
+    int num_retries;
+    int default_retry_interval;
 
     pdebug(DEBUG_INFO,"Starting.");
 
@@ -237,11 +241,40 @@ plc_tag_p ab_tag_create(attr attribs)
 
     tag->first_read = 1;
 
-    /* some kinds of tag need a connection and we know right away */
-    if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
-        /* this type of tag must use connected mode. */
-        tag->needs_connection = 1;
+    /* set up retry and other PLC-specific information. */
+
+    switch(tag->protocol_type) {
+        case AB_PROTOCOL_PLC:
+            tag->needs_connection = 0;
+            num_retries = DEFAULT_NUM_RETRIES;
+            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            break;
+
+        case AB_PROTOCOL_MLGX:
+            tag->needs_connection = 0;
+            num_retries = DEFAULT_NUM_RETRIES;
+            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            break;
+
+        case AB_PROTOCOL_LGX:
+            tag->needs_connection = 0;
+            num_retries = DEFAULT_NUM_RETRIES;
+            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            break;
+
+        case AB_PROTOCOL_MLGX800:
+            tag->needs_connection = 1;
+            num_retries = DEFAULT_NUM_RETRIES;
+            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unknown PLC type!");
+            tag->status = PLCTAG_ERR_BAD_DEVICE;
+            return (plc_tag_p)tag;
+            break;
     }
+
 
     /* start parsing the parts of the tag. */
 
@@ -272,6 +305,7 @@ plc_tag_p ab_tag_create(attr attribs)
     if(tag->use_dhp_direct) {
         /* this is a bit of a cheat.   The logic should be fixed up to combine with the check above.*/
         tag->needs_connection = 1;
+        default_retry_interval = DEFAULT_RETRY_INTERVAL*3; /* MAGIC boost the default timeout! */
     }
 
     /*
@@ -284,6 +318,9 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
     }
+
+    tag->default_retry_interval = attr_get_int(attribs,"default_retry_interval", default_retry_interval);
+    tag->num_retries = attr_get_int(attribs, "num_retries", num_retries);
 
     /*
      * Find or create a session.
@@ -734,11 +771,18 @@ int ok_to_resend(ab_session_p session, ab_request_p request)
     }
 
     /* have we waited enough time to resend? */
-    if((request->time_sent + session->retry_interval) > time_ms()) {
+    if((request->time_sent + request->retry_interval) > time_ms()) {
         return 0;
     }
 
-    pdebug(DEBUG_INFO,"Request waited %lldms, need to resend.",(time_ms() - request->time_sent));
+    if(request->num_retries_left <= 0) {
+        return 0;
+    }
+
+    pdebug(DEBUG_INFO,"Request waited %lldms, and has %d retries left need to resend.",(time_ms() - request->time_sent), request->num_retries_left);
+
+    /* track how many times we've retried. */
+    request->num_retries_left--;
 
     return 1;
 }
@@ -883,63 +927,6 @@ static int session_send_current_request(ab_session_p session)
     return rc;
 }
 
-/*
- * Check to see if the session should send a request to the PLC.
- * This implements the checks for throttling.
- */
-//~ static int ready_to_send(ab_request_p request)
-//~ {
-    //~ /* is there already a request being sent? */
-    //~ if(request->session->current_request) {
-        //~ return 0;
-    //~ }
-
-    //~ /* is this a serialized packet?  If so, are we already sending one? */
-    //~ if(request->connected_request && request->session->connected_request_in_flight) {
-        //~ return 0;
-    //~ }
-
-    //~ /*
-     //~ * if this is a connected request type, then check the connection
-     //~ * to make sure that we do not have a packet in flight.
-     //~ *
-     //~ * Only allow a few at a time until we figure out the packet loss problem.
-     //~ */
-    //~ if(request->connection) {
-        //~ for(int index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
-            //~ if(!request->connection->request_in_flight[index]) {
-                //~ pdebug(DEBUG_INFO,"Found open slot at %d",index);
-                //~ return 1;
-            //~ } else {
-                //~ pdebug(DEBUG_INFO,"Slot %d is full.",index);
-            //~ }
-        //~ }
-
-        //~ pdebug(DEBUG_INFO,"No open slots to send.");
-
-        //~ return 0;
-    //~ }
-
-    //~ /* not a connected message, so OK to send. */
-    //~ return 1;
-//~ }
-
-
-//~ static int handle_abort_request(ab_request_p request)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ /* clear any in flight markers. */
-    //~ clear_connection_for_request(request);
-    //~ clear_session_for_request(request);
-
-    //~ rc = session_remove_request_unsafe(request->session,request);
-
-    //~ //request_destroy_unsafe(&request);
-    //~ request_release(request);
-
-    //~ return rc;
-//~ }
 
 static int session_check_outgoing_data_unsafe(ab_session_p session)
 {

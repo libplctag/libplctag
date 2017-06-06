@@ -153,6 +153,9 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
         return rc;
     }
 
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
+
     pccc = (pccc_dhp_co_req*)(req->data);
 
     /* point to the end of the struct */
@@ -209,8 +212,8 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[0] = NULL;
+        request_release(req);
+        tag->reqs[0] = NULL;
         return rc;
     }
 
@@ -276,6 +279,9 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
+
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_dhp_co_req*)(req->data);
 
@@ -377,8 +383,8 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[0] = NULL;
+        request_release(req);
+        tag->reqs[0] = NULL;
         return rc;
     }
 
@@ -486,8 +492,8 @@ static int check_read_status(ab_tag_p tag)
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-	/* clean up request */
-	ab_tag_abort(tag);
+    /* clean up request */
+    ab_tag_abort(tag);
 
     tag->read_in_progress = 0;
 
@@ -564,8 +570,8 @@ static int check_write_status(ab_tag_p tag)
 
     tag->write_in_progress = 0;
 
-	/* clean up any outstanding requests. */
-	ab_tag_abort(tag);
+    /* clean up any outstanding requests. */
+    ab_tag_abort(tag);
 
     pdebug(DEBUG_INFO,"Done.");
 

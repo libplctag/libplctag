@@ -156,6 +156,9 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
         return rc;
     }
 
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
+
     /* point the struct pointers to the buffer*/
     pccc = (pccc_req*)(req->data);
 
@@ -222,8 +225,8 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[0] = NULL;
+        request_release(req);
+        tag->reqs[0] = NULL;
         return rc;
     }
 
@@ -341,11 +344,11 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-	//session_remove_request(tag->session, req);
-	request_release(req);
-	tag->reqs[0] = NULL;
-	
-	tag->read_in_progress = 0;
+    //session_remove_request(tag->session, req);
+    request_release(req);
+    tag->reqs[0] = NULL;
+
+    tag->read_in_progress = 0;
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -411,6 +414,9 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
+
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_req*)(req->data);
 
@@ -517,8 +523,8 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[0] = NULL;
+        request_release(req);
+        tag->reqs[0] = NULL;
         return rc;
    }
 
@@ -598,11 +604,11 @@ static int check_write_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-	//session_remove_request(tag->session, req);
-	request_release(req);
-	tag->reqs[0] = NULL;
-	
-	tag->write_in_progress = 0;
+    //session_remove_request(tag->session, req);
+    request_release(req);
+    tag->reqs[0] = NULL;
+
+    tag->write_in_progress = 0;
 
     pdebug(DEBUG_WARN,"Done.");
 

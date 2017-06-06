@@ -59,7 +59,7 @@ struct ab_request_t {
 
     /* used when processing a response */
     int processed;
-    
+
     /* reference count information */
     refcount rc;
 
@@ -69,10 +69,13 @@ struct ab_request_t {
     uint64_t session_seq_id;
     uint32_t conn_id;
     uint16_t conn_seq;
-    
+
     /* time stamps for rate calculations */
     int64_t time_sent;
     int send_count;
+
+    int num_retries_left;
+    int retry_interval;
 
     /* used by the background thread for incrementally getting data */
     int current_offset;

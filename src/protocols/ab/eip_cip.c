@@ -439,6 +439,9 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
         return rc;
     }
 
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
+
     /* point the request struct at the buffer */
     cip = (eip_cip_co_req*)(req->data);
 
@@ -504,8 +507,8 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[slot] = NULL;
+        request_release(req);
+        tag->reqs[slot] = NULL;
         return rc;
     }
 
@@ -536,6 +539,9 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
+
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
 
     /* point the request struct at the buffer */
     cip = (eip_cip_uc_req*)(req->data);
@@ -631,8 +637,8 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[slot] = NULL;
+        request_release(req);
+        tag->reqs[slot] = NULL;
         return rc;
     }
 
@@ -663,6 +669,9 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
+
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
 
     cip = (eip_cip_co_req*)(req->data);
 
@@ -746,7 +755,7 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
 
     /* store the connection */
     req->connection = tag->connection;
-    
+
     /* mark the request as a connected request */
     req->connected_request = 1;
 
@@ -755,8 +764,8 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[slot] = NULL;
+        request_release(req);
+        tag->reqs[slot] = NULL;
         return rc;
     }
 
@@ -786,6 +795,9 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
+
+    req->num_retries_left = tag->num_retries;
+    req->retry_interval = tag->default_retry_interval;
 
     /* point the request struct at the buffer */
     cip = (eip_cip_uc_req*)(req->data);
@@ -906,8 +918,8 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-		request_release(req);
-		tag->reqs[slot] = NULL;
+        request_release(req);
+        tag->reqs[slot] = NULL;
         return rc;
     }
 

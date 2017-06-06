@@ -137,23 +137,23 @@ int connection_find_or_create(ab_tag_p tag, attr attribs)
 
 int connection_acquire(ab_connection_p connection)
 {
-	if(!connection) {
-		return PLCTAG_ERR_NULL_PTR;
-	}
-	
-	pdebug(DEBUG_INFO,"Acquire connection.");
-	
+    if(!connection) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO,"Acquire connection.");
+
     return refcount_acquire(&connection->rc);
 }
 
 int connection_release(ab_connection_p connection)
 {
-	if(!connection) {
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if(!connection) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	pdebug(DEBUG_INFO,"Release connection.");
-	
+    pdebug(DEBUG_INFO,"Release connection.");
+
     return refcount_release(&connection->rc);
 }
 
@@ -181,7 +181,7 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int sha
         return NULL;
     }
 
-	connection->session = tag->session;
+    connection->session = tag->session;
     connection->conn_seq_num = 1 /*(uint16_t)(intptr_t)(connection)*/;
     connection->orig_connection_id = ++(connection->session->conn_serial_number);
     connection->status = PLCTAG_STATUS_PENDING;
@@ -254,6 +254,9 @@ int connection_perform_forward_open(ab_connection_p connection)
             break;
         }
 
+        req->num_retries_left = 5; /* MAGIC! */
+        req->retry_interval = 900; /* MAGIC! */
+
         /* send the ForwardOpen command to the PLC */
         if((rc = send_forward_open_req(connection, req)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN,"Unable to send ForwardOpen packet!");
@@ -261,7 +264,7 @@ int connection_perform_forward_open(ab_connection_p connection)
         }
 
         /* wait for a response */
-        timeout_time = time_ms() + CONNECTION_SETUP_TIMEOUT; 
+        timeout_time = time_ms() + CONNECTION_SETUP_TIMEOUT;
 
         while (timeout_time > time_ms() && !req->resp_received) {
             sleep_ms(1);
@@ -285,7 +288,7 @@ int connection_perform_forward_open(ab_connection_p connection)
     connection->status = rc;
 
     if(req) {
-		//session_remove_request(connection->session,req);
+        //session_remove_request(connection->session,req);
         request_release(req);
         //request_destroy(&req);
     }
@@ -428,8 +431,8 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
 void connection_destroy(void *connection_arg)
 {
     ab_connection_p connection = connection_arg;
-	int really_destroy = 1;
-	
+    int really_destroy = 1;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     if (!connection) {
@@ -447,35 +450,35 @@ void connection_destroy(void *connection_arg)
     }
     */
 
-	/*
-	 * This needs to be done carefully.  We can have a race condition here.
-	 * 
-	 * If there is another thread that just looked up the connection and got
-	 * a reference (and thus a ref count increment), then we have another
-	 * reference and thus cannot delete this connection yet.
-	 */
-	critical_block(global_session_mut) {
-		if(refcount_get_count(&connection->rc) > 0) {
-			pdebug(DEBUG_WARN,"Some other thread took a reference to this connection before we could delete it.  Aborting deletion.");
-			really_destroy = 0;
-			break;
-		}
+    /*
+     * This needs to be done carefully.  We can have a race condition here.
+     *
+     * If there is another thread that just looked up the connection and got
+     * a reference (and thus a ref count increment), then we have another
+     * reference and thus cannot delete this connection yet.
+     */
+    critical_block(global_session_mut) {
+        if(refcount_get_count(&connection->rc) > 0) {
+            pdebug(DEBUG_WARN,"Some other thread took a reference to this connection before we could delete it.  Aborting deletion.");
+            really_destroy = 0;
+            break;
+        }
 
-		/* make sure the session does not reference the connection */
-		session_remove_connection_unsafe(connection->session, connection);
-		
-		/* now no one can get a reference to this connection. */
-	}
-	
-	if(really_destroy) {	
-		/* clean up connection with the PLC, ignore return code, we can't do anything about it. */
-		connection_close(connection);
+        /* make sure the session does not reference the connection */
+        session_remove_connection_unsafe(connection->session, connection);
 
-		session_release(connection->session);
+        /* now no one can get a reference to this connection. */
+    }
 
-		/* do final clean up */
-		mem_free(connection);
-	}
+    if(really_destroy) {
+        /* clean up connection with the PLC, ignore return code, we can't do anything about it. */
+        connection_close(connection);
+
+        session_release(connection->session);
+
+        /* do final clean up */
+        mem_free(connection);
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -515,6 +518,9 @@ int connection_close(ab_connection_p connection)
             break;
         }
 
+        req->num_retries_left = 5; /* MAGIC! */
+        req->retry_interval = 900; /* MAGIC! */
+
         /* send the ForwardClose command to the PLC */
         if((rc = send_forward_close_req(connection, req)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN,"Unable to send ForwardClose packet!");
@@ -522,7 +528,7 @@ int connection_close(ab_connection_p connection)
         }
 
         /* wait for a response */
-        timeout_time = time_ms() + CONNECTION_TEARDOWN_TIMEOUT; 
+        timeout_time = time_ms() + CONNECTION_TEARDOWN_TIMEOUT;
 
         while (timeout_time > time_ms() && !req->resp_received) {
             sleep_ms(1);

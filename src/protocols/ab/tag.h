@@ -31,7 +31,7 @@
 /* do these first */
 #define MAX_TAG_NAME        (64)
 #define MAX_TAG_TYPE_INFO   (64)
-#define MAX_CONN_PATH		(128)
+#define MAX_CONN_PATH       (128)
 
 /* they are used in some of these includes */
 #include <lib/libplctag.h>
@@ -67,6 +67,10 @@ struct ab_tag_t {
     /* the connection IOI path */
     uint8_t conn_path[MAX_CONN_PATH];
     uint8_t conn_path_size;
+
+    /* timeout/retry information */
+    int num_retries;
+    int default_retry_interval;
 
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];

@@ -55,6 +55,10 @@ int request_create(ab_request_p* req)
         rc = PLCTAG_ERR_NO_MEM;
     } else {
         res->rc = refcount_init(1, res, request_destroy);
+
+        res->num_retries_left = 5; /* MAGIC */
+        res->retry_interval = 900; /* MAGIC */
+
         *req = res;
     }
 
@@ -64,25 +68,25 @@ int request_create(ab_request_p* req)
 
 int request_acquire(ab_request_p req)
 {
-	if(!req) {
-		return PLCTAG_ERR_NULL_PTR;
-	}
-	
-	pdebug(DEBUG_INFO,"Acquiring request.");
-	
-	return refcount_acquire(&req->rc);
+    if(!req) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO,"Acquiring request.");
+
+    return refcount_acquire(&req->rc);
 }
 
 
 int request_release(ab_request_p req)
 {
-	if(!req) {
-		return PLCTAG_ERR_NULL_PTR;
-	}
-	
-	pdebug(DEBUG_INFO,"Releasing request.");
-	
-	return refcount_release(&req->rc);
+    if(!req) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO,"Releasing request.");
+
+    return refcount_release(&req->rc);
 }
 
 
@@ -114,11 +118,3 @@ void request_destroy(void *req_arg)
 }
 
 
-//~ int request_destroy(ab_request_p* req_pp)
-//~ {
-    //~ critical_block(global_session_mut) {
-        //~ request_destroy_unsafe(req_pp);
-    //~ }
-
-    //~ return PLCTAG_STATUS_OK;
-//~ }
