@@ -182,6 +182,7 @@ if (UNIX)
                            simple
                            simple_dual
                            slc500
+                           stress_api_lock
                            stress_test
                            string
                            test_special
