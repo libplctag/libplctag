@@ -140,7 +140,7 @@ int session_add_connection_unsafe(ab_session_p session, ab_connection_p connecti
 {
     pdebug(DEBUG_DETAIL, "Starting");
 
-	/* add the connection to the list in the session */
+    /* add the connection to the list in the session */
     connection->next = session->connections;
     session->connections = connection;
 
@@ -155,7 +155,7 @@ int session_add_connection(ab_session_p session, ab_connection_p connection)
 
     pdebug(DEBUG_DETAIL, "Starting");
 
-	if(session) {
+    if(session) {
         critical_block(global_session_mut) {
             rc = session_add_connection_unsafe(session, connection);
         }
@@ -210,7 +210,7 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
 
     pdebug(DEBUG_DETAIL, "Starting");
 
-	if(session) {
+    if(session) {
         critical_block(global_session_mut) {
             rc = session_remove_connection_unsafe(session, connection);
         }
@@ -315,7 +315,7 @@ int add_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-	critical_block(global_session_mut) {
+    critical_block(global_session_mut) {
         rc = add_session_unsafe(s);
     }
 
@@ -368,7 +368,7 @@ int remove_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-	critical_block(global_session_mut) {
+    critical_block(global_session_mut) {
         rc = remove_session_unsafe(s);
     }
 
@@ -380,7 +380,7 @@ int remove_session(ab_session_p s)
 
 static int session_match_valid(const char *host, ab_session_p session)
 {
-	if(!session) {
+    if(!session) {
         return 0;
     }
 
@@ -437,7 +437,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
         return AB_SESSION_NULL;
     }
 
-	str_copy(session->host, MAX_SESSION_HOST, host);
+    str_copy(session->host, MAX_SESSION_HOST, host);
 
     session->status = PLCTAG_STATUS_PENDING;
 
@@ -477,8 +477,8 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
     /* set up the ref count */
     session->rc = refcount_init(1, session, session_destroy);
 
-	/* FIXME */
-	pdebug(DEBUG_DETAIL, "Refcount is now %d", session->rc.count);
+    /* FIXME */
+    pdebug(DEBUG_DETAIL, "Refcount is now %d", session->rc.count);
 
     /* add the new session to the list. */
     add_session_unsafe(session);
@@ -501,7 +501,7 @@ int session_init(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-	/* we must connect to the gateway and register */
+    /* we must connect to the gateway and register */
     if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "session connect failed!");
         session->status = rc;
@@ -531,7 +531,7 @@ int session_connect(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-	/* Open a socket for communication with the gateway. */
+    /* Open a socket for communication with the gateway. */
     rc = socket_create(&(session->sock));
 
     if (rc) {
@@ -562,7 +562,7 @@ void session_destroy(void *session_arg)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-	if (!session) {
+    if (!session) {
         pdebug(DEBUG_WARN, "Session ptr is null!");
 
         return;
@@ -578,46 +578,46 @@ void session_destroy(void *session_arg)
     }
     */
 
-	/*
-	 * Work around the race condition here.  Another thread could have looked up the
-	 * session before this thread got to this point, but after this thread saw the 
-	 * session's ref count go to zero.  So, we need to check again after preventing
-	 * other threads from getting a reference.
-	 */
-	 
-	critical_block(global_session_mut) {
-		if(refcount_get_count(&session->rc) > 0) {
-			pdebug(DEBUG_WARN,"Another thread got a reference to this session before it could be deleted.  Aborting deletion");
-			really_destroy = 0;
-			break;
-		}
-		
-		/* still good, so remove the session from the list so no one else can reference it. */
-		remove_session_unsafe(session);
-	}
-	
-	/* 
-	 * if we are really destroying the session then we know that this is
-	 * the last reference.  So, we can use the unsafe variants.
-	 */
-	if(really_destroy) {
-		ab_request_p req;
+    /*
+     * Work around the race condition here.  Another thread could have looked up the
+     * session before this thread got to this point, but after this thread saw the
+     * session's ref count go to zero.  So, we need to check again after preventing
+     * other threads from getting a reference.
+     */
 
-		/* unregister and close the socket. */
-		session_unregister_unsafe(session);
+    critical_block(global_session_mut) {
+        if(refcount_get_count(&session->rc) > 0) {
+            pdebug(DEBUG_WARN,"Another thread got a reference to this session before it could be deleted.  Aborting deletion");
+            really_destroy = 0;
+            break;
+        }
 
-		/* remove any remaining requests, they are dead */
-		req = session->requests;
+        /* still good, so remove the session from the list so no one else can reference it. */
+        remove_session_unsafe(session);
+    }
 
-		while(req) {
-			session_remove_request_unsafe(session, req);
-			//~ request_destroy_unsafe(&req);
-			//request_release(req);
-			req = session->requests;
-		}
+    /*
+     * if we are really destroying the session then we know that this is
+     * the last reference.  So, we can use the unsafe variants.
+     */
+    if(really_destroy) {
+        ab_request_p req;
 
-		mem_free(session);
-	}
+        /* unregister and close the socket. */
+        session_unregister_unsafe(session);
+
+        /* remove any remaining requests, they are dead */
+        req = session->requests;
+
+        while(req) {
+            session_remove_request_unsafe(session, req);
+            //~ request_destroy_unsafe(&req);
+            //request_release(req);
+            req = session->requests;
+        }
+
+        mem_free(session);
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -635,7 +635,7 @@ int session_register(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-	/*
+    /*
      * clear the session data.
      *
      * We use the receiving buffer because we do not have a request and nothing can
@@ -699,7 +699,7 @@ int session_register(ab_session_p session)
     session->recv_offset = 0;
     mem_set(session->recv_data, 0, MAX_REQ_RESP_SIZE);
 
-    timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT; 
+    timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
 
     while (timeout_time > time_ms()) {
         if (session->recv_offset < sizeof(eip_encap_t)) {
@@ -798,7 +798,7 @@ int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
     int rc = PLCTAG_STATUS_OK;
     ab_request_p cur, prev;
     int total_requests = 0;
-    
+
     pdebug(DEBUG_INFO, "Starting.");
 
     if(!sess) {
@@ -827,7 +827,7 @@ int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
 
     /* update the request's refcount as we point to it. */
     request_acquire(req);
-    
+
     pdebug(DEBUG_INFO,"Total requests in the queue: %d",total_requests);
 
     pdebug(DEBUG_INFO, "Done.");
@@ -913,7 +913,7 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
 
     pdebug(DEBUG_DETAIL, "Starting.  session=%p, req=%p", sess, req);
 
-	if(sess == NULL || req == NULL) {
+    if(sess == NULL || req == NULL) {
         return rc;
     }
 
@@ -931,21 +931,21 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
 
 int session_acquire(ab_session_p session)
 {
-	pdebug(DEBUG_INFO, "Acquire session=%p", session);
+    pdebug(DEBUG_INFO, "Acquire session=%p", session);
 
-	if(!session) {
+    if(!session) {
         return PLCTAG_ERR_NULL_PTR;
     }
-    
+
     return refcount_acquire(&session->rc);
 }
 
 
 int session_release(ab_session_p session)
 {
-	pdebug(DEBUG_DETAIL, "Release session=%p", session);
+    pdebug(DEBUG_INFO, "Release session=%p", session);
 
-	if(!session) {
+    if(!session) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
