@@ -344,11 +344,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         /* set up the links between the tag and the connection. */
         //connection_add_tag(tag->connection, tag);
-    } /*
-    else {
-        session_add_tag(tag->session, tag);
     }
-    */
 
     /*
      * check the tag name, this is protocol specific.
@@ -482,73 +478,63 @@ int ab_tag_abort(ab_tag_p tag)
 int ab_tag_destroy(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
+    ab_connection_p connection = NULL;
+    ab_session_p session = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* FIXME - this is going to serialize everything. */
-    //critical_block(global_library_mutex) {
-        ab_connection_p connection = NULL;
-        ab_session_p session = NULL;
+    /* already destroyed? */
+    if (!tag) {
+        pdebug(DEBUG_WARN,"Tag pointer is null!");
+        rc = PLCTAG_ERR_NULL_PTR;
+        //~ break;
+        return rc;
+    }
 
-        /* already destroyed? */
-        if (!tag) {
-            pdebug(DEBUG_WARN,"Tag pointer is null!");
-            rc = PLCTAG_ERR_NULL_PTR;
-            //~ break;
-            return rc;
-        }
+    connection = tag->connection;
+    session = tag->session;
 
-        connection = tag->connection;
-        session = tag->session;
+    /* tags may have a connection.  Release if so. */
+    if(connection) {
+        pdebug(DEBUG_DETAIL, "Removing tag from connection.");
+        connection_release(connection);
+        tag->connection = NULL;
+    }
 
-        /*
-         * stop any current actions. Note that we
-         * want to use the thread-safe version here.  We
-         * do lock a mutex later, but a different one.
-         */
-        /* remove - this is already called by the main library code. */
-        plc_tag_abort_mapped((plc_tag_p)tag);
+    /* tags should always have a session.  Release it. */
+    pdebug(DEBUG_DETAIL,"Getting ready to release tag session %p",tag->session);
+    if(session) {
+        pdebug(DEBUG_DETAIL, "Removing tag from session.");
+        session_release(session);
+        tag->session = NULL;
+    } else {
+        pdebug(DEBUG_WARN,"No session pointer!");
+    }
 
-        /* tags are stored in different locations depending on the type. */
-        if(connection) {
-            pdebug(DEBUG_DETAIL, "Removing tag from connection.");
-            connection_release(connection);
-            tag->connection = NULL;
-            //connection_remove_tag(connection, tag);
-        }
+    if (tag->reqs) {
+        mem_free(tag->reqs);
+        tag->reqs = NULL;
+    }
 
-        if(session) {
-            pdebug(DEBUG_DETAIL, "Removing tag from session.");
-            session_release(session);
-            tag->session = NULL;
-            //session_remove_tag(session, tag);
-        }
+    if (tag->read_req_sizes) {
+        mem_free(tag->read_req_sizes);
+        tag->read_req_sizes = NULL;
+    }
 
-        if (tag->reqs) {
-            mem_free(tag->reqs);
-            tag->reqs = NULL;
-        }
+    if (tag->write_req_sizes) {
+        mem_free(tag->write_req_sizes);
+        tag->write_req_sizes = NULL;
+    }
 
-        if (tag->read_req_sizes) {
-            mem_free(tag->read_req_sizes);
-            tag->read_req_sizes = NULL;
-        }
+    if (tag->data) {
+        mem_free(tag->data);
+        tag->data = NULL;
+    }
 
-        if (tag->write_req_sizes) {
-            mem_free(tag->write_req_sizes);
-            tag->write_req_sizes = NULL;
-        }
+    /* release memory */
+    mem_free(tag);
 
-        if (tag->data) {
-            mem_free(tag->data);
-            tag->data = NULL;
-        }
-
-        /* release memory */
-        mem_free(tag);
-
-        pdebug(DEBUG_INFO,"Finished releasing all tag resources.");
-    //}
+    pdebug(DEBUG_INFO,"Finished releasing all tag resources.");
 
     pdebug(DEBUG_INFO, "done");
 
@@ -969,10 +955,10 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
         if(request->recv_in_progress) {
             if(request->connected_request) {
                 connected_requests_in_flight++;
-                pdebug(DEBUG_INFO,"%d connected requests in flight.", connected_requests_in_flight);
+                pdebug(DEBUG_SPEW,"%d connected requests in flight.", connected_requests_in_flight);
             } else {
                 unconnected_requests_in_flight++;
-                pdebug(DEBUG_INFO,"%d unconnected requests in flight.", unconnected_requests_in_flight);
+                pdebug(DEBUG_SPEW,"%d unconnected requests in flight.", unconnected_requests_in_flight);
             }
         }
 
@@ -1021,7 +1007,7 @@ static void process_session_tasks_unsafe(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Checking for things to do with session %p", session);
+    pdebug(DEBUG_SPEW, "Checking for things to do with session %p", session);
 
 
     if(!session->registered) {
