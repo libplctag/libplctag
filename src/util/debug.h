@@ -33,7 +33,8 @@
 #define DEBUG_WARN      (2)
 #define DEBUG_INFO      (3)
 #define DEBUG_DETAIL    (4)
-#define DEBUG_END		(5)
+#define DEBUG_SPEW      (5)
+#define DEBUG_END       (6)
 
 extern int set_debug_level(int debug_level);
 extern int get_debug_level(void);
