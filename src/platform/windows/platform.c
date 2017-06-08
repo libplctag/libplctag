@@ -184,8 +184,6 @@ extern int str_cmp_i(const char *first, const char *second)
  */
 extern int str_copy(char *dst, int dst_size, const char *src)
 {
-	int rc;
-
 	if (!src) {
 		return PLCTAG_ERR_NULL_PTR;
 	}
