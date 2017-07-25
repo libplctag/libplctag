@@ -9,6 +9,7 @@
 *.user
 *.aps
 *.pch
+build_win/*
 *.vspscc
 *.vssscc
 *_i.c
