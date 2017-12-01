@@ -422,7 +422,7 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
 
     state = START;
 
-    while(*p) {
+    while(*p && (dp - data) < MAX_TAG_NAME) {
         switch(state) {
             case START:
 
@@ -536,6 +536,11 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
 
                 break;
         }
+    }
+
+    if((dp - data) >= MAX_TAG_NAME) {
+        pdebug(DEBUG_WARN,"Encoded tag name is too long!  Length=%d", (dp - data));
+        return 0;
     }
 
     /* word_count is in units of 16-bit integers, do not

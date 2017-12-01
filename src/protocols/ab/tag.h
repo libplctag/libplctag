@@ -29,9 +29,9 @@
 #define __PLCTAG_AB_TAG_H__ 1
 
 /* do these first */
-#define MAX_TAG_NAME        (64)
+#define MAX_TAG_NAME        (260)
 #define MAX_TAG_TYPE_INFO   (64)
-#define MAX_CONN_PATH       (128)
+#define MAX_CONN_PATH       (200)
 
 /* they are used in some of these includes */
 #include <lib/libplctag.h>
