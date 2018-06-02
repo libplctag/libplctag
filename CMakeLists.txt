@@ -31,6 +31,8 @@ project (libplctag_project)
 # the project is version 1.5
 set (libplctag_VERSION_MAJOR 1)
 set (libplctag_VERSION_MINOR 5)
+set (libplctag_VERSION_PATCH 8)
+set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 
 message("MSVC = ${MSVC}")
@@ -219,6 +221,10 @@ set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMP
 add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
+# Generate files from templates
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" @ONLY)
+
 # for installation
 install(TARGETS plctag DESTINATION lib)
 install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib/pkgconfig")
