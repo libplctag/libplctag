@@ -808,7 +808,7 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag tag_id, int offset)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -852,7 +852,7 @@ LIB_EXPORT int plc_tag_set_uint32(plc_tag tag_id, int offset, uint32_t val)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -901,7 +901,7 @@ LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag tag_id, int offset)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -946,7 +946,7 @@ LIB_EXPORT int plc_tag_set_int32(plc_tag tag_id, int offset, int32_t ival)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -999,7 +999,7 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag tag_id, int offset)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1042,7 +1042,7 @@ LIB_EXPORT int plc_tag_set_uint16(plc_tag tag_id, int offset, uint16_t val)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1093,7 +1093,7 @@ LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag tag_id, int offset)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1137,7 +1137,7 @@ LIB_EXPORT int plc_tag_set_int16(plc_tag tag_id, int offset, int16_t ival)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1187,7 +1187,7 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(plc_tag tag_id, int offset)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1229,7 +1229,7 @@ LIB_EXPORT int plc_tag_set_uint8(plc_tag tag_id, int offset, uint8_t val)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1275,7 +1275,7 @@ LIB_EXPORT int8_t plc_tag_get_int8(plc_tag tag_id, int offset)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1318,7 +1318,7 @@ LIB_EXPORT int plc_tag_set_int8(plc_tag tag_id, int offset, int8_t ival)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1370,7 +1370,7 @@ LIB_EXPORT float plc_tag_get_float32(plc_tag tag_id, int offset)
     plc_tag_p tag = NULL;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
@@ -1503,7 +1503,7 @@ static int api_lock(int index)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL,"Starting");
+    pdebug(DEBUG_SPEW,"Starting");
 
     if(index < 0 || index > MAX_TAG_ENTRIES) {
         pdebug(DEBUG_WARN,"Illegal tag index %d",index);
@@ -1512,7 +1512,7 @@ static int api_lock(int index)
 
     rc = mutex_lock(tag_api_mutex[index]);
 
-    pdebug(DEBUG_DETAIL,"Done with status %d", rc);
+    pdebug(DEBUG_SPEW,"Done with status %d", rc);
 
     return rc;
 }
@@ -1523,7 +1523,7 @@ static int api_unlock(int index)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL,"Starting");
+    pdebug(DEBUG_SPEW,"Starting");
 
     if(index < 0 || index > MAX_TAG_ENTRIES) {
         pdebug(DEBUG_WARN,"Illegal tag index %d",index);
@@ -1532,7 +1532,7 @@ static int api_unlock(int index)
 
     rc = mutex_unlock(tag_api_mutex[index]);
 
-    pdebug(DEBUG_DETAIL,"Done with status %d", rc);
+    pdebug(DEBUG_SPEW,"Done with status %d", rc);
 
     return rc;
 }
@@ -1600,7 +1600,7 @@ static plc_tag_p map_id_to_tag(plc_tag tag_id_ptr)
     int tag_id = (int)(intptr_t)tag_id_ptr;
     int index = to_tag_index(tag_id);
 
-    pdebug(DEBUG_DETAIL, "Starting");
+    pdebug(DEBUG_SPEW, "Starting");
 
     if(index == TAG_ID_ERROR) {
         pdebug(DEBUG_ERROR,"Bad tag ID passed! %d", tag_id);
@@ -1609,13 +1609,13 @@ static plc_tag_p map_id_to_tag(plc_tag tag_id_ptr)
 
     result = tag_map[index];
     if(result && result->tag_id == tag_id) {
-        pdebug(DEBUG_DETAIL, "Correct mapping at index %d for id %d found with tag %p", index, tag_id, result);
+        pdebug(DEBUG_SPEW, "Correct mapping at index %d for id %d found with tag %p", index, tag_id, result);
     } else {
         pdebug(DEBUG_WARN, "Not found, tag id %d maps to a different tag", tag_id);
         result = NULL;
     }
 
-    pdebug(DEBUG_DETAIL,"Done with tag %p", result);
+    pdebug(DEBUG_SPEW,"Done with tag %p", result);
 
     /* either nothing was there or it is the wrong tag. */
     return result;
