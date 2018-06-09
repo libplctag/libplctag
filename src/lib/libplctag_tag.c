@@ -1456,7 +1456,7 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag tag_id, int offset, float fval)
         tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
     }
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
