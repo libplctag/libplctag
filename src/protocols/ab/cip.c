@@ -33,7 +33,7 @@
 #include <ab/ab_common.h>
 #include <ab/cip.h>
 #include <ab/tag.h>
-#include <ab/eip.h>
+#include <ab/defs.h>
 #include <util/debug.h>
 
 

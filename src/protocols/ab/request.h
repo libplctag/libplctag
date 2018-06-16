@@ -30,9 +30,10 @@
 
 #include <ab/ab_common.h>
 #include <util/refcount.h>
+#include <ab/defs.h>
 
 
-#define MAX_REQ_RESP_SIZE   (768) /* enough? */
+#define MAX_REQ_RESP_SIZE   (MAX_EIP_PACKET_SIZE_EX) /* enough? */
 
 /*
  * this structure contains data necessary to set up a request and hold

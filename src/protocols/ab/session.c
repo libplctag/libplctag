@@ -31,6 +31,7 @@
 #include <ab/session.h>
 #include <ab/connection.h>
 #include <ab/request.h>
+#include <ab/defs.h>
 #include <ab/eip.h>
 #include <util/debug.h>
 #include <stdlib.h>

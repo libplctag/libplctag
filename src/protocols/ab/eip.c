@@ -27,6 +27,7 @@
 
 #include <lib/libplctag.h>
 #include <platform.h>
+#include <ab/defs.h>
 #include <ab/eip.h>
 #include <ab/session.h>
 #include <ab/connection.h>
@@ -161,6 +162,11 @@ int recv_eip_response_unsafe(ab_session_p session)
                                             sizeof(eip_encap_t) :
                                             sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
 
+    if(data_needed >= MAX_REQ_RESP_SIZE) {
+        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, MAX_REQ_RESP_SIZE);
+        return PLCTAG_ERR_TOO_LONG;
+    }
+
     if (session->recv_offset < data_needed) {
         /* read everything we can */
         do {
@@ -183,6 +189,11 @@ int recv_eip_response_unsafe(ab_session_p session)
                 /* recalculate the amount of data needed if we have just completed the read of an encap header */
                 if (session->recv_offset >= sizeof(eip_encap_t)) {
                     data_needed = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
+
+                    if(data_needed >= MAX_REQ_RESP_SIZE) {
+                        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, MAX_REQ_RESP_SIZE);
+                        return PLCTAG_ERR_TOO_LONG;
+                    }
                 }
             }
         } while (rc > 0 && session->recv_offset < data_needed);
