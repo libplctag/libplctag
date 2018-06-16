@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@CMAKE_INSTALL_PREFIX@/lib
+includedir=@CMAKE_INSTALL_PREFIX@/include
+
+Name: libplctag
+Description: Portable and simple API for accessing Allen-Bradley PLC data over Ethernet
+Version: @VERSION@
+
+Libs: -L${libdir} -lplctag -pthread
+Cflags: -I${includedir}
