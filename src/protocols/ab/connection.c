@@ -42,7 +42,7 @@ extern "C"
 #include <ab/connection.h>
 #include <ab/session.h>
 #include <ab/tag.h>
-#include <ab/eip.h>
+#include <ab/defs.h>
 #include <ab/ab.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -301,16 +301,16 @@ int connection_perform_forward_open(ab_connection_p connection)
 
 int send_forward_open_req(ab_connection_p connection, ab_request_p req)
 {
-    eip_forward_open_request_t *fo;
+    eip_forward_open_request_ex_t *fo;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO,"Starting");
 
-    fo = (eip_forward_open_request_t*)(req->data);
+    fo = (eip_forward_open_request_ex_t*)(req->data);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_forward_open_request_t);
+    data = (req->data) + sizeof(eip_forward_open_request_ex_t);
 
     /* set up the path information. */
     mem_copy(data, connection->conn_path, connection->conn_path_size);
@@ -331,7 +331,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request */
+    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
     fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
     fo->cm_req_path[0] = 0x20;                     /* class */
     fo->cm_req_path[1] = 0x06;                     /* CM class */
@@ -349,9 +349,9 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params = h2le16(connection->conn_params); /* packet size and some other things, based on protocol/cpu type */
+    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_LGX_PARAM_EX); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params = h2le16(connection->conn_params); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_LGX_PARAM_EX); /* packet size and some other things, based on protocol/cpu type */
     fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
 
