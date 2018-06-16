@@ -60,7 +60,7 @@ int refcount_acquire(refcount *rc)
     /* release the lock so that other things can get to it. */
     lock_release(&rc->lock);
 
-    pdebug(DEBUG_INFO,"Ref count is now %d",count);
+    pdebug(DEBUG_SPEW,"Ref count is now %d",count);
 
     return count;
 }
@@ -90,7 +90,7 @@ int refcount_release(refcount *rc)
     /* release the lock so that other things can get to it. */
     lock_release(&rc->lock);
 
-    pdebug(DEBUG_INFO,"Refcount is now %d", count);
+    pdebug(DEBUG_SPEW,"Refcount is now %d", count);
 
     if(count <= 0) {
         pdebug(DEBUG_INFO,"Calling destructor function.");
