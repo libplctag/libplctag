@@ -38,6 +38,7 @@ extern "C"
 #include <ab/tag.h>
 #include <ab/connection.h>
 #include <ab/session.h>
+#include <ab/defs.h>
 #include <ab/eip.h>
 #include <util/debug.h>
 

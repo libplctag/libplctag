@@ -37,7 +37,7 @@
 #include <platform.h>
 #include <lib/libplctag.h>
 #include <lib/libplctag_tag.h>
-#include <ab/eip.h>
+#include <ab/defs.h>
 #include <ab/ab_common.h>
 #include <ab/cip.h>
 #include <ab/tag.h>
