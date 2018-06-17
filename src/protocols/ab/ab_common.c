@@ -720,7 +720,11 @@ static void receive_response_unsafe(ab_session_p session, ab_request_p request)
     request->send_request = 0;
     request->recv_in_progress = 0;
 
-    /* clear the request from the session as it is done. Note we hold the mutex here. */
+    /* clear the request from the session as it is done. Note we hold the mutex here.
+     *
+     * This must be done last since we release the reference to the request here!  That could
+     * destroy the request.
+     */
     session_remove_request_unsafe(session, request);
 }
 
