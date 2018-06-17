@@ -29,14 +29,7 @@
 #define MAX_CIP_MSG_SIZE        (508)
 #define MAX_CIP_MSG_SIZE_EX     (4002)
 
-#define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /*
-                                   * AB says somewhere that you must
-                                   * support packets of 544 bytes.  We support 768.  That should
-                                   * be good for now.  The maximum we've seen is 540.  We'll
-                                   * use that.
-                                   *
-                                   * Hopefully 540 is safe.  This should be checked.
-                                   */
+#define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /* total packet size. */
 
 
 #define MAX_EIP_PACKET_SIZE_EX (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX)
@@ -52,9 +45,10 @@
 #define AB_EIP_PLC5_PARAM ((uint16_t)0x4302)
 #define AB_EIP_SLC_PARAM ((uint16_t)0x4302)
 #define AB_EIP_LGX_PARAM ((uint16_t)0x43F8)
+#define AB_EIP_CONN_PARAM ((uint16_t)0x43F8)
 //0100 0011 1111 1000
 //0100 001 1 1111 1000
-#define AB_EIP_LGX_PARAM_EX ((uint32_t)0x42000000)
+#define AB_EIP_CONN_PARAM_EX ((uint32_t)0x42000000)
 //0100 001 0 0000 0000  0000 0100 0000 0000
 //0x42000400
 
@@ -487,7 +481,7 @@ START_PACK typedef struct {
 } END_PACK eip_forward_close_resp_t;
 
 
-/* PCCC Request PLC5 DH+ Only */
+/* CIP generic connected response */
 START_PACK typedef struct {
     /* encap header */
     uint16_t encap_command;    /* ALWAYS 0x0070 Connected Send */

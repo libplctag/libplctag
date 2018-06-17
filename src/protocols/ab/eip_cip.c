@@ -1620,12 +1620,13 @@ int check_write_status_unconnected(ab_tag_p tag)
 
 int calculate_write_sizes(ab_tag_p tag)
 {
-    int overhead;
-    int data_per_packet;
-    int num_reqs;
+    int overhead = 0;
+    int data_per_packet = 0;
+    int num_reqs = 0;
     int rc = PLCTAG_STATUS_OK;
-    int i;
-    int byte_offset;
+    int i = 0;
+    int byte_offset = 0;
+    int max_cip_packet = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1636,26 +1637,28 @@ int calculate_write_sizes(ab_tag_p tag)
 
     /* if we are here, then we have all the type data etc. */
     if(tag->connection) {
-        overhead = sizeof(eip_cip_co_req);
+        pdebug(DEBUG_DETAIL,"Connected tag.");
+        max_cip_packet = tag->connection->max_cip_packet;
+        overhead =  1                               /* service request, one byte */
+                    + tag->encoded_name_size        /* full encoded name */
+                    + tag->encoded_type_info_size   /* encoded type size */
+                    + 2                             /* element count, 16-bit int */
+                    + 4                             /* byte offset, 32-bit int */
+                    + 8;                            /* MAGIC fudge factor */
     } else {
-        overhead = sizeof(eip_cip_uc_req);
+        max_cip_packet = MAX_EIP_PACKET_SIZE;
+        overhead =  1                               /* service request, one byte */
+                    + tag->encoded_name_size        /* full encoded name */
+                    + tag->encoded_type_info_size   /* encoded type size */
+                    + tag->conn_path_size + 2       /* encoded device path size plus two bytes for length and padding */
+                    + 2                             /* element count, 16-bit int */
+                    + 4                             /* byte offset, 32-bit int */
+                    + 8;                            /* MAGIC fudge factor */
     }
 
-    /* we want to over-estimate here. */
-    overhead = overhead                      /* base packet size */
-               + 1                           /* service request, one byte */
-               + tag->encoded_name_size      /* full encoded name */
-               + tag->encoded_type_info_size /* encoded type size */
-               + tag->conn_path_size + 2     /* encoded device path size plus two bytes for length and padding */
-               + 2                           /* element count, 16-bit int */
-               + 4                           /* byte offset, 32-bit int */
-               + 8;                          /* MAGIC fudge factor */
+    data_per_packet = max_cip_packet - overhead;
 
-    data_per_packet = MAX_EIP_PACKET_SIZE - overhead;
-
-    /* we want a multiple of 4 bytes */
-    /* FIXME - this might be undefined behavior.  Need to check for negative first and then mask. */
-    data_per_packet &= 0xFFFFFFFC;
+    pdebug(DEBUG_DETAIL,"Write packet maximum size is %d, write overhead is %d, and write data per packet is %d.", max_cip_packet, overhead, data_per_packet);
 
     if (data_per_packet <= 0) {
         pdebug(DEBUG_WARN,
@@ -1664,6 +1667,9 @@ int calculate_write_sizes(ab_tag_p tag)
                MAX_EIP_PACKET_SIZE);
         return PLCTAG_ERR_TOO_LONG;
     }
+
+    /* we want a multiple of 8 bytes */
+    data_per_packet &= 0xFFFFF8;
 
     num_reqs = (tag->size + (data_per_packet - 1)) / data_per_packet;
 

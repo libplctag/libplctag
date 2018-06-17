@@ -454,9 +454,9 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params = h2le16(AB_EIP_LGX_PARAM | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params = h2le32(AB_EIP_LGX_PARAM | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
     fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
 
@@ -535,9 +535,9 @@ int send_forward_open_req_ex(ab_connection_p connection, ab_request_p req)
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_LGX_PARAM_EX | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_LGX_PARAM_EX | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
     fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
 
