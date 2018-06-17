@@ -27,7 +27,7 @@
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
 #define MAX_CIP_MSG_SIZE        (508)
-#define MAX_CIP_MSG_SIZE_EX     (4002)
+#define MAX_CIP_MSG_SIZE_EX     (4004)
 
 #define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /*
                                    * AB says somewhere that you must
@@ -54,7 +54,7 @@
 #define AB_EIP_LGX_PARAM ((uint16_t)0x43F8)
 //0100 0011 1111 1000
 //0100 001 1 1111 1000
-#define AB_EIP_LGX_PARAM_EX ((uint32_t)0x42000000 | (uint32_t)MAX_CIP_MSG_SIZE_EX)
+#define AB_EIP_LGX_PARAM_EX ((uint32_t)0x42000000)
 //0100 001 0 0000 0000  0000 0100 0000 0000
 //0x42000400
 
@@ -97,6 +97,8 @@
 
 #define AB_CIP_STATUS_OK                ((uint8_t)0x00)
 #define AB_CIP_STATUS_FRAG              ((uint8_t)0x06)
+
+#define AB_CIP_ERR_UNSUPPORTED_SERVICE  ((uint8_t)0x08)
 
 /* PCCC commands */
 #define AB_EIP_PCCC_TYPED_CMD ((uint8_t)0x0F)
