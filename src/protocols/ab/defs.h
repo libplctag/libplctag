@@ -27,7 +27,7 @@
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
 #define MAX_CIP_MSG_SIZE        (508)
-#define MAX_CIP_MSG_SIZE_EX     (4004)
+#define MAX_CIP_MSG_SIZE_EX     (4002)
 
 #define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /*
                                    * AB says somewhere that you must
