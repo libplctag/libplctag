@@ -1,5 +1,5 @@
 #
-#   Copyright 2016, OmanTek
+#   Copyright 2018, Kyle Hayes
 #   Author: Kyle Hayes
 #
 #    This library is free software; you can redistribute it and/or
@@ -31,7 +31,7 @@ project (libplctag_project)
 # the project is version 1.5
 set (libplctag_VERSION_MAJOR 1)
 set (libplctag_VERSION_MINOR 5)
-set (libplctag_VERSION_PATCH 9)
+set (libplctag_VERSION_PATCH 11)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 
@@ -46,6 +46,7 @@ if(MSVC)
         set(COMPILE_AS_C 1)
     endif()
 endif()
+
 
 
 
