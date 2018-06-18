@@ -438,6 +438,8 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
         return AB_SESSION_NULL;
     }
 
+    session->recv_capacity = EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX;
+
     str_copy(session->host, MAX_SESSION_HOST, host);
 
     session->status = PLCTAG_STATUS_PENDING;
@@ -698,7 +700,7 @@ int session_register(ab_session_p session)
 
     /* ready the input buffer */
     session->recv_offset = 0;
-    mem_set(session->recv_data, 0, MAX_REQ_RESP_SIZE);
+    mem_set(session->recv_data, 0, session->recv_capacity);
 
     timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
 

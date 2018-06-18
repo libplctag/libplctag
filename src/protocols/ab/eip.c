@@ -162,8 +162,8 @@ int recv_eip_response_unsafe(ab_session_p session)
                                             sizeof(eip_encap_t) :
                                             sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
 
-    if(data_needed >= MAX_REQ_RESP_SIZE) {
-        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, MAX_REQ_RESP_SIZE);
+    if(data_needed >= session->recv_capacity) {
+        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->recv_capacity);
         return PLCTAG_ERR_TOO_LONG;
     }
 
@@ -190,8 +190,8 @@ int recv_eip_response_unsafe(ab_session_p session)
                 if (session->recv_offset >= sizeof(eip_encap_t)) {
                     data_needed = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
 
-                    if(data_needed >= MAX_REQ_RESP_SIZE) {
-                        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, MAX_REQ_RESP_SIZE);
+                    if(data_needed >= session->recv_capacity) {
+                        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->recv_capacity);
                         return PLCTAG_ERR_TOO_LONG;
                     }
                 }

@@ -26,14 +26,20 @@
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
-#define MAX_CIP_MSG_SIZE        (508)
-#define MAX_CIP_MSG_SIZE_EX     (4002)
+/* WARNING: this must fit within 9 bits! */
+#define MAX_CIP_MSG_SIZE        (0x01FF & 511)
 
-#define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /* total packet size. */
+/* Warning, this must fit within 16 bits */
+#define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
+
+/* maximum for PCCC embedded within CIP. */
+#define MAX_CIP_PCCC_MSG_SIZE (258)
 
 
-#define MAX_EIP_PACKET_SIZE_EX (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX)
+//#define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /* total packet size. */
 
+
+//#define MAX_EIP_CIP_PACKET_SIZE_EX (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX)
 
 #define MAX_PCCC_PACKET_SIZE (244) /*
                                     * That's what the docs say.
@@ -45,7 +51,9 @@
 #define AB_EIP_PLC5_PARAM ((uint16_t)0x4302)
 #define AB_EIP_SLC_PARAM ((uint16_t)0x4302)
 #define AB_EIP_LGX_PARAM ((uint16_t)0x43F8)
-#define AB_EIP_CONN_PARAM ((uint16_t)0x43F8)
+
+
+#define AB_EIP_CONN_PARAM ((uint16_t)0x4200)
 //0100 0011 1111 1000
 //0100 001 1 1111 1000
 #define AB_EIP_CONN_PARAM_EX ((uint32_t)0x42000000)
