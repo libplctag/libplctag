@@ -78,14 +78,14 @@ static uint32_t get_thread_id()
     return this_thread_num;
 }
 
-static int make_prefix(char *prefix_buf, int prefix_buf_size) 
+static int make_prefix(char *prefix_buf, int prefix_buf_size)
 {
 	struct tm t;
     time_t epoch;
     int64_t epoch_ms;
     int remainder_ms;
     int rc;
-    
+
     /* make sure we have room, MAGIC */
     if(prefix_buf_size < 37) {
 		return 0;
@@ -105,7 +105,7 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
     rc = snprintf(prefix_buf, prefix_buf_size,"thread(%04u) %04d-%02d-%02d %02d:%02d:%02d.%03d",
              get_thread_id(),
              t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms);
-             
+
     /* enforce zero string termination */
     if(rc > 1 && rc < prefix_buf_size) {
 		prefix_buf[rc] = 0;
@@ -126,10 +126,10 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     char output[2048];
     char prefix[48]; /* MAGIC */
 	int prefix_size;
-	
+
     /* build the prefix */
     prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
-    
+
     if(prefix_size <= 0) {
 		return;
 	}
@@ -161,7 +161,7 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
 
     /* build the prefix */
     prefix_size = make_prefix(prefix,(int)sizeof(prefix));
-    
+
     if(prefix_size <= 0) {
 		return;
 	}
@@ -171,21 +171,22 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
 
     for(row = 0; row < max_row; row++) {
         offset = (row * COLUMNS);
-        
+
         /* print the prefix and address */
         row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s %s:%d %05d", prefix, debug_level_name[debug_level], func, line_num, offset);
-        
-        for(column = 0; column < COLUMNS && offset < count && row_offset < (int)sizeof(row_buf); column++) {
+
+        for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
             row_offset += snprintf(&row_buf[row_offset], sizeof(row_buf) - row_offset, " %02x", data[offset]);
         }
 
-		/* terminate the row string*/
+        /* terminate the row string*/
         row_buf[sizeof(row_buf)-1] = 0; /* just in case */
-        
+
         /* output it, finally */
         fprintf(stderr,"%s\n",row_buf);
     }
+
 
     /*fflush(stderr);*/
 }
