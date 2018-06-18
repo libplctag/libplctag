@@ -820,7 +820,7 @@ int session_check_incoming_data_unsafe(ab_session_p session)
             rc = process_response_packet_unsafe(session);
 
             /* reset the session's buffer */
-            mem_set(session->recv_data, 0, MAX_REQ_RESP_SIZE);
+            mem_set(session->recv_data, 0, session->recv_capacity);
             session->recv_offset = 0;
             session->resp_seq_id = 0;
             session->has_response = 0;
