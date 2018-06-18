@@ -33,7 +33,7 @@
 #include <ab/defs.h>
 
 
-#define MAX_REQ_RESP_SIZE   (MAX_EIP_PACKET_SIZE_EX) /* enough? */
+//#define MAX_REQ_RESP_SIZE   (MAX_EIP_CIP_PACKET_SIZE_EX) /* enough? */
 
 /*
  * this structure contains data necessary to set up a request and hold
@@ -81,14 +81,15 @@ struct ab_request_t {
     /* used by the background thread for incrementally getting data */
     int current_offset;
     int request_size; /* total bytes, not just data */
-    uint8_t data[MAX_REQ_RESP_SIZE];
+    int request_capacity;
+    uint8_t data[];
 };
 
 
 
 
 
-int request_create(ab_request_p *req);
+int request_create(ab_request_p *req, int max_payload_size);
 int request_acquire(ab_request_p req);
 int request_release(ab_request_p req);
 //~ int request_destroy_unsafe(ab_request_p* req_pp);

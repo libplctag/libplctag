@@ -125,15 +125,35 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     /* how many packets will we need? How much overhead? */
     overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
+    /* calculate based on the response. */
+    overhead =   1      /* reply code */
+                +1      /* reserved */
+                +1      /* general status */
+                +1      /* status size */
+                +1      /* request ID size */
+                +2      /* vendor ID */
+                +4      /* vendor serial number */
+                +1      /* PCCC command */
+                +1      /* PCCC status */
+                +2      /* PCCC sequence number */
+                +1      /* type byte */
+                +2      /* maximum extended type. */
+                +2      /* maximum extended size. */
+                +1      /* secondary type byte if type was array. */
+                +2      /* maximum extended type. */
+                +2;     /* maximum extended size. */
+
+
+
     data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_PCCC_PACKET_SIZE);
         return PLCTAG_ERR_TOO_LONG;
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_WARN,"PCCC requests cannot be fragmented.  Too much data requested.");
+        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->size, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LONG;
     }
 
@@ -150,7 +170,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
@@ -382,15 +402,31 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     /* how many packets will we need? How much overhead? */
     overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
+    /* overhead comes from the request in this case */
+    overhead =   1  /* CIP PCCC command */
+                +2  /* UCMM path size for PCCC command */
+                +4  /* path to PCCC command object */
+                +1  /* request ID size */
+                +2  /* vendor ID */
+                +4  /* vendor serial number */
+                +1  /* PCCC command */
+                +1  /* PCCC status */
+                +2  /* PCCC sequence number */
+                +1  /* PCCC function */
+                +2  /* request offset */
+                +2  /* request total transfer size in elements. */
+                + (tag->encoded_name_size)
+                +2; /* actual request size in elements */
+
     data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_EIP_PACKET_SIZE);
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_PCCC_PACKET_SIZE);
         return PLCTAG_ERR_TOO_LONG;
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_WARN,"PCCC requests cannot be fragmented.  Too much data requested.");
+        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", MAX_PCCC_PACKET_SIZE, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LONG;
     }
 
@@ -409,7 +445,7 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);

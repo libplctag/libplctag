@@ -51,7 +51,7 @@
 /* how long to wait for session registration before timing out. In milliseconds. */
 #define SESSION_REGISTRATION_TIMEOUT (1500)
 
-/* 
+/*
  * the queue depth depends on the type of the request.
  */
 
@@ -101,7 +101,8 @@ struct ab_session_t {
     uint64_t resp_seq_id;
     int has_response;
     uint32_t recv_offset;
-    uint8_t recv_data[MAX_REQ_RESP_SIZE];
+    uint32_t recv_capacity;
+    uint8_t recv_data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
 
     /*int recv_size;*/
 

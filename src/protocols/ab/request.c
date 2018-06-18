@@ -43,17 +43,20 @@ void request_destroy(void *request_arg);
  * is here so that such a change can be done without major code changes
  * elsewhere.
  */
-int request_create(ab_request_p* req)
+int request_create(ab_request_p* req, int max_payload_size)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p res;
+    int request_capacity = EIP_CIP_PREFIX_SIZE + max_payload_size;
 
-    res = (ab_request_p)mem_alloc(sizeof(struct ab_request_t));
+    res = (ab_request_p)mem_alloc(sizeof(struct ab_request_t) + request_capacity);
 
     if (!res) {
         *req = NULL;
         rc = PLCTAG_ERR_NO_MEM;
     } else {
+        res->request_capacity = request_capacity;
+
         res->rc = refcount_init(1, res, request_destroy);
 
         res->num_retries_left = 5; /* MAGIC */
