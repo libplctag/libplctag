@@ -432,7 +432,7 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, tag->connection->max_payload_size);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -533,7 +533,7 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -663,7 +663,7 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, tag->connection->max_payload_size);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -789,7 +789,7 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -1626,7 +1626,7 @@ int calculate_write_sizes(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     int i = 0;
     int byte_offset = 0;
-    int max_cip_packet = 0;
+    int max_payload_size = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1638,7 +1638,7 @@ int calculate_write_sizes(ab_tag_p tag)
     /* if we are here, then we have all the type data etc. */
     if(tag->connection) {
         pdebug(DEBUG_DETAIL,"Connected tag.");
-        max_cip_packet = tag->connection->max_cip_packet;
+        max_payload_size = tag->connection->max_payload_size;
         overhead =  1                               /* service request, one byte */
                     + tag->encoded_name_size        /* full encoded name */
                     + tag->encoded_type_info_size   /* encoded type size */
@@ -1646,7 +1646,7 @@ int calculate_write_sizes(ab_tag_p tag)
                     + 4                             /* byte offset, 32-bit int */
                     + 8;                            /* MAGIC fudge factor */
     } else {
-        max_cip_packet = MAX_EIP_PACKET_SIZE;
+        max_payload_size = MAX_CIP_MSG_SIZE;
         overhead =  1                               /* service request, one byte */
                     + tag->encoded_name_size        /* full encoded name */
                     + tag->encoded_type_info_size   /* encoded type size */
@@ -1656,15 +1656,15 @@ int calculate_write_sizes(ab_tag_p tag)
                     + 8;                            /* MAGIC fudge factor */
     }
 
-    data_per_packet = max_cip_packet - overhead;
+    data_per_packet = max_payload_size - overhead;
 
-    pdebug(DEBUG_DETAIL,"Write packet maximum size is %d, write overhead is %d, and write data per packet is %d.", max_cip_packet, overhead, data_per_packet);
+    pdebug(DEBUG_DETAIL,"Write packet maximum size is %d, write overhead is %d, and write data per packet is %d.", max_payload_size, overhead, data_per_packet);
 
     if (data_per_packet <= 0) {
         pdebug(DEBUG_WARN,
                "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!",
                overhead,
-               MAX_EIP_PACKET_SIZE);
+               max_payload_size);
         return PLCTAG_ERR_TOO_LONG;
     }
 

@@ -58,6 +58,7 @@ static ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, 
 static int connection_perform_forward_open(ab_connection_p connection);
 static int try_forward_open_ex(ab_connection_p connection);
 static int try_forward_open(ab_connection_p connection);
+static int guess_max_packet_size(ab_connection_p connection, int alternate);
 static int send_forward_open_req(ab_connection_p connection, ab_request_p req);
 static int send_forward_open_req_ex(ab_connection_p connection, ab_request_p req);
 static int recv_forward_open_resp(ab_connection_p connection, ab_request_p req);
@@ -205,22 +206,7 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int sha
      * Determine the right param for the connection.
      * This sets up the packet size, among other things.
      */
-    switch(tag->protocol_type) {
-        case AB_PROTOCOL_PLC:
-        case AB_PROTOCOL_MLGX:
-            connection->conn_params = AB_EIP_PLC5_PARAM;
-            break;
-
-        case AB_PROTOCOL_LGX:
-        case AB_PROTOCOL_MLGX800:
-            connection->conn_params = AB_EIP_LGX_PARAM;
-            break;
-
-        default:
-            pdebug(DEBUG_WARN,"Unknown protocol/cpu type!");
-            connection->status = PLCTAG_ERR_BAD_PARAM;
-            break;
-    }
+    connection->protocol_type = tag->protocol_type;
 
     pdebug(DEBUG_DETAIL,"conn path size = %d", connection->conn_path_size);
 
@@ -239,6 +225,33 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int sha
 }
 
 
+int guess_max_packet_size(ab_connection_p connection, int alternate)
+{
+    int result = MAX_CIP_PCCC_MSG_SIZE;
+
+    switch(connection->protocol_type) {
+    case AB_PROTOCOL_PLC:
+    case AB_PROTOCOL_MLGX:
+        result = MAX_CIP_PCCC_MSG_SIZE;
+        break;
+
+    case AB_PROTOCOL_LGX:
+        result = (alternate ? MAX_CIP_MSG_SIZE_EX : MAX_CIP_MSG_SIZE);
+        break;
+
+    case AB_PROTOCOL_MLGX800:
+        result = MAX_CIP_MSG_SIZE;
+        break;
+
+    default:
+        pdebug(DEBUG_WARN,"Unknown protocol/cpu type!");
+        result = PLCTAG_ERR_BAD_PARAM;
+        break;
+    }
+
+    return result;
+}
+
 
 int connection_perform_forward_open(ab_connection_p connection)
 {
@@ -248,37 +261,41 @@ int connection_perform_forward_open(ab_connection_p connection)
 
     do {
         /* Try Forward Open Extended first with a large connection size */
-        connection->max_cip_packet=MAX_CIP_MSG_SIZE_EX;
+        connection->max_payload_size=guess_max_packet_size(connection, 1);
 
         rc = try_forward_open_ex(connection);
         if(rc == PLCTAG_ERR_TOO_LONG) {
             /* we support the Forward Open Extended command, but we need to use a smaller size. */
-            pdebug(DEBUG_DETAIL,"ForwardOpenEx is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE_EX, connection->max_cip_packet);
+            pdebug(DEBUG_DETAIL,"ForwardOpenEx is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE_EX, connection->max_payload_size);
 
             rc = try_forward_open_ex(connection);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
             } else {
-                pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", connection->max_cip_packet);
+                pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", connection->max_payload_size);
             }
         } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
             /* the PLC does not support Forward Open Extended, use the old one. */
-            connection->max_cip_packet = MAX_CIP_MSG_SIZE;
+            connection->max_payload_size = guess_max_packet_size(connection, 0);
 
             rc = try_forward_open(connection);
             if(rc == PLCTAG_ERR_TOO_LONG) {
                 /* we support the Forward Open Extended command, but we need to use a smaller size. */
-                pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, connection->max_cip_packet);
+                pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, connection->max_payload_size);
 
                 rc = try_forward_open_ex(connection);
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
                 } else {
-                    pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", connection->max_cip_packet);
+                    pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", connection->max_payload_size);
                 }
             }
         }
     } while(0);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_DETAIL, "ForwardOpen succeeded and maximum CIP packet size is %d.", connection->max_payload_size);
+    }
 
     connection->status = rc;
 
@@ -297,7 +314,7 @@ int try_forward_open_ex(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -353,7 +370,7 @@ int try_forward_open(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -436,7 +453,7 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
+    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
     fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
     fo->cm_req_path[0] = 0x20;                     /* class */
     fo->cm_req_path[1] = 0x06;                     /* CM class */
@@ -454,9 +471,9 @@ int send_forward_open_req(ab_connection_p connection, ab_request_p req)
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | connection->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | connection->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
     fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
 
@@ -535,9 +552,9 @@ int send_forward_open_req_ex(ab_connection_p connection, ab_request_p req)
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | connection->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | connection->max_cip_packet); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | connection->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
     fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
     fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
 
@@ -601,7 +618,7 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
 
                     if(extended_status == 0x109) { /* MAGIC */
                         pdebug(DEBUG_WARN,"Error from forward open request, unsupported size, but size %d is supported.", supported_size);
-                        connection->max_cip_packet = supported_size;
+                        connection->max_payload_size = supported_size;
                         rc = PLCTAG_ERR_TOO_LONG;
                     } else {
                         pdebug(DEBUG_WARN,"CIP extended error %x!", extended_status);
@@ -717,7 +734,7 @@ int connection_close(ab_connection_p connection)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
