@@ -783,7 +783,7 @@ LIB_EXPORT int plc_tag_get_size(plc_tag tag_id)
     int result = 0;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     api_block(tag_id) {
         tag = map_id_to_tag(tag_id);
