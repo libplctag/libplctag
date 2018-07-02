@@ -149,12 +149,12 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_PCCC_PACKET_SIZE);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->size, overhead, data_per_packet);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(!tag->reqs) {
@@ -355,7 +355,7 @@ static int check_read_status(ab_tag_p tag)
 
         /* copy data into the tag. */
         if((data_end - data) > tag->size) {
-            rc = PLCTAG_ERR_TOO_LONG;
+            rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
@@ -422,12 +422,12 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_PCCC_PACKET_SIZE);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", MAX_PCCC_PACKET_SIZE, overhead, data_per_packet);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
 
