@@ -156,8 +156,10 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${util_SRC_PATH}/attr.h"
                      "${util_SRC_PATH}/debug.c"
                      "${util_SRC_PATH}/debug.h"
-                     "${util_SRC_PATH}/refcount.c"
-                     "${util_SRC_PATH}/refcount.h"
+                     "${util_SRC_PATH}/hash.c"
+                     "${util_SRC_PATH}/hash.h"
+                     "${util_SRC_PATH}/rc.c"
+                     "${util_SRC_PATH}/rc.h"
                      "${platform_SRC_PATH}/platform.c"
                      "${platform_SRC_PATH}/platform.h" )
 
