@@ -23,7 +23,6 @@
 #include <platform.h>
 #include <util/rc.h>
 #include <util/debug.h>
-#include <util/hashtable.h>
 
 
 //~ #ifndef container_of
@@ -79,8 +78,8 @@ struct refcount_t {
 typedef struct refcount_t *refcount_p;
 
 static void refcount_cleanup(refcount_p rc);
-static cleanup_p cleanup_entry_create(const char *func, int line_num, rc_cleanup_func cleaner, int extra_arg_count, va_list extra_args);
-static void cleanup_entry_destroy(cleanup_p entry);
+//static cleanup_p cleanup_entry_create(const char *func, int line_num, rc_cleanup_func cleaner, int extra_arg_count, va_list extra_args);
+//static void cleanup_entry_destroy(cleanup_p entry);
 
 
 
@@ -94,8 +93,8 @@ static void cleanup_entry_destroy(cleanup_p entry);
 void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_func cleaner_func)
 {
     refcount_p rc = NULL;
-    cleanup_p cleanup = NULL;
-    va_list extra_args;
+    //cleanup_p cleanup = NULL;
+    //va_list extra_args;
 
     pdebug(DEBUG_INFO,"Starting, called from %s:%d",func, line_num);
 
@@ -343,48 +342,48 @@ void refcount_cleanup(refcount_p rc)
     pdebug(DEBUG_INFO,"Done.");
 }
 
-
-cleanup_p cleanup_entry_create(const char *func, int line_num, rc_cleanup_func cleanup_func, int extra_arg_count, va_list extra_args)
-{
-    cleanup_p entry = NULL;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    entry = mem_alloc(sizeof(struct cleanup_t) + (sizeof(void*) * extra_arg_count));
-    if(!entry) {
-        pdebug(DEBUG_ERROR,"Unable to allocate new cleanup struct!");
-        return NULL;
-    }
-
-    entry->cleanup_func = cleanup_func;
-    entry->function_name = func;
-    entry->line_num = line_num;
-    entry->extra_arg_count = extra_arg_count;
-    entry->extra_args = (void **)(entry+1); /* just past the struct... */
-
-    /*
-     * Fill in the extra args.   There might not be any.
-     */
-    for(int i=0; i < extra_arg_count; i++) {
-        entry->extra_args[i] = va_arg(extra_args, void *);
-    }
-
-    pdebug(DEBUG_INFO,"Done.");
-
-    return entry;
-}
-
-
-void cleanup_entry_destroy(cleanup_p entry)
-{
-    pdebug(DEBUG_DETAIL,"Starting.");
-    if(!entry) {
-        pdebug(DEBUG_WARN,"Entry pointer is NULL!");
-        return;
-    }
-
-    mem_free(entry);
-
-    pdebug(DEBUG_DETAIL,"Done.");
-}
-
+//
+//cleanup_p cleanup_entry_create(const char *func, int line_num, rc_cleanup_func cleanup_func, int extra_arg_count, va_list extra_args)
+//{
+//    cleanup_p entry = NULL;
+//
+//    pdebug(DEBUG_INFO,"Starting");
+//
+//    entry = mem_alloc(sizeof(struct cleanup_t) + (sizeof(void*) * extra_arg_count));
+//    if(!entry) {
+//        pdebug(DEBUG_ERROR,"Unable to allocate new cleanup struct!");
+//        return NULL;
+//    }
+//
+//    entry->cleanup_func = cleanup_func;
+//    entry->function_name = func;
+//    entry->line_num = line_num;
+//    entry->extra_arg_count = extra_arg_count;
+//    entry->extra_args = (void **)(entry+1); /* just past the struct... */
+//
+//    /*
+//     * Fill in the extra args.   There might not be any.
+//     */
+//    for(int i=0; i < extra_arg_count; i++) {
+//        entry->extra_args[i] = va_arg(extra_args, void *);
+//    }
+//
+//    pdebug(DEBUG_INFO,"Done.");
+//
+//    return entry;
+//}
+//
+//
+//void cleanup_entry_destroy(cleanup_p entry)
+//{
+//    pdebug(DEBUG_DETAIL,"Starting.");
+//    if(!entry) {
+//        pdebug(DEBUG_WARN,"Entry pointer is NULL!");
+//        return;
+//    }
+//
+//    mem_free(entry);
+//
+//    pdebug(DEBUG_DETAIL,"Done.");
+//}
+//
