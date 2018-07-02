@@ -31,7 +31,7 @@
 #include <platform.h>
 #include <ab/session.h>
 #include <util/debug.h>
-#include <util/refcount.h>
+#include <util/rc.h>
 
 void request_destroy(void *request_arg);
 
@@ -49,7 +49,7 @@ int request_create(ab_request_p* req, int max_payload_size)
     ab_request_p res;
     int request_capacity = EIP_CIP_PREFIX_SIZE + max_payload_size;
 
-    res = (ab_request_p)mem_alloc(sizeof(struct ab_request_t) + request_capacity);
+    res = (ab_request_p)rc_alloc(sizeof(struct ab_request_t) + request_capacity, request_destroy);
 
     if (!res) {
         *req = NULL;
@@ -57,7 +57,7 @@ int request_create(ab_request_p* req, int max_payload_size)
     } else {
         res->request_capacity = request_capacity;
 
-        res->rc = refcount_init(1, res, request_destroy);
+        //res->rc = refcount_init(1, res, request_destroy);
 
         res->num_retries_left = 5; /* MAGIC */
         res->retry_interval = 900; /* MAGIC */
@@ -69,29 +69,29 @@ int request_create(ab_request_p* req, int max_payload_size)
 }
 
 
-int request_acquire(ab_request_p req)
-{
-    if(!req) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    pdebug(DEBUG_INFO,"Acquiring request.");
-
-    return refcount_acquire(&req->rc);
-}
-
-
-int request_release(ab_request_p req)
-{
-    if(!req) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    pdebug(DEBUG_INFO,"Releasing request.");
-
-    return refcount_release(&req->rc);
-}
-
+//int request_acquire(ab_request_p req)
+//{
+//    if(!req) {
+//        return PLCTAG_ERR_NULL_PTR;
+//    }
+//
+//    pdebug(DEBUG_INFO,"Acquiring request.");
+//
+//    return refcount_acquire(&req->rc);
+//}
+//
+//
+//int request_release(ab_request_p req)
+//{
+//    if(!req) {
+//        return PLCTAG_ERR_NULL_PTR;
+//    }
+//
+//    pdebug(DEBUG_INFO,"Releasing request.");
+//
+//    return refcount_release(&req->rc);
+//}
+//
 
 /*
  * request_destroy
