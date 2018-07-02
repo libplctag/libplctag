@@ -1028,21 +1028,10 @@ static int check_read_status_connected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
-            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
 
-            switch (cip_resp->status) {
-                case 0x04: /* FIXME - should be defined constants */
-                case 0x05:
-                case 0x13:
-                case 0x1C:
-                    rc = PLCTAG_ERR_BAD_PARAM;
-                    break;
-
-                default:
-                    rc = PLCTAG_ERR_REMOTE_ERR;
-                    break;
-            }
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
 
             break;
         }
@@ -1089,7 +1078,7 @@ static int check_read_status_connected(ab_tag_p tag)
             /* check for extra long types */
             if (type_length > MAX_TAG_TYPE_INFO) {
                 pdebug(DEBUG_WARN, "Read data type info is too long (%d)!", type_length);
-                rc = PLCTAG_ERR_TOO_LONG;
+                rc = PLCTAG_ERR_TOO_LARGE;
                 break;
             }
 
@@ -1112,7 +1101,7 @@ static int check_read_status_connected(ab_tag_p tag)
                    "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
                    byte_offset + (int)(data_end - data),
                    tag->size);
-            rc = PLCTAG_ERR_TOO_LONG;
+            rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
@@ -1280,21 +1269,10 @@ static int check_read_status_unconnected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
-            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
 
-            switch (cip_resp->status) {
-                case 0x04: /* FIXME - should be defined constants */
-                case 0x05:
-                case 0x13:
-                case 0x1C:
-                    rc = PLCTAG_ERR_BAD_PARAM;
-                    break;
-
-                default:
-                    rc = PLCTAG_ERR_REMOTE_ERR;
-                    break;
-            }
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
 
             break;
         }
@@ -1341,7 +1319,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
             /* check for extra long types */
             if (type_length > MAX_TAG_TYPE_INFO) {
                 pdebug(DEBUG_WARN, "Read data type info is too long (%d)!", type_length);
-                rc = PLCTAG_ERR_TOO_LONG;
+                rc = PLCTAG_ERR_TOO_LARGE;
                 break;
             }
 
@@ -1365,7 +1343,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
                    byte_offset + (int)(data_end - data),
                    tag->size);
             pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", (int)byte_offset, (int)(data_end - data));
-            rc = PLCTAG_ERR_TOO_LONG;
+            rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
@@ -1518,9 +1496,9 @@ static int check_write_status_connected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
-            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
             break;
         }
     }
@@ -1599,9 +1577,9 @@ int check_write_status_unconnected(ab_tag_p tag)
         }
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_SHORT));
-            pdebug(DEBUG_INFO, decode_cip_error((uint8_t *)&cip_resp->status, AB_ERROR_STR_LONG));
-            rc = PLCTAG_ERR_REMOTE_ERR;
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
             break;
         }
     }
@@ -1665,7 +1643,7 @@ int calculate_write_sizes(ab_tag_p tag)
                "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!",
                overhead,
                max_payload_size);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     /* we want a multiple of 8 bytes */

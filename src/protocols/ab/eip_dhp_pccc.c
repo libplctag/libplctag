@@ -136,12 +136,12 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->connection->max_payload_size);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_WARN,"PCCC requests cannot be fragmented.  Tag size (%d) is greater than data allowed per packet (%d).", tag->size, data_per_packet);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(!tag->reqs) {
@@ -272,12 +272,12 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->connection->max_payload_size);
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_WARN,"PCCC requests cannot be fragmented.  Too much data requested.");
-        return PLCTAG_ERR_TOO_LONG;
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(!tag->reqs) {
@@ -502,7 +502,7 @@ static int check_read_status(ab_tag_p tag)
 
         /* copy data into the tag. */
         if((data_end - data) > tag->size) {
-            rc = PLCTAG_ERR_TOO_LONG;
+            rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 

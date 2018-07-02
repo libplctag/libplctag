@@ -150,44 +150,42 @@ void lib_teardown(void)
 LIB_EXPORT const char* plc_tag_decode_error(int rc)
 {
     switch(rc) {
-        case PLCTAG_STATUS_PENDING: return "PLCTAG_STATUS_PENDING"; break;
-        case PLCTAG_STATUS_OK: return "PLCTAG_STATUS_OK"; break;
-        case PLCTAG_ERR_NULL_PTR: return "PLCTAG_ERR_NULL_PTR"; break;
-        case PLCTAG_ERR_OUT_OF_BOUNDS: return "PLCTAG_ERR_OUT_OF_BOUNDS"; break;
-        case PLCTAG_ERR_NO_MEM: return "PLCTAG_ERR_NO_MEM"; break;
-        case PLCTAG_ERR_LL_ADD: return "PLCTAG_ERR_LL_ADD"; break;
-        case PLCTAG_ERR_BAD_PARAM: return "PLCTAG_ERR_BAD_PARAM"; break;
-        case PLCTAG_ERR_CREATE: return "PLCTAG_ERR_CREATE"; break;
-        case PLCTAG_ERR_NOT_EMPTY: return "PLCTAG_ERR_NOT_EMPTY"; break;
-        case PLCTAG_ERR_OPEN: return "PLCTAG_ERR_OPEN"; break;
-        case PLCTAG_ERR_SET: return "PLCTAG_ERR_SET"; break;
-        case PLCTAG_ERR_WRITE: return "PLCTAG_ERR_WRITE"; break;
-        case PLCTAG_ERR_TIMEOUT: return "PLCTAG_ERR_TIMEOUT"; break;
-        case PLCTAG_ERR_TIMEOUT_ACK: return "PLCTAG_ERR_TIMEOUT_ACK"; break;
-        case PLCTAG_ERR_RETRIES: return "PLCTAG_ERR_RETRIES"; break;
-        case PLCTAG_ERR_READ: return "PLCTAG_ERR_READ"; break;
-        case PLCTAG_ERR_BAD_DATA: return "PLCTAG_ERR_BAD_DATA"; break;
-        case PLCTAG_ERR_ENCODE: return "PLCTAG_ERR_ENCODE"; break;
-        case PLCTAG_ERR_DECODE: return "PLCTAG_ERR_DECODE"; break;
-        case PLCTAG_ERR_UNSUPPORTED: return "PLCTAG_ERR_UNSUPPORTED"; break;
-        case PLCTAG_ERR_TOO_LONG: return "PLCTAG_ERR_TOO_LONG"; break;
-        case PLCTAG_ERR_CLOSE: return "PLCTAG_ERR_CLOSE"; break;
-        case PLCTAG_ERR_NOT_ALLOWED: return "PLCTAG_ERR_NOT_ALLOWED"; break;
-        case PLCTAG_ERR_THREAD: return "PLCTAG_ERR_THREAD"; break;
-        case PLCTAG_ERR_NO_DATA: return "PLCTAG_ERR_NO_DATA"; break;
-        case PLCTAG_ERR_THREAD_JOIN: return "PLCTAG_ERR_THREAD_JOIN"; break;
-        case PLCTAG_ERR_THREAD_CREATE: return "PLCTAG_ERR_THREAD_CREATE"; break;
-        case PLCTAG_ERR_MUTEX_DESTROY: return "PLCTAG_ERR_MUTEX_DESTROY"; break;
-        case PLCTAG_ERR_MUTEX_UNLOCK: return "PLCTAG_ERR_MUTEX_UNLOCK"; break;
-        case PLCTAG_ERR_MUTEX_INIT: return "PLCTAG_ERR_MUTEX_INIT"; break;
-        case PLCTAG_ERR_MUTEX_LOCK: return "PLCTAG_ERR_MUTEX_LOCK"; break;
-        case PLCTAG_ERR_NOT_IMPLEMENTED: return "PLCTAG_ERR_NOT_IMPLEMENTED"; break;
-        case PLCTAG_ERR_BAD_DEVICE: return "PLCTAG_ERR_BAD_DEVICE"; break;
-        case PLCTAG_ERR_BAD_GATEWAY: return "PLCTAG_ERR_BAD_GATEWAY"; break;
-        case PLCTAG_ERR_REMOTE_ERR: return "PLCTAG_ERR_REMOTE_ERR"; break;
-        case PLCTAG_ERR_NOT_FOUND: return "PLCTAG_ERR_NOT_FOUND"; break;
-        case PLCTAG_ERR_ABORT: return "PLCTAG_ERR_ABORT"; break;
-        case PLCTAG_ERR_WINSOCK: return "PLCTAG_ERR_WINSOCK"; break;
+        case PLCTAG_ERR_BAD_CONFIG: return "PLCTAG_ERR_BAD_CONFIG";
+        case PLCTAG_ERR_BAD_CONNECTION: return "PLCTAG_ERR_BAD_CONNECTION";
+        case PLCTAG_ERR_BAD_DATA: return "PLCTAG_ERR_BAD_DATA";
+        case PLCTAG_ERR_BAD_DEVICE: return "PLCTAG_ERR_BAD_DEVICE";
+        case PLCTAG_ERR_BAD_GATEWAY: return "PLCTAG_ERR_BAD_GATEWAY";
+        case PLCTAG_ERR_BAD_PARAM: return "PLCTAG_ERR_BAD_PARAM";
+        case PLCTAG_ERR_BAD_REPLY: return "PLCTAG_ERR_BAD_REPLY";
+        case PLCTAG_ERR_BAD_STATUS: return "PLCTAG_ERR_BAD_STATUS";
+        case PLCTAG_ERR_CLOSE: return "PLCTAG_ERR_CLOSE";
+        case PLCTAG_ERR_CREATE: return "PLCTAG_ERR_CREATE";
+        case PLCTAG_ERR_DUPLICATE: return "PLCTAG_ERR_DUPLICATE";
+        case PLCTAG_ERR_ENCODE: return "PLCTAG_ERR_ENCODE";
+        case PLCTAG_ERR_MUTEX_DESTROY: return "PLCTAG_ERR_MUTEX_DESTROY";
+        case PLCTAG_ERR_MUTEX_INIT: return "PLCTAG_ERR_MUTEX_INIT";
+        case PLCTAG_ERR_MUTEX_LOCK: return "PLCTAG_ERR_MUTEX_LOCK";
+        case PLCTAG_ERR_MUTEX_UNLOCK: return "PLCTAG_ERR_MUTEX_UNLOCK";
+        case PLCTAG_ERR_NOT_ALLOWED: return "PLCTAG_ERR_NOT_ALLOWED";
+        case PLCTAG_ERR_NOT_FOUND: return "PLCTAG_ERR_NOT_FOUND";
+        case PLCTAG_ERR_NOT_IMPLEMENTED: return "PLCTAG_ERR_NOT_IMPLEMENTED";
+        case PLCTAG_ERR_NO_DATA: return "PLCTAG_ERR_NO_DATA";
+        case PLCTAG_ERR_NO_MATCH: return "PLCTAG_ERR_NO_MATCH";
+        case PLCTAG_ERR_NO_MEM: return "PLCTAG_ERR_NO_MEM";
+        case PLCTAG_ERR_NO_RESOURCES: return "PLCTAG_ERR_NO_RESOURCES";
+        case PLCTAG_ERR_NULL_PTR: return "PLCTAG_ERR_NULL_PTR";
+        case PLCTAG_ERR_OPEN: return "PLCTAG_ERR_OPEN";
+        case PLCTAG_ERR_OUT_OF_BOUNDS: return "PLCTAG_ERR_OUT_OF_BOUNDS";
+        case PLCTAG_ERR_READ: return "PLCTAG_ERR_READ";
+        case PLCTAG_ERR_REMOTE_ERR: return "PLCTAG_ERR_REMOTE_ERR";
+        case PLCTAG_ERR_THREAD_CREATE: return "PLCTAG_ERR_THREAD_CREATE";
+        case PLCTAG_ERR_THREAD_JOIN: return "PLCTAG_ERR_THREAD_JOIN";
+        case PLCTAG_ERR_TIMEOUT: return "PLCTAG_ERR_TIMEOUT";
+        case PLCTAG_ERR_TOO_LARGE: return "PLCTAG_ERR_TOO_LARGE";
+        case PLCTAG_ERR_TOO_SMALL: return "PLCTAG_ERR_TOO_SMALL";
+        case PLCTAG_ERR_UNSUPPORTED: return "PLCTAG_ERR_UNSUPPORTED";
+        case PLCTAG_ERR_WINSOCK: return "PLCTAG_ERR_WINSOCK";
+        case PLCTAG_ERR_WRITE: return "PLCTAG_ERR_WRITE";
 
         default: return "Unknown error."; break;
     }
@@ -215,16 +213,19 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     pdebug(DEBUG_INFO,"Starting");
 
     if(initialize_modules() != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR,"Unable to initialize the internal library state!");
         return PLC_TAG_NULL;
     }
 
     if(!attrib_str || str_length(attrib_str) == 0) {
+        pdebug(DEBUG_WARN,"Tag attribute string is null or zero length!");
         return PLC_TAG_NULL;
     }
 
     attribs = attr_create_from_str(attrib_str);
 
     if(!attribs) {
+        pdebug(DEBUG_WARN,"Unable to parse attribute string!");
         return PLC_TAG_NULL;
     }
 
@@ -795,6 +796,8 @@ LIB_EXPORT int plc_tag_get_size(plc_tag tag_id)
 
         result = tag->size;
     }
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return result;
 }

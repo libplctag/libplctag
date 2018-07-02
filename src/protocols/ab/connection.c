@@ -264,7 +264,7 @@ int connection_perform_forward_open(ab_connection_p connection)
         connection->max_payload_size=guess_max_packet_size(connection, 1);
 
         rc = try_forward_open_ex(connection);
-        if(rc == PLCTAG_ERR_TOO_LONG) {
+        if(rc == PLCTAG_ERR_TOO_LARGE) {
             /* we support the Forward Open Extended command, but we need to use a smaller size. */
             pdebug(DEBUG_DETAIL,"ForwardOpenEx is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE_EX, connection->max_payload_size);
 
@@ -279,7 +279,7 @@ int connection_perform_forward_open(ab_connection_p connection)
             connection->max_payload_size = guess_max_packet_size(connection, 0);
 
             rc = try_forward_open(connection);
-            if(rc == PLCTAG_ERR_TOO_LONG) {
+            if(rc == PLCTAG_ERR_TOO_LARGE) {
                 /* we support the Forward Open Extended command, but we need to use a smaller size. */
                 pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, connection->max_payload_size);
 
@@ -339,7 +339,7 @@ int try_forward_open_ex(ab_connection_p connection)
         /* timeout? */
         if(!req->resp_received) {
             pdebug(DEBUG_WARN,"Timed out waiting for ForwardOpen response!");
-            rc = PLCTAG_ERR_TIMEOUT_ACK;
+            rc = PLCTAG_ERR_TIMEOUT;
             break;
         }
 
@@ -395,7 +395,7 @@ int try_forward_open(ab_connection_p connection)
         /* timeout? */
         if(!req->resp_received) {
             pdebug(DEBUG_WARN,"Timed out waiting for ForwardOpen response!");
-            rc = PLCTAG_ERR_TIMEOUT_ACK;
+            rc = PLCTAG_ERR_TIMEOUT;
             break;
         }
 
@@ -604,7 +604,7 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
         }
 
         if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"Forward Open command failed, response code: %s (%d)",decode_cip_error(&fo_resp->general_status,1), fo_resp->general_status);
+            pdebug(DEBUG_WARN,"Forward Open command failed, response code: %s (%d)",decode_cip_error_short(&fo_resp->general_status), fo_resp->general_status);
             if(fo_resp->general_status == AB_CIP_ERR_UNSUPPORTED_SERVICE) {
                 rc = PLCTAG_ERR_UNSUPPORTED;
             } else {
@@ -619,7 +619,7 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
                     if(extended_status == 0x109) { /* MAGIC */
                         pdebug(DEBUG_WARN,"Error from forward open request, unsupported size, but size %d is supported.", supported_size);
                         connection->max_payload_size = supported_size;
-                        rc = PLCTAG_ERR_TOO_LONG;
+                        rc = PLCTAG_ERR_TOO_LARGE;
                     } else {
                         pdebug(DEBUG_WARN,"CIP extended error %x!", extended_status);
                     }
@@ -762,7 +762,7 @@ int connection_close(ab_connection_p connection)
         /* timeout? */
         if(!req->resp_received) {
             pdebug(DEBUG_WARN,"Timed out waiting for ForwardClose response!");
-            rc = PLCTAG_ERR_TIMEOUT_ACK;
+            rc = PLCTAG_ERR_TIMEOUT;
             break;
         }
 
