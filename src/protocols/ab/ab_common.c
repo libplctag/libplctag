@@ -231,6 +231,11 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
+    /* set connection requirement. But only if is it a Logix PLC. */
+    tag->needs_connection = (tag->protocol_type == AB_PROTOCOL_LGX ?
+                             attr_get_int(attribs,"use_connected_msg", 0)
+                             : 0);
+
     /* get the connection path, punt if there is not one and we have a Logix-class PLC. */
     path = attr_get_str(attribs,"path",NULL);
 
@@ -258,7 +263,7 @@ plc_tag_p ab_tag_create(attr attribs)
             break;
 
         case AB_PROTOCOL_LGX:
-            tag->needs_connection = 0;
+            /* tag->needs_connection = 0;*/
             num_retries = DEFAULT_NUM_RETRIES;
             default_retry_interval = DEFAULT_RETRY_INTERVAL;
             break;
