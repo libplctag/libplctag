@@ -81,7 +81,7 @@ struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_
 
 /* forward declarations*/
 int session_check_incoming_data_unsafe(ab_session_p session);
-int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req);
+//int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req);
 tag_vtable_p set_tag_vtable(ab_tag_p tag);
 //int setup_session_mutex(void);
 
@@ -460,7 +460,7 @@ int ab_tag_abort(ab_tag_p tag)
             tag->reqs[i]->abort_request = 1;
 
             /* release our hold on the request */
-            request_release(tag->reqs[i]);
+            rc_dec(tag->reqs[i]);
 
             /* we are not holding on to this anymore */
             tag->reqs[i] = NULL;
@@ -503,7 +503,7 @@ int ab_tag_destroy(ab_tag_p tag)
     /* tags may have a connection.  Release if so. */
     if(connection) {
         pdebug(DEBUG_DETAIL, "Removing tag from connection.");
-        connection_release(connection);
+        rc_dec(connection);
         tag->connection = NULL;
     }
 
@@ -511,7 +511,7 @@ int ab_tag_destroy(ab_tag_p tag)
     pdebug(DEBUG_DETAIL,"Getting ready to release tag session %p",tag->session);
     if(session) {
         pdebug(DEBUG_DETAIL, "Removing tag from session.");
-        session_release(session);
+        rc_dec(session);
         tag->session = NULL;
     } else {
         pdebug(DEBUG_WARN,"No session pointer!");
@@ -538,7 +538,7 @@ int ab_tag_destroy(ab_tag_p tag)
     }
 
     /* release memory */
-    mem_free(tag);
+    //mem_free(tag);
 
     pdebug(DEBUG_INFO,"Finished releasing all tag resources.");
 
@@ -844,58 +844,62 @@ int session_check_incoming_data_unsafe(ab_session_p session)
     return rc;
 }
 
-int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p request)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    /*pdebug(DEBUG_DETAIL,"Starting.");*/
-
-    /*
-     * Check to see if we can send something.
-     */
-
-    if(!session->current_request && request->send_request /*&& session->next_packet_time_us < (time_ms() * 1000)*/) {
-        /* nothing being sent and this request is outstanding */
-
-        /* refcount++ since we are storing a pointer */
-        request_acquire(request);
-        session->current_request = request;
-        //session->next_packet_time_us = (time_ms()*1000) + session->next_packet_interval_us;
-
-        pdebug(DEBUG_INFO,"request->send_request=%d",request->send_request);
-       // pdebug(DEBUG_INFO,"session->next_packet_time_us=%lld and time=%lld",session->next_packet_time_us, (time_ms()*1000));
-        //pdebug(DEBUG_INFO,"Setting up request for sending, next packet in %lldus",(session->next_packet_time_us - (time_ms()*1000)));
-
-        if(request->send_count == 0) {
-            request->time_sent = time_ms();
-        }
-
-        request->send_count++;
-    }
-
-    /* if we are already sending this request, check its status */
-    if (session->current_request == request) {
-        /* is the request done? */
-        if (request->send_request) {
-            /* not done, try sending more */
-            send_eip_request_unsafe(request);
-            /* FIXME - handle return code! */
-        } else {
-            /*
-             * done in some manner, remove it from the session to let
-             * another request get sent.
-             */
-            /* we need to release the request since we are removing a pointer to it. */
-            request_release(session->current_request);
-            session->current_request = NULL;
-        }
-    }
-
-    /*pdebug(DEBUG_DETAIL,"Done.");*/
-
-    return rc;
-}
-
+//int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p request)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    /*pdebug(DEBUG_DETAIL,"Starting.");*/
+//
+//    /*
+//     * Check to see if we can send something.
+//     */
+//
+//    if(!session->current_request && request->send_request /*&& session->next_packet_time_us < (time_ms() * 1000)*/) {
+//        /* nothing being sent and this request is outstanding */
+//
+//        /* refcount++ since we are storing a pointer */
+//        rc_inc(request);
+//
+//        /* FIXME - this is not safe.  The request could be in the process of being
+//         * destroyed at this time and so the rc_inc could fail.
+//         */
+//        session->current_request = request;
+//        //session->next_packet_time_us = (time_ms()*1000) + session->next_packet_interval_us;
+//
+//        pdebug(DEBUG_INFO,"request->send_request=%d",request->send_request);
+//       // pdebug(DEBUG_INFO,"session->next_packet_time_us=%lld and time=%lld",session->next_packet_time_us, (time_ms()*1000));
+//        //pdebug(DEBUG_INFO,"Setting up request for sending, next packet in %lldus",(session->next_packet_time_us - (time_ms()*1000)));
+//
+//        if(request->send_count == 0) {
+//            request->time_sent = time_ms();
+//        }
+//
+//        request->send_count++;
+//    }
+//
+//    /* if we are already sending this request, check its status */
+//    if (session->current_request == request) {
+//        /* is the request done? */
+//        if (request->send_request) {
+//            /* not done, try sending more */
+//            send_eip_request_unsafe(request);
+//            /* FIXME - handle return code! */
+//        } else {
+//            /*
+//             * done in some manner, remove it from the session to let
+//             * another request get sent.
+//             */
+//            /* we need to release the request since we are removing a pointer to it. */
+//            rc_dec(session->current_request);
+//            session->current_request = NULL;
+//        }
+//    }
+//
+//    /*pdebug(DEBUG_DETAIL,"Done.");*/
+//
+//    return rc;
+//}
+//
 
 
 static int session_send_current_request(ab_session_p session)
@@ -916,7 +920,7 @@ static int session_send_current_request(ab_session_p session)
     /* if we are done, then clean up */
     if(!session->current_request->send_in_progress) {
         /* release the refcount on the request, we are not referencing it anymore */
-        request_release(session->current_request);
+        rc_dec(session->current_request);
         session->current_request = NULL;
     }
 
@@ -980,7 +984,7 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
                     pdebug(DEBUG_INFO,"Readying connected packet to send.");
 
                     /* increment the refcount since we are storing a pointer to the request */
-                    request_acquire(request);
+                    rc_inc(request);
                     session->current_request = request;
 
                     connected_requests_in_flight++;
@@ -992,7 +996,7 @@ static int session_check_outgoing_data_unsafe(ab_session_p session)
                     pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
 
                     /* increment the refcount since we are storing a pointer to the request */
-                    request_acquire(request);
+                    rc_inc(request);
                     session->current_request = request;
 
                     unconnected_requests_in_flight++;

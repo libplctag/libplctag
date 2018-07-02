@@ -30,7 +30,7 @@
 
 #include <ab/ab_common.h>
 #include <ab/request.h>
-#include <util/refcount.h>
+#include <util/rc.h>
 
 #define MAX_SESSION_HOST    (128)
 
@@ -110,7 +110,7 @@ struct ab_session_t {
     ab_tag_p tags;
 
     /* ref count for session */
-    refcount rc;
+    //refcount rc;
 
     /* connections for this session */
     ab_connection_p connections;
@@ -130,8 +130,8 @@ extern int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
 extern int session_remove_request_unsafe(ab_session_p sess, ab_request_p req);
 extern int session_remove_request(ab_session_p sess, ab_request_p req);
-extern int session_acquire(ab_session_p session);
-extern int session_release(ab_session_p session);
+//extern int session_acquire(ab_session_p session);
+//extern int session_release(ab_session_p session);
 
 
 #endif

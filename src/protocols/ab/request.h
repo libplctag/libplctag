@@ -29,7 +29,7 @@
 #define __PLCTAG_AB_REQUEST_H__ 1
 
 #include <ab/ab_common.h>
-#include <util/refcount.h>
+#include <util/rc.h>
 #include <ab/defs.h>
 
 
@@ -62,7 +62,7 @@ struct ab_request_t {
     int processed;
 
     /* reference count information */
-    refcount rc;
+    //refcount rc;
 
     ab_session_p session;
     ab_connection_p connection;
@@ -90,8 +90,8 @@ struct ab_request_t {
 
 
 int request_create(ab_request_p *req, int max_payload_size);
-int request_acquire(ab_request_p req);
-int request_release(ab_request_p req);
+//int request_acquire(ab_request_p req);
+//int request_release(ab_request_p req);
 //~ int request_destroy_unsafe(ab_request_p* req_pp);
 //~ int request_destroy(ab_request_p *req);
 

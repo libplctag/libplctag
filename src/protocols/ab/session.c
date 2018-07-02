@@ -123,15 +123,31 @@ ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,cons
      * We do not want to use connections that are used exclusively by one tag.
      * We want to use connections that have the same path as the tag.
      */
-    while (connection && !connection_is_usable(connection) && str_cmp_i(connection->path, path) != 0) {
+
+    while(connection) {
+        /* scan past any that are in the process of being deleted. */
+        while(connection && !rc_inc(connection)) {
+            connection = connection->next;
+        }
+
+        /* did we walk off the end? */
+        if(!connection) {
+            break;
+        }
+
+        if(connection_is_usable(connection) && str_cmp_i(connection->path, path)==0) {
+            /* this is the one! */
+            break;
+        }
+
+        /* we are not going to use this connection, release it. */
+        rc_dec(connection);
+
+        /* try the next one. */
         connection = connection->next;
     }
 
-    /* add to the ref count since we found an existing one. */
-    if(connection) {
-        connection_acquire(connection);
-    }
-
+    /* add to the ref count.  This is safe if connection is null. */
     return connection;
 }
 
@@ -272,7 +288,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
         if(rc != PLCTAG_STATUS_OK) {
             /* failed to set up the session! */
             //session_destroy(session);
-            session_release(session);
+            rc_dec(session);
             session = AB_SESSION_NULL;
         } else {
             /* save the status */
@@ -397,26 +413,35 @@ static int session_match_valid(const char *host, ab_session_p session)
 }
 
 
-ab_session_p find_session_by_host_unsafe(const char* t)
+ab_session_p find_session_by_host_unsafe(const char* host)
 {
-    ab_session_p tmp;
+    ab_session_p session;
 
-    tmp = sessions;
+    session = sessions;
 
-    while (tmp && !session_match_valid(t, tmp)) {
-        tmp = tmp->next;
+    while(session) {
+        /* scan past any that are in the process of being deleted. */
+        while(session && !rc_inc(session)) {
+            session = session->next;
+        }
+
+        if(!session) {
+            break;
+        }
+
+        if(session_match_valid(host, session)) {
+            /* this is the one! */
+            break;
+        }
+
+        /* we are not going to use this session, release it. */
+        rc_dec(session);
+
+        /* try the next one. */
+        session = session->next;
     }
 
-    if (!tmp) {
-        return (ab_session_p)NULL;
-    }
-
-    if(tmp) {
-        /* found the session, so increase the ref count. */
-        refcount_acquire(&tmp->rc);
-    }
-
-    return tmp;
+    return session;
 }
 
 
@@ -431,7 +456,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
 
     pdebug(DEBUG_DETAIL, "Warning: not using passed port %d", gw_port);
 
-    session = (ab_session_p)mem_alloc(sizeof(struct ab_session_t));
+    session = (ab_session_p)rc_alloc(sizeof(struct ab_session_t), session_destroy);
 
     if (!session) {
         pdebug(DEBUG_WARN, "Error allocating new session.");
@@ -478,10 +503,10 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
     session->retry_interval = SESSION_DEFAULT_RESEND_INTERVAL_MS;
 
     /* set up the ref count */
-    session->rc = refcount_init(1, session, session_destroy);
+    //session->rc = refcount_init(1, session, session_destroy);
 
     /* FIXME */
-    pdebug(DEBUG_DETAIL, "Refcount is now %d", session->rc.count);
+    //pdebug(DEBUG_DETAIL, "Refcount is now %d", session->rc.count);
 
     /* add the new session to the list. */
     add_session_unsafe(session);
@@ -589,11 +614,11 @@ void session_destroy(void *session_arg)
      */
 
     critical_block(global_session_mut) {
-        if(refcount_get_count(&session->rc) > 0) {
-            pdebug(DEBUG_WARN,"Another thread got a reference to this session before it could be deleted.  Aborting deletion");
-            really_destroy = 0;
-            break;
-        }
+//        if(refcount_get_count(&session->rc) > 0) {
+//            pdebug(DEBUG_WARN,"Another thread got a reference to this session before it could be deleted.  Aborting deletion");
+//            really_destroy = 0;
+//            break;
+//        }
 
         /* still good, so remove the session from the list so no one else can reference it. */
         remove_session_unsafe(session);
@@ -823,13 +848,13 @@ int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
     }
 
     if (!prev) {
-        sess->requests = req;
+        sess->requests = rc_inc(req);
     } else {
-        prev->next = req;
+        prev->next = rc_inc(req);
     }
 
     /* update the request's refcount as we point to it. */
-    request_acquire(req);
+//    rc_inc(req);
 
     pdebug(DEBUG_INFO,"Total requests in the queue: %d",total_requests);
 
@@ -896,7 +921,7 @@ int session_remove_request_unsafe(ab_session_p sess, ab_request_p req)
     req->session = NULL;
 
     /* release the request refcount */
-    request_release(req);
+    rc_dec(req);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -932,25 +957,25 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
 
 
 
-int session_acquire(ab_session_p session)
-{
-    pdebug(DEBUG_INFO, "Acquire session=%p", session);
-
-    if(!session) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    return refcount_acquire(&session->rc);
-}
-
-
-int session_release(ab_session_p session)
-{
-    pdebug(DEBUG_INFO, "Release session=%p", session);
-
-    if(!session) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    return refcount_release(&session->rc);
-}
+//int session_acquire(ab_session_p session)
+//{
+//    pdebug(DEBUG_INFO, "Acquire session=%p", session);
+//
+//    if(!session) {
+//        return PLCTAG_ERR_NULL_PTR;
+//    }
+//
+//    return refcount_acquire(&session->rc);
+//}
+//
+//
+//int session_release(ab_session_p session)
+//{
+//    pdebug(DEBUG_INFO, "Release session=%p", session);
+//
+//    if(!session) {
+//        return PLCTAG_ERR_NULL_PTR;
+//    }
+//
+//    return refcount_release(&session->rc);
+//}
