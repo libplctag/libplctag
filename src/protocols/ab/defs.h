@@ -27,7 +27,7 @@
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
 /* WARNING: this must fit within 9 bits! */
-#define MAX_CIP_MSG_SIZE        (0x01FF & 511)
+#define MAX_CIP_MSG_SIZE        (0x01FF & 508)
 
 /* Warning, this must fit within 16 bits */
 #define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
