@@ -83,12 +83,13 @@ struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_
 
 
 /* forward declarations*/
+static void ab_tag_destroy(ab_tag_p tag);
 static int session_check_incoming_data_unsafe(ab_session_p session);
 //int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req);
 static tag_vtable_p set_tag_vtable(ab_tag_p tag);
 static int insert_read_group_tag(ab_tag_p tag);
 static int remove_read_group_tag(ab_tag_p tag);
-static vector_p find_read_group_tags(ab_tag_p tag);
+
 
 //int setup_session_mutex(void);
 
@@ -106,22 +107,22 @@ int ab_init(void)
     pdebug(DEBUG_INFO,"Initializing AB protocol library.");
 
     /* set up the vtables. */
-    default_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
+    //default_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
 
     plc_dhp_vtable.abort    = (tag_abort_func)ab_tag_abort;
-    plc_dhp_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
+    //plc_dhp_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
     plc_dhp_vtable.read     = (tag_read_func)eip_dhp_pccc_tag_read_start;
     plc_dhp_vtable.status   = (tag_status_func)eip_dhp_pccc_tag_status;
     plc_dhp_vtable.write    = (tag_write_func)eip_dhp_pccc_tag_write_start;
 
     plc_vtable.abort        = (tag_abort_func)ab_tag_abort;
-    plc_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
+    //plc_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
     plc_vtable.read         = (tag_read_func)eip_pccc_tag_read_start;
     plc_vtable.status       = (tag_status_func)eip_pccc_tag_status;
     plc_vtable.write        = (tag_write_func)eip_pccc_tag_write_start;
 
     cip_vtable.abort        = (tag_abort_func)ab_tag_abort;
-    cip_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
+    //cip_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
     cip_vtable.read         = (tag_read_func)eip_cip_tag_read_start;
     cip_vtable.status       = (tag_status_func)eip_cip_tag_status;
     cip_vtable.write        = (tag_write_func)eip_cip_tag_write_start;
@@ -195,7 +196,7 @@ plc_tag_p ab_tag_create(attr attribs)
      * we have a vehicle for returning status.
      */
 
-    tag = (ab_tag_p)mem_alloc(sizeof(struct ab_tag_t));
+    tag = (ab_tag_p)rc_alloc(sizeof(struct ab_tag_t), (rc_cleanup_func)ab_tag_destroy);
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Unable to allocate memory for AB EIP tag!");
@@ -509,7 +510,7 @@ int ab_tag_abort(ab_tag_p tag)
  * the primary concern.
  */
 
-int ab_tag_destroy(ab_tag_p tag)
+void ab_tag_destroy(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_connection_p connection = NULL;
@@ -522,7 +523,7 @@ int ab_tag_destroy(ab_tag_p tag)
         pdebug(DEBUG_WARN,"Tag pointer is null!");
         rc = PLCTAG_ERR_NULL_PTR;
         //~ break;
-        return rc;
+        return;
     }
 
     if(tag->read_group) {
@@ -579,7 +580,7 @@ int ab_tag_destroy(ab_tag_p tag)
 
     pdebug(DEBUG_INFO, "done");
 
-    return rc;
+    //return rc;
 }
 
 

@@ -111,7 +111,7 @@ void request_destroy(void *req_arg)
         /* debug = r->debug; */
 
         //session_remove_request_unsafe(r->session, r);
-        mem_free(r);
+        //mem_free(r);
         //*req_pp = NULL;
     }
 

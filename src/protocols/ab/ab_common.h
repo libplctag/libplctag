@@ -30,6 +30,7 @@
 
 #include <lib/libplctag.h>
 #include <lib/libplctag_tag.h>
+#include <util/vector.h>
 
 typedef struct ab_tag_t *ab_tag_p;
 #define AB_TAG_NULL ((ab_tag_p)NULL)
@@ -50,11 +51,11 @@ extern volatile thread_p io_handler_thread;
 
 
 int ab_tag_abort(ab_tag_p tag);
-int ab_tag_destroy(ab_tag_p p_tag);
+//int ab_tag_destroy(ab_tag_p p_tag);
 int check_cpu(ab_tag_p tag, attr attribs);
 int check_tag_name(ab_tag_p tag, const char *name);
 int check_mutex(int debug);
-
+extern vector_p find_read_group_tags(ab_tag_p tag);
 
 #ifdef _WIN32
 DWORD __stdcall request_handler_func(LPVOID not_used);

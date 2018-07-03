@@ -140,6 +140,33 @@ extern void mem_copy(void *d1, void *d2, int size)
 
 
 
+/*
+ * mem_move
+ *
+ * move memory from one pointer to another for the passed number of bytes.
+ */
+extern void mem_move(void *dest, void *src, int size)
+{
+    memmove(dest, src, size);
+}
+
+
+
+
+
+int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
+{
+    /* short circuit the comparison if the blocks are different lengths */
+    if(src1_size != src2_size) {
+        return (src1_size - src2_size);
+    }
+
+    return memcmp(src1, src2, src1_size);
+}
+
+
+
+
 
 /***************************************************************************
  ******************************* Strings ***********************************
@@ -184,11 +211,11 @@ extern int str_cmp_i(const char *first, const char *second)
  */
 extern int str_copy(char *dst, int dst_size, const char *src)
 {
-	if (!src) {
-		return PLCTAG_ERR_NULL_PTR;
-	}
+    if (!src) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-	/* FIXME - if there is not enough room, truncate the string. */
+    /* FIXME - if there is not enough room, truncate the string. */
     strncpy_s(dst, dst_size, src, _TRUNCATE);
 
     return 0;
@@ -355,15 +382,46 @@ extern char **str_split(const char *str, const char *sep)
 }
 
 
+char *str_concat_impl(int num_args, ...)
+{
+    va_list arg_list;
+    int total_length = 0;
+    char *result = NULL;
+    char *tmp = NULL;
 
+    /* first loop to find the length */
+    va_start(arg_list, num_args);
+    for(int i=0; i < num_args; i++) {
+        tmp = va_arg(arg_list, char *);
+        if(tmp) {
+            total_length += str_length(tmp);
+        }
+    }
+    va_end(arg_list);
 
+    /* make a buffer big enough */
+    total_length += 1;
 
+    result = mem_alloc(total_length);
+    if(!result) {
+        pdebug(DEBUG_ERROR,"Unable to allocate new string buffer!");
+        return NULL;
+    }
 
-struct plc_thread_t {
-    HANDLE h_thread;
-    HANDLE h_mutex;
-};
+    /* loop to copy the strings */
+    result[0] = 0;
+    va_start(arg_list, num_args);
+    for(int i=0; i < num_args; i++) {
+        tmp = va_arg(arg_list, char *);
+        if(tmp) {
+            int len = str_length(result);
+            str_copy(&result[len], total_length - len, tmp);
+        }
+    }
+    va_end(arg_list);
 
+    return result;
+}
 
 
 
@@ -560,6 +618,20 @@ void thread_stop(void)
 
 
 /*
+ * thread_kill()
+ *
+ * Stop the indicated thread completely.
+ */
+
+void thread_kill(thread_p t)
+{
+    if(t) {
+        TerminateThread(t->h_thread, (DWORD)0);
+    }
+}
+
+
+/*
  * thread_join()
  *
  * Wait for the argument thread to stop and then continue.
@@ -585,6 +657,23 @@ int thread_join(thread_p t)
 
     return PLCTAG_STATUS_OK;
 }
+
+
+
+
+/*
+ * thread_detach
+ *
+ * Detach the thread.  You cannot call thread_join on a detached thread!
+ */
+
+extern int thread_detach()
+{
+    /* FIXME - it does not look like you can do this on Windows??? */
+
+    return PLCTAG_STATUS_OK;
+}
+
 
 
 
