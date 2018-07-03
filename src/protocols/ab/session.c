@@ -644,7 +644,7 @@ void session_destroy(void *session_arg)
             req = session->requests;
         }
 
-        mem_free(session);
+        //mem_free(session);
     }
 
     pdebug(DEBUG_INFO, "Done.");

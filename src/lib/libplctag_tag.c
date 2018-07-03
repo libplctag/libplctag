@@ -40,6 +40,7 @@
 #include <platform.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/rc.h>
 #include <ab/ab.h>
 
 
@@ -487,17 +488,18 @@ int plc_tag_destroy_mapped(plc_tag_p tag)
     rc = plc_tag_abort_mapped(tag);
 
     /* call the destructor */
-    if(!tag->vtable || !tag->vtable->destroy) {
-        pdebug(DEBUG_ERROR, "tag destructor not defined!");
-        rc = PLCTAG_ERR_NOT_IMPLEMENTED;
-    } else {
-        /*
-         * It is the responsibility of the destroy
-         * function to free all memory associated with
-         * the tag.
-         */
-        rc = tag->vtable->destroy(tag);
-    }
+//    if(!tag->vtable || !tag->vtable->destroy) {
+//        pdebug(DEBUG_ERROR, "tag destructor not defined!");
+//        rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+//    } else {
+//        /*
+//         * It is the responsibility of the destroy
+//         * function to free all memory associated with
+//         * the tag.
+//         */
+//        rc = tag->vtable->destroy(tag);
+//    }
+    rc_dec(tag);
 
     pdebug(DEBUG_INFO, "Done.");
 

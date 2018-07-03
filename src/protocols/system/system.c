@@ -25,6 +25,7 @@
 #include <lib/libplctag.h>
 #include <system/tag.h>
 #include <lib/init.h>
+#include <util/rc.h>
 
 
 /* we'll need to set these per protocol type.
@@ -37,13 +38,15 @@ struct tag_vtable_t {
 };
 */
 
+static void system_tag_destroy(plc_tag_p tag);
+
+
 static int system_tag_abort(plc_tag_p tag);
-static int system_tag_destroy(plc_tag_p tag);
 static int system_tag_read(plc_tag_p tag);
 static int system_tag_status(plc_tag_p tag);
 static int system_tag_write(plc_tag_p tag);
 
-struct tag_vtable_t system_tag_vtable = { system_tag_abort, system_tag_destroy, system_tag_read, system_tag_status, system_tag_write};
+struct tag_vtable_t system_tag_vtable = { system_tag_abort, /* system_tag_destroy, */ system_tag_read, system_tag_status, system_tag_write};
 
 
 plc_tag_p system_tag_create(attr attribs)
@@ -66,7 +69,7 @@ plc_tag_p system_tag_create(attr attribs)
      * we have a vehicle for returning status.
      */
 
-    tag = (system_tag_p)mem_alloc(sizeof(struct system_tag_t));
+    tag = (system_tag_p)rc_alloc(sizeof(struct system_tag_t), (rc_cleanup_func)system_tag_destroy);
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Unable to allocate memory for system tag!");
@@ -104,17 +107,17 @@ static int system_tag_abort(plc_tag_p tag)
 
 
 
-static int system_tag_destroy(plc_tag_p ptag)
+static void system_tag_destroy(plc_tag_p ptag)
 {
     system_tag_p tag = (system_tag_p)ptag;
 
     if(!tag) {
-        return PLCTAG_ERR_NULL_PTR;
+        return;
     }
 
-    mem_free(tag);
+    //mem_free(tag);
 
-    return PLCTAG_STATUS_OK;
+    return;
 }
 
 
