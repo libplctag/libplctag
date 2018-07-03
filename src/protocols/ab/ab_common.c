@@ -43,6 +43,7 @@
 #include <ab/request.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/vector.h>
 
 
 /*
@@ -51,6 +52,8 @@
 
 volatile ab_session_p sessions = NULL;
 volatile mutex_p global_session_mut = NULL;
+
+volatile vector_p read_group_tags = NULL;
 
 
 /* request/response handling thread */
@@ -80,9 +83,13 @@ struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_
 
 
 /* forward declarations*/
-int session_check_incoming_data_unsafe(ab_session_p session);
+static int session_check_incoming_data_unsafe(ab_session_p session);
 //int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p req);
-tag_vtable_p set_tag_vtable(ab_tag_p tag);
+static tag_vtable_p set_tag_vtable(ab_tag_p tag);
+static int insert_read_group_tag(ab_tag_p tag);
+static int remove_read_group_tag(ab_tag_p tag);
+static vector_p find_read_group_tags(ab_tag_p tag);
+
 //int setup_session_mutex(void);
 
 /* declare this so that the library initializer can pass it to atexit() */
@@ -119,6 +126,12 @@ int ab_init(void)
     cip_vtable.status       = (tag_status_func)eip_cip_tag_status;
     cip_vtable.write        = (tag_write_func)eip_cip_tag_write_start;
 
+    read_group_tags = vector_create(100,50); /* MAGIC */
+    if(!read_group_tags) {
+        pdebug(DEBUG_ERROR,"Unable to create read group vector!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
     /* this is a mutex used to synchronize most activities in this protocol */
     rc = mutex_create((mutex_p*)&global_session_mut);
 
@@ -131,7 +144,7 @@ int ab_init(void)
     rc = thread_create((thread_p*)&io_handler_thread, request_handler_func, 32*1024, NULL);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO,"Unable to create request handler thread!");
+        pdebug(DEBUG_ERROR,"Unable to create request handler thread!");
         return rc;
     }
 
@@ -159,6 +172,9 @@ void ab_teardown(void)
     pdebug(DEBUG_INFO,"Freeing global session mutex.");
     /* clean up the mutex */
     mutex_destroy((mutex_p*)&global_session_mut);
+
+    pdebug(DEBUG_INFO, "Removing the read group vector.");
+    vector_destroy(read_group_tags);
 
     pdebug(DEBUG_INFO,"Done.");
 }
@@ -231,10 +247,22 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
-    /* set connection requirement. But only if is it a Logix PLC. */
-    tag->needs_connection = (tag->protocol_type == AB_PROTOCOL_LGX ?
-                             attr_get_int(attribs,"use_connected_msg", 0)
-                             : 0);
+    /* special features for Logix tags. */
+    if(tag->protocol_type == AB_PROTOCOL_LGX) {
+        tag->needs_connection = attr_get_int(attribs,"use_connected_msg", 0);
+
+        if(attr_get_str(attribs,"read_group",NULL)) {
+            tag->read_group = str_dup(attr_get_str(attribs,"read_group",NULL));
+
+            if(!tag->read_group) {
+                pdebug(DEBUG_WARN,"Unable to save read group name!");
+                tag->status = PLCTAG_ERR_BAD_PARAM;
+                return (plc_tag_p)tag;
+            }
+
+            insert_read_group_tag(tag);
+        }
+    }
 
     /* get the connection path, punt if there is not one and we have a Logix-class PLC. */
     path = attr_get_str(attribs,"path",NULL);
@@ -495,6 +523,13 @@ int ab_tag_destroy(ab_tag_p tag)
         rc = PLCTAG_ERR_NULL_PTR;
         //~ break;
         return rc;
+    }
+
+    if(tag->read_group) {
+        remove_read_group_tag(tag);
+
+        mem_free(tag->read_group);
+        tag->read_group = NULL;
     }
 
     connection = tag->connection;
@@ -1104,3 +1139,74 @@ void* request_handler_func(void* not_used)
     return NULL;
 #endif
 }
+
+
+
+/***********************************************************************
+ *                           READ GROUP HANDLING                       *
+ ***********************************************************************/
+
+int insert_read_group_tag(ab_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    critical_block(global_library_mutex) {
+        vector_put(read_group_tags, vector_length(read_group_tags), tag);
+    }
+
+    return rc;
+}
+
+
+int remove_read_group_tag(ab_tag_p tag)
+{
+    int rc = PLCTAG_ERR_NOT_FOUND;
+    int i = 0;
+    int found = -1;
+
+    critical_block(global_library_mutex) {
+        for(i=0; i< vector_length(read_group_tags); i++) {
+            ab_tag_p tmp = vector_get(read_group_tags, i);
+            if(tmp == tag) {
+                found = i;
+                break;
+            }
+        }
+
+        if(found != -1) {
+            vector_remove(read_group_tags, found);
+            rc = PLCTAG_STATUS_OK;
+        }
+    }
+
+    return rc;
+}
+
+
+vector_p find_read_group_tags(ab_tag_p tag)
+{
+    int i = 0;
+    vector_p result = NULL;
+
+    result = vector_create(10,5); /* MAGIC */
+    if(!result) {
+        pdebug(DEBUG_WARN,"Unable to allocate new result vector!");
+        return NULL;
+    }
+
+    critical_block(global_library_mutex) {
+        for(i=0; i < vector_length(read_group_tags); i++) {
+            ab_tag_p tmp = vector_get(read_group_tags, i);
+
+            if(str_cmp_i(tag->read_group, tmp->read_group) == 0) {
+                /* found one, might even be this tag. */
+                if(rc_inc(tmp)) {
+                    vector_put(result, vector_length(result), tmp);
+                }
+            }
+        }
+    }
+
+    return result;
+}
+

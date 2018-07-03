@@ -160,6 +160,8 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${util_SRC_PATH}/hash.h"
                      "${util_SRC_PATH}/rc.c"
                      "${util_SRC_PATH}/rc.h"
+                     "${util_SRC_PATH}/vector.c"
+                     "${util_SRC_PATH}/vector.h"
                      "${platform_SRC_PATH}/platform.c"
                      "${platform_SRC_PATH}/platform.h" )
 
