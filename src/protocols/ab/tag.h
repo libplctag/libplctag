@@ -64,6 +64,8 @@ struct ab_tag_t {
     uint8_t encoded_name[MAX_TAG_NAME];
     int encoded_name_size;
 
+    const char *read_group;
+
     /* the connection IOI path */
     uint8_t conn_path[MAX_CONN_PATH];
     uint8_t conn_path_size;
