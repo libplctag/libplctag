@@ -574,12 +574,12 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
     data += tag->encoded_name_size;
 
     /* add the count of elements to read. */
-    *((uint16_t*)data) = h2le16(tag->elem_count);
-    data += sizeof(uint16_t);
+    *((uint16_le*)data) = h2le16(tag->elem_count);
+    data += sizeof(uint16_le);
 
     /* add the byte offset for this request */
-    *((uint32_t*)data) = h2le32(byte_offset);
-    data += sizeof(uint32_t);
+    *((uint32_le*)data) = h2le32(byte_offset);
+    data += sizeof(uint32_le);
 
     /* now we go back and fill in the fields of the static part */
 
@@ -675,12 +675,12 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     data += tag->encoded_name_size;
 
     /* add the count of elements to read. */
-    *((uint16_t*)data) = h2le16(tag->elem_count);
-    data += sizeof(uint16_t);
+    *((uint16_le*)data) = h2le16(tag->elem_count);
+    data += sizeof(uint16_le);
 
     /* add the byte offset for this request */
-    *((uint32_t*)data) = h2le32(byte_offset);
-    data += sizeof(uint32_t);
+    *((uint32_le*)data) = h2le32(byte_offset);
+    data += sizeof(uint32_le);
 
     /* mark the end of the embedded packet */
     embed_end = data;
@@ -819,13 +819,13 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
     }
 
     /* copy the item count, little endian */
-    *((uint16_t*)data) = h2le16(tag->elem_count);
-    data += 2;
+    *((uint16_le*)data) = h2le16(tag->elem_count);
+    data += sizeof(uint16_le);
 
     if (tag->num_write_requests > 1) {
         /* put in the byte offset */
-        *((uint32_t*)data) = h2le32(byte_offset);
-        data += 4;
+        *((uint32_le*)data) = h2le32(byte_offset);
+        data += sizeof(uint32_le);
     }
 
     /* now copy the data to write */
@@ -948,13 +948,13 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     }
 
     /* copy the item count, little endian */
-    *((uint16_t*)data) = h2le16(tag->elem_count);
-    data += 2;
+    *((uint16_le*)data) = h2le16(tag->elem_count);
+    data += sizeof(uint16_le);
 
     if (tag->num_write_requests > 1) {
         /* put in the byte offset */
-        *((uint32_t*)data) = h2le32(byte_offset);
-        data += 4;
+        *((uint32_le*)data) = h2le32(byte_offset);
+        data += sizeof(uint32_le);
     }
 
     /* now copy the data to write */
@@ -1113,8 +1113,8 @@ static int check_read_status_connected(ab_tag_p tag)
             break;
         }
 
-        if (le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", cip_resp->encap_status);
+        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -1354,8 +1354,8 @@ static int check_read_status_unconnected(ab_tag_p tag)
             break;
         }
 
-        if (le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", cip_resp->encap_status);
+        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -1585,8 +1585,8 @@ static int check_write_status_connected(ab_tag_p tag)
             break;
         }
 
-        if (le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", cip_resp->encap_status);
+        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -1666,8 +1666,8 @@ int check_write_status_unconnected(ab_tag_p tag)
             break;
         }
 
-        if (le2h16(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", cip_resp->encap_status);
+        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }

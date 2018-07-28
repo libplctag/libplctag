@@ -597,7 +597,7 @@ int recv_forward_open_resp(ab_connection_p connection, ab_request_p req)
             break;
         }
 
-        if(le2h16(fo_resp->encap_status) != AB_EIP_OK) {
+        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
             pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
@@ -874,7 +874,7 @@ int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
             break;
         }
 
-        if(le2h16(fo_resp->encap_status) != AB_EIP_OK) {
+        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
             pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
@@ -896,64 +896,3 @@ int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
 
     return rc;
 }
-
-
-//~ int mark_connection_for_request(ab_request_p request)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-    //~ int index = 0;
-
-    //~ if(!request) {
-        //~ return PLCTAG_ERR_NULL_PTR;
-    //~ }
-
-    //~ if(!request->connection) {
-        //~ return PLCTAG_STATUS_OK;
-    //~ }
-
-    //~ /* FIXME DEBUG - remove! */
-    //~ //return PLCTAG_STATUS_OK;
-
-    //~ /* mark the connection as in use. */
-    //~ for(index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
-        //~ if(!request->connection->request_in_flight[index]) {
-            //~ request->connection->request_in_flight[index] = 1;
-            //~ request->connection->seq_in_flight[index] = request->connection->conn_seq_num;
-            //~ pdebug(DEBUG_INFO,"Found empty connection slot at position %d",index);
-            //~ return rc;
-        //~ } else {
-            //~ pdebug(DEBUG_INFO,"Slot %d already marked.",index);
-        //~ }
-    //~ }
-
-    //~ return rc;
-//~ }
-
-
-//~ int clear_connection_for_request(ab_request_p request)
-//~ {
-    //~ int rc = PLCTAG_STATUS_OK;
-
-    //~ if(request->connection) {
-        //~ ab_connection_p connection = request->connection;
-        //~ int index = 0;
-        //~ int found = 0;
-
-        //~ for(index = 0; index < CONNECTION_MAX_IN_FLIGHT; index++) {
-            //~ if(connection->request_in_flight[index]) {
-                //~ if(connection->seq_in_flight[index] == request->conn_seq) {
-                    //~ pdebug(DEBUG_INFO, "Clearing connection in flight flag for packet sequence ID %d", request->conn_seq);
-                    //~ connection->request_in_flight[index] = 0;
-                    //~ found = 1;
-                    //~ break;
-                //~ }
-            //~ }
-        //~ }
-
-        //~ if(!found) {
-            //~ pdebug(DEBUG_INFO,"Packet with sequence ID %d not found in flight.", request->conn_seq);
-        //~ }
-    //~ }
-
-    //~ return rc;
-//~ }

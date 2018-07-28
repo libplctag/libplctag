@@ -676,13 +676,13 @@ int session_register(ab_session_p session)
     /* fill in the fields of the request */
     req->encap_command = h2le16(AB_EIP_REGISTER_SESSION);
     req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap_t));
-    req->encap_session_handle = session->session_handle;
+    req->encap_session_handle = h2le32(session->session_handle);
     req->encap_status = h2le32(0);
-    req->encap_sender_context = (uint64_t)0;
+    req->encap_sender_context = h2le64((uint64_t)0);
     req->encap_options = h2le32(0);
 
     req->eip_version = h2le16(AB_EIP_VERSION);
-    req->option_flags = 0;
+    req->option_flags = h2le16(0);
 
     /*
      * socket ops here are _ASYNCHRONOUS_!
@@ -784,8 +784,8 @@ int session_register(ab_session_p session)
         return PLCTAG_ERR_BAD_DATA;
     }
 
-    if (le2h16(resp->encap_status) != AB_EIP_OK) {
-        pdebug(DEBUG_WARN, "EIP command failed, response code: %d", resp->encap_status);
+    if (le2h32(resp->encap_status) != AB_EIP_OK) {
+        pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(resp->encap_status));
         return PLCTAG_ERR_REMOTE_ERR;
     }
 
@@ -793,7 +793,7 @@ int session_register(ab_session_p session)
      * after all that, save the session handle, we will
      * use it in future packets.
      */
-    session->session_handle = resp->encap_session_handle; /* opaque to us */
+    session->session_handle = le2h32(resp->encap_session_handle);
     session->registered = 1;
 
     pdebug(DEBUG_INFO, "Done.");

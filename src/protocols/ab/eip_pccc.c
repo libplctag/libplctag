@@ -214,8 +214,8 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     data += tag->encoded_name_size;
 
     /* we need the count twice? */
-    *((uint16_t*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
-    data += sizeof(uint16_t);
+    *((uint16_le*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
+    data += sizeof(uint16_le);
 
     /*
      * after the embedded packet, we need to tell the message router
@@ -315,8 +315,8 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        if(le2h16(pccc->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",pccc->encap_status);
+        if(le2h32(pccc->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",le2h32(pccc->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -619,8 +619,8 @@ static int check_write_status(ab_tag_p tag)
             break;
         }
 
-        if(le2h16(pccc->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",pccc->encap_status);
+        if(le2h32(pccc->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",le2h32(pccc->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }

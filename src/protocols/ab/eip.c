@@ -53,12 +53,12 @@ int send_eip_request_unsafe(ab_request_p req)
         int payload_size = req->request_size - sizeof(eip_encap_t);
 
         /* set up the session sequence ID for this transaction */
-        if(encap->encap_command == h2le16(AB_EIP_READ_RR_DATA)) {
+        if(le2h16(encap->encap_command) == AB_EIP_READ_RR_DATA) {
             /* get new ID */
             req->session->session_seq_id++;
 
             req->session_seq_id = req->session->session_seq_id;
-            encap->encap_sender_context = req->session->session_seq_id; /* link up the request seq ID and the packet seq ID */
+            encap->encap_sender_context = h2le64(req->session->session_seq_id); /* link up the request seq ID and the packet seq ID */
 
             /* mark the session as being used if this is a serialized packet */
             //~ mark_session_for_request(req);
@@ -86,7 +86,7 @@ int send_eip_request_unsafe(ab_request_p req)
 
         /* fill in the header fields. */
         encap->encap_length = h2le16(payload_size);
-        encap->encap_session_handle = req->session->session_handle;
+        encap->encap_session_handle = h2le32(req->session->session_handle);
         encap->encap_status = h2le32(0);
         encap->encap_options = h2le32(0);
 
@@ -146,6 +146,11 @@ int recv_eip_response_unsafe(ab_session_p session)
     uint32_t data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
 
+    if(!session) {
+        pdebug(DEBUG_WARN,"Called with null session!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     /* skip the rest if we already have a packet waiting in the session buffer. */
     if(session->has_response) {
         return PLCTAG_STATUS_OK;
@@ -164,6 +169,7 @@ int recv_eip_response_unsafe(ab_session_p session)
 
     if(data_needed >= session->recv_capacity) {
         pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->recv_capacity);
+        pdebug_dump_bytes(DEBUG_WARN, session->recv_data, session->recv_offset);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -201,14 +207,16 @@ int recv_eip_response_unsafe(ab_session_p session)
 
     /* did we get all the data? */
     if (session->recv_offset >= data_needed) {
-        session->resp_seq_id = ((eip_encap_t*)(session->recv_data))->encap_sender_context;
+        session->resp_seq_id = le2h64(((eip_encap_t*)(session->recv_data))->encap_sender_context);
         session->has_response = 1;
 
         rc = PLCTAG_STATUS_OK;
 
-        pdebug(DEBUG_DETAIL, "request received all needed data.");
+        pdebug(DEBUG_DETAIL, "request received all needed data (%d bytes of %d).", session->recv_offset, data_needed);
 
-        if(((eip_encap_t*)(session->recv_data))->encap_command == h2le16(AB_EIP_READ_RR_DATA)) {
+        pdebug_dump_bytes(DEBUG_DETAIL, session->recv_data, session->recv_offset);
+
+        if(le2h16(((eip_encap_t*)(session->recv_data))->encap_command) == AB_EIP_READ_RR_DATA) {
             eip_encap_t *encap = (eip_encap_t*)(session->recv_data);
             pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
         } else {
