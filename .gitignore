@@ -1,6 +1,7 @@
 .cproject
 .project
 .settings
+.codelit*/*
 *~
 */*~
 */*/*~
@@ -9,6 +10,7 @@
 *.user
 *.aps
 *.pch
+.vscod*/*
 build_win/*
 *.vspscc
 *.vssscc
