@@ -512,7 +512,6 @@ int ab_tag_abort(ab_tag_p tag)
 
 void ab_tag_destroy(ab_tag_p tag)
 {
-    int rc = PLCTAG_STATUS_OK;
     ab_connection_p connection = NULL;
     ab_session_p session = NULL;
 
@@ -521,7 +520,6 @@ void ab_tag_destroy(ab_tag_p tag)
     /* already destroyed? */
     if (!tag) {
         pdebug(DEBUG_WARN,"Tag pointer is null!");
-        rc = PLCTAG_ERR_NULL_PTR;
         //~ break;
         return;
     }
@@ -573,14 +571,9 @@ void ab_tag_destroy(ab_tag_p tag)
         tag->data = NULL;
     }
 
-    /* release memory */
-    //mem_free(tag);
-
     pdebug(DEBUG_INFO,"Finished releasing all tag resources.");
 
     pdebug(DEBUG_INFO, "done");
-
-    //return rc;
 }
 
 
@@ -684,7 +677,7 @@ int setup_session_mutex(void)
 
 static int match_request_and_response(ab_request_p request, eip_cip_co_resp *response)
 {
-    int connected_response = (response->encap_command == le2h16(AB_EIP_CONNECTED_SEND) ? 1 : 0);
+    int connected_response = (le2h16(response->encap_command) == AB_EIP_CONNECTED_SEND ? 1 : 0);
 
     /*
      * AB decided not to use the 64-bit sender context in connected messages.  No idea
@@ -694,7 +687,7 @@ static int match_request_and_response(ab_request_p request, eip_cip_co_resp *res
     if(connected_response && request->conn_id == le2h32(response->cpf_orig_conn_id) && request->conn_seq == le2h16(response->cpf_conn_seq_num)) {
         /* if it is a connected packet, match the connection ID and sequence num. */
         return 1;
-    } else if(!connected_response && response->encap_sender_context != (uint64_t)0 && response->encap_sender_context == request->session_seq_id) {
+    } else if(!connected_response && le2h64(response->encap_sender_context) != (uint64_t)0 && le2h64(response->encap_sender_context) == request->session_seq_id) {
         /* if it is not connected, match the sender context, note that this is sent in host order. */
         return 1;
     }
@@ -879,63 +872,6 @@ int session_check_incoming_data_unsafe(ab_session_p session)
 
     return rc;
 }
-
-//int request_check_outgoing_data_unsafe(ab_session_p session, ab_request_p request)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    /*pdebug(DEBUG_DETAIL,"Starting.");*/
-//
-//    /*
-//     * Check to see if we can send something.
-//     */
-//
-//    if(!session->current_request && request->send_request /*&& session->next_packet_time_us < (time_ms() * 1000)*/) {
-//        /* nothing being sent and this request is outstanding */
-//
-//        /* refcount++ since we are storing a pointer */
-//        rc_inc(request);
-//
-//        /* FIXME - this is not safe.  The request could be in the process of being
-//         * destroyed at this time and so the rc_inc could fail.
-//         */
-//        session->current_request = request;
-//        //session->next_packet_time_us = (time_ms()*1000) + session->next_packet_interval_us;
-//
-//        pdebug(DEBUG_INFO,"request->send_request=%d",request->send_request);
-//       // pdebug(DEBUG_INFO,"session->next_packet_time_us=%lld and time=%lld",session->next_packet_time_us, (time_ms()*1000));
-//        //pdebug(DEBUG_INFO,"Setting up request for sending, next packet in %lldus",(session->next_packet_time_us - (time_ms()*1000)));
-//
-//        if(request->send_count == 0) {
-//            request->time_sent = time_ms();
-//        }
-//
-//        request->send_count++;
-//    }
-//
-//    /* if we are already sending this request, check its status */
-//    if (session->current_request == request) {
-//        /* is the request done? */
-//        if (request->send_request) {
-//            /* not done, try sending more */
-//            send_eip_request_unsafe(request);
-//            /* FIXME - handle return code! */
-//        } else {
-//            /*
-//             * done in some manner, remove it from the session to let
-//             * another request get sent.
-//             */
-//            /* we need to release the request since we are removing a pointer to it. */
-//            rc_dec(session->current_request);
-//            session->current_request = NULL;
-//        }
-//    }
-//
-//    /*pdebug(DEBUG_DETAIL,"Done.");*/
-//
-//    return rc;
-//}
-//
 
 
 static int session_send_current_request(ab_session_p session)

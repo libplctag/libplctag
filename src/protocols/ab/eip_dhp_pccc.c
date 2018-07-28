@@ -177,8 +177,8 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     data += tag->encoded_name_size;
 
     /* we need the count twice? */
-    *((uint16_t*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
-    data += sizeof(uint16_t);
+    *((uint16_le*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
+    data += sizeof(uint16_le);
 
     /* encap fields */
     pccc->encap_command = h2le16(AB_EIP_CONNECTED_SEND);    /* ALWAYS 0x006F Unconnected Send*/
@@ -194,10 +194,10 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     pccc->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&(pccc->cpf_conn_seq_num)));/* REQ: fill in with length of remaining data. */
 
     /* DH+ Routing */
-    pccc->dest_link = 0;
+    pccc->dest_link = h2le16(0);
     pccc->dest_node = h2le16(tag->dhp_dest);
-    pccc->src_link = 0;
-    pccc->src_node = 0 /*h2le16(tag->dhp_src)*/;
+    pccc->src_link = h2le16(0);
+    pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
     /* PCCC Command */
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -374,10 +374,10 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
     pccc->cpf_cdi_item_length = h2le16(data - (uint8_t*)(&(pccc->cpf_conn_seq_num)));/* REQ: fill in with length of remaining data. */
 
     /* DH+ Routing */
-    pccc->dest_link = 0;
+    pccc->dest_link = h2le16(0);
     pccc->dest_node = h2le16(tag->dhp_dest);
-    pccc->src_link = 0;
-    pccc->src_node = 0 /*h2le16(tag->dhp_src)*/;
+    pccc->src_link = h2le16(0);
+    pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
     /* PCCC Command */
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -466,8 +466,8 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        if(le2h16(resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",resp->encap_status);
+        if(le2h32(resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",le2h32(resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -567,8 +567,8 @@ static int check_write_status(ab_tag_p tag)
             break;
         }
 
-        if(le2h16(pccc_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",pccc_resp->encap_status);
+        if(le2h32(pccc_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",le2h32(pccc_resp->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
