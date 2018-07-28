@@ -18,14 +18,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
- /**************************************************************************
-  * CHANGE LOG                                                             *
-  *                                                                        *
-  * 2012-07-05  KRH - Created file.                                        *
-  *                                                                        *
-  * 2012-07-25  KRH - Updates for new thread API.                          *
-  *                                                                        *
-  **************************************************************************/
+/**************************************************************************
+ * CHANGE LOG                                                             *
+ *                                                                        *
+ * 2012-07-05  KRH - Created file.                                        *
+ *                                                                        *
+ * 2012-07-25  KRH - Updates for new thread API.                          *
+ *                                                                        *
+ **************************************************************************/
 
 
 /***************************************************************************
@@ -446,9 +446,9 @@ int mutex_create(mutex_p *m)
 
     /* set up the mutex */
     (*m)->h_mutex = CreateMutex(
-                            NULL,                   /* default security attributes  */
-                            FALSE,                  /* initially not owned          */
-                            NULL);                  /* unnamed mutex                */
+                        NULL,                   /* default security attributes  */
+                        FALSE,                  /* initially not owned          */
+                        NULL);                  /* unnamed mutex                */
 
     if(!(*m)->h_mutex) {
         mem_free(*m);
@@ -579,12 +579,12 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
 
     /* create a thread. */
     (*t)->h_thread = CreateThread(
-                NULL,                   /* default security attributes */
-                0,                      /* use default stack size      */
-                func,                   /* thread function             */
-                arg,                    /* argument to thread function */
-                0,                      /* use default creation flags  */
-                NULL);                  /* do not need thread ID       */
+                         NULL,                   /* default security attributes */
+                         0,                      /* use default stack size      */
+                         func,                   /* thread function             */
+                         arg,                    /* argument to thread function */
+                         0,                      /* use default creation flags  */
+                         NULL);                  /* do not need thread ID       */
 
     if(!(*t)->h_thread) {
         //pdebug(debug, "error creating thread.");
@@ -949,9 +949,9 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
      */
 
     if(ioctlsocket(fd,FIONBIO,&non_blocking)) {
-      /*pdebug("Error getting socket options, errno: %d", errno);*/
-      closesocket(fd);
-      return PLCTAG_ERR_OPEN;
+        /*pdebug("Error getting socket options, errno: %d", errno);*/
+        closesocket(fd);
+        return PLCTAG_ERR_OPEN;
     }
 
     /* save the values */
@@ -1098,92 +1098,92 @@ serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int ba
      */
 
     switch (baud_rate) {
-        case 38400:
-            BAUD = CBR_38400;
-            break;
-        case 19200:
-            BAUD  = CBR_19200;
-            break;
-        case 9600:
-            BAUD  = CBR_9600;
-            break;
-        case 4800:
-            BAUD  = CBR_4800;
-            break;
-        case 2400:
-            BAUD  = CBR_2400;
-            break;
-        case 1200:
-            BAUD  = CBR_1200;
-            break;
-        case 600:
-            BAUD  = CBR_600;
-            break;
-        case 300:
-            BAUD  = CBR_300;
-            break;
-        case 110:
-            BAUD  = CBR_110;
-            break;
-        default:
-            /* unsupported baud rate */
-            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported baud rate: %d. Use standard baud rates (300,600,1200,2400...).",baud_rate);
-            return NULL;
+    case 38400:
+        BAUD = CBR_38400;
+        break;
+    case 19200:
+        BAUD  = CBR_19200;
+        break;
+    case 9600:
+        BAUD  = CBR_9600;
+        break;
+    case 4800:
+        BAUD  = CBR_4800;
+        break;
+    case 2400:
+        BAUD  = CBR_2400;
+        break;
+    case 1200:
+        BAUD  = CBR_1200;
+        break;
+    case 600:
+        BAUD  = CBR_600;
+        break;
+    case 300:
+        BAUD  = CBR_300;
+        break;
+    case 110:
+        BAUD  = CBR_110;
+        break;
+    default:
+        /* unsupported baud rate */
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported baud rate: %d. Use standard baud rates (300,600,1200,2400...).",baud_rate);
+        return NULL;
     }
 
 
     /* data bits */
     switch(data_bits) {
-        case 5:
-            DATABITS = 5;
-            break;
+    case 5:
+        DATABITS = 5;
+        break;
 
-        case 6:
-            DATABITS = 6;
-            break;
+    case 6:
+        DATABITS = 6;
+        break;
 
-        case 7:
-            DATABITS = 7;
-            break;
+    case 7:
+        DATABITS = 7;
+        break;
 
-        case 8:
-            DATABITS = 8;
-            break;
+    case 8:
+        DATABITS = 8;
+        break;
 
-        default:
-            /* unsupported number of data bits. */
-            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of data bits: %d. Use 5-8.",data_bits);
-            return NULL;
+    default:
+        /* unsupported number of data bits. */
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of data bits: %d. Use 5-8.",data_bits);
+        return NULL;
     }
 
 
     switch(stop_bits) {
-         case 1:
-            STOPBITS = ONESTOPBIT;
-            break;
-         case 2:
-            STOPBITS = TWOSTOPBITS;
-            break;
-        default:
-            /* unsupported number of stop bits. */
-            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of stop bits, %d, must be 1 or 2.",stop_bits);
-            return NULL;
+    case 1:
+        STOPBITS = ONESTOPBIT;
+        break;
+    case 2:
+        STOPBITS = TWOSTOPBITS;
+        break;
+    default:
+        /* unsupported number of stop bits. */
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported number of stop bits, %d, must be 1 or 2.",stop_bits);
+        return NULL;
     }
 
     switch(parity_type) {
-        case 0:
-            PARITY = NOPARITY;
-            break;
-        case 1: /* Odd parity */
-            PARITY = ODDPARITY;
-            break;
-        case 2: /* Even parity */
-            PARITY = EVENPARITY;
-            break;
-        default:
-            /* unsupported number of stop bits. */
-            //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported parity type, must be none (0), odd (1) or even (2).");
-            return NULL;
+    case 0:
+        PARITY = NOPARITY;
+        break;
+    case 1: /* Odd parity */
+        PARITY = ODDPARITY;
+        break;
+    case 2: /* Even parity */
+        PARITY = EVENPARITY;
+        break;
+    default:
+        /* unsupported number of stop bits. */
+        //plc_err(lib, PLC_LOG_ERR, PLC_ERR_BAD_PARAM,"Unsupported parity type, must be none (0), odd (1) or even (2).");
+        return NULL;
     }
 
     /* allocate the structure */
@@ -1196,12 +1196,12 @@ serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int ba
 
     /* open the serial port device */
     hSerialPort = CreateFile(path,
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            NULL,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            NULL);
+                             GENERIC_READ | GENERIC_WRITE,
+                             0,
+                             NULL,
+                             OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL,
+                             NULL);
 
     /* did the open succeed? */
     if(hSerialPort == INVALID_HANDLE_VALUE) {
@@ -1278,11 +1278,12 @@ serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int ba
 
 
 
-int plc_lib_close_serial_port(/*plc_lib lib,*/ serial_port_p serial_port)
+int plc_lib_close_serial_port(serial_port_p serial_port)
 {
     /* try to prevent this from being called twice */
-    if(!serial_port || !serial_port->hSerialPort)
+    if(!serial_port || !serial_port->hSerialPort) {
         return 1;
+    }
 
     /* reset the old options */
     SetCommTimeouts(serial_port->hSerialPort, &(serial_port->oldTimeouts));
@@ -1326,198 +1327,6 @@ int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size
 }
 
 
-
-
-
-
-
-
-
-/***************************************************************************
- ********************************* Endian **********************************
- **************************************************************************/
-
-
-/*
- * FIXME
- *
- * Windows does not have endian.h.  Fake it.
- */
-
-#ifndef __ORDER_LITTLE_ENDIAN__
-#define __ORDER_LITTLE_ENDIAN__ 1
-#endif
-
-#ifndef __BYTE_ORDER__
-#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__
-#endif
-
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-/* little endian */
-extern uint16_t h2le16(uint16_t v)
-{
-    return v;
-}
-
-
-
-extern uint16_t le2h16(uint16_t v)
-{
-    return v;
-}
-
-
-
-extern uint16_t h2be16(uint16_t v)
-{
-    uint8_t bytes[2];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-
-    return ((uint32_t)(bytes[0]) << 8)
-           |((uint32_t)(bytes[1]));
-}
-
-
-
-extern uint16_t be2h16(uint16_t v)
-{
-    uint8_t bytes[2];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-
-    return ((uint32_t)(bytes[0]) << 8)
-           |((uint32_t)(bytes[1]));
-}
-
-
-
-extern uint32_t h2le32(uint32_t v)
-{
-    return v;
-}
-
-extern uint32_t le2h32(uint32_t v)
-{
-    return v;
-}
-
-
-extern uint32_t h2be32(uint32_t v)
-{
-    uint8_t bytes[4];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-    bytes[2] = ((v >> 16) & 0xFF);
-    bytes[3] = ((v >> 24) & 0xFF);
-
-    return ((uint32_t)(bytes[0]) << 24)
-           |((uint32_t)(bytes[1]) << 16)
-           |((uint32_t)(bytes[2]) << 8)
-           |((uint32_t)(bytes[3]));
-}
-
-
-extern uint32_t be2h32(uint32_t v)
-{
-    uint8_t bytes[4];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-    bytes[2] = ((v >> 16) & 0xFF);
-    bytes[3] = ((v >> 24) & 0xFF);
-
-    return ((uint32_t)(bytes[0]) << 24)
-           |((uint32_t)(bytes[1]) << 16)
-           |((uint32_t)(bytes[2]) << 8)
-           |((uint32_t)(bytes[3]));
-}
-
-
-#else
-/* big endian */
-extern uint16_t h2le16(uint16_t v)
-{
-    uint8_t bytes[2];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-
-    return  ((uint32_t)(bytes[0]) << 8)
-           |((uint32_t)(bytes[1]));
-}
-
-
-extern uint16_t le2h16(uint16_t v)
-{
-    uint8_t bytes[2];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-
-    return  ((uint32_t)(bytes[0]) << 8)
-           |((uint32_t)(bytes[1]));
-}
-
-
-extern uint16_t h2be16(uint16_t v)
-{
-    return v;
-}
-
-extern uint16_t be2h16(uint16_t v)
-{
-    return v;
-}
-
-
-
-
-extern uint32_t h2le32(uint32_t v)
-{
-    uint8_t bytes[4];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-    bytes[2] = ((v >> 16) & 0xFF);
-    bytes[3] = ((v >> 24) & 0xFF);
-
-    return ((uint32_t)(bytes[0]) << 24)
-           |((uint32_t)(bytes[1]) << 16)
-           |((uint32_t)(bytes[2]) << 8)
-           |((uint32_t)(bytes[3]));
-}
-
-extern uint32_t le2h32(uint32_t v)
-{
-    uint8_t bytes[4];
-
-    bytes[0] = (v & 0xFF);
-    bytes[1] = ((v >> 8) & 0xFF);
-    bytes[2] = ((v >> 16) & 0xFF);
-    bytes[3] = ((v >> 24) & 0xFF);
-
-    return ((uint32_t)(bytes[0]) << 24)
-           |((uint32_t)(bytes[1]) << 16)
-           |((uint32_t)(bytes[2]) << 8)
-           |((uint32_t)(bytes[3]));
-}
-
-
-extern uint32_t h2be32(uint32_t v)
-{
-    return v;
-}
-
-extern uint32_t be2h32(uint32_t v)
-{
-    return v;
-}
-
-#endif
 
 
 

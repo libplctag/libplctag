@@ -221,18 +221,6 @@ extern int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, in
 extern int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size);
 
 
-/* endian functions */
-
-extern uint16_t h2le16(uint16_t v);
-extern uint16_t le2h16(uint16_t v);
-extern uint16_t h2be16(uint16_t v);
-extern uint16_t be2h16(uint16_t v);
-
-extern uint32_t h2le32(uint32_t v);
-extern uint32_t le2h32(uint32_t v);
-extern uint32_t h2be32(uint32_t v);
-extern uint32_t be2h32(uint32_t v);
-
 /* time functions */
 extern int sleep_ms(int ms);
 extern int64_t time_ms(void);
