@@ -264,6 +264,7 @@ plc_tag_p ab_tag_create(attr attribs)
         break;
 
     case AB_PROTOCOL_LGX_PCCC:
+        pdebug(DEBUG_DETAIL, "Setting up PCCC-mapped Logix tag.");
         tag->use_connected_msg = 0;
         tag->allow_packing = 0;
         tag->vtable = &eip_lgx_pccc_vtable;
@@ -628,72 +629,3 @@ int setup_session_mutex(void)
     return rc;
 }
 
-
-/***********************************************************************
- *                           READ GROUP HANDLING                       *
- ***********************************************************************/
-
-//int insert_read_group_tag(ab_tag_p tag)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    critical_block(global_library_mutex) {
-//        vector_put(read_group_tags, vector_length(read_group_tags), tag);
-//    }
-//
-//    return rc;
-//}
-//
-//
-//int remove_read_group_tag(ab_tag_p tag)
-//{
-//    int rc = PLCTAG_ERR_NOT_FOUND;
-//    int i = 0;
-//    int found = -1;
-//
-//    critical_block(global_library_mutex) {
-//        for(i=0; i< vector_length(read_group_tags); i++) {
-//            ab_tag_p tmp = vector_get(read_group_tags, i);
-//            if(tmp == tag) {
-//                found = i;
-//                break;
-//            }
-//        }
-//
-//        if(found != -1) {
-//            vector_remove(read_group_tags, found);
-//            rc = PLCTAG_STATUS_OK;
-//        }
-//    }
-//
-//    return rc;
-//}
-//
-//
-//vector_p find_read_group_tags(ab_tag_p tag)
-//{
-//    int i = 0;
-//    vector_p result = NULL;
-//
-//    result = vector_create(10,5); /* MAGIC */
-//    if(!result) {
-//        pdebug(DEBUG_WARN,"Unable to allocate new result vector!");
-//        return NULL;
-//    }
-//
-//    critical_block(global_library_mutex) {
-//        for(i=0; i < vector_length(read_group_tags); i++) {
-//            ab_tag_p tmp = vector_get(read_group_tags, i);
-//
-//            if(str_cmp_i(tag->read_group, tmp->read_group) == 0) {
-//                /* found one, might even be this tag. */
-//                if(rc_inc(tmp)) {
-//                    vector_put(result, vector_length(result), tmp);
-//                }
-//            }
-//        }
-//    }
-//
-//    return result;
-//}
-//
