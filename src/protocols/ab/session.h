@@ -102,13 +102,22 @@ struct ab_session_t {
 
     /* data for receiving messages */
     uint64_t resp_seq_id;
-    uint32_t data_offset;
-    uint32_t data_capacity;
-    uint32_t data_size;
-    uint8_t data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
+    int has_response;
+    uint32_t recv_offset;
+    uint32_t recv_capacity;
+    uint8_t recv_data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
+
+    /*int recv_size;*/
+
+    /* tags for this session */
+    //ab_tag_p tags;
+
+    /* ref count for session */
+    //refcount rc;
 
     /* connections for this session */
-//    ab_connection_p connections;
+    ab_connection_p connections;
+    uint32_t conn_serial_number; /* id for the next connection */
 
     thread_p handler_thread;
     int terminating;
