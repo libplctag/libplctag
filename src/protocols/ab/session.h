@@ -107,7 +107,7 @@ struct ab_session_t {
     /*int recv_size;*/
 
     /* tags for this session */
-    ab_tag_p tags;
+    //ab_tag_p tags;
 
     /* ref count for session */
     //refcount rc;
@@ -115,6 +115,10 @@ struct ab_session_t {
     /* connections for this session */
     ab_connection_p connections;
     uint32_t conn_serial_number; /* id for the next connection */
+
+    thread_p handler_thread;
+    int terminating;
+    mutex_p session_mutex;
 };
 
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);

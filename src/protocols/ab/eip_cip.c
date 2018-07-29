@@ -80,24 +80,28 @@ int eip_cip_tag_status(ab_tag_p tag)
     int connection_rc = PLCTAG_STATUS_OK;
 
     if (tag->read_in_progress) {
-        if(tag->connection) {
-            rc = check_read_status_connected(tag);
-        } else {
-            rc = check_read_status_unconnected(tag);
-        }
-
-        return rc;
+        return PLCTAG_STATUS_PENDING;
     }
-
+//        if(tag->connection) {
+//            rc = check_read_status_connected(tag);
+//        } else {
+//            rc = check_read_status_unconnected(tag);
+//        }
+//
+//        return rc;
+//    }
+//
     if (tag->write_in_progress) {
-        if(tag->connection) {
-            rc = check_write_status_connected(tag);
-        } else {
-            rc = check_write_status_unconnected(tag);
-        }
-
-        return rc;
+        return PLCTAG_STATUS_PENDING;
     }
+//        if(tag->connection) {
+//            rc = check_write_status_connected(tag);
+//        } else {
+//            rc = check_write_status_unconnected(tag);
+//        }
+//
+//        return rc;
+//    }
 
     /* We need to treat the session and connection statuses
      * as async because we might not be the thread creating those
@@ -157,6 +161,39 @@ int eip_cip_tag_status(ab_tag_p tag)
 
     return rc;
 }
+
+
+
+int eip_cip_tag_tickler(ab_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    if (tag->read_in_progress) {
+        if(tag->connection) {
+            rc = check_read_status_connected(tag);
+        } else {
+            rc = check_read_status_unconnected(tag);
+        }
+
+        return rc;
+    }
+
+    if (tag->write_in_progress) {
+        if(tag->connection) {
+            rc = check_write_status_connected(tag);
+        } else {
+            rc = check_write_status_unconnected(tag);
+        }
+
+        return rc;
+    }
+
+    return tag->status;
+}
+
+
+
+
 
 /*
  * eip_cip_tag_read_start
@@ -528,6 +565,7 @@ int allocate_write_request_slot(ab_tag_p tag)
     return PLCTAG_STATUS_OK;
 }
 
+
 int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
 {
     eip_cip_co_req* cip = NULL;
@@ -538,7 +576,7 @@ int build_read_request_connected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size);
+    rc = request_create(&req, tag->connection->max_payload_size, tag);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -639,7 +677,7 @@ int build_read_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE, tag);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -769,7 +807,7 @@ int build_write_request_connected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size);
+    rc = request_create(&req, tag->connection->max_payload_size, tag);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -895,7 +933,7 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE, tag);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -1036,6 +1074,7 @@ int build_write_request_unconnected(ab_tag_p tag, int slot, int byte_offset)
 
     return PLCTAG_STATUS_OK;
 }
+
 
 
 
