@@ -955,27 +955,3 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
 }
 
 
-
-
-//int session_acquire(ab_session_p session)
-//{
-//    pdebug(DEBUG_INFO, "Acquire session=%p", session);
-//
-//    if(!session) {
-//        return PLCTAG_ERR_NULL_PTR;
-//    }
-//
-//    return refcount_acquire(&session->rc);
-//}
-//
-//
-//int session_release(ab_session_p session)
-//{
-//    pdebug(DEBUG_INFO, "Release session=%p", session);
-//
-//    if(!session) {
-//        return PLCTAG_ERR_NULL_PTR;
-//    }
-//
-//    return refcount_release(&session->rc);
-//}
