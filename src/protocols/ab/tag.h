@@ -85,13 +85,18 @@ struct ab_tag_t {
     /* requests */
     int pre_write_read;
     int first_read;
-    int num_read_requests; /* number of read requests */
-    int num_write_requests; /* number of write requests */
-    int max_requests; /* how many can we have without reallocating? */
-    int *read_req_sizes;
-    int *write_req_sizes;
+    ab_request_p req;
+    int req_byte_offset;
 
-    ab_request_p *reqs;
+    int allow_packing;
+
+//    int num_read_requests; /* number of read requests */
+//    int num_write_requests; /* number of write requests */
+//    int max_requests; /* how many can we have without reallocating? */
+//    int *read_req_sizes;
+//    int *write_req_sizes;
+//
+//    ab_request_p *reqs;
 
     /* flags for operations */
     int read_in_progress;

@@ -256,19 +256,23 @@ plc_tag_p ab_tag_create(attr attribs)
 
     /* special features for Logix tags. */
     if(tag->protocol_type == AB_PROTOCOL_LGX) {
-        tag->needs_connection = attr_get_int(attribs,"use_connected_msg", 0);
+        /* default to requiring a connection. */
+        tag->needs_connection = attr_get_int(attribs,"use_connected_msg", 1);
 
-        if(attr_get_str(attribs,"read_group",NULL)) {
-            tag->read_group = str_dup(attr_get_str(attribs,"read_group",NULL));
+        /* default to allow packing, IF using connected mode. */
+        tag->allow_packing = attr_get_int(attribs, "allow_packing", tag->needs_connection);
 
-            if(!tag->read_group) {
-                pdebug(DEBUG_WARN,"Unable to save read group name!");
-                tag->status = PLCTAG_ERR_BAD_PARAM;
-                return (plc_tag_p)tag;
-            }
-
-            insert_read_group_tag(tag);
-        }
+//        if(attr_get_str(attribs,"read_group",NULL)) {
+//            tag->read_group = str_dup(attr_get_str(attribs,"read_group",NULL));
+//
+//            if(!tag->read_group) {
+//                pdebug(DEBUG_WARN,"Unable to save read group name!");
+//                tag->status = PLCTAG_ERR_BAD_PARAM;
+//                return (plc_tag_p)tag;
+//            }
+//
+//            insert_read_group_tag(tag);
+//        }
     }
 
     /* get the connection path, punt if there is not one and we have a Logix-class PLC. */
@@ -287,8 +291,7 @@ plc_tag_p ab_tag_create(attr attribs)
     switch(tag->protocol_type) {
         case AB_PROTOCOL_PLC:
             tag->needs_connection = 0;
-            num_retries = DEFAULT_NUM_RETRIES;
-            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            tag->allow_packing = 0;
             break;
 
         case AB_PROTOCOL_LGX_PCCC:
@@ -299,20 +302,20 @@ plc_tag_p ab_tag_create(attr attribs)
 
         case AB_PROTOCOL_MLGX:
             tag->needs_connection = 0;
-            num_retries = DEFAULT_NUM_RETRIES;
-            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            tag->allow_packing = 0;
             break;
 
         case AB_PROTOCOL_LGX:
-            /* tag->needs_connection = 0;*/
-            num_retries = DEFAULT_NUM_RETRIES;
-            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            /* default to requiring a connection. */
+            tag->needs_connection = attr_get_int(attribs,"use_connected_msg", 1);
+
+            /* default to allow packing, IF using connected mode. */
+            tag->allow_packing = attr_get_int(attribs, "allow_packing", tag->needs_connection);
             break;
 
         case AB_PROTOCOL_MLGX800:
             tag->needs_connection = 1;
-            num_retries = DEFAULT_NUM_RETRIES;
-            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            tag->allow_packing = 0;
             break;
 
         default:
@@ -468,22 +471,28 @@ int ab_tag_abort(ab_tag_p tag)
 {
     int i;
 
-    for (i = 0; i < tag->max_requests; i++) {
-        if (tag->reqs && tag->reqs[i]) {
-            /* if any activity is still happening, signal the IO thread to kill the request */
-            //tag->reqs[i]->abort_request = 1;
-            request_abort(tag->reqs[i]);
+//    for (i = 0; i < tag->max_requests; i++) {
+//        if (tag->reqs && tag->reqs[i]) {
+//            /* if any activity is still happening, signal the IO thread to kill the request */
+//            //tag->reqs[i]->abort_request = 1;
+//            request_abort(tag->reqs[i]);
+//
+//            /* release our hold on the request */
+//            rc_dec(tag->reqs[i]);
+//
+//            /* we are not holding on to this anymore */
+//            tag->reqs[i] = NULL;
+//        }
+//    }
 
-            /* release our hold on the request */
-            rc_dec(tag->reqs[i]);
-
-            /* we are not holding on to this anymore */
-            tag->reqs[i] = NULL;
-        }
+    if(tag->req) {
+        request_abort(tag->req);
+        tag->req = rc_dec(tag->req);
     }
 
     tag->read_in_progress = 0;
     tag->write_in_progress = 0;
+    tag->byte_offset = 0;
 
     return PLCTAG_STATUS_OK;
 }
@@ -510,12 +519,12 @@ void ab_tag_destroy(ab_tag_p tag)
         return;
     }
 
-    if(tag->read_group) {
-        remove_read_group_tag(tag);
-
-        mem_free(tag->read_group);
-        tag->read_group = NULL;
-    }
+//    if(tag->read_group) {
+//        remove_read_group_tag(tag);
+//
+//        mem_free(tag->read_group);
+//        tag->read_group = NULL;
+//    }
 
     connection = tag->connection;
     session = tag->session;
@@ -663,384 +672,6 @@ int setup_session_mutex(void)
 
     return rc;
 }
-
-//
-//static int match_request_and_response(ab_request_p request, eip_cip_co_resp *response)
-//{
-//    int connected_response = (le2h16(response->encap_command) == AB_EIP_CONNECTED_SEND ? 1 : 0);
-//
-//    /*
-//     * AB decided not to use the 64-bit sender context in connected messages.  No idea
-//     * why they did this, but it means that we need to look at the connection details
-//     * instead.
-//     */
-//    if(connected_response && request->conn_id == le2h32(response->cpf_orig_conn_id) && request->conn_seq == le2h16(response->cpf_conn_seq_num)) {
-//        /* if it is a connected packet, match the connection ID and sequence num. */
-//        return 1;
-//    } else if(!connected_response && le2h64(response->encap_sender_context) != (uint64_t)0 && le2h64(response->encap_sender_context) == request->session_seq_id) {
-//        /* if it is not connected, match the sender context, note that this is sent in host order. */
-//        return 1;
-//    }
-//
-//    /* no match */
-//    return 0;
-//}
-//
-
-
-
-//
-//static void receive_response_unsafe(ab_session_p session, ab_request_p request)
-//{
-//    /*
-//     * We received a packet.  Modify the packet interval downword slightly
-//     * to get to the maximum value.  We want to get to the point where we lose
-//     * a packet once in a while.
-//     */
-//
-//    /*session->next_packet_interval_us -= SESSION_PACKET_RECEIVE_INTERVAL_DEC;
-//    if(session->next_packet_interval_us < SESSION_MIN_PACKET_INTERVAL) {
-//        session->next_packet_interval_us = SESSION_MIN_PACKET_INTERVAL;
-//    }
-//    pdebug(DEBUG_INFO,"Packet received, so decreasing packet interval to %lldus", session->next_packet_interval_us);
-//    */
-//
-//    pdebug(DEBUG_INFO,"Packet sent initially %dms ago and was sent %d times",(int)(time_ms() - request->time_sent), request->send_count);
-//
-//    //update_resend_samples(session, time_ms() - request->time_sent);
-//
-//    /* set the packet ready for processing. */
-//    pdebug(DEBUG_INFO, "got full packet of size %d", session->recv_offset);
-//    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, session->recv_offset);
-//
-//    /* copy the data from the session's buffer */
-//    mem_copy(request->data, session->recv_data, session->recv_offset);
-//    request->request_size = session->recv_offset;
-//
-//    request->resp_received = 1;
-//    request->send_in_progress = 0;
-//    request->send_request = 0;
-//    request->recv_in_progress = 0;
-//
-//    /* clear the request from the session as it is done. Note we hold the mutex here.
-//     *
-//     * This must be done last since we release the reference to the request here!  That could
-//     * destroy the request.
-//     */
-//    session_remove_request_unsafe(session, request);
-//}
-//
-//
-
-
-int ok_to_resend(ab_session_p session, ab_request_p request)
-{
-    /* FIXME - short circuit and always say no. */
-    return 0;
-
-    if(!session) {
-        return 0;
-    }
-
-    if(!request) {
-        return 0;
-    }
-
-    /* was it already sent? */
-    if(!request->recv_in_progress) {
-        return 0;
-    }
-
-    /* did it have a response? */
-    if(request->resp_received) {
-        return 0;
-    }
-
-    /* does it want a resend? */
-    if(request->no_resend) {
-        return 0;
-    }
-
-    /* was the request aborted or should it be aborted? */
-    if(request_check_abort(request) || request->abort_after_send) {
-        return 0;
-    }
-
-    /* have we waited enough time to resend? */
-    if((request->time_sent + request->retry_interval) > time_ms()) {
-        return 0;
-    }
-
-    if(request->num_retries_left <= 0) {
-        return 0;
-    }
-
-    pdebug(DEBUG_INFO,"Request waited %lldms, and has %d retries left need to resend.",(time_ms() - request->time_sent), request->num_retries_left);
-
-    /* track how many times we've retried. */
-    request->num_retries_left--;
-
-    return 1;
-}
-
-//int process_response_packet_unsafe(ab_session_p session)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//    eip_cip_co_resp *response = (eip_cip_co_resp*)(&session->recv_data[0]);
-//    ab_request_p request = session->requests;
-//
-//    /* find the request for which there is a response pending. */
-//    while(request) {
-//        /* need to get the next request now because we might be removing it in receive_response_unsafe */
-//        ab_request_p next_req = request->next;
-//
-//        if(match_request_and_response(request, response)) {
-//            receive_response_unsafe(session, request);
-//        }
-//
-//        request = next_req;
-//    }
-//
-//    return rc;
-//}
-//
-//
-
-//int session_check_incoming_data_unsafe(ab_session_p session)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    /*
-//     * check for data.
-//     *
-//     * Read a packet into the session's buffer and find the
-//     * request it is for.  Repeat while there is data.
-//     */
-//
-//    do {
-//        rc = recv_eip_response_unsafe(session);
-//
-//        /* did we get a packet? */
-//        if(rc == PLCTAG_STATUS_OK && session->has_response) {
-//            rc = process_response_packet_unsafe(session);
-//
-//            /* reset the session's buffer */
-//            mem_set(session->recv_data, 0, session->recv_capacity);
-//            session->recv_offset = 0;
-//            session->resp_seq_id = 0;
-//            session->has_response = 0;
-//        }
-//    } while(rc == PLCTAG_STATUS_OK);
-//
-//    /* No data is not an error */
-//    if(rc == PLCTAG_ERR_NO_DATA) {
-//        rc = PLCTAG_STATUS_OK;
-//    }
-//
-//    if(rc != PLCTAG_STATUS_OK) {
-//        pdebug(DEBUG_WARN,"Error while trying to receive a response packet.  rc=%d",rc);
-//    }
-//
-//    return rc;
-//}
-
-//
-//static int session_send_current_request(ab_session_p session)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    if(!session->current_request) {
-//        return PLCTAG_STATUS_OK;
-//    }
-//
-//    rc = send_eip_request_unsafe(session->current_request);
-//
-//    if(rc != PLCTAG_STATUS_OK) {
-//        /*error sending packet!*/
-//        return rc;
-//    }
-//
-//    /* if we are done, then clean up */
-//    if(!session->current_request->send_in_progress) {
-//        /* release the refcount on the request, we are not referencing it anymore */
-//        rc_dec(session->current_request);
-//        session->current_request = NULL;
-//    }
-//
-//    return rc;
-//}
-
-//
-//static int session_check_outgoing_data_unsafe(ab_session_p session)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//    ab_request_p request = session->requests;
-//    int connected_requests_in_flight = 0;
-//    int unconnected_requests_in_flight = 0;
-//
-//    /* loop over the requests and process them one at a time. */
-//    while(request && rc == PLCTAG_STATUS_OK) {
-//        if(request->abort_request) {
-//            ab_request_p old_request = request;
-//
-//            /* skip to the next one */
-//            request = request->next;
-//
-//            //~ rc = handle_abort_request(old_request);
-//            rc = session_remove_request_unsafe(session,old_request);
-//
-//            //request_destroy_unsafe(&old_request);
-//            //~ request_release(old_request);
-//
-//            continue;
-//        }
-//
-//        /* check resending */
-//        if(ok_to_resend(session, request)) {
-//            //~ handle_resend(session, request);
-//            if(request->connected_request) {
-//                pdebug(DEBUG_INFO,"Requeuing connected request.");
-//            } else {
-//                pdebug(DEBUG_INFO,"Requeuing unconnected request.");
-//            }
-//
-//            request->recv_in_progress = 0;
-//            request->send_request = 1;
-//        }
-//
-//        /* count requests in flight */
-//        if(request->recv_in_progress) {
-//            if(request->connected_request) {
-//                connected_requests_in_flight++;
-//                pdebug(DEBUG_SPEW,"%d connected requests in flight.", connected_requests_in_flight);
-//            } else {
-//                unconnected_requests_in_flight++;
-//                pdebug(DEBUG_SPEW,"%d unconnected requests in flight.", unconnected_requests_in_flight);
-//            }
-//        }
-//
-//
-//        /* is there a request ready to send and can we send? */
-//        if(!session->current_request && request->send_request) {
-//            if(request->connected_request) {
-//                if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
-//                    pdebug(DEBUG_INFO,"Readying connected packet to send.");
-//
-//                    /* increment the refcount since we are storing a pointer to the request */
-//                    rc_inc(request);
-//                    session->current_request = request;
-//
-//                    connected_requests_in_flight++;
-//
-//                    pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
-//                }
-//            } else {
-//                if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
-//                    pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
-//
-//                    /* increment the refcount since we are storing a pointer to the request */
-//                    rc_inc(request);
-//                    session->current_request = request;
-//
-//                    unconnected_requests_in_flight++;
-//
-//                    pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
-//                }
-//            }
-//        }
-//
-//        /* call this often to make sure we get the data out. */
-//        rc = session_send_current_request(session);
-//
-//        /* get the next request to process */
-//        request = request->next;
-//    }
-//
-//    return rc;
-//}
-//
-//
-//static void process_session_tasks_unsafe(ab_session_p session)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    pdebug(DEBUG_SPEW, "Checking for things to do with session %p", session);
-//
-//
-//    if(!session->registered) {
-//        return;
-//    }
-//
-//    /* check for incoming data. */
-//    rc = session_check_incoming_data_unsafe(session);
-//
-//    if (rc != PLCTAG_STATUS_OK) {
-//        pdebug(DEBUG_WARN, "Error when checking for incoming session data! %d", rc);
-//        /* FIXME - do something useful with this error */
-//    }
-//
-//    /* check for incoming data. */
-//    rc = session_check_outgoing_data_unsafe(session);
-//
-//    if (rc != PLCTAG_STATUS_OK) {
-//        pdebug(DEBUG_WARN, "Error when checking for outgoing session data! %d", rc);
-//        /* FIXME - do something useful with this error */
-//    }
-//}
-//
-
-
-//
-//THREAD_FUNC(request_handler_func)
-//{
-//    ab_session_p cur_sess;
-//
-//    (void)arg;
-//
-//    /* garbage code to stop compiler from whining about unused variables */
-//    pdebug(DEBUG_DETAIL,"Starting.");
-//
-//    while (!library_terminating) {
-//        /* we need the mutex */
-//        if (global_session_mut == NULL) {
-//            pdebug(DEBUG_ERROR, "global_session_mut is NULL!");
-//            break;
-//        }
-//
-//        /*pdebug(DEBUG_INFO,"entering critical block %p",global_session_mut);*/
-//        critical_block(global_session_mut) {
-//            /*
-//             * loop over the sessions.  For each session, see if we can read some
-//             * data.  If we can, read it in and try to update a request.  If the
-//             * session has outstanding requests that need to be sent, try to send
-//             * them.
-//             */
-//
-//            cur_sess = sessions;
-//
-//            while (cur_sess) {
-//                /* process incoming and outgoing data for the session. */
-//                process_session_tasks_unsafe(cur_sess);
-//
-//                /*  move to the next session */
-//                /*pdebug(DEBUG_INFO,"cur_sess=%p, cur_sess->next=%p",cur_sess, cur_sess->next);*/
-//                cur_sess = cur_sess->next;
-//            }
-//        } /* end synchronized block */
-//        /*pdebug(DEBUG_INFO,"leaving critical block %p",global_session_mut);*/
-//
-//        /*
-//         * give up the CPU. 1ms is not really going to happen.  Usually it is more based on the OS
-//         * default time and is usually around 10ms.  But, this sleep usually causes context switch.
-//         */
-//        sleep_ms(1);
-//    }
-//
-//    thread_stop();
-//
-//    THREAD_RETURN(0);
-//}
-//
 
 
 /***********************************************************************
