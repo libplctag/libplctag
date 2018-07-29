@@ -51,7 +51,7 @@ struct ab_request_t {
     int send_in_progress;
     int resp_received;
     int recv_in_progress;
-    int abort_request;
+    int _abort_request;
     int abort_after_send; /* for one shot packets */
     int no_resend; /* do not resend if this is set. */
     int connected_request; /* serialize this packet with respect to other serialized packets. */
@@ -61,9 +61,8 @@ struct ab_request_t {
     /* used when processing a response */
     int processed;
 
-    /* reference count information */
-    //refcount rc;
-
+    mutex_p request_mutex;
+    ab_tag_p tag;
     ab_session_p session;
     ab_connection_p connection;
 
@@ -89,12 +88,9 @@ struct ab_request_t {
 
 
 
-int request_create(ab_request_p *req, int max_payload_size);
-//int request_acquire(ab_request_p req);
-//int request_release(ab_request_p req);
-//~ int request_destroy_unsafe(ab_request_p* req_pp);
-//~ int request_destroy(ab_request_p *req);
-
-
+extern int request_create(ab_request_p *req, int max_payload_size, ab_tag_p tag);
+extern int request_abort(ab_request_p req);
+extern int request_check_abort(ab_request_p req);
+extern ab_tag_p request_get_tag(ab_request_p req);
 
 #endif

@@ -59,11 +59,14 @@ int eip_pccc_tag_status(ab_tag_p tag)
     int connection_rc = PLCTAG_STATUS_OK;
 
     if(tag->read_in_progress) {
-        return check_read_status(tag);
+//        return check_read_status(tag);
+        return PLCTAG_STATUS_PENDING;
     }
 
+
     if(tag->write_in_progress) {
-        return check_write_status(tag);
+//        return check_write_status(tag);
+        return PLCTAG_STATUS_PENDING;
     }
 
     /* propagate the status up */
@@ -100,7 +103,18 @@ int eip_pccc_tag_status(ab_tag_p tag)
 }
 
 
+int eip_pccc_tag_tickler(ab_tag_p tag)
+{
+    if(tag->read_in_progress) {
+        return check_read_status(tag);
+    }
 
+    if(tag->write_in_progress) {
+        return check_write_status(tag);
+    }
+
+    return tag->status;
+}
 
 
 /*
@@ -170,7 +184,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
+    rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
@@ -445,7 +459,7 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
+    rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);

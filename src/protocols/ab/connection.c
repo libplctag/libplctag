@@ -314,7 +314,7 @@ int try_forward_open_ex(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -370,7 +370,7 @@ int try_forward_open(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -733,13 +733,11 @@ int connection_close(ab_connection_p connection)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
-
     do {
+        /* get a request buffer */
+        rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-            rc = 0;
             break;
         }
 
