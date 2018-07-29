@@ -44,7 +44,7 @@ void request_destroy(void *request_arg);
  * elsewhere.
  */
 
-int request_create(ab_request_p *req, int max_payload_size)
+int request_create(ab_request_p *req, int max_payload_size, ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p res;
@@ -52,12 +52,14 @@ int request_create(ab_request_p *req, int max_payload_size)
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
+    res = (ab_request_p)rc_alloc(sizeof(struct ab_request_t) + request_capacity, request_destroy);
+
     res = (ab_request_p)rc_alloc((int)(sizeof(struct ab_request_t) + request_capacity), request_destroy);
     if (!res) {
         *req = NULL;
         rc = PLCTAG_ERR_NO_MEM;
     } else {
-        res->request_capacity = (int)request_capacity;
+        res->request_capacity = request_capacity;
 
         rc = mutex_create(&(res->request_mutex));
         if(rc != PLCTAG_STATUS_OK) {
@@ -66,6 +68,9 @@ int request_create(ab_request_p *req, int max_payload_size)
             rc_dec(req);
             return rc;
         }
+
+        /* we need to be careful as this sets up a reference cycle! */
+        res->tag = rc_inc(tag);
 
         *req = res;
     }
@@ -89,6 +94,7 @@ int request_abort(ab_request_p req)
 
     critical_block(req->request_mutex) {
         req->_abort_request = !0;
+        req->tag = rc_dec(req->tag);
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -113,44 +119,10 @@ int request_check_abort(ab_request_p req)
 }
 
 
-int request_allow_packing(ab_request_p req)
+
+ab_tag_p request_get_tag(ab_request_p req)
 {
-    int result = PLCTAG_STATUS_OK;
-
-    if(!req) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    critical_block(req->request_mutex) {
-        req->allow_packing = 1;
-        result = PLCTAG_STATUS_OK;
-    }
-
-    return result;
-}
-
-
-int request_check_packing(ab_request_p req)
-{
-    int result = 0;
-
-    if(!req) {
-        return result;
-    }
-
-    critical_block(req->request_mutex) {
-        result = req->allow_packing;
-    }
-
-    return result;
-}
-
-
-
-
-int request_get_packing_num(ab_request_p req)
-{
-    int result = 0;
+    ab_tag_p result = NULL;
 
     if(!req) {
         return result;
@@ -182,7 +154,6 @@ int request_set_packing_num(ab_request_p req, int packing_num)
 
 
 
-
 /*
  * request_destroy
  *
@@ -197,7 +168,6 @@ void request_destroy(void *req_arg)
 
     request_abort(req);
 
-    /* FIXME - is this needed any more? */
     mutex_destroy(&(req->request_mutex));
 
     pdebug(DEBUG_DETAIL, "Done.");
