@@ -1,3 +1,6 @@
+cmake-build*
+*.project
+*.workspace
 .cproject
 .project
 .settings
