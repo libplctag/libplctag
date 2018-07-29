@@ -500,7 +500,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
     for(int index=0; index < SESSION_NUM_ROUND_TRIP_SAMPLES; index++) {
         session->round_trip_samples[index] = SESSION_DEFAULT_RESEND_INTERVAL_MS;
     }
-    session->retry_interval = SESSION_DEFAULT_RESEND_INTERVAL_MS;
+    //session->retry_interval = SESSION_DEFAULT_RESEND_INTERVAL_MS;
 
     /* set up the ref count */
     //session->rc = refcount_init(1, session, session_destroy);

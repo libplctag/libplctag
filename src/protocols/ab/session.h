@@ -55,8 +55,8 @@
  * the queue depth depends on the type of the request.
  */
 
-#define SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT (2)
-#define SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT (8)
+#define SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT (1)
+#define SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT (4)
 
 struct ab_session_t {
     ab_session_p next;
@@ -87,7 +87,7 @@ struct ab_session_t {
     //int64_t next_packet_time_us;
     //int64_t next_packet_interval_us;
 
-    int64_t retry_interval;
+    //int64_t retry_interval;
 
     /* short cumulative period for calculating round trip time. */
     int64_t round_trip_samples[SESSION_NUM_ROUND_TRIP_SAMPLES];
