@@ -1005,8 +1005,10 @@ THREAD_FUNC(request_handler_func)
 {
     ab_session_p cur_sess;
 
+    (void)arg;
+
     /* garbage code to stop compiler from whining about unused variables */
-    pdebug(DEBUG_DETAIL,"Starting with arg %p",not_used);
+    pdebug(DEBUG_DETAIL,"Starting.");
 
     while (!library_terminating) {
         /* we need the mutex */
