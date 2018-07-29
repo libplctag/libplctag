@@ -99,25 +99,19 @@ int tag_status(ab_tag_p tag)
 
 
 
-int tag_tickler(ab_tag_p tag)
+int eip_dhp_pccc_tag_tickler(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW, "Starting.");
-
     if(tag->read_in_progress) {
-        pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
         return rc;
     }
 
     if(tag->write_in_progress) {
-        pdebug(DEBUG_SPEW, "Write in progress.");
         rc = check_write_status(tag);
         return rc;
     }
-
-    pdebug(DEBUG_SPEW, "Done.");
 
     return tag->status;
 }
@@ -165,7 +159,8 @@ int tag_read_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req, tag->session->max_payload_size);
+    rc = request_create(&req, tag->connection->max_payload_size, tag);
+
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
@@ -285,7 +280,7 @@ int tag_write_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req, tag->session->max_payload_size);
+    rc = request_create(&req, tag->connection->max_payload_size, tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);

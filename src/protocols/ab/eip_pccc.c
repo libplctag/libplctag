@@ -119,7 +119,11 @@ int tag_status(ab_tag_p tag)
 }
 
 
+<<<<<<< HEAD
 int tag_tickler(ab_tag_p tag)
+=======
+int eip_pccc_tag_tickler(ab_tag_p tag)
+>>>>>>> Added tickler function and session-specific thread.
 {
     if(tag->read_in_progress) {
         return check_read_status(tag);
@@ -200,7 +204,7 @@ int tag_read_start(ab_tag_p tag)
 //    }
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
+    rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
@@ -469,7 +473,7 @@ int tag_write_start(ab_tag_p tag)
 //    }
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
+    rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
         return rc;
