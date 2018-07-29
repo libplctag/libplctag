@@ -698,28 +698,6 @@ static int match_request_and_response(ab_request_p request, eip_cip_co_resp *res
 
 
 
-static void update_resend_samples(ab_session_p session, int64_t round_trip_time)
-{
-//    int index;
-//    int64_t round_trip_sum = 0;
-//    int64_t round_trip_avg = 0;
-//
-//    /* store the round trip information */
-//    session->round_trip_sample_index = ((++ session->round_trip_sample_index) >= SESSION_NUM_ROUND_TRIP_SAMPLES ? 0 : session->round_trip_sample_index);
-//    session->round_trip_samples[session->round_trip_sample_index] = round_trip_time;
-//
-//    /* calculate the retry interval */
-//    for(index=0; index < SESSION_NUM_ROUND_TRIP_SAMPLES; index++) {
-//        round_trip_sum += session->round_trip_samples[index];
-//    }
-//
-//    /* round up and double */
-//    round_trip_avg = (round_trip_sum + (SESSION_NUM_ROUND_TRIP_SAMPLES/2))/SESSION_NUM_ROUND_TRIP_SAMPLES;
-//    session->retry_interval = 3 * (round_trip_avg < SESSION_MIN_RESEND_INTERVAL ? SESSION_MIN_RESEND_INTERVAL : round_trip_avg);
-//
-//    pdebug(DEBUG_INFO,"Packet round trip time %lld, running average round trip time is %lld",round_trip_time, session->retry_interval);
-}
-
 
 
 static void receive_response_unsafe(ab_session_p session, ab_request_p request)
