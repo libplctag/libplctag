@@ -464,7 +464,6 @@ int tag_write_start(ab_tag_p tag)
 }
 
 
-
 int build_read_request_connected(ab_tag_p tag, int byte_offset)
 {
     eip_cip_co_req* cip = NULL;
@@ -536,6 +535,10 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
 //    req->connection = tag->connection;
 
     req->session = tag->session;
+
+    if(tag->allow_packing) {
+        request_allow_packing(req);
+    }
 
     if(tag->allow_packing) {
         request_allow_packing(req);
@@ -1190,7 +1193,6 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
 //}
 //
 //
-
 
 
 
