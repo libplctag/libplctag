@@ -46,6 +46,9 @@ struct ab_tag_t {
     /*struct plc_tag_t p_tag;*/
     TAG_BASE_STRUCT;
 
+//    ab_tag_p next;
+//    ab_tag_p prev;
+//
     /* how do we talk to this device? */
     int protocol_type;
 //    int use_dhp_direct;

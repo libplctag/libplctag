@@ -105,10 +105,26 @@ int tag_status(ab_tag_p tag)
     if (tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
-
+//        if(tag->connection) {
+//            rc = check_read_status_connected(tag);
+//        } else {
+//            rc = check_read_status_unconnected(tag);
+//        }
+//
+//        return rc;
+//    }
+//
     if (tag->write_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
+//        if(tag->connection) {
+//            rc = check_write_status_connected(tag);
+//        } else {
+//            rc = check_write_status_unconnected(tag);
+//        }
+//
+//        return rc;
+//    }
 
     if (tag->session) {
         session_rc = tag->session->status;
@@ -537,7 +553,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE, tag);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -1149,6 +1165,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
 //}
 //
 //
+
 
 
 
