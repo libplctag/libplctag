@@ -765,7 +765,7 @@ LIB_EXPORT int plc_tag_write(plc_tag tag_id, int timeout)
                 rc = PLCTAG_ERR_TIMEOUT;
             }
 
-            pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
+            pdebug(DEBUG_INFO,"elapsed time %lldms",(time_ms()-start_time));
         }
     } /* end of api block */
 
