@@ -277,7 +277,7 @@ int try_forward_open_ex(ab_connection_p connection)
 //    ab_request_p req=NULL;
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -349,7 +349,7 @@ int try_forward_open(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -663,6 +663,81 @@ void connection_destroy(void *connection_arg)
     pdebug(DEBUG_INFO, "Done.");
 
     return;
+}
+
+/*
+ * This should never be called directly.  It should only be called
+ * as a result of the reference count hitting zero.
+ */
+/* not called due to refcount code
+void connection_destroy(void conn_arg)
+{
+    ab_connection_p connection = conn_arg;
+
+    critical_block(global_session_mut) {
+        connection_destroy_unsafe(connection);
+    }
+}
+*/
+
+int connection_close(ab_connection_p connection)
+{
+    ab_request_p req;
+    int64_t timeout_time = 0L;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    do {
+        /* get a request buffer */
+        rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+            break;
+        }
+
+        req->num_retries_left = 5; /* MAGIC! */
+        req->retry_interval = 900; /* MAGIC! */
+
+        /* send the ForwardClose command to the PLC */
+        if((rc = send_forward_close_req(connection, req)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to send ForwardClose packet!");
+            break;
+        }
+
+        /* wait for a response */
+        timeout_time = time_ms() + CONNECTION_TEARDOWN_TIMEOUT;
+
+        while (timeout_time > time_ms() && !req->resp_received) {
+            sleep_ms(1);
+        }
+
+        /* timeout? */
+        if(!req->resp_received) {
+            pdebug(DEBUG_WARN,"Timed out waiting for ForwardClose response!");
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
+        }
+
+        /* check for the ForwardClose response. */
+        if((rc = recv_forward_close_resp(connection, req)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to use ForwardClose response!");
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
+    } while(0);
+
+    connection->status = rc;
+
+    if(req) {
+        //session_remove_request(connection->session,req);
+        req = rc_dec(req);
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
 }
 
 

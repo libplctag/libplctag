@@ -52,19 +52,12 @@ static void session_destroy(void *session);
 static int session_register(ab_session_p session);
 static int session_unregister_unsafe(ab_session_p session);
 static THREAD_FUNC(session_handler);
-static int prepare_request(ab_session_p session, ab_request_p request);
-static int send_eip_request(ab_session_p session, int timeout);
-static int recv_eip_response(ab_session_p session, int timeout);
-static int perform_forward_open(ab_session_p session);
-static int perform_forward_close(ab_session_p session);
-static int try_forward_open_ex(ab_session_p session);
-static int try_forward_open(ab_session_p session);
-static int send_forward_open_req(ab_session_p session);
-static int send_forward_open_req_ex(ab_session_p session);
-static int recv_forward_open_resp(ab_session_p session);
-static int send_forward_close_req(ab_session_p session);
-static int recv_forward_close_resp(ab_session_p session);
-
+static int check_incoming_data_unsafe(ab_session_p session);
+static int check_outgoing_data_unsafe(ab_session_p session);
+static int send_current_request(ab_session_p session);
+static int process_response_packet_unsafe(ab_session_p session);
+static int match_request_and_response(ab_request_p request, eip_cip_co_resp *response);
+static void receive_response_unsafe(ab_session_p session, ab_request_p request);
 
 
 /*
@@ -588,7 +581,15 @@ ab_session_p session_create_unsafe(const char* host, int gw_port, const char *pa
      * FIXME - this could collide.  The probability is low, but it could happen
      * as there are only 32 bits.
      */
-    session->orig_connection_id = ++connection_id;
+    session->conn_serial_number = ++connection_id;
+
+    /* set up the packet interval to a reasonable default */
+    //session->next_packet_interval_us = SESSION_DEFAULT_PACKET_INTERVAL;
+
+    /* set up packet round trip information */
+    for(int index=0; index < SESSION_NUM_ROUND_TRIP_SAMPLES; index++) {
+        session->round_trip_samples[index] = SESSION_DEFAULT_RESEND_INTERVAL_MS;
+    }
 
     /* add the new session to the list. */
     add_session_unsafe(session);
@@ -622,6 +623,19 @@ int session_init(ab_session_p session)
         session->status = rc;
         return rc;
     }
+
+//    /* we must connect to the gateway and register */
+//    if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_WARN, "session connect failed!");
+//        session->status = rc;
+//        return rc;
+//    }
+//
+//    if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_WARN, "session registration failed!");
+//        session->status = rc;
+//        return rc;
+//    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -663,6 +677,53 @@ int session_connect(ab_session_p session)
     return rc;
 }
 
+/* must have the session mutex held here */
+void session_destroy(void *session_arg)
+{
+    ab_session_p session = session_arg;
+    ab_request_p req = NULL;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if (!session) {
+        pdebug(DEBUG_WARN, "Session ptr is null!");
+
+        return;
+    }
+
+
+    /* terminate the thread first. */
+    session->terminating = 1;
+
+    /* so remove the session from the list so no one else can reference it. */
+    remove_session(session);
+
+    /* unregister and close the socket. */
+    session_unregister_unsafe(session);
+
+    if(session->handler_thread) {
+        thread_join(session->handler_thread);
+        thread_destroy(&(session->handler_thread));
+        session->handler_thread = NULL;
+    }
+
+    /* remove any remaining requests, they are dead */
+    req = session->requests;
+    while(req) {
+        session_remove_request(session, req);
+        req = session->requests;
+    }
+
+    /* we are done with the mutex, finally destroy it. */
+    if(session->session_mutex) {
+        mutex_destroy(&(session->session_mutex));
+        session->session_mutex = NULL;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return;
+}
 
 
 int session_register(ab_session_p session)
@@ -997,129 +1058,40 @@ THREAD_FUNC(session_handler)
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
     while(!session->terminating) {
-        ab_request_p request = NULL;
-
-        do {
-            /* is the session ready? */
-            if(!session->registered) {
-                /* we must connect to the gateway and register */
-                if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "session connect failed!");
-                    session->status = rc;
-                    break;
-                }
-
-                if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "session registration failed!");
-                    session->status = rc;
-                    break;
-                }
-
-                if(session->use_connected_msg && !session->targ_connection_id) {
-                    pdebug(DEBUG_DETAIL, "Opening CIP connection.");
-                    if((rc = perform_forward_open(session)) != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN, "Forward open failed! rc=%d", rc);
-                        session->status = rc;
-                        break;
-                    }
-                }
-
-                /* let the world know that the session is ready for use. */
-                pdebug(DEBUG_DETAIL, "Session now ready for use.");
-                session->status = PLCTAG_STATUS_OK;
-            }
-
-            /*
-             * session is ready.
-             *
-             * Take a request from the queue, send it and wait for the response.
-             */
-
-            critical_block(session->session_mutex) {
-                /* grab a request off the front of the list. */
-                request = session->requests;
-                if(request) {
-                    session->requests = request->next;
-
-                    /* get, or try to get, a reference to the request. */
-                    //request = rc_inc(request);
-                }
-            }
-
-            if(!request) {
-                /* nothing to do. */
-                pdebug(DEBUG_DETAIL, "No requests to process.");
-
+        if(!session->registered) {
+            /* we must connect to the gateway and register */
+            if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "session connect failed!");
+                session->status = rc;
                 break;
             }
 
-            if(request_check_abort(request)) {
-                pdebug(DEBUG_DETAIL, "Request is aborted.");
-                rc = PLCTAG_ERR_ABORT;
-
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
-
+            if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "session registration failed!");
+                session->status = rc;
                 break;
             }
-
-            /* request is good, set it up and process it. */
-            rc = prepare_request(session, request);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to prepare request, rc=%d!", rc);
-
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
-
-                break;
-            }
-
-            /* copy the data from the request into the session's buffer. */
-            mem_copy(session->data, request->data, request->request_size);
-            session->data_size = request->request_size;
-
-            rc = send_eip_request(session, 0);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error sending packet! rc=%d", rc);
-
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
-
-                break;
-            }
-
-            rc = recv_eip_response(session, 0);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error receiving packet response! rc=%d", rc);
-
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
-
-                break;
-            }
-
-            /* copy the data back into the request buffer. */
-            mem_copy(request->data, session->data, session->data_size);
-
-            rc = PLCTAG_STATUS_OK;
-
-            request->status = rc;
-            request->resp_received = 1;
-            request->request_size = session->data_size;
-        } while(0);
-
-        if(request) {
-            rc_dec(request);
         }
 
-        /* give up the CPU a bit. */
-        if(!session->terminating) {
-            sleep_ms(1);
+        critical_block(session->session_mutex) {
+            /* check for incoming data. */
+            rc = check_incoming_data_unsafe(session);
+
+            if (rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error when checking for incoming session data! %d", rc);
+                /* FIXME - do something useful with this error */
+            }
+
+            /* check for incoming data. */
+            rc = check_outgoing_data_unsafe(session);
+
+            if (rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error when checking for outgoing session data! %d", rc);
+                /* FIXME - do something useful with this error */
+            }
         }
+
+        sleep_ms(1);
     }
 
     THREAD_RETURN(0);
@@ -1127,707 +1099,259 @@ THREAD_FUNC(session_handler)
 
 
 
-int prepare_request(ab_session_p session, ab_request_p request)
-{
-    eip_encap_t* encap = (eip_encap_t*)(request->data);
-    int payload_size = request->request_size - sizeof(eip_encap_t);
 
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(!session) {
-        pdebug(DEBUG_WARN,"Called with null session!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* fill in the fields of the request. */
-
-    encap->encap_length = h2le16(payload_size);
-    encap->encap_session_handle = h2le32(session->session_handle);
-    encap->encap_status = h2le32(0);
-    encap->encap_options = h2le32(0);
-
-    /* set up the session sequence ID for this transaction */
-    if(le2h16(encap->encap_command) == AB_EIP_READ_RR_DATA) {
-        /* get new ID */
-        session->session_seq_id++;
-
-        request->session_seq_id = session->session_seq_id;
-        encap->encap_sender_context = h2le64(session->session_seq_id); /* link up the request seq ID and the packet seq ID */
-
-        pdebug(DEBUG_INFO,"Preparing unconnected packet with session sequence ID %llx",session->session_seq_id);
-    } else if(le2h16(encap->encap_command) == AB_EIP_CONNECTED_SEND) {
-        eip_cip_co_req *conn_req = (eip_cip_co_req*)(request->data);
-
-        pdebug(DEBUG_DETAIL, "cpf_targ_conn_id=%x", session->targ_connection_id);
-
-        /* set up the connection information */
-        conn_req->cpf_targ_conn_id = h2le32(session->targ_connection_id);
-        request->conn_id = session->orig_connection_id;
-
-        session->conn_seq_num++;
-        conn_req->cpf_conn_seq_num = h2le16(session->conn_seq_num);
-        request->conn_seq = session->conn_seq_num;
-
-        pdebug(DEBUG_INFO,"Preparing connected packet with connection ID %x and sequence ID %u(%x)",request->conn_id, request->conn_seq, request->conn_seq);
-    } else {
-        pdebug(DEBUG_WARN, "Unsupported packet type %x!", le2h16(encap->encap_command));
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    /* display the data */
-    pdebug(DEBUG_INFO,"Prepared packet of size %d",request->request_size);
-    pdebug_dump_bytes(DEBUG_INFO, request->data, request->request_size);
-
-    pdebug(DEBUG_INFO,"Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-
-
-int send_eip_request(ab_session_p session, int timeout)
+int check_incoming_data_unsafe(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
-    int64_t timeout_time = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(!session) {
-        pdebug(DEBUG_WARN, "Session pointer is null.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(timeout > 0) {
-        timeout_time = time_ms() + timeout;
-    } else {
-        timeout_time = INT64_MAX;
-    }
-
-    pdebug(DEBUG_DETAIL,"Sending packet of size %d",session->data_size);
-    pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_size);
-
-    session->data_offset = 0;
-
-    /* send the packet */
-    do {
-        rc = socket_write(session->sock, session->data + session->data_offset, session->data_size - session->data_offset);
-
-        if(rc >= 0) {
-            session->data_offset += rc;
-        }
-
-        /* give up the CPU if we still are looping */
-        if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
-            sleep_ms(1);
-        }
-    } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size && timeout_time > time_ms());
-
-    if(session->terminating) {
-        pdebug(DEBUG_WARN, "Session is terminating.");
-        return PLCTAG_ERR_ABORT;
-    }
-
-    if(rc < 0) {
-        pdebug(DEBUG_WARN,"Error, %d, writing socket!", rc);
-        return rc;
-    }
-
-    if(timeout_time <= time_ms()) {
-        pdebug(DEBUG_WARN, "Timed out waiting to send data!");
-        return PLCTAG_ERR_TIMEOUT;
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-
-/*
- * recv_eip_response
- *
- * Look at the passed session and read any data we can
- * to fill in a packet.  If we already have a full packet,
- * punt.
- */
-int recv_eip_response(ab_session_p session, int timeout)
-{
-    uint32_t data_needed = 0;
-    int rc = PLCTAG_STATUS_OK;
-    int64_t timeout_time = 0;
-
-    pdebug(DEBUG_DETAIL,"Starting.");
-
-    if(!session) {
-        pdebug(DEBUG_WARN,"Called with null session!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-
-    if(timeout > 0) {
-        timeout_time = time_ms() + timeout;
-    } else {
-        timeout_time = INT64_MAX;
-    }
-
-    session->data_offset = 0;
-    session->data_size = 0;
-    data_needed = sizeof(eip_encap_t);
+    /*
+     * check for data.
+     *
+     * Read a packet into the session's buffer and find the
+     * request it is for.  Repeat while there is data.
+     */
 
     do {
-        rc = socket_read(session->sock, session->data + session->data_offset,
-                         data_needed - session->data_offset);
+        rc = recv_eip_response_unsafe(session);
 
-        /*pdebug(DEBUG_DETAIL,"socket_read rc=%d",rc);*/
+        /* did we get a packet? */
+        if(rc == PLCTAG_STATUS_OK && session->has_response) {
+            rc = process_response_packet_unsafe(session);
 
-        if (rc < 0) {
-            /* error! */
-            pdebug(DEBUG_WARN,"Error reading socket! rc=%d",rc);
-            return rc;
-        } else {
-            session->data_offset += rc;
-
-            /*pdebug_dump_bytes(session->debug, session->data, session->data_offset);*/
-
-            /* recalculate the amount of data needed if we have just completed the read of an encap header */
-            if(session->data_offset >= sizeof(eip_encap_t)) {
-                data_needed = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
-
-                if(data_needed > session->data_capacity) {
-                    pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
-                    return PLCTAG_ERR_TOO_LARGE;
-                }
-            }
+            /* reset the session's buffer */
+            mem_set(session->recv_data, 0, session->recv_capacity);
+            session->recv_offset = 0;
+            session->resp_seq_id = 0;
+            session->has_response = 0;
         }
+    } while(rc == PLCTAG_STATUS_OK);
 
-        /* did we get all the data? */
-        if(!session->terminating && session->data_offset < data_needed) {
-            /* do not hog the CPU */
-            sleep_ms(1);
-        }
-    } while(!session->terminating && session->data_offset < data_needed && timeout_time > time_ms());
-
-    if(session->terminating) {
-        pdebug(DEBUG_INFO,"Session is terminating, returning...");
-        return PLCTAG_ERR_ABORT;
-    }
-
-    if(timeout_time <= time_ms()) {
-        pdebug(DEBUG_WARN, "Timed out waiting for data to read!");
-        return PLCTAG_ERR_TIMEOUT;
-    }
-
-    session->resp_seq_id = le2h64(((eip_encap_t*)(session->data))->encap_sender_context);
-    session->data_size = data_needed;
-
-    rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_DETAIL, "request received all needed data (%d bytes of %d).", session->data_offset, data_needed);
-
-    pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_offset);
-
-    if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
-        eip_encap_t *encap = (eip_encap_t*)(session->data);
-        pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
-    } else if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
-        eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->data);
-        pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
-    }
-
-
-    return rc;
-}
-
-
-
-int perform_forward_open(ab_session_p session)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    do {
-        /* Try Forward Open Extended first with a large connection size */
-        if(session->plc_type == AB_PROTOCOL_LGX && session->use_connected_msg) {
-            session->max_payload_size = MAX_CIP_MSG_SIZE_EX;
-        }
-
-        rc = try_forward_open_ex(session);
-        if(rc == PLCTAG_ERR_TOO_LARGE) {
-            /* we support the Forward Open Extended command, but we need to use a smaller size. */
-            pdebug(DEBUG_DETAIL,"ForwardOpenEx is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE_EX, session->max_payload_size);
-
-            rc = try_forward_open_ex(session);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
-            } else {
-                pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", session->max_payload_size);
-            }
-        } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
-            /* the PLC does not support Forward Open Extended.   Try the old request type. */
-            if(session->max_payload_size == MAX_CIP_MSG_SIZE_EX) {
-                session->max_payload_size = MAX_CIP_MSG_SIZE;
-            }
-
-            rc = try_forward_open(session);
-            if(rc == PLCTAG_ERR_TOO_LARGE) {
-                /* we support the Forward Open Extended command, but we need to use a smaller size. */
-                pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, session->max_payload_size);
-
-                rc = try_forward_open(session);
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
-                } else {
-                    pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", session->max_payload_size);
-                }
-            }
-        } /*else {
-            pdebug(DEBUG_WARN, "Unknown error! rc=%d", rc);
-        }*/
-    } while(0);
-
-    if(rc == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_DETAIL, "ForwardOpen succeeded and maximum CIP packet size is %d.", session->max_payload_size);
-    }
-
-    //session->status = rc;
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return rc;
-}
-
-
-int perform_forward_close(ab_session_p session)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    do {
-        rc = send_forward_close_req(session);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL,"Sending forward close failed! rc=%d",rc);
-            break;
-        }
-
-        rc = recv_forward_close_resp(session);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL,"Forward close not received! rc=%d", rc);
-            break;
-        }
-    } while(0);
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return rc;
-}
-
-
-int try_forward_open_ex(ab_session_p session)
-{
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req=NULL;
-
-    pdebug(DEBUG_INFO,"Starting.");
-
-    /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
-
-    do {
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-            rc = 0;
-            break;
-        }
-
-        /* send the ForwardOpenEx command to the PLC */
-        if((rc = send_forward_open_req_ex(session)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to send ForwardOpenEx packet!");
-            break;
-        }
-
-        /* check for the ForwardOpen response. */
-        if((rc = recv_forward_open_resp(session)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
-            break;
-        }
-    } while(0);
-
-    if(req) {
-        req = rc_dec(req);
-    }
-
-    pdebug(DEBUG_INFO,"Done.");
-
-    return rc;
-}
-
-
-
-int try_forward_open(ab_session_p session)
-{
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req=NULL;
-
-    pdebug(DEBUG_INFO,"Starting.");
-
-    /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
-
-    do {
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-            rc = 0;
-            break;
-        }
-
-        /* send the ForwardOpen command to the PLC */
-        if((rc = send_forward_open_req(session)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to send ForwardOpenEx packet!");
-            break;
-        }
-
-        /* check for the ForwardOpen response. */
-        if((rc = recv_forward_open_resp(session)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
-            break;
-        }
-    } while(0);
-
-    if(req) {
-        req = rc_dec(req);
-    }
-
-    pdebug(DEBUG_INFO,"Done.");
-
-    return rc;
-}
-
-
-
-int send_forward_open_req(ab_session_p session)
-{
-    eip_forward_open_request_t *fo = NULL;
-    uint8_t *data;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    mem_set(session->data, 0, sizeof(*fo) + session->conn_path_size);
-
-    fo = (eip_forward_open_request_t*)(session->data);
-
-    /* point to the end of the struct */
-    data = (session->data) + sizeof(eip_forward_open_request_t);
-
-    /* set up the path information. */
-    mem_copy(data, session->conn_path, session->conn_path_size);
-    data += session->conn_path_size;
-
-    /* fill in the static parts */
-
-    /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
-    fo->encap_session_handle = h2le32(session->session_handle);
-    fo->encap_sender_context = h2le64(++session->session_seq_id);
-    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
-
-    /* CPF parts */
-    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
-    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
-
-    /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
-    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
-    fo->cm_req_path[0] = 0x20;                     /* class */
-    fo->cm_req_path[1] = 0x06;                     /* CM class */
-    fo->cm_req_path[2] = 0x24;                     /* instance */
-    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
-
-    /* Forward Open Params */
-    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
-    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
-    fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
-    fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
-    /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
-    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
-    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
-    fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
-    fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
-    fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
-
-    /* set the size of the request */
-    session->data_size = data - (session->data);
-
-    rc = send_eip_request(session, 0);
-
-    pdebug(DEBUG_INFO, "Done");
-
-    return rc;
-}
-
-
-
-/* new version of Forward Open */
-int send_forward_open_req_ex(ab_session_p session)
-{
-    eip_forward_open_request_ex_t *fo = NULL;
-    uint8_t *data;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    mem_set(session->data, 0, sizeof(*fo) + session->conn_path_size);
-
-    fo = (eip_forward_open_request_ex_t*)(session->data);
-
-    /* point to the end of the struct */
-    data = (session->data) + sizeof(eip_forward_open_request_ex_t);
-
-    /* set up the path information. */
-    mem_copy(data, session->conn_path, session->conn_path_size);
-    data += session->conn_path_size;
-
-    /* fill in the static parts */
-
-    /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
-    fo->encap_session_handle = h2le32(session->session_handle);
-    fo->encap_sender_context = h2le64(++session->session_seq_id);
-    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
-
-    /* CPF parts */
-    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
-    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
-
-    /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
-    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
-    fo->cm_req_path[0] = 0x20;                     /* class */
-    fo->cm_req_path[1] = 0x06;                     /* CM class */
-    fo->cm_req_path[2] = 0x24;                     /* instance */
-    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
-
-    /* Forward Open Params */
-    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
-    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
-    fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
-    fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
-    /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
-    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
-    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
-    fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
-    fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
-    fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
-
-    /* set the size of the request */
-    session->data_size = data - (session->data);
-
-    rc = send_eip_request(session, 0);
-
-    pdebug(DEBUG_INFO, "Done");
-
-    return rc;
-}
-
-
-
-
-int recv_forward_open_resp(ab_session_p session)
-{
-    eip_forward_open_response_t *fo_resp;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    rc = recv_eip_response(session, 0);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to receive Forward Open response.");
-        return rc;
-    }
-
-    fo_resp = (eip_forward_open_response_t*)(session->data);
-
-    do {
-        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"Forward Open command failed, response code: %s (%d)",decode_cip_error_short(&fo_resp->general_status), fo_resp->general_status);
-            if(fo_resp->general_status == AB_CIP_ERR_UNSUPPORTED_SERVICE) {
-                rc = PLCTAG_ERR_UNSUPPORTED;
-            } else {
-                rc = PLCTAG_ERR_REMOTE_ERR;
-
-                if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2) {
-                    /* we might have an error that tells us the actual size to use. */
-                    uint8_t *data = &fo_resp->status_size;
-                    uint16_t extended_status = data[1] | (data[2] << 8);
-                    uint16_t supported_size = data[3] | (data[4] << 8);
-
-                    if(extended_status == 0x109) { /* MAGIC */
-                        pdebug(DEBUG_WARN,"Error from forward open request, unsupported size, but size %d is supported.", supported_size);
-                        session->max_payload_size = supported_size;
-                        rc = PLCTAG_ERR_TOO_LARGE;
-                    } else {
-                        pdebug(DEBUG_WARN,"CIP extended error %x!", extended_status);
-                    }
-                } else {
-                    pdebug(DEBUG_WARN,"CIP error code %x!", fo_resp->general_status);
-                }
-            }
-
-            break;
-        }
-
-        /* success! */
-        session->targ_connection_id = le2h32(fo_resp->orig_to_targ_conn_id);
-        session->orig_connection_id = le2h32(fo_resp->targ_to_orig_conn_id);
-
-        pdebug(DEBUG_INFO,"ForwardOpen succeeded with our connection ID %x and the PLC connection ID %x",session->orig_connection_id, session->targ_connection_id);
-
-        pdebug(DEBUG_DETAIL,"Connection set up succeeded.");
-
-        //session->status = PLCTAG_STATUS_OK;
-
+    /* No data is not an error */
+    if(rc == PLCTAG_ERR_NO_DATA) {
         rc = PLCTAG_STATUS_OK;
-    } while(0);
+    }
 
-    pdebug(DEBUG_INFO,"Done.");
-
-    return rc;
-}
-
-
-int send_forward_close_req(ab_session_p session)
-{
-    eip_forward_close_req_t *fo;
-    uint8_t *data;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    fo = (eip_forward_close_req_t*)(session->data);
-
-    /* point to the end of the struct */
-    data = (session->data) + sizeof(eip_forward_close_req_t);
-
-    /* set up the path information. */
-    mem_copy(data, session->conn_path, session->conn_path_size);
-    data += session->conn_path_size;
-
-    /* fill in the static parts */
-
-    /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
-    fo->encap_sender_context = h2le64(++session->session_seq_id);
-    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
-
-    /* CPF parts */
-    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
-    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
-
-    /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_CLOSE;/* 0x4E Forward Close Request */
-    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
-    fo->cm_req_path[0] = 0x20;                     /* class */
-    fo->cm_req_path[1] = 0x06;                     /* CM class */
-    fo->cm_req_path[2] = 0x24;                     /* instance */
-    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
-
-    /* Forward Open Params */
-    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
-    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
-    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
-    fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
-
-    /* set the size of the request */
-    session->data_size = data - (session->data);
-
-    rc = send_eip_request(session, 100);
-
-    pdebug(DEBUG_INFO, "Done");
-
-    return rc;
-}
-
-
-int recv_forward_close_resp(ab_session_p session)
-{
-    eip_forward_close_resp_t *fo_resp;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    rc = recv_eip_response(session, 150);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to receive Forward Close response! rc=%d", rc);
+        pdebug(DEBUG_WARN,"Error while trying to receive a response packet.  rc=%d",rc);
+    }
+
+    return rc;
+}
+
+
+
+int check_outgoing_data_unsafe(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p request = session->requests;
+    int connected_requests_in_flight = 0;
+    int unconnected_requests_in_flight = 0;
+
+    /* loop over the requests and process them one at a time. */
+    while(request && rc == PLCTAG_STATUS_OK) {
+        if(request_check_abort(request)) {
+            ab_request_p old_request = request;
+
+            /* skip to the next one */
+            request = request->next;
+
+            //~ rc = handle_abort_request(old_request);
+            rc = session_remove_request_unsafe(session,old_request);
+
+            //request_destroy_unsafe(&old_request);
+            //~ request_release(old_request);
+
+            continue;
+        }
+
+        /* check resending */
+//        if(ok_to_resend(session, request)) {
+//            //~ handle_resend(session, request);
+//            if(request->connected_request) {
+//                pdebug(DEBUG_INFO,"Requeuing connected request.");
+//            } else {
+//                pdebug(DEBUG_INFO,"Requeuing unconnected request.");
+//            }
+//
+//            request->recv_in_progress = 0;
+//            request->send_request = 1;
+//        }
+
+        /* count requests in flight */
+        if(request->recv_in_progress) {
+            if(request->connected_request) {
+                connected_requests_in_flight++;
+                pdebug(DEBUG_SPEW,"%d connected requests in flight.", connected_requests_in_flight);
+            } else {
+                unconnected_requests_in_flight++;
+                pdebug(DEBUG_SPEW,"%d unconnected requests in flight.", unconnected_requests_in_flight);
+            }
+        }
+
+
+        /* is there a request ready to send and can we send? */
+        if(!session->current_request && request->send_request) {
+            if(request->connected_request) {
+                if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
+                    pdebug(DEBUG_INFO,"Readying connected packet to send.");
+
+                    /* increment the refcount since we are storing a pointer to the request */
+                    rc_inc(request);
+                    session->current_request = request;
+
+                    connected_requests_in_flight++;
+
+                    pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
+                }
+            } else {
+                if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
+                    pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
+
+                    /* increment the refcount since we are storing a pointer to the request */
+                    rc_inc(request);
+                    session->current_request = request;
+
+                    unconnected_requests_in_flight++;
+
+                    pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
+                }
+            }
+        }
+
+        /* call this often to make sure we get the data out. */
+        rc = send_current_request(session);
+
+        /* get the next request to process */
+        request = request->next;
+    }
+
+    return rc;
+}
+
+
+
+
+
+int send_current_request(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    if(!session->current_request) {
+        return PLCTAG_STATUS_OK;
+    }
+
+    rc = send_eip_request_unsafe(session->current_request);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        /*error sending packet!*/
         return rc;
     }
 
-    fo_resp = (eip_forward_close_resp_t*)(session->data);
-
-    do {
-        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"Forward Close command failed, response code: %d",fo_resp->general_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        pdebug(DEBUG_DETAIL,"Connection close succeeded.");
-
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    pdebug(DEBUG_INFO,"Done.");
+    /* if we are done, then clean up */
+    if(!session->current_request->send_in_progress) {
+        /* release the refcount on the request, we are not referencing it anymore */
+        rc_dec(session->current_request);
+        session->current_request = NULL;
+    }
 
     return rc;
 }
+
+
+
+int process_response_packet_unsafe(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+    eip_cip_co_resp *response = (eip_cip_co_resp*)(&session->recv_data[0]);
+    ab_request_p request = session->requests;
+
+    /* find the request for which there is a response pending. */
+    while(request) {
+        /* need to get the next request now because we might be removing it in receive_response_unsafe */
+        ab_request_p next_req = request->next;
+
+        if(match_request_and_response(request, response)) {
+            receive_response_unsafe(session, request);
+        }
+
+        request = next_req;
+    }
+
+    return rc;
+}
+
+
+int match_request_and_response(ab_request_p request, eip_cip_co_resp *response)
+{
+    int connected_response = (le2h16(response->encap_command) == AB_EIP_CONNECTED_SEND ? 1 : 0);
+
+    /*
+     * AB decided not to use the 64-bit sender context in connected messages.  No idea
+     * why they did this, but it means that we need to look at the connection details
+     * instead.
+     */
+    if(connected_response && request->conn_id == le2h32(response->cpf_orig_conn_id) && request->conn_seq == le2h16(response->cpf_conn_seq_num)) {
+        /* if it is a connected packet, match the connection ID and sequence num. */
+        return 1;
+    } else if(!connected_response && le2h64(response->encap_sender_context) != (uint64_t)0 && le2h64(response->encap_sender_context) == request->session_seq_id) {
+        /* if it is not connected, match the sender context, note that this is sent in host order. */
+        return 1;
+    }
+
+    /* no match */
+    return 0;
+}
+
+
+
+void receive_response_unsafe(ab_session_p session, ab_request_p request)
+{
+    ab_tag_p tag = NULL;
+
+    /*
+     * We received a packet.  Modify the packet interval downword slightly
+     * to get to the maximum value.  We want to get to the point where we lose
+     * a packet once in a while.
+     */
+
+    /*session->next_packet_interval_us -= SESSION_PACKET_RECEIVE_INTERVAL_DEC;
+    if(session->next_packet_interval_us < SESSION_MIN_PACKET_INTERVAL) {
+        session->next_packet_interval_us = SESSION_MIN_PACKET_INTERVAL;
+    }
+    pdebug(DEBUG_INFO,"Packet received, so decreasing packet interval to %lldus", session->next_packet_interval_us);
+    */
+
+    pdebug(DEBUG_INFO,"Packet sent initially %dms ago and was sent %d times",(int)(time_ms() - request->time_sent), request->send_count);
+
+    //update_resend_samples(session, time_ms() - request->time_sent);
+
+    /* set the packet ready for processing. */
+    pdebug(DEBUG_INFO, "got full packet of size %d", session->recv_offset);
+    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, session->recv_offset);
+
+    /* copy the data from the session's buffer */
+    mem_copy(request->data, session->recv_data, session->recv_offset);
+    request->request_size = session->recv_offset;
+
+    request->resp_received = 1;
+    request->send_in_progress = 0;
+    request->send_request = 0;
+    request->recv_in_progress = 0;
+
+    /* call the tag tickler function. */
+    tag = request_get_tag(request);
+    if(tag) {
+        pdebug(DEBUG_DETAIL, "Calling tickler.");
+        tag->vtable->tickler((plc_tag_p)tag);
+        rc_dec(tag);
+    }
+
+    /* clear the request from the session as it is done. Note we hold the mutex here.
+     *
+     * This must be done last since we release the reference to the request here!  That could
+     * destroy the request.
+     */
+    session_remove_request_unsafe(session, request);
+}
+
+
