@@ -84,7 +84,7 @@ struct ab_tag_t {
     int pre_write_read;
     int first_read;
     ab_request_p req;
-    int byte_offset;
+    int req_byte_offset;
 
     int allow_packing;
 
