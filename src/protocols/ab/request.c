@@ -135,6 +135,75 @@ ab_tag_p request_get_tag(ab_request_p req)
 }
 
 
+int request_allow_packing(ab_request_p req)
+{
+    int result = PLCTAG_STATUS_OK;
+
+    if(!req) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    critical_block(req->request_mutex) {
+        req->allow_packing = 1;
+        result = PLCTAG_STATUS_OK;
+    }
+
+    return result;
+}
+
+
+int request_check_packing(ab_request_p req)
+{
+    int result = 0;
+
+    if(!req) {
+        return result;
+    }
+
+    critical_block(req->request_mutex) {
+        result = req->allow_packing;
+    }
+
+    return result;
+}
+
+
+
+
+int request_get_packing_num(ab_request_p req)
+{
+    int result = 0;
+
+    if(!req) {
+        return result;
+    }
+
+    critical_block(req->request_mutex) {
+        result = req->allow_packing;
+    }
+
+    return result;
+}
+
+
+int request_set_packing_num(ab_request_p req, int packing_num)
+{
+    int result = PLCTAG_STATUS_OK;
+
+    if(!req) {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    critical_block(req->request_mutex) {
+        req->packing_num = packing_num;
+        result = PLCTAG_STATUS_OK;
+    }
+
+    return result;
+}
+
+
+
 
 /*
  * request_destroy
