@@ -114,7 +114,8 @@ int send_eip_request_unsafe(ab_request_p req)
 
             /* set this request up for a receive action */
             if(req->abort_after_send) {
-                req->abort_request = 1; /* for one shots */
+//                req->abort_request = 1; /* for one shots */
+                request_abort(req);
             } else {
                 req->recv_in_progress = 1;
             }

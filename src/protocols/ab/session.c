@@ -55,6 +55,13 @@ static void session_destroy(void *session);
 //~ static int session_is_empty(ab_session_p session);
 static int session_register(ab_session_p session);
 static int session_unregister_unsafe(ab_session_p session);
+static THREAD_FUNC(session_handler);
+static int check_incoming_data_unsafe(ab_session_p session);
+static int check_outgoing_data_unsafe(ab_session_p session);
+static int send_current_request(ab_session_p session);
+static int process_response_packet_unsafe(ab_session_p session);
+static int match_request_and_response(ab_request_p request, eip_cip_co_resp *response);
+static void receive_response_unsafe(ab_session_p session, ab_request_p request);
 
 
 /*
@@ -286,8 +293,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
         rc = session_init(session);
 
         if(rc != PLCTAG_STATUS_OK) {
-            /* failed to set up the session! */
-            //session_destroy(session);
             rc_dec(session);
             session = AB_SESSION_NULL;
         } else {
@@ -500,13 +505,6 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
     for(int index=0; index < SESSION_NUM_ROUND_TRIP_SAMPLES; index++) {
         session->round_trip_samples[index] = SESSION_DEFAULT_RESEND_INTERVAL_MS;
     }
-    //session->retry_interval = SESSION_DEFAULT_RESEND_INTERVAL_MS;
-
-    /* set up the ref count */
-    //session->rc = refcount_init(1, session, session_destroy);
-
-    /* FIXME */
-    //pdebug(DEBUG_DETAIL, "Refcount is now %d", session->rc.count);
 
     /* add the new session to the list. */
     add_session_unsafe(session);
@@ -529,18 +527,30 @@ int session_init(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* we must connect to the gateway and register */
-    if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "session connect failed!");
+    if((rc = mutex_create(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create session mutex!");
         session->status = rc;
         return rc;
     }
 
-    if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "session registration failed!");
+    if((rc = thread_create((thread_p*)&(session->handler_thread), session_handler, 32*1024, session)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create session thread!");
         session->status = rc;
         return rc;
     }
+
+//    /* we must connect to the gateway and register */
+//    if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_WARN, "session connect failed!");
+//        session->status = rc;
+//        return rc;
+//    }
+//
+//    if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_WARN, "session registration failed!");
+//        session->status = rc;
+//        return rc;
+//    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -586,7 +596,7 @@ int session_connect(ab_session_p session)
 void session_destroy(void *session_arg)
 {
     ab_session_p session = session_arg;
-    int really_destroy = 1;
+    ab_request_p req = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -596,55 +606,33 @@ void session_destroy(void *session_arg)
         return;
     }
 
-    /* do not destroy the session if there are
-     * tags or connections still */
-     /* removed due to refcount code
-      *
-    if(!session_is_empty(session)) {
-        pdebug(DEBUG_WARN, "Attempt to destroy session while open tags or connections exist!");
-        return 0;
-    }
-    */
 
-    /*
-     * Work around the race condition here.  Another thread could have looked up the
-     * session before this thread got to this point, but after this thread saw the
-     * session's ref count go to zero.  So, we need to check again after preventing
-     * other threads from getting a reference.
-     */
+    /* terminate the thread first. */
+    session->terminating = 1;
 
-    critical_block(global_session_mut) {
-//        if(refcount_get_count(&session->rc) > 0) {
-//            pdebug(DEBUG_WARN,"Another thread got a reference to this session before it could be deleted.  Aborting deletion");
-//            really_destroy = 0;
-//            break;
-//        }
+    /* so remove the session from the list so no one else can reference it. */
+    remove_session(session);
 
-        /* still good, so remove the session from the list so no one else can reference it. */
-        remove_session_unsafe(session);
+    /* unregister and close the socket. */
+    session_unregister_unsafe(session);
+
+    if(session->handler_thread) {
+        thread_join(session->handler_thread);
+        thread_destroy(&(session->handler_thread));
+        session->handler_thread = NULL;
     }
 
-    /*
-     * if we are really destroying the session then we know that this is
-     * the last reference.  So, we can use the unsafe variants.
-     */
-    if(really_destroy) {
-        ab_request_p req;
-
-        /* unregister and close the socket. */
-        session_unregister_unsafe(session);
-
-        /* remove any remaining requests, they are dead */
+    /* remove any remaining requests, they are dead */
+    req = session->requests;
+    while(req) {
+        session_remove_request(session, req);
         req = session->requests;
+    }
 
-        while(req) {
-            session_remove_request_unsafe(session, req);
-            //~ request_destroy_unsafe(&req);
-            //request_release(req);
-            req = session->requests;
-        }
-
-        //mem_free(session);
+    /* we are done with the mutex, finally destroy it. */
+    if(session->session_mutex) {
+        mutex_destroy(&(session->session_mutex));
+        session->session_mutex = NULL;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -952,6 +940,317 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
     pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
+}
+
+
+
+/*****************************************************************
+ **************** Session handling functions *********************
+ ****************************************************************/
+
+
+THREAD_FUNC(session_handler)
+{
+    ab_session_p session = arg;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting thread for session %p", session);
+
+    while(!session->terminating) {
+        if(!session->registered) {
+            /* we must connect to the gateway and register */
+            if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "session connect failed!");
+                session->status = rc;
+                break;
+            }
+
+            if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "session registration failed!");
+                session->status = rc;
+                break;
+            }
+        }
+
+        critical_block(session->session_mutex) {
+            /* check for incoming data. */
+            rc = check_incoming_data_unsafe(session);
+
+            if (rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error when checking for incoming session data! %d", rc);
+                /* FIXME - do something useful with this error */
+            }
+
+            /* check for incoming data. */
+            rc = check_outgoing_data_unsafe(session);
+
+            if (rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error when checking for outgoing session data! %d", rc);
+                /* FIXME - do something useful with this error */
+            }
+        }
+
+        sleep_ms(1);
+    }
+
+    THREAD_RETURN(0);
+}
+
+
+
+
+int check_incoming_data_unsafe(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    /*
+     * check for data.
+     *
+     * Read a packet into the session's buffer and find the
+     * request it is for.  Repeat while there is data.
+     */
+
+    do {
+        rc = recv_eip_response_unsafe(session);
+
+        /* did we get a packet? */
+        if(rc == PLCTAG_STATUS_OK && session->has_response) {
+            rc = process_response_packet_unsafe(session);
+
+            /* reset the session's buffer */
+            mem_set(session->recv_data, 0, session->recv_capacity);
+            session->recv_offset = 0;
+            session->resp_seq_id = 0;
+            session->has_response = 0;
+        }
+    } while(rc == PLCTAG_STATUS_OK);
+
+    /* No data is not an error */
+    if(rc == PLCTAG_ERR_NO_DATA) {
+        rc = PLCTAG_STATUS_OK;
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Error while trying to receive a response packet.  rc=%d",rc);
+    }
+
+    return rc;
+}
+
+
+
+int check_outgoing_data_unsafe(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p request = session->requests;
+    int connected_requests_in_flight = 0;
+    int unconnected_requests_in_flight = 0;
+
+    /* loop over the requests and process them one at a time. */
+    while(request && rc == PLCTAG_STATUS_OK) {
+        if(request_check_abort(request)) {
+            ab_request_p old_request = request;
+
+            /* skip to the next one */
+            request = request->next;
+
+            //~ rc = handle_abort_request(old_request);
+            rc = session_remove_request_unsafe(session,old_request);
+
+            //request_destroy_unsafe(&old_request);
+            //~ request_release(old_request);
+
+            continue;
+        }
+
+        /* check resending */
+//        if(ok_to_resend(session, request)) {
+//            //~ handle_resend(session, request);
+//            if(request->connected_request) {
+//                pdebug(DEBUG_INFO,"Requeuing connected request.");
+//            } else {
+//                pdebug(DEBUG_INFO,"Requeuing unconnected request.");
+//            }
+//
+//            request->recv_in_progress = 0;
+//            request->send_request = 1;
+//        }
+
+        /* count requests in flight */
+        if(request->recv_in_progress) {
+            if(request->connected_request) {
+                connected_requests_in_flight++;
+                pdebug(DEBUG_SPEW,"%d connected requests in flight.", connected_requests_in_flight);
+            } else {
+                unconnected_requests_in_flight++;
+                pdebug(DEBUG_SPEW,"%d unconnected requests in flight.", unconnected_requests_in_flight);
+            }
+        }
+
+
+        /* is there a request ready to send and can we send? */
+        if(!session->current_request && request->send_request) {
+            if(request->connected_request) {
+                if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
+                    pdebug(DEBUG_INFO,"Readying connected packet to send.");
+
+                    /* increment the refcount since we are storing a pointer to the request */
+                    rc_inc(request);
+                    session->current_request = request;
+
+                    connected_requests_in_flight++;
+
+                    pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
+                }
+            } else {
+                if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
+                    pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
+
+                    /* increment the refcount since we are storing a pointer to the request */
+                    rc_inc(request);
+                    session->current_request = request;
+
+                    unconnected_requests_in_flight++;
+
+                    pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
+                }
+            }
+        }
+
+        /* call this often to make sure we get the data out. */
+        rc = send_current_request(session);
+
+        /* get the next request to process */
+        request = request->next;
+    }
+
+    return rc;
+}
+
+
+
+
+
+int send_current_request(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    if(!session->current_request) {
+        return PLCTAG_STATUS_OK;
+    }
+
+    rc = send_eip_request_unsafe(session->current_request);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        /*error sending packet!*/
+        return rc;
+    }
+
+    /* if we are done, then clean up */
+    if(!session->current_request->send_in_progress) {
+        /* release the refcount on the request, we are not referencing it anymore */
+        rc_dec(session->current_request);
+        session->current_request = NULL;
+    }
+
+    return rc;
+}
+
+
+
+int process_response_packet_unsafe(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+    eip_cip_co_resp *response = (eip_cip_co_resp*)(&session->recv_data[0]);
+    ab_request_p request = session->requests;
+
+    /* find the request for which there is a response pending. */
+    while(request) {
+        /* need to get the next request now because we might be removing it in receive_response_unsafe */
+        ab_request_p next_req = request->next;
+
+        if(match_request_and_response(request, response)) {
+            receive_response_unsafe(session, request);
+        }
+
+        request = next_req;
+    }
+
+    return rc;
+}
+
+
+int match_request_and_response(ab_request_p request, eip_cip_co_resp *response)
+{
+    int connected_response = (le2h16(response->encap_command) == AB_EIP_CONNECTED_SEND ? 1 : 0);
+
+    /*
+     * AB decided not to use the 64-bit sender context in connected messages.  No idea
+     * why they did this, but it means that we need to look at the connection details
+     * instead.
+     */
+    if(connected_response && request->conn_id == le2h32(response->cpf_orig_conn_id) && request->conn_seq == le2h16(response->cpf_conn_seq_num)) {
+        /* if it is a connected packet, match the connection ID and sequence num. */
+        return 1;
+    } else if(!connected_response && le2h64(response->encap_sender_context) != (uint64_t)0 && le2h64(response->encap_sender_context) == request->session_seq_id) {
+        /* if it is not connected, match the sender context, note that this is sent in host order. */
+        return 1;
+    }
+
+    /* no match */
+    return 0;
+}
+
+
+
+void receive_response_unsafe(ab_session_p session, ab_request_p request)
+{
+    ab_tag_p tag = NULL;
+
+    /*
+     * We received a packet.  Modify the packet interval downword slightly
+     * to get to the maximum value.  We want to get to the point where we lose
+     * a packet once in a while.
+     */
+
+    /*session->next_packet_interval_us -= SESSION_PACKET_RECEIVE_INTERVAL_DEC;
+    if(session->next_packet_interval_us < SESSION_MIN_PACKET_INTERVAL) {
+        session->next_packet_interval_us = SESSION_MIN_PACKET_INTERVAL;
+    }
+    pdebug(DEBUG_INFO,"Packet received, so decreasing packet interval to %lldus", session->next_packet_interval_us);
+    */
+
+    pdebug(DEBUG_INFO,"Packet sent initially %dms ago and was sent %d times",(int)(time_ms() - request->time_sent), request->send_count);
+
+    //update_resend_samples(session, time_ms() - request->time_sent);
+
+    /* set the packet ready for processing. */
+    pdebug(DEBUG_INFO, "got full packet of size %d", session->recv_offset);
+    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, session->recv_offset);
+
+    /* copy the data from the session's buffer */
+    mem_copy(request->data, session->recv_data, session->recv_offset);
+    request->request_size = session->recv_offset;
+
+    request->resp_received = 1;
+    request->send_in_progress = 0;
+    request->send_request = 0;
+    request->recv_in_progress = 0;
+
+    /* call the tag tickler function. */
+    tag = request_get_tag(request);
+    if(tag) {
+        pdebug(DEBUG_DETAIL, "Calling tickler.");
+        tag->vtable->tickler((plc_tag_p)tag);
+        rc_dec(tag);
+    }
+
+    /* clear the request from the session as it is done. Note we hold the mutex here.
+     *
+     * This must be done last since we release the reference to the request here!  That could
+     * destroy the request.
+     */
+    session_remove_request_unsafe(session, request);
 }
 
 
