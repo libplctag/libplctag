@@ -46,11 +46,11 @@ typedef struct plc_tag_t *plc_tag_p;
 
 
 /* define tag operation functions */
-typedef int (*tag_abort_func)(plc_tag_p tag);
-typedef int (*tag_destroy_func)(plc_tag_p tag);
-typedef int (*tag_read_func)(plc_tag_p tag);
-typedef int (*tag_status_func)(plc_tag_p tag);
-typedef int (*tag_write_func)(plc_tag_p tag);
+//typedef int (*tag_abort_func)(plc_tag_p tag);
+//typedef int (*tag_destroy_func)(plc_tag_p tag);
+//typedef int (*tag_read_func)(plc_tag_p tag);
+//typedef int (*tag_status_func)(plc_tag_p tag);
+//typedef int (*tag_write_func)(plc_tag_p tag);
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
@@ -60,6 +60,7 @@ struct tag_vtable_t {
     /* tag_vtable_func destroy; */
     tag_vtable_func read;
     tag_vtable_func status;
+    tag_vtable_func tickler;
     tag_vtable_func write;
 };
 
