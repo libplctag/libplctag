@@ -78,7 +78,7 @@ int request_create(ab_request_p* req, int max_payload_size)
 //int request_destroy_unsafe(ab_request_p* req_pp)
 void request_destroy(void *req_arg)
 {
-    ab_request_p r = req_arg;
+    (void)req_arg;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
