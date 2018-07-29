@@ -64,9 +64,8 @@ struct ab_request_t {
     mutex_p request_mutex;
     ab_tag_p tag;
     ab_session_p session;
-//    ab_connection_p connection;
+    ab_connection_p connection;
     int allow_packing;
-    int packing_num;
 
     uint64_t session_seq_id;
     uint32_t conn_id;
@@ -75,6 +74,9 @@ struct ab_request_t {
     /* time stamps for rate calculations */
     int64_t time_sent;
     int send_count;
+
+//    int num_retries_left;
+//    int retry_interval;
 
     /* used by the background thread for incrementally getting data */
     int current_offset;
@@ -91,5 +93,7 @@ extern int request_create(ab_request_p *req, int max_payload_size, ab_tag_p tag)
 extern int request_abort(ab_request_p req);
 extern int request_check_abort(ab_request_p req);
 extern ab_tag_p request_get_tag(ab_request_p req);
+extern int request_allow_packing(ab_request_p req);
+extern int request_check_packing(ab_request_p req);
 
 #endif
