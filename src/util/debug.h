@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2016 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2018 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -25,8 +25,7 @@
  *      Author: Kyle Hayes
  */
 
-#ifndef __DEBUG_H__
-#define __DEBUG_H__
+#pragma once
 
 #define DEBUG_NONE      (0)
 #define DEBUG_ERROR     (1)
@@ -58,6 +57,3 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count);
 #define pdebug_dump_bytes(dbg, d,c)  do { if((dbg) && (dbg) <= get_debug_level()) pdebug_dump_bytes_impl(__func__, __LINE__,dbg,d,c); } while(0)
 
-
-
-#endif /* __DEBUG_H__ */

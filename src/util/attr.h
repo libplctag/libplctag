@@ -18,15 +18,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/*
- * attr.h
- *
- *  Created on: Nov 27, 2012
- *      Author: Kyle Hayes
- */
 
-#ifndef ATTR_H_
-#define ATTR_H_
+#pragma once
 
 
 typedef struct attr_entry_t *attr_entry;
@@ -45,4 +38,3 @@ extern int attr_remove(attr attrs, const char *name);
 extern void attr_destroy(attr attrs);
 
 
-#endif /* ATTR_H_ */

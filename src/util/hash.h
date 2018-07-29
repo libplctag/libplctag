@@ -18,8 +18,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __UTIL_HASH_H__
-#define __UTIL_HASH_H__
+#pragma once
 
 /*
  * This comes from Bob Jenkins's excellent site:
@@ -34,5 +33,3 @@
 #include <stdint.h>
 
 extern uint32_t hash(uint8_t *k, size_t length, uint32_t initval);
-
-#endif
