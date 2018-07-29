@@ -57,15 +57,6 @@ int check_tag_name(ab_tag_p tag, const char *name);
 int check_mutex(int debug);
 extern vector_p find_read_group_tags(ab_tag_p tag);
 
-#ifdef _WIN32
-DWORD __stdcall request_handler_func(LPVOID not_used);
-#else
-void *request_handler_func(void *not_used);
-#endif
-#ifdef _WIN32
-DWORD __stdcall request_handler_func(LPVOID not_used);
-#else
-void *request_handler_func(void *not_used);
-#endif
+THREAD_FUNC(request_handler_func);
 
 #endif

@@ -1001,11 +1001,7 @@ static void process_session_tasks_unsafe(ab_session_p session)
 
 
 
-#ifdef _WIN32
-DWORD __stdcall request_handler_func(LPVOID not_used)
-#else
-void* request_handler_func(void* not_used)
-#endif
+THREAD_FUNC(request_handler_func)
 {
     ab_session_p cur_sess;
 
@@ -1050,12 +1046,7 @@ void* request_handler_func(void* not_used)
 
     thread_stop();
 
-    /* FIXME -- this should be factored out as a platform dependency.*/
-#ifdef _WIN32
-    return (DWORD)0;
-#else
-    return NULL;
-#endif
+    THREAD_RETURN(0);
 }
 
 
