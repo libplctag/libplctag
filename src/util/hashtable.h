@@ -1,9 +1,9 @@
 /***************************************************************************
- *   Copyright (C) 2016 by Kyle Hayes                                      *
+ *   Copyright (C) 2017 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU Library General Public License as       *
+ *   it under the terms of the GNU Library/Lesser General Public License as*
  *   published by the Free Software Foundation; either version 2 of the    *
  *   License, or (at your option) any later version.                       *
  *                                                                         *
@@ -18,28 +18,18 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-
-#ifndef __UTIL__REFCOUNT_H__
-#define __UTIL__REFCOUNT_H__ 1
-
-#include <platform.h>
+#ifndef __UTIL_HASHTABLE_H__
+#define __UTIL_HASHTABLE_H__ 1
 
 
-struct refcount {
-    int count;
-    lock_t lock;
-    void *data;
-    void (*delete_func)(void *data);
-};
+typedef struct hashtable_t *hashtable_p;
 
-
-typedef struct refcount refcount;
-
-
-extern refcount refcount_init(int count, void *data, void (*delete_func)(void *data));
-extern int refcount_acquire(refcount *rc);
-extern int refcount_release(refcount *rc);
-extern int refcount_get_count(refcount *rc);
+extern hashtable_p hashtable_create(int size);
+extern void *hashtable_get(hashtable_p table, void *key, int key_len);
+extern int hashtable_put(hashtable_p table, void *key, int key_len, void *arg);
+extern int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table, void *key, int key_len, void *data));
+extern void *hashtable_remove(hashtable_p table, void *key, int key_len);
+extern int hashtable_destroy(hashtable_p table);
 
 
 #endif
