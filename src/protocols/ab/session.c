@@ -639,6 +639,19 @@ int session_init(ab_session_p session)
         return rc;
     }
 
+//    /* we must connect to the gateway and register */
+//    if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_WARN, "session connect failed!");
+//        session->status = rc;
+//        return rc;
+//    }
+//
+//    if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_WARN, "session registration failed!");
+//        session->status = rc;
+//        return rc;
+//    }
+
     pdebug(DEBUG_INFO, "Done.");
 
     return rc;
@@ -1458,41 +1471,47 @@ int perform_forward_close(ab_session_p session)
 
 int try_forward_open_ex(ab_session_p session)
 {
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p req=NULL;
+//    int rc = PLCTAG_STATUS_OK;
+//    ab_request_p req=NULL;
+    (void) session;
 
     pdebug(DEBUG_INFO,"Starting.");
 
-    /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    pdebug(DEBUG_WARN,"ForwardOpenEx not supported!");
 
-    do {
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-            rc = 0;
-            break;
-        }
+    return PLCTAG_ERR_UNSUPPORTED;
 
-        /* send the ForwardOpenEx command to the PLC */
-        if((rc = send_forward_open_req_ex(session)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to send ForwardOpenEx packet!");
-            break;
-        }
-
-        /* check for the ForwardOpen response. */
-        if((rc = recv_forward_open_resp(session)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
-            break;
-        }
-    } while(0);
-
-    if(req) {
-        req = rc_dec(req);
-    }
-
-    pdebug(DEBUG_INFO,"Done.");
-
-    return rc;
+//
+//    /* get a request buffer */
+//    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+//
+//    do {
+//        if(rc != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+//            rc = 0;
+//            break;
+//        }
+//
+//        /* send the ForwardOpenEx command to the PLC */
+//        if((rc = send_forward_open_req_ex(session)) != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_WARN,"Unable to send ForwardOpenEx packet!");
+//            break;
+//        }
+//
+//        /* check for the ForwardOpen response. */
+//        if((rc = recv_forward_open_resp(session)) != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
+//            break;
+//        }
+//    } while(0);
+//
+//    if(req) {
+//        req = rc_dec(req);
+//    }
+//
+//    pdebug(DEBUG_INFO,"Done.");
+//
+//    return rc;
 }
 
 
@@ -1861,3 +1880,4 @@ int recv_forward_close_resp(ab_session_p session)
 
     return rc;
 }
+

@@ -200,7 +200,7 @@ int tag_read_start(ab_tag_p tag)
 //    }
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
+    rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
