@@ -69,29 +69,6 @@ int request_create(ab_request_p* req, int max_payload_size)
 }
 
 
-//int request_acquire(ab_request_p req)
-//{
-//    if(!req) {
-//        return PLCTAG_ERR_NULL_PTR;
-//    }
-//
-//    pdebug(DEBUG_INFO,"Acquiring request.");
-//
-//    return refcount_acquire(&req->rc);
-//}
-//
-//
-//int request_release(ab_request_p req)
-//{
-//    if(!req) {
-//        return PLCTAG_ERR_NULL_PTR;
-//    }
-//
-//    pdebug(DEBUG_INFO,"Releasing request.");
-//
-//    return refcount_release(&req->rc);
-//}
-//
 
 /*
  * request_destroy
@@ -105,19 +82,9 @@ void request_destroy(void *req_arg)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(r) {
-        //r = *req_pp;
-
-        /* debug = r->debug; */
-
-        //session_remove_request_unsafe(r->session, r);
-        //mem_free(r);
-        //*req_pp = NULL;
-    }
+    /* nothing to do. */
 
     pdebug(DEBUG_DETAIL, "Done.");
-
-    //~ return PLCTAG_STATUS_OK;
 }
 
 
