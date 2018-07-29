@@ -18,8 +18,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __UTIL_VECTOR_H__
-#define __UTIL_VECTOR_H__ 1
+#pragma once
 
 
 typedef struct vector_t *vector_p;
@@ -32,6 +31,3 @@ extern int vector_on_each(vector_p vec, int (*callback_func)(vector_p vec, int i
 extern void *vector_remove(vector_p vec, int index);
 extern int vector_destroy(vector_p vec);
 
-
-
-#endif
