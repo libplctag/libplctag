@@ -62,6 +62,10 @@ struct ab_request_t {
     int processed;
 
     mutex_p request_mutex;
+<<<<<<< HEAD
+=======
+    ab_tag_p tag;
+>>>>>>> Added tickler function and session-specific thread.
     ab_session_p session;
 //    ab_connection_p connection;
     int allow_packing;
