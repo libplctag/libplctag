@@ -71,12 +71,15 @@ struct ab_tag_t {
     uint8_t conn_path_size;
 
     /* timeout/retry information */
-    int num_retries;
-    int default_retry_interval;
+//    int num_retries;
+//    int default_retry_interval;
 
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
     int encoded_type_info_size;
+
+    /* how much data can we send per packet? */
+    int write_data_per_packet;
 
     /* number of elements and size of each in the tag. */
     int elem_count;
@@ -86,7 +89,7 @@ struct ab_tag_t {
     int pre_write_read;
     int first_read;
     ab_request_p req;
-    int req_byte_offset;
+    int byte_offset;
 
     int allow_packing;
 
