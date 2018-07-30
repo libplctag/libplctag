@@ -96,8 +96,8 @@ struct tag_vtable_t lgx_pccc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip
 /* forward declarations*/
 static void ab_tag_destroy(ab_tag_p tag);
 static tag_vtable_p set_tag_vtable(ab_tag_p tag);
-static int insert_read_group_tag(ab_tag_p tag);
-static int remove_read_group_tag(ab_tag_p tag);
+//static int insert_read_group_tag(ab_tag_p tag);
+//static int remove_read_group_tag(ab_tag_p tag);
 
 
 //int setup_session_mutex(void);
@@ -197,7 +197,9 @@ void ab_teardown(void)
 plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
-    const char *path = NULL;
+    const char *path;
+//    int num_retries;
+//    int default_retry_interval;
 
     pdebug(DEBUG_INFO,"Starting.");
 
@@ -354,19 +356,34 @@ plc_tag_p ab_tag_create(attr attribs)
         break;
     }
 
-    /* pass the connection requirement since it may be overridden above. */
-    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
+    /*
+     * handle the strange LGX->DH+->PLC5 case.
+     *
+     * This is separate from the check above of the PLC type.  The reason is
+     * that we do not know whether we need a connection or not until we parse
+     * the path element.  If we are doing a DH+ routing via a Logix chassis,
+     * then we need to be in connected mode.  Even if the PLC that we want
+     * to talk to is one that supports non-connected mode.
+     */
+    if(tag->use_dhp_direct) {
+        /* this is a bit of a cheat.   The logic should be fixed up to combine with the check above.*/
+        tag->needs_connection = 1;
+//        default_retry_interval = DEFAULT_RETRY_INTERVAL*3; /* MAGIC boost the default timeout! */
+    }
 
-//    /*
-//     * set up tag vtable.  This is protocol specific
-//     */
-//    tag->vtable = set_tag_vtable(tag);
-//
-//    if(!tag->vtable) {
-//        pdebug(DEBUG_INFO,"Unable to set tag vtable!");
-//        tag->status = PLCTAG_ERR_BAD_PARAM;
-//        return (plc_tag_p)tag;
-//    }
+    /*
+     * set up tag vtable.  This is protocol specific
+     */
+    tag->vtable = set_tag_vtable(tag);
+
+    if(!tag->vtable) {
+        pdebug(DEBUG_INFO,"Unable to set tag vtable!");
+        tag->status = PLCTAG_ERR_BAD_PARAM;
+        return (plc_tag_p)tag;
+    }
+
+//    tag->default_retry_interval = attr_get_int(attribs,"default_retry_interval", default_retry_interval);
+//    tag->num_retries = attr_get_int(attribs, "num_retries", num_retries);
 
     /*
      * Find or create a session.
@@ -509,7 +526,7 @@ int default_write(plc_tag_p tag)
 
 int ab_tag_abort(ab_tag_p tag)
 {
-    int i;
+//    int i;
 
 //    for (i = 0; i < tag->max_requests; i++) {
 //        if (tag->reqs && tag->reqs[i]) {
@@ -579,15 +596,20 @@ void ab_tag_destroy(ab_tag_p tag)
         pdebug(DEBUG_WARN,"No session pointer!");
     }
 
-    if(tag->ext_mutex) {
-        mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
-    }
-
-    if(tag->api_mutex) {
-        mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
-    }
+//    if (tag->reqs) {
+//        mem_free(tag->reqs);
+//        tag->reqs = NULL;
+//    }
+//
+//    if (tag->read_req_sizes) {
+//        mem_free(tag->read_req_sizes);
+//        tag->read_req_sizes = NULL;
+//    }
+//
+//    if (tag->write_req_sizes) {
+//        mem_free(tag->write_req_sizes);
+//        tag->write_req_sizes = NULL;
+//    }
 
     if (tag->data) {
         mem_free(tag->data);
@@ -705,51 +727,6 @@ int setup_session_mutex(void)
 /***********************************************************************
  *                           READ GROUP HANDLING                       *
  ***********************************************************************/
-
-int insert_read_group_tag(ab_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    critical_block(global_library_mutex) {
-        vector_put(read_group_tags, vector_length(read_group_tags), tag);
-    }
-
-    return rc;
-}
-
-
-int remove_read_group_tag(ab_tag_p tag)
-{
-    int rc = PLCTAG_ERR_NOT_FOUND;
-    int i = 0;
-    int found = -1;
-
-    critical_block(global_library_mutex) {
-        for(i=0; i< vector_length(read_group_tags); i++) {
-            ab_tag_p tmp = vector_get(read_group_tags, i);
-            if(tmp == tag) {
-                found = i;
-                break;
-            }
-        }
-
-        if(found != -1) {
-            vector_remove(read_group_tags, found);
-            rc = PLCTAG_STATUS_OK;
-        }
-    }
-
-    return rc;
-}
-
-
-        return rc;
-    }
-
-
-    /***********************************************************************
-     *                           READ GROUP HANDLING                       *
-     ***********************************************************************/
 
 //int insert_read_group_tag(ab_tag_p tag)
 //{
