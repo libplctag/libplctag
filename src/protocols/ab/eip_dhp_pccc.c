@@ -146,7 +146,7 @@ int tag_read_start(ab_tag_p tag)
                  +2  /* maximum extended type. */
                  +2; /* maximum extended size. */
 
-    data_per_packet = tag->session->max_payload_size - overhead;
+    data_per_packet = tag->connection->max_payload_size - overhead;
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->session->max_payload_size);
@@ -158,13 +158,27 @@ int tag_read_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
+
     /* get a request buffer */
     rc = request_create(&req, tag->connection->max_payload_size, tag);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
+
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_dhp_co_req*)(req->data);
 
@@ -222,6 +236,7 @@ int tag_read_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+//        request_release(req);
         request_abort(req);
         tag->req = rc_dec(req);
         return rc;
@@ -267,7 +282,7 @@ int tag_write_start(ab_tag_p tag)
                +(tag->encoded_name_size)
                +2;       /* this request size in elements */
 
-    data_per_packet = tag->session->max_payload_size - overhead;
+    data_per_packet = tag->connection->max_payload_size - overhead;
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->session->max_payload_size);
@@ -279,6 +294,18 @@ int tag_write_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
+
     /* get a request buffer */
     rc = request_create(&req, tag->connection->max_payload_size, tag);
 
@@ -286,6 +313,9 @@ int tag_write_start(ab_tag_p tag)
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
+
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_dhp_co_req*)(req->data);
 

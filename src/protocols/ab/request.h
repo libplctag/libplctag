@@ -66,6 +66,7 @@ struct ab_request_t {
     ab_session_p session;
     ab_connection_p connection;
     int allow_packing;
+    int packing_num;
 
     uint64_t session_seq_id;
     uint32_t conn_id;

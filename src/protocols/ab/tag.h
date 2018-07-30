@@ -66,6 +66,10 @@ struct ab_tag_t {
     uint8_t conn_path[MAX_CONN_PATH];
     uint8_t conn_path_size;
 
+    /* timeout/retry information */
+//    int num_retries;
+//    int default_retry_interval;
+
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
     int encoded_type_info_size;
@@ -81,7 +85,7 @@ struct ab_tag_t {
     int pre_write_read;
     int first_read;
     ab_request_p req;
-    int req_byte_offset;
+    int byte_offset;
 
     int allow_packing;
 
