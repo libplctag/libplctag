@@ -141,16 +141,16 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 
     /* how many packets will we need? How much overhead? */
     overhead =   2  /* size of sequence num */
-                +8  /* DH+ routing */
-                +1  /* DF1 command */
-                +1  /* status */
-                +2  /* PCCC packet sequence number */
-                +1  /* type byte */
-                +2  /* maximum extended type. */
-                +2  /* maximum extended size. */
-                +1  /* secondary type byte if type was array. */
-                +2  /* maximum extended type. */
-                +2; /* maximum extended size. */
+                 +8  /* DH+ routing */
+                 +1  /* DF1 command */
+                 +1  /* status */
+                 +2  /* PCCC packet sequence number */
+                 +1  /* type byte */
+                 +2  /* maximum extended type. */
+                 +2  /* maximum extended size. */
+                 +1  /* secondary type byte if type was array. */
+                 +2  /* maximum extended type. */
+                 +2; /* maximum extended size. */
 
     data_per_packet = tag->connection->max_payload_size - overhead;
 
@@ -164,28 +164,27 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if(!tag->reqs) {
-        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-        tag->max_requests = 1;
-        tag->num_read_requests = 1;
-        tag->num_write_requests = 1;
-
-        if(!tag->reqs) {
-            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-    }
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
 
     /* get a request buffer */
     rc = request_create(&req, tag->connection->max_payload_size, tag);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
 
-    req->num_retries_left = tag->num_retries;
-    req->retry_interval = tag->default_retry_interval;
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_dhp_co_req*)(req->data);
 
@@ -244,12 +243,13 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
 //        request_release(req);
-        tag->reqs[0] = rc_dec(req);
+        request_abort(req);
+        tag->req = rc_dec(req);
         return rc;
     }
 
     /* save the request for later */
-    tag->reqs[0] = req;
+    tag->req = req;
     tag->read_in_progress = 1;
 
     /* the read is now pending */
@@ -278,15 +278,15 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
 
     /* how many packets will we need? How much overhead? */
     overhead = 2        /* size of sequence num */
-              +8        /* DH+ routing */
-              +1        /* DF1 command */
-              +1        /* status */
-              +2        /* PCCC packet sequence number */
-              +1        /* PCCC function */
-              +2        /* request offset */
-              +2        /* tag size in elements */
-              +(tag->encoded_name_size)
-              +2;       /* this request size in elements */
+               +8        /* DH+ routing */
+               +1        /* DF1 command */
+               +1        /* status */
+               +2        /* PCCC packet sequence number */
+               +1        /* PCCC function */
+               +2        /* request offset */
+               +2        /* tag size in elements */
+               +(tag->encoded_name_size)
+               +2;       /* this request size in elements */
 
     data_per_packet = tag->connection->max_payload_size - overhead;
 
@@ -300,17 +300,17 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if(!tag->reqs) {
-        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-        tag->max_requests = 1;
-        tag->num_read_requests = 1;
-        tag->num_write_requests = 1;
-
-        if(!tag->reqs) {
-            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-    }
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
 
     /* get a request buffer */
     rc = request_create(&req, tag->connection->max_payload_size, tag);
@@ -320,8 +320,8 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
         return rc;
     }
 
-    req->num_retries_left = tag->num_retries;
-    req->retry_interval = tag->default_retry_interval;
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_dhp_co_req*)(req->data);
 
@@ -424,12 +424,13 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
 //        request_release(req);
-        tag->reqs[0] = rc_dec(req);
+        request_abort(req);
+        tag->req = rc_dec(req);
         return rc;
     }
 
     /* save the request for later */
-    tag->reqs[0] = req;
+    tag->req = req;
     tag->write_in_progress = 1;
 
     pdebug(DEBUG_INFO,"Done.");
@@ -451,35 +452,31 @@ static int check_read_status(ab_tag_p tag)
     int pccc_res_type;
     int pccc_res_length;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req;
 
     pdebug(DEBUG_DETAIL,"Starting");
 
     /* is there an outstanding request? */
-    if(!tag->reqs || !(tag->reqs[0]) ) {
+    if(!tag->req) {
         tag->read_in_progress = 0;
         pdebug(DEBUG_WARN,"Read was in progress, but there are no outstanding requests!");
-        /* FIXME - this should be a different error, but which one? */
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    req = tag->reqs[0];
-
-    if(!req->resp_received) {
+    if(!tag->req->resp_received) {
         /* still waiting */
         return PLCTAG_STATUS_PENDING;
     }
 
+    resp = (pccc_dhp_co_resp*)(tag->req->data);
+
+    /* point to the start of the data */
+    data = (uint8_t *)resp + sizeof(*resp);
+
+    /* point to the end of the data */
+    data_end = (tag->req->data + le2h16(resp->encap_length) + sizeof(eip_encap_t));
+
     /* fake exception */
     do {
-        resp = (pccc_dhp_co_resp*)(req->data);
-
-        /* point to the start of the data */
-        data = (uint8_t *)resp + sizeof(*resp);
-
-        /* point to the end of the data */
-        data_end = (req->data + le2h16(resp->encap_length) + sizeof(eip_encap_t));
-
         if( le2h16(resp->encap_command) != AB_EIP_CONNECTED_SEND) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
@@ -533,8 +530,8 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* clean up request */
-    ab_tag_abort(tag);
-
+    request_abort(tag->req);
+    tag->req = rc_dec(tag->req);
     tag->read_in_progress = 0;
 
     pdebug(DEBUG_DETAIL,"Done.");
@@ -548,38 +545,27 @@ static int check_write_status(ab_tag_p tag)
     pccc_dhp_co_resp *pccc_resp;
     uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req;
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
     /* is there an outstanding request? */
-    if(!tag->reqs || !(tag->reqs[0]) ) {
+    if(!tag->req) {
         tag->write_in_progress = 0;
         pdebug(DEBUG_WARN,"Write was in progress, but no requests are in flight!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    req = tag->reqs[0];
-
-    /* is there an outstanding request? */
-    if(!req) {
-        tag->write_in_progress = 0;
-        pdebug(DEBUG_WARN,"Write was in progress, but no requests are outstanding!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!req->resp_received) {
-        /* still waiting */
+    if(!tag->req->resp_received) {
         return PLCTAG_STATUS_PENDING;
     }
 
+    pccc_resp = (pccc_dhp_co_resp*)(tag->req->data);
+
+    /* point data just past the header */
+    data = (uint8_t *)pccc_resp + sizeof(*pccc_resp);
+
     /* fake exception */
     do {
-        pccc_resp = (pccc_dhp_co_resp*)(req->data);
-
-        /* point data just past the header */
-        data = (uint8_t *)pccc_resp + sizeof(*pccc_resp);
-
         /* check the response status */
         if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
             pdebug(DEBUG_WARN,"EIP unexpected response packet type: %d!",pccc_resp->encap_command);
@@ -599,19 +585,14 @@ static int check_write_status(ab_tag_p tag)
             break;
         }
 
-        /*if(pccc_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_INFO,"PCCC command failed, response code: %d",pccc_resp->general_status);
-            return 0;
-        }*/
-
         /* everything OK */
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    tag->write_in_progress = 0;
-
     /* clean up any outstanding requests. */
-    ab_tag_abort(tag);
+    request_abort(tag->req);
+    tag->req = rc_dec(tag->req);
+    tag->write_in_progress = 0;
 
     pdebug(DEBUG_INFO,"Done.");
 
