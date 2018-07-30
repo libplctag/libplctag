@@ -158,6 +158,8 @@ int tag_read_start(ab_tag_p tag)
                  +2      /* maximum extended type. */
                  +2;     /* maximum extended size. */
 
+
+
     data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
 
     if(data_per_packet <= 0) {
@@ -170,6 +172,18 @@ int tag_read_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
+
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
 
@@ -177,6 +191,9 @@ int tag_read_start(ab_tag_p tag)
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
+
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     /* point the struct pointers to the buffer*/
     pccc = (pccc_req*)(req->data);
@@ -430,13 +447,29 @@ int tag_write_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
+
+//    /* set up the requests */
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
+
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
+
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_req*)(req->data);
 
@@ -539,18 +572,22 @@ int tag_write_start(ab_tag_p tag)
     req->send_request = 1;
     req->conn_seq = conn_seq_id;
 
+    /* the write is now pending */
+    tag->write_in_progress = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+//        request_release(req);
         request_abort(req);
         tag->req = rc_dec(req);
         return rc;
     }
 
-    /* the write is now pending */
-    tag->write_in_progress = 1;
+    /* save the request for later */
+    tag->req = req;
+
 
     /* save the request for later */
     tag->req = req;
