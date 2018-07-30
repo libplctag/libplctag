@@ -743,8 +743,8 @@ int connection_close(ab_connection_p connection)
             break;
         }
 
-        req->num_retries_left = 5; /* MAGIC! */
-        req->retry_interval = 900; /* MAGIC! */
+//        req->num_retries_left = 5; /* MAGIC! */
+//        req->retry_interval = 900; /* MAGIC! */
 
         /* send the ForwardClose command to the PLC */
         if((rc = send_forward_close_req(connection, req)) != PLCTAG_STATUS_OK) {
@@ -779,6 +779,7 @@ int connection_close(ab_connection_p connection)
 
     if(req) {
         //session_remove_request(connection->session,req);
+        request_abort(req); /* FIXME - needed? */
         req = rc_dec(req);
     }
 
