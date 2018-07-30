@@ -85,8 +85,8 @@ struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_
 /* forward declarations*/
 static void ab_tag_destroy(ab_tag_p tag);
 static tag_vtable_p set_tag_vtable(ab_tag_p tag);
-static int insert_read_group_tag(ab_tag_p tag);
-static int remove_read_group_tag(ab_tag_p tag);
+//static int insert_read_group_tag(ab_tag_p tag);
+//static int remove_read_group_tag(ab_tag_p tag);
 
 
 //int setup_session_mutex(void);
@@ -187,8 +187,8 @@ plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path;
-    int num_retries;
-    int default_retry_interval;
+//    int num_retries;
+//    int default_retry_interval;
 
     pdebug(DEBUG_INFO,"Starting.");
 
@@ -344,7 +344,7 @@ plc_tag_p ab_tag_create(attr attribs)
     if(tag->use_dhp_direct) {
         /* this is a bit of a cheat.   The logic should be fixed up to combine with the check above.*/
         tag->needs_connection = 1;
-        default_retry_interval = DEFAULT_RETRY_INTERVAL*3; /* MAGIC boost the default timeout! */
+//        default_retry_interval = DEFAULT_RETRY_INTERVAL*3; /* MAGIC boost the default timeout! */
     }
 
     /*
@@ -358,8 +358,8 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
-    tag->default_retry_interval = attr_get_int(attribs,"default_retry_interval", default_retry_interval);
-    tag->num_retries = attr_get_int(attribs, "num_retries", num_retries);
+//    tag->default_retry_interval = attr_get_int(attribs,"default_retry_interval", default_retry_interval);
+//    tag->num_retries = attr_get_int(attribs, "num_retries", num_retries);
 
     /*
      * Find or create a session.
@@ -453,7 +453,7 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
 
 int ab_tag_abort(ab_tag_p tag)
 {
-    int i;
+//    int i;
 
 //    for (i = 0; i < tag->max_requests; i++) {
 //        if (tag->reqs && tag->reqs[i]) {
@@ -530,20 +530,20 @@ void ab_tag_destroy(ab_tag_p tag)
         pdebug(DEBUG_WARN,"No session pointer!");
     }
 
-    if (tag->reqs) {
-        mem_free(tag->reqs);
-        tag->reqs = NULL;
-    }
-
-    if (tag->read_req_sizes) {
-        mem_free(tag->read_req_sizes);
-        tag->read_req_sizes = NULL;
-    }
-
-    if (tag->write_req_sizes) {
-        mem_free(tag->write_req_sizes);
-        tag->write_req_sizes = NULL;
-    }
+//    if (tag->reqs) {
+//        mem_free(tag->reqs);
+//        tag->reqs = NULL;
+//    }
+//
+//    if (tag->read_req_sizes) {
+//        mem_free(tag->read_req_sizes);
+//        tag->read_req_sizes = NULL;
+//    }
+//
+//    if (tag->write_req_sizes) {
+//        mem_free(tag->write_req_sizes);
+//        tag->write_req_sizes = NULL;
+//    }
 
     if (tag->data) {
         mem_free(tag->data);
@@ -658,67 +658,67 @@ int setup_session_mutex(void)
  *                           READ GROUP HANDLING                       *
  ***********************************************************************/
 
-int insert_read_group_tag(ab_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    critical_block(global_library_mutex) {
-        vector_put(read_group_tags, vector_length(read_group_tags), tag);
-    }
-
-    return rc;
-}
-
-
-int remove_read_group_tag(ab_tag_p tag)
-{
-    int rc = PLCTAG_ERR_NOT_FOUND;
-    int i = 0;
-    int found = -1;
-
-    critical_block(global_library_mutex) {
-        for(i=0; i< vector_length(read_group_tags); i++) {
-            ab_tag_p tmp = vector_get(read_group_tags, i);
-            if(tmp == tag) {
-                found = i;
-                break;
-            }
-        }
-
-        if(found != -1) {
-            vector_remove(read_group_tags, found);
-            rc = PLCTAG_STATUS_OK;
-        }
-    }
-
-    return rc;
-}
-
-
-vector_p find_read_group_tags(ab_tag_p tag)
-{
-    int i = 0;
-    vector_p result = NULL;
-
-    result = vector_create(10,5); /* MAGIC */
-    if(!result) {
-        pdebug(DEBUG_WARN,"Unable to allocate new result vector!");
-        return NULL;
-    }
-
-    critical_block(global_library_mutex) {
-        for(i=0; i < vector_length(read_group_tags); i++) {
-            ab_tag_p tmp = vector_get(read_group_tags, i);
-
-            if(str_cmp_i(tag->read_group, tmp->read_group) == 0) {
-                /* found one, might even be this tag. */
-                if(rc_inc(tmp)) {
-                    vector_put(result, vector_length(result), tmp);
-                }
-            }
-        }
-    }
-
-    return result;
-}
-
+//int insert_read_group_tag(ab_tag_p tag)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    critical_block(global_library_mutex) {
+//        vector_put(read_group_tags, vector_length(read_group_tags), tag);
+//    }
+//
+//    return rc;
+//}
+//
+//
+//int remove_read_group_tag(ab_tag_p tag)
+//{
+//    int rc = PLCTAG_ERR_NOT_FOUND;
+//    int i = 0;
+//    int found = -1;
+//
+//    critical_block(global_library_mutex) {
+//        for(i=0; i< vector_length(read_group_tags); i++) {
+//            ab_tag_p tmp = vector_get(read_group_tags, i);
+//            if(tmp == tag) {
+//                found = i;
+//                break;
+//            }
+//        }
+//
+//        if(found != -1) {
+//            vector_remove(read_group_tags, found);
+//            rc = PLCTAG_STATUS_OK;
+//        }
+//    }
+//
+//    return rc;
+//}
+//
+//
+//vector_p find_read_group_tags(ab_tag_p tag)
+//{
+//    int i = 0;
+//    vector_p result = NULL;
+//
+//    result = vector_create(10,5); /* MAGIC */
+//    if(!result) {
+//        pdebug(DEBUG_WARN,"Unable to allocate new result vector!");
+//        return NULL;
+//    }
+//
+//    critical_block(global_library_mutex) {
+//        for(i=0; i < vector_length(read_group_tags); i++) {
+//            ab_tag_p tmp = vector_get(read_group_tags, i);
+//
+//            if(str_cmp_i(tag->read_group, tmp->read_group) == 0) {
+//                /* found one, might even be this tag. */
+//                if(rc_inc(tmp)) {
+//                    vector_put(result, vector_length(result), tmp);
+//                }
+//            }
+//        }
+//    }
+//
+//    return result;
+//}
+//

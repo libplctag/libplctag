@@ -141,21 +141,21 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
     /* calculate based on the response. */
     overhead =   1      /* reply code */
-                +1      /* reserved */
-                +1      /* general status */
-                +1      /* status size */
-                +1      /* request ID size */
-                +2      /* vendor ID */
-                +4      /* vendor serial number */
-                +1      /* PCCC command */
-                +1      /* PCCC status */
-                +2      /* PCCC sequence number */
-                +1      /* type byte */
-                +2      /* maximum extended type. */
-                +2      /* maximum extended size. */
-                +1      /* secondary type byte if type was array. */
-                +2      /* maximum extended type. */
-                +2;     /* maximum extended size. */
+                 +1      /* reserved */
+                 +1      /* general status */
+                 +1      /* status size */
+                 +1      /* request ID size */
+                 +2      /* vendor ID */
+                 +4      /* vendor serial number */
+                 +1      /* PCCC command */
+                 +1      /* PCCC status */
+                 +2      /* PCCC sequence number */
+                 +1      /* type byte */
+                 +2      /* maximum extended type. */
+                 +2      /* maximum extended size. */
+                 +1      /* secondary type byte if type was array. */
+                 +2      /* maximum extended type. */
+                 +2;     /* maximum extended size. */
 
 
 
@@ -171,17 +171,17 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if(!tag->reqs) {
-        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-        tag->max_requests = 1;
-        tag->num_read_requests = 1;
-        tag->num_write_requests = 1;
-
-        if(!tag->reqs) {
-            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-    }
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
 
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
@@ -191,8 +191,8 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
         return rc;
     }
 
-    req->num_retries_left = tag->num_retries;
-    req->retry_interval = tag->default_retry_interval;
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     /* point the struct pointers to the buffer*/
     pccc = (pccc_req*)(req->data);
@@ -257,18 +257,16 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-//        request_release(req);
-        tag->reqs[0] = rc_dec(req);
+        request_abort(req);
+        tag->req = rc_dec(req);
+
         return rc;
     }
 
     /* save the request for later */
-    tag->reqs[0] = req;
-    req = NULL;
-
+    tag->req = req;
     tag->read_in_progress = 1;
 
     pdebug(DEBUG_INFO, "Done.");
@@ -296,33 +294,30 @@ static int check_read_status(ab_tag_p tag)
     int pccc_res_type;
     int pccc_res_length;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req;
 
     pdebug(DEBUG_DETAIL,"Starting");
 
     /* PCCC only can have one request outstanding */
     /* is there an outstanding request? */
-    if(!tag->reqs || !(tag->reqs[0])) {
+    if(!tag->req) {
         tag->read_in_progress = 0;
         pdebug(DEBUG_WARN,"Read in progress but no requests in flight!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    req = tag->reqs[0];
-
-    if(!req->resp_received) {
+    if(!tag->req->resp_received) {
         return PLCTAG_STATUS_PENDING;
     }
 
+    pccc = (pccc_resp*)(tag->req->data);
+
+    /* point to the start of the data */
+    data = (uint8_t *)pccc + sizeof(*pccc);
+
+    data_end = (tag->req->data + le2h16(pccc->encap_length) + sizeof(eip_encap_t));
+
     /* fake exceptions */
     do {
-        pccc = (pccc_resp*)(req->data);
-
-        /* point to the start of the data */
-        data = (uint8_t *)pccc + sizeof(*pccc);
-
-        data_end = (req->data + le2h16(pccc->encap_length) + sizeof(eip_encap_t));
-
         if(le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",pccc->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
@@ -379,9 +374,8 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    //session_remove_request(tag->session, req);
-//    request_release(req);
-    tag->reqs[0] = rc_dec(req);
+    request_abort(tag->req);
+    tag->req = rc_dec(tag->req);
 
     tag->read_in_progress = 0;
 
@@ -406,10 +400,10 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     uint8_t array_def[16];
     int array_def_size;
     int pccc_data_type;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
-    ab_request_p req = NULL;
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *embed_start;
     int overhead, data_per_packet;
+    ab_request_p req = NULL;
 
     pdebug(DEBUG_INFO,"Starting.");
 
@@ -418,19 +412,19 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
 
     /* overhead comes from the request in this case */
     overhead =   1  /* CIP PCCC command */
-                +2  /* UCMM path size for PCCC command */
-                +4  /* path to PCCC command object */
-                +1  /* request ID size */
-                +2  /* vendor ID */
-                +4  /* vendor serial number */
-                +1  /* PCCC command */
-                +1  /* PCCC status */
-                +2  /* PCCC sequence number */
-                +1  /* PCCC function */
-                +2  /* request offset */
-                +2  /* request total transfer size in elements. */
-                + (tag->encoded_name_size)
-                +2; /* actual request size in elements */
+                 +2  /* UCMM path size for PCCC command */
+                 +4  /* path to PCCC command object */
+                 +1  /* request ID size */
+                 +2  /* vendor ID */
+                 +4  /* vendor serial number */
+                 +1  /* PCCC command */
+                 +1  /* PCCC status */
+                 +2  /* PCCC sequence number */
+                 +1  /* PCCC function */
+                 +2  /* request offset */
+                 +2  /* request total transfer size in elements. */
+                 + (tag->encoded_name_size)
+                 +2; /* actual request size in elements */
 
     data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
 
@@ -445,29 +439,28 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     }
 
 
-    /* set up the requests */
-    if(!tag->reqs) {
-        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-        tag->max_requests = 1;
-        tag->num_read_requests = 1;
-        tag->num_write_requests = 1;
-
-        if(!tag->reqs) {
-            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-    }
+//    /* set up the requests */
+//    if(!tag->reqs) {
+//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
+//        tag->max_requests = 1;
+//        tag->num_read_requests = 1;
+//        tag->num_write_requests = 1;
+//
+//        if(!tag->reqs) {
+//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
+//            return PLCTAG_ERR_NO_MEM;
+//        }
+//    }
 
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE, tag);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
 
-    req->num_retries_left = tag->num_retries;
-    req->retry_interval = tag->default_retry_interval;
+//    req->num_retries_left = tag->num_retries;
+//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_req*)(req->data);
 
@@ -489,10 +482,11 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
         return PLCTAG_ERR_NOT_ALLOWED;
     }
 
-    if(tag->elem_size == 4)
+    if(tag->elem_size == 4) {
         pccc_data_type = AB_PCCC_DATA_REAL;
-    else
+    } else {
         pccc_data_type = AB_PCCC_DATA_INT;
+    }
 
     /* generate the data type/data size fields, first the element part so that
      * we can get the size for the array part.
@@ -569,21 +563,22 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     req->send_request = 1;
     req->conn_seq = conn_seq_id;
 
+    /* the write is now pending */
+    tag->write_in_progress = 1;
+
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
 //        request_release(req);
-        tag->reqs[0] = rc_dec(req);
+        request_abort(req);
+        tag->req = rc_dec(req);
         return rc;
-   }
+    }
 
     /* save the request for later */
-    tag->reqs[0] = req;
+    tag->req = req;
 
-    /* the write is now pending */
-    tag->write_in_progress = 1;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -602,30 +597,27 @@ static int check_write_status(ab_tag_p tag)
     pccc_resp *pccc;
     uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req;
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
     /* is there an outstanding request? */
-    if(!tag->reqs || !(tag->reqs[0]) ) {
+    if(!tag->req) {
         tag->write_in_progress = 0;
         pdebug(DEBUG_WARN,"Write in progress but not requests in flight!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    req = tag->reqs[0];
-
-    if(!req->resp_received) {
+    if(!tag->req->resp_received) {
         return PLCTAG_STATUS_PENDING;
     }
 
+    pccc = (pccc_resp*)(tag->req->data);
+
+    /* point to the start of the data */
+    data = (uint8_t *)pccc + sizeof(*pccc);
+
     /* fake exception */
     do {
-        pccc = (pccc_resp*)(req->data);
-
-        /* point to the start of the data */
-        data = (uint8_t *)pccc + sizeof(*pccc);
-
         /* check the response status */
         if( le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
             pdebug(DEBUG_WARN,"EIP unexpected response packet type: %d!",pccc->encap_command);
@@ -655,10 +647,8 @@ static int check_write_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    //session_remove_request(tag->session, req);
-//    request_release(req);
-    tag->reqs[0] = rc_dec(req);
-
+    request_abort(tag->req);
+    tag->req = rc_dec(tag->req);
     tag->write_in_progress = 0;
 
     pdebug(DEBUG_WARN,"Done.");
