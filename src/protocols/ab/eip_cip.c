@@ -458,7 +458,7 @@ int tag_write_start(ab_tag_p tag)
         return rc;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+   pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
