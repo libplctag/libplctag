@@ -24,7 +24,7 @@
 #include <util/attr.h>
 #include <util/debug.h>
 #include <platform.h>
-#include <lib/libplctag_tag.h>
+#include <lib/tag.h>
 
 #define MAX_SYSTEM_TAG_NAME (20)
 #define MAX_SYSTEM_TAG_SIZE (30)

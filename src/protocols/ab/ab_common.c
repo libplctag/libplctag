@@ -27,7 +27,7 @@
 
 #include <platform.h>
 #include <lib/libplctag.h>
-#include <lib/libplctag_tag.h>
+#include <lib/tag.h>
 #include <ab/ab.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>

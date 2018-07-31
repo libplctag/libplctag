@@ -30,7 +30,7 @@
 
 
 #include <lib/libplctag.h>
-#include <lib/libplctag_tag.h>
+#include <lib/tag.h>
 #include <platform.h>
 
 

@@ -38,7 +38,7 @@ extern "C"
 #include <errno.h>
 #include <platform.h>
 #include <lib/libplctag.h>
-#include <lib/libplctag_tag.h>
+#include <lib/tag.h>
 #include <ab/connection.h>
 #include <ab/session.h>
 #include <ab/tag.h>
