@@ -29,7 +29,7 @@
 #define __PLCTAG_AB_AB_COMMON_H__ 1
 
 #include <lib/libplctag.h>
-#include <lib/libplctag_tag.h>
+#include <lib/tag.h>
 #include <util/vector.h>
 
 typedef struct ab_tag_t *ab_tag_p;
