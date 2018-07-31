@@ -35,7 +35,7 @@
 #include <limits.h>
 #include <float.h>
 #include <lib/libplctag.h>
-#include <lib/libplctag_tag.h>
+#include <lib/tag.h>
 #include <lib/init.h>
 #include <platform.h>
 #include <util/attr.h>
