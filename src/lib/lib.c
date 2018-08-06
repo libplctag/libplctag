@@ -1753,53 +1753,6 @@ int to_tag_index(int id)
     return (id & TAG_INDEX_MASK);
 }
 
-//static inline int tag_ptr_to_tag_index(plc_tag tag_id_ptr)
-//{
-//    int plc_tag = (int)(intptr_t)tag_id_ptr;
-//    return to_tag_index(plc_tag);
-//}
-//
-//
-//
-//static int api_lock(int index)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    pdebug(DEBUG_SPEW,"Starting");
-//
-//    if(index < 0 || index > MAX_TAG_ENTRIES) {
-//        pdebug(DEBUG_WARN,"Illegal tag index %d",index);
-//        return PLCTAG_ERR_OUT_OF_BOUNDS;
-//    }
-//
-//    rc = mutex_lock(tag_api_mutex[index]);
-//
-//    pdebug(DEBUG_SPEW,"Done with status %d", rc);
-//
-//    return rc;
-//}
-//
-//
-//
-//static int api_unlock(int index)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    pdebug(DEBUG_SPEW,"Starting");
-//
-//    if(index < 0 || index > MAX_TAG_ENTRIES) {
-//        pdebug(DEBUG_WARN,"Illegal tag index %d",index);
-//        return PLCTAG_ERR_OUT_OF_BOUNDS;
-//    }
-//
-//    rc = mutex_unlock(tag_api_mutex[index]);
-//
-//    pdebug(DEBUG_SPEW,"Done with status %d", rc);
-//
-//    return rc;
-//}
-//
-//
 
 
 int add_tag_lookup(plc_tag_p tag)
