@@ -503,13 +503,6 @@ void ab_tag_destroy(ab_tag_p tag)
         return;
     }
 
-//    if(tag->read_group) {
-//        remove_read_group_tag(tag);
-//
-//        mem_free(tag->read_group);
-//        tag->read_group = NULL;
-//    }
-
     connection = tag->connection;
     session = tag->session;
 
@@ -530,20 +523,15 @@ void ab_tag_destroy(ab_tag_p tag)
         pdebug(DEBUG_WARN,"No session pointer!");
     }
 
-//    if (tag->reqs) {
-//        mem_free(tag->reqs);
-//        tag->reqs = NULL;
-//    }
-//
-//    if (tag->read_req_sizes) {
-//        mem_free(tag->read_req_sizes);
-//        tag->read_req_sizes = NULL;
-//    }
-//
-//    if (tag->write_req_sizes) {
-//        mem_free(tag->write_req_sizes);
-//        tag->write_req_sizes = NULL;
-//    }
+    if(tag->ext_mutex) {
+        mutex_destroy(&(tag->ext_mutex));
+        tag->ext_mutex = NULL;
+    }
+
+    if(tag->api_mutex) {
+        mutex_destroy(&(tag->api_mutex));
+        tag->api_mutex = NULL;
+    }
 
     if (tag->data) {
         mem_free(tag->data);
