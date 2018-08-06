@@ -75,7 +75,8 @@ typedef struct tag_vtable_t *tag_vtable_p;
  */
 
 #define TAG_BASE_STRUCT tag_vtable_p vtable; \
-                        mutex_p mut; \
+                        mutex_p ext_mutex; \
+                        mutex_p api_mutex; \
                         int status; \
                         int endian; \
                         int tag_id; \
