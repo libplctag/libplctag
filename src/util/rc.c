@@ -115,19 +115,6 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
     rc->function_name = func;
     rc->line_num = line_num;
 
-    /* allocate the final cleanup struct */
-//    va_start(extra_args, cleaner_func);
-//    cleanup = cleanup_entry_create(func, line_num, cleaner_func, extra_arg_count, extra_args);
-//    va_end(extra_args);
-//
-//    if(!cleanup) {
-//        pdebug(DEBUG_ERROR,"Unable to allocate cleanup entry!");
-//        mem_free(rc);
-//        return NULL;
-//    }
-//
-//    rc->cleaners = cleanup;
-
     pdebug(DEBUG_INFO, "Done");
 
     /* return the original address if successful otherwise NULL. */
@@ -139,60 +126,6 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
 }
 
 
-
-
-
-
-/*
- * create a new cleanup entry.   This will be called when the reference is completely release.
- * Cleanup functions are called in reverse order that they are created.
- */
-//int rc_register_cleanup_impl(const char *func, int line_num, void *data, rc_cleanup_func cleanup_func, int extra_arg_count, ...)
-//{
-//    cleanup_p entry = NULL;
-//    int status = PLCTAG_STATUS_OK;
-//    refcount_p rc = NULL;
-//    va_list extra_args;
-//
-//    pdebug(DEBUG_INFO,"Starting, called from %s:%d for memory pointer %p",func, line_num, data);
-//
-//    if(!data) {
-//        pdebug(DEBUG_WARN,"Invalid pointer passed at %s:%d!",func, line_num);
-//        return PLCTAG_ERR_NULL_PTR;
-//    }
-//
-//    /* get the refcount structure. */
-//    rc = ((refcount_p)data) - 1;
-//
-//    /* loop until we get the lock */
-//    while (!lock_acquire(&rc->lock)) {
-//        ; /* do nothing, just spin */
-//    }
-//
-//        if(rc->count > 0) {
-//            va_start(extra_args, extra_arg_count);
-//            entry = cleanup_entry_create(func, line_num, cleanup_func, extra_arg_count, extra_args);
-//            va_end(extra_args);
-//
-//            if(!entry) {
-//                pdebug(DEBUG_ERROR,"Unable to allocate cleanup entry!");
-//                status = PLCTAG_ERR_NO_MEM;
-//            } else {
-//                entry->next = rc->cleaners;
-//                rc->cleaners = entry;
-//            }
-//        } else {
-//            pdebug(DEBUG_WARN,"Reference is invalid!");
-//            status = PLCTAG_ERR_BAD_DATA;
-//        }
-//
-//    /* release the lock so that other things can get to it. */
-//    lock_release(&rc->lock);
-//
-//    pdebug(DEBUG_INFO,"Done.");
-//
-//    return status;
-//}
 
 
 
@@ -215,10 +148,10 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     refcount_p rc = NULL;
     void *  result = NULL;
 
-    pdebug(DEBUG_DETAIL,"Starting, called from %s:%d for %p",func, line_num, data);
+    pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_WARN,"Invalid pointer passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_SPEW,"Invalid pointer passed from %s:%d!", func, line_num);
         return result;
     }
 
@@ -243,9 +176,9 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     lock_release(&rc->lock);
 
     if(!result) {
-        pdebug(DEBUG_WARN,"Invalid ref from call at %s line %d!  Unable to take strong reference.", func, line_num);
+        pdebug(DEBUG_SPEW,"Invalid ref from call at %s line %d!  Unable to take strong reference.", func, line_num);
     } else {
-        pdebug(DEBUG_DETAIL,"Ref count is %d for %p.", count, data);
+        pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
     }
 
     /* return the result pointer. */
@@ -271,10 +204,10 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     int invalid = 0;
     refcount_p rc = NULL;
 
-    pdebug(DEBUG_DETAIL,"Starting, called from %s:%d for %p",func, line_num, data);
+    pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_WARN,"Null reference passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_SPEW,"Null reference passed from %s:%d!", func, line_num);
         return NULL;
     }
 
@@ -297,7 +230,7 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     /* release the lock so that other things can get to it. */
     lock_release(&rc->lock);
 
-    pdebug(DEBUG_DETAIL,"Ref count is %d for %p.", count, data);
+    pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
 
     /* clean up only if count is zero. */
     if(rc && !invalid && count <= 0) {
@@ -320,19 +253,6 @@ void refcount_cleanup(refcount_p rc)
         return;
     }
 
-//    while(rc->cleaners) {
-//        cleanup_p entry = rc->cleaners;
-//        void *data = (void *)(rc+1);
-//
-//        rc->cleaners = entry->next;
-//
-//        /* do the clean up of the object. */
-//        pdebug(DEBUG_DETAIL,"Calling clean function added in %s at line %d", entry->function_name, entry->line_num);
-//        entry->cleanup_func(data, entry->extra_arg_count, entry->extra_args);
-//
-//        cleanup_entry_destroy(entry);
-//    }
-
     /* call the clean up function */
     rc->cleanup_func((void *)(rc+1));
 
@@ -342,48 +262,3 @@ void refcount_cleanup(refcount_p rc)
     pdebug(DEBUG_INFO,"Done.");
 }
 
-//
-//cleanup_p cleanup_entry_create(const char *func, int line_num, rc_cleanup_func cleanup_func, int extra_arg_count, va_list extra_args)
-//{
-//    cleanup_p entry = NULL;
-//
-//    pdebug(DEBUG_INFO,"Starting");
-//
-//    entry = mem_alloc(sizeof(struct cleanup_t) + (sizeof(void*) * extra_arg_count));
-//    if(!entry) {
-//        pdebug(DEBUG_ERROR,"Unable to allocate new cleanup struct!");
-//        return NULL;
-//    }
-//
-//    entry->cleanup_func = cleanup_func;
-//    entry->function_name = func;
-//    entry->line_num = line_num;
-//    entry->extra_arg_count = extra_arg_count;
-//    entry->extra_args = (void **)(entry+1); /* just past the struct... */
-//
-//    /*
-//     * Fill in the extra args.   There might not be any.
-//     */
-//    for(int i=0; i < extra_arg_count; i++) {
-//        entry->extra_args[i] = va_arg(extra_args, void *);
-//    }
-//
-//    pdebug(DEBUG_INFO,"Done.");
-//
-//    return entry;
-//}
-//
-//
-//void cleanup_entry_destroy(cleanup_p entry)
-//{
-//    pdebug(DEBUG_DETAIL,"Starting.");
-//    if(!entry) {
-//        pdebug(DEBUG_WARN,"Entry pointer is NULL!");
-//        return;
-//    }
-//
-//    mem_free(entry);
-//
-//    pdebug(DEBUG_DETAIL,"Done.");
-//}
-//
