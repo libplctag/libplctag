@@ -1205,8 +1205,6 @@ int match_request_and_response(ab_request_p request, eip_cip_co_resp *response)
 
 void receive_response_unsafe(ab_session_p session, ab_request_p request)
 {
-    ab_tag_p tag = NULL;
-
     /*
      * We received a packet.  Modify the packet interval downword slightly
      * to get to the maximum value.  We want to get to the point where we lose
@@ -1236,14 +1234,6 @@ void receive_response_unsafe(ab_session_p session, ab_request_p request)
     request->send_in_progress = 0;
     request->send_request = 0;
     request->recv_in_progress = 0;
-
-    /* call the tag tickler function. */
-    tag = request_get_tag(request);
-    if(tag) {
-        pdebug(DEBUG_DETAIL, "Calling tickler.");
-        tag->vtable->tickler((plc_tag_p)tag);
-        rc_dec(tag);
-    }
 
     /* clear the request from the session as it is done. Note we hold the mutex here.
      *
