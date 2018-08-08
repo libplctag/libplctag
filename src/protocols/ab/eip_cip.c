@@ -153,12 +153,16 @@ int eip_cip_tag_tickler(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL,"Starting.");
+
     if (tag->read_in_progress) {
         if(tag->connection) {
             rc = check_read_status_connected(tag);
         } else {
             rc = check_read_status_unconnected(tag);
         }
+
+        pdebug(DEBUG_DETAIL,"Done.  Read in progress.");
 
         return rc;
     }
@@ -170,8 +174,12 @@ int eip_cip_tag_tickler(ab_tag_p tag)
             rc = check_write_status_unconnected(tag);
         }
 
+        pdebug(DEBUG_DETAIL, "Done. Write in progress.");
+
         return rc;
     }
+
+    pdebug(DEBUG_DETAIL, "Done.  No operation in progress.");
 
     return tag->status;
 }
