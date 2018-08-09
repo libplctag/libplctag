@@ -71,8 +71,8 @@ static int recv_forward_open_resp(ab_connection_p connection, ab_request_p req);
 //static int connection_destroy_unsafe(ab_connection_p connection);
 static void connection_destroy(void *connection);
 //static int connection_close(ab_connection_p connection);
-static int send_forward_close_req(ab_connection_p connection, ab_request_p req);
-static int recv_forward_close_resp(ab_connection_p connection, ab_request_p req);
+//static int send_forward_close_req(ab_connection_p connection, ab_request_p req);
+//static int recv_forward_close_resp(ab_connection_p connection, ab_request_p req);
 
 
 /*
@@ -689,188 +689,112 @@ void connection_destroy(void *connection_arg)
     return;
 }
 
-/*
- * This should never be called directly.  It should only be called
- * as a result of the reference count hitting zero.
- */
-/* not called due to refcount code
-void connection_destroy(void conn_arg)
-{
-    ab_connection_p connection = conn_arg;
-
-    critical_block(global_session_mut) {
-        connection_destroy_unsafe(connection);
-    }
-}
-*/
-
-//int connection_close(ab_connection_p connection)
+//
+//int send_forward_close_req(ab_connection_p connection, ab_request_p req)
 //{
-//    ab_request_p req;
-//    int64_t timeout_time = 0L;
+//    eip_forward_close_req_t *fo;
+//    uint8_t *data;
 //    int rc = PLCTAG_STATUS_OK;
 //
-//    pdebug(DEBUG_INFO, "Starting.");
+//    pdebug(DEBUG_INFO,"Starting");
+//
+//    fo = (eip_forward_close_req_t*)(req->data);
+//
+//    /* point to the end of the struct */
+//    data = (req->data) + sizeof(eip_forward_close_req_t);
+//
+//    /* set up the path information. */
+//    mem_copy(data, connection->conn_path, connection->conn_path_size);
+//    data += connection->conn_path_size;
+//
+//    /* fill in the static parts */
+//
+//    /* encap header parts */
+//    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
+//    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+//    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
+//
+//    /* CPF parts */
+//    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
+//    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
+//    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
+//    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+//    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
+//
+//    /* Connection Manager parts */
+//    fo->cm_service_code = AB_EIP_CMD_FORWARD_CLOSE;/* 0x4E Forward Close Request */
+//    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
+//    fo->cm_req_path[0] = 0x20;                     /* class */
+//    fo->cm_req_path[1] = 0x06;                     /* CM class */
+//    fo->cm_req_path[2] = 0x24;                     /* instance */
+//    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
+//
+//    /* Forward Open Params */
+//    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
+//    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+//    fo->conn_serial_number = h2le16((uint16_t)(intptr_t)(connection)); /* our connection SEQUENCE number. */
+//    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
+//    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
+//    fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
+//
+//    /* set the size of the request */
+//    req->request_size = data - (req->data);
+//
+//    /* mark it as ready to send */
+//    req->send_request = 1;
+//    /*req->abort_after_send = 1;*/ /* don't return to us.*/
+//
+//    /*
+//     * make sure the session serializes this with respect to other
+//     * control packets.  Apparently, the connection manager has no
+//     * buffers.
+//     */
+//    req->connected_request = 1;
+//
+//    /* add the request to the session's list. */
+//    rc = session_add_request(connection->session, req);
+//
+//    pdebug(DEBUG_INFO, "Done");
+//
+//    return rc;
+//}
+//
+//
+//int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
+//{
+//    eip_forward_close_resp_t *fo_resp;
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    pdebug(DEBUG_INFO,"Starting");
+//
+//    fo_resp = (eip_forward_close_resp_t*)(req->data);
 //
 //    do {
-//        /* get a request buffer */
-//        rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
-//        if(rc != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+//        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+//            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
+//            rc = PLCTAG_ERR_BAD_DATA;
 //            break;
 //        }
 //
-////        req->num_retries_left = 5; /* MAGIC! */
-////        req->retry_interval = 900; /* MAGIC! */
-//
-//        /* send the ForwardClose command to the PLC */
-//        if((rc = send_forward_close_req(connection, req)) != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to send ForwardClose packet!");
-//            break;
-//        }
-//
-//        /* wait for a response */
-//        timeout_time = time_ms() + CONNECTION_TEARDOWN_TIMEOUT;
-//
-//        while (timeout_time > time_ms() && !req->resp_received) {
-//            sleep_ms(1);
-//        }
-//
-//        /* timeout? */
-//        if(!req->resp_received) {
-//            pdebug(DEBUG_WARN,"Timed out waiting for ForwardClose response!");
-//            rc = PLCTAG_ERR_TIMEOUT;
-//            break;
-//        }
-//
-//        /* check for the ForwardClose response. */
-//        if((rc = recv_forward_close_resp(connection, req)) != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to use ForwardClose response!");
+//        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
+//            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
 //            rc = PLCTAG_ERR_REMOTE_ERR;
 //            break;
 //        }
 //
+//        if(fo_resp->general_status != AB_EIP_OK) {
+//            pdebug(DEBUG_WARN,"Forward Close command failed, response code: %d",fo_resp->general_status);
+//            rc = PLCTAG_ERR_REMOTE_ERR;
+//            break;
+//        }
+//
+//        pdebug(DEBUG_DETAIL,"Connection close succeeded.");
+//
+//        connection->status = PLCTAG_STATUS_OK;
+//        rc = PLCTAG_STATUS_OK;
 //    } while(0);
 //
-//    connection->status = rc;
-//
-//    if(req) {
-//        //session_remove_request(connection->session,req);
-//        request_abort(req); /* FIXME - needed? */
-//        req = rc_dec(req);
-//    }
-//
-//    pdebug(DEBUG_INFO, "Done.");
+//    pdebug(DEBUG_INFO,"Done.");
 //
 //    return rc;
 //}
-
-
-int send_forward_close_req(ab_connection_p connection, ab_request_p req)
-{
-    eip_forward_close_req_t *fo;
-    uint8_t *data;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    fo = (eip_forward_close_req_t*)(req->data);
-
-    /* point to the end of the struct */
-    data = (req->data) + sizeof(eip_forward_close_req_t);
-
-    /* set up the path information. */
-    mem_copy(data, connection->conn_path, connection->conn_path_size);
-    data += connection->conn_path_size;
-
-    /* fill in the static parts */
-
-    /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
-    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
-
-    /* CPF parts */
-    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
-    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
-
-    /* Connection Manager parts */
-    fo->cm_service_code = AB_EIP_CMD_FORWARD_CLOSE;/* 0x4E Forward Close Request */
-    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
-    fo->cm_req_path[0] = 0x20;                     /* class */
-    fo->cm_req_path[1] = 0x06;                     /* CM class */
-    fo->cm_req_path[2] = 0x24;                     /* instance */
-    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
-
-    /* Forward Open Params */
-    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
-    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
-    fo->conn_serial_number = h2le16((uint16_t)(intptr_t)(connection)); /* our connection SEQUENCE number. */
-    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
-    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
-    fo->path_size = connection->conn_path_size/2; /* size in 16-bit words */
-
-    /* set the size of the request */
-    req->request_size = data - (req->data);
-
-    /* mark it as ready to send */
-    req->send_request = 1;
-    /*req->abort_after_send = 1;*/ /* don't return to us.*/
-
-    /*
-     * make sure the session serializes this with respect to other
-     * control packets.  Apparently, the connection manager has no
-     * buffers.
-     */
-    req->connected_request = 1;
-
-    /* add the request to the session's list. */
-    rc = session_add_request(connection->session, req);
-
-    pdebug(DEBUG_INFO, "Done");
-
-    return rc;
-}
-
-
-int recv_forward_close_resp(ab_connection_p connection, ab_request_p req)
-{
-    eip_forward_close_resp_t *fo_resp;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO,"Starting");
-
-    fo_resp = (eip_forward_close_resp_t*)(req->data);
-
-    do {
-        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
-            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        if(fo_resp->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"Forward Close command failed, response code: %d",fo_resp->general_status);
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        pdebug(DEBUG_DETAIL,"Connection close succeeded.");
-
-        connection->status = PLCTAG_STATUS_OK;
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
-
-    pdebug(DEBUG_INFO,"Done.");
-
-    return rc;
-}
