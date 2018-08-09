@@ -56,12 +56,15 @@ static void session_destroy(void *session);
 static int session_register(ab_session_p session);
 static int session_unregister_unsafe(ab_session_p session);
 static THREAD_FUNC(session_handler);
-static int check_incoming_data_unsafe(ab_session_p session);
-static int check_outgoing_data_unsafe(ab_session_p session);
-static int send_current_request(ab_session_p session);
-static int process_response_packet_unsafe(ab_session_p session);
-static int match_request_and_response(ab_request_p request, eip_cip_co_resp *response);
-static void receive_response_unsafe(ab_session_p session, ab_request_p request);
+//static int check_incoming_data_unsafe(ab_session_p session);
+//static int check_outgoing_data_unsafe(ab_session_p session);
+//static int send_current_request(ab_session_p session);
+//static int process_response_packet_unsafe(ab_session_p session);
+//static int match_request_and_response(ab_request_p request, eip_cip_co_resp *response);
+//static void receive_response_unsafe(ab_session_p session, ab_request_p request);
+static int prepare_request(ab_session_p session, ab_request_p request);
+static int send_eip_request(ab_session_p session);
+static int recv_eip_response(ab_session_p session);
 
 
 /*
@@ -468,7 +471,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port)
         return AB_SESSION_NULL;
     }
 
-    session->recv_capacity = EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX;
+    session->data_capacity = EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX;
 
     str_copy(session->host, MAX_SESSION_HOST, host);
 
@@ -657,9 +660,9 @@ int session_register(ab_session_p session)
      * We use the receiving buffer because we do not have a request and nothing can
      * be coming in (we hope) on the socket yet.
      */
-    mem_set(session->recv_data, 0, sizeof(eip_session_reg_req));
+    mem_set(session->data, 0, sizeof(eip_session_reg_req));
 
-    req = (eip_session_reg_req*)(session->recv_data);
+    req = (eip_session_reg_req*)(session->data);
 
     /* fill in the fields of the request */
     req->encap_command = h2le16(AB_EIP_REGISTER_SESSION);
@@ -681,70 +684,68 @@ int session_register(ab_session_p session)
 
     /* send registration to the gateway */
     data_size = sizeof(eip_session_reg_req);
-    session->recv_offset = 0;
+    session->data_offset = 0;
     timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
 
     pdebug(DEBUG_INFO, "sending data:");
-    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, data_size);
+    pdebug_dump_bytes(DEBUG_INFO, session->data, data_size);
 
-    while (timeout_time > time_ms() && session->recv_offset < data_size) {
-        rc = socket_write(session->sock, session->recv_data + session->recv_offset, data_size - session->recv_offset);
+    while (!session->terminating && timeout_time > time_ms() && session->data_offset < data_size) {
+        rc = socket_write(session->sock, session->data + session->data_offset, data_size - session->data_offset);
 
         if (rc < 0) {
             pdebug(DEBUG_WARN, "Unable to send session registration packet! rc=%d", rc);
-            session->recv_offset = 0;
+            session->data_offset = 0;
             return rc;
         }
 
-        session->recv_offset += rc;
+        session->data_offset += rc;
 
         /* don't hog the CPU */
-        if (session->recv_offset < data_size) {
+        if (session->data_offset < data_size) {
             sleep_ms(1);
         }
     }
 
-    if (session->recv_offset != data_size) {
-        session->recv_offset = 0;
+    if (session->data_offset != data_size) {
+        session->data_offset = 0;
         return PLCTAG_ERR_TIMEOUT;
     }
 
     /* get the response from the gateway */
 
     /* ready the input buffer */
-    session->recv_offset = 0;
-    mem_set(session->recv_data, 0, session->recv_capacity);
+    session->data_offset = 0;
+    mem_set(session->data, 0, session->data_capacity);
 
     timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
 
-    while (timeout_time > time_ms()) {
-        if (session->recv_offset < sizeof(eip_encap_t)) {
+    while (!session->terminating && timeout_time > time_ms()) {
+        if (session->data_offset < sizeof(eip_encap_t)) {
             data_size = sizeof(eip_encap_t);
         } else {
-            data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
+            data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
         }
 
-        if (session->recv_offset < data_size) {
-            rc = socket_read(session->sock, session->recv_data + session->recv_offset, data_size - session->recv_offset);
+        if (session->data_offset < data_size) {
+            rc = socket_read(session->sock, session->data + session->data_offset, data_size - session->data_offset);
 
             if (rc < 0) {
-                if (rc != PLCTAG_ERR_NO_DATA) {
-                    /* error! */
-                    pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
-                    return rc;
-                }
+                /* error! */
+                pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
+                return rc;
             } else {
-                session->recv_offset += rc;
+                session->data_offset += rc;
 
                 /* recalculate the amount of data needed if we have just completed the read of an encap header */
-                if (session->recv_offset >= sizeof(eip_encap_t)) {
-                    data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
+                if (session->data_offset >= sizeof(eip_encap_t)) {
+                    data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
                 }
             }
         }
 
         /* did we get all the data? */
-        if (session->recv_offset == data_size) {
+        if (session->data_offset == data_size) {
             break;
         } else {
             /* do not hog the CPU */
@@ -752,19 +753,19 @@ int session_register(ab_session_p session)
         }
     }
 
-    if (session->recv_offset != data_size) {
-        session->recv_offset = 0;
+    if (session->data_offset != data_size) {
+        session->data_offset = 0;
         return PLCTAG_ERR_TIMEOUT;
     }
 
     /* set the offset back to zero for the next packet */
-    session->recv_offset = 0;
+    session->data_offset = 0;
 
     pdebug(DEBUG_INFO, "received response:");
-    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, data_size);
+    pdebug_dump_bytes(DEBUG_INFO, session->data, data_size);
 
     /* encap header is at the start of the buffer */
-    resp = (eip_encap_t*)(session->recv_data);
+    resp = (eip_encap_t*)(session->data);
 
     /* check the response status */
     if (le2h16(resp->encap_command) != AB_EIP_REGISTER_SESSION) {
@@ -957,39 +958,107 @@ THREAD_FUNC(session_handler)
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
     while(!session->terminating) {
-        if(!session->registered) {
-            /* we must connect to the gateway and register */
-            if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "session connect failed!");
-                session->status = rc;
+        ab_request_p request = NULL;
+
+        do {
+            /* is the session ready? */
+            if(!session->registered) {
+                /* we must connect to the gateway and register */
+                if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_WARN, "session connect failed!");
+                    session->status = rc;
+                    break;
+                }
+
+                if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_WARN, "session registration failed!");
+                    session->status = rc;
+                    break;
+                }
+            }
+
+            /*
+             * session is ready.
+             *
+             * Take a request from the queue, send it and wait for the response.
+             */
+
+            critical_block(session->session_mutex) {
+                /* grab a request off the front of the list. */
+                request = session->requests;
+                if(request) {
+                    session->requests = request->next;
+
+                    /* get, or try to get, a reference to the request. */
+                    request = rc_inc(session->requests);
+                }
+            }
+
+            if(!request) {
+                /* nothing to do. */
                 break;
             }
 
-            if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "session registration failed!");
-                session->status = rc;
+            if(request_check_abort(request)) {
+                pdebug(DEBUG_DETAIL, "Request is aborted.");
+                rc = PLCTAG_ERR_ABORT;
+
+                request->status = rc;
+                request->resp_received = 1;
+                request->request_size = 0;
+
                 break;
             }
-        }
 
-        critical_block(session->session_mutex) {
-            /* check for incoming data. */
-            rc = check_incoming_data_unsafe(session);
+            /* request is good, set it up and process it. */
+            rc = prepare_request(session, request);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to prepare request, rc=%d!", rc);
 
-            if (rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error when checking for incoming session data! %d", rc);
-                /* FIXME - do something useful with this error */
+                request->status = rc;
+                request->resp_received = 1;
+                request->request_size = 0;
+
+                break;
             }
 
-            /* check for incoming data. */
-            rc = check_outgoing_data_unsafe(session);
+            /* copy the data from the request into the session's buffer. */
+            mem_copy(session->data, request->data, request->request_size);
+            session->data_size = request->request_size;
 
-            if (rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error when checking for outgoing session data! %d", rc);
-                /* FIXME - do something useful with this error */
+            rc = send_eip_request(session);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error sending packet! rc=%d", rc);
+
+                request->status = rc;
+                request->resp_received = 1;
+                request->request_size = 0;
+
+                break;
             }
-        }
 
+            rc = recv_eip_response(session);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error receiving packet response! rc=%d", rc);
+
+                request->status = rc;
+                request->resp_received = 1;
+                request->request_size = 0;
+
+                break;
+            }
+
+            /* copy the data back into the request buffer. */
+            mem_copy(request->data, session->data, session->data_size);
+
+            rc = PLCTAG_STATUS_OK;
+
+            request->status = rc;
+            request->resp_received = 1;
+            request->request_size = session->data_size;
+        } while(0);
+
+        /* give up the CPU a bit. */
         sleep_ms(1);
     }
 
@@ -997,250 +1066,427 @@ THREAD_FUNC(session_handler)
 }
 
 
+int prepare_request(ab_session_p session, ab_request_p request)
+{
+    eip_encap_t* encap = (eip_encap_t*)(request->data);
+    int payload_size = request->request_size - sizeof(eip_encap_t);
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!session) {
+        pdebug(DEBUG_WARN,"Called with null session!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* fill in the fields of the request. */
+
+    encap->encap_length = h2le16(payload_size);
+    encap->encap_session_handle = h2le32(session->session_handle);
+    encap->encap_status = h2le32(0);
+    encap->encap_options = h2le32(0);
+
+    /* set up the session sequence ID for this transaction */
+    if(le2h16(encap->encap_command) == AB_EIP_READ_RR_DATA) {
+        /* get new ID */
+        session->session_seq_id++;
+
+        request->session_seq_id = session->session_seq_id;
+        encap->encap_sender_context = h2le64(session->session_seq_id); /* link up the request seq ID and the packet seq ID */
+
+        pdebug(DEBUG_INFO,"Preparing unconnected packet with session sequence ID %llx",session->session_seq_id);
+    } else if(le2h16(encap->encap_command) == AB_EIP_CONNECTED_SEND) {
+        eip_cip_co_req *conn_req = (eip_cip_co_req*)(session->data);
+
+        /* set up the connection information */
+        conn_req->cpf_targ_conn_id = h2le32(request->connection->targ_connection_id);
+        request->conn_id = request->connection->orig_connection_id;
+
+        request->connection->conn_seq_num++;
+        conn_req->cpf_conn_seq_num = h2le16(request->connection->conn_seq_num);
+        request->conn_seq = request->connection->conn_seq_num;
+
+        pdebug(DEBUG_INFO,"Preparing connected packet with connection ID %x and sequence ID %u(%x)",request->conn_id, request->conn_seq, request->conn_seq);
+    } else {
+        pdebug(DEBUG_WARN, "Unsupported packet type %x!", le2h16(encap->encap_command));
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* display the data */
+    pdebug(DEBUG_INFO,"Prepared packet of size %d",request->request_size);
+    pdebug_dump_bytes(DEBUG_INFO, request->data, request->request_size);
+
+    return PLCTAG_STATUS_OK;
+}
 
 
-int check_incoming_data_unsafe(ab_session_p session)
+
+
+int send_eip_request(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    /*
-     * check for data.
-     *
-     * Read a packet into the session's buffer and find the
-     * request it is for.  Repeat while there is data.
-     */
+    if(!session) {
+        pdebug(DEBUG_WARN, "Session pointer is null.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
+    session->data_offset = 0;
+
+    /* send the packet */
     do {
-        rc = recv_eip_response_unsafe(session);
+        rc = socket_write(session->sock, session->data + session->data_offset, session->data_size - session->data_offset);
 
-        /* did we get a packet? */
-        if(rc == PLCTAG_STATUS_OK && session->has_response) {
-            rc = process_response_packet_unsafe(session);
-
-            /* reset the session's buffer */
-            mem_set(session->recv_data, 0, session->recv_capacity);
-            session->recv_offset = 0;
-            session->resp_seq_id = 0;
-            session->has_response = 0;
+        if(rc >= 0) {
+            session->data_offset += rc;
         }
-    } while(rc == PLCTAG_STATUS_OK);
+    } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size);
 
-    /* No data is not an error */
-    if(rc == PLCTAG_ERR_NO_DATA) {
-        rc = PLCTAG_STATUS_OK;
+    if(session->terminating) {
+        pdebug(DEBUG_WARN, "Session is terminating.");
+        return PLCTAG_ERR_ABORT;
     }
 
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Error while trying to receive a response packet.  rc=%d",rc);
-    }
-
-    return rc;
-}
-
-
-
-int check_outgoing_data_unsafe(ab_session_p session)
-{
-    int rc = PLCTAG_STATUS_OK;
-    ab_request_p request = session->requests;
-    int connected_requests_in_flight = 0;
-    int unconnected_requests_in_flight = 0;
-
-    /* loop over the requests and process them one at a time. */
-    while(request && rc == PLCTAG_STATUS_OK) {
-        if(request_check_abort(request)) {
-            ab_request_p old_request = request;
-
-            /* skip to the next one */
-            request = request->next;
-
-            //~ rc = handle_abort_request(old_request);
-            rc = session_remove_request_unsafe(session,old_request);
-
-            //request_destroy_unsafe(&old_request);
-            //~ request_release(old_request);
-
-            continue;
-        }
-
-        /* check resending */
-//        if(ok_to_resend(session, request)) {
-//            //~ handle_resend(session, request);
-//            if(request->connected_request) {
-//                pdebug(DEBUG_INFO,"Requeuing connected request.");
-//            } else {
-//                pdebug(DEBUG_INFO,"Requeuing unconnected request.");
-//            }
-//
-//            request->recv_in_progress = 0;
-//            request->send_request = 1;
-//        }
-
-        /* count requests in flight */
-        if(request->recv_in_progress) {
-            if(request->connected_request) {
-                connected_requests_in_flight++;
-                pdebug(DEBUG_SPEW,"%d connected requests in flight.", connected_requests_in_flight);
-            } else {
-                unconnected_requests_in_flight++;
-                pdebug(DEBUG_SPEW,"%d unconnected requests in flight.", unconnected_requests_in_flight);
-            }
-        }
-
-
-        /* is there a request ready to send and can we send? */
-        if(!session->current_request && request->send_request) {
-            if(request->connected_request) {
-                if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
-                    pdebug(DEBUG_INFO,"Readying connected packet to send.");
-
-                    /* increment the refcount since we are storing a pointer to the request */
-                    rc_inc(request);
-                    session->current_request = request;
-
-                    connected_requests_in_flight++;
-
-                    pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
-                }
-            } else {
-                if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
-                    pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
-
-                    /* increment the refcount since we are storing a pointer to the request */
-                    rc_inc(request);
-                    session->current_request = request;
-
-                    unconnected_requests_in_flight++;
-
-                    pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
-                }
-            }
-        }
-
-        /* call this often to make sure we get the data out. */
-        rc = send_current_request(session);
-
-        /* get the next request to process */
-        request = request->next;
-    }
-
-    return rc;
-}
-
-
-
-
-
-int send_current_request(ab_session_p session)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    if(!session->current_request) {
-        return PLCTAG_STATUS_OK;
-    }
-
-    rc = send_eip_request_unsafe(session->current_request);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        /*error sending packet!*/
+    if(rc < 0) {
+        pdebug(DEBUG_WARN,"Error, %d, writing socket!", rc);
         return rc;
     }
 
-    /* if we are done, then clean up */
-    if(!session->current_request->send_in_progress) {
-        /* release the refcount on the request, we are not referencing it anymore */
-        rc_dec(session->current_request);
-        session->current_request = NULL;
-    }
+    pdebug(DEBUG_DETAIL, "Done.");
 
-    return rc;
+    return PLCTAG_STATUS_OK;
 }
 
 
 
-int process_response_packet_unsafe(ab_session_p session)
+/*
+ * recv_eip_response
+ *
+ * Look at the passed session and read any data we can
+ * to fill in a packet.  If we already have a full packet,
+ * punt.
+ */
+int recv_eip_response(ab_session_p session)
 {
+    uint32_t data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp *response = (eip_cip_co_resp*)(&session->recv_data[0]);
-    ab_request_p request = session->requests;
 
-    /* find the request for which there is a response pending. */
-    while(request) {
-        /* need to get the next request now because we might be removing it in receive_response_unsafe */
-        ab_request_p next_req = request->next;
+    pdebug(DEBUG_DETAIL,"Starting.");
 
-        if(match_request_and_response(request, response)) {
-            receive_response_unsafe(session, request);
+    if(!session) {
+        pdebug(DEBUG_WARN,"Called with null session!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+
+    session->data_offset = 0;
+    session->data_size = 0;
+    data_needed = sizeof(eip_encap_t);
+
+    do {
+        rc = socket_read(session->sock, session->data + session->data_offset,
+                         data_needed - session->data_offset);
+
+        /*pdebug(DEBUG_DETAIL,"socket_read rc=%d",rc);*/
+
+        if (rc < 0) {
+            /* error! */
+            pdebug(DEBUG_WARN,"Error reading socket! rc=%d",rc);
+            return rc;
+        } else {
+            session->data_offset += rc;
+
+            /*pdebug_dump_bytes(session->debug, session->data, session->data_offset);*/
+
+            /* recalculate the amount of data needed if we have just completed the read of an encap header */
+            if(session->data_offset >= sizeof(eip_encap_t)) {
+                data_needed = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
+
+                if(data_needed > session->data_capacity) {
+                    pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
+                    return PLCTAG_ERR_TOO_LARGE;
+                }
+            }
         }
 
-        request = next_req;
+        /* did we get all the data? */
+        if(session->data_offset < data_needed) {
+            /* do not hog the CPU */
+            sleep_ms(1);
+        }
+    } while(!session->terminating && session->data_offset < data_needed);
+
+    if(session->terminating) {
+        pdebug(DEBUG_INFO,"Session is terminating, returning...");
+        rc = PLCTAG_ERR_ABORT;
+        return rc;
+    } else {
+        session->resp_seq_id = le2h64(((eip_encap_t*)(session->data))->encap_sender_context);
+        session->has_response = 1;
+        session->data_size = data_needed;
+
+        rc = PLCTAG_STATUS_OK;
+
+        pdebug(DEBUG_DETAIL, "request received all needed data (%d bytes of %d).", session->data_offset, data_needed);
+
+        pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_offset);
+
+        if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
+            eip_encap_t *encap = (eip_encap_t*)(session->data);
+            pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
+        } else {
+            eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->data);
+            pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
+        }
     }
 
     return rc;
 }
 
 
-int match_request_and_response(ab_request_p request, eip_cip_co_resp *response)
-{
-    int connected_response = (le2h16(response->encap_command) == AB_EIP_CONNECTED_SEND ? 1 : 0);
 
-    /*
-     * AB decided not to use the 64-bit sender context in connected messages.  No idea
-     * why they did this, but it means that we need to look at the connection details
-     * instead.
-     */
-    if(connected_response && request->conn_id == le2h32(response->cpf_orig_conn_id) && request->conn_seq == le2h16(response->cpf_conn_seq_num)) {
-        /* if it is a connected packet, match the connection ID and sequence num. */
-        return 1;
-    } else if(!connected_response && le2h64(response->encap_sender_context) != (uint64_t)0 && le2h64(response->encap_sender_context) == request->session_seq_id) {
-        /* if it is not connected, match the sender context, note that this is sent in host order. */
-        return 1;
-    }
-
-    /* no match */
-    return 0;
-}
-
-
-
-void receive_response_unsafe(ab_session_p session, ab_request_p request)
-{
-    /*
-     * We received a packet.  Modify the packet interval downword slightly
-     * to get to the maximum value.  We want to get to the point where we lose
-     * a packet once in a while.
-     */
-
-    /*session->next_packet_interval_us -= SESSION_PACKET_RECEIVE_INTERVAL_DEC;
-    if(session->next_packet_interval_us < SESSION_MIN_PACKET_INTERVAL) {
-        session->next_packet_interval_us = SESSION_MIN_PACKET_INTERVAL;
-    }
-    pdebug(DEBUG_INFO,"Packet received, so decreasing packet interval to %lldus", session->next_packet_interval_us);
-    */
-
-    pdebug(DEBUG_INFO,"Packet sent initially %dms ago and was sent %d times",(int)(time_ms() - request->time_sent), request->send_count);
-
-    //update_resend_samples(session, time_ms() - request->time_sent);
-
-    /* set the packet ready for processing. */
-    pdebug(DEBUG_INFO, "got full packet of size %d", session->recv_offset);
-    pdebug_dump_bytes(DEBUG_INFO, session->recv_data, session->recv_offset);
-
-    /* copy the data from the session's buffer */
-    mem_copy(request->data, session->recv_data, session->recv_offset);
-    request->request_size = session->recv_offset;
-
-    request->resp_received = 1;
-    request->send_in_progress = 0;
-    request->send_request = 0;
-    request->recv_in_progress = 0;
-
-    /* clear the request from the session as it is done. Note we hold the mutex here.
-     *
-     * This must be done last since we release the reference to the request here!  That could
-     * destroy the request.
-     */
-    session_remove_request_unsafe(session, request);
-}
-
-
+//
+//
+//
+//int check_incoming_data_unsafe(ab_session_p session)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    /*
+//     * check for data.
+//     *
+//     * Read a packet into the session's buffer and find the
+//     * request it is for.  Repeat while there is data.
+//     */
+//
+//    do {
+//        rc = recv_eip_response_unsafe(session);
+//
+//        /* did we get a packet? */
+//        if(rc == PLCTAG_STATUS_OK && session->has_response) {
+//            rc = process_response_packet_unsafe(session);
+//
+//            /* reset the session's buffer */
+//            mem_set(session->data, 0, session->data_capacity);
+//            session->data_offset = 0;
+//            session->resp_seq_id = 0;
+//            session->has_response = 0;
+//        }
+//    } while(rc == PLCTAG_STATUS_OK);
+//
+//    /* No data is not an error */
+//    if(rc == PLCTAG_ERR_NO_DATA) {
+//        rc = PLCTAG_STATUS_OK;
+//    }
+//
+//    if(rc != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_WARN,"Error while trying to receive a response packet.  rc=%d",rc);
+//    }
+//
+//    return rc;
+//}
+//
+//
+//
+//int check_outgoing_data_unsafe(ab_session_p session)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//    ab_request_p request = session->requests;
+//    int connected_requests_in_flight = 0;
+//    int unconnected_requests_in_flight = 0;
+//
+//    /* loop over the requests and process them one at a time. */
+//    while(request && rc == PLCTAG_STATUS_OK) {
+//        if(request_check_abort(request)) {
+//            ab_request_p old_request = request;
+//
+//            /* skip to the next one */
+//            request = request->next;
+//
+//            //~ rc = handle_abort_request(old_request);
+//            rc = session_remove_request_unsafe(session,old_request);
+//
+//            //request_destroy_unsafe(&old_request);
+//            //~ request_release(old_request);
+//
+//            continue;
+//        }
+//
+//        /* check resending */
+////        if(ok_to_resend(session, request)) {
+////            //~ handle_resend(session, request);
+////            if(request->connected_request) {
+////                pdebug(DEBUG_INFO,"Requeuing connected request.");
+////            } else {
+////                pdebug(DEBUG_INFO,"Requeuing unconnected request.");
+////            }
+////
+////            request->recv_in_progress = 0;
+////            request->send_request = 1;
+////        }
+//
+//        /* count requests in flight */
+//        if(request->recv_in_progress) {
+//            if(request->connected_request) {
+//                connected_requests_in_flight++;
+//                pdebug(DEBUG_SPEW,"%d connected requests in flight.", connected_requests_in_flight);
+//            } else {
+//                unconnected_requests_in_flight++;
+//                pdebug(DEBUG_SPEW,"%d unconnected requests in flight.", unconnected_requests_in_flight);
+//            }
+//        }
+//
+//
+//        /* is there a request ready to send and can we send? */
+//        if(!session->current_request && request->send_request) {
+//            if(request->connected_request) {
+//                if(connected_requests_in_flight < SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT) {
+//                    pdebug(DEBUG_INFO,"Readying connected packet to send.");
+//
+//                    /* increment the refcount since we are storing a pointer to the request */
+//                    rc_inc(request);
+//                    session->current_request = request;
+//
+//                    connected_requests_in_flight++;
+//
+//                    pdebug(DEBUG_INFO,"sending packet, so %d connected requests in flight.", connected_requests_in_flight);
+//                }
+//            } else {
+//                if(unconnected_requests_in_flight < SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT) {
+//                    pdebug(DEBUG_INFO,"Readying unconnected packet to send.");
+//
+//                    /* increment the refcount since we are storing a pointer to the request */
+//                    rc_inc(request);
+//                    session->current_request = request;
+//
+//                    unconnected_requests_in_flight++;
+//
+//                    pdebug(DEBUG_INFO,"sending packet, so %d unconnected requests in flight.", unconnected_requests_in_flight);
+//                }
+//            }
+//        }
+//
+//        /* call this often to make sure we get the data out. */
+//        rc = send_current_request(session);
+//
+//        /* get the next request to process */
+//        request = request->next;
+//    }
+//
+//    return rc;
+//}
+//
+//
+//
+//
+//
+//int send_current_request(ab_session_p session)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    if(!session->current_request) {
+//        return PLCTAG_STATUS_OK;
+//    }
+//
+//    rc = send_eip_request_unsafe(session->current_request);
+//
+//    if(rc != PLCTAG_STATUS_OK) {
+//        /*error sending packet!*/
+//        return rc;
+//    }
+//
+//    /* if we are done, then clean up */
+//    if(!session->current_request->send_in_progress) {
+//        /* release the refcount on the request, we are not referencing it anymore */
+//        rc_dec(session->current_request);
+//        session->current_request = NULL;
+//    }
+//
+//    return rc;
+//}
+//
+//
+//
+//int process_response_packet_unsafe(ab_session_p session)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//    eip_cip_co_resp *response = (eip_cip_co_resp*)(&session->data[0]);
+//    ab_request_p request = session->requests;
+//
+//    /* find the request for which there is a response pending. */
+//    while(request) {
+//        /* need to get the next request now because we might be removing it in receive_response_unsafe */
+//        ab_request_p next_req = request->next;
+//
+//        if(match_request_and_response(request, response)) {
+//            receive_response_unsafe(session, request);
+//        }
+//
+//        request = next_req;
+//    }
+//
+//    return rc;
+//}
+//
+//
+//int match_request_and_response(ab_request_p request, eip_cip_co_resp *response)
+//{
+//    int connected_response = (le2h16(response->encap_command) == AB_EIP_CONNECTED_SEND ? 1 : 0);
+//
+//    /*
+//     * AB decided not to use the 64-bit sender context in connected messages.  No idea
+//     * why they did this, but it means that we need to look at the connection details
+//     * instead.
+//     */
+//    if(connected_response && request->conn_id == le2h32(response->cpf_orig_conn_id) && request->conn_seq == le2h16(response->cpf_conn_seq_num)) {
+//        /* if it is a connected packet, match the connection ID and sequence num. */
+//        return 1;
+//    } else if(!connected_response && le2h64(response->encap_sender_context) != (uint64_t)0 && le2h64(response->encap_sender_context) == request->session_seq_id) {
+//        /* if it is not connected, match the sender context, note that this is sent in host order. */
+//        return 1;
+//    }
+//
+//    /* no match */
+//    return 0;
+//}
+//
+//
+//
+//void receive_response_unsafe(ab_session_p session, ab_request_p request)
+//{
+//    /*
+//     * We received a packet.  Modify the packet interval downword slightly
+//     * to get to the maximum value.  We want to get to the point where we lose
+//     * a packet once in a while.
+//     */
+//
+//    /*session->next_packet_interval_us -= SESSION_PACKET_RECEIVE_INTERVAL_DEC;
+//    if(session->next_packet_interval_us < SESSION_MIN_PACKET_INTERVAL) {
+//        session->next_packet_interval_us = SESSION_MIN_PACKET_INTERVAL;
+//    }
+//    pdebug(DEBUG_INFO,"Packet received, so decreasing packet interval to %lldus", session->next_packet_interval_us);
+//    */
+//
+//    pdebug(DEBUG_INFO,"Packet sent initially %dms ago and was sent %d times",(int)(time_ms() - request->time_sent), request->send_count);
+//
+//    //update_resend_samples(session, time_ms() - request->time_sent);
+//
+//    /* set the packet ready for processing. */
+//    pdebug(DEBUG_INFO, "got full packet of size %d", session->data_offset);
+//    pdebug_dump_bytes(DEBUG_INFO, session->data, session->data_offset);
+//
+//    /* copy the data from the session's buffer */
+//    mem_copy(request->data, session->data, session->data_offset);
+//    request->request_size = session->data_offset;
+//
+//    request->resp_received = 1;
+//    request->send_in_progress = 0;
+//    request->send_request = 0;
+//    request->recv_in_progress = 0;
+//
+//    /* clear the request from the session as it is done. Note we hold the mutex here.
+//     *
+//     * This must be done last since we release the reference to the request here!  That could
+//     * destroy the request.
+//     */
+//    session_remove_request_unsafe(session, request);
+//}
