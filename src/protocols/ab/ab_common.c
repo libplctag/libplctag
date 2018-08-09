@@ -301,7 +301,12 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->needs_connection = attr_get_int(attribs,"use_connected_msg", 1);
 
             /* default to allow packing, IF using connected mode. */
-            tag->allow_packing = attr_get_int(attribs, "allow_packing", tag->needs_connection);
+            if(tag->needs_connection) {
+                tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
+            } else {
+                tag->allow_packing = 0;
+            }
+
             break;
 
         case AB_PROTOCOL_MLGX800:
