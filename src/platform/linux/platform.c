@@ -471,7 +471,7 @@ int mutex_try_lock(mutex_p m)
     }
 
     if(pthread_mutex_trylock(&(m->p_mutex))) {
-        pdebug(DEBUG_WARN, "error locking mutex.");
+        pdebug(DEBUG_SPEW, "error locking mutex.");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
@@ -928,7 +928,7 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
 
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
-            return PLCTAG_ERR_NO_DATA;
+            return 0;
         } else {
             pdebug(DEBUG_WARN,"Socket read error: rc=%d, errno=%d", rc, errno);
             return PLCTAG_ERR_READ;
