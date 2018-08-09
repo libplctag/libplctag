@@ -103,9 +103,10 @@ struct ab_session_t {
     /* data for receiving messages */
     uint64_t resp_seq_id;
     int has_response;
-    uint32_t recv_offset;
-    uint32_t recv_capacity;
-    uint8_t recv_data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
+    uint32_t data_offset;
+    uint32_t data_capacity;
+    uint32_t data_size;
+    uint8_t data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
 
     /*int recv_size;*/
 
