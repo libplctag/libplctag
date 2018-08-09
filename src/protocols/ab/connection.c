@@ -70,7 +70,7 @@ static int recv_forward_open_resp(ab_connection_p connection, ab_request_p req);
 //~ static int connection_is_empty(ab_connection_p connection);
 //static int connection_destroy_unsafe(ab_connection_p connection);
 static void connection_destroy(void *connection);
-static int connection_close(ab_connection_p connection);
+//static int connection_close(ab_connection_p connection);
 static int send_forward_close_req(ab_connection_p connection, ab_request_p req);
 static int recv_forward_close_resp(ab_connection_p connection, ab_request_p req);
 
@@ -97,7 +97,7 @@ int connection_find_or_create(ab_tag_p tag, attr attribs)
      * connection at the same time.
      */
 
-    critical_block(global_session_mut) {
+    critical_block(tag->session->session_mutex) {
         if(shared_connection) {
             connection = session_find_connection_by_path_unsafe(tag->session, path);
         } else {
@@ -314,7 +314,7 @@ int try_forward_open_ex(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -370,7 +370,7 @@ int try_forward_open(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -665,15 +665,6 @@ void connection_destroy(void *connection_arg)
         return;
     }
 
-    /* do not destroy the connection if there are
-     * connections still */
-
-    /* removed due to refcount code
-    if (connection->tags) {
-        pdebug(DEBUG_WARN, "Attempt to destroy connection while open tags exist!");
-        return 0;
-    }
-    */
 
     /*
      * This needs to be done carefully.  We can have a race condition here.
@@ -682,28 +673,14 @@ void connection_destroy(void *connection_arg)
      * a reference (and thus a ref count increment), then we have another
      * reference and thus cannot delete this connection yet.
      */
-    critical_block(global_session_mut) {
-//        if(refcount_get_count(&connection->rc) > 0) {
-//            pdebug(DEBUG_WARN,"Some other thread took a reference to this connection before we could delete it.  Aborting deletion.");
-//            really_destroy = 0;
-//            break;
-//        }
-
+    critical_block(connection->session->session_mutex) {
         /* make sure the session does not reference the connection */
         session_remove_connection_unsafe(connection->session, connection);
 
         /* now no one can get a reference to this connection. */
     }
 
-//    if(really_destroy) {
-        /* clean up connection with the PLC, ignore return code, we can't do anything about it. */
-        connection_close(connection);
-
-        rc_dec(connection->session);
-
-        /* do final clean up */
-        //mem_free(connection);
-//    }
+    rc_dec(connection->session);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -725,66 +702,66 @@ void connection_destroy(void conn_arg)
 }
 */
 
-int connection_close(ab_connection_p connection)
-{
-    ab_request_p req;
-    int64_t timeout_time = 0L;
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    do {
-        /* get a request buffer */
-        rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-            break;
-        }
-
-//        req->num_retries_left = 5; /* MAGIC! */
-//        req->retry_interval = 900; /* MAGIC! */
-
-        /* send the ForwardClose command to the PLC */
-        if((rc = send_forward_close_req(connection, req)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to send ForwardClose packet!");
-            break;
-        }
-
-        /* wait for a response */
-        timeout_time = time_ms() + CONNECTION_TEARDOWN_TIMEOUT;
-
-        while (timeout_time > time_ms() && !req->resp_received) {
-            sleep_ms(1);
-        }
-
-        /* timeout? */
-        if(!req->resp_received) {
-            pdebug(DEBUG_WARN,"Timed out waiting for ForwardClose response!");
-            rc = PLCTAG_ERR_TIMEOUT;
-            break;
-        }
-
-        /* check for the ForwardClose response. */
-        if((rc = recv_forward_close_resp(connection, req)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to use ForwardClose response!");
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-    } while(0);
-
-    connection->status = rc;
-
-    if(req) {
-        //session_remove_request(connection->session,req);
-        request_abort(req); /* FIXME - needed? */
-        req = rc_dec(req);
-    }
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return rc;
-}
+//int connection_close(ab_connection_p connection)
+//{
+//    ab_request_p req;
+//    int64_t timeout_time = 0L;
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    pdebug(DEBUG_INFO, "Starting.");
+//
+//    do {
+//        /* get a request buffer */
+//        rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
+//        if(rc != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+//            break;
+//        }
+//
+////        req->num_retries_left = 5; /* MAGIC! */
+////        req->retry_interval = 900; /* MAGIC! */
+//
+//        /* send the ForwardClose command to the PLC */
+//        if((rc = send_forward_close_req(connection, req)) != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_WARN,"Unable to send ForwardClose packet!");
+//            break;
+//        }
+//
+//        /* wait for a response */
+//        timeout_time = time_ms() + CONNECTION_TEARDOWN_TIMEOUT;
+//
+//        while (timeout_time > time_ms() && !req->resp_received) {
+//            sleep_ms(1);
+//        }
+//
+//        /* timeout? */
+//        if(!req->resp_received) {
+//            pdebug(DEBUG_WARN,"Timed out waiting for ForwardClose response!");
+//            rc = PLCTAG_ERR_TIMEOUT;
+//            break;
+//        }
+//
+//        /* check for the ForwardClose response. */
+//        if((rc = recv_forward_close_resp(connection, req)) != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_WARN,"Unable to use ForwardClose response!");
+//            rc = PLCTAG_ERR_REMOTE_ERR;
+//            break;
+//        }
+//
+//    } while(0);
+//
+//    connection->status = rc;
+//
+//    if(req) {
+//        //session_remove_request(connection->session,req);
+//        request_abort(req); /* FIXME - needed? */
+//        req = rc_dec(req);
+//    }
+//
+//    pdebug(DEBUG_INFO, "Done.");
+//
+//    return rc;
+//}
 
 
 int send_forward_close_req(ab_connection_p connection, ab_request_p req)
