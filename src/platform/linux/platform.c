@@ -471,7 +471,7 @@ int mutex_try_lock(mutex_p m)
     }
 
     if(pthread_mutex_trylock(&(m->p_mutex))) {
-        pdebug(DEBUG_SPEW, "error locking mutex.");
+        pdebug(DEBUG_WARN, "error locking mutex.");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
