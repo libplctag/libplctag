@@ -457,6 +457,30 @@ int mutex_lock(mutex_p m)
 }
 
 
+int mutex_try_lock(mutex_p m)
+{
+    /*pdebug(DEBUG_DETAIL,"locking mutex %p",m);*/
+
+    if(!m) {
+        pdebug(DEBUG_WARN, "null mutex pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!m->initialized) {
+        return PLCTAG_ERR_MUTEX_INIT;
+    }
+
+    if(pthread_mutex_trylock(&(m->p_mutex))) {
+        pdebug(DEBUG_WARN, "error locking mutex.");
+        return PLCTAG_ERR_MUTEX_LOCK;
+    }
+
+    /*pdebug(DEBUG_DETAIL,"Done.");*/
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 
 int mutex_unlock(mutex_p m)
 {
@@ -1010,4 +1034,3 @@ int64_t time_ms(void)
 
     return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
 }
-

@@ -148,6 +148,7 @@ extern char *str_concat_impl(int num_args, ...);
 typedef struct mutex_t *mutex_p;
 extern int mutex_create(mutex_p *m);
 extern int mutex_lock(mutex_p m);
+extern int mutex_try_lock(mutex_p m);
 extern int mutex_unlock(mutex_p m);
 extern int mutex_destroy(mutex_p *m);
 
