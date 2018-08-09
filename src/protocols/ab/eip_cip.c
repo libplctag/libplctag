@@ -372,8 +372,6 @@ int tag_tickler(ab_tag_p tag)
 int tag_write_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-//    int i;
-//    int byte_offset = 0;
 
     pdebug(DEBUG_INFO, "Starting");
 
@@ -392,23 +390,10 @@ int tag_write_start(ab_tag_p tag)
         return eip_cip_tag_read_start(tag);
     }
 
-    /*
-     * calculate the number and size of the write requests
-     * if we have not already done so.
-     */
-//    if (!tag->num_write_requests) {
-//        rc = calculate_write_sizes(tag);
-//    }
-
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to calculate write sizes!");
         return rc;
     }
-
-//    /* set up all the requests at once. */
-//    byte_offset = 0;
-//
-//    for (i = 0; i < tag->num_write_requests; i++) {
 
     /* the write is now pending */
     tag->write_in_progress = 1;
@@ -424,118 +409,12 @@ int tag_write_start(ab_tag_p tag)
         return rc;
     }
 
-//    byte_offset += tag->write_req_sizes[i];
-//}
-
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
 
-/*
- * allocate_request_slot
- *
- * Increase the number of available request slots.
- */
-//int allocate_request_slot(ab_tag_p tag)
-//{
-//    int* old_sizes;
-//    ab_request_p* old_reqs;
-//    int i;
-//    int old_max = tag->max_requests;
-//
-//    pdebug(DEBUG_DETAIL, "Starting.");
-//
-//    /* bump up the number of allowed requests */
-//    tag->max_requests += DEFAULT_MAX_REQUESTS;
-//
-//    pdebug(DEBUG_DETAIL, "setting max_requests = %d", tag->max_requests);
-//
-//    /* (re)allocate the read size array */
-//    old_sizes = tag->read_req_sizes;
-//    tag->read_req_sizes = (int*)mem_alloc(tag->max_requests * sizeof(int));
-//
-//    if (!tag->read_req_sizes) {
-//        mem_free(old_sizes);
-//        pdebug(DEBUG_WARN,"Unable to allocate read sizes array!");
-//        return PLCTAG_ERR_NO_MEM;
-//    }
-//
-//    /* copy the size data */
-//    if (old_sizes) {
-//        for (i = 0; i < old_max; i++) {
-//            tag->read_req_sizes[i] = old_sizes[i];
-//        }
-//
-//        mem_free(old_sizes);
-//    }
-//
-//    /* (re)allocate the write size array */
-//    old_sizes = tag->write_req_sizes;
-//    tag->write_req_sizes = (int*)mem_alloc(tag->max_requests * sizeof(int));
-//
-//    if (!tag->write_req_sizes) {
-//        mem_free(old_sizes);
-//        pdebug(DEBUG_WARN,"Unable to allocate write sizes array!");
-//        return PLCTAG_ERR_NO_MEM;
-//    }
-//
-//    /* copy the size data */
-//    if (old_sizes) {
-//        for (i = 0; i < old_max; i++) {
-//            tag->write_req_sizes[i] = old_sizes[i];
-//        }
-//
-//        mem_free(old_sizes);
-//    }
-//
-//    /* do the same for the request array */
-//    old_reqs = tag->reqs;
-//    tag->reqs = (ab_request_p*)mem_alloc(tag->max_requests * sizeof(ab_request_p));
-//
-//    if (!tag->reqs) {
-//        pdebug(DEBUG_WARN,"Unable to allocate requests array!");
-//        return PLCTAG_ERR_NO_MEM;
-//    }
-//
-//    /* copy the request data, there shouldn't be anything here I think... */
-//    if (old_reqs) {
-//        for (i = 0; i < old_max; i++) {
-//            tag->reqs[i] = old_reqs[i];
-//        }
-//
-//        mem_free(old_reqs);
-//    }
-//
-//    pdebug(DEBUG_DETAIL, "Done.");
-//
-//    return PLCTAG_STATUS_OK;
-//}
-//
-//int allocate_read_request_slot(ab_tag_p tag)
-//{
-//    /* increase the number of available request slots */
-//    tag->num_read_requests++;
-//
-//    if (tag->num_read_requests > tag->max_requests) {
-//        return allocate_request_slot(tag);
-//    }
-//
-//    return PLCTAG_STATUS_OK;
-//}
-//
-//int allocate_write_request_slot(ab_tag_p tag)
-//{
-//    /* increase the number of available request slots */
-//    tag->num_write_requests++;
-//
-//    if (tag->num_write_requests > tag->max_requests) {
-//        return allocate_request_slot(tag);
-//    }
-//
-//    return PLCTAG_STATUS_OK;
-//}
-//
+
 
 int build_read_request_connected(ab_tag_p tag, int byte_offset)
 {
@@ -547,15 +426,11 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size, tag);
-
+    rc = request_create(&req, tag->connection->max_payload_size);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
-
-//    req->num_retries_left = tag->num_retries;
-//    req->retry_interval = tag->default_retry_interval;
 
     /* point the request struct at the buffer */
     cip = (eip_cip_co_req*)(req->data);
@@ -660,7 +535,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE, tag);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -800,7 +675,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size, tag);
+    rc = request_create(&req, tag->connection->max_payload_size);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -950,7 +825,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size, tag);
+    rc = request_create(&req, tag->connection->max_payload_size);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
