@@ -162,7 +162,11 @@ THREAD_FUNC(tag_tickler_func)
             }
 
             if(tag && tag->vtable->tickler) {
-                tag->vtable->tickler(tag);
+                if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+                    tag->vtable->tickler(tag);
+
+                    mutex_unlock(tag->api_mutex);
+                }
             }
 
             rc_dec(tag);
@@ -196,6 +200,12 @@ THREAD_FUNC(tag_tickler_func)
 LIB_EXPORT const char* plc_tag_decode_error(int rc)
 {
     switch(rc) {
+    case PLCTAG_STATUS_PENDING:
+        return "PLCTAG_STATUS_PENDING";
+    case PLCTAG_STATUS_OK:
+        return "PLCTAG_STATUS_OK";
+    case PLCTAG_ERR_ABORT:
+        return "PLCTAG_ERR_ABORT";
     case PLCTAG_ERR_BAD_CONFIG:
         return "PLCTAG_ERR_BAD_CONFIG";
     case PLCTAG_ERR_BAD_CONNECTION:
@@ -413,6 +423,11 @@ LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
         int64_t start_time = time_ms();
 
         while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
+            /* give some time to the tickler function. */
+            if(tag->vtable->tickler) {
+                tag->vtable->tickler(tag);
+            }
+
             rc = tag->vtable->status(tag);
 
             /*
@@ -660,6 +675,11 @@ LIB_EXPORT int plc_tag_read(plc_tag id, int timeout)
             int64_t start_time = time_ms();
 
             while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
+                /* give some time to the tickler function. */
+                if(tag->vtable->tickler) {
+                    tag->vtable->tickler(tag);
+                }
+
                 rc = tag->vtable->status(tag);
 
                 /*
@@ -724,6 +744,10 @@ int plc_tag_status(plc_tag id)
     }
 
     critical_block(tag->api_mutex) {
+        if(tag && tag->vtable->tickler) {
+            tag->vtable->tickler(tag);
+        }
+
         rc = tag->vtable->status(tag);
     }
 
@@ -780,6 +804,11 @@ LIB_EXPORT int plc_tag_write(plc_tag id, int timeout)
             int64_t timeout_time = timeout + start_time;
 
             while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
+                /* give some time to the tickler function. */
+                if(tag->vtable->tickler) {
+                    tag->vtable->tickler(tag);
+                }
+
                 rc = tag->vtable->status(tag);
 
                 /*
