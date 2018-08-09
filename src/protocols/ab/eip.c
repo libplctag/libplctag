@@ -164,64 +164,62 @@ int recv_eip_response_unsafe(ab_session_p session)
      * need to get an encap header.  This will determine
      * whether we need to get more data or not.
      */
-    data_needed = (session->recv_offset < sizeof(eip_encap_t)) ?
-                                            sizeof(eip_encap_t) :
-                                            sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
+    data_needed = (session->data_offset < sizeof(eip_encap_t)) ?
+                  sizeof(eip_encap_t) :
+                  sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
 
-    if(data_needed >= session->recv_capacity) {
-        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->recv_capacity);
-        pdebug_dump_bytes(DEBUG_WARN, session->recv_data, session->recv_offset);
+    if(data_needed >= session->data_capacity) {
+        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
+        pdebug_dump_bytes(DEBUG_WARN, session->data, session->data_offset);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if (session->recv_offset < data_needed) {
+    if (session->data_offset < data_needed) {
         /* read everything we can */
         do {
-            rc = socket_read(session->sock, session->recv_data + session->recv_offset,
-                             data_needed - session->recv_offset);
+            rc = socket_read(session->sock, session->data + session->data_offset,
+                             data_needed - session->data_offset);
 
             /*pdebug(DEBUG_DETAIL,"socket_read rc=%d",rc);*/
 
             if (rc < 0) {
-                if (rc != PLCTAG_ERR_NO_DATA) {
-                    /* error! */
-                    pdebug(DEBUG_WARN,"Error reading socket! rc=%d",rc);
-                    return rc;
-                }
+                /* error! */
+                pdebug(DEBUG_WARN,"Error reading socket! rc=%d",rc);
+                return rc;
             } else {
-                session->recv_offset += rc;
+                session->data_offset += rc;
 
-                /*pdebug_dump_bytes(session->debug, session->recv_data, session->recv_offset);*/
+                /*pdebug_dump_bytes(session->debug, session->data, session->data_offset);*/
 
                 /* recalculate the amount of data needed if we have just completed the read of an encap header */
-                if (session->recv_offset >= sizeof(eip_encap_t)) {
-                    data_needed = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->recv_data))->encap_length);
+                if (session->data_offset >= sizeof(eip_encap_t)) {
+                    data_needed = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
 
-                    if(data_needed >= session->recv_capacity) {
-                        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->recv_capacity);
+                    if(data_needed >= session->data_capacity) {
+                        pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
                         return PLCTAG_ERR_TOO_LARGE;
                     }
                 }
             }
-        } while (rc > 0 && session->recv_offset < data_needed);
+        } while (rc > 0 && session->data_offset < data_needed);
     }
 
     /* did we get all the data? */
-    if (session->recv_offset >= data_needed) {
-        session->resp_seq_id = le2h64(((eip_encap_t*)(session->recv_data))->encap_sender_context);
+    if (session->data_offset >= data_needed) {
+        session->resp_seq_id = le2h64(((eip_encap_t*)(session->data))->encap_sender_context);
         session->has_response = 1;
 
         rc = PLCTAG_STATUS_OK;
 
-        pdebug(DEBUG_DETAIL, "request received all needed data (%d bytes of %d).", session->recv_offset, data_needed);
+        pdebug(DEBUG_DETAIL, "request received all needed data (%d bytes of %d).", session->data_offset, data_needed);
 
-        pdebug_dump_bytes(DEBUG_DETAIL, session->recv_data, session->recv_offset);
+        pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_offset);
 
-        if(le2h16(((eip_encap_t*)(session->recv_data))->encap_command) == AB_EIP_READ_RR_DATA) {
-            eip_encap_t *encap = (eip_encap_t*)(session->recv_data);
+        if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
+            eip_encap_t *encap = (eip_encap_t*)(session->data);
             pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
         } else {
-            eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->recv_data);
+            eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->data);
             pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
         }
     }
