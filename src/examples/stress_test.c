@@ -170,11 +170,13 @@ static void *test_cip(void *data)
 void *test_cip(void *data)
 {
     int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
-    int32_t value = 0;
-    int64_t start = 0;
-    int64_t end = 0;
-    int64_t timeout = 0;
+    static const char *tag_str_no_connect = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&use_connected_msg=0&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
+    static const char *tag_str_connect_shared = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
+    static const char *tag_str_connect_not_shared = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&share_session=0&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
+    const char * tag_str = NULL;
+    int32_t value;
+    uint64_t start;
+    uint64_t end;
     plc_tag tag = PLC_TAG_NULL;
     int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
