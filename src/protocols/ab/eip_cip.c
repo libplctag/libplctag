@@ -458,7 +458,7 @@ int tag_write_start(ab_tag_p tag)
         return rc;
     }
 
-   pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
@@ -583,7 +583,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE, tag);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);

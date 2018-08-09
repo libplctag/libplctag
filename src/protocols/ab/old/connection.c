@@ -341,7 +341,7 @@ int try_forward_open(ab_connection_p connection)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE, NULL);
+    rc = request_create(&req, MAX_CIP_MSG_SIZE);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
