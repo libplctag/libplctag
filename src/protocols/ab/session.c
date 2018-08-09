@@ -88,6 +88,155 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
 }
 
 
+static int connection_is_usable(ab_connection_p connection)
+{
+    if(!connection) {
+        return 0;
+    }
+
+    if(connection->exclusive) {
+        return 0;
+    }
+
+    if(connection->disconnect_in_progress) {
+        return 0;
+    }
+
+    return 1;
+}
+
+
+
+ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path)
+{
+    ab_connection_p connection;
+
+    connection = session->connections;
+
+    /*
+     * there are a lot of conditions.
+     * We do not want to use connections that are in the process of shutting down.
+     * We do not want to use connections that are used exclusively by one tag.
+     * We want to use connections that have the same path as the tag.
+     */
+
+    while(connection) {
+        /* scan past any that are in the process of being deleted. */
+        while(connection && !rc_inc(connection)) {
+            connection = connection->next;
+        }
+
+        /* did we walk off the end? */
+        if(!connection) {
+            break;
+        }
+
+        if(connection_is_usable(connection) && str_cmp_i(connection->path, path)==0) {
+            /* this is the one! */
+            break;
+        }
+
+        /* we are not going to use this connection, release it. */
+        rc_dec(connection);
+
+        /* try the next one. */
+        connection = connection->next;
+    }
+
+    /* add to the ref count.  This is safe if connection is null. */
+    return connection;
+}
+
+
+
+int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection)
+{
+    pdebug(DEBUG_DETAIL, "Starting");
+
+    /* add the connection to the list in the session */
+    connection->next = session->connections;
+    session->connections = connection;
+
+    pdebug(DEBUG_DETAIL, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+int session_add_connection(ab_session_p session, ab_connection_p connection)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting");
+
+    if(session) {
+        critical_block(session->session_mutex) {
+            rc = session_add_connection_unsafe(session, connection);
+        }
+    } else {
+        pdebug(DEBUG_WARN, "Session ptr is null!");
+        rc = PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done");
+
+    return rc;
+}
+
+/* must have the session mutex held here. */
+int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection)
+{
+    ab_connection_p cur;
+    ab_connection_p prev;
+    /* int debug = session->debug; */
+    int rc;
+
+    pdebug(DEBUG_DETAIL, "Starting");
+
+    cur = session->connections;
+    prev = NULL;
+
+    while (cur && cur != connection) {
+        prev = cur;
+        cur = cur->next;
+    }
+
+    if (cur && cur == connection) {
+        if (prev) {
+            prev->next = cur->next;
+        } else {
+            session->connections = cur->next;
+        }
+
+        rc = PLCTAG_STATUS_OK;
+    } else {
+        rc = PLCTAG_ERR_NOT_FOUND;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done");
+
+    return rc;
+}
+
+int session_remove_connection(ab_session_p session, ab_connection_p connection)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting");
+
+    if(session) {
+        critical_block(session->session_mutex) {
+            rc = session_remove_connection_unsafe(session, connection);
+        }
+    } else {
+        rc = PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done");
+
+    return rc;
+}
+
+
 int session_find_or_create(ab_session_p *tag_session, attr attribs)
 {
     /*int debug = attr_get_int(attribs,"debug",0);*/
