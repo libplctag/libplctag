@@ -90,7 +90,7 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
     uint16_t res = 0;
 
     //pdebug(DEBUG_DETAIL, "entering critical block %p",global_session_mut);
-    critical_block(global_session_mut) {
+    critical_block(sess->session_mutex) {
         res = (uint16_t)session_get_new_seq_id_unsafe(sess);
     }
     //pdebug(DEBUG_DETAIL, "leaving critical block %p", global_session_mut);
@@ -180,7 +180,7 @@ int session_add_connection(ab_session_p session, ab_connection_p connection)
     pdebug(DEBUG_DETAIL, "Starting");
 
     if(session) {
-        critical_block(global_session_mut) {
+        critical_block(session->session_mutex) {
             rc = session_add_connection_unsafe(session, connection);
         }
     } else {
@@ -235,7 +235,7 @@ int session_remove_connection(ab_session_p session, ab_connection_p connection)
     pdebug(DEBUG_DETAIL, "Starting");
 
     if(session) {
-        critical_block(global_session_mut) {
+        critical_block(session->session_mutex) {
             rc = session_remove_connection_unsafe(session, connection);
         }
     } else {
@@ -862,7 +862,7 @@ int session_add_request(ab_session_p sess, ab_request_p req)
 
     pdebug(DEBUG_DETAIL, "Starting. sess=%p, req=%p", sess, req);
 
-    critical_block(global_session_mut) {
+    critical_block(sess->session_mutex) {
         rc = session_add_request_unsafe(sess, req);
     }
 
@@ -933,7 +933,7 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
         return rc;
     }
 
-    critical_block(global_session_mut) {
+    critical_block(sess->session_mutex) {
         rc = session_remove_request_unsafe(sess, req);
     }
 
