@@ -484,8 +484,9 @@ int mutex_lock(mutex_p m)
     dwWaitResult = ~WAIT_OBJECT_0;
 
     /* FIXME - This will potentially hang forever! */
-    while(dwWaitResult != WAIT_OBJECT_0)
+    while(dwWaitResult != WAIT_OBJECT_0) {
         dwWaitResult = WaitForSingleObject(m->h_mutex,INFINITE);
+    }
 
     return PLCTAG_STATUS_OK;
 }
@@ -1016,7 +1017,7 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
     if(rc < 0) {
         err=WSAGetLastError();
         if(err == WSAEWOULDBLOCK) {
-            return PLCTAG_ERR_NO_DATA;
+            return 0;
         } else {
             pdebug(DEBUG_WARN,"socket read error rc=%d, errno=%d", rc, err);
             return PLCTAG_ERR_READ;
