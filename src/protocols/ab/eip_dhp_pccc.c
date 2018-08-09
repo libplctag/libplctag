@@ -177,7 +177,7 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 //    }
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size, tag);
+    rc = request_create(&req, tag->connection->max_payload_size);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
@@ -313,7 +313,7 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
 //    }
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size, tag);
+    rc = request_create(&req, tag->connection->max_payload_size);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
