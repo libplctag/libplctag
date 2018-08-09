@@ -1165,10 +1165,16 @@ THREAD_FUNC(session_handler)
         }
     }
 
-    THREAD_RETURN(0);
-}
+            rc = send_eip_request(session);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error sending packet! rc=%d", rc);
 
+                request->status = rc;
+                request->resp_received = 1;
+                request->request_size = 0;
 
+                break;
+            }
 
 int prepare_request(ab_session_p session, ab_request_p request)
 {
@@ -1697,9 +1703,10 @@ int send_forward_open_req_ex(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Done");
 
-    return rc;
-}
 
+    session->data_offset = 0;
+    session->data_size = 0;
+    data_needed = sizeof(eip_encap_t);
 
 
 
@@ -1777,6 +1784,7 @@ int recv_forward_open_resp(ab_session_p session)
     return rc;
 }
 
+            /*pdebug_dump_bytes(session->debug, session->data, session->data_offset);*/
 
 int send_forward_close_req(ab_session_p session)
 {
