@@ -990,12 +990,14 @@ THREAD_FUNC(session_handler)
                     session->requests = request->next;
 
                     /* get, or try to get, a reference to the request. */
-                    request = rc_inc(session->requests);
+                    //request = rc_inc(request);
                 }
             }
 
             if(!request) {
                 /* nothing to do. */
+                pdebug(DEBUG_DETAIL, "No requests to process.");
+
                 break;
             }
 
@@ -1057,6 +1059,10 @@ THREAD_FUNC(session_handler)
             request->resp_received = 1;
             request->request_size = session->data_size;
         } while(0);
+
+        if(request) {
+            rc_dec(request);
+        }
 
         /* give up the CPU a bit. */
         sleep_ms(1);
