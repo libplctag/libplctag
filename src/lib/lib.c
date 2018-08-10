@@ -158,7 +158,11 @@ THREAD_FUNC(tag_tickler_func)
             plc_tag_p tag = NULL;
 
             critical_block(tag_lookup_mutex) {
-                tag = rc_inc(tag_lookup_table[i]);
+                tag = tag_lookup_table[i];
+
+                if(tag) {
+                    tag = rc_inc(tag);
+                }
             }
 
             if(tag && tag->vtable->tickler) {
@@ -169,7 +173,9 @@ THREAD_FUNC(tag_tickler_func)
                 }
             }
 
-            rc_dec(tag);
+            if(tag) {
+                rc_dec(tag);
+            }
         }
 
         sleep_ms(1);
