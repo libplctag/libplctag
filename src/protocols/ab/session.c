@@ -649,8 +649,6 @@ int session_register(ab_session_p session)
     eip_session_reg_req* req;
     eip_encap_t* resp;
     int rc = PLCTAG_STATUS_OK;
-    uint32_t data_size = 0;
-    int64_t timeout_time;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -683,86 +681,27 @@ int session_register(ab_session_p session)
      */
 
     /* send registration to the gateway */
-    data_size = sizeof(eip_session_reg_req);
+    session->data_size = sizeof(eip_session_reg_req);
     session->data_offset = 0;
-    timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
 
-    pdebug(DEBUG_INFO, "sending data:");
-    pdebug_dump_bytes(DEBUG_INFO, session->data, data_size);
-
-    while (!session->terminating && timeout_time > time_ms() && session->data_offset < data_size) {
-        rc = socket_write(session->sock, session->data + session->data_offset, data_size - session->data_offset);
-
-        if (rc < 0) {
-            pdebug(DEBUG_WARN, "Unable to send session registration packet! rc=%d", rc);
-            session->data_offset = 0;
-            return rc;
-        }
-
-        session->data_offset += rc;
-
-        /* don't hog the CPU */
-        if (session->data_offset < data_size) {
-            sleep_ms(1);
-        }
-    }
-
-    if (session->data_offset != data_size) {
-        session->data_offset = 0;
-        return PLCTAG_ERR_TIMEOUT;
+    rc = send_eip_request(session);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Error sending session registration request! rc=%d", rc);
+        return rc;
     }
 
     /* get the response from the gateway */
-
-    /* ready the input buffer */
-    session->data_offset = 0;
-    mem_set(session->data, 0, session->data_capacity);
-
-    timeout_time = time_ms() + SESSION_REGISTRATION_TIMEOUT;
-
-    while (!session->terminating && timeout_time > time_ms()) {
-        if (session->data_offset < sizeof(eip_encap_t)) {
-            data_size = sizeof(eip_encap_t);
-        } else {
-            data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
-        }
-
-        if (session->data_offset < data_size) {
-            rc = socket_read(session->sock, session->data + session->data_offset, data_size - session->data_offset);
-
-            if (rc < 0) {
-                /* error! */
-                pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
-                return rc;
-            } else {
-                session->data_offset += rc;
-
-                /* recalculate the amount of data needed if we have just completed the read of an encap header */
-                if (session->data_offset >= sizeof(eip_encap_t)) {
-                    data_size = sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length);
-                }
-            }
-        }
-
-        /* did we get all the data? */
-        if (session->data_offset == data_size) {
-            break;
-        } else {
-            /* do not hog the CPU */
-            sleep_ms(1);
-        }
+    rc = recv_eip_response(session);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error receiving session registration response!");
+        return rc;
     }
 
-    if (session->data_offset != data_size) {
-        session->data_offset = 0;
-        return PLCTAG_ERR_TIMEOUT;
-    }
-
-    /* set the offset back to zero for the next packet */
-    session->data_offset = 0;
-
-    pdebug(DEBUG_INFO, "received response:");
-    pdebug_dump_bytes(DEBUG_INFO, session->data, data_size);
+//    /* set the offset back to zero for the next packet */
+//    session->data_offset = 0;
+//
+//    pdebug(DEBUG_INFO, "received response:");
+//    pdebug_dump_bytes(DEBUG_INFO, session->data, data_size);
 
     /* encap header is at the start of the buffer */
     resp = (eip_encap_t*)(session->data);
@@ -1065,11 +1004,14 @@ THREAD_FUNC(session_handler)
         }
 
         /* give up the CPU a bit. */
-        sleep_ms(1);
+        if(!session->terminating) {
+            sleep_ms(1);
+        }
     }
 
     THREAD_RETURN(0);
 }
+
 
 
 int prepare_request(ab_session_p session, ab_request_p request)
@@ -1135,10 +1077,15 @@ int send_eip_request(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     if(!session) {
         pdebug(DEBUG_WARN, "Session pointer is null.");
         return PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_DETAIL,"Sending packet of size %d",session->data_size);
+    pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_size);
 
     session->data_offset = 0;
 
@@ -1148,6 +1095,11 @@ int send_eip_request(ab_session_p session)
 
         if(rc >= 0) {
             session->data_offset += rc;
+        }
+
+        /* give up the CPU if we still are looping */
+        if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
+            sleep_ms(1);
         }
     } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size);
 
@@ -1219,7 +1171,7 @@ int recv_eip_response(ab_session_p session)
         }
 
         /* did we get all the data? */
-        if(session->data_offset < data_needed) {
+        if(!session->terminating && session->data_offset < data_needed) {
             /* do not hog the CPU */
             sleep_ms(1);
         }
@@ -1243,7 +1195,7 @@ int recv_eip_response(ab_session_p session)
         if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
             eip_encap_t *encap = (eip_encap_t*)(session->data);
             pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
-        } else {
+        } else if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
             eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->data);
             pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
         }
@@ -1251,4 +1203,3 @@ int recv_eip_response(ab_session_p session)
 
     return rc;
 }
-
