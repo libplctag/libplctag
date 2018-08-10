@@ -110,8 +110,7 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
 }
 
 
-static const char *debug_level_name[DEBUG_END] = {"NONE","ERROR","WARN","INFO","DETAIL","SPEW"};
-
+static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO", "DETAIL", "SPEW"};
 
 extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...)
 {
