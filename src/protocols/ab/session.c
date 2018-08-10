@@ -1146,6 +1146,7 @@ THREAD_FUNC(session_handler)
                 break;
             }
 
+
 int prepare_request(ab_session_p session, ab_request_p request)
 {
     eip_encap_t* encap = (eip_encap_t*)(request->data);
@@ -1209,6 +1210,8 @@ int send_eip_request(ab_session_p session, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1858,4 +1861,3 @@ int recv_forward_close_resp(ab_session_p session)
 
     return rc;
 }
-
