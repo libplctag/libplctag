@@ -705,6 +705,7 @@ int send_forward_close_req(ab_connection_p connection)
     uint8_t *data;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
+    int wait_iterations = 0;
 
     pdebug(DEBUG_INFO,"Starting");
 
@@ -762,9 +763,11 @@ int send_forward_close_req(ab_connection_p connection)
     /* add the request to the session's list. */
     rc = session_add_request(connection->session, req);
 
-    /* wait for a reply */
-    while(!req->resp_received) {
+    /* wait for a reply, timeout after 50ms or so.  Just enought to send the data. */
+    wait_iterations = 0;
+    while(!req->resp_received && wait_iterations < 50) {
         sleep_ms(1);
+        wait_iterations++;
     }
 
     /* now remove the request reference here.  The only remaining one is in the session. */
