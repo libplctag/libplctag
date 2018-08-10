@@ -1269,7 +1269,9 @@ int prepare_request(ab_session_p session, ab_request_p request)
 
         pdebug(DEBUG_INFO,"Preparing unconnected packet with session sequence ID %llx",session->session_seq_id);
     } else if(le2h16(encap->encap_command) == AB_EIP_CONNECTED_SEND) {
-        eip_cip_co_req *conn_req = (eip_cip_co_req*)(session->data);
+        eip_cip_co_req *conn_req = (eip_cip_co_req*)(request->data);
+
+        pdebug(DEBUG_DETAIL, "cpf_targ_conn_id=%x", request->connection->targ_connection_id);
 
         /* set up the connection information */
         conn_req->cpf_targ_conn_id = h2le32(request->connection->targ_connection_id);
@@ -1288,6 +1290,8 @@ int prepare_request(ab_session_p session, ab_request_p request)
     /* display the data */
     pdebug(DEBUG_INFO,"Prepared packet of size %d",request->request_size);
     pdebug_dump_bytes(DEBUG_INFO, request->data, request->request_size);
+
+    pdebug(DEBUG_INFO,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
