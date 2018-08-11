@@ -157,7 +157,8 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
  * FIXME - This should be factored out into a separate function.
  */
 
-int cip_encode_path(ab_tag_p tag, const char *path)
+//int cip_encode_path(ab_tag_p tag, const char *path)
+int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint8_t *dhp_dest)
 {
     int ioi_size=0;
     int link_index=0;
@@ -168,7 +169,8 @@ int cip_encode_path(ab_tag_p tag, const char *path)
     int tmp=0;
     char **links=NULL;
     char *link=NULL;
-    uint8_t *data = tag->conn_path;
+    uint8_t tmp_path[MAX_CONN_PATH+16];
+    uint8_t *data = &tmp_path[0];
 
     /* split the path */
     if(path) {
@@ -179,7 +181,7 @@ int cip_encode_path(ab_tag_p tag, const char *path)
         /* work along each string. */
         link = links[link_index];
 
-        while(link && ioi_size < (MAX_CONN_PATH-2)) {   /* MAGIC -2 to allow for padding */
+        while(link && ioi_size < MAX_CONN_PATH) {   /* MAGIC -2 to allow for padding */
             int rc = match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr);
             if(rc > 0) {
                 /* we matched a DH+ route node */
@@ -228,17 +230,10 @@ int cip_encode_path(ab_tag_p tag, const char *path)
       * whether the last part is DH+.  Only some combinations of
       * DH+ and PLC type work.
       */
-    if(last_is_dhp && tag->protocol_type == AB_PROTOCOL_PLC) {
+    if(last_is_dhp && plc_type == AB_PROTOCOL_PLC) {
         /* We have to make the difference from the more
          * generic case.
          */
-        //tag->routing_path[0] = 0x20; /* class */
-        //tag->routing_path[1] = 0xA6; /* DH+ */
-        //tag->routing_path[2] = 0x24; /* instance */
-        //tag->routing_path[3] = dhp_channel;  /* 1 = Channel A, 2 = Channel B */
-        //tag->routing_path[4] = 0x2C; /* ? */
-        //tag->routing_path[5] = 0x01; /* ? */
-        //tag->routing_path_size = 6;
 
         /* try adding this onto the end of the routing path */
         *data = 0x20;
@@ -255,11 +250,9 @@ int cip_encode_path(ab_tag_p tag, const char *path)
         data++;
         ioi_size += 6;
 
-        tag->dhp_src  = src_addr;
-        tag->dhp_dest = dest_addr;
-        tag->use_dhp_direct = 1;
+        *dhp_dest = dest_addr;
     } else if(!has_dhp) {
-        if(tag->needs_connection) {
+        if(needs_connection) {
             /*
              * we do a generic path to the router
              * object in the PLC.  But only if the PLC is
@@ -276,18 +269,14 @@ int cip_encode_path(ab_tag_p tag, const char *path)
             ioi_size += 4;
         }
 
-        tag->dhp_src  = 0;
-        tag->dhp_dest = 0;
-        tag->use_dhp_direct = 0;
+        *dhp_dest = 0;
     } else {
         /* we had the special DH+ format and it was
          * either not last or not a PLC5/SLC.  That
          * is an error.
          */
 
-        tag->dhp_src  = 0;
-        tag->dhp_dest = 0;
-        tag->use_dhp_direct = 0;
+        *dhp_dest = 0;
 
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -303,8 +292,18 @@ int cip_encode_path(ab_tag_p tag, const char *path)
         ioi_size++;
     }
 
-    /* set the connection path size */
-    tag->conn_path_size = ioi_size;
+    /* allocate space for the connection path */
+    *conn_path = mem_alloc(ioi_size);
+    if(! *conn_path) {
+        pdebug(DEBUG_WARN, "Unable to allocate connection path!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    mem_copy(*conn_path, &tmp_path[0], ioi_size);
+
+    *conn_path_size = ioi_size;
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
