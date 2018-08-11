@@ -70,23 +70,20 @@ struct ab_session_t {
     int port;
     char *path;
     sock_p sock;
-//    int is_open;
-//    int is_registered;
-//    int is_connected;
-//    int was_ok;
+    int is_connected;
 
     /* connection variables. */
     int use_connected_msg;
     uint32_t orig_connection_id;
     uint32_t targ_connection_id;
     uint16_t conn_seq_num;
-    uint16_t conn_serial_number;
+//    uint32_t conn_serial_number; /* id for the next connection */
 
     int plc_type;
     uint16_t max_payload_size;
     uint8_t *conn_path;
     uint8_t conn_path_size;
-    uint16_t dhp_dest;
+    uint8_t dhp_dest;
 
     /* registration info */
     uint32_t session_handle;
@@ -102,23 +99,13 @@ struct ab_session_t {
 
     /* data for receiving messages */
     uint64_t resp_seq_id;
-    int has_response;
     uint32_t data_offset;
     uint32_t data_capacity;
     uint32_t data_size;
     uint8_t data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
 
-    /*int recv_size;*/
-
-    /* tags for this session */
-    //ab_tag_p tags;
-
-    /* ref count for session */
-    //refcount rc;
-
     /* connections for this session */
-    ab_connection_p connections;
-    uint32_t conn_serial_number; /* id for the next connection */
+//    ab_connection_p connections;
 
     thread_p handler_thread;
     int terminating;
