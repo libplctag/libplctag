@@ -46,9 +46,6 @@ struct ab_tag_t {
     /*struct plc_tag_t p_tag;*/
     TAG_BASE_STRUCT;
 
-//    ab_tag_p next;
-//    ab_tag_p prev;
-//
     /* how do we talk to this device? */
     int protocol_type;
 //    int use_dhp_direct;
@@ -68,10 +65,6 @@ struct ab_tag_t {
     /* the connection IOI path */
     uint8_t conn_path[MAX_CONN_PATH];
     uint8_t conn_path_size;
-
-    /* timeout/retry information */
-//    int num_retries;
-//    int default_retry_interval;
 
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];

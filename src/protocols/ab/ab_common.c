@@ -198,9 +198,7 @@ void ab_teardown(void)
 plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
-    const char *path;
-//    int num_retries;
-//    int default_retry_interval;
+    const char *path = NULL;
 
     pdebug(DEBUG_INFO,"Starting.");
 
@@ -263,29 +261,23 @@ plc_tag_p ab_tag_create(attr attribs)
 
     /* special features for Logix tags. */
     if(tag->protocol_type == AB_PROTOCOL_LGX) {
-        /* default to requiring a connection. */
-        tag->needs_connection = attr_get_int(attribs,"use_connected_msg", 1);
-
-        /* default to allow packing, IF using connected mode. */
-        tag->allow_packing = attr_get_int(attribs, "allow_packing", tag->needs_connection);
-
-//        if(attr_get_str(attribs,"read_group",NULL)) {
-//            tag->read_group = str_dup(attr_get_str(attribs,"read_group",NULL));
-//
-//            if(!tag->read_group) {
-//                pdebug(DEBUG_WARN,"Unable to save read group name!");
-//                tag->status = PLCTAG_ERR_BAD_PARAM;
-//                return (plc_tag_p)tag;
-//            }
-//
-//            insert_read_group_tag(tag);
-//        }
+        /* default to allow packing */
+        tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
     }
 
     /* get the connection path.  We need this to make a decision about the PLC. */
     path = attr_get_str(attribs,"path",NULL);
 
-    /* set up PLC-specific information. */
+    if(path == NULL && tag->protocol_type == AB_PROTOCOL_LGX) {
+        pdebug(DEBUG_WARN,"A path is required for Logix-class PLCs!");
+        tag->status = PLCTAG_ERR_BAD_PARAM;
+        return (plc_tag_p)tag;
+    }
+
+    tag->first_read = 1;
+
+    /* set up retry and other PLC-specific information. */
+
     switch(tag->protocol_type) {
         case AB_PROTOCOL_PLC:
             tag->needs_connection = 0;
@@ -311,39 +303,40 @@ plc_tag_p ab_tag_create(attr attribs)
                 tag->allow_packing = 0;
             }
 
-            break;
-
-        case AB_PROTOCOL_MLGX800:
-            tag->needs_connection = 1;
-            tag->allow_packing = 0;
-            break;
-
-        default:
-            pdebug(DEBUG_WARN, "Unknown PLC type!");
-            tag->status = PLCTAG_ERR_BAD_DEVICE;
-            return (plc_tag_p)tag;
-        }
-
-        /* default to requiring a connection. */
-        tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
-        tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
-        tag->vtable = &eip_cip_vtable;
-
         break;
 
     case AB_PROTOCOL_MLGX800:
-        pdebug(DEBUG_DETAIL, "Setting up Micro8X0 tag.");
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
-        tag->vtable = &eip_cip_vtable;
         break;
 
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
-        tag->status = PLCTAG_ERR_BAD_CONFIG;
+        tag->status = PLCTAG_ERR_BAD_DEVICE;
         return (plc_tag_p)tag;
         break;
     }
+
+    /* pass the connection requirement since it may be overridden above. */
+    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
+
+    /* start parsing the parts of the tag. */
+
+    /*
+     * parse the link path into the tag.  Note that it must
+     * pad the byte string to a multiple of 16-bit words. The function
+     * also adds the protocol/PLC specific routing information to the
+     * links specified.  This fills in fields in the connection about
+     * any DH+ special data.
+     *
+     * Skip this if we don't have a path.
+     */
+//    if(cip_encode_path(tag,path) != PLCTAG_STATUS_OK) {
+//        pdebug(DEBUG_INFO,"Unable to convert path links strings to binary path!");
+//        tag->status = PLCTAG_ERR_BAD_PARAM;
+//        return (plc_tag_p)tag;
+//    }
+>>>>>>> Removal of independent connections.
 
     /*
      * handle the strange LGX->DH+->PLC5 case.
@@ -354,11 +347,10 @@ plc_tag_p ab_tag_create(attr attribs)
      * then we need to be in connected mode.  Even if the PLC that we want
      * to talk to is one that supports non-connected mode.
      */
-    if(tag->use_dhp_direct) {
-        /* this is a bit of a cheat.   The logic should be fixed up to combine with the check above.*/
-        tag->needs_connection = 1;
-//        default_retry_interval = DEFAULT_RETRY_INTERVAL*3; /* MAGIC boost the default timeout! */
-    }
+//    if(tag->use_dhp_direct) {
+//        /* this is a bit of a cheat.   The logic should be fixed up to combine with the check above.*/
+//        tag->needs_connection = 1;
+//    }
 
     /*
      * set up tag vtable.  This is protocol specific
@@ -386,6 +378,17 @@ plc_tag_p ab_tag_create(attr attribs)
     }
 
     pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
+
+//    if(tag->needs_connection) {
+//        /* Find or create a connection.*/
+//        if((tag->status = connection_find_or_create(tag, attribs)) != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_INFO,"Unable to create connection! Status=%d",tag->status);
+//            return (plc_tag_p)tag;
+//        }
+//
+//        /* set up the links between the tag and the connection. */
+//        //connection_add_tag(tag->connection, tag);
+//    }
 
     /*
      * check the tag name, this is protocol specific.
@@ -421,20 +424,19 @@ int default_abort(plc_tag_p tag)
 int default_read(plc_tag_p tag)
 {
     switch(tag->protocol_type) {
-        case AB_PROTOCOL_PLC:
-            if(tag->use_dhp_direct) {
-                return &plc_dhp_vtable;
-            } else {
-                return &plc_vtable;
-            }
-
-int default_status(plc_tag_p tag)
-{
-    (void)tag;
-
-        case AB_PROTOCOL_MLGX:
+    case AB_PROTOCOL_PLC:
+        if(tag->use_dhp_direct) {
+            return &plc_dhp_vtable;
+        } else {
             return &plc_vtable;
+        }
 
+        break;
+
+    case AB_PROTOCOL_MLGX:
+        return &plc_vtable;
+
+        break;
 
 int default_tickler(plc_tag_p tag)
 {
@@ -446,10 +448,12 @@ int default_tickler(plc_tag_p tag)
         case AB_PROTOCOL_LGX:
             return &cip_vtable;
 
+        break;
 
-int default_write(plc_tag_p tag)
-{
-    (void)tag;
+    default:
+        return NULL;
+        break;
+    }
 
     pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
@@ -518,8 +522,15 @@ void ab_tag_destroy(ab_tag_p tag)
         return;
     }
 
-    connection = tag->connection;
+//    connection = tag->connection;
     session = tag->session;
+
+//    /* tags may have a connection.  Release if so. */
+//    if(connection) {
+//        pdebug(DEBUG_DETAIL, "Removing tag from connection.");
+//        rc_dec(connection);
+//        tag->connection = NULL;
+//    }
 
     /* tags should always have a session.  Release it. */
     pdebug(DEBUG_DETAIL,"Getting ready to release tag session %p",tag->session);

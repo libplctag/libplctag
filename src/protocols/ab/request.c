@@ -67,9 +67,6 @@ int request_create(ab_request_p *req, int max_payload_size)
             return rc;
         }
 
-        /* we need to be careful as this sets up a reference cycle! */
-        //res->tag = rc_inc(tag);
-
         *req = res;
     }
 
@@ -92,7 +89,6 @@ int request_abort(ab_request_p req)
 
     critical_block(req->request_mutex) {
         req->_abort_request = !0;
-        //req->tag = rc_dec(req->tag);
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -116,23 +112,6 @@ int request_check_abort(ab_request_p req)
     return result;
 }
 
-
-
-//ab_tag_p request_get_tag(ab_request_p req)
-//{
-//    ab_tag_p result = NULL;
-//
-//    if(!req) {
-//        return result;
-//    }
-//
-//    critical_block(req->request_mutex) {
-//        //result = rc_inc(req->tag);
-//    }
-//
-//    return result;
-//}
-//
 
 int request_allow_packing(ab_request_p req)
 {
@@ -217,6 +196,14 @@ void request_destroy(void *req_arg)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     request_abort(req);
+
+//    if(req->session) {
+//        rc_dec(req->session);
+//    }
+//
+//    if(req->connection) {
+//        rc_dec(req->connection);
+//    }
 
     mutex_destroy(&(req->request_mutex));
 
