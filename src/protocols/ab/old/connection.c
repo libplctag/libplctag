@@ -650,8 +650,6 @@ void connection_destroy(void *connection_arg)
         /* now no one can get a reference to this connection. */
     }
 
-
-
     rc_dec(connection->session);
 
     pdebug(DEBUG_INFO, "Done.");
