@@ -140,34 +140,6 @@ int connection_find_or_create(ab_tag_p tag, attr attribs)
 }
 
 
-//int connection_acquire(ab_connection_p connection)
-//{
-//    if(!connection) {
-//        return PLCTAG_ERR_NULL_PTR;
-//    }
-//
-//    pdebug(DEBUG_INFO,"Acquire connection.");
-//
-//    return refcount_acquire(&connection->rc);
-//}
-//
-//int connection_release(ab_connection_p connection)
-//{
-//    if(!connection) {
-//        return PLCTAG_ERR_NULL_PTR;
-//    }
-//
-//    pdebug(DEBUG_INFO,"Release connection.");
-//
-//    return refcount_release(&connection->rc);
-//}
-//
-
-
-
-
-
-
 
 
 /*
@@ -191,9 +163,6 @@ ab_connection_p connection_create_unsafe(const char* path, ab_tag_p tag, int sha
     connection->orig_connection_id = ++(connection->session->conn_serial_number);
     connection->status = PLCTAG_STATUS_PENDING;
     connection->exclusive = !shared;
-
-    /* connection is going to be referenced, so set refcount up. */
-//    connection->rc = refcount_init(1, connection, connection_destroy);
 
     /* copy the path for later */
     str_copy(&connection->path[0], MAX_CONN_PATH, path);
@@ -688,8 +657,6 @@ void connection_destroy(void *connection_arg)
 
         /* now no one can get a reference to this connection. */
     }
-
-
 
     rc_dec(connection->session);
 
