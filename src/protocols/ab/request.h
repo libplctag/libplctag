@@ -62,9 +62,8 @@ struct ab_request_t {
     int processed;
 
     mutex_p request_mutex;
-    //ab_tag_p tag;
     ab_session_p session;
-    ab_connection_p connection;
+//    ab_connection_p connection;
     int allow_packing;
     int packing_num;
 
@@ -75,9 +74,6 @@ struct ab_request_t {
     /* time stamps for rate calculations */
     int64_t time_sent;
     int send_count;
-
-//    int num_retries_left;
-//    int retry_interval;
 
     /* used by the background thread for incrementally getting data */
     int current_offset;
