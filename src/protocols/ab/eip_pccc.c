@@ -36,7 +36,7 @@ extern "C"
 #include <ab/pccc.h>
 #include <ab/eip_pccc.h>
 #include <ab/tag.h>
-#include <ab/connection.h>
+//#include <ab/connection.h>
 #include <ab/session.h>
 #include <ab/defs.h>
 #include <ab/eip.h>
@@ -56,7 +56,7 @@ int eip_pccc_tag_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int session_rc = PLCTAG_STATUS_OK;
-    int connection_rc = PLCTAG_STATUS_OK;
+//    int connection_rc = PLCTAG_STATUS_OK;
 
     if(tag->read_in_progress) {
 //        return check_read_status(tag);
@@ -77,23 +77,23 @@ int eip_pccc_tag_status(ab_tag_p tag)
         session_rc = PLCTAG_ERR_CREATE;
     }
 
-    if(tag->needs_connection) {
-        if(tag->connection) {
-            connection_rc = tag->connection->status;
-        } else {
-            /* fatal! */
-            connection_rc = PLCTAG_ERR_CREATE;
-        }
-    } else {
-        connection_rc = PLCTAG_STATUS_OK;
-    }
+//    if(tag->needs_connection) {
+//        if(tag->connection) {
+//            connection_rc = tag->connection->status;
+//        } else {
+//            /* fatal! */
+//            connection_rc = PLCTAG_ERR_CREATE;
+//        }
+//    } else {
+//        connection_rc = PLCTAG_STATUS_OK;
+//    }
 
     /* now collect the status.  Highest level wins. */
     rc = session_rc;
 
-    if(rc == PLCTAG_STATUS_OK) {
-        rc = connection_rc;
-    }
+//    if(rc == PLCTAG_STATUS_OK) {
+//        rc = connection_rc;
+//    }
 
     if(rc == PLCTAG_STATUS_OK) {
         rc = tag->status;
