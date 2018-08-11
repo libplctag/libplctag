@@ -78,6 +78,7 @@ int tag_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int session_rc = PLCTAG_STATUS_OK;
+//    int connection_rc = PLCTAG_STATUS_OK;
 
     if (tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
@@ -137,8 +138,23 @@ int tag_status(ab_tag_p tag)
         session_rc = PLCTAG_ERR_CREATE;
     }
 
+//    if(tag->needs_connection) {
+//        if(tag->connection) {
+//            connection_rc = tag->connection->status;
+//        } else {
+//            /* fatal! */
+//            connection_rc = PLCTAG_ERR_CREATE;
+//        }
+//    } else {
+//        connection_rc = PLCTAG_STATUS_OK;
+//    }
+
     /* now collect the status.  Highest level wins. */
     rc = session_rc;
+
+//    if(rc == PLCTAG_STATUS_OK) {
+//        rc = connection_rc;
+//    }
 
     if(rc == PLCTAG_STATUS_OK) {
         rc = tag->status;
@@ -156,7 +172,7 @@ int eip_cip_tag_tickler(ab_tag_p tag)
     pdebug(DEBUG_DETAIL,"Starting.");
 
     if (tag->read_in_progress) {
-        if(tag->connection) {
+        if(tag->use_connected_msg) {
             rc = check_read_status_connected(tag);
         } else {
             rc = check_read_status_unconnected(tag);
@@ -168,7 +184,7 @@ int eip_cip_tag_tickler(ab_tag_p tag)
     }
 
     if (tag->write_in_progress) {
-        if(tag->connection) {
+        if(tag->use_connected_msg) {
             rc = check_write_status_connected(tag);
         } else {
             rc = check_write_status_unconnected(tag);
@@ -249,7 +265,7 @@ int tag_tickler(ab_tag_p tag)
     tag->read_in_progress = 1;
 
     /* i is the index of the first new request */
-    if(tag->connection) {
+    if(tag->use_connected_msg) {
         rc = build_read_request_connected(tag, tag->byte_offset);
     } else {
         rc = build_read_request_unconnected(tag, tag->byte_offset);
@@ -425,7 +441,7 @@ int tag_write_start(ab_tag_p tag)
     /* the write is now pending */
     tag->write_in_progress = 1;
 
-    if(tag->connection) {
+    if(tag->use_connected_msg) {
         rc = build_write_request_connected(tag, tag->byte_offset);
     } else {
         rc = build_write_request_unconnected(tag, tag->byte_offset);
@@ -453,7 +469,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size);
+    rc = request_create(&req, tag->session->max_payload_size);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -514,10 +530,6 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
 //    req->connection = tag->connection;
 
     req->session = tag->session;
-
-    if(tag->allow_packing) {
-        request_allow_packing(req);
-    }
 
     if(tag->allow_packing) {
         request_allow_packing(req);
@@ -700,7 +712,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size);
+    rc = request_create(&req, tag->session->max_payload_size);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -850,7 +862,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size);
+    rc = request_create(&req, tag->session->max_payload_size);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
