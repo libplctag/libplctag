@@ -31,14 +31,14 @@
 /* do these first */
 #define MAX_TAG_NAME        (260)
 #define MAX_TAG_TYPE_INFO   (64)
-#define MAX_CONN_PATH       (200)
+#define MAX_CONN_PATH       (260)   /* 256 plus padding. */
 
 /* they are used in some of these includes */
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <ab/ab_common.h>
 #include <ab/session.h>
-#include <ab/connection.h>
+//#include <ab/connection.h>
 #include <ab/request.h>
 
 
@@ -46,9 +46,6 @@ struct ab_tag_t {
     /*struct plc_tag_t p_tag;*/
     TAG_BASE_STRUCT;
 
-//    ab_tag_p next;
-//    ab_tag_p prev;
-//
     /* how do we talk to this device? */
     int protocol_type;
     int use_dhp_direct;
@@ -57,8 +54,7 @@ struct ab_tag_t {
 
     /* pointers back to session */
     ab_session_p session;
-    int needs_connection;
-    ab_connection_p connection;
+    int use_connected_msg;
 
     /* this contains the encoded name */
     uint8_t encoded_name[MAX_TAG_NAME];
@@ -69,10 +65,6 @@ struct ab_tag_t {
     /* the connection IOI path */
     uint8_t conn_path[MAX_CONN_PATH];
     uint8_t conn_path_size;
-
-    /* timeout/retry information */
-//    int num_retries;
-//    int default_retry_interval;
 
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];

@@ -34,7 +34,7 @@
 #include <ab/pccc.h>
 #include <ab/eip_dhp_pccc.h>
 #include <ab/tag.h>
-#include <ab/connection.h>
+//#include <ab/connection.h>
 #include <ab/session.h>
 #include <ab/defs.h>
 #include <ab/eip.h>
@@ -54,20 +54,14 @@ int eip_dhp_pccc_tag_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int session_rc = PLCTAG_STATUS_OK;
-    int connection_rc = PLCTAG_STATUS_OK;
+//    int connection_rc = PLCTAG_STATUS_OK;
 
     if(tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
-//        rc = check_read_status(tag);
-//
-//        return rc;
     }
 
     if(tag->write_in_progress) {
         return PLCTAG_STATUS_PENDING;
-//        rc = check_write_status(tag);
-//
-//        return rc;
     }
 
     /* propagate the status up. */
@@ -78,24 +72,24 @@ int eip_dhp_pccc_tag_status(ab_tag_p tag)
         session_rc = PLCTAG_ERR_CREATE;
     }
 
-    if(tag->needs_connection) {
-        if(tag->connection) {
-            connection_rc = tag->connection->status;
-        } else {
-            /* fatal! */
-            connection_rc = PLCTAG_ERR_CREATE;
-        }
-    } else {
-        connection_rc = PLCTAG_STATUS_OK;
-    }
+//    if(tag->needs_connection) {
+//        if(tag->use_connected_msg) {
+//            connection_rc = tag->connection->status;
+//        } else {
+//            /* fatal! */
+//            connection_rc = PLCTAG_ERR_CREATE;
+//        }
+//    } else {
+//        connection_rc = PLCTAG_STATUS_OK;
+//    }
 
     /* now collect the status.  Highest level wins. */
     rc = session_rc;
 
-    if(rc == PLCTAG_STATUS_OK) {
-        rc = connection_rc;
-    }
-
+//    if(rc == PLCTAG_STATUS_OK) {
+//        rc = connection_rc;
+//    }
+//
     if(rc == PLCTAG_STATUS_OK) {
         rc = tag->status;
     }
@@ -152,10 +146,10 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
                  +2  /* maximum extended type. */
                  +2; /* maximum extended size. */
 
-    data_per_packet = tag->connection->max_payload_size - overhead;
+    data_per_packet = tag->session->max_payload_size - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->connection->max_payload_size);
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->session->max_payload_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -164,27 +158,12 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-//    if(!tag->reqs) {
-//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-//        tag->max_requests = 1;
-//        tag->num_read_requests = 1;
-//        tag->num_write_requests = 1;
-//
-//        if(!tag->reqs) {
-//            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
-//            return PLCTAG_ERR_NO_MEM;
-//        }
-//    }
-
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size);
+    rc = request_create(&req, tag->session->max_payload_size);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
-
-//    req->num_retries_left = tag->num_retries;
-//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_dhp_co_req*)(req->data);
 
@@ -221,7 +200,7 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     /* PCCC Command */
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
-    pccc->pccc_seq_num = /*h2le16(conn_seq_id)*/ h2le16((uint16_t)(intptr_t)(tag->connection));
+    pccc->pccc_seq_num = /*h2le16(conn_seq_id)*/ h2le16((uint16_t)(intptr_t)(tag->session));
     pccc->pccc_function = AB_EIP_PCCC_TYPED_READ_FUNC;
     pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
 
@@ -229,7 +208,7 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
     req->request_size = data - (req->data);
 
     /* store the connection */
-    req->connection = tag->connection;
+//    req->connection = tag->connection;
 
     /* this request is connected, so it needs the session exclusively */
     req->connected_request = 1;
@@ -242,7 +221,6 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-//        request_release(req);
         request_abort(req);
         tag->req = rc_dec(req);
         return rc;
@@ -288,10 +266,10 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
                +(tag->encoded_name_size)
                +2;       /* this request size in elements */
 
-    data_per_packet = tag->connection->max_payload_size - overhead;
+    data_per_packet = tag->session->max_payload_size - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->connection->max_payload_size);
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->session->max_payload_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -300,28 +278,13 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-//    if(!tag->reqs) {
-//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-//        tag->max_requests = 1;
-//        tag->num_read_requests = 1;
-//        tag->num_write_requests = 1;
-//
-//        if(!tag->reqs) {
-//            pdebug(DEBUG_ERROR,"Unable to get memory for request array!");
-//            return PLCTAG_ERR_NO_MEM;
-//        }
-//    }
-
     /* get a request buffer */
-    rc = request_create(&req, tag->connection->max_payload_size);
+    rc = request_create(&req, tag->session->max_payload_size);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
-
-//    req->num_retries_left = tag->num_retries;
-//    req->retry_interval = tag->default_retry_interval;
 
     pccc = (pccc_dhp_co_req*)(req->data);
 
@@ -402,7 +365,7 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
     /* PCCC Command */
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
-    pccc->pccc_seq_num = h2le16((uint16_t)(intptr_t)(tag->connection));
+    pccc->pccc_seq_num = h2le16((uint16_t)(intptr_t)(tag->session));
     pccc->pccc_function = AB_EIP_PCCC_TYPED_WRITE_FUNC;
     pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
 
@@ -410,7 +373,7 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
     req->request_size = data - (req->data);
 
     /* store the connection */
-    req->connection = tag->connection;
+//    req->connection = tag->connection;
 
     /* ready the request for sending */
     req->send_request = 1;

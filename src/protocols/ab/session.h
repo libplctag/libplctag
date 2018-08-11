@@ -62,12 +62,27 @@ struct ab_session_t {
     ab_session_p next;
     ab_session_p prev;
 
+    int status;
+
     /* gateway connection related info */
-    char host[MAX_SESSION_HOST];
+    char *host;
     int port;
+    char *path;
     sock_p sock;
     int is_connected;
-    int status;
+
+    /* connection variables. */
+    int use_connected_msg;
+    uint32_t orig_connection_id;
+    uint32_t targ_connection_id;
+    uint16_t conn_seq_num;
+//    uint32_t conn_serial_number; /* id for the next connection */
+
+    int plc_type;
+    uint16_t max_payload_size;
+    uint8_t *conn_path;
+    uint8_t conn_path_size;
+    uint8_t dhp_dest;
 
     /* registration info */
     uint32_t session_handle;
@@ -82,40 +97,15 @@ struct ab_session_t {
     /* list of outstanding requests for this session */
     ab_request_p requests;
 
-    /* counter for number of messages in flight */
-    int num_reqs_in_flight;
-    //int64_t next_packet_time_us;
-    //int64_t next_packet_interval_us;
-
-    //int64_t retry_interval;
-
-    /* short cumulative period for calculating round trip time. */
-    int64_t round_trip_samples[SESSION_NUM_ROUND_TRIP_SAMPLES];
-    int round_trip_sample_index;
-
-    /* serialization control */
-    //~ int serial_request_in_flight;
-    //~ uint64_t serial_seq_in_flight;
-
     /* data for receiving messages */
     uint64_t resp_seq_id;
-    int has_response;
     uint32_t data_offset;
     uint32_t data_capacity;
     uint32_t data_size;
     uint8_t data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
 
-    /*int recv_size;*/
-
-    /* tags for this session */
-    //ab_tag_p tags;
-
-    /* ref count for session */
-    //refcount rc;
-
     /* connections for this session */
-    ab_connection_p connections;
-    uint32_t conn_serial_number; /* id for the next connection */
+//    ab_connection_p connections;
 
     thread_p handler_thread;
     int terminating;
@@ -126,17 +116,15 @@ uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
 uint64_t session_get_new_seq_id(ab_session_p sess);
 
 extern int session_find_or_create(ab_session_p *session, attr attribs);
-ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
-extern int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection);
-extern int session_add_connection(ab_session_p session, ab_connection_p connection);
-extern int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection);
-extern int session_remove_connection(ab_session_p session, ab_connection_p connection);
+//ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
+//extern int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection);
+//extern int session_add_connection(ab_session_p session, ab_connection_p connection);
+//extern int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection);
+//extern int session_remove_connection(ab_session_p session, ab_connection_p connection);
 extern int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
 extern int session_remove_request_unsafe(ab_session_p sess, ab_request_p req);
 extern int session_remove_request(ab_session_p sess, ab_request_p req);
-//extern int session_acquire(ab_session_p session);
-//extern int session_release(ab_session_p session);
 
 
 #endif
