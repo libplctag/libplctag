@@ -31,7 +31,7 @@ typedef struct {
 
 
 
-static void print_buf(uint8_t *buf, size_t data_len);
+static void print_buf(uint8_t *buf, ssize_t data_len);
 static int process_packet(session_context *context);
 static void register_session(session_context *context);
 
@@ -71,9 +71,9 @@ void *session_handler(void *sockptr)
         }
 
         log("session_handler() got packet:\n");
-        print_buf(context.buf, (size_t)rc); /* safe cast because we checked for negative above */
+        print_buf(context.buf, rc);
 
-        context.buf_len = (uint16_t)rc;
+        context.buf_len = rc;
 
         continue_running = process_packet(&context);
     }
@@ -244,16 +244,16 @@ void handle_forward_close(session_context *context)
 
     memset(&resp, 0, sizeof(resp));
 
-    memcpy(path_data, path_start, (size_t)path_size); /* FIXME - check if negative first! */
+    memcpy(path_data, path_start, path_size);
 
     log("handle_forward_close() path_size=%d\n",(int)path_size);
-    print_buf(path_data, (size_t)path_size);
+    print_buf(path_data, path_size);
 
     resp.command = req->command;
     resp.session_handle = req->session_handle;
     resp.sender_context = req->sender_context;
 
-    resp.length = (uint16_t)((size_t)path_size + sizeof(resp) - sizeof(eip_header));
+    resp.length = path_size + sizeof(resp) - sizeof(eip_header);
 
     resp.interface_handle = req->interface_handle;
     resp.router_timeout = req->router_timeout;
@@ -271,14 +271,14 @@ void handle_forward_close(session_context *context)
     resp.orig_serial_number = req->orig_serial_number;
 
     memcpy(context->buf, &resp, sizeof(resp));
-    memcpy(context->buf + sizeof(resp), path_data, (size_t)path_size);
+    memcpy(context->buf + sizeof(resp), path_data, path_size);
 
     log("handle_forward_close() sending response:\n");
-    print_buf(context->buf, sizeof(resp) + (size_t)path_size);
+    print_buf(context->buf, sizeof(resp) + path_size);
 
-    rc = write(context->sock, context->buf, sizeof(resp) + (size_t)path_size);
-    if(rc != (int)(sizeof(resp) + (size_t)path_size)) {
-        log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(sizeof(resp) + (size_t)path_size));
+    rc = write(context->sock, context->buf, sizeof(resp) + path_size);
+    if(rc != (int)(sizeof(resp) + path_size)) {
+        log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(sizeof(resp) + path_size));
     }
 }
 
@@ -322,8 +322,8 @@ void handle_cip_read(session_context *context)
     uint8_t *data = NULL;
     char *tag_name = NULL;
     int item_offset = 0;
-    int elem_count = 0;
-    int byte_offset = 0;
+    uint16_t elem_count = 0;
+    uint32_t byte_offset = 0;
     tag_data *tag = NULL;
     int data_remaining = 0;
 //    int items_remaining = 0;
@@ -368,16 +368,16 @@ void handle_cip_read(session_context *context)
     }
 
     /* read the number of elements to read */
-    elem_count = (data[0]) + ((data[1]) << 8);
+    elem_count = (uint16_t)(data[0]) + (((uint16_t)(data[1])) << 8);
     data += 2;
 
     log("tag elem_count=%d\n",elem_count);
 
     if(req->service_code == CIP_CMD_READ_FRAG) {
-        byte_offset =  (data[0])
-                       + ((data[1]) << 8)
-                       + ((data[2]) << 16)
-                       + ((data[3]) << 24);
+        byte_offset =  (uint32_t)(data[0])
+                       +((uint32_t)(data[1]) << 8)
+                       +((uint32_t)(data[2]) << 16)
+                       +((uint32_t)(data[3]) << 24);
         data += 4;
 
         log("tag byte offset=%d\n", byte_offset);
@@ -414,7 +414,7 @@ void handle_cip_read(session_context *context)
         log("Clamping number of items to write to %d\n", items_that_fit);
     }
 
-    memcpy(data, &tag->data[base_offset], (size_t)items_that_fit * tag->elem_size);
+    memcpy(data, &tag->data[base_offset], items_that_fit * tag->elem_size);
     data += (items_that_fit * tag->elem_size);
 
     /* set the status based on whether there is more to read or not. */
@@ -424,14 +424,14 @@ void handle_cip_read(session_context *context)
         resp_ptr->cip_status = CIP_STATUS_OK;
     }
 
-    resp_ptr->length = (uint16_t)(data - (uint8_t*)&(resp_ptr->interface_handle));
-    resp_ptr->cpf_cdi_item_length = (uint16_t)(data - (uint8_t*)(&(resp_ptr->cpf_conn_seq_num)));
+    resp_ptr->length = (data - (uint8_t*)&(resp_ptr->interface_handle));
+    resp_ptr->cpf_cdi_item_length = (data - (uint8_t*)(&(resp_ptr->cpf_conn_seq_num)));
 
     log("handle_cip_read() sending response:\n");
-    print_buf(context->buf, (size_t)(data - context->buf));
+    print_buf(context->buf, (data - context->buf));
 
-    rc = (int)write(context->sock, context->buf, (size_t)(data - context->buf));
-    if(rc != (int)(data - context->buf)) {
+    rc = write(context->sock, context->buf, (data - context->buf));
+    if(rc != (data - context->buf)) {
         log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(data - context->buf));
     }
 
@@ -448,8 +448,8 @@ void handle_cip_write(session_context *context)
     uint8_t *data = NULL;
     char *tag_name = NULL;
     int item_offset = 0;
-    int elem_count = 0;
-    int byte_offset = 0;
+    uint16_t elem_count = 0;
+    uint32_t byte_offset = 0;
     tag_data *tag = NULL;
     int data_remaining = 0;
 //    int items_remaining = 0;
@@ -508,16 +508,16 @@ void handle_cip_write(session_context *context)
     data += 2;
 
     /* read the number of elements to write */
-    elem_count = (data[0]) + ((data[1]) << 8);
+    elem_count = (uint16_t)(data[0]) + (((uint16_t)(data[1])) << 8);
     data += 2;
 
     log("tag elem_count=%d\n",elem_count);
 
     if(req->service_code == CIP_CMD_WRITE_FRAG) {
-        byte_offset =  (data[0])
-                       +((data[1]) << 8)
-                       +((data[2]) << 16)
-                       +((data[3]) << 24);
+        byte_offset =  (uint32_t)(data[0])
+                       +((uint32_t)(data[1]) << 8)
+                       +((uint32_t)(data[2]) << 16)
+                       +((uint32_t)(data[3]) << 24);
         data += 4;
 
         log("tag byte offset=%d\n", byte_offset);
@@ -532,10 +532,9 @@ void handle_cip_write(session_context *context)
 
     log("writing %d elements of tag %s starting at offset %d.\n", elem_count, tag->name, base_offset);
 
-    data_avail = context->buf_len - (int)(data - context->buf);
+    data_avail = context->buf_len - (data - context->buf);
 
-    /* FIXME - must check to see if data_avail is negative! */
-    memcpy(tag->data + base_offset, data, (size_t)data_avail);
+    memcpy(tag->data + base_offset, data, data_avail);
 
     /* how much data is left to write? */
     data_remaining = (elem_count * tag->elem_size) - byte_offset - data_avail;
@@ -557,7 +556,7 @@ void handle_cip_write(session_context *context)
     log("handle_cip_write() sending response:\n");
     print_buf(context->buf, sizeof(resp));
 
-    rc = (int)write(context->sock, context->buf, sizeof(resp));
+    rc = write(context->sock, context->buf, sizeof(resp));
     if(rc != sizeof(resp)) {
         log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(sizeof(resp)));
     }
@@ -572,7 +571,7 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
 {
     /* read the length in words, convert to bytes. */
     uint8_t *data = buf;
-    uint8_t path_len = (uint8_t)((*data)*2); /* translate to bytes */
+    uint8_t path_len = (*data)*2; /* translate to bytes */
     uint8_t name_len = 0;
     int index = 0;
 
@@ -591,7 +590,7 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
 
         log("read_tag_path() reading symbolic segment of length %d\n", name_len);
 
-        *tag_name = (char *)calloc(1, (size_t)(name_len+1));
+        *tag_name = calloc(1, name_len+1);
 
         if(!*tag_name) {
             log("Warning! Unable to allocate new tag name buf!");
@@ -661,7 +660,7 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
 
 
 
-void print_buf(uint8_t *buf, size_t data_len)
+void print_buf(uint8_t *buf, ssize_t data_len)
 {
     int index = 0;
     int column = 0;
