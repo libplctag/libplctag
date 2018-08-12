@@ -117,7 +117,7 @@ typedef struct {
     uint8_t timeout_ticks;          /* timeout = srd_secs_per_tick * src_timeout_ticks */
     uint32_t orig_to_targ_conn_id;  /* 0, returned by target in reply. */
     uint32_t targ_to_orig_conn_id;  /* what is _our_ ID for this connection, use ab_connection ptr as id ? */
-    uint16_t conn_serial_number;    /* our connection serial number */
+    uint16_t conn_serial_number;    /* our connection serial number ?? */
     uint16_t orig_vendor_id;        /* our unique vendor ID */
     uint32_t orig_serial_number;    /* our unique serial number */
     uint8_t conn_timeout_multiplier;/* timeout = mult * RPI */
@@ -204,7 +204,7 @@ typedef struct {
     /* Forward Open Params */
     uint8_t secs_per_tick;       /* seconds per tick */
     uint8_t timeout_ticks;       /* timeout = srd_secs_per_tick * src_timeout_ticks */
-    uint16_t conn_serial_number;    /* our connection serial number */
+    uint16_t conn_serial_number;    /* our connection serial number ?? */
     uint16_t orig_vendor_id;        /* our unique vendor ID */
     uint32_t orig_serial_number;    /* our unique serial number */
 } __attribute__((packed)) forward_close_request;
@@ -234,7 +234,7 @@ typedef struct {
     uint8_t reserved1;               /* returned as 0x00? */
     uint8_t general_status;         /* 0 on success */
     uint8_t status_size;            /* number of 16-bit words of extra status, 0 if success */
-    uint16_t conn_serial_number;    /* our connection serial number */
+    uint16_t conn_serial_number;    /* our connection serial number ?? */
     uint16_t orig_vendor_id;        /* our unique vendor ID */
     uint32_t orig_serial_number;    /* our unique serial number */
 } __attribute__((packed)) forward_close_response;

@@ -8,34 +8,62 @@
 #include "tags.h"
 
 
+#define BUFFER_LEN (4096)
 
-static void print_buf(uint8_t *buf, size_t data_len);
-static int process_packet(session_context *session);
-static void register_session(session_context *session);
+typedef struct {
+    int sock;
 
-static void process_unconnected_data(session_context *session);
-static void handle_forward_open_ex(session_context *session);
-static void handle_forward_close(session_context *session);
+//    uint16_t command;
+//    uint16_t length;
+//    uint32_t status;
 
-static void process_connected_data(session_context *session);
-static void handle_cip_read(session_context *session);
-static void handle_cip_write(session_context *session);
+    uint64_t sender_context;
+    uint32_t session_handle;
+    uint32_t connection_id;
+    uint32_t connection_id_targ;
+    uint16_t connection_seq;
+
+    uint16_t max_packet_size;
+
+    uint8_t buf[BUFFER_LEN];
+    uint16_t buf_len;
+} session_context;
+
+
+
+static void print_buf(uint8_t *buf, ssize_t data_len);
+static int process_packet(session_context *context);
+static void register_session(session_context *context);
+
+static void process_unconnected_data(session_context *context);
+static void handle_forward_open_ex(session_context *context);
+static void handle_forward_close(session_context *context);
+
+static void process_connected_data(session_context *context);
+static void handle_cip_read(session_context *context);
+static void handle_cip_write(session_context *context);
 
 static uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item);
 
 
-//static _Atomic uint32_t session_id;
-//static _Atomic uint32_t connection_id;
+static _Atomic uint32_t session_id;
+static _Atomic uint32_t connection_id;
 
 
 
-void *session_handler(void *session_arg)
+void *session_handler(void *sockptr)
 {
     int continue_running = 1;
-    session_context *session = (session_context *)session_arg;
+    int sock = *(int*)sockptr;
+    session_context context;
+
+    free(sockptr);
+
+    memset(&context, 0, sizeof(context));
+    context.sock = sock;
 
     while(continue_running) {
-        ssize_t rc = read(session->sock, session->buf, BUFFER_LEN);
+        ssize_t rc = read(context.sock, context.buf, BUFFER_LEN);
 
         if(rc < 0) {
             log("read() failed!\n");
@@ -43,48 +71,47 @@ void *session_handler(void *session_arg)
         }
 
         log("session_handler() got packet:\n");
-        print_buf(session->buf, (size_t)rc); /* safe cast because we checked for negative above */
+        print_buf(context.buf, rc);
 
-        session->buf_len = (uint16_t)rc;
+        context.buf_len = rc;
 
-        continue_running = process_packet(session);
+        continue_running = process_packet(&context);
     }
 
     log("client handler thread terminating.\n");
 
-    close(session->sock);
-
-    free(session);
+//    buffer_free(buf);
+    close(sock);
 
     return NULL;
 }
 
 
-int process_packet(session_context *session)
+int process_packet(session_context *context)
 {
-    eip_header *header = (eip_header*)session->buf;
+    eip_header *header = (eip_header*)context->buf;
 
-    if(session->buf_len < sizeof(eip_header)) {
-        log("process_packet() got less data (%d) than needed for EIP header!", (int)session->buf_len);
+    if(context->buf_len < sizeof(eip_header)) {
+        log("process_packet() got less data (%d) than needed for EIP header!", (int)context->buf_len);
         return 0;
     }
 
-    if(session->buf_len != sizeof(*header) + header->length) {
-        log("process_packet() got wrong amount (%d) of data than required (%d)\n",(int)session->buf_len, (int)(sizeof(*header) + header->length));
+    if(context->buf_len != sizeof(*header) + header->length) {
+        log("process_packet() got wrong amount (%d) of data than required (%d)\n",(int)context->buf_len, (int)(sizeof(*header) + header->length));
         return 0;
     }
 
     switch(header->command) {
     case EIP_REGISTER_SESSION:
-        register_session(session);
+        register_session(context);
         break;
 
     case EIP_UNCONNECTED_DATA:
-        process_unconnected_data(session);
+        process_unconnected_data(context);
         break;
 
     case EIP_CONNECTED_SEND:
-        process_connected_data(session);
+        process_connected_data(context);
         break;
 
     default:
@@ -96,42 +123,42 @@ int process_packet(session_context *session)
 }
 
 
-void register_session(session_context *session)
+void register_session(session_context *context)
 {
-    session_registration *reg = (session_registration*)session->buf;
+    session_registration *reg = (session_registration*)context->buf;
     ssize_t rc = 0;
 
     log("register_session() got request:\n");
-    print_buf(session->buf, sizeof(*reg));
+    print_buf(context->buf, sizeof(*reg));
 
-    reg->session_handle = session->session_handle;
+    reg->session_handle = ++session_id;
 
     log("register_session() sending response:\n");
-    print_buf(session->buf, sizeof(*reg));
+    print_buf(context->buf, sizeof(*reg));
 
-    rc = write(session->sock, session->buf, sizeof(*reg));
+    rc = write(context->sock, context->buf, sizeof(*reg));
     if(rc != sizeof(*reg)) {
         log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)sizeof(*reg));
     }
 }
 
 
-void process_unconnected_data(session_context *session)
+void process_unconnected_data(session_context *context)
 {
-    unconnected_message *header = (unconnected_message *)session->buf;
+    unconnected_message *header = (unconnected_message *)context->buf;
 
     switch(header->service_code) {
     case CIP_CMD_FORWARD_OPEN_EX:
-        handle_forward_open_ex(session);
+        handle_forward_open_ex(context);
         break;
 
     case CIP_CMD_FORWARD_CLOSE:
-        handle_forward_close(session);
+        handle_forward_close(context);
         break;
 
     default:
         log("process_unconnected_data() unsupported service code %x!\n", header->service_code);
-        print_buf(session->buf,sizeof(eip_header) + header->length);
+        print_buf(context->buf,sizeof(eip_header) + header->length);
 
         break;
     }
@@ -141,21 +168,21 @@ void process_unconnected_data(session_context *session)
 
 
 
-void handle_forward_open_ex(session_context *session)
+void handle_forward_open_ex(session_context *context)
 {
-    forward_open_ex_request *req = (forward_open_ex_request *)session->buf;
+    forward_open_ex_request *req = (forward_open_ex_request *)context->buf;
     forward_open_response resp;
     ssize_t rc = 0;
 
     log("handle_forward_open_ex() got request:\n");
-    print_buf(session->buf, sizeof(eip_header) + req->length);
+    print_buf(context->buf, sizeof(eip_header) + req->length);
 
     if((req->orig_to_targ_conn_params_ex & 0xFFFF) > BUFFER_LEN) {
         log("Requested packet size, %d, is too large!\n", (int)(req->orig_to_targ_conn_params_ex & 0xFFFF));
         return;
     }
 
-    session->max_packet_size = req->orig_to_targ_conn_params_ex & 0xFFFF;
+    context->max_packet_size = req->orig_to_targ_conn_params_ex & 0xFFFF;
 
     memset(&resp, 0, sizeof(resp));
 
@@ -176,7 +203,7 @@ void handle_forward_open_ex(session_context *session)
     resp.general_status = 0;
     resp.status_size = 0;
     /* make the connection ID global, seems that way on LGX??? */
-    resp.orig_to_targ_conn_id = session->connection_id++;
+    resp.orig_to_targ_conn_id = ++connection_id;
     resp.targ_to_orig_conn_id = req->targ_to_orig_conn_id;
     resp.conn_serial_number = req->conn_serial_number;
     resp.orig_vendor_id = req->orig_vendor_id;
@@ -187,14 +214,14 @@ void handle_forward_open_ex(session_context *session)
 
     log("handle_forward_open_ex() called with remote connection ID %x and local connection ID %x\n", resp.targ_to_orig_conn_id, resp.orig_to_targ_conn_id);
 
-    session->connection_id_targ = req->targ_to_orig_conn_id;
+    context->connection_id_targ = req->targ_to_orig_conn_id;
 
-    memcpy(session->buf, &resp, sizeof(resp));
+    memcpy(context->buf, &resp, sizeof(resp));
 
     log("handle_forward_open_ex() sending response:\n");
-    print_buf(session->buf, sizeof(resp));
+    print_buf(context->buf, sizeof(resp));
 
-    rc = write(session->sock, session->buf, sizeof(resp));
+    rc = write(context->sock, context->buf, sizeof(resp));
     if(rc != sizeof(resp)) {
         log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)sizeof(resp));
     }
@@ -202,31 +229,31 @@ void handle_forward_open_ex(session_context *session)
 
 
 
-void handle_forward_close(session_context *session)
+void handle_forward_close(session_context *context)
 {
-    forward_close_request *req = (forward_close_request *)session->buf;
+    forward_close_request *req = (forward_close_request *)context->buf;
     forward_close_response resp;
     ssize_t rc = 0;
-    uint8_t *data_end = session->buf + sizeof(eip_header) + req->length;
-    uint8_t *path_start = session->buf + sizeof(*req);
+    uint8_t *data_end = context->buf + sizeof(eip_header) + req->length;
+    uint8_t *path_start = context->buf + sizeof(*req);
     ssize_t path_size = data_end - path_start;
     uint8_t path_data[path_size];
 
     log("handle_forward_close() got request:\n");
-    print_buf(session->buf, sizeof(eip_header) + req->length);
+    print_buf(context->buf, sizeof(eip_header) + req->length);
 
     memset(&resp, 0, sizeof(resp));
 
-    memcpy(path_data, path_start, (size_t)path_size); /* FIXME - check if negative first! */
+    memcpy(path_data, path_start, path_size);
 
     log("handle_forward_close() path_size=%d\n",(int)path_size);
-    print_buf(path_data, (size_t)path_size);
+    print_buf(path_data, path_size);
 
     resp.command = req->command;
     resp.session_handle = req->session_handle;
     resp.sender_context = req->sender_context;
 
-    resp.length = (uint16_t)((size_t)path_size + sizeof(resp) - sizeof(eip_header));
+    resp.length = path_size + sizeof(resp) - sizeof(eip_header);
 
     resp.interface_handle = req->interface_handle;
     resp.router_timeout = req->router_timeout;
@@ -243,15 +270,15 @@ void handle_forward_close(session_context *session)
     resp.orig_vendor_id = req->orig_vendor_id;
     resp.orig_serial_number = req->orig_serial_number;
 
-    memcpy(session->buf, &resp, sizeof(resp));
-    memcpy(session->buf + sizeof(resp), path_data, (size_t)path_size);
+    memcpy(context->buf, &resp, sizeof(resp));
+    memcpy(context->buf + sizeof(resp), path_data, path_size);
 
     log("handle_forward_close() sending response:\n");
-    print_buf(session->buf, sizeof(resp) + (size_t)path_size);
+    print_buf(context->buf, sizeof(resp) + path_size);
 
-    rc = write(session->sock, session->buf, sizeof(resp) + (size_t)path_size);
-    if(rc != (int)(sizeof(resp) + (size_t)path_size)) {
-        log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(sizeof(resp) + (size_t)path_size));
+    rc = write(context->sock, context->buf, sizeof(resp) + path_size);
+    if(rc != (int)(sizeof(resp) + path_size)) {
+        log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(sizeof(resp) + path_size));
     }
 }
 
@@ -259,25 +286,25 @@ void handle_forward_close(session_context *session)
 
 
 
-void process_connected_data(session_context *session)
+void process_connected_data(session_context *context)
 {
-    connected_message *header = (connected_message *)session->buf;
+    connected_message *header = (connected_message *)context->buf;
 
     switch(header->service_code) {
     case CIP_CMD_READ:
     case CIP_CMD_READ_FRAG:
-        handle_cip_read(session);
+        handle_cip_read(context);
         break;
 
     case CIP_CMD_WRITE:
     case CIP_CMD_WRITE_FRAG:
-        handle_cip_write(session);
+        handle_cip_write(context);
         break;
 
 
     default:
         log("process_connected_data() unsupported service code %x!\n", header->service_code);
-        print_buf(session->buf,sizeof(eip_header) + header->length);
+        print_buf(context->buf,sizeof(eip_header) + header->length);
 
         break;
     }
@@ -286,17 +313,17 @@ void process_connected_data(session_context *session)
 
 
 
-void handle_cip_read(session_context *session)
+void handle_cip_read(session_context *context)
 {
     int rc = 0;
-    connected_message *req = (connected_message *)(session->buf);
+    connected_message *req = (connected_message *)(context->buf);
     connected_message_cip_resp resp;
     connected_message_cip_resp *resp_ptr = NULL;
     uint8_t *data = NULL;
     char *tag_name = NULL;
     int item_offset = 0;
-    int elem_count = 0;
-    int byte_offset = 0;
+    uint16_t elem_count = 0;
+    uint32_t byte_offset = 0;
     tag_data *tag = NULL;
     int data_remaining = 0;
 //    int items_remaining = 0;
@@ -316,7 +343,7 @@ void handle_cip_read(session_context *session)
     resp.cpf_item_count = 2;
     resp.cpf_cai_item_type = CPF_ITEM_CAI;
     resp.cpf_cai_item_length = 4;
-    resp.cpf_targ_conn_id = session->connection_id_targ;
+    resp.cpf_targ_conn_id = context->connection_id_targ;
     resp.cpf_cdi_item_type = CPF_ITEM_CDI;
     resp.cpf_cdi_item_length = 0; /* patch this later! */
     resp.cpf_conn_seq_num = req->cpf_conn_seq_num;
@@ -341,16 +368,16 @@ void handle_cip_read(session_context *session)
     }
 
     /* read the number of elements to read */
-    elem_count = (data[0]) + ((data[1]) << 8);
+    elem_count = (uint16_t)(data[0]) + (((uint16_t)(data[1])) << 8);
     data += 2;
 
     log("tag elem_count=%d\n",elem_count);
 
     if(req->service_code == CIP_CMD_READ_FRAG) {
-        byte_offset =  (data[0])
-                       + ((data[1]) << 8)
-                       + ((data[2]) << 16)
-                       + ((data[3]) << 24);
+        byte_offset =  (uint32_t)(data[0])
+                       +((uint32_t)(data[1]) << 8)
+                       +((uint32_t)(data[2]) << 16)
+                       +((uint32_t)(data[3]) << 24);
         data += 4;
 
         log("tag byte offset=%d\n", byte_offset);
@@ -366,9 +393,9 @@ void handle_cip_read(session_context *session)
     log("reading %d elements of tag %s starting at offset %d.\n", elem_count, tag_name, base_offset);
 
     /* copy data into response */
-    memcpy(session->buf, &resp, sizeof(resp));
+    memcpy(context->buf, &resp, sizeof(resp));
 
-    resp_ptr = (connected_message_cip_resp *)(session->buf);
+    resp_ptr = (connected_message_cip_resp *)(context->buf);
     data = (uint8_t*)(resp_ptr+1);
 
     memcpy(data, tag->data_type, 2);
@@ -379,7 +406,7 @@ void handle_cip_read(session_context *session)
 //    items_remaining = data_remaining / tag->elem_size;
 
     /* how much can we actually send? */
-    data_avail = session->max_packet_size - 8; /* MAGIC overhead */
+    data_avail = context->max_packet_size - 8; /* MAGIC overhead */
     items_that_fit = data_avail / tag->elem_size;
 
     if((int)((items_that_fit * tag->elem_size) + byte_offset) > (int)(elem_count * tag->elem_size)) {
@@ -387,7 +414,7 @@ void handle_cip_read(session_context *session)
         log("Clamping number of items to write to %d\n", items_that_fit);
     }
 
-    memcpy(data, &tag->data[base_offset], (size_t)items_that_fit * tag->elem_size);
+    memcpy(data, &tag->data[base_offset], items_that_fit * tag->elem_size);
     data += (items_that_fit * tag->elem_size);
 
     /* set the status based on whether there is more to read or not. */
@@ -397,32 +424,32 @@ void handle_cip_read(session_context *session)
         resp_ptr->cip_status = CIP_STATUS_OK;
     }
 
-    resp_ptr->length = (uint16_t)(data - (uint8_t*)&(resp_ptr->interface_handle));
-    resp_ptr->cpf_cdi_item_length = (uint16_t)(data - (uint8_t*)(&(resp_ptr->cpf_conn_seq_num)));
+    resp_ptr->length = (data - (uint8_t*)&(resp_ptr->interface_handle));
+    resp_ptr->cpf_cdi_item_length = (data - (uint8_t*)(&(resp_ptr->cpf_conn_seq_num)));
 
     log("handle_cip_read() sending response:\n");
-    print_buf(session->buf, (size_t)(data - session->buf));
+    print_buf(context->buf, (data - context->buf));
 
-    rc = (int)write(session->sock, session->buf, (size_t)(data - session->buf));
-    if(rc != (int)(data - session->buf)) {
-        log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(data - session->buf));
+    rc = write(context->sock, context->buf, (data - context->buf));
+    if(rc != (data - context->buf)) {
+        log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(data - context->buf));
     }
 
     log("Done.\n");
 }
 
 
-void handle_cip_write(session_context *session)
+void handle_cip_write(session_context *context)
 {
     int rc = 0;
-    connected_message *req = (connected_message *)(session->buf);
+    connected_message *req = (connected_message *)(context->buf);
     connected_message_cip_resp resp;
 //    connected_message_cip_resp *resp_ptr = NULL;
     uint8_t *data = NULL;
     char *tag_name = NULL;
     int item_offset = 0;
-    int elem_count = 0;
-    int byte_offset = 0;
+    uint16_t elem_count = 0;
+    uint32_t byte_offset = 0;
     tag_data *tag = NULL;
     int data_remaining = 0;
 //    int items_remaining = 0;
@@ -442,7 +469,7 @@ void handle_cip_write(session_context *session)
     resp.cpf_item_count = 2;
     resp.cpf_cai_item_type = CPF_ITEM_CAI;
     resp.cpf_cai_item_length = 4;
-    resp.cpf_targ_conn_id = session->connection_id_targ;
+    resp.cpf_targ_conn_id = context->connection_id_targ;
     resp.cpf_cdi_item_type = CPF_ITEM_CDI;
     resp.cpf_cdi_item_length = 0; /* patch this later! */
     resp.cpf_conn_seq_num = req->cpf_conn_seq_num;
@@ -481,16 +508,16 @@ void handle_cip_write(session_context *session)
     data += 2;
 
     /* read the number of elements to write */
-    elem_count = (data[0]) + ((data[1]) << 8);
+    elem_count = (uint16_t)(data[0]) + (((uint16_t)(data[1])) << 8);
     data += 2;
 
     log("tag elem_count=%d\n",elem_count);
 
     if(req->service_code == CIP_CMD_WRITE_FRAG) {
-        byte_offset =  (data[0])
-                       +((data[1]) << 8)
-                       +((data[2]) << 16)
-                       +((data[3]) << 24);
+        byte_offset =  (uint32_t)(data[0])
+                       +((uint32_t)(data[1]) << 8)
+                       +((uint32_t)(data[2]) << 16)
+                       +((uint32_t)(data[3]) << 24);
         data += 4;
 
         log("tag byte offset=%d\n", byte_offset);
@@ -505,10 +532,9 @@ void handle_cip_write(session_context *session)
 
     log("writing %d elements of tag %s starting at offset %d.\n", elem_count, tag->name, base_offset);
 
-    data_avail = session->buf_len - (int)(data - session->buf);
+    data_avail = context->buf_len - (data - context->buf);
 
-    /* FIXME - must check to see if data_avail is negative! */
-    memcpy(tag->data + base_offset, data, (size_t)data_avail);
+    memcpy(tag->data + base_offset, data, data_avail);
 
     /* how much data is left to write? */
     data_remaining = (elem_count * tag->elem_size) - byte_offset - data_avail;
@@ -525,12 +551,12 @@ void handle_cip_write(session_context *session)
     resp.length = (sizeof(resp) - sizeof(eip_header));
     resp.cpf_cdi_item_length = ((uint8_t*)(&resp.cip_status_words) - (uint8_t*)(&(resp.cpf_conn_seq_num)))+1;
 
-    memcpy(session->buf, &resp, sizeof(resp));
+    memcpy(context->buf, &resp, sizeof(resp));
 
     log("handle_cip_write() sending response:\n");
-    print_buf(session->buf, sizeof(resp));
+    print_buf(context->buf, sizeof(resp));
 
-    rc = (int)write(session->sock, session->buf, sizeof(resp));
+    rc = write(context->sock, context->buf, sizeof(resp));
     if(rc != sizeof(resp)) {
         log("Amount written, %d, does not equal the response size, %d!\n", (int)rc, (int)(sizeof(resp)));
     }
@@ -545,7 +571,7 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
 {
     /* read the length in words, convert to bytes. */
     uint8_t *data = buf;
-    uint8_t path_len = (uint8_t)((*data)*2); /* translate to bytes */
+    uint8_t path_len = (*data)*2; /* translate to bytes */
     uint8_t name_len = 0;
     int index = 0;
 
@@ -564,7 +590,7 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
 
         log("read_tag_path() reading symbolic segment of length %d\n", name_len);
 
-        *tag_name = (char *)calloc(1, (size_t)(name_len+1));
+        *tag_name = calloc(1, name_len+1);
 
         if(!*tag_name) {
             log("Warning! Unable to allocate new tag name buf!");
@@ -634,7 +660,7 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
 
 
 
-void print_buf(uint8_t *buf, size_t data_len)
+void print_buf(uint8_t *buf, ssize_t data_len)
 {
     int index = 0;
     int column = 0;
