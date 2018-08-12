@@ -57,6 +57,7 @@ set ( protocol_SRC_PATH "${base_SRC_PATH}/protocols" )
 set ( ab_SRC_PATH "${protocol_SRC_PATH}/ab" )
 set ( util_SRC_PATH "${base_SRC_PATH}/util" )
 set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
+set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
 
 # OS-specific files for the platform code.
 # FIXME - does this work for macOS?
@@ -200,8 +201,26 @@ if (UNIX)
                            write_string
                            tag_rw )
 
-    set ( example_PROG_UTIL utils_posix.c)
+    set ( example_PROG_UTIL utils_posix.c )
     set ( example_LIBRARIES plctag pthread )
+
+    # Logix simulator
+    set ( lgx_sim_FILES "${test_SRC_PATH}/lgx_sim/log.h"
+                        "${test_SRC_PATH}/lgx_sim/main.c"
+                        "${test_SRC_PATH}/lgx_sim/packet.h"
+                        "${test_SRC_PATH}/lgx_sim/main.c"
+                        "${test_SRC_PATH}/lgx_sim/session.c"
+                        "${test_SRC_PATH}/lgx_sim/session.h"
+                        "${test_SRC_PATH}/lgx_sim/tags.c"
+                        "${test_SRC_PATH}/lgx_sim/tags.h" )
+
+    foreach ( file ${lgx_sim_FILES} )
+        set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${BASE_FLAGS} -std=c11")
+    endforeach ( file )
+
+    add_executable ( lgx_sim ${lgx_sim_FILES} )
+    target_link_libraries ( lgx_sim pthread )
+
 elseif(WIN32)
     set ( example_PROGRAMS async
                            plc5
