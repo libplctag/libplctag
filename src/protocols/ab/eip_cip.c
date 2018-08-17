@@ -105,26 +105,10 @@ int tag_status(ab_tag_p tag)
     if (tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
-//        if(tag->connection) {
-//            rc = check_read_status_connected(tag);
-//        } else {
-//            rc = check_read_status_unconnected(tag);
-//        }
-//
-//        return rc;
-//    }
-//
+
     if (tag->write_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
-//        if(tag->connection) {
-//            rc = check_write_status_connected(tag);
-//        } else {
-//            rc = check_write_status_unconnected(tag);
-//        }
-//
-//        return rc;
-//    }
 
     if (tag->session) {
         session_rc = tag->session->status;
