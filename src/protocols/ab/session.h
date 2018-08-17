@@ -77,13 +77,13 @@ struct ab_session_t {
     uint32_t orig_connection_id;
     uint32_t targ_connection_id;
     uint16_t conn_seq_num;
-//    uint32_t conn_serial_number; /* id for the next connection */
+    uint32_t conn_serial_number;
 
     int plc_type;
     uint16_t max_payload_size;
     uint8_t *conn_path;
     uint8_t conn_path_size;
-    uint8_t dhp_dest;
+    uint16_t dhp_dest;
 
     /* registration info */
     uint32_t session_handle;
