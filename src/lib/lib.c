@@ -418,8 +418,6 @@ LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
         return (plc_tag)rc_dec(tag);
     }
 
-    pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
-
     /*
     * if there is a timeout, then loop until we get
     * an error or we timeout.
@@ -427,6 +425,9 @@ LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
     if(timeout) {
         int64_t timeout_time = timeout + time_ms();
         int64_t start_time = time_ms();
+
+        /* get the tag status. */
+        rc = tag->vtable->status(tag);
 
         while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
             /* give some time to the tickler function. */
@@ -454,12 +455,16 @@ LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
          * Abort the operation and set the status to show the timeout.
          */
         if(rc == PLCTAG_STATUS_PENDING) {
+            pdebug(DEBUG_WARN,"Timeout waiting for tag to be ready!");
             tag->vtable->abort(tag);
             rc = PLCTAG_ERR_TIMEOUT;
+            tag->status = rc;
         }
 
         pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
     }
+
+    pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
 
     pdebug(DEBUG_INFO,"Done.");
 
