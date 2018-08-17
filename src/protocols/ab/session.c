@@ -1029,12 +1029,18 @@ THREAD_FUNC(session_handler)
                 session->status = PLCTAG_STATUS_OK;
             }
 
-            if(session->use_connected_msg && !session->targ_connection_id) {
-                if((rc = perform_forward_open(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Forward open failed! rc=%d", rc);
-                    session->status = rc;
-                    break;
+                if(session->use_connected_msg && !session->targ_connection_id) {
+                    pdebug(DEBUG_DETAIL, "Opening CIP connection.");
+                    if((rc = perform_forward_open(session)) != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_WARN, "Forward open failed! rc=%d", rc);
+                        session->status = rc;
+                        break;
+                    }
                 }
+
+                /* let the world know that the session is ready for use. */
+                pdebug(DEBUG_DETAIL, "Session now ready for use.");
+                session->status = PLCTAG_STATUS_OK;
             }
 
             /*
@@ -1882,7 +1888,7 @@ int perform_forward_open(ab_session_p session)
             } else {
                 pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", session->max_payload_size);
             }
-        } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
+        } else { /*if(rc == PLCTAG_ERR_UNSUPPORTED)*/
             /* the PLC does not support Forward Open Extended.   Try the old request type. */
             if(session->max_payload_size == MAX_CIP_MSG_SIZE_EX) {
                 session->max_payload_size = MAX_CIP_MSG_SIZE;
@@ -1893,21 +1899,49 @@ int perform_forward_open(ab_session_p session)
                 /* we support the Forward Open Extended command, but we need to use a smaller size. */
                 pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, session->max_payload_size);
 
-                rc = try_forward_open_ex(session);
+                rc = try_forward_open(session);
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
                 } else {
                     pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", session->max_payload_size);
                 }
             }
-        }
+        } /*else {
+            pdebug(DEBUG_WARN, "Unknown error! rc=%d", rc);
+        }*/
     } while(0);
 
     if(rc == PLCTAG_STATUS_OK) {
         pdebug(DEBUG_DETAIL, "ForwardOpen succeeded and maximum CIP packet size is %d.", session->max_payload_size);
     }
 
-    session->status = rc;
+    //session->status = rc;
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+
+int perform_forward_close(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    do {
+        rc = send_forward_close_req(session);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_DETAIL,"Sending forward close failed! rc=%d",rc);
+            break;
+        }
+
+        rc = recv_forward_close_resp(session);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_DETAIL,"Forward close not received! rc=%d", rc);
+            break;
+        }
+    } while(0);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -1999,11 +2033,13 @@ int try_forward_open(ab_session_p session)
 
 int send_forward_open_req(ab_session_p session)
 {
-    eip_forward_open_request_t *fo;
+    eip_forward_open_request_t *fo = NULL;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO,"Starting");
+
+    mem_set(session->data, 0, sizeof(*fo) + session->conn_path_size);
 
     fo = (eip_forward_open_request_t*)(session->data);
 
@@ -2019,6 +2055,8 @@ int send_forward_open_req(ab_session_p session)
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
     fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_session_handle = h2le32(session->session_handle);
+    fo->encap_sender_context = h2le64(++session->session_seq_id);
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
 
     /* CPF parts */
@@ -2042,7 +2080,7 @@ int send_forward_open_req(ab_session_p session)
     fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16((uint16_t)(intptr_t)(session)); /* our connection SEQUENCE number. */
+    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
     fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
@@ -2068,11 +2106,13 @@ int send_forward_open_req(ab_session_p session)
 /* new version of Forward Open */
 int send_forward_open_req_ex(ab_session_p session)
 {
-    eip_forward_open_request_ex_t *fo;
+    eip_forward_open_request_ex_t *fo = NULL;
     uint8_t *data;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO,"Starting");
+
+    mem_set(session->data, 0, sizeof(*fo) + session->conn_path_size);
 
     fo = (eip_forward_open_request_ex_t*)(session->data);
 
@@ -2088,6 +2128,8 @@ int send_forward_open_req_ex(ab_session_p session)
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
     fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_session_handle = h2le32(session->session_handle);
+    fo->encap_sender_context = h2le64(++session->session_seq_id);
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
 
     /* CPF parts */
@@ -2111,7 +2153,7 @@ int send_forward_open_req_ex(ab_session_p session)
     fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16((uint16_t)(intptr_t)(session)); /* our connection SEQUENCE number. */
+    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
     fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
@@ -2199,7 +2241,110 @@ int recv_forward_open_resp(ab_session_p session)
 
         pdebug(DEBUG_DETAIL,"Connection set up succeeded.");
 
-        session->status = PLCTAG_STATUS_OK;
+        //session->status = PLCTAG_STATUS_OK;
+
+        rc = PLCTAG_STATUS_OK;
+    } while(0);
+
+    pdebug(DEBUG_INFO,"Done.");
+
+    return rc;
+}
+
+
+int send_forward_close_req(ab_session_p session)
+{
+    eip_forward_close_req_t *fo;
+    uint8_t *data;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO,"Starting");
+
+    fo = (eip_forward_close_req_t*)(session->data);
+
+    /* point to the end of the struct */
+    data = (session->data) + sizeof(eip_forward_close_req_t);
+
+    /* set up the path information. */
+    mem_copy(data, session->conn_path, session->conn_path_size);
+    data += session->conn_path_size;
+
+    /* fill in the static parts */
+
+    /* encap header parts */
+    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
+    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
+
+    /* CPF parts */
+    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
+    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
+    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
+    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
+
+    /* Connection Manager parts */
+    fo->cm_service_code = AB_EIP_CMD_FORWARD_CLOSE;/* 0x4E Forward Close Request */
+    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
+    fo->cm_req_path[0] = 0x20;                     /* class */
+    fo->cm_req_path[1] = 0x06;                     /* CM class */
+    fo->cm_req_path[2] = 0x24;                     /* instance */
+    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
+
+    /* Forward Open Params */
+    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
+    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
+    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
+    fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
+
+    /* set the size of the request */
+    session->data_size = data - (session->data);
+
+    rc = send_eip_request(session);
+
+    pdebug(DEBUG_INFO, "Done");
+
+    return rc;
+}
+
+
+int recv_forward_close_resp(ab_session_p session)
+{
+    eip_forward_close_resp_t *fo_resp;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO,"Starting");
+
+    rc = recv_eip_response(session);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to receive Forward Close response! rc=%d", rc);
+        return rc;
+    }
+
+    fo_resp = (eip_forward_close_resp_t*)(session->data);
+
+    do {
+        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
+        if(le2h32(fo_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",fo_resp->encap_status);
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
+        if(fo_resp->general_status != AB_EIP_OK) {
+            pdebug(DEBUG_WARN,"Forward Close command failed, response code: %d",fo_resp->general_status);
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL,"Connection close succeeded.");
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
