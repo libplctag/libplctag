@@ -48,9 +48,9 @@ struct ab_tag_t {
 
     /* how do we talk to this device? */
     int protocol_type;
-    int use_dhp_direct;
-    uint8_t dhp_src;
-    uint8_t dhp_dest;
+//    int use_dhp_direct;
+//    uint8_t dhp_src;
+//    uint8_t dhp_dest;
 
     /* pointers back to session */
     ab_session_p session;
