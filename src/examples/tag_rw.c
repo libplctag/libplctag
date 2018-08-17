@@ -158,7 +158,6 @@ int main(int argc, char **argv)
     real32_t f_val;
     int i;
     int rc;
-    int64_t timeout;
 
     parse_args(argc, argv);
 
@@ -215,7 +214,7 @@ int main(int argc, char **argv)
     }
 
     /* create the tag */
-    tag = plc_tag_create(path);
+    tag = plc_tag_create_sync(path, 500);
 
     printf("INFO: Got tag %p\n", (void *)tag);
 
@@ -223,12 +222,6 @@ int main(int argc, char **argv)
         printf("ERROR: error creating tag!\n");
 
         return 0;
-    }
-
-    timeout = time_ms() + 500;
-
-    while(timeout>time_ms() && plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(100);
     }
 
     rc = plc_tag_status(tag);
