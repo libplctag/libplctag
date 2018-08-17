@@ -64,6 +64,29 @@ static int check_write_status_unconnected(ab_tag_p tag);
 //int calculate_write_sizes(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
 
+/*
+    tag_vtable_func abort;
+    tag_vtable_func read;
+    tag_vtable_func status;
+    tag_vtable_func tickler;
+    tag_vtable_func write;
+*/
+
+static int tag_read_start(ab_tag_p tag);
+static int tag_status(ab_tag_p tag);
+static int tag_tickler(ab_tag_p tag);
+static int tag_write_start(ab_tag_p tag);
+
+/* define the exported vtable for this tag type. */
+struct tag_vtable_t eip_cip_vtable = {
+    (tag_vtable_func)ab_tag_abort, /* shared */
+    (tag_vtable_func)tag_read_start,
+    (tag_vtable_func)tag_status,
+    (tag_vtable_func)tag_tickler,
+    (tag_vtable_func)tag_write_start
+};
+
+
 /*************************************************************************
  **************************** API Functions ******************************
  ************************************************************************/
@@ -78,31 +101,14 @@ int tag_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int session_rc = PLCTAG_STATUS_OK;
-//    int connection_rc = PLCTAG_STATUS_OK;
 
     if (tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
-//        if(tag->connection) {
-//            rc = check_read_status_connected(tag);
-//        } else {
-//            rc = check_read_status_unconnected(tag);
-//        }
-//
-//        return rc;
-//    }
-//
+
     if (tag->write_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
-//        if(tag->connection) {
-//            rc = check_write_status_connected(tag);
-//        } else {
-//            rc = check_write_status_unconnected(tag);
-//        }
-//
-//        return rc;
-//    }
 
     if (tag->session) {
         session_rc = tag->session->status;
@@ -111,25 +117,9 @@ int tag_status(ab_tag_p tag)
         session_rc = PLCTAG_ERR_CREATE;
     }
 
-//    if(tag->needs_connection) {
-//        if(tag->connection) {
-//            connection_rc = tag->connection->status;
-//        } else {
-//            /* fatal! */
-//            connection_rc = PLCTAG_ERR_CREATE;
-//        }
-//    } else {
-//        connection_rc = PLCTAG_STATUS_OK;
-//    }
-
     /* now collect the status.  Highest level wins. */
     rc = session_rc;
 
-//    if(rc == PLCTAG_STATUS_OK) {
-//        rc = connection_rc;
-//    }
-
->>>>>>> Removal of independent connections.
     if(rc == PLCTAG_STATUS_OK) {
         rc = tag->status;
     }
@@ -139,7 +129,7 @@ int tag_status(ab_tag_p tag)
 
 
 
-int eip_cip_tag_tickler(ab_tag_p tag)
+int tag_tickler(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -179,7 +169,7 @@ int eip_cip_tag_tickler(ab_tag_p tag)
 
 
 /*
- * eip_cip_tag_read_start
+ * tag_read_start
  *
  * This function must be called only from within one thread, or while
  * the tag's mutex is locked.
@@ -187,8 +177,7 @@ int eip_cip_tag_tickler(ab_tag_p tag)
  * The function starts the process of getting tag data from the PLC.
  */
 
-
-int tag_tickler(ab_tag_p tag)
+int tag_read_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 //    int i;
@@ -404,7 +393,7 @@ int tag_write_start(ab_tag_p tag)
 
         tag->pre_write_read = 1;
 
-        return eip_cip_tag_read_start(tag);
+        return tag_read_start(tag);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -1329,8 +1318,8 @@ static int check_read_status_connected(ab_tag_p tag)
         /* skip if we are doing a pre-write read. */
         if (!tag->pre_write_read && tag->byte_offset < tag->size) {
             /* call read start again to get the next piece */
-            pdebug(DEBUG_DETAIL, "calling eip_cip_tag_read_start() to get the next chunk.");
-            rc = eip_cip_tag_read_start(tag);
+            pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
+            rc = tag_read_start(tag);
         } else {
             /* done! */
             tag->first_read = 0;
@@ -1577,8 +1566,8 @@ static int check_read_status_connected(ab_tag_p tag)
 //            /* no, not yet */
 ////            if (tag->first_read) {
 //            /* call read start again to get the next piece */
-//            pdebug(DEBUG_DETAIL, "calling eip_cip_tag_read_start() to get the next chunk.");
-//            rc = eip_cip_tag_read_start(tag);
+//            pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
+//            rc = tag_read_start(tag);
 ////            } else {
 ////                pdebug(DEBUG_WARN, "Insufficient data read for tag!");
 ////                ab_tag_abort(tag);
@@ -1598,7 +1587,7 @@ static int check_read_status_connected(ab_tag_p tag)
 //                pdebug(DEBUG_DETAIL, "Restarting write call now.");
 //
 //                tag->pre_write_read = 0;
-//                rc = eip_cip_tag_write_start(tag);
+//                rc = tag_write_start(tag);
 //            }
 //
 //            /* do this after the write starts. This helps prevent races with the client. */
@@ -1776,8 +1765,8 @@ static int check_read_status_unconnected(ab_tag_p tag)
         /* skip if we are doing a pre-write read. */
         if (!tag->pre_write_read && tag->byte_offset < tag->size) {
             /* call read start again to get the next piece */
-            pdebug(DEBUG_DETAIL, "calling eip_cip_tag_read_start() to get the next chunk.");
-            rc = eip_cip_tag_read_start(tag);
+            pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
+            rc = tag_read_start(tag);
         } else {
             /* done! */
             tag->first_read = 0;
@@ -1860,7 +1849,7 @@ static int check_write_status_connected(ab_tag_p tag)
         }
 
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
-        && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)) {
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -1882,7 +1871,7 @@ static int check_write_status_connected(ab_tag_p tag)
         if(tag->byte_offset < tag->size) {
 
             pdebug(DEBUG_DETAIL, "Write not complete, triggering next round.");
-            rc = eip_cip_tag_write_start(tag);
+            rc = tag_write_start(tag);
         } else {
             /* only clear this if we are done. */
             tag->write_in_progress = 0;
@@ -2011,7 +2000,7 @@ static int check_write_status_connected(ab_tag_p tag)
 //        if(tag->byte_offset < tag->size) {
 //
 //            pdebug(DEBUG_DETAIL, "Write not complete, triggering next round.");
-//            rc = eip_cip_tag_write_start(tag);
+//            rc = tag_write_start(tag);
 //        } else {
 //            /* only clear this if we are done. */
 //            tag->write_in_progress = 0;
@@ -2074,7 +2063,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
         }
 
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
-        && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)) {
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -2096,7 +2085,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
         if(tag->byte_offset < tag->size) {
 
             pdebug(DEBUG_DETAIL, "Write not complete, triggering next round.");
-            rc = eip_cip_tag_write_start(tag);
+            rc = tag_write_start(tag);
         } else {
             /* only clear this if we are done. */
             tag->write_in_progress = 0;
