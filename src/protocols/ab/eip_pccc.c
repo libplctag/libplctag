@@ -43,6 +43,21 @@ extern "C"
 #include <util/debug.h>
 
 
+/* PCCC */
+static int tag_read_start(ab_tag_p tag);
+static int tag_status(ab_tag_p tag);
+static int tag_tickler(ab_tag_p tag);
+static int tag_write_start(ab_tag_p tag);
+
+struct tag_vtable_t eip_pccc_vtable = {
+    (tag_vtable_func)ab_tag_abort, /* shared */
+    (tag_vtable_func)tag_read_start,
+    (tag_vtable_func)tag_status,
+    (tag_vtable_func)tag_tickler,
+    (tag_vtable_func)tag_write_start
+};
+
+
 static int check_read_status(ab_tag_p tag);
 static int check_write_status(ab_tag_p tag);
 
@@ -52,7 +67,7 @@ static int check_write_status(ab_tag_p tag);
  * CIP-specific status.  This functions as a "tickler" routine
  * to check on the completion of async requests.
  */
-int eip_pccc_tag_status(ab_tag_p tag)
+int tag_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int session_rc = PLCTAG_STATUS_OK;
@@ -103,7 +118,7 @@ int eip_pccc_tag_status(ab_tag_p tag)
 }
 
 
-int eip_pccc_tag_tickler(ab_tag_p tag)
+int tag_tickler(ab_tag_p tag)
 {
     if(tag->read_in_progress) {
         return check_read_status(tag);
@@ -118,12 +133,12 @@ int eip_pccc_tag_tickler(ab_tag_p tag)
 
 
 /*
- * eip_pccc_tag_read_start
+ * tag_read_start
  *
  * Start a PCCC tag read (PLC5, SLC).
  */
 
-int eip_pccc_tag_read_start(ab_tag_p tag)
+int tag_read_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
@@ -167,7 +182,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->size, overhead, data_per_packet);
+        pdebug(DEBUG_DETAIL,"Unable to send request: Tag size is %d, write overhead is %d, and write data per packet is %d!", tag->size, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -390,7 +405,7 @@ static int check_read_status(ab_tag_p tag)
 
 /* FIXME  convert to unconnected messages. */
 
-int eip_pccc_tag_write_start(ab_tag_p tag)
+int tag_write_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     pccc_req *pccc;

@@ -29,11 +29,10 @@
 
 #include <ab/ab_common.h>
 
-/* PCCC */
-int eip_pccc_tag_status(ab_tag_p tag);
-int eip_pccc_tag_read_start(ab_tag_p tag);
-int eip_pccc_tag_write_start(ab_tag_p tag);
-int eip_pccc_tag_tickler(ab_tag_p tag);
+
+
+/* PCCC with DH+ last hop */
+extern struct tag_vtable_t eip_pccc_vtable;
 
 
 #endif

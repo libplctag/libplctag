@@ -44,17 +44,32 @@
 static int check_read_status(ab_tag_p tag);
 static int check_write_status(ab_tag_p tag);
 
+
+
+static int tag_read_start(ab_tag_p tag);
+static int tag_status(ab_tag_p tag);
+static int tag_tickler(ab_tag_p tag);
+static int tag_write_start(ab_tag_p tag);
+
+struct tag_vtable_t eip_dhp_pccc_vtable = {
+    (tag_vtable_func)ab_tag_abort, /* shared */
+    (tag_vtable_func)tag_read_start,
+    (tag_vtable_func)tag_status,
+    (tag_vtable_func)tag_tickler,
+    (tag_vtable_func)tag_write_start
+};
+
+
 /*
- * eip_dhp_pccc_tag_status
+ * tag_status
  *
  * PCCC/DH+-specific status.  This functions as a "tickler" routine
  * to check on the completion of async requests.
  */
-int eip_dhp_pccc_tag_status(ab_tag_p tag)
+int tag_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int session_rc = PLCTAG_STATUS_OK;
-//    int connection_rc = PLCTAG_STATUS_OK;
 
     if(tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
@@ -72,24 +87,9 @@ int eip_dhp_pccc_tag_status(ab_tag_p tag)
         session_rc = PLCTAG_ERR_CREATE;
     }
 
-//    if(tag->needs_connection) {
-//        if(tag->use_connected_msg) {
-//            connection_rc = tag->connection->status;
-//        } else {
-//            /* fatal! */
-//            connection_rc = PLCTAG_ERR_CREATE;
-//        }
-//    } else {
-//        connection_rc = PLCTAG_STATUS_OK;
-//    }
-
     /* now collect the status.  Highest level wins. */
     rc = session_rc;
 
-//    if(rc == PLCTAG_STATUS_OK) {
-//        rc = connection_rc;
-//    }
-//
     if(rc == PLCTAG_STATUS_OK) {
         rc = tag->status;
     }
@@ -99,30 +99,36 @@ int eip_dhp_pccc_tag_status(ab_tag_p tag)
 
 
 
-int eip_dhp_pccc_tag_tickler(ab_tag_p tag)
+int tag_tickler(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_SPEW, "Starting.");
+
     if(tag->read_in_progress) {
+        pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
         return rc;
     }
 
     if(tag->write_in_progress) {
+        pdebug(DEBUG_SPEW, "Write in progress.");
         rc = check_write_status(tag);
         return rc;
     }
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return tag->status;
 }
 
 
 /*
- * eip_dhp_pccc_tag_read_start
+ * tag_read_start
  *
  * This does not support multiple request fragments.
  */
-int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
+int tag_read_start(ab_tag_p tag)
 {
     pccc_dhp_co_req *pccc;
     uint8_t *data = NULL;
@@ -193,7 +199,7 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 
     /* DH+ Routing */
     pccc->dest_link = h2le16(0);
-    pccc->dest_node = h2le16(tag->dhp_dest);
+    pccc->dest_node = h2le16(tag->session->dhp_dest);
     pccc->src_link = h2le16(0);
     pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
@@ -238,7 +244,7 @@ int eip_dhp_pccc_tag_read_start(ab_tag_p tag)
 
 
 
-int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
+int tag_write_start(ab_tag_p tag)
 {
     pccc_dhp_co_req *pccc;
     uint8_t *data;
@@ -358,7 +364,7 @@ int eip_dhp_pccc_tag_write_start(ab_tag_p tag)
 
     /* DH+ Routing */
     pccc->dest_link = h2le16(0);
-    pccc->dest_node = h2le16(tag->dhp_dest);
+    pccc->dest_node = h2le16(tag->session->dhp_dest);
     pccc->src_link = h2le16(0);
     pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
