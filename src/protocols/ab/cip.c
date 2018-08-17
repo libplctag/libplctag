@@ -158,14 +158,15 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
  */
 
 //int cip_encode_path(ab_tag_p tag, const char *path)
-int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint8_t *dhp_dest)
+int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest)
 {
     int ioi_size=0;
     int link_index=0;
     int last_is_dhp=0;
     int has_dhp=0;
     int dhp_channel=0;
-    int src_addr=0, dest_addr=0;
+    int src_addr=0;
+    int dest_addr=0;
     int tmp=0;
     char **links=NULL;
     char *link=NULL;
