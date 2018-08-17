@@ -30,10 +30,8 @@
 #include <ab/ab_common.h>
 
 /* PCCC with DH+ last hop */
-int eip_dhp_pccc_tag_status(ab_tag_p tag);
-int eip_dhp_pccc_tag_read_start(ab_tag_p tag);
-int eip_dhp_pccc_tag_write_start(ab_tag_p tag);
-int eip_dhp_pccc_tag_tickler(ab_tag_p tag);
+extern struct tag_vtable_t eip_dhp_pccc_vtable;
+
 
 
 #endif

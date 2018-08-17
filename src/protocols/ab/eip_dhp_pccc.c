@@ -70,7 +70,6 @@ int tag_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int session_rc = PLCTAG_STATUS_OK;
-//    int connection_rc = PLCTAG_STATUS_OK;
 
     if(tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
@@ -88,24 +87,9 @@ int tag_status(ab_tag_p tag)
         session_rc = PLCTAG_ERR_CREATE;
     }
 
-//    if(tag->needs_connection) {
-//        if(tag->use_connected_msg) {
-//            connection_rc = tag->connection->status;
-//        } else {
-//            /* fatal! */
-//            connection_rc = PLCTAG_ERR_CREATE;
-//        }
-//    } else {
-//        connection_rc = PLCTAG_STATUS_OK;
-//    }
-
     /* now collect the status.  Highest level wins. */
     rc = session_rc;
 
-//    if(rc == PLCTAG_STATUS_OK) {
-//        rc = connection_rc;
-//    }
-//
     if(rc == PLCTAG_STATUS_OK) {
         rc = tag->status;
     }
@@ -115,19 +99,25 @@ int tag_status(ab_tag_p tag)
 
 
 
-int eip_dhp_pccc_tag_tickler(ab_tag_p tag)
+int tag_tickler(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_SPEW, "Starting.");
+
     if(tag->read_in_progress) {
+        pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
         return rc;
     }
 
     if(tag->write_in_progress) {
+        pdebug(DEBUG_SPEW, "Write in progress.");
         rc = check_write_status(tag);
         return rc;
     }
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return tag->status;
 }

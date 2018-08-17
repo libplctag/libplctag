@@ -119,7 +119,7 @@ int tag_status(ab_tag_p tag)
 }
 
 
-int eip_pccc_tag_tickler(ab_tag_p tag)
+int tag_tickler(ab_tag_p tag)
 {
     if(tag->read_in_progress) {
         return check_read_status(tag);
