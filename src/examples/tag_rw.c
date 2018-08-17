@@ -214,7 +214,7 @@ int main(int argc, char **argv)
     }
 
     /* create the tag */
-    tag = plc_tag_create(path);
+    tag = plc_tag_create_sync(path, 500);
 
     printf("INFO: Got tag %p\n", (void *)tag);
 
@@ -224,9 +224,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(1);
-    }
+    rc = plc_tag_status(tag);
 
     printf("INFO: tag status %d\n", rc);
 
