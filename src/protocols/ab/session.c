@@ -53,8 +53,8 @@ static int session_register(ab_session_p session);
 static int session_unregister_unsafe(ab_session_p session);
 static THREAD_FUNC(session_handler);
 static int prepare_request(ab_session_p session, ab_request_p request);
-static int send_eip_request(ab_session_p session);
-static int recv_eip_response(ab_session_p session);
+static int send_eip_request(ab_session_p session, int timeout);
+static int recv_eip_response(ab_session_p session, int timeout);
 static int perform_forward_open(ab_session_p session);
 static int perform_forward_close(ab_session_p session);
 static int try_forward_open_ex(ab_session_p session);
@@ -705,14 +705,14 @@ int session_register(ab_session_p session)
     session->data_size = sizeof(eip_session_reg_req);
     session->data_offset = 0;
 
-    rc = send_eip_request(session);
+    rc = send_eip_request(session, 0);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Error sending session registration request! rc=%d", rc);
         return rc;
     }
 
     /* get the response from the gateway */
-    rc = recv_eip_response(session);
+    rc = recv_eip_response(session, 0);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error receiving session registration response!");
         return rc;
@@ -1080,7 +1080,7 @@ THREAD_FUNC(session_handler)
             mem_copy(session->data, request->data, request->request_size);
             session->data_size = request->request_size;
 
-            rc = send_eip_request(session);
+            rc = send_eip_request(session, 0);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error sending packet! rc=%d", rc);
 
@@ -1091,7 +1091,7 @@ THREAD_FUNC(session_handler)
                 break;
             }
 
-            rc = recv_eip_response(session);
+            rc = recv_eip_response(session, 0);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error receiving packet response! rc=%d", rc);
 
@@ -1186,15 +1186,22 @@ int prepare_request(ab_session_p session, ab_request_p request)
 
 
 
-int send_eip_request(ab_session_p session)
+int send_eip_request(ab_session_p session, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
+    int64_t timeout_time = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!session) {
         pdebug(DEBUG_WARN, "Session pointer is null.");
         return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(timeout > 0) {
+        timeout_time = time_ms() + timeout;
+    } else {
+        timeout_time = INT64_MAX;
     }
 
     pdebug(DEBUG_DETAIL,"Sending packet of size %d",session->data_size);
@@ -1214,7 +1221,7 @@ int send_eip_request(ab_session_p session)
         if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
             sleep_ms(1);
         }
-    } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size);
+    } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size && timeout_time > time_ms());
 
     if(session->terminating) {
         pdebug(DEBUG_WARN, "Session is terminating.");
@@ -1224,6 +1231,11 @@ int send_eip_request(ab_session_p session)
     if(rc < 0) {
         pdebug(DEBUG_WARN,"Error, %d, writing socket!", rc);
         return rc;
+    }
+
+    if(timeout_time <= time_ms()) {
+        pdebug(DEBUG_WARN, "Timed out waiting to send data!");
+        return PLCTAG_ERR_TIMEOUT;
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1240,10 +1252,11 @@ int send_eip_request(ab_session_p session)
  * to fill in a packet.  If we already have a full packet,
  * punt.
  */
-int recv_eip_response(ab_session_p session)
+int recv_eip_response(ab_session_p session, int timeout)
 {
     uint32_t data_needed = 0;
     int rc = PLCTAG_STATUS_OK;
+    int64_t timeout_time = 0;
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
@@ -1252,6 +1265,12 @@ int recv_eip_response(ab_session_p session)
         return PLCTAG_ERR_NULL_PTR;
     }
 
+
+    if(timeout > 0) {
+        timeout_time = time_ms() + timeout;
+    } else {
+        timeout_time = INT64_MAX;
+    }
 
     session->data_offset = 0;
     session->data_size = 0;
@@ -1288,30 +1307,35 @@ int recv_eip_response(ab_session_p session)
             /* do not hog the CPU */
             sleep_ms(1);
         }
-    } while(!session->terminating && session->data_offset < data_needed);
+    } while(!session->terminating && session->data_offset < data_needed && timeout_time > time_ms());
 
     if(session->terminating) {
         pdebug(DEBUG_INFO,"Session is terminating, returning...");
-        rc = PLCTAG_ERR_ABORT;
-        return rc;
-    } else {
-        session->resp_seq_id = le2h64(((eip_encap_t*)(session->data))->encap_sender_context);
-        session->data_size = data_needed;
-
-        rc = PLCTAG_STATUS_OK;
-
-        pdebug(DEBUG_DETAIL, "request received all needed data (%d bytes of %d).", session->data_offset, data_needed);
-
-        pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_offset);
-
-        if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
-            eip_encap_t *encap = (eip_encap_t*)(session->data);
-            pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
-        } else if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
-            eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->data);
-            pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
-        }
+        return PLCTAG_ERR_ABORT;
     }
+
+    if(timeout_time <= time_ms()) {
+        pdebug(DEBUG_WARN, "Timed out waiting for data to read!");
+        return PLCTAG_ERR_TIMEOUT;
+    }
+
+    session->resp_seq_id = le2h64(((eip_encap_t*)(session->data))->encap_sender_context);
+    session->data_size = data_needed;
+
+    rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "request received all needed data (%d bytes of %d).", session->data_offset, data_needed);
+
+    pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_offset);
+
+    if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
+        eip_encap_t *encap = (eip_encap_t*)(session->data);
+        pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
+    } else if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
+        eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->data);
+        pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
+    }
+
 
     return rc;
 }
@@ -1547,7 +1571,7 @@ int send_forward_open_req(ab_session_p session)
     /* set the size of the request */
     session->data_size = data - (session->data);
 
-    rc = send_eip_request(session);
+    rc = send_eip_request(session, 0);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -1620,7 +1644,7 @@ int send_forward_open_req_ex(ab_session_p session)
     /* set the size of the request */
     session->data_size = data - (session->data);
 
-    rc = send_eip_request(session);
+    rc = send_eip_request(session, 0);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -1637,7 +1661,7 @@ int recv_forward_open_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session);
+    rc = recv_eip_response(session, 0);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to receive Forward Open response.");
         return rc;
@@ -1727,6 +1751,7 @@ int send_forward_close_req(ab_session_p session)
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
     fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_sender_context = h2le64(++session->session_seq_id);
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
 
     /* CPF parts */
@@ -1755,7 +1780,7 @@ int send_forward_close_req(ab_session_p session)
     /* set the size of the request */
     session->data_size = data - (session->data);
 
-    rc = send_eip_request(session);
+    rc = send_eip_request(session, 100);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -1770,7 +1795,7 @@ int recv_forward_close_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session);
+    rc = recv_eip_response(session, 150);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to receive Forward Close response! rc=%d", rc);
         return rc;
