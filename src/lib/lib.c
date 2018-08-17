@@ -597,10 +597,6 @@ int plc_tag_abort(plc_tag id)
  *
  * Remove all implementation specific details about a tag and clear its
  * memory.
- *
- * FIXME - this leaves a dangling pointer.  Should we take the address
- * of the tag pointer as an arg and zero out the pointer?  That may not be
- * as portable.
  */
 
 
