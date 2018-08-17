@@ -1214,8 +1214,6 @@ int send_eip_request(ab_session_p session, int timeout)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    pdebug(DEBUG_DETAIL, "Starting.");
-
     if(!session) {
         pdebug(DEBUG_WARN, "Session pointer is null.");
         return PLCTAG_ERR_NULL_PTR;
@@ -2094,7 +2092,7 @@ int send_forward_open_req(ab_session_p session)
     /* set the size of the request */
     session->data_size = data - (session->data);
 
-    rc = send_eip_request(session);
+    rc = send_eip_request(session, 0);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -2167,7 +2165,7 @@ int send_forward_open_req_ex(ab_session_p session)
     /* set the size of the request */
     session->data_size = data - (session->data);
 
-    rc = send_eip_request(session);
+    rc = send_eip_request(session, 0);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -2184,7 +2182,7 @@ int recv_forward_open_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session);
+    rc = recv_eip_response(session, 0);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to receive Forward Open response.");
         return rc;
@@ -2274,6 +2272,7 @@ int send_forward_close_req(ab_session_p session)
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
     fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_sender_context = h2le64(++session->session_seq_id);
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
 
     /* CPF parts */
@@ -2302,7 +2301,7 @@ int send_forward_close_req(ab_session_p session)
     /* set the size of the request */
     session->data_size = data - (session->data);
 
-    rc = send_eip_request(session);
+    rc = send_eip_request(session, 100);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -2317,7 +2316,7 @@ int recv_forward_close_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session);
+    rc = recv_eip_response(session, 150);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to receive Forward Close response! rc=%d", rc);
         return rc;
