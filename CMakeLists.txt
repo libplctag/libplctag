@@ -233,6 +233,6 @@ target_link_libraries (simple_cpp ${example_LIBRARIES} )
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" @ONLY)
 
 # for installation
-install(TARGETS plctag DESTINATION lib)
+install(TARGETS plctag DESTINATION lib${LIB_SUFFIX})
 install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib/pkgconfig")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
