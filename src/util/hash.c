@@ -156,17 +156,17 @@ uint32_t hash( uint8_t *k, size_t length, uint32_t initval)
    c += length;
    switch(len)              /* all the case statements fall through */
    {
-   case 11: c+=((ub4)k[10]<<24);
-   case 10: c+=((ub4)k[9]<<16);
-   case 9 : c+=((ub4)k[8]<<8);
+   case 11: c+=((ub4)k[10]<<24); __attribute__((fallthrough));
+   case 10: c+=((ub4)k[9]<<16); __attribute__((fallthrough));
+   case 9 : c+=((ub4)k[8]<<8); __attribute__((fallthrough));
       /* the first byte of c is reserved for the length */
-   case 8 : b+=((ub4)k[7]<<24);
-   case 7 : b+=((ub4)k[6]<<16);
-   case 6 : b+=((ub4)k[5]<<8);
-   case 5 : b+=k[4];
-   case 4 : a+=((ub4)k[3]<<24);
-   case 3 : a+=((ub4)k[2]<<16);
-   case 2 : a+=((ub4)k[1]<<8);
+   case 8 : b+=((ub4)k[7]<<24); __attribute__((fallthrough));
+   case 7 : b+=((ub4)k[6]<<16); __attribute__((fallthrough));
+   case 6 : b+=((ub4)k[5]<<8); __attribute__((fallthrough));
+   case 5 : b+=k[4]; __attribute__((fallthrough));
+   case 4 : a+=((ub4)k[3]<<24); __attribute__((fallthrough));
+   case 3 : a+=((ub4)k[2]<<16); __attribute__((fallthrough));
+   case 2 : a+=((ub4)k[1]<<8); __attribute__((fallthrough));
    case 1 : a+=k[0];
      /* case 0: nothing left to add */
    }
