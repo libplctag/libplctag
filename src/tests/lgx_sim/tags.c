@@ -6,7 +6,7 @@
 
 
 tag_data *tags = NULL;
-int num_tags = 0;
+size_t num_tags = 0;
 
 void init_tags()
 {
@@ -35,7 +35,7 @@ tag_data *find_tag(const char *tag_name)
 {
     log("find_data() finding tag %s\n", tag_name);
 
-    for(int i=0; i<num_tags; i++) {
+    for(size_t i=0; i<num_tags; i++) {
         if(strcmp(tags[i].name, tag_name) == 0) {
             return &(tags[i]);
         }
