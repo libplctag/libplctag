@@ -174,9 +174,8 @@ FOREACH( lib_src ${libplctag_SRCS} )
 ENDFOREACH()
 
 # set up the library
-SET(BUILD_SHARED_LIBS OFF)
-add_library(plctag STATIC ${libplctag_SRCS} )
-#add_library(plctag_static STATIC ${libplctag_SRCS} )
+add_library(plctag SHARED ${libplctag_SRCS} )
+add_library(plctag_static STATIC ${libplctag_SRCS} )
 
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
