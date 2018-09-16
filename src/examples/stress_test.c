@@ -57,7 +57,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 
     /* create the tag */
     start_time = time_ms();
-    *tag = plc_tag_create(tag_str);
+    *tag = plc_tag_create_sync(tag_str, 2000);
 
     /* everything OK? */
     if(! *tag) {
@@ -65,11 +65,6 @@ static int open_tag(plc_tag *tag, const char *tag_str)
         return PLCTAG_ERR_CREATE;
     } else {
         fprintf(stderr, "INFO: Tag created with status %s\n", plc_tag_decode_error(plc_tag_status(*tag)));
-    }
-
-    /* let the connect succeed we hope */
-    while((start_time + 2000) > time_ms() && (rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(10);
     }
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -148,6 +143,83 @@ void *test_dhp(void *data)
 void *test_cip(void *data)
 {
     int tid = (int)(intptr_t)data;
+    static const char *tag_str = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
+    int32_t value = 0;
+    uint64_t start = 0;
+    uint64_t end = 0;
+    int64_t timeout = 0;
+    plc_tag tag = PLC_TAG_NULL;
+    int rc = PLCTAG_STATUS_OK;
+    int iteration = 1;
+
+    while(!done) {
+        if(!tag) {
+            rc = open_tag(&tag, tag_str);
+            if(rc != PLCTAG_STATUS_OK) {
+                fprintf(stderr,"Test %d, iteration %d, Error (%s) creating tag!  Terminating test...\n", tid, iteration, plc_tag_decode_error(rc));
+                done = 1;
+                return NULL;
+            }
+        }
+
+        /* capture the starting time */
+        start = time_ms();
+
+        do {
+            rc = plc_tag_read(tag, DATA_TIMEOUT);
+            if(rc != PLCTAG_STATUS_OK) {
+                fprintf(stderr, "Test %d, iteration %d, read failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
+                break;
+            }
+
+            value = plc_tag_get_int32(tag,0);
+
+            /* increment the value, keep it in bounds of 0-499 */
+            value = (value >= (int32_t)500 ? (int32_t)0 : value + (int32_t)1);
+
+            /* yes, we should be checking this return value too... */
+            plc_tag_set_int32(tag, 0, value);
+
+            /* write the value */
+            rc = plc_tag_write(tag, DATA_TIMEOUT);
+            if(rc != PLCTAG_STATUS_OK) {
+                fprintf("Test %d, iteration %d, write failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
+                break;
+            }
+        } while(0);
+
+        end = time_ms();
+
+        fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
+
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"Test %d, iteration %d, closing tag due to error %s, will retry in 2 seconds.\n", tid, iteration, plc_tag_decode_error(rc));
+
+            plc_tag_destroy(tag);
+            tag = PLC_TAG_NULL;
+
+            /* retry later */
+            timeout = time_ms() + 2000;
+            while(timeout < time_ms()) {
+                sleep_ms(10);
+            }
+        }
+
+        iteration++;
+    }
+
+    plc_tag_destroy(tag);
+
+    fprintf(stderr, "Test %d terminating.\n", tid);
+
+    return NULL;
+}
+
+
+
+void *test_cip_old(void *data)
+{
+    int tid = (int)(intptr_t)data;
     static const char *tag_str_no_connect = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&use_connected_msg=0&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
     static const char *tag_str_connect_shared = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
     static const char *tag_str_connect_not_shared = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&share_session=0&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
@@ -160,7 +232,7 @@ void *test_cip(void *data)
     int iteration = 1;
     int no_destroy = 0;
 
-    switch(test_flags) {
+/*    switch(test_flags) {
         case 0:
             tag_str = tag_str_no_connect;
             no_destroy = 1;
@@ -197,6 +269,7 @@ void *test_cip(void *data)
             return NULL;
             break;
     }
+*/
 
     if(no_destroy) {
         rc = open_tag(&tag, tag_str);
@@ -271,6 +344,7 @@ void *test_cip(void *data)
 }
 
 
+
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv)
@@ -281,9 +355,9 @@ int main(int argc, char **argv)
     int64_t seconds = 600;  /* default 1 hour */
     int num_threads = 0;
 
-    if(argc>2) {
+    if(argc>1) {
         num_threads = atoi(argv[1]);
-        test_flags = atoi(argv[2]);
+/*        test_flags = atoi(argv[2]);*/
     } else {
         fprintf(stderr,"Usage: stress_test <num threads> <test type>\n");
         return 0;
