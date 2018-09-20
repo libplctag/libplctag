@@ -3,17 +3,20 @@
 #include "utils.h"
 
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.28&cpu=PLC5&elem_size=4&elem_count=5&name=F8:10&debug=1"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_size=4&elem_count=5&name=F8:10&debug=4"
 #define ELEM_COUNT 5
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 5000
 
 
-int main()
+int main(int argc, char **argv)
 {
     plc_tag tag = PLC_TAG_NULL;
     int rc;
     int i;
+
+    (void)argc;
+    (void)argv;
 
     /* create the tag */
     tag = plc_tag_create(TAG_PATH);
