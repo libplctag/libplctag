@@ -58,6 +58,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 
     /* create the tag */
     start_time = util_time_ms();
+
     *tag = plc_tag_create_sync(tag_str, TAG_CREATE_TIMEOUT);
 
     /* everything OK? */
