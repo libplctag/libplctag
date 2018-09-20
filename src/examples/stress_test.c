@@ -77,7 +77,7 @@ static int open_tag(plc_tag *tag, FILE *log, int tid, int num_elems)
 
     /* create the tag */
     start_time = time_ms();
-    *tag = plc_tag_create_sync(tag_str, 2000);
+    *tag = plc_tag_create_sync(tag_str, TAG_CREATE_TIMEOUT);
 
     /* everything OK? */
     if(! *tag) {
@@ -167,7 +167,7 @@ static void *test_cip(void *data)
 void *test_cip(void *data)
 {
     int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=5";
     int32_t value = 0;
     uint64_t start = 0;
     uint64_t end = 0;
@@ -223,7 +223,7 @@ void *test_cip(void *data)
             tag = PLC_TAG_NULL;
 
             /* retry later */
-            timeout = time_ms() + 2000;
+            timeout = time_ms() + TAG_CREATE_TIMEOUT;
             while(timeout < time_ms()) {
                 sleep_ms(10);
             }
@@ -234,7 +234,7 @@ void *test_cip(void *data)
 
     plc_tag_destroy(tag);
 
-    fprintf(stderr, "Test %d terminating.\n", tid);
+    fprintf(stderr, "Test %d terminating after %d iterations.\n", tid, iteration);
 
     return NULL;
 }
