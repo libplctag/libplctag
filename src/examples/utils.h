@@ -42,8 +42,8 @@
 extern "C" {
 #endif
 
-extern int sleep_ms(int ms);
-extern int64_t time_ms(void);
+extern int util_sleep_ms(int ms);
+extern int64_t util_time_ms(void);
 
 
 #ifdef __cplusplus
