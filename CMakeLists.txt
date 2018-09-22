@@ -85,10 +85,10 @@ MESSAGE("CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}")
 # C compiler specific settings
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
-    set(BASE_FLAGS "${CMAKE_C_FLAGS} -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_FLAGS "${CMAKE_C_FLAGS} -g -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # using GCC
-    set(BASE_FLAGS "${CMAKE_C_FLAGS} -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_FLAGS "${CMAKE_C_FLAGS} -g -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     # using Intel C/C++
     MESSAGE("Intel C compiler not supported!")
@@ -179,9 +179,10 @@ FOREACH( lib_src ${libplctag_SRCS} )
     set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
 ENDFOREACH()
 
-# shared library
-add_library(plctag SHARED ${libplctag_SRCS} )
-add_library(plctag_static STATIC ${libplctag_SRCS} )
+# set up the library
+SET(BUILD_SHARED_LIBS OFF)
+add_library(plctag STATIC ${libplctag_SRCS} )
+#add_library(plctag_static STATIC ${libplctag_SRCS} )
 
 # static Library
 #SET(BUILD_SHARED_LIBS OFF)
@@ -258,6 +259,8 @@ set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMP
 add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
+SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+SET(CMAKE_EXE_LINKER_FLAGS "-static")
 
 foreach ( example ${example_PROGRAMS} )
     set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
