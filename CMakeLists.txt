@@ -85,10 +85,10 @@ MESSAGE("CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}")
 # C compiler specific settings
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
-    set(BASE_FLAGS "${CMAKE_C_FLAGS} -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_FLAGS "${CMAKE_C_FLAGS} -g -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # using GCC
-    set(BASE_FLAGS "${CMAKE_C_FLAGS} -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_FLAGS "${CMAKE_C_FLAGS} -g -Wuseless-cast -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     # using Intel C/C++
     MESSAGE("Intel C compiler not supported!")
@@ -172,8 +172,9 @@ FOREACH( lib_src ${libplctag_SRCS} )
 ENDFOREACH()
 
 # set up the library
-add_library(plctag SHARED ${libplctag_SRCS} )
-add_library(plctag_static STATIC ${libplctag_SRCS} )
+SET(BUILD_SHARED_LIBS OFF)
+add_library(plctag STATIC ${libplctag_SRCS} )
+#add_library(plctag_static STATIC ${libplctag_SRCS} )
 
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
@@ -237,16 +238,20 @@ elseif(WIN32)
     set ( example_LIBRARIES plctag ws2_32 )
 endif()
 
+# simple.cpp is different because it is C++
+set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS ${BASE_CXX_FLAGS})
+add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
+target_link_libraries (simple_cpp ${example_LIBRARIES} )
+
+SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+SET(CMAKE_EXE_LINKER_FLAGS "-static")
+
 foreach ( example ${example_PROGRAMS} )
     set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
     add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
     target_link_libraries(${example} ${example_LIBRARIES} )
 endforeach(example)
 
-# simple.cpp is different because it is C++
-set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS ${BASE_CXX_FLAGS})
-add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
 # Generate files from templates
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" @ONLY)
