@@ -58,7 +58,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
     int64_t start_time;
 
     /* create the tag */
-    start_time = time_ms();
+    start_time = util_time_ms();
     *tag = plc_tag_create(tag_str);
 
     /* everything OK? */
@@ -71,7 +71,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 
     /* let the connect succeed we hope */
     while((start_time + 2000) > time_ms() && (rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(10);
+        util_sleep_ms(10);
     }
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -97,7 +97,7 @@ void *test_tag(void *data)
 
     while(!done) {
         /* capture the starting time */
-        start = time_ms();
+        start = util_time_ms();
 
         /* read the tag */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -123,7 +123,7 @@ void *test_tag(void *data)
             }
         }
 
-        end = time_ms();
+        end = util_time_ms();
 
         fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
     end_time = start_time + (seconds * 1000);
 
     while(!done && time_ms() < end_time) {
-        sleep_ms(100);
+        util_sleep_ms(100);
     }
 
     if(done) {

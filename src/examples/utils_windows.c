@@ -39,7 +39,7 @@
  * Sleep the passed number of milliseconds.
  */
 
-int sleep_ms(int ms)
+int util_sleep_ms(int ms)
 {
     Sleep(ms);
     return 1;
@@ -54,7 +54,7 @@ int sleep_ms(int ms)
  * Unix epoch time.  Windows uses a different epoch starting 1/1/1601.
  */
 
-int64_t time_ms(void)
+int64_t util_time_ms(void)
 {
     FILETIME ft;
     int64_t res;
