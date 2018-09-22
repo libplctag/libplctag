@@ -608,6 +608,11 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    if(id <= 0 || index < 0) {
+        pdebug(DEBUG_WARN, "Called with zero or invalid tag!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     critical_block(tag_lookup_mutex) {
         tag = tag_lookup_table[index];
 
