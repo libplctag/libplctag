@@ -353,14 +353,16 @@ int main(int argc, char **argv)
     pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
-    int64_t seconds = 3600;  /* default 1 hour */
     int num_threads = 0;
+    int64_t seconds = 0;
 
-    if(argc>1) {
+    if(argc>2) {
+        int tmp_seconds = 0;
         num_threads = atoi(argv[1]);
+        seconds = atoi(argv[2]);
 /*        test_flags = atoi(argv[2]);*/
     } else {
-        fprintf(stderr,"Usage: stress_test <num threads> <test type>\n");
+        fprintf(stderr,"Usage: stress_test <num threads> <seconds to run>\n");
         return 0;
     }
 
