@@ -125,7 +125,7 @@ int main(int argc, char **argv)
         /* get the data */
         rc = plc_tag_read(tag, 0);
 
-        sleep_ms(delay);
+        util_sleep_ms(delay);
 
         if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
             fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);

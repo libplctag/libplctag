@@ -33,7 +33,7 @@
 
 
 
-int sleep_ms(int ms)
+int util_sleep_ms(int ms)
 {
     struct timeval tv;
 
@@ -49,7 +49,7 @@ int sleep_ms(int ms)
  *
  * Return the current epoch time in milliseconds.
  */
-int64_t time_ms(void)
+int64_t util_time_ms(void)
 {
     struct timeval tv;
 
