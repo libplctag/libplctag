@@ -70,7 +70,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
     }
 
     /* let the connect succeed we hope */
-    while((start_time + 2000) > time_ms() && (rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
+    while((start_time + 2000) > util_time_ms() && (rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
         util_sleep_ms(10);
     }
 
@@ -171,7 +171,7 @@ int main(int argc, char **argv)
     start_time = util_time_ms();
     end_time = start_time + (seconds * 1000);
 
-    while(!done && time_ms() < end_time) {
+    while(!done && util_time_ms() < end_time) {
         util_sleep_ms(100);
     }
 
