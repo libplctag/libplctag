@@ -12,21 +12,21 @@ void init_tags()
 {
     num_tags = 2;
 
-    tags = calloc(num_tags, sizeof(tag_data));
+    tags = (tag_data *)calloc(num_tags, sizeof(tag_data));
 
     tags[0].name = "TestDINTArray";
     tags[0].data_type[0] = 0xc4;
     tags[0].data_type[1] = 0x00;
     tags[0].elem_count = 10;
     tags[0].elem_size = 4;
-    tags[0].data = calloc(tags[0].elem_size, tags[0].elem_count);
+    tags[0].data = (uint8_t *)calloc(tags[0].elem_size, tags[0].elem_count);
 
     tags[1].name = "TestBigArray";
     tags[1].data_type[0] = 0xc4;
     tags[1].data_type[1] = 0x00;
     tags[1].elem_count = 1000;
     tags[1].elem_size = 4;
-    tags[1].data = calloc(tags[1].elem_size, tags[1].elem_count);
+    tags[1].data = (uint8_t *)calloc(tags[1].elem_size, tags[1].elem_count);
 
 }
 
