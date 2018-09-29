@@ -79,7 +79,7 @@ void *thread_func(void *data)
 
         /* let the connect succeed we hope */
         while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-            sleep_ms(100);
+            util_sleep_ms(100);
         }
 
         if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
@@ -91,7 +91,7 @@ void *thread_func(void *data)
 
         while(loops > 0 && iterations > 0) {
             /* capture the starting time */
-            start = time_ms();
+            start = util_time_ms();
 
             rc = plc_tag_read(tag, DATA_TIMEOUT);
 
@@ -102,12 +102,12 @@ void *thread_func(void *data)
 
             value =  plc_tag_get_int16(tag,0);
 
-            end = time_ms();
+            end = util_time_ms();
 
             fprintf(stderr,"Thread %d (iteration %d) got result %d with return code %s in %dms\n",tid,iterations, value,plc_tag_decode_error(rc),(int)(end-start));
 
             /* no short sleeps, this is a PLC5 */
-            sleep_ms(50+random_min_max(0,50));
+            util_sleep_ms(50+random_min_max(0,50));
 
             iterations--;
             loops--;
@@ -116,7 +116,7 @@ void *thread_func(void *data)
         plc_tag_destroy(tag);
         tag = NULL;
 
-        sleep_ms(100+random_min_max(0,100));
+        util_sleep_ms(100+random_min_max(0,100));
     }
 
     fprintf(stderr,"Thread %d completed work.\n",tid);
@@ -155,7 +155,7 @@ int main(int argc, char **argv)
     }
 
     while(total_done != num_threads) {
-        sleep_ms(100);
+        util_sleep_ms(100);
         total_done = 0;
 
         for(tid=0; tid<num_threads; tid++) {
@@ -166,7 +166,7 @@ int main(int argc, char **argv)
     }
 
     /* let the background thread clean up anything it can */
-    sleep_ms(2000);
+    util_sleep_ms(2000);
 
     return 0;
 }

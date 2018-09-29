@@ -41,7 +41,7 @@ void *thread_func(void *data)
 
     while(1) {
         /* capture the starting time */
-        start = time_ms();
+        start = util_time_ms();
 
         /* use do/while to allow easy exit without return */
         do {
@@ -73,12 +73,12 @@ void *thread_func(void *data)
             plc_tag_unlock(tag);
         } while(0);
 
-        end = time_ms();
+        end = util_time_ms();
 
         fprintf(stderr,"Thread %d got result %f with return code %s in %dms\n",tid,value,plc_tag_decode_error(rc),(int)(end-start));
 
         /* no short sleeps, this is a PLC5 */
-        sleep_ms(10);
+        util_sleep_ms(10);
     }
 
     return NULL;
@@ -116,7 +116,7 @@ int main(int argc, char **argv)
 
     /* let the connect succeed we hope */
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(100);
+        util_sleep_ms(100);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 
     /* wait until ^C */
     while(1) {
-        sleep_ms(100);
+        util_sleep_ms(100);
     }
 
     return 0;
