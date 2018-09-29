@@ -76,7 +76,7 @@ static int open_tag(plc_tag *tag, FILE *log, int tid, int num_elems)
     int rc = PLCTAG_STATUS_OK;
 
     /* create the tag */
-    start_time = time_ms();
+    start_time = util_time_ms();
     *tag = plc_tag_create_sync(tag_str, TAG_CREATE_TIMEOUT);
 
     /* everything OK? */
@@ -146,11 +146,11 @@ static void *test_cip(void *data)
 
         fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
-        /*        if(iteration >= 100) {
-                    iteration = 1;
-                    util_sleep_ms(5000);
-                }
-        */
+/*        if(iteration >= 100) {
+            iteration = 1;
+            util_sleep_ms(5000);
+        }
+*/
         iteration++;
     }
 
@@ -187,7 +187,7 @@ void *test_cip(void *data)
         }
 
         /* capture the starting time */
-        start = time_ms();
+        start = util_time_ms();
 
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -212,7 +212,7 @@ void *test_cip(void *data)
             }
         } while(0);
 
-        end = time_ms();
+        end = util_time_ms();
 
         fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
@@ -223,9 +223,9 @@ void *test_cip(void *data)
             tag = PLC_TAG_NULL;
 
             /* retry later */
-            timeout = time_ms() + TAG_CREATE_TIMEOUT;
-            while(timeout < time_ms()) {
-                sleep_ms(10);
+            timeout = util_time_ms() + TAG_CREATE_TIMEOUT;
+            while(timeout < util_time_ms()) {
+                util_sleep_ms(10);
             }
         }
 
@@ -306,14 +306,8 @@ void *test_cip_old(void *data)
     }
 
     while(!done) {
-        while(!tag && !done) {
-            if(!first_time) {
-                /* retry later */
-                timeout = util_time_ms() + TAG_CREATE_TIMEOUT;
-                while(!done && timeout > util_time_ms()) {
-                    util_sleep_ms(5);
-                }
-            }
+        /* capture the starting time */
+        start = util_time_ms();
 
             first_time = 0;
 
@@ -353,11 +347,9 @@ void *test_cip_old(void *data)
 
         fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
-        if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Test %d, iteration %d, closing tag due to error %s, will retry in 2 seconds.\n", tid, iteration, plc_tag_decode_error(rc));
-
-            plc_tag_destroy(tag);
-            tag = PLC_TAG_NULL;
+/*        if(iteration >= 100) {
+            iteration = 1;
+            util_sleep_ms(5000);
         }
 
         iteration++;
