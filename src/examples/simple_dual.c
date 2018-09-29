@@ -60,7 +60,7 @@ int main()
     }
 
     /* wait for tags to finish setting up */
-    sleep_ms(1000);
+    util_sleep_ms(1000);
 
     if(plc_tag_status(tag1) != PLCTAG_STATUS_OK) {
         fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag1)));
@@ -87,7 +87,7 @@ int main()
     }
 
     /* let the reads complete */
-    sleep_ms(1000);
+    util_sleep_ms(1000);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);
@@ -117,11 +117,11 @@ int main()
     /* we are done, clean up tag 2 first */
     plc_tag_destroy(tag2);
 
-    sleep_ms(1000);
+    util_sleep_ms(1000);
 
     plc_tag_destroy(tag1);
 
-    sleep_ms(1000);
+    util_sleep_ms(1000);
 
     return 0;
 }
