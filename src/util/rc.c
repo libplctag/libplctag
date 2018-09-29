@@ -90,7 +90,7 @@ static void refcount_cleanup(refcount_p rc);
  * reference to the data.
  */
 //void *rc_alloc_impl(const char *func, int line_num, int data_size, int extra_arg_count, rc_cleanup_func cleaner_func, ...)
-void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_func cleaner_func)
+char *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_func cleaner_func)
 {
     refcount_p rc = NULL;
     //cleanup_p cleanup = NULL;
@@ -120,9 +120,9 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
     /* return the original address if successful otherwise NULL. */
 
     /* DEBUG */
-    pdebug(DEBUG_DETAIL,"Returning memory pointer %p",(void *)(rc + 1));
+    pdebug(DEBUG_DETAIL,"Returning memory pointer %p",(char *)(rc + 1));
 
-    return (void *)(rc + 1);
+    return (char *)(rc + 1);
 }
 
 
@@ -142,11 +142,11 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
  * my_struct->some_field_ref = rc_inc(ref);
  */
 
-void *rc_inc_impl(const char *func, int line_num, void *data)
+char *rc_inc_impl(const char *func, int line_num, char *data)
 {
     int count = 0;
     refcount_p rc = NULL;
-    void *  result = NULL;
+    char *result = NULL;
 
     pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
 
@@ -198,7 +198,7 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
  * and the block itself using mem_free() or the appropriate function;
  */
 
-void *rc_dec_impl(const char *func, int line_num, void *data)
+char *rc_dec_impl(const char *func, int line_num, char *data)
 {
     int count = 0;
     int invalid = 0;
