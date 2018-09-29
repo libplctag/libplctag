@@ -1916,7 +1916,7 @@ int perform_forward_open(ab_session_p session)
             } else {
                 pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", session->max_payload_size);
             }
-        } else { /*if(rc == PLCTAG_ERR_UNSUPPORTED)*/
+        } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
             /* the PLC does not support Forward Open Extended.   Try the old request type. */
             if(session->max_payload_size == MAX_CIP_MSG_SIZE_EX) {
                 session->max_payload_size = MAX_CIP_MSG_SIZE;
