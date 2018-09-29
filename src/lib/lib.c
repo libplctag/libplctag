@@ -1267,8 +1267,8 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag id, int offset)
             break;
         }
 
-        res = ((uint16_t)(tag->data[offset])) +
-              ((uint16_t)(tag->data[offset+1]) << 8);
+        res = (uint16_t)((tag->data[offset]) +
+              ((tag->data[offset+1]) << 8));
     }
 
     rc_dec(tag);
@@ -1348,8 +1348,8 @@ LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag id, int offset)
             break;
         }
 
-        res = (int16_t)(((uint16_t)(tag->data[offset])) +
-                        ((uint16_t)(tag->data[offset+1]) << 8));
+        res = (int16_t)(((tag->data[offset])) +
+                        ((tag->data[offset+1]) << 8));
     }
 
     rc_dec(tag);
