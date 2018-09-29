@@ -82,7 +82,7 @@ static int open_tag(plc_tag *tag, FILE *log, int tid, int num_elems)
     fprintf(log,"--- Test %d, Creating tag (%d, %d) with string %s\n", tid, tid, num_elems, buf);
 
     /* create the tag */
-    start_time = time_ms();
+    start_time = util_time_ms();
     *tag = plc_tag_create_sync(tag_str, TAG_CREATE_TIMEOUT);
 
     /* everything OK? */
@@ -118,8 +118,53 @@ static void *test_cip(void *data)
     int first_time = 1;
     FILE *log = NULL;
 
-    /* a hack to allow threads to start. */
-    sleep_ms(tid);
+    while(!done) {
+        /* capture the starting time */
+        start = util_time_ms();
+
+        rc = open_tag(&tag, tag_str);
+
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"Test %d, Error creating tag!  Terminating test...\n", tid);
+            done = 1;
+            return NULL;
+        }
+
+        rc = plc_tag_read(tag, DATA_TIMEOUT);
+
+        if(rc != PLCTAG_STATUS_OK) {
+            done = 1;
+        } else {
+            value = plc_tag_get_int16(tag,0);
+
+            /* increment the value, keep it in bounds of 0-499 */
+            value = (value >= (int16_t)500 ? (int16_t)0 : value + (int16_t)1);
+
+            /* yes, we should be checking this return value too... */
+            plc_tag_set_int16(tag, 0, value);
+
+            /* write the value */
+            rc = plc_tag_write(tag, DATA_TIMEOUT);
+        }
+
+        plc_tag_destroy(tag);
+
+        end = util_time_ms();
+
+        fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
+
+/*        if(iteration >= 100) {
+            iteration = 1;
+            util_sleep_ms(5000);
+        }
+*/
+        iteration++;
+    }
+
+    fprintf(stderr, "Test %d terminating.\n", tid);
+
+    return NULL;
+}
 
     log = open_log(tid);
 
@@ -149,7 +194,7 @@ void *test_cip(void *data)
         }
 
         /* capture the starting time */
-        start = time_ms();
+        start = util_time_ms();
 
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -174,7 +219,7 @@ void *test_cip(void *data)
             }
         } while(0);
 
-        end = time_ms();
+        end = util_time_ms();
 
         fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
@@ -185,9 +230,9 @@ void *test_cip(void *data)
             tag = PLC_TAG_NULL;
 
             /* retry later */
-            timeout = time_ms() + TAG_CREATE_TIMEOUT;
-            while(timeout < time_ms()) {
-                sleep_ms(10);
+            timeout = util_time_ms() + TAG_CREATE_TIMEOUT;
+            while(timeout < util_time_ms()) {
+                util_sleep_ms(10);
             }
         }
 
@@ -266,7 +311,7 @@ void *test_cip_old(void *data)
         }
 
         /* capture the starting time */
-        start = time_ms();
+        start = util_time_ms();
 
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -293,17 +338,16 @@ void *test_cip_old(void *data)
             }
         } while(0);
 
-        end = time_ms();
+        end = util_time_ms();
 
         total_io_time += (end - start);
 
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(log,"!!! Test %d, iteration %d, closing tag due to error %s, will retry in %dms.\n", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
 
-            plc_tag_destroy(tag);
-            tag = PLC_TAG_NULL;
-        } else {
-            fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems, (int)(end-start));
+/*        if(iteration >= 100) {
+            iteration = 1;
+            util_sleep_ms(5000);
         }
 
         iteration++;
@@ -350,11 +394,11 @@ int main(int argc, char **argv)
         pthread_create(&threads[tid], NULL, &test_cip, &args[tid]);
     }
 
-    start_time = time_ms();
+    start_time = util_time_ms();
     end_time = start_time + (seconds * 1000);
 
-    while(!done && time_ms() < end_time) {
-        sleep_ms(100);
+    while(!done && util_time_ms() < end_time) {
+        util_sleep_ms(100);
     }
 
     success = !done;
