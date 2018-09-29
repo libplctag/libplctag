@@ -54,7 +54,7 @@ int main()
 
     /* let the connect complete */
     fprintf(stderr,"Sleeping to let the connect complete.\n");
-    sleep_ms(1000);
+    util_sleep_ms(1000);
 
     for(i=0; i < NUM_TAGS; i++) {
         /* called to update the status in the tag. */
@@ -74,7 +74,7 @@ int main()
 
     /* sleeping to let the reads complete */
     fprintf(stderr,"Sleeping to let the reads complete.\n");
-    sleep_ms(2000);
+    util_sleep_ms(2000);
 
 
     /* get any data we can */
