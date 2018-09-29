@@ -62,8 +62,7 @@ inline static uint16_t le2h16(uint16_le src)
 {
     uint16_t result = 0;
 
-    result |= (uint16_t)(src.val.b_val[0]);
-    result |= ((uint16_t)(src.val.b_val[1]) << 8);
+    result = (uint16_t)(src.val.b_val[0] + ((src.val.b_val[1]) << 8));
 
     return result;
 }
