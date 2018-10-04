@@ -345,6 +345,9 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
+    /* trigger the first read. */
+    tag->first_read = 1;
+
     pdebug(DEBUG_INFO,"Done.");
 
     return (plc_tag_p)tag;
