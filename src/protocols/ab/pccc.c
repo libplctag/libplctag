@@ -513,8 +513,8 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, in
         }
     }
 
-    *pccc_res_type = d_type;
-    *pccc_res_length = d_size;
+    *pccc_res_type = (int)d_type;
+    *pccc_res_length = (int)d_size;
 
     /* point past the last byte read */
     data++;
