@@ -251,7 +251,7 @@ int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_
         data++;
         ioi_size += 6;
 
-        *dhp_dest = dest_addr;
+        *dhp_dest = (uint16_t)dest_addr;
     } else if(!has_dhp) {
         if(needs_connection) {
             /*
@@ -299,69 +299,6 @@ int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_
         pdebug(DEBUG_WARN, "Unable to allocate connection path!");
         return PLCTAG_ERR_NO_MEM;
     }
-
-    mem_copy(*conn_path, &tmp_path[0], ioi_size);
-
-    *conn_path_size = ioi_size;
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-
-
-
-
-
-//~ char *cip_decode_status(int status)
-//~ {
-    //~ switch(status) {
-        //~ case 0x01:
-            //~ /* FIXME - this should handle the extended error codes */
-            //~ return "Connection error!";
-            //~ break;
-
-        //~ case 0x02:
-            //~ return "Insufficient resources!";
-            //~ break;
-
-        //~ case 0x03:
-            //~ return "Value invalid!"; /* huh? */
-            //~ break;
-
-        //~ case 0x04:
-            //~ return "Bad or indecipherable IOI or tag not found!";
-            //~ break;
-
-        //~ case 0x05:
-            //~ return "Unknown destination, tag or item!";
-            //~ break;
-
-        //~ case 0x06:
-            //~ return "Response too large, partial data transfered!";
-            //~ break;
-
-        //~ case 0x0A:
-            //~ return "Error processing attributes!";
-            //~ break;
-
-        //~ case 0x13:
-            //~ return "Insufficient data/params to process request!";
-            //~ break;
-
-        //~ case 0x1C:
-            //~ return "Insufficient attributes to process request!";
-            //~ break;
-
-        //~ case 0x26:
-            //~ return "IOI word length does not match IOI length processed!";
-            //~ break;
-
-        //~ case 0xFF:
-
-            //~ /* extended status */
 
     mem_copy(*conn_path, &tmp_path[0], ioi_size);
 

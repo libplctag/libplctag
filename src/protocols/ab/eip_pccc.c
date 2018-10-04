@@ -187,18 +187,6 @@ int tag_read_start(ab_tag_p tag)
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-//    if(!tag->reqs) {
-//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-//        tag->max_requests = 1;
-//        tag->num_read_requests = 1;
-//        tag->num_write_requests = 1;
-//
-//        if(!tag->reqs) {
-//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-//            return PLCTAG_ERR_NO_MEM;
-//        }
-//    }
-
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
 
@@ -391,7 +379,6 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        /* copy data into the tag. */
         mem_copy(tag->data, data, (int)(data_end - data));
 
         rc = PLCTAG_STATUS_OK;
@@ -432,7 +419,6 @@ int tag_write_start(ab_tag_p tag)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* how many packets will we need? How much overhead? */
-    //overhead = (int)(sizeof(pccc_resp) + 4 + tag->encoded_name_size); /* MAGIC 4 = fudge */
 
     /* overhead comes from the request in this case */
     overhead =   1  /* CIP PCCC command */
@@ -461,20 +447,6 @@ int tag_write_start(ab_tag_p tag)
         pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", MAX_PCCC_PACKET_SIZE, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
-
-
-//    /* set up the requests */
-//    if(!tag->reqs) {
-//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-//        tag->max_requests = 1;
-//        tag->num_read_requests = 1;
-//        tag->num_write_requests = 1;
-//
-//        if(!tag->reqs) {
-//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-//            return PLCTAG_ERR_NO_MEM;
-//        }
-//    }
 
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
