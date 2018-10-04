@@ -106,14 +106,14 @@ void update_string(plc_tag tag, int i, char *str)
     int str_index;
 
     /* now write the data */
-    str_len = strlen(str);
+    str_len = (int)strlen(str);
 
     /* set the length */
     plc_tag_set_int32(tag, base_offset, str_len);
 
     /* copy the data */
     for(str_index=0; str_index < str_len && str_index < STRING_DATA_SIZE; str_index++) {
-        plc_tag_set_uint8(tag,base_offset + 4 + str_index, str[str_index]);
+        plc_tag_set_uint8(tag,base_offset + 4 + str_index, (uint8_t)str[str_index]);
     }
 
     /* pad with zeros */
