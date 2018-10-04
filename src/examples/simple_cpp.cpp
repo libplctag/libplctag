@@ -33,7 +33,7 @@ int main()
 
     /* let the connect succeed we hope */
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep_ms(100);
+        sleep_ms(10);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
@@ -68,7 +68,7 @@ int main()
     rc = plc_tag_write(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr,"ERROR: Unable to write the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         return 0;
     }
 
