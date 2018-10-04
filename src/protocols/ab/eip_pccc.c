@@ -153,7 +153,7 @@ int tag_read_start(ab_tag_p tag)
     pdebug(DEBUG_INFO,"Starting");
 
     /* how many packets will we need? How much overhead? */
-    overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
+    //overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
     /* calculate based on the response. */
     overhead =   1      /* reply code */
@@ -186,18 +186,6 @@ int tag_read_start(ab_tag_p tag)
         pdebug(DEBUG_DETAIL,"Unable to send request: Tag size is %d, write overhead is %d, and write data per packet is %d!", tag->size, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
-
-//    if(!tag->reqs) {
-//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-//        tag->max_requests = 1;
-//        tag->num_read_requests = 1;
-//        tag->num_write_requests = 1;
-//
-//        if(!tag->reqs) {
-//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-//            return PLCTAG_ERR_NO_MEM;
-//        }
-//    }
 
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
@@ -234,7 +222,7 @@ int tag_read_start(ab_tag_p tag)
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
     pccc->pccc_function = AB_EIP_PCCC_TYPED_READ_FUNC;
-    pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is the offset items */
+    pccc->pccc_transfer_size = h2le16((uint16_t)(tag->elem_count)); /* This is not in the docs, but it is in the data. */
 
     /* point to the end of the struct */
     data = ((uint8_t *)pccc) + sizeof(pccc_req);
@@ -243,8 +231,8 @@ int tag_read_start(ab_tag_p tag)
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* FIXME - This is the total items */
-    *((uint16_le*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
+    /* we need the count twice? */
+    *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count)); /* FIXME - bytes or INTs? */
     data += sizeof(uint16_le);
 
     /*
@@ -263,10 +251,10 @@ int tag_read_start(ab_tag_p tag)
     pccc->cpf_nai_item_type     = h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
     pccc->cpf_nai_item_length   = h2le16(0);                /* ALWAYS 0 */
     pccc->cpf_udi_item_type     = h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
-    pccc->cpf_udi_item_length   = h2le16(data - embed_start);  /* REQ: fill in with length of remaining data. */
+    pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - embed_start));  /* REQ: fill in with length of remaining data. */
 
     /* set the size of the request */
-    req->request_size = data - (req->data);
+    req->request_size = (int)(data - (req->data));
 
     /* mark it as ready to send */
     req->send_request = 1;
@@ -358,7 +346,7 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        if(!(data = pccc_decode_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
+        if(!(data = pccc_decode_dt_byte(data,(int)(data_end - data), &pccc_res_type,&pccc_res_length))) {
             pdebug(DEBUG_WARN,"Unable to decode PCCC response data type and data size!");
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -371,7 +359,7 @@ static int check_read_status(ab_tag_p tag)
          */
 
         if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
-            if(!(data = pccc_decode_dt_byte(data,data_end - data, &pccc_res_type,&pccc_res_length))) {
+            if(!(data = pccc_decode_dt_byte(data,(int)(data_end - data), &pccc_res_type,&pccc_res_length))) {
                 pdebug(DEBUG_WARN,"Unable to decode PCCC response array element data type and data size!");
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
@@ -384,7 +372,7 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        mem_copy(tag->data, data, data_end - data);
+        mem_copy(tag->data, data, (int)(data_end - data));
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
@@ -424,7 +412,6 @@ int tag_write_start(ab_tag_p tag)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* how many packets will we need? How much overhead? */
-    //overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
     /* overhead comes from the request in this case */
     overhead =   1  /* CIP PCCC command */
@@ -453,20 +440,6 @@ int tag_write_start(ab_tag_p tag)
         pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", MAX_PCCC_PACKET_SIZE, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
-
-
-//    /* set up the requests */
-//    if(!tag->reqs) {
-//        tag->reqs = (ab_request_p*)mem_alloc(1 * sizeof(ab_request_p));
-//        tag->max_requests = 1;
-//        tag->num_read_requests = 1;
-//        tag->num_write_requests = 1;
-//
-//        if(!tag->reqs) {
-//            pdebug(DEBUG_WARN,"Unable to get memory for request array!");
-//            return PLCTAG_ERR_NO_MEM;
-//        }
-//    }
 
     /* get a request buffer */
     rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
@@ -507,14 +480,14 @@ int tag_write_start(ab_tag_p tag)
     /* generate the data type/data size fields, first the element part so that
      * we can get the size for the array part.
      */
-    if(!(element_def_size = pccc_encode_dt_byte(element_def,sizeof(element_def),pccc_data_type,tag->elem_size))) {
+    if(!(element_def_size = pccc_encode_dt_byte(element_def,sizeof(element_def),(uint32_t)pccc_data_type,(uint32_t)(tag->elem_size)))) {
         pdebug(DEBUG_WARN,"Unable to encode PCCC request array element data type and size fields!");
         //~ request_destroy(&req);
         rc_dec(req);
         return PLCTAG_ERR_ENCODE;
     }
 
-    if(!(array_def_size = pccc_encode_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY,element_def_size + tag->size))) {
+    if(!(array_def_size = pccc_encode_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY, (uint32_t)(element_def_size + tag->size)))) {
         pdebug(DEBUG_WARN,"Unable to encode PCCC request data type and size fields!");
         //~ request_destroy(&req);
         rc_dec(req);
@@ -546,7 +519,7 @@ int tag_write_start(ab_tag_p tag)
     pccc->cpf_nai_item_type     = h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
     pccc->cpf_nai_item_length   = h2le16(0);                /* ALWAYS 0 */
     pccc->cpf_udi_item_type     = h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
-    pccc->cpf_udi_item_length   = h2le16(data - embed_start);  /* REQ: fill in with length of remaining data. */
+    pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - embed_start));  /* REQ: fill in with length of remaining data. */
 
     /* Command Routing */
     pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
@@ -571,11 +544,11 @@ int tag_write_start(ab_tag_p tag)
      *
      * Seems to be the number of elements??
      */
-    pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
+    pccc->pccc_transfer_size = h2le16((uint16_t)(tag->elem_count)); /* This is not in the docs, but it is in the data. */
 
 
     /* get ready to add the request to the queue for this session */
-    req->request_size = data - (req->data);
+    req->request_size = (int)(data - (req->data));
     req->send_request = 1;
     req->conn_seq = conn_seq_id;
 
