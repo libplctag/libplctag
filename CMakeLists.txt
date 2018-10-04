@@ -30,8 +30,8 @@ project (libplctag_project)
 
 # the project is version 1.5
 set (libplctag_VERSION_MAJOR 1)
-set (libplctag_VERSION_MINOR 5)
-set (libplctag_VERSION_PATCH 13)
+set (libplctag_VERSION_MINOR 6)
+set (libplctag_VERSION_PATCH 0)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 
@@ -173,10 +173,16 @@ FOREACH( lib_src ${libplctag_SRCS} )
     set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
 ENDFOREACH()
 
-# set up the library
-SET(BUILD_SHARED_LIBS OFF)
-add_library(plctag STATIC ${libplctag_SRCS} )
-#add_library(plctag_static STATIC ${libplctag_SRCS} )
+# shared library
+add_library(plctag SHARED ${libplctag_SRCS} )
+
+# static Library
+#SET(BUILD_SHARED_LIBS OFF)
+#add_library(plctag STATIC ${libplctag_SRCS} )
+#SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+#SET(CMAKE_EXE_LINKER_FLAGS "-static")
+
+
 
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
@@ -245,8 +251,6 @@ set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMP
 add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
-SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-SET(CMAKE_EXE_LINKER_FLAGS "-static")
 
 foreach ( example ${example_PROGRAMS} )
     set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS ${BASE_C_FLAGS})
