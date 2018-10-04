@@ -501,7 +501,7 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        /* copy data into the tag. */
+        /* all OK, copy the data. */
         mem_copy(tag->data, data, (int)(data_end - data));
 
         rc = PLCTAG_STATUS_OK;
