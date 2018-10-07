@@ -46,8 +46,8 @@ Obsolete.  Use lookup3.c instead, it is faster and more thorough.
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
-typedef  unsigned long  int  ub4;   /* unsigned 4-byte quantities */
-typedef  unsigned       char ub1;
+typedef uint32_t ub4;   /* unsigned 4-byte quantities */
+typedef uint8_t ub1;
 
 #define hashsize(n) ((ub4)1<<(n))
 #define hashmask(n) (hashsize(n)-1)
@@ -143,25 +143,25 @@ uint32_t hash( uint8_t *k, size_t length, uint32_t initval)
     uint32_t a,b,c,len;
 
     /* Set up the internal state */
-    len = length;
+    len = (uint32_t)length;
     a = b = 0x9e3779b9;  /* the golden ratio; an arbitrary value */
     c = initval;           /* the previous hash value */
 
     /*---------------------------------------- handle most of the key */
     while (len >= 12) {
-        a += (k[0] +((ub4)k[1]<<8) +((ub4)k[2]<<16) +((ub4)k[3]<<24));
-        b += (k[4] +((ub4)k[5]<<8) +((ub4)k[6]<<16) +((ub4)k[7]<<24));
-        c += (k[8] +((ub4)k[9]<<8) +((ub4)k[10]<<16)+((ub4)k[11]<<24));
+        a += (uint32_t)((k[0] +((ub4)k[1]<<8) +((ub4)k[2]<<16) +((ub4)k[3]<<24)));
+        b += (uint32_t)((k[4] +((ub4)k[5]<<8) +((ub4)k[6]<<16) +((ub4)k[7]<<24)));
+        c += (uint32_t)((k[8] +((ub4)k[9]<<8) +((ub4)k[10]<<16)+((ub4)k[11]<<24)));
         mix(a,b,c);
         k += 12;
         len -= 12;
     }
 
     /*------------------------------------- handle the last 11 bytes */
-    c += length;
+    c += (uint32_t)length;
     switch(len) {            /* all the case statements fall through */
     case 11:
-        c+=((ub4)k[10]<<24);
+        c += ((ub4)k[10]<<24);
         /* Falls through. */
     case 10:
         c+=((ub4)k[9]<<16);
