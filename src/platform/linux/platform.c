@@ -68,7 +68,7 @@
  */
 extern void *mem_alloc(int size)
 {
-    void *res = calloc(size, 1);
+    void *res = calloc((size_t)size, 1);
 
     return res;
 }
@@ -98,7 +98,7 @@ extern void mem_free(const void *mem)
  */
 extern void mem_set(void *d1, int c, int size)
 {
-    memset(d1, c, size);
+    memset(d1, c, (size_t)size);
 }
 
 
@@ -112,7 +112,7 @@ extern void mem_set(void *d1, int c, int size)
  */
 extern void mem_copy(void *d1, void *d2, int size)
 {
-    memcpy(d1, d2, size);
+    memcpy(d1, d2, (size_t)size);
 }
 
 
@@ -124,7 +124,7 @@ extern void mem_copy(void *d1, void *d2, int size)
  */
 extern void mem_move(void *dest, void *src, int size)
 {
-    memmove(dest, src, size);
+    memmove(dest, src, (size_t)size);
 }
 
 
@@ -138,7 +138,7 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
         return (src1_size - src2_size);
     }
 
-    return memcmp(src1, src2, src1_size);
+    return memcmp(src1, src2, (size_t)src1_size);
 }
 
 
@@ -189,7 +189,7 @@ extern int str_cmp_i(const char *first, const char *second)
  */
 extern int str_copy(char *dst, int dst_size, const char *src)
 {
-    strncpy(dst, src, dst_size);
+    strncpy(dst, src, (size_t)dst_size);
     return 0;
 }
 
@@ -206,7 +206,7 @@ extern int str_length(const char *str)
         return 0;
     }
 
-    return strlen(str);
+    return (int)strlen(str);
 }
 
 
@@ -307,7 +307,7 @@ extern char **str_split(const char *str, const char *sep)
         sub_str_count++;
 
     /* calculate total size for string plus pointers */
-    size = sizeof(char *)*(sub_str_count+1)+str_length(str)+1;
+    size = ((int)sizeof(char *)*(sub_str_count+1)+str_length(str)+1);
 
     /* allocate enough memory */
     res = mem_alloc(size);
@@ -316,10 +316,10 @@ extern char **str_split(const char *str, const char *sep)
         return NULL;
 
     /* calculate the beginning of the string */
-    tmp = (char *)res + sizeof(char *)*(sub_str_count+1);
+    tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count+1);
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
-    str_copy((char *)tmp, (size - ((char*)tmp - (char*)res)), str);
+    str_copy((char *)tmp, (int)(size - ((char*)tmp - (char*)res)), str);
 
     /* set up the pointers */
     sub_str_count=0;
@@ -857,7 +857,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     memset((void *)&gw_addr,0, sizeof(gw_addr));
     gw_addr.sin_family = AF_INET ;
-    gw_addr.sin_port = htons(port);
+    gw_addr.sin_port = htons((uint16_t)port);
 
     do {
         int rc;
@@ -924,7 +924,7 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-    rc = read(s->fd,buf,size);
+    rc = (int)read(s->fd,buf,(size_t)size);
 
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -948,7 +948,7 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-    rc = write(s->fd,buf,size);
+    rc = (int)write(s->fd,buf, (size_t)size);
 
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
