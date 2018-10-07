@@ -279,7 +279,7 @@ START_PACK typedef struct {
     uint8_t timeout_ticks;          /* timeout = srd_secs_per_tick * src_timeout_ticks */
     uint32_le orig_to_targ_conn_id;  /* 0, returned by target in reply. */
     uint32_le targ_to_orig_conn_id;  /* what is _our_ ID for this connection, use ab_connection ptr as id ? */
-    uint16_le conn_serial_number;    /* our connection serial number ?? */
+    uint16_le conn_serial_number;    /* our connection ID/serial number */
     uint16_le orig_vendor_id;        /* our unique vendor ID */
     uint32_le orig_serial_number;    /* our unique serial number */
     uint8_t conn_timeout_multiplier;/* timeout = mult * RPI */
@@ -339,7 +339,7 @@ START_PACK typedef struct {
     uint8_t timeout_ticks;          /* timeout = srd_secs_per_tick * src_timeout_ticks */
     uint32_le orig_to_targ_conn_id;  /* 0, returned by target in reply. */
     uint32_le targ_to_orig_conn_id;  /* what is _our_ ID for this connection, use ab_connection ptr as id ? */
-    uint16_le conn_serial_number;    /* our connection serial number ?? */
+    uint16_le conn_serial_number;    /* our connection ID/serial number ?? */
     uint16_le orig_vendor_id;        /* our unique vendor ID */
     uint32_le orig_serial_number;    /* our unique serial number */
     uint8_t conn_timeout_multiplier;/* timeout = mult * RPI */
@@ -398,7 +398,7 @@ START_PACK typedef struct {
     uint8_t status_size;            /* number of 16-bit words of extra status, 0 if success */
     uint32_le orig_to_targ_conn_id;  /* target's connection ID for us, save this. */
     uint32_le targ_to_orig_conn_id;  /* our connection ID back for reference */
-    uint16_le conn_serial_number;    /* our connection serial number from request */
+    uint16_le conn_serial_number;    /* our connection ID/serial number from request */
     uint16_le orig_vendor_id;        /* our unique vendor ID from request*/
     uint32_le orig_serial_number;    /* our unique serial number from request*/
     uint32_le orig_to_targ_api;      /* Actual packet interval, microsecs */
@@ -442,7 +442,7 @@ START_PACK typedef struct {
     /* Forward Open Params */
     uint8_t secs_per_tick;       /* seconds per tick */
     uint8_t timeout_ticks;       /* timeout = srd_secs_per_tick * src_timeout_ticks */
-    uint16_le conn_serial_number;    /* our connection serial number ?? */
+    uint16_le conn_serial_number;    /* our connection ID/serial number */
     uint16_le orig_vendor_id;        /* our unique vendor ID */
     uint32_le orig_serial_number;    /* our unique serial number */
     uint8_t path_size;              /* size of connection path in 16-bit words*/
@@ -481,7 +481,7 @@ START_PACK typedef struct {
     uint8_t reserved1;               /* returned as 0x00? */
     uint8_t general_status;         /* 0 on success */
     uint8_t status_size;            /* number of 16-bit words of extra status, 0 if success */
-    uint16_le conn_serial_number;    /* our connection serial number ?? */
+    uint16_le conn_serial_number;    /* our connection ID/serial number ?? */
     uint16_le orig_vendor_id;        /* our unique vendor ID */
     uint32_le orig_serial_number;    /* our unique serial number */
     uint8_t path_size;              /* size of connection path in 16-bit words*/

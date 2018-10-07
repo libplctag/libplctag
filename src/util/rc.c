@@ -100,7 +100,7 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
 
     pdebug(DEBUG_SPEW,"Allocating %d-byte refcount struct",(int)sizeof(struct refcount_t));
 
-    rc = mem_alloc(sizeof(struct refcount_t) + data_size);
+    rc = mem_alloc((int)sizeof(struct refcount_t) + data_size);
     if(!rc) {
         pdebug(DEBUG_WARN,"Unable to allocate refcount struct!");
         return NULL;

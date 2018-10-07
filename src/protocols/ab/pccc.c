@@ -458,7 +458,7 @@ int pccc_encode_dt_byte(uint8_t *data,int buf_size,uint32_t data_type,uint32_t d
      */
 
     if(data_type <= 0x07) {
-        t_byte = data_type;
+        t_byte = (uint8_t)data_type;
         data_type =0;
     } else {
         size_bytes=0;
@@ -471,11 +471,11 @@ int pccc_encode_dt_byte(uint8_t *data,int buf_size,uint32_t data_type,uint32_t d
             data++;
         }
 
-        t_byte = 0x08 | size_bytes;
+        t_byte = (uint8_t)(0x08 | size_bytes);
     }
 
     if(data_size <= 0x07) {
-        d_byte = data_size;
+        d_byte = (uint8_t)data_size;
         data_size = 0;
     } else {
         size_bytes = 0;
@@ -488,15 +488,15 @@ int pccc_encode_dt_byte(uint8_t *data,int buf_size,uint32_t data_type,uint32_t d
             data++;
         }
 
-        d_byte = 0x08 | size_bytes;
+        d_byte = (uint8_t)(0x08 | size_bytes);
     }
 
-    *dt_byte = (t_byte << 4) | d_byte;
+    *dt_byte = (uint8_t)((t_byte << 4) | d_byte);
 
     /* did we succeed? */
     if(buf_size == 0 || data_type != 0 || data_size != 0)
         return 0;
 
 
-    return data - dt_byte;
+    return (int)(data - dt_byte);
 }

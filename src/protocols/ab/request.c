@@ -48,16 +48,16 @@ int request_create(ab_request_p *req, int max_payload_size)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p res;
-    int request_capacity = EIP_CIP_PREFIX_SIZE + max_payload_size;
+    size_t request_capacity = (size_t)(EIP_CIP_PREFIX_SIZE + max_payload_size);
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
-    res = (ab_request_p)rc_alloc(sizeof(struct ab_request_t) + request_capacity, request_destroy);
+    res = (ab_request_p)rc_alloc((int)(sizeof(struct ab_request_t) + request_capacity), request_destroy);
     if (!res) {
         *req = NULL;
         rc = PLCTAG_ERR_NO_MEM;
     } else {
-        res->request_capacity = request_capacity;
+        res->request_capacity = (int)request_capacity;
 
         rc = mutex_create(&(res->request_mutex));
         if(rc != PLCTAG_STATUS_OK) {
@@ -197,14 +197,7 @@ void request_destroy(void *req_arg)
 
     request_abort(req);
 
-//    if(req->session) {
-//        rc_dec(req->session);
-//    }
-//
-//    if(req->connection) {
-//        rc_dec(req->connection);
-//    }
-
+    /* FIXME - is this needed any more? */
     mutex_destroy(&(req->request_mutex));
 
     pdebug(DEBUG_DETAIL, "Done.");

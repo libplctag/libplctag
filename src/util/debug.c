@@ -95,7 +95,7 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
     localtime_r(&epoch,&t);
 
     /* create the prefix and format for the file entry. */
-    rc = snprintf(prefix_buf, prefix_buf_size,"thread(%04u) %04d-%02d-%02d %02d:%02d:%02d.%03d",
+    rc = snprintf(prefix_buf, (size_t)prefix_buf_size,"thread(%04u) %04d-%02d-%02d %02d:%02d:%02d.%03d",
              get_thread_id(),
              t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms);
 
@@ -170,7 +170,7 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
-            row_offset += snprintf(&row_buf[row_offset], sizeof(row_buf) - row_offset, " %02x", data[offset]);
+            row_offset += snprintf(&row_buf[row_offset], sizeof(row_buf) - (size_t)row_offset, " %02x", data[offset]);
         }
 
         /* terminate the row string*/
