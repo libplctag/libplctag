@@ -214,7 +214,7 @@ int main(int argc, char **argv)
     }
 
     /* create the tag */
-    tag = plc_tag_create_sync(path, 500);
+    tag = plc_tag_create(path);
 
     printf("INFO: Got tag %p\n", (void *)tag);
 
@@ -224,7 +224,9 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    rc = plc_tag_status(tag);
+    while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING) {
+        util_sleep_ms(1);
+    }
 
     printf("INFO: tag status %d\n", rc);
 
@@ -292,27 +294,27 @@ int main(int argc, char **argv)
         } else {
             switch(data_type) {
                 case PLC_LIB_UINT8:
-                    rc = plc_tag_set_uint8(tag,0,u_val);
+                    rc = plc_tag_set_uint8(tag,0,(uint8_t)u_val);
                     break;
 
                 case PLC_LIB_UINT16:
-                    rc = plc_tag_set_uint16(tag,0,u_val);
+                    rc = plc_tag_set_uint16(tag,0, (uint16_t)u_val);
                     break;
 
                 case PLC_LIB_UINT32:
-                    rc = plc_tag_set_uint32(tag,0,u_val);
+                    rc = plc_tag_set_uint32(tag,0,(uint32_t)u_val);
                     break;
 
                 case PLC_LIB_SINT8:
-                    rc = plc_tag_set_int8(tag,0,i_val);
+                    rc = plc_tag_set_int8(tag,0,(int8_t)i_val);
                     break;
 
                 case PLC_LIB_SINT16:
-                    rc = plc_tag_set_int16(tag,0,i_val);
+                    rc = plc_tag_set_int16(tag,0,(int16_t)i_val);
                     break;
 
                 case PLC_LIB_SINT32:
-                    rc = plc_tag_set_int32(tag,0,i_val);
+                    rc = plc_tag_set_int32(tag,0,(int32_t)i_val);
                     break;
 
                 case PLC_LIB_REAL32:
