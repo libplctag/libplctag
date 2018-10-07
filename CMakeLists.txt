@@ -85,19 +85,27 @@ MESSAGE("CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}")
 # C compiler specific settings
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
-    set(BASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # using GCC
-    set(BASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     # using Intel C/C++
     MESSAGE("Intel C compiler not supported!")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
-    set(BASE_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
     # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
 endif()
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(BASE_FLAGS "${BASE_DEBUG_FLAGS}")
+else()
+    set(BASE_FLAGS "${BASE_RELEASE_FLAGS}")
+endif()
 
 MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
 
