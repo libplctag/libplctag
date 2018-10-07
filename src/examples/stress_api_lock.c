@@ -90,8 +90,8 @@ void *test_tag(void *data)
 {
     int tid = (int)(intptr_t)data;
     int32_t value;
-    uint64_t start;
-    uint64_t end;
+    int64_t start;
+    int64_t end;
     int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
 

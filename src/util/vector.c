@@ -54,7 +54,7 @@ vector_p vector_create(int capacity, int max_inc)
         return NULL;
     }
 
-    vec = mem_alloc(sizeof(struct vector_t));
+    vec = mem_alloc((int)sizeof(struct vector_t));
     if(!vec) {
         pdebug(DEBUG_ERROR,"Unable to allocate memory for vector!");
         return NULL;
@@ -64,7 +64,7 @@ vector_p vector_create(int capacity, int max_inc)
     vec->capacity = capacity;
     vec->max_inc = max_inc;
 
-    vec->data = mem_alloc(capacity * sizeof(void *));
+    vec->data = mem_alloc(capacity * (int)sizeof(void *));
     if(!vec->data) {
         pdebug(DEBUG_ERROR,"Unable to allocate memory for vector data!");
         vector_destroy(vec);
@@ -174,7 +174,7 @@ void * vector_remove(vector_p vec, int index)
     result = vec->data[index];
 
     /* move the rest of the data over this. */
-    mem_move(&vec->data[index], &vec->data[index+1], sizeof(void *) * (vec->len - index - 1));
+    mem_move(&vec->data[index], &vec->data[index+1], (int)((sizeof(void *) * (size_t)(vec->len - index - 1))));
 
     /* make sure that we do not have old data hanging around. */
     vec->data[vec->len - 1] = NULL;
@@ -246,13 +246,13 @@ int ensure_capacity(vector_p vec, int capacity)
     }
 
     /* allocate the new data area */
-    new_data = (void * *)mem_alloc(sizeof(void *) * (vec->capacity + new_inc));
+    new_data = (void * *)mem_alloc((int)((sizeof(void *) * (size_t)(vec->capacity + new_inc))));
     if(!new_data) {
         pdebug(DEBUG_ERROR,"Unable to allocate new data area!");
         return PLCTAG_ERR_NO_MEM;
     }
 
-    mem_copy(new_data, vec->data, vec->capacity * sizeof(void *));
+    mem_copy(new_data, vec->data, (int)((size_t)(vec->capacity) * sizeof(void *)));
 
     mem_free(vec->data);
 

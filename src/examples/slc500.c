@@ -53,7 +53,7 @@ int main()
     for(i=0; i < ELEM_COUNT; i++) {
         int16_t val = plc_tag_get_int16(tag,(i*ELEM_SIZE));
 
-        val = val+1;
+        val++;
 
         fprintf(stderr,"Setting element %d to %d\n",i,val);
 

@@ -36,8 +36,8 @@ void *thread_func(void *data)
     int tid = (int)(intptr_t)data;
     int rc;
     float value;
-    uint64_t start;
-    uint64_t end;
+    int64_t start;
+    int64_t end;
 
     while(1) {
         /* capture the starting time */
@@ -60,7 +60,7 @@ void *thread_func(void *data)
                 value =  plc_tag_get_float32(tag,0);
 
                 /* increment the value */
-                value = (value > 500.0 ? 0.0 : value + 1.5);
+                value = (float)(value > 500.0 ? 0.0 : value + 1.5);
 
                 /* yes, we should be checking this return value too... */
                 plc_tag_set_float32(tag, 0, value);
