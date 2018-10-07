@@ -77,7 +77,7 @@ struct ab_session_t {
     uint32_t orig_connection_id;
     uint32_t targ_connection_id;
     uint16_t conn_seq_num;
-    uint32_t conn_serial_number;
+    uint16_t conn_serial_number;
 
     int plc_type;
     uint16_t max_payload_size;

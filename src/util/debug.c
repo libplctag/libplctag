@@ -95,8 +95,9 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
     localtime_r(&epoch,&t);
 
     /* create the prefix and format for the file entry. */
-    rc = snprintf(prefix_buf, (size_t)prefix_buf_size,"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%04u)",
-             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms, get_thread_id());
+    rc = snprintf(prefix_buf, (size_t)prefix_buf_size,"thread(%04u) %04d-%02d-%02d %02d:%02d:%02d.%03d",
+             get_thread_id(),
+             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms);
 
     /* enforce zero string termination */
     if(rc > 1 && rc < prefix_buf_size) {
