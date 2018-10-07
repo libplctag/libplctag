@@ -303,10 +303,12 @@ LIB_EXPORT const char* plc_tag_decode_error(int rc)
  * Just pass through to the plc_tag_create_sync() function.
  */
 
+
+static plc_tag plc_tag_create_sync(const char *attrib_str, int timeout);
+
 LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 {
-
-    return plc_tag_create_sync(attrib_str, 0);
+    return plc_tag_create_sync(attrib_str, 1500);
 }
 
 

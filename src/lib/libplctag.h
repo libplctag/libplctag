@@ -147,21 +147,6 @@ extern "C" {
 
 
     /*
-     * plc_tag_create_sync
-     *
-     * Create a new tag based on the passed attributed string.  The attributes
-     * are protocol-specific.  The only required part of the string is the key-
-     * value pair "protocol=XXX" where XXX is one of the supported protocol
-     * types.
-     *
-     * An opaque pointer is returned on success.  NULL is returned on allocation
-     * failure.  Other failures will set the tag status.
-     */
-
-    LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout);
-
-
-    /*
      * plc_tag_lock
      *
      * Lock the tag against use by other threads.  Because operations on a tag are
