@@ -120,15 +120,26 @@ int tag_status(ab_tag_p tag)
 
 int tag_tickler(ab_tag_p tag)
 {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
     if(tag->read_in_progress) {
-        return check_read_status(tag);
+        pdebug(DEBUG_SPEW, "Read in progress.");
+        rc = check_read_status(tag);
+        return rc;
     }
 
     if(tag->write_in_progress) {
-        return check_write_status(tag);
+        pdebug(DEBUG_SPEW, "Write in progress.");
+        rc = check_write_status(tag);
+        return rc;
     }
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return tag->status;
+
 }
 
 
