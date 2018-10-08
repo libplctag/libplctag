@@ -49,7 +49,8 @@
 #define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
 
 /* how long to wait for session registration before timing out. In milliseconds. */
-#define SESSION_REGISTRATION_TIMEOUT (1500)
+//#define SESSION_REGISTRATION_TIMEOUT (1500)
+#define SESSION_DEFAULT_TIMEOUT      (2000)
 
 /*
  * the queue depth depends on the type of the request.
@@ -69,7 +70,10 @@ struct ab_session_t {
     int port;
     char *path;
     sock_p sock;
-    int is_connected;
+//    int is_open;
+//    int is_registered;
+//    int is_connected;
+//    int was_ok;
 
     /* connection variables. */
     int use_connected_msg;
@@ -86,7 +90,6 @@ struct ab_session_t {
 
     /* registration info */
     uint32_t session_handle;
-    int registered;
 
     /* Sequence ID for requests. */
     uint64_t session_seq_id;
