@@ -394,45 +394,6 @@ int default_write(plc_tag_p tag)
 }
 
 
-//
-///*
-// * set_tag_vtable
-// *
-// * Use various bits of information about the tag to determine
-// * just what flavor of the protocol we will be using for this
-// * tag.
-// */
-//tag_vtable_p set_tag_vtable(ab_tag_p tag)
-//{
-//    switch(tag->protocol_type) {
-//    case AB_PROTOCOL_PLC:
-//        if(tag->use_dhp_direct) {
-//            return &plc_dhp_vtable;
-//        } else {
-//            return &plc_vtable;
-//        }
-//
-//        break;
-//
-//    case AB_PROTOCOL_MLGX:
-//        return &plc_vtable;
-//
-//        break;
-//
-//    case AB_PROTOCOL_MLGX800:
-//    case AB_PROTOCOL_LGX:
-//        return &cip_vtable;
-//
-//        break;
-//
-//    default:
-//        return NULL;
-//        break;
-//    }
-//
-//    return NULL;
-//}
-//
 
 /*
  * ab_tag_abort
