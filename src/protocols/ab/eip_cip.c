@@ -160,7 +160,7 @@ int tag_tickler(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL,"Starting.");
+    pdebug(DEBUG_SPEW,"Starting.");
 
     if (tag->read_in_progress) {
         if(tag->use_connected_msg) {
@@ -169,7 +169,7 @@ int tag_tickler(ab_tag_p tag)
             rc = check_read_status_unconnected(tag);
         }
 
-        pdebug(DEBUG_DETAIL,"Done.  Read in progress.");
+        pdebug(DEBUG_SPEW,"Done.  Read in progress.");
 
         return rc;
     }
@@ -181,12 +181,12 @@ int tag_tickler(ab_tag_p tag)
             rc = check_write_status_unconnected(tag);
         }
 
-        pdebug(DEBUG_DETAIL, "Done. Write in progress.");
+        pdebug(DEBUG_SPEW, "Done. Write in progress.");
 
         return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.  No operation in progress.");
+    pdebug(DEBUG_SPEW, "Done.  No operation in progress.");
 
     return tag->status;
 }
@@ -1037,7 +1037,7 @@ static int check_read_status_connected(ab_tag_p tag)
     uint8_t* data;
     uint8_t* data_end;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Null tag pointer passed!");
@@ -1214,7 +1214,7 @@ static int check_read_status_connected(ab_tag_p tag)
         ab_tag_abort(tag);
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -1230,7 +1230,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
     uint8_t* data;
     uint8_t* data_end;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Null tag pointer passed!");
@@ -1408,7 +1408,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
         ab_tag_abort(tag);
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -1428,7 +1428,7 @@ static int check_write_status_connected(ab_tag_p tag)
     eip_cip_co_resp* cip_resp;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Null tag pointer passed!");
@@ -1498,7 +1498,7 @@ static int check_write_status_connected(ab_tag_p tag)
         tag->byte_offset = 0;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -1512,7 +1512,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
     eip_cip_uc_resp* cip_resp;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Null tag pointer passed!");
@@ -1582,7 +1582,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
         tag->byte_offset = 0;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -1641,88 +1641,8 @@ int calculate_write_data_per_packet(ab_tag_p tag)
 
     tag->write_data_per_packet = data_per_packet;
 
+    pdebug(DEBUG_DETAIL, "Done.");
+
     return data_per_packet;
 }
 
-//int calculate_write_sizes(ab_tag_p tag)
-//{
-//    int overhead = 0;
-//    int data_per_packet = 0;
-//    int num_reqs = 0;
-//    int rc = PLCTAG_STATUS_OK;
-//    int i = 0;
-//    int byte_offset = 0;
-//    int max_payload_size = 0;
-//
-//    pdebug(DEBUG_DETAIL, "Starting.");
-//
-//    if (tag->num_write_requests > 0) {
-//        pdebug(DEBUG_DETAIL, "Early termination, write sizes already calculated.");
-//        return rc;
-//    }
-//
-//    /* if we are here, then we have all the type data etc. */
-//    if(tag->connection) {
-//        pdebug(DEBUG_DETAIL,"Connected tag.");
-//        max_payload_size = tag->connection->max_payload_size;
-//        overhead =  1                               /* service request, one byte */
-//                    + tag->encoded_name_size        /* full encoded name */
-//                    + tag->encoded_type_info_size   /* encoded type size */
-//                    + 2                             /* element count, 16-bit int */
-//                    + 4                             /* byte offset, 32-bit int */
-//                    + 8;                            /* MAGIC fudge factor */
-//    } else {
-//        max_payload_size = MAX_CIP_MSG_SIZE;
-//        overhead =  1                               /* service request, one byte */
-//                    + tag->encoded_name_size        /* full encoded name */
-//                    + tag->encoded_type_info_size   /* encoded type size */
-//                    + tag->conn_path_size + 2       /* encoded device path size plus two bytes for length and padding */
-//                    + 2                             /* element count, 16-bit int */
-//                    + 4                             /* byte offset, 32-bit int */
-//                    + 8;                            /* MAGIC fudge factor */
-//    }
-//
-//    data_per_packet = max_payload_size - overhead;
-//
-//    pdebug(DEBUG_DETAIL,"Write packet maximum size is %d, write overhead is %d, and write data per packet is %d.", max_payload_size, overhead, data_per_packet);
-//
-//    if (data_per_packet <= 0) {
-//        pdebug(DEBUG_WARN,
-//               "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!",
-//               overhead,
-//               max_payload_size);
-//        return PLCTAG_ERR_TOO_LARGE;
-//    }
-//
-//    /* we want a multiple of 8 bytes */
-//    data_per_packet &= 0xFFFFF8;
-//
-//    num_reqs = (tag->size + (data_per_packet - 1)) / data_per_packet;
-//
-//    pdebug(DEBUG_DETAIL, "We need %d requests.", num_reqs);
-//
-//    byte_offset = 0;
-//
-//    for (i = 0; i < num_reqs && rc == PLCTAG_STATUS_OK; i++) {
-//        /* allocate a new slot */
-//        rc = allocate_write_request_slot(tag);
-//
-//        if (rc == PLCTAG_STATUS_OK) {
-//            /* how much data are we going to write in this packet? */
-//            if ((tag->size - byte_offset) > data_per_packet) {
-//                tag->write_req_sizes[i] = data_per_packet;
-//            } else {
-//                tag->write_req_sizes[i] = (tag->size - byte_offset);
-//            }
-//
-//            pdebug(DEBUG_DETAIL, "Request %d is of size %d.", i, tag->write_req_sizes[i]);
-//
-//            /* update the byte offset for the next packet */
-//            byte_offset += tag->write_req_sizes[i];
-//        }
-//    }
-//
-//    pdebug(DEBUG_DETAIL, "Done.");
-//
-//    return rc;
-//}
