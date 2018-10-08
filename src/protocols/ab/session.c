@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2018 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -17,13 +17,6 @@
  *   Free Software Foundation, Inc.,                                       *
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
-
-/**************************************************************************
- * CHANGE LOG                                                             *
- *                                                                        *
- * 2015-09-12  KRH - Created file.                                        *
- *                                                                        *
- **************************************************************************/
 
 
 #include <platform.h>
@@ -47,11 +40,13 @@ static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
 static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path);
 static int session_match_valid(const char *host, const char *path, ab_session_p session);
-static int session_connect(ab_session_p session);
+static int session_open_socket(ab_session_p session);
 static void session_destroy(void *session);
 static int session_register(ab_session_p session);
-static int session_unregister_unsafe(ab_session_p session);
+static int session_close_socket(ab_session_p session);
+static int session_unregister(ab_session_p session);
 static THREAD_FUNC(session_handler);
+static int process_requests(ab_session_p session);
 static int prepare_request(ab_session_p session, ab_request_p request);
 static int send_eip_request(ab_session_p session, int timeout);
 static int recv_eip_response(ab_session_p session, int timeout);
@@ -629,12 +624,12 @@ int session_init(ab_session_p session)
 }
 
 /*
- * session_connect()
+ * session_open_socket()
  *
  * Connect to the host/port passed via TCP.
  */
 
-int session_connect(ab_session_p session)
+int session_open_socket(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -654,9 +649,6 @@ int session_connect(ab_session_p session)
         pdebug(DEBUG_WARN, "Unable to connect socket for session!");
         return rc;
     }
-
-    /* everything is OK.  We have a TCP stream open to a gateway. */
-    session->is_connected = 1;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -705,24 +697,18 @@ int session_register(ab_session_p session)
     session->data_size = sizeof(eip_session_reg_req);
     session->data_offset = 0;
 
-    rc = send_eip_request(session, 0);
+    rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Error sending session registration request! rc=%d", rc);
+        pdebug(DEBUG_WARN,"Error sending session registration request %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
     /* get the response from the gateway */
-    rc = recv_eip_response(session, 0);
+    rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error receiving session registration response!");
+        pdebug(DEBUG_WARN, "Error receiving session registration response %s!", plc_tag_decode_error(rc));
         return rc;
     }
-
-//    /* set the offset back to zero for the next packet */
-//    session->data_offset = 0;
-//
-//    pdebug(DEBUG_INFO, "received response:");
-//    pdebug_dump_bytes(DEBUG_INFO, session->data, data_size);
 
     /* encap header is at the start of the buffer */
     resp = (eip_encap_t*)(session->data);
@@ -743,22 +729,39 @@ int session_register(ab_session_p session)
      * use it in future packets.
      */
     session->session_handle = le2h32(resp->encap_session_handle);
-    session->registered = 1;
 
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
-int session_unregister_unsafe(ab_session_p session)
+
+int session_unregister(ab_session_p session)
 {
+    (void)session;
+
+    pdebug(DEBUG_INFO,"Starting.");
+
+    /* nothing to do, perhaps. */
+
+    pdebug(DEBUG_INFO,"Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+int session_close_socket(ab_session_p session)
+{
+    pdebug(DEBUG_INFO,"Starting.");
+
     if (session->sock) {
-        session->is_connected = 0;
-        session->registered = 0;
         socket_close(session->sock);
         socket_destroy(&(session->sock));
         session->sock = NULL;
     }
+
+    pdebug(DEBUG_INFO,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -778,12 +781,11 @@ void session_destroy(void *session_arg)
         return;
     }
 
+    /* so remove the session from the list so no one else can reference it. */
+    remove_session(session);
 
     /* terminate the thread first. */
     session->terminating = 1;
-
-    /* so remove the session from the list so no one else can reference it. */
-    remove_session(session);
 
     /* get rid of the handler thread. */
     if(session->handler_thread) {
@@ -793,14 +795,23 @@ void session_destroy(void *session_arg)
     }
 
     if(session->targ_connection_id) {
-        /* need to mark the session as not terminating to get the sends to complete. */
+        /*
+         * we do not want the internal loop to immediately
+         * return, so set the flag like we are not terminating.
+         * There is still a timeout that applies.
+         */
         session->terminating = 0;
         perform_forward_close(session);
         session->terminating = 1;
     }
 
-    /* unregister and close the socket. */
-    session_unregister_unsafe(session);
+    if(session->session_handle) {
+        session_unregister(session);
+    }
+
+    if(session->sock) {
+        session_close_socket(session);
+    }
 
     /* remove any remaining requests, they are dead */
     req = session->requests;
@@ -989,135 +1000,142 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
  ****************************************************************/
 
 
+typedef enum { SESSION_OPEN_SOCKET, SESSION_REGISTER, SESSION_CONNECT, SESSION_IDLE, SESSION_DISCONNECT, SESSION_UNREGISTER, SESSION_CLOSE_SOCKET, SESSION_TERMINATE } session_state_t;
+
+
 THREAD_FUNC(session_handler)
 {
     ab_session_p session = arg;
     int rc = PLCTAG_STATUS_OK;
+    session_state_t state = SESSION_OPEN_SOCKET;
+    int idle = 0;
+//    int64_t timeout_time = 0;
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
     while(!session->terminating) {
-        ab_request_p request = NULL;
+        idle = 0;
 
-        do {
-            /* is the session ready? */
-            if(!session->registered) {
-                /* we must connect to the gateway and register */
-                if ((rc = session_connect(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "session connect failed!");
-                    session->status = rc;
-                    break;
-                }
+        switch(state) {
+        case SESSION_OPEN_SOCKET:
+            pdebug(DEBUG_DETAIL,"in SESSION_OPEN_SOCKET state.");
+            session->status = PLCTAG_STATUS_PENDING;
 
-                if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "session registration failed!");
-                    session->status = rc;
-                    break;
-                }
-
-                if(session->use_connected_msg && !session->targ_connection_id) {
-                    pdebug(DEBUG_DETAIL, "Opening CIP connection.");
-                    if((rc = perform_forward_open(session)) != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN, "Forward open failed! rc=%d", rc);
-                        session->status = rc;
-                        break;
-                    }
-                }
-
-                /* let the world know that the session is ready for use. */
-                pdebug(DEBUG_DETAIL, "Session now ready for use.");
-                session->status = PLCTAG_STATUS_OK;
+            /* we must connect to the gateway*/
+            if ((rc = session_open_socket(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "session connect failed %s!", plc_tag_decode_error(rc));
+                session->status = rc;
+                state = SESSION_TERMINATE;
+            } else {
+                state = SESSION_REGISTER;
             }
+            break;
 
-            /*
-             * session is ready.
-             *
-             * Take a request from the queue, send it and wait for the response.
-             */
-
-            critical_block(session->session_mutex) {
-                /* grab a request off the front of the list. */
-                request = session->requests;
-                if(request) {
-                    session->requests = request->next;
-
-                    /* get, or try to get, a reference to the request. */
-                    //request = rc_inc(request);
+        case SESSION_REGISTER:
+            pdebug(DEBUG_DETAIL,"in SESSION_REGISTER state.");
+            if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "session registration failed %s!", plc_tag_decode_error(rc));
+                session->status = rc;
+                state = SESSION_CLOSE_SOCKET;
+            } else {
+                if(session->use_connected_msg) {
+                    state = SESSION_CONNECT;
+                } else {
+                    state = SESSION_IDLE;
                 }
             }
+            break;
 
-            if(!request) {
-                /* nothing to do. */
-                pdebug(DEBUG_DETAIL, "No requests to process.");
+        case SESSION_CONNECT:
+            pdebug(DEBUG_DETAIL,"in SESSION_CONNECT state.");
+            if((rc = perform_forward_open(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Forward open failed %s!", plc_tag_decode_error(rc));
+                session->status = rc;
+                state = SESSION_UNREGISTER;
+            } else {
+                pdebug(DEBUG_DETAIL,"forward open succeeded, going to idle state.");
+                state = SESSION_IDLE;
+            }
+            break;
 
-                break;
+        case SESSION_IDLE:
+            pdebug(DEBUG_SPEW, "in SESSION_IDLE state.");
+
+            idle = 1;
+            session->status = PLCTAG_STATUS_OK;
+
+            if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error while processing requests %s!", plc_tag_decode_error(rc));
+                session->status = rc;
+                idle = 0;
+                if(session->use_connected_msg) {
+                    state = SESSION_DISCONNECT;
+                } else {
+                    state = SESSION_UNREGISTER;
+                }
+            }
+            break;
+
+        case SESSION_DISCONNECT:
+            pdebug(DEBUG_DETAIL,"in SESSION_DISCONNECT state.");
+            if((rc = perform_forward_close(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Forward close failed %s!", plc_tag_decode_error(rc));
+                session->status = rc;
             }
 
-            if(request_check_abort(request)) {
-                pdebug(DEBUG_DETAIL, "Request is aborted.");
-                rc = PLCTAG_ERR_ABORT;
+            state = SESSION_UNREGISTER;
+            break;
 
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
-
-                break;
+        case SESSION_UNREGISTER:
+            pdebug(DEBUG_DETAIL,"in SESSION_UNREGISTER state.");
+            if((rc = session_unregister(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unregistering session failed %s!", plc_tag_decode_error(rc));
+                session->status = rc;
             }
 
-            /* request is good, set it up and process it. */
-            rc = prepare_request(session, request);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to prepare request, rc=%d!", rc);
+            state = SESSION_CLOSE_SOCKET;
+            break;
 
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
-
-                break;
+        case SESSION_CLOSE_SOCKET:
+            pdebug(DEBUG_DETAIL,"in SESSION_CLOSE_SOCKET state.");
+            if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Closing session socket failed %s!", plc_tag_decode_error(rc));
+                session->status = rc;
             }
 
-            /* copy the data from the request into the session's buffer. */
-            mem_copy(session->data, request->data, request->request_size);
-            session->data_size = (uint32_t)request->request_size;
+            state = SESSION_TERMINATE;
+            break;
 
-            rc = send_eip_request(session, 0);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error sending packet! rc=%d", rc);
+        case SESSION_TERMINATE:
+            pdebug(DEBUG_SPEW,"in SESSION_TERMINATE state.");
 
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
+            idle = 1;
+            session->status = PLCTAG_ERR_BAD_CONNECTION;
 
-                break;
+            /* else just hang here until we are cleaned up. */
+            break;
+
+        default:
+            pdebug(DEBUG_ERROR, "Unknown state %d!",state);
+
+            /* FIXME - this logic is not complete.  We might be here without
+             * a connected session or a registered session. */
+            if(session->use_connected_msg) {
+                state = SESSION_DISCONNECT;
+            } else {
+                state = SESSION_UNREGISTER;
             }
 
-            rc = recv_eip_response(session, 0);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error receiving packet response! rc=%d", rc);
-
-                request->status = rc;
-                request->resp_received = 1;
-                request->request_size = 0;
-
-                break;
-            }
-
-            /* copy the data back into the request buffer. */
-            mem_copy(request->data, session->data, (int)(session->data_size));
-
-            rc = PLCTAG_STATUS_OK;
-
-            request->status = rc;
-            request->resp_received = 1;
-            request->request_size = (int)(session->data_size);
-        } while(0);
-
-        if(request) {
-            rc_dec(request);
+            break;
         }
 
-        /* give up the CPU a bit. */
-        if(!session->terminating) {
+        /*
+         * give up the CPU a bit, but only if we are not
+         * doing some linked states (like setting up the CIP
+         * session or terminating one, or terminating the whole
+         * session.
+         */
+        if(idle && !session->terminating) {
             sleep_ms(1);
         }
     }
@@ -1125,6 +1143,96 @@ THREAD_FUNC(session_handler)
     THREAD_RETURN(0);
 }
 
+
+int process_requests(ab_session_p session)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p request = NULL;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!session) {
+        pdebug(DEBUG_WARN, "Null session pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* are there any requests to process? Loop over requests. */
+    do {
+        rc = PLCTAG_STATUS_OK;
+        request = NULL;
+
+        /* grab a request off the front of the list. */
+        critical_block(session->session_mutex) {
+            request = session->requests;
+            if(request) {
+                session->requests = request->next;
+            }
+        }
+
+        /* process any request. */
+        if(request) {
+            /* if the request is aborted, remove it and mark it. */
+            if(request_check_abort(request)) {
+                pdebug(DEBUG_DETAIL, "Request %p is aborted.", request);
+                request->status = PLCTAG_ERR_ABORT;
+                request->resp_received = 1;
+                request->request_size = 0;
+            } else {
+                pdebug(DEBUG_DETAIL, "Processing request %p", request);
+
+                do {
+                    if((rc = prepare_request(session, request)) != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_WARN, "Unable to prepare request, rc=%d!", rc);
+                        break;
+                    }
+
+                    /* copy the data from the request into the session's buffer. */
+                    mem_copy(session->data, request->data, request->request_size);
+                    session->data_size = (uint32_t)request->request_size;
+
+                    /* send the request */
+                    if((rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_WARN, "Error sending packet %s!", plc_tag_decode_error(rc));
+                        break;
+                    }
+
+                    /* wait for the response */
+                    if((rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_WARN, "Error receiving packet response %s!", plc_tag_decode_error(rc));
+                        break;
+                    }
+
+                    /* copy the data back into the request buffer. */
+                    /* FIXME - check the returned data size to make sure it is smaller than the request buffer! */
+                    mem_copy(request->data, session->data, (int)(session->data_size));
+
+                    rc = PLCTAG_STATUS_OK;
+                    request->resp_received = 1;
+                    request->request_size = (int)(session->data_size);
+                } while(0);
+
+                /* done with this request. */
+                request->status = rc;
+
+                if(rc != PLCTAG_STATUS_OK) {
+                    request->resp_received = 1;
+                    request->request_size = 0;
+                }
+            }
+
+            rc_dec(request);
+
+            /* if there was an error that was not an abort, we need to push that up. */
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_ABORT) {
+                break;
+            }
+        }
+    } while(request && !session->terminating);
+
+    pdebug(DEBUG_SPEW,"Done.");
+
+    return rc;
+}
 
 
 int prepare_request(ab_session_p session, ab_request_p request)
@@ -1571,7 +1679,7 @@ int send_forward_open_req(ab_session_p session)
     /* set the size of the request */
     session->data_size = (uint32_t)(data - (session->data));
 
-    rc = send_eip_request(session, 0);
+    rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -1644,7 +1752,7 @@ int send_forward_open_req_ex(ab_session_p session)
     /* set the size of the request */
     session->data_size = (uint32_t)(data - (session->data));
 
-    rc = send_eip_request(session, 0);
+    rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -1661,7 +1769,7 @@ int recv_forward_open_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session, 0);
+    rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to receive Forward Open response.");
         return rc;
@@ -1795,7 +1903,7 @@ int recv_forward_close_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session, 150);
+    rc = recv_eip_response(session, 150); /* MAGIC, something short */
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to receive Forward Close response! rc=%d", rc);
         return rc;
