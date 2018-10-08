@@ -178,7 +178,9 @@ THREAD_FUNC(tag_tickler_func)
             }
         }
 
-        sleep_ms(1);
+        if(!library_terminating) {
+            sleep_ms(1);
+        }
     }
 
     pdebug(DEBUG_INFO,"Terminating.");
@@ -411,15 +413,6 @@ LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
      */
     attr_destroy(attribs);
 
-    /* map the tag to a tag ID */
-    id = add_tag_lookup(tag);
-
-    /* if the mapping failed, then punt */
-    if(id < 0) {
-        pdebug(DEBUG_ERROR, "Unable to map tag %p to lookup table entry, rc=%s", tag, plc_tag_decode_error(id));
-        return (plc_tag)rc_dec(tag);
-    }
-
     /*
     * if there is a timeout, then loop until we get
     * an error or we timeout.
@@ -464,6 +457,15 @@ LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
         }
 
         pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
+    }
+
+    /* map the tag to a tag ID */
+    id = add_tag_lookup(tag);
+
+    /* if the mapping failed, then punt */
+    if(id < 0) {
+        pdebug(DEBUG_ERROR, "Unable to map tag %p to lookup table entry, rc=%s", tag, plc_tag_decode_error(id));
+        return (plc_tag)rc_dec(tag);
     }
 
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
@@ -1270,7 +1272,7 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag id, int offset)
         }
 
         res = (uint16_t)((tag->data[offset]) +
-              ((tag->data[offset+1]) << 8));
+                         ((tag->data[offset+1]) << 8));
     }
 
     rc_dec(tag);
