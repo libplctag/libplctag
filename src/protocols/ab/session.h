@@ -70,7 +70,10 @@ struct ab_session_t {
     int port;
     char *path;
     sock_p sock;
-    int is_connected;
+//    int is_open;
+//    int is_registered;
+//    int is_connected;
+//    int was_ok;
 
     /* connection variables. */
     int use_connected_msg;
