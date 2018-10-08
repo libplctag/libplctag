@@ -128,11 +128,11 @@ void *test_dhp(void *data)
 
         fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
-/*        if(iteration >= 100) {
-            iteration = 1;
-            util_sleep_ms(5000);
-        }
-*/
+        /*        if(iteration >= 100) {
+                    iteration = 1;
+                    util_sleep_ms(5000);
+                }
+        */
         iteration++;
     }
 
@@ -146,7 +146,7 @@ void *test_dhp(void *data)
 void *test_cip(void *data)
 {
     int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=5";
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
     int32_t value = 0;
     int64_t start = 0;
     int64_t end = 0;
@@ -154,14 +154,23 @@ void *test_cip(void *data)
     plc_tag tag = PLC_TAG_NULL;
     int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
+    int first_time = 1;
 
     while(!done) {
-        if(!tag) {
+        while(!tag && !done) {
+            if(!first_time) {
+                /* retry later */
+                timeout = util_time_ms() + TAG_CREATE_TIMEOUT;
+                while(!done && timeout > util_time_ms()) {
+                    util_sleep_ms(5);
+                }
+            }
+
+            first_time = 0;
+
             rc = open_tag(&tag, tag_str);
             if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr,"Test %d, iteration %d, Error (%s) creating tag!  Terminating test...\n", tid, iteration, plc_tag_decode_error(rc));
-                done = 1;
-                return NULL;
+                fprintf(stderr,"Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
             }
         }
 
@@ -200,12 +209,6 @@ void *test_cip(void *data)
 
             plc_tag_destroy(tag);
             tag = PLC_TAG_NULL;
-
-            /* retry later */
-            timeout = util_time_ms() + TAG_CREATE_TIMEOUT;
-            while(timeout < util_time_ms()) {
-                util_sleep_ms(10);
-            }
         }
 
         iteration++;
@@ -268,4 +271,3 @@ int main(int argc, char **argv)
 
     return 0;
 }
-
