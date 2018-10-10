@@ -110,33 +110,6 @@ int tag_status(ab_tag_p tag)
         return PLCTAG_STATUS_PENDING;
     }
 
-    /* We need to treat the session and connection statuses
-     * as async because we might not be the thread creating those
-     * objects.  In that case, we propagate the status back up
-     * to the tag.
-     */
-
-    /*
-     * session  connection  tag     result
-     *   OK         OK       OK       OK
-     *   OK         OK       N        N
-     *   OK        PEND      OK      PEND
-     *   OK        PEND      N        N
-     *   OK         N       OK        N
-     *   OK         N1      N2        N1
-     *  PEND        OK       OK      PEND
-     *  PEND        OK       N        N
-     *  PEND        PEND     OK      PEND
-     *  PEND        PEND     N        N
-     *  PEND        N        OK       N
-     *  PEND        N1       N2       N1
-     *   N          OK      OK        N
-     *   N1         OK      N2        N1
-     *   N          PEND    OK        N
-     *   N1         PEND    N2        N1
-     *   N1         N2      OK        N1
-     *   N1         N2      N3        N1
-     */
     if (tag->session) {
         session_rc = tag->session->status;
     } else {
@@ -169,6 +142,8 @@ int tag_tickler(ab_tag_p tag)
             rc = check_read_status_unconnected(tag);
         }
 
+        tag->status = rc;
+
         pdebug(DEBUG_SPEW,"Done.  Read in progress.");
 
         return rc;
@@ -180,6 +155,8 @@ int tag_tickler(ab_tag_p tag)
         } else {
             rc = check_write_status_unconnected(tag);
         }
+
+        tag->status = rc;
 
         pdebug(DEBUG_SPEW, "Done. Write in progress.");
 
@@ -207,49 +184,8 @@ int tag_tickler(ab_tag_p tag)
 int tag_read_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-//    int i;
-//    int byte_offset = 0;
 
     pdebug(DEBUG_INFO, "Starting");
-
-//    if(tag->read_group) {
-//        pdebug(DEBUG_DETAIL,"Redirecting to the multi-tag read code.");
-//        return multi_tag_read_start(tag);
-//    }
-
-    /* is this the first read? */
-//    if (1 || tag->first_read) {
-    /*
-     * On a new tag, the first time we read, we go through and
-     * request the maximum possible (up to the size of the tag)
-     * each time.  We record what we actually get back in the
-     * tag->read_req_sizes array.  The next time we read, we
-     * use that array to make the new requests.
-     */
-
-//        rc = allocate_read_request_slot(tag);
-//
-//        if (rc != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to allocate read request slot!");
-//            return rc;
-//        }
-
-    /*
-     * The PLC may not send back as much data as we would like.
-     * So, we attempt to determine what the size will be by
-     * single-stepping through the requests the first time.
-     * This will be slow, but subsequent reads will be pipelined.
-     */
-
-    /* determine the byte offset this time. */
-//    tag->byte_offset = 0;
-
-//        /* scan and add the byte offsets */
-//        for (i = 0; i < tag->num_read_requests && tag->reqs[i]; i++) {
-//            byte_offset += tag->read_req_sizes[i];
-//        }
-//
-//        pdebug(DEBUG_DETAIL, "First read tag->num_read_requests=%d, byte_offset=%d.", tag->num_read_requests, byte_offset);
 
     /* mark the tag read in progress */
     tag->read_in_progress = 1;
@@ -267,27 +203,7 @@ int tag_read_start(ab_tag_p tag)
         return rc;
     }
 
-//    }
-
-//    else {
-//        /* this is not the first read, so just set up all the requests at once. */
-//        byte_offset = 0;
-//
-//        for (i = 0; i < tag->num_read_requests; i++) {
-//            if(tag->connection) {
-//                rc = build_read_request_connected(tag, i, byte_offset);
-//            } else {
-//                rc = build_read_request_unconnected(tag, i, byte_offset);
-//            }
-//
-//            if (rc != PLCTAG_STATUS_OK) {
-//                pdebug(DEBUG_WARN,"Unable to build read request!");
-//                return rc;
-//            }
-//
-//            byte_offset += tag->read_req_sizes[i];
-//        }
-//    }
+    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -295,102 +211,6 @@ int tag_read_start(ab_tag_p tag)
 }
 
 
-//int multi_tag_read_start(ab_tag_p tag)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//    int i;
-//    int byte_offset = 0;
-//    vector_p read_tags = NULL;
-//
-//    pdebug(DEBUG_INFO, "Starting");
-//
-//    pdebug(DEBUG_DETAIL,"Getting read group tags for group %s.", tag->read_group);
-//
-//    read_tags = find_read_group_tags(tag);
-//    if(!read_tags || vector_length(read_tags) == 0) {
-//        pdebug(DEBUG_WARN,"Something wrong, no tags found for read group %s.",tag->read_group);
-//        vector_destroy(read_tags);
-//        return PLCTAG_ERR_BAD_DATA;
-//    }
-//
-//    /* now these cannot go away since we are holding the ref. */
-//    pdebug(DEBUG_DETAIL,"Found %d tags in read group %s.",vector_length(read_tags), tag->read_group);
-//
-//
-//
-//    /* is this the first read? */
-//    if (1 || tag->first_read) {
-//        /*
-//         * On a new tag, the first time we read, we go through and
-//         * request the maximum possible (up to the size of the tag)
-//         * each time.  We record what we actually get back in the
-//         * tag->read_req_sizes array.  The next time we read, we
-//         * use that array to make the new requests.
-//         */
-//
-//        rc = allocate_read_request_slot(tag);
-//
-//        if (rc != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to allocate read request slot!");
-//            return rc;
-//        }
-//
-//        /*
-//         * The PLC may not send back as much data as we would like.
-//         * So, we attempt to determine what the size will be by
-//         * single-stepping through the requests the first time.
-//         * This will be slow, but subsequent reads will be pipelined.
-//         */
-//
-//        /* determine the byte offset this time. */
-//        byte_offset = 0;
-//
-//        /* scan and add the byte offsets */
-//        for (i = 0; i < tag->num_read_requests && tag->reqs[i]; i++) {
-//            byte_offset += tag->read_req_sizes[i];
-//        }
-//
-//        pdebug(DEBUG_DETAIL, "First read tag->num_read_requests=%d, byte_offset=%d.", tag->num_read_requests, byte_offset);
-//
-//        /* i is the index of the first new request */
-//        if(tag->connection) {
-//            rc = build_read_request_connected(tag, i, byte_offset);
-//        } else {
-//            rc = build_read_request_unconnected(tag, i, byte_offset);
-//        }
-//
-//        if (rc != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to build read request!");
-//            return rc;
-//        }
-//
-//    } else {
-//        /* this is not the first read, so just set up all the requests at once. */
-//        byte_offset = 0;
-//
-//        for (i = 0; i < tag->num_read_requests; i++) {
-//            if(tag->connection) {
-//                rc = build_read_request_connected(tag, i, byte_offset);
-//            } else {
-//                rc = build_read_request_unconnected(tag, i, byte_offset);
-//            }
-//
-//            if (rc != PLCTAG_STATUS_OK) {
-//                pdebug(DEBUG_WARN,"Unable to build read request!");
-//                return rc;
-//            }
-//
-//            byte_offset += tag->read_req_sizes[i];
-//        }
-//    }
-//
-//    /* mark the tag read in progress */
-//    tag->read_in_progress = 1;
-//
-//    pdebug(DEBUG_INFO, "Done.");
-//
-//    return PLCTAG_STATUS_PENDING;
-//}
 
 
 /*
@@ -441,6 +261,8 @@ int tag_write_start(ab_tag_p tag)
         pdebug(DEBUG_WARN,"Unable to build write request!");
         return rc;
     }
+
+    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -1044,7 +866,7 @@ static int check_read_status_connected(ab_tag_p tag)
     if (!tag->req) {
         tag->read_in_progress = 0;
         pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
-        return PLCTAG_ERR_NULL_PTR;
+        return PLCTAG_ERR_READ;
     }
 
     if(!tag->req->resp_received) {
@@ -1642,4 +1464,3 @@ int calculate_write_data_per_packet(ab_tag_p tag)
 
     return data_per_packet;
 }
-
