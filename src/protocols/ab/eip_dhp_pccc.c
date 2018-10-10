@@ -108,12 +108,14 @@ int tag_tickler(ab_tag_p tag)
     if(tag->read_in_progress) {
         pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
+        tag->status = rc;
         return rc;
     }
 
     if(tag->write_in_progress) {
         pdebug(DEBUG_SPEW, "Write in progress.");
         rc = check_write_status(tag);
+        tag->status = rc;
         return rc;
     }
 
@@ -236,6 +238,7 @@ int tag_read_start(ab_tag_p tag)
     /* save the request for later */
     tag->req = req;
     tag->read_in_progress = 1;
+    tag->status = PLCTAG_STATUS_PENDING;
 
     /* the read is now pending */
     pdebug(DEBUG_INFO,"Done.");
@@ -402,6 +405,7 @@ int tag_write_start(ab_tag_p tag)
     /* save the request for later */
     tag->req = req;
     tag->write_in_progress = 1;
+    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -509,8 +513,6 @@ static int check_read_status(ab_tag_p tag)
     request_abort(tag->req);
     tag->req = rc_dec(tag->req);
 
-    tag->status = rc;
-
     tag->read_in_progress = 0;
 
     pdebug(DEBUG_INFO,"Done.");
@@ -571,7 +573,6 @@ static int check_write_status(ab_tag_p tag)
     /* clean up any outstanding requests. */
     request_abort(tag->req);
     tag->req = rc_dec(tag->req);
-    tag->status = rc;
     tag->write_in_progress = 0;
 
     pdebug(DEBUG_INFO,"Done.");
