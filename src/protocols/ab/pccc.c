@@ -132,7 +132,6 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
 
     /* now read the element number */
     tmp = parse_pccc_name_number(tmp, data, size);
-
     if(!tmp) {
         /* oops, bad parse! */
         *size = 0;
@@ -179,8 +178,11 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
          * 8        kd - Kd
          * 26       pv - PV
          *
+<<<<<<< HEAD
          * The following are NOT handled correctly!
          *
+=======
+>>>>>>> Added additional handleing to PCCC/DF1/CSP tags.
          * BT
          * Offset   Field
          * 0        con - control
@@ -360,85 +362,85 @@ uint16_t pccc_calculate_crc16(uint8_t *data, int size)
 const char *pccc_decode_error(int error)
 {
     switch(error) {
-        case 1:
-            return "Error converting block address.";
-            break;
+    case 1:
+        return "Error converting block address.";
+        break;
 
-        case 2:
-            return "Less levels specified in address than minimum for any address.";
-            break;
+    case 2:
+        return "Less levels specified in address than minimum for any address.";
+        break;
 
-        case 3:
-            return "More levels specified in address than system supports";
-            break;
+    case 3:
+        return "More levels specified in address than system supports";
+        break;
 
-        case 4:
-            return "Symbol not found.";
-            break;
+    case 4:
+        return "Symbol not found.";
+        break;
 
-        case 5:
-            return "Symbol is of improper format.";
-            break;
+    case 5:
+        return "Symbol is of improper format.";
+        break;
 
-        case 6:
-            return "Address doesn't point to something usable.";
-            break;
+    case 6:
+        return "Address doesn't point to something usable.";
+        break;
 
-        case 7:
-            return "File is wrong size.";
-            break;
+    case 7:
+        return "File is wrong size.";
+        break;
 
-        case 8:
-            return "Cannot complete request, situation has changed since the start of the command.";
-            break;
+    case 8:
+        return "Cannot complete request, situation has changed since the start of the command.";
+        break;
 
-        case 9:
-            return "File is too large.";
-            break;
+    case 9:
+        return "File is too large.";
+        break;
 
-        case 0x0A:
-            return "Transaction size plus word address is too large.";
-            break;
+    case 0x0A:
+        return "Transaction size plus word address is too large.";
+        break;
 
-        case 0x0B:
-            return "Access denied, improper privilege.";
-            break;
+    case 0x0B:
+        return "Access denied, improper privilege.";
+        break;
 
-        case 0x0C:
-            return "Condition cannot be generated - resource is not available (some has upload active)";
-            break;
+    case 0x0C:
+        return "Condition cannot be generated - resource is not available (some has upload active)";
+        break;
 
-        case 0x0D:
-            return "Condition already exists - resource is already available.";
-            break;
+    case 0x0D:
+        return "Condition already exists - resource is already available.";
+        break;
 
-        case 0x0E:
-            return "Shutdown could not be executed.";
-            break;
+    case 0x0E:
+        return "Shutdown could not be executed.";
+        break;
 
-        case 0x0F:
-            return "Requester does not have upload or download access - no privilege.";
-            break;
+    case 0x0F:
+        return "Requester does not have upload or download access - no privilege.";
+        break;
 
-        case 0x10:
-            return "Histogram overflow.";
-            break;
+    case 0x10:
+        return "Histogram overflow.";
+        break;
 
-        case 0x11:
-            return "Illegal data type.";
-            break;
+    case 0x11:
+        return "Illegal data type.";
+        break;
 
-        case 0x12:
-            return "Bad parameter.";
-            break;
+    case 0x12:
+        return "Bad parameter.";
+        break;
 
-        case 0x13:
-            return "Address reference exists to deleted data table.";
-            break;
+    case 0x13:
+        return "Address reference exists to deleted data table.";
+        break;
 
-        default:
-            return "Unknown error response.";
-            break;
+    default:
+        return "Unknown error response.";
+        break;
     }
 
     return "Unknown error response.";
