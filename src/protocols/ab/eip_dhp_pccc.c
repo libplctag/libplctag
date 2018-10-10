@@ -501,15 +501,18 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        /* all OK, copy the data. */
+        /* copy data into the tag. */
         mem_copy(tag->data, data, (int)(data_end - data));
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* clean up request */
+    /* clean up the request */
     request_abort(tag->req);
     tag->req = rc_dec(tag->req);
+
+    tag->status = rc;
+
     tag->read_in_progress = 0;
 
     pdebug(DEBUG_INFO,"Done.");
