@@ -390,6 +390,7 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
+        /* copy data into the tag. */
         mem_copy(tag->data, data, (int)(data_end - data));
 
         rc = PLCTAG_STATUS_OK;
@@ -398,6 +399,8 @@ static int check_read_status(ab_tag_p tag)
     /* clean up the request */
     request_abort(tag->req);
     tag->req = rc_dec(tag->req);
+
+    tag->status = rc;
 
     tag->read_in_progress = 0;
 

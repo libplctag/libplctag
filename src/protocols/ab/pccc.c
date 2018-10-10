@@ -178,11 +178,6 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
          * 8        kd - Kd
          * 26       pv - PV
          *
-<<<<<<< HEAD
-         * The following are NOT handled correctly!
-         *
-=======
->>>>>>> Added additional handleing to PCCC/DF1/CSP tags.
          * BT
          * Offset   Field
          * 0        con - control
