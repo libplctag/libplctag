@@ -377,12 +377,19 @@ static int check_read_status(ab_tag_p tag)
             }
         }
 
-        /* copy data into the tag. */
-        if((data_end - data) > tag->size) {
-            rc = PLCTAG_ERR_TOO_LARGE;
+        /* did we get the right amount of data? */
+        if((data_end - data) != tag->size) {
+            if((int)(data_end - data) > tag->size) {
+                pdebug(DEBUG_WARN,"Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
+                rc = PLCTAG_ERR_TOO_LARGE;
+            } else {
+                pdebug(DEBUG_WARN,"Too little data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
+                rc = PLCTAG_ERR_TOO_SMALL;
+            }
             break;
         }
 
+        /* copy data into the tag. */
         mem_copy(tag->data, data, (int)(data_end - data));
 
         rc = PLCTAG_STATUS_OK;
@@ -391,6 +398,8 @@ static int check_read_status(ab_tag_p tag)
     /* clean up the request */
     request_abort(tag->req);
     tag->req = rc_dec(tag->req);
+
+    tag->status = rc;
 
     tag->read_in_progress = 0;
 
