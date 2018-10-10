@@ -659,6 +659,7 @@ static int check_write_status(ab_tag_p tag)
     /* clean up the request */
     request_abort(tag->req);
     tag->req = rc_dec(tag->req);
+    tag->status = rc;
     tag->write_in_progress = 0;
 
     pdebug(DEBUG_WARN,"Done.");
