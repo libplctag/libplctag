@@ -195,7 +195,7 @@ add_library(plctag SHARED ${libplctag_SRCS} )
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
     target_link_libraries(plctag ws2_32)
-    target_link_libraries(plctag_static ws2_32)
+    #target_link_libraries(plctag_static ws2_32)
 endif()
 
 # add the examples
