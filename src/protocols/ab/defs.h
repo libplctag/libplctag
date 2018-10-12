@@ -31,7 +31,8 @@
 #define MAX_CIP_MSG_SIZE        (0x01FF & 508)
 
 /* Warning, this must fit within 16 bits */
-#define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
+//#define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
+#define MAX_CIP_MSG_SIZE_EX     (0x01FF & 508)
 
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PCCC_MSG_SIZE (258)
