@@ -322,7 +322,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
  * This is where the dispatch occurs to the protocol specific implementation.
  */
 
-LIB_EXPORT plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
+/*LIB_EXPORT*/ plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
 {
     plc_tag_p tag = PLC_TAG_P_NULL;
     int id = PLCTAG_ERR_OUT_OF_BOUNDS;
