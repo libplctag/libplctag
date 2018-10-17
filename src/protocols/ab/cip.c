@@ -279,6 +279,8 @@ int cip_encode_path(ab_tag_p tag, const char *path)
         tag->dhp_src  = 0;
         tag->dhp_dest = 0;
         tag->use_dhp_direct = 0;
+        tag->use_ucmm = 1;
+        pdebug(DEBUG_INFO,"No DH+ Path and no Micro800 detected, falling back to LGX-UCMM-packets");
     } else {
         /* we had the special DH+ format and it was
          * either not last or not a PLC5/SLC.  That

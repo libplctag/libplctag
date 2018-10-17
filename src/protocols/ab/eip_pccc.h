@@ -32,6 +32,8 @@
 /* PCCC */
 int eip_pccc_tag_status(ab_tag_p tag);
 int eip_pccc_tag_read_start(ab_tag_p tag);
+int eip_pccc_tag_read_start_standard(ab_tag_p tag);
+int eip_pccc_tag_read_start_ucmm(ab_tag_p tag);
 int eip_pccc_tag_write_start(ab_tag_p tag);
 
 
