@@ -52,6 +52,7 @@ struct ab_tag_t {
     /* how do we talk to this device? */
     int protocol_type;
     int use_dhp_direct;
+    int use_ucmm;
     uint8_t dhp_src;
     uint8_t dhp_dest;
 
