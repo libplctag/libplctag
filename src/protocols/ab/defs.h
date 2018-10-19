@@ -32,6 +32,7 @@
 
 /* Warning, this must fit within 16 bits */
 //#define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
+/* FIXME - reset to actual value! */
 #define MAX_CIP_MSG_SIZE_EX     (0x01FF & 508)
 
 /* maximum for PCCC embedded within CIP. */
