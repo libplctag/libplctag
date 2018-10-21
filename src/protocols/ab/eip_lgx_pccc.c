@@ -472,11 +472,11 @@ int eip_lgx_pccc_tag_write_start(ab_tag_p tag)
     eip_cip_uc_req *lgx_pccc;
     embedded_pccc *embed_pccc;
     uint8_t *data;
-    uint8_t element_def[16];
-    int element_def_size;
-    uint8_t array_def[16];
-    int array_def_size;
-    int pccc_data_type;
+//    uint8_t element_def[16];
+//    int element_def_size;
+//    uint8_t array_def[16];
+//    int array_def_size;
+//    int pccc_data_type;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
     ab_request_p req = NULL;
     uint8_t *embed_start;
