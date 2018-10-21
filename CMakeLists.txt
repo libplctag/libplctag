@@ -31,7 +31,7 @@ project (libplctag_project)
 # the project is version 1.5
 set (libplctag_VERSION_MAJOR 1)
 set (libplctag_VERSION_MINOR 5)
-set (libplctag_VERSION_PATCH 11)
+set (libplctag_VERSION_PATCH 13)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 
