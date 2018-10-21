@@ -21,6 +21,7 @@
 #include <platform.h>
 #include <lib/libplctag.h>
 #include <ab/error_codes.h>
+#include <util/debug.h>
 
 
 struct error_code_entry {
@@ -222,9 +223,12 @@ const char *decode_cip_error_long(uint8_t *data)
 		}
 	}
 
+    //pdebug(DEBUG_DETAIL, "decoding error with primary code %d and secondary code %d", primary_code, secondary_code);
+
 	while(error_code_table[index].primary_code != -1) {
 		if(error_code_table[index].primary_code == primary_code) {
 			if(error_code_table[index].secondary_code == secondary_code || error_code_table[index].secondary_code == -1) {
+                //pdebug(DEBUG_DETAIL,"matched entry with index %d and primary code %d and secondary code %d", index, error_code_table[index].primary_code, error_code_table[index].secondary_code);
 				break;
 			}
 		}

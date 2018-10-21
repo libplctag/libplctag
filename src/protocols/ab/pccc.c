@@ -442,7 +442,7 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, in
 
 
 
-int pccc_encode_dt_byte(uint8_t *data,int buf_size,uint32_t data_type,uint32_t data_size)
+int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size)
 {
     uint8_t *dt_byte = data;
     uint8_t d_byte;
