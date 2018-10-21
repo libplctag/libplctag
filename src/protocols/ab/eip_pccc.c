@@ -40,6 +40,7 @@ extern "C"
 #include <ab/session.h>
 #include <ab/defs.h>
 #include <ab/eip.h>
+#include <ab/error_codes.h>
 #include <util/debug.h>
 
 
@@ -204,7 +205,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
     pccc->pccc_function = AB_EIP_PCCC_TYPED_READ_FUNC;
-    pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is not in the docs, but it is in the data. */
+    pccc->pccc_transfer_size = h2le16(tag->elem_count); /* This is the offset items */
 
     /* point to the end of the struct */
     data = ((uint8_t *)pccc) + sizeof(pccc_req);
@@ -213,7 +214,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* we need the count twice? */
+    /* FIXME - This is the total items */
     *((uint16_le*)data) = h2le16(tag->elem_count); /* FIXME - bytes or INTs? */
     data += sizeof(uint16_le);
 
@@ -223,7 +224,7 @@ int eip_pccc_tag_read_start(ab_tag_p tag)
      */
 
     /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* ALWAYS 0x0070 Unconnected Send*/
+    pccc->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* set up for unconnected sending */
 
     /* router timeout */
     pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
@@ -322,7 +323,7 @@ static int check_read_status(ab_tag_p tag)
         }
 
         if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"PCCC command failed, response code: %d",pccc->general_status);
+            pdebug(DEBUG_WARN,"PCCC command failed, response code: (%d) %s", pccc->general_status, decode_cip_error_long((uint8_t*)&(pccc->general_status)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -400,7 +401,7 @@ int eip_pccc_tag_write_start(ab_tag_p tag)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* how many packets will we need? How much overhead? */
-    overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
+    //overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
     /* overhead comes from the request in this case */
     overhead =   1  /* CIP PCCC command */

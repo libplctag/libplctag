@@ -205,10 +205,11 @@
 
 
 /* Types of AB protocols */
-#define AB_PROTOCOL_PLC     1
-#define AB_PROTOCOL_MLGX    2
-#define AB_PROTOCOL_LGX     3
-#define AB_PROTOCOL_MLGX800 4
+#define AB_PROTOCOL_PLC         (1)
+#define AB_PROTOCOL_MLGX        (2)
+#define AB_PROTOCOL_LGX         (3)
+#define AB_PROTOCOL_MLGX800     (4)
+#define AB_PROTOCOL_LGX_PCCC    (5)
 
 
 /*********************************************************************

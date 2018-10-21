@@ -35,6 +35,7 @@
 #include <ab/defs.h>
 #include <ab/eip.h>
 #include <ab/eip_cip.h>
+#include <ab/eip_lgx_pccc.h>
 #include <ab/eip_pccc.h>
 #include <ab/eip_dhp_pccc.h>
 #include <ab/session.h>
@@ -80,6 +81,7 @@ struct tag_vtable_t default_vtable = {0}/*= { NULL, ab_tag_destroy, NULL, NULL }
 struct tag_vtable_t cip_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_cip_tag_read_start, eip_cip_tag_status, eip_cip_tag_write_start }*/;
 struct tag_vtable_t plc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_pccc_tag_read_start, eip_pccc_tag_status, eip_pccc_tag_write_start }*/;
 struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
+struct tag_vtable_t lgx_pccc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
 
 
 /* forward declarations*/
@@ -107,10 +109,12 @@ int ab_init(void)
     pdebug(DEBUG_INFO,"Initializing AB protocol library.");
 
     /* set up the vtables. */
-    //default_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
+    lgx_pccc_vtable.abort    = (tag_abort_func)ab_tag_abort;
+    lgx_pccc_vtable.read     = (tag_read_func)eip_lgx_pccc_tag_read_start;
+    lgx_pccc_vtable.status   = (tag_status_func)eip_lgx_pccc_tag_status;
+    lgx_pccc_vtable.write    = (tag_write_func)eip_lgx_pccc_tag_write_start;
 
     plc_dhp_vtable.abort    = (tag_abort_func)ab_tag_abort;
-    //plc_dhp_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
     plc_dhp_vtable.read     = (tag_read_func)eip_dhp_pccc_tag_read_start;
     plc_dhp_vtable.status   = (tag_status_func)eip_dhp_pccc_tag_status;
     plc_dhp_vtable.write    = (tag_write_func)eip_dhp_pccc_tag_write_start;
@@ -285,6 +289,12 @@ plc_tag_p ab_tag_create(attr attribs)
             default_retry_interval = DEFAULT_RETRY_INTERVAL;
             break;
 
+        case AB_PROTOCOL_LGX_PCCC:
+            tag->needs_connection = 0;
+            num_retries = DEFAULT_NUM_RETRIES;
+            default_retry_interval = DEFAULT_RETRY_INTERVAL;
+            break;
+
         case AB_PROTOCOL_MLGX:
             tag->needs_connection = 0;
             num_retries = DEFAULT_NUM_RETRIES;
@@ -448,6 +458,11 @@ tag_vtable_p set_tag_vtable(ab_tag_p tag)
 
             break;
 
+        case AB_PROTOCOL_LGX_PCCC:
+            return &lgx_pccc_vtable;
+
+            break;
+
         case AB_PROTOCOL_MLGX800:
         case AB_PROTOCOL_LGX:
             //~ if(!cip_vtable.abort) {
@@ -585,6 +600,9 @@ int check_cpu(ab_tag_p tag, attr attribs)
     if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
         !str_cmp_i(cpu_type, "slc500")) {
         tag->protocol_type = AB_PROTOCOL_PLC;
+    } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") ||
+               !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5")) {
+        tag->protocol_type = AB_PROTOCOL_LGX_PCCC;
     } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
         tag->protocol_type = AB_PROTOCOL_MLGX800;
     } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
@@ -613,6 +631,7 @@ int check_tag_name(ab_tag_p tag, const char* name)
     switch (tag->protocol_type) {
         case AB_PROTOCOL_PLC:
         case AB_PROTOCOL_MLGX:
+        case AB_PROTOCOL_LGX_PCCC:
             if (!pccc_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), name, MAX_TAG_NAME)) {
                 pdebug(DEBUG_WARN, "parse of PCCC-style tag name %s failed!", name);
 
