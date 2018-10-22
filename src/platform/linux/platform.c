@@ -696,19 +696,22 @@ extern int thread_destroy(thread_p *t)
 
 #define ATOMIC_LOCK_VAL (1)
 
-extern int lock_acquire(lock_t *lock)
+extern int lock_acquire_try(lock_t *lock)
 {
     int rc = __sync_lock_test_and_set((int*)lock, ATOMIC_LOCK_VAL);
 
     if(rc != ATOMIC_LOCK_VAL) {
-        /* we got the lock */
-        /*pdebug("got lock");*/
         return 1;
     } else {
-        /* we did not get the lock */
-        /*pdebug("did not get lock");*/
         return 0;
     }
+}
+
+int lock_acquire(lock_t *lock)
+{
+    while(!lock_acquire_try(lock)) ;
+
+    return 1;
 }
 
 

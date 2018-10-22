@@ -752,21 +752,24 @@ extern int thread_destroy(thread_p *t)
 #define ATOMIC_UNLOCK_VAL ((LONG)(0))
 #define ATOMIC_LOCK_VAL ((LONG)(1))
 
-extern int lock_acquire(lock_t *lock)
+extern int lock_acquire_try(lock_t *lock)
 {
     LONG rc = InterlockedExchange(lock, ATOMIC_LOCK_VAL);
 
     if(rc != ATOMIC_LOCK_VAL) {
-        /* we got the lock */
-        /*pdebug("got lock");*/
         return 1;
     } else {
-        /* we did not get the lock */
-        /*pdebug("did not get lock");*/
         return 0;
     }
 }
 
+
+extern int lock_acquire(lock_t *lock)
+{
+    while(!lock_acquire_try(lock)) ;
+
+    return 1;
+}
 
 extern void lock_release(lock_t *lock)
 {

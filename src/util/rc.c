@@ -158,10 +158,8 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     /* get the refcount structure. */
     rc = ((refcount_p)data) - 1;
 
-    /* loop until we get the lock */
-    while (!lock_acquire(&rc->lock)) {
-        ; /* do nothing, just spin */
-    }
+    /* get the lock */
+    lock_acquire(&rc->lock);
 
         if(rc->count > 0) {
             rc->count++;
@@ -214,10 +212,8 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     /* get the refcount structure. */
     rc = ((refcount_p)data) - 1;
 
-    /* loop until we get the lock */
-    while (!lock_acquire(&rc->lock)) {
-        ; /* do nothing, just spin */
-    }
+    /* get the lock */
+    lock_acquire(&rc->lock);
 
         if(rc->count > 0) {
             rc->count--;
