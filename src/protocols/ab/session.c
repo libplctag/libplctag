@@ -176,6 +176,9 @@ int get_plc_type(attr attribs)
     if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
         !str_cmp_i(cpu_type, "slc500")) {
         return AB_PROTOCOL_PLC;
+    } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
+               !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
+        return AB_PROTOCOL_LGX_PCCC;
     } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
         return AB_PROTOCOL_MLGX800;
     } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
@@ -401,6 +404,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port, const char *pa
     switch(plc_type) {
     case AB_PROTOCOL_PLC:
     case AB_PROTOCOL_MLGX:
+    case AB_PROTOCOL_LGX_PCCC:
         session->max_payload_size = MAX_CIP_PCCC_MSG_SIZE;
         break;
 
@@ -1475,7 +1479,7 @@ int send_forward_open_req(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    mem_set(session->data, 0, sizeof(*fo) + session->conn_path_size);
+    mem_set(session->data, 0, (int)(sizeof(*fo) + session->conn_path_size));
 
     fo = (eip_forward_open_request_t*)(session->data);
 
@@ -1490,7 +1494,7 @@ int send_forward_open_req(ab_session_p session)
 
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_session_handle = h2le32(session->session_handle);
     fo->encap_sender_context = h2le64(++session->session_seq_id);
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
@@ -1500,7 +1504,7 @@ int send_forward_open_req(ab_session_p session)
     fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
     fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
+    fo->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
     fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
@@ -1528,7 +1532,7 @@ int send_forward_open_req(ab_session_p session)
     fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
 
     /* set the size of the request */
-    session->data_size = data - (session->data);
+    session->data_size = (uint32_t)(data - (session->data));
 
     rc = send_eip_request(session, 0);
 
@@ -1650,12 +1654,12 @@ int recv_forward_open_resp(ab_session_p session)
                 if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2) {
                     /* we might have an error that tells us the actual size to use. */
                     uint8_t *data = &fo_resp->status_size;
-                    uint16_t extended_status = data[1] | (data[2] << 8);
-                    uint16_t supported_size = data[3] | (data[4] << 8);
+                    int extended_status = data[1] | (data[2] << 8);
+                    int supported_size = data[3] | (data[4] << 8);
 
                     if(extended_status == 0x109) { /* MAGIC */
                         pdebug(DEBUG_WARN,"Error from forward open request, unsupported size, but size %d is supported.", supported_size);
-                        session->max_payload_size = supported_size;
+                        session->max_payload_size = (uint16_t)supported_size;
                         rc = PLCTAG_ERR_TOO_LARGE;
                     } else {
                         pdebug(DEBUG_WARN,"CIP extended error %x!", extended_status);
@@ -1708,7 +1712,7 @@ int send_forward_close_req(ab_session_p session)
 
     /* encap header parts */
     fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
-    fo->encap_length = h2le16(data - (uint8_t*)(&fo->interface_handle)); /* total length of packet except for encap header */
+    fo->encap_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_sender_context = h2le64(++session->session_seq_id);
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
 
@@ -1717,7 +1721,7 @@ int send_forward_close_req(ab_session_p session)
     fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
     fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
     fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-    fo->cpf_udi_item_length = h2le16(data - (uint8_t*)(&fo->cm_service_code)); /* length of remaining data in UC data item */
+    fo->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->cm_service_code))); /* length of remaining data in UC data item */
 
     /* Connection Manager parts */
     fo->cm_service_code = AB_EIP_CMD_FORWARD_CLOSE;/* 0x4E Forward Close Request */
@@ -1736,7 +1740,7 @@ int send_forward_close_req(ab_session_p session)
     fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
 
     /* set the size of the request */
-    session->data_size = data - (session->data);
+    session->data_size = (uint32_t)(data - (session->data));
 
     rc = send_eip_request(session, 100);
 
