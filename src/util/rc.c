@@ -158,23 +158,20 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     /* get the refcount structure. */
     rc = ((refcount_p)data) - 1;
 
-    /* get the lock */
-    lock_acquire(&rc->lock);
-
+    /* spin until we have ownership */
+    spin_block(&rc->lock) {
         if(rc->count > 0) {
             rc->count++;
             count = rc->count;
             result = data;
         } else {
-            pdebug(DEBUG_WARN,"Reference is invalid!");
+            count = rc->count;
             result = NULL;
         }
-
-    /* release the lock so that other things can get to it. */
-    lock_release(&rc->lock);
+    }
 
     if(!result) {
-        pdebug(DEBUG_SPEW,"Invalid ref from call at %s line %d!  Unable to take strong reference.", func, line_num);
+        pdebug(DEBUG_SPEW,"Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
     } else {
         pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
     }
@@ -212,27 +209,28 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     /* get the refcount structure. */
     rc = ((refcount_p)data) - 1;
 
-    /* get the lock */
-    lock_acquire(&rc->lock);
-
+    /* do this sorta atomically */
+    spin_block(&rc->lock) {
         if(rc->count > 0) {
             rc->count--;
             count = rc->count;
         } else {
-            pdebug(DEBUG_WARN,"Reference is invalid!");
+            count = rc->count;
             invalid = 1;
         }
+    }
 
-    /* release the lock so that other things can get to it. */
-    lock_release(&rc->lock);
+    if(invalid) {
+        pdebug(DEBUG_WARN,"Reference has invalid count %d!", count);
+    } else {
+        pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
 
-    pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
+        /* clean up only if count is zero. */
+        if(rc && count <= 0) {
+            pdebug(DEBUG_DETAIL,"Calling cleanup functions due to call at %s:%d for %p.", func, line_num, data);
 
-    /* clean up only if count is zero. */
-    if(rc && !invalid && count <= 0) {
-        pdebug(DEBUG_DETAIL,"Calling cleanup functions due to call at %s:%d for %p.", func, line_num, data);
-
-        refcount_cleanup(rc);
+            refcount_cleanup(rc);
+        }
     }
 
     return NULL;
@@ -257,4 +255,3 @@ void refcount_cleanup(refcount_p rc)
 
     pdebug(DEBUG_INFO,"Done.");
 }
-
