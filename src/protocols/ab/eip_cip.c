@@ -445,13 +445,13 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
      * uint8_t reserved/pad (zero)
      * uint8_t[...] path (padded to even number of bytes)
      */
-    if(tag->conn_path_size > 0) {
-        *data = (tag->conn_path_size) / 2; /* in 16-bit words */
+    if(tag->session->conn_path_size > 0) {
+        *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
         data++;
         *data = 0; /* reserved/pad */
         data++;
-        mem_copy(data, tag->conn_path, tag->conn_path_size);
-        data += tag->conn_path_size;
+        mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
+        data += tag->session->conn_path_size;
     }
 
     /* now we go back and fill in the fields of the static part */
@@ -773,12 +773,12 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
      */
 
     /* Now copy in the routing information for the embedded message */
-    *data = (tag->conn_path_size) / 2; /* in 16-bit words */
+    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
     data++;
     *data = 0;
     data++;
-    mem_copy(data, tag->conn_path, tag->conn_path_size);
-    data += tag->conn_path_size;
+    mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
+    data += tag->session->conn_path_size;
 
     /* now fill in the rest of the structure. */
 
@@ -1440,7 +1440,7 @@ int calculate_write_data_per_packet(ab_tag_p tag)
         overhead =  1                               /* service request, one byte */
                     + tag->encoded_name_size        /* full encoded name */
                     + tag->encoded_type_info_size   /* encoded type size */
-                    + tag->conn_path_size + 2       /* encoded device path size plus two bytes for length and padding */
+                    + tag->session->conn_path_size + 2       /* encoded device path size plus two bytes for length and padding */
                     + 2                             /* element count, 16-bit int */
                     + 4                             /* byte offset, 32-bit int */
                     + 8;                            /* MAGIC fudge factor */
