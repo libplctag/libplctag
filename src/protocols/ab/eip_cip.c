@@ -169,9 +169,6 @@ int tag_tickler(ab_tag_p tag)
 }
 
 
-
-
-
 /*
  * tag_read_start
  *
@@ -341,10 +338,6 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
 //    req->connection = tag->connection;
 
     req->session = tag->session;
-
-    if(tag->allow_packing) {
-        request_allow_packing(req);
-    }
 
     if(tag->allow_packing) {
         request_allow_packing(req);

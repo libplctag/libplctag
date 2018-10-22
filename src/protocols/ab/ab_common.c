@@ -106,33 +106,6 @@ int ab_init(void)
 
     pdebug(DEBUG_INFO,"Initializing AB protocol library.");
 
-    /* set up the vtables. */
-//    lgx_pccc_vtable.abort    = (tag_abort_func)ab_tag_abort;
-//    lgx_pccc_vtable.read     = (tag_read_func)eip_lgx_pccc_tag_read_start;
-//    lgx_pccc_vtable.status   = (tag_status_func)eip_lgx_pccc_tag_status;
-//    lgx_pccc_vtable.write    = (tag_write_func)eip_lgx_pccc_tag_write_start;
-//
-//    plc_dhp_vtable.abort    = (tag_vtable_func)ab_tag_abort;
-//    //plc_dhp_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
-//    plc_dhp_vtable.read     = (tag_vtable_func)eip_dhp_pccc_tag_read_start;
-//    plc_dhp_vtable.status   = (tag_vtable_func)eip_dhp_pccc_tag_status;
-//    plc_dhp_vtable.tickler  = (tag_vtable_func)eip_dhp_pccc_tag_tickler;
-//    plc_dhp_vtable.write    = (tag_vtable_func)eip_dhp_pccc_tag_write_start;
-
-//    plc_vtable.abort        = (tag_vtable_func)ab_tag_abort;
-//    //plc_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
-//    plc_vtable.read         = (tag_vtable_func)eip_pccc_tag_read_start;
-//    plc_vtable.status       = (tag_vtable_func)eip_pccc_tag_status;
-//    plc_vtable.tickler      = (tag_vtable_func)eip_pccc_tag_tickler;
-//    plc_vtable.write        = (tag_vtable_func)eip_pccc_tag_write_start;
-
-//    cip_vtable.abort        = (tag_vtable_func)ab_tag_abort;
-//    //cip_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
-//    cip_vtable.read         = (tag_vtable_func)eip_cip_tag_read_start;
-//    cip_vtable.status       = (tag_vtable_func)eip_cip_tag_status;
-//    cip_vtable.tickler      = (tag_vtable_func)eip_cip_tag_tickler;
-//    cip_vtable.write        = (tag_vtable_func)eip_cip_tag_write_start;
-
     /* this is a mutex used to synchronize most activities in this protocol */
     rc = mutex_create((mutex_p*)&global_session_mut);
 
@@ -310,17 +283,6 @@ plc_tag_p ab_tag_create(attr attribs)
 
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
-
-//    /*
-//     * set up tag vtable.  This is protocol specific
-//     */
-//    tag->vtable = set_tag_vtable(tag);
-//
-//    if(!tag->vtable) {
-//        pdebug(DEBUG_INFO,"Unable to set tag vtable!");
-//        tag->status = PLCTAG_ERR_BAD_PARAM;
-//        return (plc_tag_p)tag;
-//    }
 
     /*
      * Find or create a session.
@@ -588,4 +550,3 @@ int setup_session_mutex(void)
 
     return rc;
 }
-

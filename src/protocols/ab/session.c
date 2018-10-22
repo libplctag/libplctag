@@ -1534,7 +1534,7 @@ int send_forward_open_req(ab_session_p session)
     /* set the size of the request */
     session->data_size = (uint32_t)(data - (session->data));
 
-    rc = send_eip_request(session, 0);
+    rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
 
     pdebug(DEBUG_INFO, "Done");
 
@@ -1623,7 +1623,7 @@ int recv_forward_open_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session, 0);
+    rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to receive Forward Open response.");
         return rc;
@@ -1734,7 +1734,7 @@ int send_forward_close_req(ab_session_p session)
     /* Forward Open Params */
     fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
     fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
-    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
+    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection ID/serial number. */
     fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
@@ -1757,7 +1757,7 @@ int recv_forward_close_resp(ab_session_p session)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    rc = recv_eip_response(session, 150);
+    rc = recv_eip_response(session, 150); /* MAGIC, something short */
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to receive Forward Close response! rc=%d", rc);
         return rc;

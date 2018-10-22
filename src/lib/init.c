@@ -36,7 +36,6 @@
 const char *VERSION="1.6.2";
 
 
-
 /*
  * The following maps attributes to the tag creation functions.
  */

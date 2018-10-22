@@ -62,10 +62,6 @@ struct ab_tag_t {
 
     const char *read_group;
 
-    /* the connection IOI path */
-//    uint8_t conn_path[MAX_CONN_PATH];
-//    uint8_t conn_path_size;
-
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
     int encoded_type_info_size;

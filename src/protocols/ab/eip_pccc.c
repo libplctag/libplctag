@@ -127,7 +127,6 @@ int tag_tickler(ab_tag_p tag)
     pdebug(DEBUG_SPEW, "Done.");
 
     return tag->status;
-
 }
 
 
