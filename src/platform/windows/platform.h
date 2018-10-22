@@ -196,11 +196,15 @@ extern int thread_destroy(thread_p *t);
 #define THREAD_LOCAL __declspec(thread)
 
 /* atomic operations */
+#define spin_block(lock) \
+for(int LINE_ID(__sync_flag_nargle_lock) = 1; LINE_ID(__sync_flag_nargle_lock); LINE_ID(__sync_flag_nargle_lock) = 0, lock_release(lock))  for(int LINE_ID(__sync_rc_nargle_lock) = lock_acquire(lock); LINE_ID(__sync_rc_nargle_lock) && LINE_ID(__sync_flag_nargle_lock) ; LINE_ID(__sync_flag_nargle_lock) = 0)
+
 typedef volatile long int lock_t;
 
 #define LOCK_INIT (0)
 
 /* returns non-zero when lock acquired, zero when lock operation failed */
+extern int lock_acquire_try(lock_t *lock);
 extern int lock_acquire(lock_t *lock);
 extern void lock_release(lock_t *lock);
 
