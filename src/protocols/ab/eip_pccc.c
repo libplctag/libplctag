@@ -250,13 +250,13 @@ int tag_read_start(ab_tag_p tag)
     req->request_size = (int)(data - (req->data));
 
     /* mark it as ready to send */
-    req->send_request = 1;
+    //req->send_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        request_abort(req);
+        req->abort_request = 1;
         tag->req = rc_dec(req);
 
         return rc;
@@ -312,7 +312,7 @@ static int check_read_status(ab_tag_p tag)
     /* point to the start of the data */
     data = (uint8_t *)pccc + sizeof(*pccc);
 
-    data_end = (tag->req->data + le2h16(pccc->encap_length) + sizeof(eip_encap_t));
+    data_end = (tag->req->data + le2h16(pccc->encap_length) + sizeof(eip_encap));
 
     /* fake exceptions */
     do {
@@ -379,7 +379,7 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
 
     tag->read_in_progress = 0;
@@ -405,7 +405,7 @@ int tag_write_start(ab_tag_p tag)
     uint8_t array_def[16];
     int array_def_size;
     int pccc_data_type;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    //uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     uint8_t *embed_start;
     int overhead, data_per_packet;
     ab_request_p req = NULL;
@@ -547,15 +547,15 @@ int tag_write_start(ab_tag_p tag)
 
     /* get ready to add the request to the queue for this session */
     req->request_size = (int)(data - (req->data));
-    req->send_request = 1;
-    req->conn_seq = conn_seq_id;
+    //req->send_request = 1;
+    //req->conn_seq = conn_seq_id;
 
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        request_abort(req);
+        req->abort_request = 1;
         tag->req = rc_dec(req);
         return rc;
     }
@@ -640,7 +640,7 @@ static int check_write_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
     tag->write_in_progress = 0;
 

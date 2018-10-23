@@ -301,7 +301,8 @@ int tag_read_start(ab_tag_p tag)
     req->request_size = (int)(data - (req->data));
 
     /* mark it as ready to send */
-    req->send_request = 1;
+    //req->send_request = 1;
+    req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -371,7 +372,7 @@ static int check_read_status(ab_tag_p tag)
         /* point to the start of the data */
         data = (uint8_t *)pccc + sizeof(*pccc);
 
-        data_end = (req->data + le2h16(pccc->encap_length) + sizeof(eip_encap_t));
+        data_end = (req->data + le2h16(pccc->encap_length) + sizeof(eip_encap));
 
         if(le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",pccc->encap_command);
@@ -630,8 +631,8 @@ int tag_write_start(ab_tag_p tag)
 
     /* get ready to add the request to the queue for this session */
     req->request_size = (int)(data - (req->data));
-    req->send_request = 1;
-    req->conn_seq = conn_seq_id;
+//    req->send_request = 1;
+//    req->conn_seq = conn_seq_id;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);

@@ -28,9 +28,10 @@
 #ifndef __PLCTAG_AB_REQUEST_H__
 #define __PLCTAG_AB_REQUEST_H__ 1
 
+#include <platform.h>
 #include <ab/ab_common.h>
-#include <util/rc.h>
 #include <ab/defs.h>
+#include <util/rc.h>
 
 
 //#define MAX_REQ_RESP_SIZE   (MAX_EIP_CIP_PACKET_SIZE_EX) /* enough? */
@@ -41,44 +42,48 @@
  */
 
 struct ab_request_t {
-    ab_request_p next;  /* for linked list */
+    //ab_request_p next;  /* for linked list */
 
-    int req_id;         /* which request is this for the tag? */
-    int data_size;      /* how many bytes did we get? */
+    //int req_id;         /* which request is this for the tag? */
+
+    /* used to force interlocks with other threads. */
+    lock_t lock;
 
     /* flags for communicating with background thread */
-    int send_request;
-    int send_in_progress;
+    //int send_request;
+    //int send_in_progress;
     int resp_received;
-    int recv_in_progress;
-    int _abort_request;
-    int abort_after_send; /* for one shot packets */
-    int no_resend; /* do not resend if this is set. */
-    int connected_request; /* serialize this packet with respect to other serialized packets. */
+    //int recv_in_progress;
+    int abort_request;
+    //int abort_after_send; /* for one shot packets */
+    //int no_resend; /* do not resend if this is set. */
+    //int connected_request; /* serialize this packet with respect to other serialized packets. */
 
     int status;
 
     /* used when processing a response */
-    int processed;
+    //int processed;
 
-    mutex_p request_mutex;
-    ab_session_p session;
+    //mutex_p request_mutex;
+    //ab_session_p session;
+
 //    ab_connection_p connection;
     int allow_packing;
     int packing_num;
 
-    uint64_t session_seq_id;
-    uint32_t conn_id;
-    uint16_t conn_seq;
+    //uint64_t session_seq_id;
+    //uint32_t conn_id;
+    //uint16_t conn_seq;
 
     /* time stamps for rate calculations */
     int64_t time_sent;
-    int send_count;
+    //int send_count;
 
     /* used by the background thread for incrementally getting data */
-    int current_offset;
+    //int current_offset;
     int request_size; /* total bytes, not just data */
     int request_capacity;
+    //int data_size;      /* how many bytes did we get? */
     uint8_t data[];
 };
 
@@ -87,9 +92,9 @@ struct ab_request_t {
 
 
 extern int request_create(ab_request_p *req, int max_payload_size);
-extern int request_abort(ab_request_p req);
-extern int request_check_abort(ab_request_p req);
-extern int request_allow_packing(ab_request_p req);
-extern int request_check_packing(ab_request_p req);
+//extern int request_abort(ab_request_p req);
+//extern int request_check_abort(ab_request_p req);
+//extern int request_allow_packing(ab_request_p req);
+//extern int request_check_packing(ab_request_p req);
 
 #endif

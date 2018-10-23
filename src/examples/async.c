@@ -31,8 +31,8 @@
 #include "utils.h"
 
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=pcomm_test_dint_array[%d]"
-#define NUM_TAGS 150
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray[%d]&debug=5"
+#define NUM_TAGS 3
 #define DATA_TIMEOUT 5000
 
 int main()
@@ -40,11 +40,18 @@ int main()
     plc_tag tag[NUM_TAGS];
     int rc;
     int i;
+    int64_t timeout = DATA_TIMEOUT + util_time_ms();
+    int done = 0;
+    int64_t start = 0;
+    int64_t end = 0;
 
     /* create the tags */
     for(i=0; i< NUM_TAGS; i++) {
         char tmp_tag_path[256] = {0,};
         snprintf_platform(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
+
+        fprintf(stderr, "Attempting to create tag with attribute string '%s'\n",tmp_tag_path);
+
         tag[i]  = plc_tag_create(tmp_tag_path);
 
         if(!tag[i]) {
@@ -52,14 +59,33 @@ int main()
         }
     }
 
-    /* let the connect complete */
-    fprintf(stderr,"Sleeping to let the connect complete.\n");
-    util_sleep_ms(1000);
 
-    for(i=0; i < NUM_TAGS; i++) {
-        /* called to update the status in the tag. */
-        plc_tag_status(tag[i]);
+    do {
+        done = 1;
+
+        for(i=0; i < NUM_TAGS; i++) {
+            rc = plc_tag_status(tag[i]);
+            if(rc != PLCTAG_STATUS_OK) {
+                done = 0;
+            }
+        }
+
+        if(!done) {
+            util_sleep_ms(1);
+        }
+    } while(timeout > util_time_ms() && !done) ;
+
+    if(!done) {
+        fprintf(stderr, "Timeout waiting for tags to be ready!\n");
+
+        for(i=0; i < NUM_TAGS; i++) {
+            plc_tag_destroy(tag[i]);
+        }
+
+        return 1;
     }
+
+    start = util_time_ms();
 
     /* get the data */
     for(i=0; i < NUM_TAGS; i++) {
@@ -72,23 +98,38 @@ int main()
         }
     }
 
-    /* sleeping to let the reads complete */
-    fprintf(stderr,"Sleeping to let the reads complete.\n");
-    util_sleep_ms(2000);
+    /* wait for all to finish */
+    do {
+        done = 1;
 
+        for(i=0; i < NUM_TAGS; i++) {
+            rc = plc_tag_status(tag[i]);
+            if(rc != PLCTAG_STATUS_OK) {
+                done = 0;
+            }
+        }
+
+        if(!done) {
+            util_sleep_ms(1);
+        }
+    } while(timeout > util_time_ms() && !done) ;
+
+    if(!done) {
+        fprintf(stderr, "Timeout waiting for tags to finish reading!\n");
+
+        for(i=0; i < NUM_TAGS; i++) {
+            plc_tag_destroy(tag[i]);
+        }
+
+        return 1;
+    }
+
+    end = util_time_ms();
 
     /* get any data we can */
     for(i=0; i < NUM_TAGS; i++) {
-        rc = plc_tag_status(tag[i]);
-
-        if(rc == PLCTAG_STATUS_PENDING) {
-            fprintf(stderr,"Tag %d is still pending.\n",i);
-        } else if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Tag %d status error! %d: %s\n",i,rc, plc_tag_decode_error(rc));
-        } else {
-            /* read complete! */
-            fprintf(stderr,"Tag %d data[0]=%d\n",i,plc_tag_get_int32(tag[i],0));
-        }
+        /* read complete! */
+        fprintf(stderr,"Tag %d data[0]=%d\n",i,plc_tag_get_int32(tag[i],0));
     }
 
 
@@ -96,6 +137,8 @@ int main()
     for(i=0; i < NUM_TAGS; i++) {
         plc_tag_destroy(tag[i]);
     }
+
+    fprintf(stderr, "Read %d tags in %dms\n", NUM_TAGS, (int)(end - start));
 
     return 0;
 }

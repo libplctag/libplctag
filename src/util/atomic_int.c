@@ -23,7 +23,7 @@
 #include <util/debug.h>
 
 
-int atomic_init(atomic_int *a, int new_val)
+void atomic_init(atomic_int *a, int new_val)
 {
     a->lock = LOCK_INIT;
     a->val = new_val;
@@ -37,15 +37,9 @@ int atomic_get(atomic_int *a)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    /* loop until we get the lock */
-    while (!lock_acquire(&a->lock)) {
-        ; /* do nothing, just spin */
+    spin_block(&a->lock) {
+        val = a->val;
     }
-
-    val = a->val;
-
-    /* release the lock so that other things can get to it. */
-    lock_release(&a->lock);
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -60,16 +54,10 @@ int atomic_set(atomic_int *a, int new_val)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    /* loop until we get the lock */
-    while (!lock_acquire(&a->lock)) {
-        ; /* do nothing, just spin */
+    spin_block(&a->lock) {
+        old_val = a->val;
+        a->val = new_val;
     }
-
-    old_val = a->val;
-    a->val = new_val;
-
-    /* release the lock so that other things can get to it. */
-    lock_release(&a->lock);
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -84,19 +72,12 @@ int atomic_add(atomic_int *a, int other)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    /* loop until we get the lock */
-    while (!lock_acquire(&a->lock)) {
-        ; /* do nothing, just spin */
+    spin_block(&a->lock) {
+        old_val = a->val;
+        a->val += other;
     }
-
-    old_val = a->val;
-    a->val += other;
-
-    /* release the lock so that other things can get to it. */
-    lock_release(&a->lock);
 
     pdebug(DEBUG_SPEW, "Done.");
 
     return old_val;
 }
-
