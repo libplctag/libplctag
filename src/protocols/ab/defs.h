@@ -92,6 +92,7 @@
 #define AB_EIP_CMD_FORWARD_OPEN_EX      ((uint8_t)0x5B)
 
 /* CIP embedded packet commands */
+#define AB_EIP_CMD_CIP_MULTI            ((uint8_t)0x0A)
 #define AB_EIP_CMD_CIP_READ             ((uint8_t)0x4C)
 #define AB_EIP_CMD_CIP_WRITE            ((uint8_t)0x4D)
 #define AB_EIP_CMD_CIP_READ_FRAG        ((uint8_t)0x52)
@@ -219,6 +220,30 @@
  ********************************************************************/
 
 
+START_PACK typedef struct {
+    uint8_t reply_service;          /* 0x?? CIP reply */
+    uint8_t reserved;               /* 0x00 in reply */
+    uint8_t status;                 /* 0x00 for success */
+    uint8_t num_status_words;       /* number of 16-bit words in status */
+} END_PACK cip_header;
+
+START_PACK typedef struct {
+    uint8_t service_code;        /* ALWAYS 0x0A Forward Open Request */
+    uint8_t req_path_size;       /* ALWAYS 2, size in words of path, next field */
+    uint8_t req_path[4];         /* ALWAYS 0x20,0x06,0x24,0x01 for CM, instance 1*/
+    uint16_le request_count;        /* number of requests packed in this packet. */
+    uint16_le request_offsets[];    /* request offsets from the count */
+} END_PACK cip_multi_req_header;
+
+START_PACK typedef struct {
+    uint8_t reply_service;          /* 0x?? CIP reply */
+    uint8_t reserved;               /* 0x00 in reply */
+    uint8_t status;                 /* 0x00 for success */
+    uint8_t num_status_words;       /* number of 16-bit words in status */
+    uint16_le request_count;        /* number of requests packed in this packet. */
+    uint16_le request_offsets[];    /* request offsets from the count */
+} END_PACK cip_multi_resp_header;
+
 /* EIP Encapsulation Header */
 START_PACK typedef struct {
     uint16_le encap_command;
@@ -227,7 +252,7 @@ START_PACK typedef struct {
     uint32_le encap_status;
     uint64_le encap_sender_context;
     uint32_le encap_options;
-} END_PACK eip_encap_t;
+} END_PACK eip_encap;
 
 /* Session Registration Request */
 START_PACK typedef struct {

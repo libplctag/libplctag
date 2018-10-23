@@ -51,10 +51,10 @@
  * Externally visible global variables
  */
 
-volatile ab_session_p sessions = NULL;
-volatile mutex_p global_session_mut = NULL;
-
-volatile vector_p read_group_tags = NULL;
+//volatile ab_session_p sessions = NULL;
+//volatile mutex_p global_session_mut = NULL;
+//
+//volatile vector_p read_group_tags = NULL;
 
 
 /* request/response handling thread */
@@ -134,10 +134,15 @@ int ab_init(void)
 //    cip_vtable.write        = (tag_vtable_func)eip_cip_tag_write_start;
 
     /* this is a mutex used to synchronize most activities in this protocol */
-    rc = mutex_create((mutex_p*)&global_session_mut);
+//    rc = mutex_create((mutex_p*)&global_session_mut);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
+        return rc;
+    }
+
+    if((rc = session_startup()) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to initialize session library!");
         return rc;
     }
 
@@ -161,12 +166,9 @@ void ab_teardown(void)
     thread_join(io_handler_thread);
     thread_destroy((thread_p*)&io_handler_thread);
 
-    pdebug(DEBUG_INFO,"Freeing global session mutex.");
-    /* clean up the mutex */
-    mutex_destroy((mutex_p*)&global_session_mut);
+    pdebug(DEBUG_INFO,"Freeing session information.");
 
-    pdebug(DEBUG_INFO, "Removing the read group vector.");
-    vector_destroy(read_group_tags);
+    session_teardown();
 
     pdebug(DEBUG_INFO,"Done.");
 }
@@ -421,7 +423,8 @@ int ab_tag_abort(ab_tag_p tag)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag->req) {
-        request_abort(tag->req);
+        //request_abort(tag->req);
+        tag->req->abort_request = 1;
         tag->req = rc_dec(tag->req);
     }
 
@@ -562,31 +565,30 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
 
 
-/*
- * setup_session_mutex
- *
- * check to see if the global mutex is set up.  If not, do an atomic
- * lock and set it up.
- */
-int setup_session_mutex(void)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    critical_block(global_library_mutex) {
-        /* first see if the mutex is there. */
-        if (!global_session_mut) {
-            rc = mutex_create((mutex_p*)&global_session_mut);
-
-            if (rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
-            }
-        }
-    }
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return rc;
-}
-
+///*
+// * setup_session_mutex
+// *
+// * check to see if the global mutex is set up.  If not, do an atomic
+// * lock and set it up.
+// */
+//int setup_session_mutex(void)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    pdebug(DEBUG_INFO, "Starting.");
+//
+//    critical_block(global_library_mutex) {
+//        /* first see if the mutex is there. */
+//        if (!global_session_mut) {
+//            rc = mutex_create((mutex_p*)&global_session_mut);
+//
+//            if (rc != PLCTAG_STATUS_OK) {
+//                pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
+//            }
+//        }
+//    }
+//
+//    pdebug(DEBUG_INFO, "Done.");
+//
+//    return rc;
+//}

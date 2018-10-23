@@ -220,17 +220,17 @@ int tag_read_start(ab_tag_p tag)
 //    req->connection = tag->connection;
 
     /* this request is connected, so it needs the session exclusively */
-    req->connected_request = 1;
+    //req->connected_request = 1;
 
     /* mark the request ready for sending */
-    req->send_request = 1;
+    //req->send_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        request_abort(req);
+        tag->req->abort_request = 1;
         tag->req = rc_dec(req);
         return rc;
     }
@@ -386,10 +386,10 @@ int tag_write_start(ab_tag_p tag)
 //    req->connection = tag->connection;
 
     /* ready the request for sending */
-    req->send_request = 1;
+    //req->send_request = 1;
 
     /* this request is connected, so it needs the session exclusively */
-    req->connected_request = 1;
+    //req->connected_request = 1;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -397,7 +397,7 @@ int tag_write_start(ab_tag_p tag)
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
 //        request_release(req);
-        request_abort(req);
+        req->abort_request = 1;
         tag->req = rc_dec(req);
         return rc;
     }
@@ -447,7 +447,7 @@ static int check_read_status(ab_tag_p tag)
     data = (uint8_t *)resp + sizeof(*resp);
 
     /* point to the end of the data */
-    data_end = (tag->req->data + le2h16(resp->encap_length) + sizeof(eip_encap_t));
+    data_end = (tag->req->data + le2h16(resp->encap_length) + sizeof(eip_encap));
 
     /* fake exception */
     do {
@@ -510,7 +510,7 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
 
     tag->read_in_progress = 0;
@@ -571,7 +571,7 @@ static int check_write_status(ab_tag_p tag)
     } while(0);
 
     /* clean up any outstanding requests. */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
     tag->write_in_progress = 0;
 

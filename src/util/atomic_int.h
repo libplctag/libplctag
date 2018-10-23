@@ -24,7 +24,7 @@
 
 typedef struct { lock_t lock; int val; } atomic_int;
 
-extern int atomic_init(atomic_int *a, int new_val);
+extern void atomic_init(atomic_int *a, int new_val);
 extern int atomic_get(atomic_int *a);
 extern int atomic_set(atomic_int *a, int new_val);
 extern int atomic_add(atomic_int *a, int other);

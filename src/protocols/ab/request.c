@@ -59,13 +59,15 @@ int request_create(ab_request_p *req, int max_payload_size)
     } else {
         res->request_capacity = (int)request_capacity;
 
-        rc = mutex_create(&(res->request_mutex));
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to create request mutex!");
-            *req = NULL;
-            rc_dec(req);
-            return rc;
-        }
+//        rc = mutex_create(&(res->request_mutex));
+//        if(rc != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_WARN,"Unable to create request mutex!");
+//            *req = NULL;
+//            rc_dec(req);
+//            return rc;
+//        }
+
+        res->lock = LOCK_INIT;
 
         *req = res;
     }
@@ -76,109 +78,109 @@ int request_create(ab_request_p *req, int max_payload_size)
 }
 
 
-int request_abort(ab_request_p req)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_DETAIL,"Starting.");
-
-    if(!req) {
-        pdebug(DEBUG_WARN,"request pointer is NULL!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    critical_block(req->request_mutex) {
-        req->_abort_request = !0;
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return rc;
-}
-
-
-int request_check_abort(ab_request_p req)
-{
-    int result = 0;
-
-    if(!req) {
-        return !0;
-    }
-
-    critical_block(req->request_mutex) {
-        result = req->_abort_request;
-    }
-
-    return result;
-}
-
-
-int request_allow_packing(ab_request_p req)
-{
-    int result = PLCTAG_STATUS_OK;
-
-    if(!req) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    critical_block(req->request_mutex) {
-        req->allow_packing = 1;
-        result = PLCTAG_STATUS_OK;
-    }
-
-    return result;
-}
-
-
-int request_check_packing(ab_request_p req)
-{
-    int result = 0;
-
-    if(!req) {
-        return result;
-    }
-
-    critical_block(req->request_mutex) {
-        result = req->allow_packing;
-    }
-
-    return result;
-}
-
-
-
-
-int request_get_packing_num(ab_request_p req)
-{
-    int result = 0;
-
-    if(!req) {
-        return result;
-    }
-
-    critical_block(req->request_mutex) {
-        result = req->allow_packing;
-    }
-
-    return result;
-}
-
-
-int request_set_packing_num(ab_request_p req, int packing_num)
-{
-    int result = PLCTAG_STATUS_OK;
-
-    if(!req) {
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    critical_block(req->request_mutex) {
-        req->packing_num = packing_num;
-        result = PLCTAG_STATUS_OK;
-    }
-
-    return result;
-}
+//int request_abort(ab_request_p req)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    pdebug(DEBUG_DETAIL,"Starting.");
+//
+//    if(!req) {
+//        pdebug(DEBUG_WARN,"request pointer is NULL!");
+//        return PLCTAG_ERR_NULL_PTR;
+//    }
+//
+//    critical_block(req->request_mutex) {
+//        req->_abort_request = !0;
+//    }
+//
+//    pdebug(DEBUG_DETAIL, "Done.");
+//
+//    return rc;
+//}
+//
+//
+//int request_check_abort(ab_request_p req)
+//{
+//    int result = 0;
+//
+//    if(!req) {
+//        return !0;
+//    }
+//
+//    critical_block(req->request_mutex) {
+//        result = req->_abort_request;
+//    }
+//
+//    return result;
+//}
+//
+//
+//int request_allow_packing(ab_request_p req)
+//{
+//    int result = PLCTAG_STATUS_OK;
+//
+//    if(!req) {
+//        return PLCTAG_ERR_NULL_PTR;
+//    }
+//
+//    critical_block(req->request_mutex) {
+//        req->allow_packing = 1;
+//        result = PLCTAG_STATUS_OK;
+//    }
+//
+//    return result;
+//}
+//
+//
+//int request_check_packing(ab_request_p req)
+//{
+//    int result = 0;
+//
+//    if(!req) {
+//        return result;
+//    }
+//
+//    critical_block(req->request_mutex) {
+//        result = req->allow_packing;
+//    }
+//
+//    return result;
+//}
+//
+//
+//
+//
+//int request_get_packing_num(ab_request_p req)
+//{
+//    int result = 0;
+//
+//    if(!req) {
+//        return result;
+//    }
+//
+//    critical_block(req->request_mutex) {
+//        result = req->allow_packing;
+//    }
+//
+//    return result;
+//}
+//
+//
+//int request_set_packing_num(ab_request_p req, int packing_num)
+//{
+//    int result = PLCTAG_STATUS_OK;
+//
+//    if(!req) {
+//        return PLCTAG_ERR_NULL_PTR;
+//    }
+//
+//    critical_block(req->request_mutex) {
+//        req->packing_num = packing_num;
+//        result = PLCTAG_STATUS_OK;
+//    }
+//
+//    return result;
+//}
 
 
 
@@ -195,10 +197,11 @@ void request_destroy(void *req_arg)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    request_abort(req);
+//    request_abort(req);
+    req->abort_request = 1;
 
     /* FIXME - is this needed any more? */
-    mutex_destroy(&(req->request_mutex));
+    //mutex_destroy(&(req->request_mutex));
 
     pdebug(DEBUG_DETAIL, "Done.");
 }
