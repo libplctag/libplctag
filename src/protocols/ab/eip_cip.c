@@ -334,20 +334,10 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
 
-    /* store the connection */
-//    req->connection = tag->connection;
+    /* set the session so that we know what session the request is aiming at */
+    //req->session = tag->session;
 
-    req->session = tag->session;
-
-    if(tag->allow_packing) {
-        request_allow_packing(req);
-    }
-
-    /* mark it as ready to send */
-    req->send_request = 1;
-
-    /* this request is connected, so it needs the session exclusively */
-    req->connected_request = 1;
+    req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -481,11 +471,9 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     req->request_size = (int)(data - (req->data));
 
     /* mark it as ready to send */
-    req->send_request = 1;
+    //req->send_request = 1;
 
-    if(tag->allow_packing) {
-        request_allow_packing(req);
-    }
+    req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -623,17 +611,18 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     req->request_size = (int)(data - (req->data));
 
     /* mark it as ready to send */
-    req->send_request = 1;
+    //req->send_request = 1;
 
     /* store the connection */
 //    req->connection = tag->connection;
 
     /* mark the request as a connected request */
-    req->connected_request = 1;
+    //req->connected_request = 1;
 
-    if(tag->allow_packing) {
-        request_allow_packing(req);
-    }
+//    if(tag->allow_packing) {
+//        request_allow_packing(req);
+//    }
+    req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -807,11 +796,12 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     req->request_size = (int)(data - (req->data));
 
     /* mark it as ready to send */
-    req->send_request = 1;
+    //req->send_request = 1;
 
-    if(tag->allow_packing) {
-        request_allow_packing(req);
-    }
+//    if(tag->allow_packing) {
+//        request_allow_packing(req);
+//    }
+    req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -851,6 +841,9 @@ static int check_read_status_connected(ab_tag_p tag)
     eip_cip_co_resp* cip_resp;
     uint8_t* data;
     uint8_t* data_end;
+    cip_multi_resp_header *multi = NULL;
+    cip_header *c_header = NULL;
+    int total_responses = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -872,11 +865,8 @@ static int check_read_status_connected(ab_tag_p tag)
     /* point to the data */
     cip_resp = (eip_cip_co_resp*)(tag->req->data);
 
-    /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
-
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap_t));
+    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
     /* check the status */
     do {
@@ -893,24 +883,51 @@ static int check_read_status_connected(ab_tag_p tag)
         }
 
         /*
-         * FIXME
-         *
-         * It probably should not be necessary to check for both as setting the type to anything other
-         * than fragmented is error-prone.
+         * our request could have been packed in with other requests, so
+         * we need to check different kinds of reply service.
          */
+        if(cip_resp->reply_service == (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
+           || cip_resp->reply_service == (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK)) {
+            pdebug(DEBUG_DETAIL, "got single read response back.");
 
-        if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
-            && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
+            /* point to the start of the data */
+            c_header = (cip_header *)(&cip_resp->reply_service);
+            data = (uint8_t *)(c_header + 1);
+        } else if(cip_resp->reply_service == (AB_EIP_CMD_CIP_MULTI | AB_EIP_CMD_CIP_OK)) {
+            pdebug(DEBUG_DETAIL, "Got multiple response packet, we should use response %d", tag->req->packing_num);
+
+            /* fix up the data pointer. */
+            multi = (cip_multi_resp_header *)(&cip_resp->reply_service);
+            total_responses = le2h16(multi->request_count);
+
+            pdebug(DEBUG_DETAIL, "Total responses in this packet: %d", le2h16(multi->request_count));
+
+            for(uint16_t index = 0; index < le2h16(multi->request_count); index++) {
+                pdebug(DEBUG_DETAIL, "Offset at index %d is %d", index, le2h16(multi->request_offsets[index]));
+            }
+
+            pdebug(DEBUG_DETAIL, "Our result offset is %d bytes.", (int)le2h16(multi->request_offsets[tag->req->packing_num]));
+
+            c_header = (cip_header *)((uint8_t*)(&multi->request_count) + le2h16(multi->request_offsets[tag->req->packing_num]));
+            data = (uint8_t *)(c_header + 1);
+
+            /* calculate the end of the data. */
+            if((tag->req->packing_num + 1) < total_responses) {
+                /* not the last response */
+                data_end = (uint8_t*)(&multi->request_count) + le2h16(multi->request_offsets[tag->req->packing_num + 1]);
+            }
+        } else {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
+        /* check the CIP status for this response. */
+        if (c_header->status != AB_CIP_STATUS_OK && c_header->status != AB_CIP_STATUS_FRAG) {
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", c_header->status, decode_cip_error_short((uint8_t *)&c_header->status));
+            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&c_header->status));
 
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+            rc = decode_cip_error_code((uint8_t *)&c_header->status);
 
             break;
         }
@@ -992,7 +1009,7 @@ static int check_read_status_connected(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
 
     /* are we actually done? */
@@ -1069,7 +1086,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
     data = (tag->req->data) + sizeof(eip_cip_uc_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap_t));
+    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
     /* check the status */
     do {
@@ -1186,7 +1203,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
 
     /* clean up the request */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
 
     /* are we actually done? */
@@ -1293,7 +1310,7 @@ static int check_write_status_connected(ab_tag_p tag)
     } while(0);
 
     /* clean up the request. */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
 
     if(rc == PLCTAG_STATUS_OK) {
@@ -1377,7 +1394,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
     } while(0);
 
     /* clean up the request. */
-    request_abort(tag->req);
+    tag->req->abort_request = 1;
     tag->req = rc_dec(tag->req);
 
     if(rc == PLCTAG_STATUS_OK) {

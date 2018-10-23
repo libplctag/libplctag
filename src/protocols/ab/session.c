@@ -33,6 +33,10 @@
 #include <time.h>
 
 
+
+
+#define MAX_REQUESTS (50)
+
 static ab_session_p session_create_unsafe(const char* host, int gw_port, const char *path, int plc_type, int use_connected_msg);
 static int session_init(ab_session_p session);
 static int get_plc_type(attr attribs);
@@ -40,6 +44,7 @@ static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
 static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path);
 static int session_match_valid(const char *host, const char *path, ab_session_p session);
+static int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
 static int session_open_socket(ab_session_p session);
 static void session_destroy(void *session);
 static int session_register(ab_session_p session);
@@ -47,7 +52,9 @@ static int session_close_socket(ab_session_p session);
 static int session_unregister(ab_session_p session);
 static THREAD_FUNC(session_handler);
 static int process_requests(ab_session_p session);
-static int prepare_request(ab_session_p session, ab_request_p request);
+static int check_packing(ab_session_p session, ab_request_p request);
+static int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests);
+static int prepare_request(ab_session_p session);
 static int send_eip_request(ab_session_p session, int timeout);
 static int recv_eip_response(ab_session_p session, int timeout);
 static int perform_forward_open(ab_session_p session);
@@ -59,6 +66,56 @@ static int send_forward_open_req(ab_session_p session);
 static int recv_forward_open_resp(ab_session_p session);
 static int send_forward_close_req(ab_session_p session);
 static int recv_forward_close_resp(ab_session_p session);
+
+
+static volatile mutex_p session_mutex = NULL;
+static volatile vector_p sessions = NULL;
+
+
+
+
+int session_startup()
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    if((rc = mutex_create((mutex_p *)&session_mutex)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    if((sessions = vector_create(25, 5)) == NULL) {
+        pdebug(DEBUG_ERROR, "Unable to create session vector!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    return rc;
+}
+
+
+void session_teardown()
+{
+    if(sessions) {
+        for(int i=0; i < vector_length(sessions); i++) {
+            ab_session_p session = vector_get(sessions, i);
+            if(session) {
+                rc_dec(session);
+            }
+        }
+
+        vector_destroy(sessions);
+
+        sessions = NULL;
+    }
+
+
+    if(session_mutex) {
+        mutex_destroy((mutex_p *)&session_mutex);
+    }
+}
+
+
+
+
 
 
 
@@ -87,11 +144,11 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
 {
     uint16_t res = 0;
 
-    //pdebug(DEBUG_DETAIL, "entering critical block %p",global_session_mut);
-    critical_block(sess->session_mutex) {
+    //pdebug(DEBUG_DETAIL, "entering critical block %p",session_mutex);
+    critical_block(sess->mutex) {
         res = (uint16_t)session_get_new_seq_id_unsafe(sess);
     }
-    //pdebug(DEBUG_DETAIL, "leaving critical block %p", global_session_mut);
+    //pdebug(DEBUG_DETAIL, "leaving critical block %p", session_mutex);
 
     return res;
 }
@@ -118,7 +175,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
         attr_set_int(attribs, "use_connected_msg", 1);
     }
 
-    critical_block(global_session_mut) {
+    critical_block(session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
         if (shared_session) {
             session = find_session_by_host_unsafe(session_gw, session_path);
@@ -197,27 +254,31 @@ int get_plc_type(attr attribs)
 }
 
 
-int add_session_unsafe(ab_session_p n)
+int add_session_unsafe(ab_session_p session)
 {
     pdebug(DEBUG_DETAIL, "Starting");
 
-    if (!n) {
+    if (!session) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    n->prev = NULL;
-    n->next = sessions;
+    vector_put(sessions, vector_length(sessions), session);
 
-    if (sessions) {
-        sessions->prev = n;
-    }
-
-    sessions = n;
+//    n->prev = NULL;
+//    n->next = sessions;
+//
+//    if (sessions) {
+//        sessions->prev = n;
+//    }
+//
+//    sessions = n;
 
     pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
+
+
 
 int add_session(ab_session_p s)
 {
@@ -225,7 +286,7 @@ int add_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    critical_block(global_session_mut) {
+    critical_block(session_mutex) {
         rc = add_session_unsafe(s);
     }
 
@@ -234,38 +295,48 @@ int add_session(ab_session_p s)
     return rc;
 }
 
-int remove_session_unsafe(ab_session_p n)
-{
-    ab_session_p tmp;
 
+
+
+int remove_session_unsafe(ab_session_p session)
+{
     pdebug(DEBUG_DETAIL, "Starting");
 
-    if (!n || !sessions) {
+    if (!session || !sessions) {
         return 0;
     }
 
-    tmp = sessions;
+    for(int i=0; i < vector_length(sessions); i++) {
+        ab_session_p tmp = vector_get(sessions, i);
 
-    while (tmp && tmp != n)
-        tmp = tmp->next;
-
-    if (!tmp || tmp != n) {
-        pdebug(DEBUG_WARN, "Session not found!");
-        return PLCTAG_ERR_NOT_FOUND;
+        if(tmp == session) {
+            vector_remove(sessions, i);
+            break;
+        }
     }
 
-    if (n->next) {
-        n->next->prev = n->prev;
-    }
-
-    if (n->prev) {
-        n->prev->next = n->next;
-    } else {
-        sessions = n->next;
-    }
-
-    n->next = NULL;
-    n->prev = NULL;
+//    tmp = sessions;
+//
+//    while (tmp && tmp != n)
+//        tmp = tmp->next;
+//
+//    if (!tmp || tmp != n) {
+//        pdebug(DEBUG_WARN, "Session not found!");
+//        return PLCTAG_ERR_NOT_FOUND;
+//    }
+//
+//    if (n->next) {
+//        n->next->prev = n->prev;
+//    }
+//
+//    if (n->prev) {
+//        n->prev->next = n->next;
+//    } else {
+//        sessions = n->next;
+//    }
+//
+//    n->next = NULL;
+//    n->prev = NULL;
 
     pdebug(DEBUG_DETAIL, "Done");
 
@@ -278,7 +349,7 @@ int remove_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    critical_block(global_session_mut) {
+    critical_block(session_mutex) {
         rc = remove_session_unsafe(s);
     }
 
@@ -312,35 +383,50 @@ int session_match_valid(const char *host, const char *path, ab_session_p session
 
 ab_session_p find_session_by_host_unsafe(const char* host, const char *path)
 {
-    ab_session_p session;
+    for(int i=0; i < vector_length(sessions); i++) {
+        ab_session_p session = vector_get(sessions, i);
 
-    session = sessions;
+        /* is this session in the process of destruction? */
+        session = rc_inc(session);
+        if(session) {
+            if(session_match_valid(host, path, session)) {
+                return session;
+            }
 
-    while(session) {
-        /* scan past any that are in the process of being deleted. */
-        while(session && !rc_inc(session)) {
-            session = session->next;
+            rc_dec(session);
         }
-
-        if(!session) {
-            break;
-        }
-
-        if(session_match_valid(host, path, session)) {
-            /* this is the one! */
-            break;
-        }
-
-        /* we are not going to use this session, release it. */
-        rc_dec(session);
-
-        /* try the next one. */
-        session = session->next;
     }
 
-    return session;
+    return NULL;
 }
 
+//    session = sessions;
+//
+//    while(session) {
+//        /* scan past any that are in the process of being deleted. */
+//        while(session && !rc_inc(session)) {
+//            session = session->next;
+//        }
+//
+//        if(!session) {
+//            break;
+//        }
+//
+//        if(session_match_valid(host, path, session)) {
+//            /* this is the one! */
+//            break;
+//        }
+//
+//        /* we are not going to use this session, release it. */
+//        rc_dec(session);
+//
+//        /* try the next one. */
+//        session = session->next;
+//    }
+//
+//    return session;
+//}
+//
 
 
 ab_session_p session_create_unsafe(const char* host, int gw_port, const char *path, int plc_type, int use_connected_msg)
@@ -378,6 +464,13 @@ ab_session_p session_create_unsafe(const char* host, int gw_port, const char *pa
     rc = cip_encode_path(path, use_connected_msg, plc_type, &session->conn_path, &session->conn_path_size, &session->dhp_dest);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Unable to convert path links strings to binary path!");
+        rc_dec(session);
+        return NULL;
+    }
+
+    session->requests = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
+    if(!session->requests) {
+        pdebug(DEBUG_WARN,"Unable to allocate vector for requests!");
         rc_dec(session);
         return NULL;
     }
@@ -457,7 +550,7 @@ int session_init(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    if((rc = mutex_create(&(session->session_mutex))) != PLCTAG_STATUS_OK) {
+    if((rc = mutex_create(&(session->mutex))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create session mutex!");
         session->status = rc;
         return rc;
@@ -511,7 +604,7 @@ int session_open_socket(ab_session_p session)
 int session_register(ab_session_p session)
 {
     eip_session_reg_req* req;
-    eip_encap_t* resp;
+    eip_encap* resp;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -528,7 +621,7 @@ int session_register(ab_session_p session)
 
     /* fill in the fields of the request */
     req->encap_command = h2le16(AB_EIP_REGISTER_SESSION);
-    req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap_t));
+    req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap));
     req->encap_session_handle = h2le32(session->session_handle);
     req->encap_status = h2le32(0);
     req->encap_sender_context = h2le64((uint64_t)0);
@@ -562,7 +655,7 @@ int session_register(ab_session_p session)
     }
 
     /* encap header is at the start of the buffer */
-    resp = (eip_encap_t*)(session->data);
+    resp = (eip_encap*)(session->data);
 
     /* check the response status */
     if (le2h16(resp->encap_command) != AB_EIP_REGISTER_SESSION) {
@@ -622,7 +715,7 @@ int session_close_socket(ab_session_p session)
 void session_destroy(void *session_arg)
 {
     ab_session_p session = session_arg;
-    ab_request_p req = NULL;
+//    ab_request_p req = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -665,16 +758,19 @@ void session_destroy(void *session_arg)
     }
 
     /* remove any remaining requests, they are dead */
-    req = session->requests;
-    while(req) {
-        session_remove_request(session, req);
-        req = session->requests;
+    if(session->requests) {
+        for(int i=0; i < vector_length(session->requests); i++) {
+            rc_dec(vector_get(session->requests, i));
+        }
+
+        vector_destroy(session->requests);
+        session->requests = NULL;
     }
 
     /* we are done with the mutex, finally destroy it. */
-    if(session->session_mutex) {
-        mutex_destroy(&(session->session_mutex));
-        session->session_mutex = NULL;
+    if(session->mutex) {
+        mutex_destroy(&(session->mutex));
+        session->mutex = NULL;
     }
 
     if(session->conn_path) {
@@ -705,15 +801,15 @@ void session_destroy(void *session_arg)
  *
  * You must hold the mutex before calling this!
  */
-int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
+int session_add_request_unsafe(ab_session_p session, ab_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p cur, prev;
-    int total_requests = 0;
+//    ab_request_p cur, prev;
+//    int total_requests = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    if(!sess) {
+    if(!session) {
         pdebug(DEBUG_WARN, "Session is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -726,27 +822,12 @@ int session_add_request_unsafe(ab_session_p sess, ab_request_p req)
     }
 
     /* make sure the request points to the session */
-    req->session = sess;
+    //req->session = sess;
 
-    /* we add the request to the end of the list. */
-    cur = sess->requests;
-    prev = NULL;
+    /* insert into the requests vector */
+    vector_put(session->requests, vector_length(session->requests), req);
 
-    while (cur) {
-        prev = cur;
-        cur = cur->next;
-        total_requests++;
-    }
-
-    if (!prev) {
-        sess->requests = req;
-    } else {
-        prev->next = req;
-    }
-
-    /* update the request's refcount as we point to it. */
-
-    pdebug(DEBUG_INFO,"Total requests in the queue: %d",total_requests);
+    pdebug(DEBUG_INFO,"Total requests in the queue: %d",vector_length(session->requests));
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -764,7 +845,7 @@ int session_add_request(ab_session_p sess, ab_request_p req)
 
     pdebug(DEBUG_DETAIL, "Starting. sess=%p, req=%p", sess, req);
 
-    critical_block(sess->session_mutex) {
+    critical_block(sess->mutex) {
         rc = session_add_request_unsafe(sess, req);
     }
 
@@ -779,36 +860,23 @@ int session_add_request(ab_session_p sess, ab_request_p req)
  *
  * You must hold the mutex before calling this!
  */
-int session_remove_request_unsafe(ab_session_p sess, ab_request_p req)
+int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p cur, prev;
+//    ab_request_p cur, prev;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(sess == NULL || req == NULL) {
+    if(session == NULL || req == NULL) {
         return rc;
     }
 
-    /* find the request and remove it from the list. */
-    cur = sess->requests;
-    prev = NULL;
-
-    while (cur && cur != req) {
-        prev = cur;
-        cur = cur->next;
-    }
-
-    if (cur == req) {
-        if (!prev) {
-            sess->requests = cur->next;
-        } else {
-            prev->next = cur->next;
+    for(int i=0; i < vector_length(session->requests); i++) {
+        if(vector_get(session->requests, i) == req) {
+            vector_remove(session->requests, i);
+            break;
         }
-    } /* else not found */
-
-    req->next = NULL;
-    req->session = NULL;
+    }
 
     /* release the request refcount */
     rc_dec(req);
@@ -835,7 +903,7 @@ int session_remove_request(ab_session_p sess, ab_request_p req)
         return rc;
     }
 
-    critical_block(sess->session_mutex) {
+    critical_block(sess->mutex) {
         rc = session_remove_request_unsafe(sess, req);
     }
 
@@ -999,6 +1067,10 @@ int process_requests(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p request = NULL;
+    ab_request_p bundled_requests[MAX_REQUESTS] = {NULL};
+    int num_bundled_requests = 0;
+    ab_request_p aborted_requests[MAX_REQUESTS] = {NULL};
+    int num_aborted_requests = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1007,78 +1079,122 @@ int process_requests(ab_session_p session)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* are there any requests to process? Loop over requests. */
-    do {
-        rc = PLCTAG_STATUS_OK;
-        request = NULL;
 
-        /* grab a request off the front of the list. */
-        critical_block(session->session_mutex) {
-            request = session->requests;
-            if(request) {
-                session->requests = request->next;
-            }
-        }
+    pdebug(DEBUG_SPEW, "Checking for requests to process.");
 
-        /* process any request. */
-        if(request) {
-            /* if the request is aborted, remove it and mark it. */
-            if(request_check_abort(request)) {
-                pdebug(DEBUG_DETAIL, "Request %p is aborted.", request);
-                request->status = PLCTAG_ERR_ABORT;
-                request->resp_received = 1;
-                request->request_size = 0;
-            } else {
-                pdebug(DEBUG_DETAIL, "Processing request %p", request);
+    rc = PLCTAG_STATUS_OK;
+    request = NULL;
 
-                do {
-                    if((rc = prepare_request(session, request)) != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN, "Unable to prepare request, rc=%d!", rc);
-                        break;
-                    }
+    /* grab a request off the front of the list. */
+    critical_block(session->mutex) {
+        /* is there anything to do? */
+        if(vector_length(session->requests)) {
+            //int blocked = 0;
 
-                    /* copy the data from the request into the session's buffer. */
-                    mem_copy(session->data, request->data, request->request_size);
-                    session->data_size = (uint32_t)request->request_size;
+            /* remove the aborted requests. */
+            for(int i=0; i < vector_length(session->requests) && num_aborted_requests < MAX_REQUESTS; i++) {
+                request = vector_get(session->requests, i);
 
-                    /* send the request */
-                    if((rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN, "Error sending packet %s!", plc_tag_decode_error(rc));
-                        break;
-                    }
+                /* filter out the aborts. */
+                if(request && request->abort_request) {
+                    aborted_requests[num_aborted_requests] = request;
+                    num_aborted_requests++;
 
-                    /* wait for the response */
-                    if((rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN, "Error receiving packet response %s!", plc_tag_decode_error(rc));
-                        break;
-                    }
+                    /* remove it from the queue. */
+                    vector_remove(session->requests, i);
 
-                    /* copy the data back into the request buffer. */
-                    /* FIXME - check the returned data size to make sure it is smaller than the request buffer! */
-                    mem_copy(request->data, session->data, (int)(session->data_size));
-
-                    rc = PLCTAG_STATUS_OK;
-                    request->resp_received = 1;
-                    request->request_size = (int)(session->data_size);
-                } while(0);
-
-                /* done with this request. */
-                request->status = rc;
-
-                if(rc != PLCTAG_STATUS_OK) {
-                    request->resp_received = 1;
-                    request->request_size = 0;
+                    /* vector size has changed, back up one. */
+                    i--;
                 }
             }
 
-            rc_dec(request);
+            do {
+                request = vector_get(session->requests, 0);
 
-            /* if there was an error that was not an abort, we need to push that up. */
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_ABORT) {
+                /*
+                 * If we have a non-packable request, only queue it if it is the first one.
+                 * If the request is packable, keep queuing as long as there is space.
+                 */
+                if(num_bundled_requests == 0 || check_packing(session, request) == PLCTAG_STATUS_OK) {
+                    bundled_requests[num_bundled_requests] = request;
+                    num_bundled_requests++;
+
+                    /* remove it from the queue. */
+                    vector_remove(session->requests, 0);
+                }
+            } while(vector_length(session->requests) && num_bundled_requests < MAX_REQUESTS && request->allow_packing);
+        }
+    }
+
+    /* this can cause destroy actions so do this outside the mutex. */
+    if(num_aborted_requests > 0) {
+
+        pdebug(DEBUG_SPEW, "%d requests to abort.", num_aborted_requests);
+
+        for(int i=0; i < num_aborted_requests; i++) {
+            request = aborted_requests[i];
+
+            pdebug(DEBUG_DETAIL, "Request %p is aborted.", request);
+
+            request->status = PLCTAG_ERR_ABORT;
+            request->request_size = 0;
+            request->resp_received = 1;
+
+            aborted_requests[i] = rc_dec(request);
+        }
+    }
+
+    if(num_bundled_requests > 0) {
+
+        pdebug(DEBUG_SPEW, "%d requests to process.", num_bundled_requests);
+
+        do {
+            /* copy and pack the requests into the session buffer. */
+            rc = pack_requests(session, bundled_requests, num_bundled_requests);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error while packing requests, %s!", plc_tag_decode_error(rc));
                 break;
             }
-        }
-    } while(request && !session->terminating);
+
+            /* fill in all the necessary parts to the request. */
+            if((rc = prepare_request(session)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to prepare request, %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* send the request */
+            if((rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error sending packet %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* wait for the response */
+            if((rc = recv_eip_response(session, SESSION_DEFAULT_TIMEOUT)) != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error receiving packet response %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
+            /* copy the results back out. Every request gets a copy. */
+            for(int i=0; i < num_bundled_requests; i++) {
+                ab_request_p request = bundled_requests[i];
+
+                /* copy the data back into the request buffer. */
+                mem_copy(request->data, session->data, (int)(session->data_size));
+
+                /* notify the reading thread that the request is ready */
+                spin_block(&request->lock) {
+                    request->request_size = (int)(session->data_size);
+                    request->packing_num = i;
+                    request->resp_received = 1;
+                }
+
+                /* release our reference */
+                bundled_requests[i] = rc_dec(request);
+            }
+
+            rc = PLCTAG_STATUS_OK;
+        } while(0);
+    }
 
     pdebug(DEBUG_SPEW,"Done.");
 
@@ -1086,12 +1202,162 @@ int process_requests(ab_session_p session)
 }
 
 
-int prepare_request(ab_session_p session, ab_request_p request)
+
+int check_packing(ab_session_p session, ab_request_p request)
 {
-    eip_encap_t* encap = (eip_encap_t*)(request->data);
-    int payload_size = request->request_size - (int)sizeof(eip_encap_t);
+    int rc = PLCTAG_STATUS_OK;
+    int remaining_data_size = 0;
+    int request_data_size = 0;
+//    eip_cip_co_req *session_req = NULL;
+    eip_cip_co_req *new_req = NULL;
+//    eip_encap *header = NULL;
 
     pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!request->allow_packing) {
+        pdebug(DEBUG_DETAIL, "Packet not allowed to pack.");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    new_req = (eip_cip_co_req *)(request->data);
+
+    if(le2h16(new_req->encap_command) != AB_EIP_CONNECTED_SEND) {
+        pdebug(DEBUG_INFO, "Only connected packets are allowed to pack for now.");
+        return PLCTAG_ERR_NOT_ALLOWED;
+    }
+
+    /* check length */
+    remaining_data_size = session->max_payload_size - ((int)session->data_size - EIP_CIP_PREFIX_SIZE) - (int)sizeof(cip_multi_req_header);
+
+    /* get length of new request */
+    request_data_size = le2h16(new_req->cpf_cdi_item_length)
+                        - 2  /* for connection sequence ID */
+                        + 2  /* for multipacket offset */
+                        ;
+
+    if(request_data_size < remaining_data_size) {
+        pdebug(DEBUG_DETAIL, "Allowing packing with %d data requested and %d remaining.", request_data_size, remaining_data_size);
+        rc = PLCTAG_STATUS_OK;
+    } else {
+        pdebug(DEBUG_DETAIL, "Not allowing packing with %d data requested and %d remaining.", request_data_size, remaining_data_size);
+        rc = PLCTAG_ERR_TOO_LARGE;
+    }
+
+    return rc;
+}
+
+
+
+
+int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests)
+{
+    eip_cip_co_req *new_req = NULL;
+    eip_cip_co_req *packed_req = NULL;
+    /* FIXME - is this the right way to check? */
+    //int is_connected = (session->conn_serial_number ? 1 : 0);
+    int header_size = 0;
+    cip_multi_req_header *multi_header = NULL;
+    int current_offset = 0;
+    uint8_t *pkt_start = NULL;
+    int pkt_len = 0;
+    uint8_t *first_pkt_data = NULL;
+    uint8_t *next_pkt_data = NULL;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* get the header info from the first request. Just copy the whole thing. */
+    mem_copy(session->data, requests[0]->data, requests[0]->request_size);
+    session->data_size = (uint32_t)requests[0]->request_size;
+
+    /* special case the case where there is just one request. */
+    if(num_requests == 1) {
+        pdebug(DEBUG_INFO, "Only one request, so done.");
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* set up Multi packet header. */
+
+    header_size = (int)(sizeof(cip_multi_req_header)
+                        + (sizeof(uint16_le) * (size_t)num_requests)); /* offsets for each request. */
+
+    pdebug(DEBUG_DETAIL, "header size %d", header_size);
+
+    packed_req = (eip_cip_co_req *)(session->data);
+
+    /* make room in the request packet in the session for the header. */
+    pkt_start = (uint8_t *)(&packed_req->cpf_conn_seq_num) + sizeof(packed_req->cpf_conn_seq_num);
+    pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
+
+    /* point to where we want the current packet to start. */
+    first_pkt_data = pkt_start + header_size;
+
+    /* move the data over to make room */
+    mem_move(first_pkt_data, pkt_start, pkt_len);
+
+    /* now fill in the header. Use pkt_start as it is pointing to the right location. */
+    multi_header = (cip_multi_req_header *)pkt_start;
+    multi_header->service_code = AB_EIP_CMD_CIP_MULTI;
+    multi_header->req_path_size = 0x02; /* length of path in words */
+    multi_header->req_path[0] = 0x20; /* Class */
+    multi_header->req_path[1] = 0x02; /* CM */
+    multi_header->req_path[2] = 0x24; /* Instance */
+    multi_header->req_path[3] = 0x01; /* #1 */
+    multi_header->request_count = h2le16((uint16_t)num_requests);
+
+    /* set up the offset for the first request. */
+    current_offset = (int)(sizeof(uint16_le) + (sizeof(uint16_le) * (size_t)num_requests));
+    multi_header->request_offsets[0] = h2le16((uint16_t)current_offset);
+
+    next_pkt_data = first_pkt_data + pkt_len;
+    current_offset = current_offset + pkt_len;
+
+    /* now process the rest of the requests. */
+    for(int i=1; i<num_requests; i++) {
+        /* set up the offset */
+        multi_header->request_offsets[i] = h2le16((uint16_t)current_offset);
+
+        /* get a pointer to the request. */
+        new_req = (eip_cip_co_req *)(requests[i]->data);
+
+        /* calculate the request start and length */
+        pkt_start = (uint8_t *)(&new_req->cpf_conn_seq_num) + sizeof(new_req->cpf_conn_seq_num);
+        pkt_len = (int)le2h16(new_req->cpf_cdi_item_length) - (int)sizeof(new_req->cpf_conn_seq_num);
+
+        pdebug(DEBUG_DETAIL, "packet %d is of length %d.", i, pkt_len);
+
+        /* copy the request into the session buffer. */
+        mem_copy(next_pkt_data, pkt_start, pkt_len);
+
+        /* calculate the next packet info. */
+        next_pkt_data += pkt_len;
+        current_offset += pkt_len;
+    }
+
+    /* stitch up the CPF packet length */
+    packed_req->cpf_cdi_item_length = h2le16((uint16_t)(next_pkt_data - (uint8_t *)(&packed_req->cpf_conn_seq_num)));
+
+    /* stick up the EIP packet length */
+    packed_req->encap_length = h2le16((uint16_t)((size_t)(next_pkt_data - session->data) - sizeof(eip_encap)));
+
+    /* set the total data size */
+    session->data_size = (uint32_t)(next_pkt_data - session->data);
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+int prepare_request(ab_session_p session)
+{
+    eip_encap* encap = NULL;
+    int payload_size = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    encap = (eip_encap*)(session->data);
+    payload_size = (int)session->data_size - (int)sizeof(eip_encap);
 
     if(!session) {
         pdebug(DEBUG_WARN,"Called with null session!");
@@ -1110,32 +1376,32 @@ int prepare_request(ab_session_p session, ab_request_p request)
         /* get new ID */
         session->session_seq_id++;
 
-        request->session_seq_id = session->session_seq_id;
+        //request->session_seq_id = session->session_seq_id;
         encap->encap_sender_context = h2le64(session->session_seq_id); /* link up the request seq ID and the packet seq ID */
 
         pdebug(DEBUG_INFO,"Preparing unconnected packet with session sequence ID %llx",session->session_seq_id);
     } else if(le2h16(encap->encap_command) == AB_EIP_CONNECTED_SEND) {
-        eip_cip_co_req *conn_req = (eip_cip_co_req*)(request->data);
+        eip_cip_co_req *conn_req = (eip_cip_co_req*)(session->data);
 
         pdebug(DEBUG_DETAIL, "cpf_targ_conn_id=%x", session->targ_connection_id);
 
         /* set up the connection information */
         conn_req->cpf_targ_conn_id = h2le32(session->targ_connection_id);
-        request->conn_id = session->orig_connection_id;
+//        request->conn_id = session->orig_connection_id;
 
         session->conn_seq_num++;
         conn_req->cpf_conn_seq_num = h2le16(session->conn_seq_num);
-        request->conn_seq = session->conn_seq_num;
+//        request->conn_seq = session->conn_seq_num;
 
-        pdebug(DEBUG_INFO,"Preparing connected packet with connection ID %x and sequence ID %u(%x)",request->conn_id, request->conn_seq, request->conn_seq);
+        pdebug(DEBUG_INFO,"Preparing connected packet with connection ID %x and sequence ID %u(%x)", session->orig_connection_id, session->conn_seq_num, session->conn_seq_num);
     } else {
         pdebug(DEBUG_WARN, "Unsupported packet type %x!", le2h16(encap->encap_command));
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     /* display the data */
-    pdebug(DEBUG_INFO,"Prepared packet of size %d",request->request_size);
-    pdebug_dump_bytes(DEBUG_INFO, request->data, request->request_size);
+    pdebug(DEBUG_INFO,"Prepared packet of size %d",session->data_size);
+    pdebug_dump_bytes(DEBUG_INFO, session->data, (int)session->data_size);
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -1233,7 +1499,7 @@ int recv_eip_response(ab_session_p session, int timeout)
 
     session->data_offset = 0;
     session->data_size = 0;
-    data_needed = sizeof(eip_encap_t);
+    data_needed = sizeof(eip_encap);
 
     do {
         rc = socket_read(session->sock, session->data + session->data_offset,
@@ -1251,8 +1517,8 @@ int recv_eip_response(ab_session_p session, int timeout)
             /*pdebug_dump_bytes(session->debug, session->data, session->data_offset);*/
 
             /* recalculate the amount of data needed if we have just completed the read of an encap header */
-            if(session->data_offset >= sizeof(eip_encap_t)) {
-                data_needed = (uint32_t)(sizeof(eip_encap_t) + le2h16(((eip_encap_t*)(session->data))->encap_length));
+            if(session->data_offset >= sizeof(eip_encap)) {
+                data_needed = (uint32_t)(sizeof(eip_encap) + le2h16(((eip_encap*)(session->data))->encap_length));
 
                 if(data_needed > session->data_capacity) {
                     pdebug(DEBUG_WARN,"Packet response (%d) is larger than possible buffer size (%d)!", data_needed, session->data_capacity);
@@ -1278,7 +1544,7 @@ int recv_eip_response(ab_session_p session, int timeout)
         return PLCTAG_ERR_TIMEOUT;
     }
 
-    session->resp_seq_id = le2h64(((eip_encap_t*)(session->data))->encap_sender_context);
+    session->resp_seq_id = le2h64(((eip_encap*)(session->data))->encap_sender_context);
     session->data_size = data_needed;
 
     rc = PLCTAG_STATUS_OK;
@@ -1287,10 +1553,10 @@ int recv_eip_response(ab_session_p session, int timeout)
 
     pdebug_dump_bytes(DEBUG_DETAIL, session->data, (int)(session->data_offset));
 
-    if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
-        eip_encap_t *encap = (eip_encap_t*)(session->data);
+    if(le2h16(((eip_encap*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
+        eip_encap *encap = (eip_encap*)(session->data);
         pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
-    } else if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
+    } else if(le2h16(((eip_encap*)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
         eip_cip_co_resp *resp = (eip_cip_co_resp*)(session->data);
         pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
     }
@@ -1340,12 +1606,12 @@ int perform_forward_open(ab_session_p session)
 //                /* we support the Forward Open Extended command, but we need to use a smaller size. */
 //                pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, session->max_payload_size);
 
-                rc = try_forward_open(session);
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
-                } else {
-                    pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", session->max_payload_size);
-                }
+        rc = try_forward_open(session);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
+        } else {
+            pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", session->max_payload_size);
+        }
 //            }
 //        } /*else {
 //            pdebug(DEBUG_WARN, "Unknown error! rc=%d", rc);

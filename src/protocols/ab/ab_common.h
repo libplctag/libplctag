@@ -45,9 +45,9 @@ typedef struct ab_request_t *ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 
-extern volatile ab_session_p sessions;
-extern volatile mutex_p global_session_mut;
-extern volatile thread_p io_handler_thread;
+//extern volatile ab_session_p sessions;
+//extern volatile mutex_p global_session_mut;
+//extern volatile thread_p io_handler_thread;
 
 
 int ab_tag_abort(ab_tag_p tag);

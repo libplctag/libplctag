@@ -31,6 +31,7 @@
 #include <ab/ab_common.h>
 #include <ab/request.h>
 #include <util/rc.h>
+#include <util/vector.h>
 
 #define MAX_SESSION_HOST    (128)
 
@@ -52,6 +53,9 @@
 //#define SESSION_REGISTRATION_TIMEOUT (1500)
 #define SESSION_DEFAULT_TIMEOUT      (2000)
 
+#define SESSION_MIN_REQUESTS    (10)
+#define SESSION_INC_REQUESTS    (10)
+
 /*
  * the queue depth depends on the type of the request.
  */
@@ -60,9 +64,6 @@
 #define SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT (4)
 
 struct ab_session_t {
-    ab_session_p next;
-    ab_session_p prev;
-
     int status;
 
     /* gateway connection related info */
@@ -95,10 +96,10 @@ struct ab_session_t {
     uint64_t session_seq_id;
 
     /* current request being sent, only one at a time */
-    ab_request_p current_request;
+    //ab_request_p current_request;
 
     /* list of outstanding requests for this session */
-    ab_request_p requests;
+    vector_p requests;
 
     /* data for receiving messages */
     uint64_t resp_seq_id;
@@ -112,11 +113,14 @@ struct ab_session_t {
 
     thread_p handler_thread;
     int terminating;
-    mutex_p session_mutex;
+    mutex_p mutex;
 };
 
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
 uint64_t session_get_new_seq_id(ab_session_p sess);
+
+extern int session_startup();
+extern void session_teardown();
 
 extern int session_find_or_create(ab_session_p *session, attr attribs);
 //ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
@@ -124,10 +128,10 @@ extern int session_find_or_create(ab_session_p *session, attr attribs);
 //extern int session_add_connection(ab_session_p session, ab_connection_p connection);
 //extern int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection);
 //extern int session_remove_connection(ab_session_p session, ab_connection_p connection);
-extern int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
+//extern int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
-extern int session_remove_request_unsafe(ab_session_p sess, ab_request_p req);
-extern int session_remove_request(ab_session_p sess, ab_request_p req);
+//extern int session_remove_request_unsafe(ab_session_p sess, ab_request_p req);
+//extern int session_remove_request(ab_session_p sess, ab_request_p req);
 
 
 #endif
