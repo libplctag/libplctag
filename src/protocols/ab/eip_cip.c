@@ -440,7 +440,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     /* now we go back and fill in the fields of the static part */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* ALWAYS 0x0070 Unconnected Send*/
+    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
@@ -765,7 +765,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     /* now fill in the rest of the structure. */
 
     /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* ALWAYS 0x006F Unconnected Send*/
+    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
 
     /* router timeout */
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
@@ -1090,7 +1090,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
     /* check the status */
     do {
-        if (le2h16(cip_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+        if (le2h16(cip_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
