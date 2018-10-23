@@ -78,7 +78,7 @@
 /* AB Commands */
 #define AB_EIP_REGISTER_SESSION     ((uint16_t)0x0065)
 #define AB_EIP_UNREGISTER_SESSION   ((uint16_t)0x0066)
-#define AB_EIP_READ_RR_DATA         ((uint16_t)0x006F)
+#define AB_EIP_UNCONNECTED_SEND     ((uint16_t)0x006F)
 #define AB_EIP_CONNECTED_SEND       ((uint16_t)0x0070)
 
 /* AB packet info */
