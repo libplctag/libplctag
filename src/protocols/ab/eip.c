@@ -53,7 +53,7 @@
 //        int payload_size = req->request_size - sizeof(eip_encap_t);
 //
 //        /* set up the session sequence ID for this transaction */
-//        if(le2h16(encap->encap_command) == AB_EIP_READ_RR_DATA) {
+//        if(le2h16(encap->encap_command) == AB_EIP_UNCONNECTED_SEND) {
 //            /* get new ID */
 //            req->session->session_seq_id++;
 //
@@ -215,7 +215,7 @@
 //
 //        pdebug_dump_bytes(DEBUG_DETAIL, session->data, session->data_offset);
 //
-//        if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
+//        if(le2h16(((eip_encap_t*)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
 //            eip_encap_t *encap = (eip_encap_t*)(session->data);
 //            pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
 //        } else {

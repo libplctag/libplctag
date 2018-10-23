@@ -234,7 +234,7 @@ int tag_read_start(ab_tag_p tag)
      */
 
     /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* set up for unconnected sending */
+    pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);    /* set up for unconnected sending */
 
     /* router timeout */
     pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
@@ -316,7 +316,7 @@ static int check_read_status(ab_tag_p tag)
 
     /* fake exceptions */
     do {
-        if(le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
+        if(le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",pccc->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -507,7 +507,7 @@ int tag_write_start(ab_tag_p tag)
     /* now fill in the rest of the structure. */
 
     /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_READ_RR_DATA);    /* ALWAYS 0x0070 Unconnected Send*/
+    pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);    /* ALWAYS 0x0070 Unconnected Send*/
 
     /* router timeout */
     pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
@@ -612,7 +612,7 @@ static int check_write_status(ab_tag_p tag)
     /* fake exception */
     do {
         /* check the response status */
-        if( le2h16(pccc->encap_command) != AB_EIP_READ_RR_DATA) {
+        if( le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_WARN,"EIP unexpected response packet type: %d!",pccc->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;

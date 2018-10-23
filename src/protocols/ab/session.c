@@ -29,6 +29,7 @@
 //#include <ab/connection.h>
 #include <ab/request.h>
 #include <util/debug.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -52,7 +53,8 @@ static int session_close_socket(ab_session_p session);
 static int session_unregister(ab_session_p session);
 static THREAD_FUNC(session_handler);
 static int process_requests(ab_session_p session);
-static int check_packing(ab_session_p session, ab_request_p request);
+//static int check_packing(ab_session_p session, ab_request_p request);
+static int get_payload_size(ab_request_p request);
 static int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests);
 static int prepare_request(ab_session_p session);
 static int send_eip_request(ab_session_p session, int timeout);
@@ -1071,6 +1073,7 @@ int process_requests(ab_session_p session)
     int num_bundled_requests = 0;
     ab_request_p aborted_requests[MAX_REQUESTS] = {NULL};
     int num_aborted_requests = 0;
+    int remaining_space = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1084,6 +1087,8 @@ int process_requests(ab_session_p session)
 
     rc = PLCTAG_STATUS_OK;
     request = NULL;
+    session->data_size = 0;
+    session->data_offset = 0;
 
     /* grab a request off the front of the list. */
     critical_block(session->mutex) {
@@ -1108,28 +1113,28 @@ int process_requests(ab_session_p session)
                 }
             }
 
+            remaining_space = session->max_payload_size - (int)sizeof(cip_multi_req_header);
+
             do {
                 request = vector_get(session->requests, 0);
+
+                remaining_space = remaining_space - get_payload_size(request);
+
+                pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests, remaining_space);
 
                 /*
                  * If we have a non-packable request, only queue it if it is the first one.
                  * If the request is packable, keep queuing as long as there is space.
                  */
 
-
-
-                /*
-                 * BUG FIXME - check_packing does not keep track of how much space
-                 * has been used, so with a lot of tags, it will run off of the end.
-                 */
-                if(num_bundled_requests == 0 || check_packing(session, request) == PLCTAG_STATUS_OK) {
+                if(num_bundled_requests == 0 || (request->allow_packing && remaining_space > 0)) {
                     bundled_requests[num_bundled_requests] = request;
                     num_bundled_requests++;
 
                     /* remove it from the queue. */
                     vector_remove(session->requests, 0);
                 }
-            } while(vector_length(session->requests) && num_bundled_requests < MAX_REQUESTS && request->allow_packing);
+            } while(vector_length(session->requests) && remaining_space > 0 && num_bundled_requests < MAX_REQUESTS && request->allow_packing);
         }
     }
 
@@ -1209,48 +1214,60 @@ int process_requests(ab_session_p session)
 }
 
 
+//
+//int check_packing(ab_session_p session, ab_request_p request)
+//{
+//    int request_data_size = 0;
+//    eip_cip_co_req *new_req = NULL;
+//
+//    pdebug(DEBUG_DETAIL, "Starting.");
+//
+//    if(!request->allow_packing) {
+//        pdebug(DEBUG_DETAIL, "Packet not allowed to pack.");
+//        return PLCTAG_ERR_NOT_ALLOWED;
+//    }
+//
+//    new_req = (eip_cip_co_req *)(request->data);
+//
+//    if(le2h16(new_req->encap_command) != AB_EIP_CONNECTED_SEND) {
+//        pdebug(DEBUG_INFO, "Only connected packets are allowed to pack for now.");
+//        return PLCTAG_ERR_NOT_ALLOWED;
+//    }
+//
+//    return PLCTAG_STATUS_OK;
+//}
+//
 
-int check_packing(ab_session_p session, ab_request_p request)
+int get_payload_size(ab_request_p request)
 {
-    int rc = PLCTAG_STATUS_OK;
-    int remaining_data_size = 0;
     int request_data_size = 0;
-//    eip_cip_co_req *session_req = NULL;
-    eip_cip_co_req *new_req = NULL;
-//    eip_encap *header = NULL;
+    eip_encap *header = (eip_encap *)(request->data);
+    eip_cip_co_req *co_req = NULL;
+//    eip_cip_uc_req *uc_req = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(!request->allow_packing) {
-        pdebug(DEBUG_DETAIL, "Packet not allowed to pack.");
-        return PLCTAG_ERR_NOT_ALLOWED;
+    if(le2h16(header->encap_command) == AB_EIP_CONNECTED_SEND) {
+        co_req = (eip_cip_co_req *)(request->data);
+        /* get length of new request */
+        request_data_size = le2h16(co_req->cpf_cdi_item_length)
+                            - 2  /* for connection sequence ID */
+                            + 2  /* for multipacket offset */
+                            ;
+    }
+//    else if(le2h16(header->encap_command) == AB_EIP_UNCONNECTED_SEND) {
+//        uc_req = (eip_cip_uc_req *)(request->data);
+//        /* get length of new request */
+//        request_data_size = le2h16(uc_req->uc_cmd_length)
+//                            - 2  /* for connection sequence ID */
+//                            + 2  /* for multipacket offset */
+//                            ;
+//
+//    }
+    else {
+        pdebug(DEBUG_WARN, "Not a supported type EIP packet type %d!", le2h16(header->encap_command));
+        request_data_size = INT_MAX;
     }
 
-    new_req = (eip_cip_co_req *)(request->data);
-
-    if(le2h16(new_req->encap_command) != AB_EIP_CONNECTED_SEND) {
-        pdebug(DEBUG_INFO, "Only connected packets are allowed to pack for now.");
-        return PLCTAG_ERR_NOT_ALLOWED;
-    }
-
-    /* check length */
-    remaining_data_size = session->max_payload_size - ((int)session->data_size - EIP_CIP_PREFIX_SIZE) - (int)sizeof(cip_multi_req_header);
-
-    /* get length of new request */
-    request_data_size = le2h16(new_req->cpf_cdi_item_length)
-                        - 2  /* for connection sequence ID */
-                        + 2  /* for multipacket offset */
-                        ;
-
-    if(request_data_size < remaining_data_size) {
-        pdebug(DEBUG_DETAIL, "Allowing packing with %d data requested and %d remaining.", request_data_size, remaining_data_size);
-        rc = PLCTAG_STATUS_OK;
-    } else {
-        pdebug(DEBUG_DETAIL, "Not allowing packing with %d data requested and %d remaining.", request_data_size, remaining_data_size);
-        rc = PLCTAG_ERR_TOO_LARGE;
-    }
-
-    return rc;
+    return request_data_size;
 }
 
 
@@ -1379,7 +1396,7 @@ int prepare_request(ab_session_p session)
     encap->encap_options = h2le32(0);
 
     /* set up the session sequence ID for this transaction */
-    if(le2h16(encap->encap_command) == AB_EIP_READ_RR_DATA) {
+    if(le2h16(encap->encap_command) == AB_EIP_UNCONNECTED_SEND) {
         /* get new ID */
         session->session_seq_id++;
 
@@ -1560,7 +1577,7 @@ int recv_eip_response(ab_session_p session, int timeout)
 
     pdebug_dump_bytes(DEBUG_DETAIL, session->data, (int)(session->data_offset));
 
-    if(le2h16(((eip_encap*)(session->data))->encap_command) == AB_EIP_READ_RR_DATA) {
+    if(le2h16(((eip_encap*)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
         eip_encap *encap = (eip_encap*)(session->data);
         pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",encap->encap_sender_context);
     } else if(le2h16(((eip_encap*)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
@@ -1766,7 +1783,7 @@ int send_forward_open_req(ab_session_p session)
     /* fill in the static parts */
 
     /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
+    fo->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_session_handle = h2le32(session->session_handle);
     fo->encap_sender_context = h2le64(++session->session_seq_id);
@@ -1838,7 +1855,7 @@ int send_forward_open_req(ab_session_p session)
 //    /* fill in the static parts */
 //
 //    /* encap header parts */
-//    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
+//    fo->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
 //    fo->encap_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->interface_handle))); /* total length of packet except for encap header */
 //    fo->encap_session_handle = h2le32(session->session_handle);
 //    fo->encap_sender_context = h2le64(++session->session_seq_id);
@@ -1905,7 +1922,7 @@ int recv_forward_open_resp(ab_session_p session)
     fo_resp = (eip_forward_open_response_t*)(session->data);
 
     do {
-        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+        if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -1984,7 +2001,7 @@ int send_forward_close_req(ab_session_p session)
     /* fill in the static parts */
 
     /* encap header parts */
-    fo->encap_command = h2le16(AB_EIP_READ_RR_DATA); /* 0x006F EIP Send RR Data command */
+    fo->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
     fo->encap_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->interface_handle))); /* total length of packet except for encap header */
     fo->encap_sender_context = h2le64(++session->session_seq_id);
     fo->router_timeout = h2le16(1);                       /* one second is enough ? */
@@ -2039,7 +2056,7 @@ int recv_forward_close_resp(ab_session_p session)
     fo_resp = (eip_forward_close_resp_t*)(session->data);
 
     do {
-        if(le2h16(fo_resp->encap_command) != AB_EIP_READ_RR_DATA) {
+        if(le2h16(fo_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",fo_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
