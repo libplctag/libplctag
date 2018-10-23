@@ -1115,6 +1115,13 @@ int process_requests(ab_session_p session)
                  * If we have a non-packable request, only queue it if it is the first one.
                  * If the request is packable, keep queuing as long as there is space.
                  */
+
+
+
+                /*
+                 * BUG FIXME - check_packing does not keep track of how much space
+                 * has been used, so with a lot of tags, it will run off of the end.
+                 */
                 if(num_bundled_requests == 0 || check_packing(session, request) == PLCTAG_STATUS_OK) {
                     bundled_requests[num_bundled_requests] = request;
                     num_bundled_requests++;

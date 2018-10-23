@@ -32,7 +32,7 @@
 
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray[%d]&debug=5"
-#define NUM_TAGS 3
+#define NUM_TAGS 100
 #define DATA_TIMEOUT 5000
 
 int main()
