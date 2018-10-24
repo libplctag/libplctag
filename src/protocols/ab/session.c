@@ -59,6 +59,7 @@ static int pack_requests(ab_session_p session, ab_request_p *requests, int num_r
 static int prepare_request(ab_session_p session);
 static int send_eip_request(ab_session_p session, int timeout);
 static int recv_eip_response(ab_session_p session, int timeout);
+static int unpack_response(ab_session_p session, ab_request_p request, int sub_packet);
 static int perform_forward_open(ab_session_p session);
 static int perform_forward_close(ab_session_p session);
 //static int try_forward_open_ex(ab_session_p session);
@@ -1188,20 +1189,14 @@ int process_requests(ab_session_p session)
 
             /* copy the results back out. Every request gets a copy. */
             for(int i=0; i < num_bundled_requests; i++) {
-                ab_request_p request = bundled_requests[i];
-
-                /* copy the data back into the request buffer. */
-                mem_copy(request->data, session->data, (int)(session->data_size));
-
-                /* notify the reading thread that the request is ready */
-                spin_block(&request->lock) {
-                    request->request_size = (int)(session->data_size);
-                    request->packing_num = i;
-                    request->resp_received = 1;
+                rc = unpack_response(session, bundled_requests[i], i);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_WARN, "Unable to unpack response!");
+                    break;
                 }
 
                 /* release our reference */
-                bundled_requests[i] = rc_dec(request);
+                bundled_requests[i] = rc_dec(bundled_requests[i]);
             }
 
             rc = PLCTAG_STATUS_OK;
@@ -1211,6 +1206,85 @@ int process_requests(ab_session_p session)
     pdebug(DEBUG_SPEW,"Done.");
 
     return rc;
+}
+
+
+int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
+{
+    eip_cip_co_resp *packed_resp = (eip_cip_co_resp *)(session->data);
+    eip_cip_co_resp *unpacked_resp = NULL;
+    cip_multi_resp_header *multi = NULL;
+    uint16_t total_responses = 0;
+    uint8_t *pkt_start = NULL;
+    uint8_t *pkt_end = NULL;
+    int pkt_len = 0;
+    int new_eip_len = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* change what we do depending on the type. */
+    if(packed_resp->reply_service != (AB_EIP_CMD_CIP_MULTI | AB_EIP_CMD_CIP_OK)) {
+        /* copy the data back into the request buffer. */
+        new_eip_len = (int)session->data_size;
+        pdebug(DEBUG_DETAIL, "Got single response packet.  Copying %d bytes unchanged.", new_eip_len);
+        mem_copy(request->data, session->data, new_eip_len);
+    } else {
+        /* this is a packed response. */
+        pdebug(DEBUG_DETAIL, "Got multiple response packet, subpacket %d", sub_packet);
+
+        /* fix up the data pointer. */
+        multi = (cip_multi_resp_header *)(&packed_resp->reply_service);
+        total_responses = le2h16(multi->request_count);
+
+        pdebug(DEBUG_DETAIL, "Total responses in this packet: %d", le2h16(multi->request_count));
+
+        for(uint16_t index = 0; index < total_responses; index++) {
+            pdebug(DEBUG_SPEW, "Offset at index %d is %d", index, le2h16(multi->request_offsets[index]));
+        }
+
+        pdebug(DEBUG_DETAIL, "Our result offset is %d bytes.", (int)le2h16(multi->request_offsets[sub_packet]));
+
+        pkt_start = ((uint8_t*)(&multi->request_count) + le2h16(multi->request_offsets[sub_packet]));
+
+        /* calculate the end of the data. */
+        if((sub_packet + 1) < total_responses) {
+            /* not the last response */
+            pkt_end = (uint8_t*)(&multi->request_count) + le2h16(multi->request_offsets[sub_packet + 1]);
+        } else {
+            pkt_end = (session->data + le2h16(packed_resp->encap_length) + sizeof(eip_encap));
+        }
+
+        pkt_len = (int)(pkt_end - pkt_start);
+
+        /* point to the response buffer in a structured way. */
+        unpacked_resp = (eip_cip_co_resp *)(request->data);
+
+        /* copy the header down */
+        mem_copy(request->data, session->data, (int)sizeof(eip_cip_co_resp));
+
+        /* now copy the packet over that. */
+        mem_copy(&unpacked_resp->reply_service, pkt_start, pkt_len);
+
+        /* stitch up the packet sizes. */
+        unpacked_resp->cpf_cdi_item_length = h2le16((uint16_t)(pkt_len + (int)sizeof(uint16_le))); /* extra for the connection sequence */
+        new_eip_len = (uint16_t)(((uint8_t *)(&unpacked_resp->reply_service) + pkt_len) /* end of the packet */
+                                 - (uint8_t *)(request->data));                                      /* start of the packet */
+        unpacked_resp->encap_length = h2le16((uint16_t)(new_eip_len - (uint16_t)sizeof(eip_encap)));
+    }
+
+    pdebug(DEBUG_DETAIL, "Unpacked packet:");
+    pdebug_dump_bytes(DEBUG_DETAIL, request->data, new_eip_len);
+
+    /* notify the reading thread that the request is ready */
+    spin_block(&request->lock) {
+        request->request_size = new_eip_len;
+        //request->packing_num = sub_packet;
+        request->resp_received = 1;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
 }
 
 
