@@ -44,26 +44,50 @@
  */
 
 
+
+typedef struct {
+    int tid;
+    int num_elems;
+} thread_args;
+
+
 /* global to cheat on passing it to threads. */
 volatile int done = 0;
 
-volatile int test_flags = 0;
+
+static FILE *open_log(int tid)
+{
+    char buf[60] = {0,};
+
+    snprintf(buf, sizeof(buf), "test-%d.log", tid);
+
+    return fopen(buf,"w");
+}
+
+static void close_log(FILE *log)
+{
+    fflush(log);
+    fclose(log);
+}
 
 
-
-static int open_tag(plc_tag *tag, const char *tag_str)
+static int open_tag(plc_tag *tag, FILE *log, int tid, int num_elems)
 {
     int rc = PLCTAG_STATUS_OK;
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,5&cpu=lgx&elem_size=4&elem_count=%d&name=TestBigArray[%d]&debug=4";
+    char buf[250] = {0,};
+
+    snprintf(buf, sizeof(buf), tag_str, num_elems, tid*num_elems);
+
+    fprintf(log,"--- Test %d, Creating tag (%d, %d) with string %s\n", tid, tid, num_elems, buf);
 
     /* create the tag */
-    *tag = plc_tag_create(tag_str);
+    *tag = plc_tag_create(buf);
 
     /* everything OK? */
     if(! *tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
+        fprintf(log,"!!! Test %d, could not create tag!\n", tid);
         return PLCTAG_ERR_CREATE;
-    } else {
-        fprintf(stderr, "INFO: Tag created with status %s\n", plc_tag_decode_error(plc_tag_status(*tag)));
     }
 
     while((rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
@@ -71,7 +95,7 @@ static int open_tag(plc_tag *tag, const char *tag_str)
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error %s setting up tag internal state.\n", plc_tag_decode_error(rc));
+        fprintf(log,"!!! Test %d, error %s setting up tag internal state.\n", tid, plc_tag_decode_error(rc));
         plc_tag_destroy(*tag);
         *tag = (plc_tag)0;
         return rc;
@@ -81,80 +105,29 @@ static int open_tag(plc_tag *tag, const char *tag_str)
 }
 
 
-
-void *test_dhp(void *data)
+static void *test_cip(void *data)
 {
-    int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=N7:0&debug=3";
-    int16_t value;
-    int64_t start;
-    int64_t end;
-    plc_tag tag = PLC_TAG_NULL;
-    int rc = PLCTAG_STATUS_OK;
-    int iteration = 1;
-
-    while(!done) {
-        /* capture the starting time */
-        start = util_time_ms();
-
-        rc = open_tag(&tag, tag_str);
-
-        if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Test %d, Error creating tag!  Terminating test...\n", tid);
-            done = 1;
-            return NULL;
-        }
-
-        rc = plc_tag_read(tag, DATA_TIMEOUT);
-
-        if(rc != PLCTAG_STATUS_OK) {
-            done = 1;
-        } else {
-            value = plc_tag_get_int16(tag,0);
-
-            /* increment the value, keep it in bounds of 0-499 */
-            value = (int16_t)(value >= (int16_t)500 ? (int16_t)0 : value + (int16_t)1);
-
-            /* yes, we should be checking this return value too... */
-            plc_tag_set_int16(tag, 0, value);
-
-            /* write the value */
-            rc = plc_tag_write(tag, DATA_TIMEOUT);
-        }
-
-        plc_tag_destroy(tag);
-
-        end = util_time_ms();
-
-        fprintf(stderr,"Thread %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
-
-        /*        if(iteration >= 100) {
-                    iteration = 1;
-                    util_sleep_ms(5000);
-                }
-        */
-        iteration++;
-    }
-
-    fprintf(stderr, "Test %d terminating.\n", tid);
-
-    return NULL;
-}
-
-
-
-void *test_cip(void *data)
-{
-    int tid = (int)(intptr_t)data;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=lgx&elem_size=4&elem_count=1&name=TestDINTArray[0]&debug=4";
+    thread_args *args = (thread_args *)data;
+    int tid = args->tid;
+    int num_elems = args->num_elems;
     int32_t value = 0;
     int64_t start = 0;
     int64_t end = 0;
+    int64_t total_io_time = 0;
     int64_t timeout = 0;
     plc_tag tag = PLC_TAG_NULL;
     int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
     int first_time = 1;
+    FILE *log = NULL;
+
+    /* a hack to allow threads to start. */
+    util_sleep_ms(tid);
+
+    log = open_log(tid);
+
+    fprintf(stderr, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, tid*num_elems);
+    fprintf(log, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, tid*num_elems);
 
     while(!done) {
         while(!tag && !done) {
@@ -168,9 +141,9 @@ void *test_cip(void *data)
 
             first_time = 0;
 
-            rc = open_tag(&tag, tag_str);
+            rc = open_tag(&tag, log, tid, num_elems);
             if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr,"Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
+                fprintf(log,"!!! Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
             }
         }
 
@@ -180,35 +153,39 @@ void *test_cip(void *data)
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
             if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr, "Test %d, iteration %d, read failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
+                fprintf(log, "!!! Test %d, iteration %d, read failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
                 break;
             }
 
-            value = plc_tag_get_int32(tag,0);
+            for(int i=0; i < num_elems; i++) {
+                value = plc_tag_get_int32(tag,i*4);
 
-            /* increment the value, keep it in bounds of 0-499 */
-            value = (value >= (int32_t)500 ? (int32_t)0 : value + (int32_t)1);
+                /* increment the value, keep it in bounds of 0-499 */
+                value = (value >= (int32_t)500 ? (int32_t)0 : value + (int32_t)1);
 
-            /* yes, we should be checking this return value too... */
-            plc_tag_set_int32(tag, 0, value);
+                /* yes, we should be checking this return value too... */
+                plc_tag_set_int32(tag, i*4, value);
+            }
 
             /* write the value */
             rc = plc_tag_write(tag, DATA_TIMEOUT);
             if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr, "Test %d, iteration %d, write failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
+                fprintf(log, "!!! Test %d, iteration %d, write failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
                 break;
             }
         } while(0);
 
         end = util_time_ms();
 
-        fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
+        total_io_time += (end - start);
 
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Test %d, iteration %d, closing tag due to error %s, will retry in 2 seconds.\n", tid, iteration, plc_tag_decode_error(rc));
+            fprintf(log,"!!! Test %d, iteration %d, closing tag due to error %s, will retry in %dms.\n", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
 
             plc_tag_destroy(tag);
             tag = PLC_TAG_NULL;
+        } else {
+            fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems, (int)(end-start));
         }
 
         iteration++;
@@ -216,7 +193,9 @@ void *test_cip(void *data)
 
     plc_tag_destroy(tag);
 
-    fprintf(stderr, "Test %d terminating after %d iterations.\n", tid, iteration);
+    fprintf(log, "*** Test %d terminating after %d iterations and an average of %dms per iteration.\n", tid, iteration, (int)(total_io_time/iteration));
+
+    close_log(log);
 
     return NULL;
 }
@@ -233,19 +212,29 @@ int main(int argc, char **argv)
     int64_t end_time;
     int num_threads = 0;
     int64_t seconds = 0;
+    int num_elems = 0;
+    int success = 0;
+    thread_args args[MAX_THREADS];
 
-    if(argc>2) {
+    if(argc == 4) {
         num_threads = atoi(argv[1]);
-        seconds = atoi(argv[2]);
+        num_elems = atoi(argv[2]);
+        seconds = atoi(argv[3]);
+
+        fprintf(stderr, "--- starting run with %d threads each handling %d elements running for %ld seconds\n", num_threads, num_elems, seconds);
     } else {
-        fprintf(stderr,"Usage: stress_test <num threads> <seconds to run>\n");
+        fprintf(stderr,"Usage: stress_test <num threads> <elements per thread> <seconds to run>\n");
         return 0;
     }
 
     /* create the test threads */
     for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
-        fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
-        pthread_create(&threads[tid], NULL, &test_cip, (void *)(intptr_t)tid);
+        args[tid].tid = num_threads - tid;
+        args[tid].num_elems = num_elems;
+
+        fprintf(stderr, "--- Creating serial test thread %d with %d elements.\n", args[tid].tid, args[tid].num_elems);
+
+        pthread_create(&threads[tid], NULL, &test_cip, &args[tid]);
     }
 
     start_time = util_time_ms();
@@ -255,11 +244,7 @@ int main(int argc, char **argv)
         util_sleep_ms(100);
     }
 
-    if(done) {
-        fprintf(stderr,"Test FAILED!\n");
-    } else {
-        fprintf(stderr,"Test SUCCEEDED!\n");
-    }
+    success = !done;
 
     done = 1;
 
@@ -267,7 +252,13 @@ int main(int argc, char **argv)
         pthread_join(threads[tid], NULL);
     }
 
-    fprintf(stderr, "All test threads terminated.\n");
+    fprintf(stderr, "--- All test threads terminated.\n");
+
+    if(!success) {
+        fprintf(stderr,"*** Test FAILED!\n");
+    } else {
+        fprintf(stderr,"*** Test SUCCEEDED!\n");
+    }
 
     return 0;
 }

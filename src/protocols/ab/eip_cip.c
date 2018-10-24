@@ -841,9 +841,6 @@ static int check_read_status_connected(ab_tag_p tag)
     eip_cip_co_resp* cip_resp;
     uint8_t* data;
     uint8_t* data_end;
-    cip_multi_resp_header *multi = NULL;
-    cip_header *c_header = NULL;
-    int total_responses = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -865,6 +862,9 @@ static int check_read_status_connected(ab_tag_p tag)
     /* point to the data */
     cip_resp = (eip_cip_co_resp*)(tag->req->data);
 
+    /* point to the start of the data */
+    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+
     /* point the end of the data */
     data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
@@ -883,51 +883,24 @@ static int check_read_status_connected(ab_tag_p tag)
         }
 
         /*
-         * our request could have been packed in with other requests, so
-         * we need to check different kinds of reply service.
+         * FIXME
+         *
+         * It probably should not be necessary to check for both as setting the type to anything other
+         * than fragmented is error-prone.
          */
-        if(cip_resp->reply_service == (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
-           || cip_resp->reply_service == (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_DETAIL, "got single read response back.");
 
-            /* point to the start of the data */
-            c_header = (cip_header *)(&cip_resp->reply_service);
-            data = (uint8_t *)(c_header + 1);
-        } else if(cip_resp->reply_service == (AB_EIP_CMD_CIP_MULTI | AB_EIP_CMD_CIP_OK)) {
-            pdebug(DEBUG_DETAIL, "Got multiple response packet, we should use response %d", tag->req->packing_num);
-
-            /* fix up the data pointer. */
-            multi = (cip_multi_resp_header *)(&cip_resp->reply_service);
-            total_responses = le2h16(multi->request_count);
-
-            pdebug(DEBUG_DETAIL, "Total responses in this packet: %d", le2h16(multi->request_count));
-
-            for(uint16_t index = 0; index < le2h16(multi->request_count); index++) {
-                pdebug(DEBUG_DETAIL, "Offset at index %d is %d", index, le2h16(multi->request_offsets[index]));
-            }
-
-            pdebug(DEBUG_DETAIL, "Our result offset is %d bytes.", (int)le2h16(multi->request_offsets[tag->req->packing_num]));
-
-            c_header = (cip_header *)((uint8_t*)(&multi->request_count) + le2h16(multi->request_offsets[tag->req->packing_num]));
-            data = (uint8_t *)(c_header + 1);
-
-            /* calculate the end of the data. */
-            if((tag->req->packing_num + 1) < total_responses) {
-                /* not the last response */
-                data_end = (uint8_t*)(&multi->request_count) + le2h16(multi->request_offsets[tag->req->packing_num + 1]);
-            }
-        } else {
+        if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
-        /* check the CIP status for this response. */
-        if (c_header->status != AB_CIP_STATUS_OK && c_header->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", c_header->status, decode_cip_error_short((uint8_t *)&c_header->status));
-            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&c_header->status));
+        if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
 
-            rc = decode_cip_error_code((uint8_t *)&c_header->status);
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
 
             break;
         }
