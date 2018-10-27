@@ -155,7 +155,7 @@ int main(int argc, char **argv)
     int is_write = 0;
     uint32_t u_val;
     int32_t i_val;
-    real32_t f_val;
+    float f_val;
     int i;
     int rc;
 
