@@ -28,10 +28,10 @@ endif()
 # this is the root libplctag project
 project (libplctag_project)
 
-# the project is version 1.5
-set (libplctag_VERSION_MAJOR 1)
-set (libplctag_VERSION_MINOR 6)
-set (libplctag_VERSION_PATCH 2)
+# the project is version 2.0
+set (libplctag_VERSION_MAJOR 2)
+set (libplctag_VERSION_MINOR 0)
+set (libplctag_VERSION_PATCH 0)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 
@@ -170,6 +170,8 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${util_SRC_PATH}/debug.h"
                      "${util_SRC_PATH}/hash.c"
                      "${util_SRC_PATH}/hash.h"
+                     "${util_SRC_PATH}/hashtable.c"
+                     "${util_SRC_PATH}/hashtable.h"
                      "${util_SRC_PATH}/macros.h"
                      "${util_SRC_PATH}/rc.c"
                      "${util_SRC_PATH}/rc.h"

@@ -40,43 +40,39 @@
 #include <platform.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/hash.h>
+#include <util/hashtable.h>
 #include <util/rc.h>
+#include <util/vector.h>
 #include <ab/ab.h>
 
 
-
-//static plc_tag_p map_id_to_tag(plc_tag plc_tag);
-//static int add_tag_lookup(plc_tag_p tag);
-//static int release_tag_to_id_mapping(plc_tag_p tag);
-//static int api_lock(int index);
-//static int api_unlock(int index);
-//static int tag_ptr_to_tag_index(plc_tag tag_id_ptr);
-
-
-
 #define TAG_ID_MASK (0xFFFFFFF)
-#define TAG_INDEX_MASK (0x3FFF)
-#define MAX_TAG_ENTRIES (TAG_INDEX_MASK + 1)
-#define TAG_ID_ERROR INT_MIN
+//#define TAG_INDEX_MASK (0x3FFF)
+//#define MAX_TAG_ENTRIES (TAG_INDEX_MASK + 1)
+//#define TAG_ID_ERROR INT_MIN
+
+#define MAX_TAG_MAP_ATTEMPTS (50)
 
 /* these are only internal to the file */
 
-static volatile int next_tag_id = MAX_TAG_ENTRIES;
-static volatile plc_tag_p tag_lookup_table[MAX_TAG_ENTRIES + 1] = {0,};
+static volatile int32_t next_tag_id = MAX_TAG_ENTRIES;
+static volatile vector_p tags = NULL;
+static mutex_p tag_lookup_mutex = NULL;
+
 static volatile int library_terminating = 0;
 static thread_p tag_tickler_thread = NULL;
-static mutex_p tag_lookup_mutex = NULL;
 
 mutex_p global_library_mutex = NULL;
 
 
 
 /* helper functions. */
-static plc_tag_p lookup_tag(plc_tag id);
+static plc_tag_p lookup_tag(int32_t id);
 static int add_tag_lookup(plc_tag_p tag);
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
-static int to_tag_index(int id);
+//static int to_tag_index(int id);
 
 /*
  * Initialize the library.  This is called in a threadsafe manner and
@@ -98,18 +94,23 @@ int lib_init(void)
         if (rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
         }
+
+        return rc;
     }
 
-//    /* initialize the mutex for API protection */
-//    for(int i=0; i < (MAX_TAG_ENTRIES + 1); i++) {
-//        rc = mutex_create((mutex_p*)&tag_api_mutex[i]);
-//    }
+    pdebug(DEBUG_INFO,"Creating tag vector.");
+    if((tags = vector_create(100, 10)) == NULL) {
+        pdebug(DEBUG_ERROR, "Unable to create tag vector!");
+        return PLCTAG_ERR_NO_MEM;
+    }
 
+    pdebug(DEBUG_INFO,"Creating tag vector mutex.");
     rc = mutex_create((mutex_p*)&tag_lookup_mutex);
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to create tag lookup mutex!");
+        pdebug(DEBUG_ERROR, "Unable to create tag vector mutex!");
     }
 
+    pdebug(DEBUG_INFO,"Creating tag tickler thread.");
     rc = thread_create(&tag_tickler_thread, tag_tickler_func, 32*1024, NULL);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to create tag tickler thread!");
@@ -135,11 +136,13 @@ void lib_teardown(void)
     pdebug(DEBUG_INFO,"Tearing down tag lookup mutex.");
     mutex_destroy(&tag_lookup_mutex);
 
+    pdebug(DEBUG_INFO, "Destroying tag vector.");
+    vector_destroy(tags);
+
     pdebug(DEBUG_INFO,"Destroying global library mutex.");
     if(global_library_mutex) {
         mutex_destroy((mutex_p*)&global_library_mutex);
     }
-
 
     pdebug(DEBUG_INFO,"Done.");
 }
@@ -154,14 +157,27 @@ THREAD_FUNC(tag_tickler_func)
     pdebug(DEBUG_INFO,"Starting.");
 
     while(!library_terminating) {
-        for(int i=0; i < MAX_TAG_ENTRIES; i++) {
+        int max_index;
+
+        critical_block(tag_lookup_mutex) {
+            max_index = vector_length(tags);
+        }
+
+        for(int i=0; i < max_index; i++) {
             plc_tag_p tag = NULL;
 
             critical_block(tag_lookup_mutex) {
-                tag = tag_lookup_table[i];
+                /* look up the max index again. it may have changed. */
+                max_index = vector_length(tags);
 
-                if(tag) {
-                    tag = rc_inc(tag);
+                if(i < max_index) {
+                    tag = tag_lookup_table[i];
+
+                    if(tag) {
+                        tag = rc_inc(tag);
+                    }
+                } else {
+                    tag = NULL;
                 }
             }
 
@@ -297,23 +313,6 @@ LIB_EXPORT const char* plc_tag_decode_error(int rc)
 
 
 
-
-
-/*
- * plc_tag_create()
- *
- * Just pass through to the plc_tag_create_sync() function.
- */
-
-
-static plc_tag plc_tag_create_sync(const char *attrib_str, int timeout);
-
-LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
-{
-    return plc_tag_create_sync(attrib_str, 1500);
-}
-
-
 /*
  * plc_tag_create()
  *
@@ -322,7 +321,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
  * This is where the dispatch occurs to the protocol specific implementation.
  */
 
-/*LIB_EXPORT*/ plc_tag plc_tag_create_sync(const char *attrib_str, int timeout)
+LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 {
     plc_tag_p tag = PLC_TAG_P_NULL;
     int id = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -333,21 +332,20 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    if(initialize_modules() != PLCTAG_STATUS_OK) {
+    if((rc = initialize_modules()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to initialize the internal library state!");
-        return NULL;
+        return rc;
     }
 
     if(!attrib_str || str_length(attrib_str) == 0) {
         pdebug(DEBUG_WARN,"Tag attribute string is null or zero length!");
-        return NULL;
+        return PLCTAG_ERR_TOO_SHORT;
     }
 
     attribs = attr_create_from_str(attrib_str);
-
     if(!attribs) {
         pdebug(DEBUG_WARN,"Unable to parse attribute string!");
-        return NULL;
+        return PLCTAG_ERR_BAD_DATA;
     }
 
     /* set debug level */
@@ -364,7 +362,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     if(!tag_constructor) {
         pdebug(DEBUG_WARN,"Tag creation failed, no tag constructor found for tag type!");
         attr_destroy(attribs);
-        return NULL;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     tag = tag_constructor(attribs);
@@ -376,21 +374,21 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     if(!tag) {
         pdebug(DEBUG_WARN, "Tag creation failed, skipping mutex creation and other generic setup.");
         attr_destroy(attribs);
-        return NULL;
+        return PLCTAG_ERR_CREATE;
     }
 
     rc = mutex_create(&(tag->ext_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
         rc_dec(tag);
-        return NULL;
+        return PLCTAG_ERR_CREATE;
     }
 
     rc = mutex_create(&(tag->api_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to create tag API mutex!");
         rc_dec(tag);
-        return NULL;
+        return PLCTAG_ERR_CREATE;
     }
 
     /* set up the read cache config. */
@@ -465,14 +463,14 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
     /* if the mapping failed, then punt */
     if(id < 0) {
         pdebug(DEBUG_ERROR, "Unable to map tag %p to lookup table entry, rc=%s", tag, plc_tag_decode_error(id));
-        return (plc_tag)rc_dec(tag);
+        return (int32_t)rc_dec(tag);
     }
 
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
 
     pdebug(DEBUG_INFO,"Done.");
 
-    return (plc_tag)(intptr_t)(id);
+    return id;
 }
 
 
@@ -490,7 +488,7 @@ LIB_EXPORT plc_tag plc_tag_create(const char *attrib_str)
  * followed by a call to plc_tag_unlock when you have everything you need from the tag.
  */
 
-LIB_EXPORT int plc_tag_lock(plc_tag id)
+LIB_EXPORT int plc_tag_lock(int32_t id)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -523,7 +521,7 @@ LIB_EXPORT int plc_tag_lock(plc_tag id)
  * tag.
  */
 
-LIB_EXPORT int plc_tag_unlock(plc_tag id)
+LIB_EXPORT int plc_tag_unlock(int32_t id)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -561,7 +559,7 @@ LIB_EXPORT int plc_tag_unlock(plc_tag id)
  * The status of the operation is returned.
  */
 
-int plc_tag_abort(plc_tag id)
+int plc_tag_abort(int32_t id)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -604,7 +602,7 @@ int plc_tag_abort(plc_tag id)
  */
 
 
-LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
+LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
 {
     plc_tag_p tag = NULL;
     int id = (int)(intptr_t)(tag_id);
@@ -651,7 +649,7 @@ LIB_EXPORT int plc_tag_destroy(plc_tag tag_id)
  * The status of the operation is returned.
  */
 
-LIB_EXPORT int plc_tag_read(plc_tag id, int timeout)
+LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -747,7 +745,7 @@ LIB_EXPORT int plc_tag_read(plc_tag id, int timeout)
  */
 
 
-int plc_tag_status(plc_tag id)
+int plc_tag_status(int32_t id)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -789,7 +787,7 @@ int plc_tag_status(plc_tag id)
  * The status of the operation is returned.
  */
 
-LIB_EXPORT int plc_tag_write(plc_tag id, int timeout)
+LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -871,7 +869,7 @@ LIB_EXPORT int plc_tag_write(plc_tag id, int timeout)
 
 
 
-LIB_EXPORT int plc_tag_get_size(plc_tag id)
+LIB_EXPORT int plc_tag_get_size(int32_t id)
 {
     int result = 0;
     plc_tag_p tag = lookup_tag(id);
@@ -899,7 +897,7 @@ LIB_EXPORT int plc_tag_get_size(plc_tag id)
 
 
 
-LIB_EXPORT uint64_t plc_tag_get_uint64(plc_tag id, int offset)
+LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
 {
     uint64_t res = UINT64_MAX;
     plc_tag_p tag = lookup_tag(id);
@@ -942,7 +940,7 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_uint64(plc_tag id, int offset, uint64_t val)
+LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -988,7 +986,7 @@ LIB_EXPORT int plc_tag_set_uint64(plc_tag id, int offset, uint64_t val)
 
 
 
-LIB_EXPORT int64_t  plc_tag_get_int64(plc_tag id, int offset)
+LIB_EXPORT int64_t  plc_tag_get_int64(int32_t id, int offset)
 {
     int64_t res = INT64_MIN;
     plc_tag_p tag = lookup_tag(id);
@@ -1030,7 +1028,7 @@ LIB_EXPORT int64_t  plc_tag_get_int64(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int64(plc_tag id, int offset, int64_t ival)
+LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
 {
     uint64_t val = (uint64_t)(ival);
     int rc = PLCTAG_STATUS_OK;
@@ -1081,7 +1079,7 @@ LIB_EXPORT int plc_tag_set_int64(plc_tag id, int offset, int64_t ival)
 
 
 
-LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag id, int offset)
+LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
 {
     uint32_t res = UINT32_MAX;
     plc_tag_p tag = lookup_tag(id);
@@ -1119,7 +1117,7 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_uint32(plc_tag id, int offset, uint32_t val)
+LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -1161,7 +1159,7 @@ LIB_EXPORT int plc_tag_set_uint32(plc_tag id, int offset, uint32_t val)
 
 
 
-LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag id, int offset)
+LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
 {
     int32_t res = INT32_MIN;
     plc_tag_p tag = lookup_tag(id);
@@ -1199,7 +1197,7 @@ LIB_EXPORT int32_t  plc_tag_get_int32(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int32(plc_tag id, int offset, int32_t ival)
+LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
 {
     uint32_t val = (uint32_t)(ival);
     int rc = PLCTAG_STATUS_OK;
@@ -1246,7 +1244,7 @@ LIB_EXPORT int plc_tag_set_int32(plc_tag id, int offset, int32_t ival)
 
 
 
-LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag id, int offset)
+LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
 {
     uint16_t res = UINT16_MAX;
     plc_tag_p tag = lookup_tag(id);
@@ -1283,7 +1281,7 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_uint16(plc_tag id, int offset, uint16_t val)
+LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -1327,7 +1325,7 @@ LIB_EXPORT int plc_tag_set_uint16(plc_tag id, int offset, uint16_t val)
 
 
 
-LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag id, int offset)
+LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
 {
     int16_t res = INT16_MIN;
     plc_tag_p tag = lookup_tag(id);
@@ -1364,7 +1362,7 @@ LIB_EXPORT int16_t  plc_tag_get_int16(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int16(plc_tag id, int offset, int16_t ival)
+LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
 {
     uint16_t val = (uint16_t)(ival);
     int rc = PLCTAG_STATUS_OK;
@@ -1408,7 +1406,7 @@ LIB_EXPORT int plc_tag_set_int16(plc_tag id, int offset, int16_t ival)
 
 
 
-LIB_EXPORT uint8_t plc_tag_get_uint8(plc_tag id, int offset)
+LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset)
 {
     uint8_t res = UINT8_MAX;
     plc_tag_p tag = lookup_tag(id);
@@ -1444,7 +1442,7 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_uint8(plc_tag id, int offset, uint8_t val)
+LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
@@ -1483,7 +1481,7 @@ LIB_EXPORT int plc_tag_set_uint8(plc_tag id, int offset, uint8_t val)
 
 
 
-LIB_EXPORT int8_t plc_tag_get_int8(plc_tag id, int offset)
+LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset)
 {
     int8_t res = INT8_MIN;
     plc_tag_p tag = lookup_tag(id);
@@ -1519,7 +1517,7 @@ LIB_EXPORT int8_t plc_tag_get_int8(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int8(plc_tag id, int offset, int8_t ival)
+LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
 {
     uint8_t val = (uint8_t)(ival);
     int rc = PLCTAG_STATUS_OK;
@@ -1560,7 +1558,7 @@ LIB_EXPORT int plc_tag_set_int8(plc_tag id, int offset, int8_t ival)
 
 
 
-LIB_EXPORT double plc_tag_get_float64(plc_tag id, int offset)
+LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 {
     uint64_t ures = 0;
     double res = DBL_MAX;
@@ -1607,7 +1605,7 @@ LIB_EXPORT double plc_tag_get_float64(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_float64(plc_tag id, int offset, double fval)
+LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 {
     int rc = PLCTAG_STATUS_OK;
     uint64_t val = 0;
@@ -1654,7 +1652,7 @@ LIB_EXPORT int plc_tag_set_float64(plc_tag id, int offset, double fval)
 
 
 
-LIB_EXPORT float plc_tag_get_float32(plc_tag id, int offset)
+LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 {
     uint32_t ures;
     float res = FLT_MAX;
@@ -1697,7 +1695,7 @@ LIB_EXPORT float plc_tag_get_float32(plc_tag id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_float32(plc_tag id, int offset, float fval)
+LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 {
     int rc = PLCTAG_STATUS_OK;
     uint32_t val = 0;
@@ -1745,19 +1743,12 @@ LIB_EXPORT int plc_tag_set_float32(plc_tag id, int offset, float fval)
  ****************************************************************************************************/
 
 
-plc_tag_p lookup_tag(plc_tag tag_id)
+plc_tag_p lookup_tag(int32_t tag_id)
 {
     plc_tag_p tag = NULL;
-    int id = (int)(intptr_t)(tag_id);
-    int index = to_tag_index(id);
-
-    if(index <= 0 || index == TAG_ID_ERROR) {
-        pdebug(DEBUG_ERROR, "Incoming ID is not valid! Got %d",id);
-        return NULL;
-    }
 
     critical_block(tag_lookup_mutex) {
-        tag = tag_lookup_table[index];
+        tag = hashtable_get(tags, (int64_t)tag_id);
 
         if(tag && tag->tag_id == id) {
             tag = rc_inc(tag);
@@ -1789,128 +1780,47 @@ int tag_id_inc(int id)
 
 
 
-int to_tag_index(int id)
-{
-    if(id <= 0 || id == TAG_ID_ERROR) {
-        pdebug(DEBUG_ERROR, "Incoming ID is not valid! Got %d",id);
-        return TAG_ID_ERROR;
-    }
-    return (id & TAG_INDEX_MASK);
-}
+//int to_tag_index(int id)
+//{
+//    if(id <= 0 || id == TAG_ID_ERROR) {
+//        pdebug(DEBUG_ERROR, "Incoming ID is not valid! Got %d",id);
+//        return TAG_ID_ERROR;
+//    }
+//    return (id & TAG_INDEX_MASK);
+//}
 
 
 
 int add_tag_lookup(plc_tag_p tag)
 {
-    int new_id = next_tag_id;
-    int index = 0;
+    int new_id = 0;
+    int index = PLCTAG_ERR_NOT_FOUND;
     int found = 0;
 
     critical_block(tag_lookup_mutex) {
-        for(int count=0; !found && count < MAX_TAG_ENTRIES && new_id != TAG_ID_ERROR; count++) {
+        int attempts = 0;
+
+        /* only get this when we hold the mutex. */
+        new_id = next_tag_id;
+
+        do {
             new_id = tag_id_inc(new_id);
-
-            /* everything OK? */
-            if(new_id == TAG_ID_ERROR) break;
-
-            index = to_tag_index(new_id);
-
-            /* is the slot empty? */
-            if(index != TAG_ID_ERROR && !tag_lookup_table[index]) {
-                next_tag_id = new_id;
-                tag->tag_id = new_id;
-
-                tag_lookup_table[index] = tag;
-
-                found = 1;
+            if(!hashtable_get(tags,(int64_t)new_id)) {
+                pdebug(DEBUG_DETAIL,"Found unused ID %d", new_id);
+                break;
             }
+        } while(attempts < MAX_TAG_MAP_ATTEMPTS);
 
-            if(index == TAG_ID_ERROR) break;
+        if(attempt != MAX_TAG_MAP_ATTEMPTS) {
+            rc = hashtable_put(tags, (int64_t)new_id, tag);
+        } else {
+            rc = PLCTAG_ERR_NO_RESOURCES;
         }
     }
 
-    if(found) {
-        return new_id;
+    if(rc != PLCTAG_STATUS_OK) {
+        new_id = rc;
     }
 
-    if(index != TAG_ID_ERROR) {
-        pdebug(DEBUG_ERROR, "Unable to find empty mapping slot!");
-        return PLCTAG_ERR_NO_RESOURCES;
-    }
-
-    /* this did not work */
-    return PLCTAG_ERR_NOT_ALLOWED;
+    return new_id;
 }
-
-
-//
-///*
-// * This MUST be called while the API mutex for this tag is held!
-// */
-//
-//static plc_tag_p map_id_to_tag(plc_tag tag_id_ptr)
-//{
-//    plc_tag_p result = NULL;
-//    int plc_tag = (int)(intptr_t)tag_id_ptr;
-//    int index = to_tag_index(plc_tag);
-//
-//    pdebug(DEBUG_SPEW, "Starting");
-//
-//    if(index == TAG_ID_ERROR) {
-//        pdebug(DEBUG_ERROR,"Bad tag ID passed! %d", plc_tag);
-//        return (plc_tag_p)0;
-//    }
-//
-//    result = tag_lookup_table[index];
-//    if(result && result->plc_tag == plc_tag) {
-//        pdebug(DEBUG_SPEW, "Correct mapping at index %d for id %d found with tag %p", index, plc_tag, result);
-//    } else {
-//        pdebug(DEBUG_WARN, "Not found, tag id %d maps to a different tag", plc_tag);
-//        result = NULL;
-//    }
-//
-//    pdebug(DEBUG_SPEW,"Done with tag %p", result);
-//
-//    /* either nothing was there or it is the wrong tag. */
-//    return result;
-//}
-//
-//
-//
-//
-///*
-// * It is REQUIRED that the tag API mutex be held when this is called!
-// */
-//
-//static int release_tag_to_id_mapping(plc_tag_p tag)
-//{
-//    int map_index = 0;
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    pdebug(DEBUG_DETAIL, "Starting");
-//
-//    if(!tag || tag->plc_tag == 0) {
-//        pdebug(DEBUG_ERROR, "Tag null or tag ID is zero.");
-//        return PLCTAG_ERR_NOT_FOUND;
-//    }
-//
-//    map_index = to_tag_index(tag->plc_tag);
-//
-//    if(map_index == TAG_ID_ERROR) {
-//        pdebug(DEBUG_ERROR,"Bad tag ID %d!", tag->plc_tag);
-//        return PLCTAG_ERR_BAD_DATA;
-//    }
-//
-//    /* find the actual slot and check if it is the right tag */
-//    if(!tag_lookup_table[map_index] || tag_lookup_table[map_index] != tag) {
-//        pdebug(DEBUG_WARN, "Tag not found or entry is already clear.");
-//        rc = PLCTAG_ERR_NOT_FOUND;
-//    } else {
-//        pdebug(DEBUG_DETAIL,"Releasing tag %p(%d) at location %d",tag, tag->plc_tag, map_index);
-//        tag_lookup_table[map_index] = (plc_tag_p)(intptr_t)0;
-//    }
-//
-//    pdebug(DEBUG_DETAIL, "Done.");
-//
-//    return rc;
-//}
