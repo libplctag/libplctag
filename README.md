@@ -3,18 +3,20 @@
 
 Version 2.0 is out!
 
-The release plan is to keep 2.0 on a separate branch for a few weeks or less if I hear back from the external wrapper owners.  For now, version 2.0 will be on the 2.0 branch and 1.5 will be on both master and 1.5.  After all porters have a chance to take up the changes in 2.0, I will switch this and 2.0 will be on master and 1.5 will live on its own branch.  I intend to support 1.5 for a while with just urgent bug fixes.   It will depend on what kind of bugs are filed how long that keeps going.   
+The release plan is to keep 2.0 on a separate branch for a few weeks or less if I hear back from the external wrapper owners.  For now, version 2.0 will be on the 2.0 branch and 1.5 will be on both master and 1.5.  After all porters have a chance to take up the changes in 2.0, I will switch this and 2.0 will be on master and 1.5 will live on its own branch.  I intend to support 1.5 for a while with just urgent bug fixes.   It will depend on what kind of bugs are filed how long that keeps going.
 
-Please help test if you can!   I have a limited selection of PLCs, networks and operating systems.   
+Please help test if you can!   I have a limited selection of PLCs, networks and operating systems.
 
 libplctag
 =========
 
-This library for Linux and Windows (not heavily tested) provides a means of accessing PLCs to read and write simple data.
+This library for Linux and Windows provides a means of accessing PLCs to read and write simple data.
+
+Stable Version: 2.0
 
 Old Stable Version: 1.5
 
-New Stable Version: 2.0 - please checkout branch 2.0 to get this!
+Future Version: ??
 
 WARNING - DISCLAIMER
 ====================
@@ -35,9 +37,6 @@ We do not ask that you transfer copyright over to us, but we do ask that you
 make any submitted patches under the same LGPL license we use.  We will not
 take any patches under the GPL license or licenses that are incompatible with the
 LGPL.
-
-We will be setting up forums or a mailing list to support this library.  Look
-here to find out when that happens.
 
 - the OmanTek team.
 
@@ -78,16 +77,20 @@ Take a look at the [test page](https://github.com/kyle-github/libplctag/wiki/PLC
 
 The library has been in production use for several years and is in use by multiple organizations including some very large ones.
 
-We are on version 1.5/2.0.  That includes:
+We are on version 2.0.  That includes:
 
 * CMake build system for better cross-platform support.
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).
 * native support for multiple data types:
   * read/write 8, 16, 32, and 64-bit signed and unsigned integers.
-  * read/write single booleans.
-  * read/write 32-bit and 64-bit IEEE format (little endian) floating point.
+  * read/write single booleans under some circumstances (BOOL arrays are still pending).
+  * read/write 32-bit IEEE format (little endian) floating point.
   * raw support for user-defined structures (you need to pull out the data piece by piece)
   * read/write arrays of the above.
+  * multiple-request support per packet.
+  * packet size negotiation with newer firmward (version 20+).
+* support for accessing Logix-class PLCs via PLC/5 protocol.
+  * support for INT and REAL read and write.
 * preliminary support for Rockwell/Allen-Bradley MicroLogix 850 PLCs.
   * Support as for ControlLogix.
 * support for Rockwell/Allen-Bradley MicroLogix 1100 and 1400 series (not CIP-based)
