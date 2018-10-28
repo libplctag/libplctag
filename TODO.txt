@@ -1,0 +1,7 @@
+TO DO
+
+Add functionality to session destroy to send a ForwardClose if there is an open connection.   Triggering
+the thread destruction should cause it to send the ForwardClose and wait, briefly, for a response.
+
+
+
