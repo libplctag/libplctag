@@ -32,7 +32,7 @@ extern void *hashtable_get(hashtable_p table, int64_t key);
 extern int hashtable_put(hashtable_p table, int64_t key, void *arg);
 extern void *hashtable_get_index(hashtable_p table, int index);
 extern int hashtable_capacity(hashtable_p table);
-extern int hashtable_entries(hashtable table);
+extern int hashtable_entries(hashtable_p table);
 extern int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table, int64_t key, void *data, void *context), void *context);
 extern void *hashtable_remove(hashtable_p table, int64_t key);
 extern int hashtable_destroy(hashtable_p table);
