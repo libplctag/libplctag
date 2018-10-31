@@ -35,16 +35,16 @@
 
 int main()
 {
-    plc_tag tag = PLC_TAG_NULL;
+    int32_t tag = 0;
     int rc;
     int b;
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
 
         return 0;
     }

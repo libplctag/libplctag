@@ -27,7 +27,7 @@
 
 typedef struct hashtable_t *hashtable_p;
 
-extern hashtable_p hashtable_create(int size);
+extern hashtable_p hashtable_create(int size, int increment);
 extern void *hashtable_get(hashtable_p table, int64_t key);
 extern int hashtable_put(hashtable_p table, int64_t key, void *arg);
 extern void *hashtable_get_index(hashtable_p table, int index);

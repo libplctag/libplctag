@@ -71,37 +71,33 @@ static void close_log(FILE *log)
 }
 
 
-static int open_tag(plc_tag *tag, FILE *log, int tid, int num_elems)
+static int32_t open_tag(FILE *log, int tid, int num_elems)
 {
     int rc = PLCTAG_STATUS_OK;
     static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,5&cpu=lgx&elem_size=4&elem_count=%d&name=TestBigArray[%d]&debug=4";
     char buf[250] = {0,};
+    int32_t tag = 0;
 
     snprintf(buf, sizeof(buf), tag_str, num_elems, tid*num_elems);
 
     fprintf(log,"--- Test %d, Creating tag (%d, %d) with string %s\n", tid, tid, num_elems, buf);
 
     /* create the tag */
-    *tag = plc_tag_create(buf);
+    tag = plc_tag_create(buf, TAG_CREATE_TIMEOUT);
 
     /* everything OK? */
-    if(! *tag) {
-        fprintf(log,"!!! Test %d, could not create tag!\n", tid);
-        return PLCTAG_ERR_CREATE;
+    if(tag < 0) {
+        fprintf(log,"!!! Test %d, could not create tag. error %s!\n", tid, plc_tag_decode_error(tag));
+        return tag;
     }
 
-    while((rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(1);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
         fprintf(log,"!!! Test %d, error %s setting up tag internal state.\n", tid, plc_tag_decode_error(rc));
-        plc_tag_destroy(*tag);
-        *tag = (plc_tag)0;
+        plc_tag_destroy(tag);
         return rc;
     }
 
-    return rc;
+    return tag;
 }
 
 
@@ -115,7 +111,7 @@ static void *test_cip(void *data)
     int64_t end = 0;
     int64_t total_io_time = 0;
     int64_t timeout = 0;
-    plc_tag tag = PLC_TAG_NULL;
+    int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
     int first_time = 1;
@@ -141,9 +137,9 @@ static void *test_cip(void *data)
 
             first_time = 0;
 
-            rc = open_tag(&tag, log, tid, num_elems);
-            if(rc != PLCTAG_STATUS_OK) {
-                fprintf(log,"!!! Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
+            tag = open_tag(log, tid, num_elems);
+            if(tag < 0) {
+                fprintf(log,"!!! Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration, plc_tag_decode_error(tag), TAG_CREATE_TIMEOUT);
             }
         }
 
@@ -181,9 +177,8 @@ static void *test_cip(void *data)
 
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(log,"!!! Test %d, iteration %d, closing tag due to error %s, will retry in %dms.\n", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
-
             plc_tag_destroy(tag);
-            tag = PLC_TAG_NULL;
+            tag = 0;
         } else {
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems, (int)(end-start));
         }

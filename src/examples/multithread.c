@@ -45,8 +45,8 @@
 
 
 /* global to cheat on passing it to threads. */
-plc_tag tag;
-
+volatile int32_t tag;
+volatile int done = 0;
 
 
 
@@ -62,7 +62,7 @@ void *thread_func(void *data)
     int64_t start;
     int64_t end;
 
-    while(1) {
+    while(!done) {
         /* capture the starting time */
         start = util_time_ms();
 
@@ -109,6 +109,7 @@ void *thread_func(void *data)
 
 int main(int argc, char **argv)
 {
+    int rc = PLCTAG_STATUS_OK;
     pthread_t thread[MAX_THREADS];
     int num_threads;
     int thread_id = 0;
@@ -127,25 +128,19 @@ int main(int argc, char **argv)
     }
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(100);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
-
 
     /* create the read threads */
 
@@ -159,6 +154,14 @@ int main(int argc, char **argv)
     while(1) {
         util_sleep_ms(100);
     }
+
+    done = 1;
+
+    for(thread_id = 0; thread_id < num_threads; thread_id++) {
+        pthread_join(thread[thread_id], NULL);
+    }
+
+    plc_tag_destroy(tag);
 
     return 0;
 }

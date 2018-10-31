@@ -45,43 +45,34 @@
 
 /* global to cheat on passing it to threads. */
 volatile int done = 0;
-
-
-volatile plc_tag tag = NULL;
+volatile int32_t tag = 0;
 
 
 
 
-static int open_tag(plc_tag *tag, const char *tag_str)
+static int open_tag(const char *tag_str)
 {
     int rc = PLCTAG_STATUS_OK;
-    int64_t start_time;
+    int32_t tag = PLCTAG_ERR_CREATE;
 
     /* create the tag */
-    start_time = util_time_ms();
-    *tag = plc_tag_create(tag_str);
+    tag = plc_tag_create(tag_str, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(! *tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return PLCTAG_ERR_CREATE;
     } else {
-        fprintf(stderr, "INFO: Tag created with status %s\n", plc_tag_decode_error(plc_tag_status(*tag)));
+        fprintf(stderr, "INFO: Tag created with status %s\n", plc_tag_decode_error(plc_tag_status(tag)));
     }
 
-    /* let the connect succeed we hope */
-    while((start_time + 2000) > util_time_ms() && (rc = plc_tag_status(*tag)) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(10);
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
         fprintf(stderr,"Error %s setting up tag internal state.\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(*tag);
-        *tag = (plc_tag)0;
+        plc_tag_destroy(tag);
         return rc;
     }
 
-    return rc;
+    return tag;
 }
 
 
@@ -146,7 +137,6 @@ int main(int argc, char **argv)
     int64_t end_time;
     int64_t seconds = 30;  /* default 1 hour */
     int num_threads = 0;
-    int rc = PLCTAG_STATUS_OK;
 
     if(argc==2) {
         num_threads = atoi(argv[1]);
@@ -155,10 +145,9 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    rc = open_tag((plc_tag*)&tag,TAG_PATH);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Unable to create tag! rc=(%d) %s\n", rc, plc_tag_decode_error(rc));
+    tag = open_tag(TAG_PATH);
+    if(tag < 0) {
+        fprintf(stderr,"Unable to create tag! %s\n", plc_tag_decode_error(tag));
         return 1;
     }
 

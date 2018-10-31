@@ -56,8 +56,8 @@
 
 /* these are only internal to the file */
 
-static volatile int32_t next_tag_id = MAX_TAG_ENTRIES;
-static volatile vector_p tags = NULL;
+static volatile int32_t next_tag_id = 10; /* MAGIC */
+static volatile hashtable_p tags = NULL;
 static mutex_p tag_lookup_mutex = NULL;
 
 static volatile int library_terminating = 0;
@@ -98,9 +98,9 @@ int lib_init(void)
         return rc;
     }
 
-    pdebug(DEBUG_INFO,"Creating tag vector.");
-    if((tags = vector_create(100, 10)) == NULL) {
-        pdebug(DEBUG_ERROR, "Unable to create tag vector!");
+    pdebug(DEBUG_INFO,"Creating tag hashtable.");
+    if((tags = hashtable_create(100, 57)) == NULL) { /* MAGIC */
+        pdebug(DEBUG_ERROR, "Unable to create tag hashtable!");
         return PLCTAG_ERR_NO_MEM;
     }
 
@@ -136,8 +136,8 @@ void lib_teardown(void)
     pdebug(DEBUG_INFO,"Tearing down tag lookup mutex.");
     mutex_destroy(&tag_lookup_mutex);
 
-    pdebug(DEBUG_INFO, "Destroying tag vector.");
-    vector_destroy(tags);
+    pdebug(DEBUG_INFO, "Destroying tag hashtable.");
+    hashtable_destroy(tags);
 
     pdebug(DEBUG_INFO,"Destroying global library mutex.");
     if(global_library_mutex) {
@@ -160,7 +160,7 @@ THREAD_FUNC(tag_tickler_func)
         int max_index;
 
         critical_block(tag_lookup_mutex) {
-            max_index = vector_length(tags);
+            max_index = hashtable_capacity(tags);
         }
 
         for(int i=0; i < max_index; i++) {
@@ -168,10 +168,10 @@ THREAD_FUNC(tag_tickler_func)
 
             critical_block(tag_lookup_mutex) {
                 /* look up the max index again. it may have changed. */
-                max_index = vector_length(tags);
+                max_index = hashtable_capacity(tags);
 
                 if(i < max_index) {
-                    tag = tag_lookup_table[i];
+                    tag = hashtable_get_index(tags, i);
 
                     if(tag) {
                         tag = rc_inc(tag);
@@ -339,7 +339,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     if(!attrib_str || str_length(attrib_str) == 0) {
         pdebug(DEBUG_WARN,"Tag attribute string is null or zero length!");
-        return PLCTAG_ERR_TOO_SHORT;
+        return PLCTAG_ERR_TOO_SMALL;
     }
 
     attribs = attr_create_from_str(attrib_str);
@@ -463,7 +463,8 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     /* if the mapping failed, then punt */
     if(id < 0) {
         pdebug(DEBUG_ERROR, "Unable to map tag %p to lookup table entry, rc=%s", tag, plc_tag_decode_error(id));
-        return (int32_t)rc_dec(tag);
+        rc_dec(tag);
+        return id;
     }
 
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
@@ -605,25 +606,26 @@ int plc_tag_abort(int32_t id)
 LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
 {
     plc_tag_p tag = NULL;
-    int id = (int)(intptr_t)(tag_id);
-    int index = to_tag_index(id);
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    if(id <= 0 || index < 0) {
+    if(tag_id <= 0 || tag_id >= TAG_ID_MASK) {
         pdebug(DEBUG_WARN, "Called with zero or invalid tag!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     critical_block(tag_lookup_mutex) {
-        tag = tag_lookup_table[index];
+        tag = hashtable_get(tags, tag_id);
 
-        if(tag && tag->tag_id == id) {
+        if(tag) {
             /* found the tag. Remove the entry so no one else gets it. */
-            tag_lookup_table[index] = NULL;
-        } else {
-            tag = NULL;
+            hashtable_remove(tags, tag_id);
         }
+    }
+
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Called with non-existent tag!");
+        return PLCTAG_ERR_NOT_FOUND;
     }
 
     /* release the reference outside the mutex. */
@@ -1750,7 +1752,7 @@ plc_tag_p lookup_tag(int32_t tag_id)
     critical_block(tag_lookup_mutex) {
         tag = hashtable_get(tags, (int64_t)tag_id);
 
-        if(tag && tag->tag_id == id) {
+        if(tag && tag->tag_id == tag_id) {
             tag = rc_inc(tag);
         } else {
             tag = NULL;
@@ -1764,9 +1766,10 @@ plc_tag_p lookup_tag(int32_t tag_id)
 
 int tag_id_inc(int id)
 {
-    if(id <= 0 || id == TAG_ID_ERROR) {
+    if(id <= 0) {
         pdebug(DEBUG_ERROR, "Incoming ID is not valid! Got %d",id);
-        return TAG_ID_ERROR;
+        /* try to correct. */
+        id = (TAG_ID_MASK/2);
     }
 
     id = (id + 1) & TAG_ID_MASK;
@@ -1780,22 +1783,10 @@ int tag_id_inc(int id)
 
 
 
-//int to_tag_index(int id)
-//{
-//    if(id <= 0 || id == TAG_ID_ERROR) {
-//        pdebug(DEBUG_ERROR, "Incoming ID is not valid! Got %d",id);
-//        return TAG_ID_ERROR;
-//    }
-//    return (id & TAG_INDEX_MASK);
-//}
-
-
-
 int add_tag_lookup(plc_tag_p tag)
 {
     int new_id = 0;
-    int index = PLCTAG_ERR_NOT_FOUND;
-    int found = 0;
+    int rc = PLCTAG_ERR_NOT_FOUND;
 
     critical_block(tag_lookup_mutex) {
         int attempts = 0;
@@ -1805,13 +1796,20 @@ int add_tag_lookup(plc_tag_p tag)
 
         do {
             new_id = tag_id_inc(new_id);
+            if(new_id <=0) {
+                pdebug(DEBUG_WARN,"ID %d is illegal!", new_id);
+                attempts = MAX_TAG_MAP_ATTEMPTS;
+                break;
+            }
+
             if(!hashtable_get(tags,(int64_t)new_id)) {
                 pdebug(DEBUG_DETAIL,"Found unused ID %d", new_id);
                 break;
             }
+            attempts++;
         } while(attempts < MAX_TAG_MAP_ATTEMPTS);
 
-        if(attempt != MAX_TAG_MAP_ATTEMPTS) {
+        if(attempts != MAX_TAG_MAP_ATTEMPTS) {
             rc = hashtable_put(tags, (int64_t)new_id, tag);
         } else {
             rc = PLCTAG_ERR_NO_RESOURCES;
