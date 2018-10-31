@@ -1,7 +1,30 @@
+/***************************************************************************
+ *   Copyright (C) 2015 by OmanTek                                         *
+ *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU Library General Public License as       *
+ *   published by the Free Software Foundation; either version 2 of the    *
+ *   License, or (at your option) any later version.                       *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU Library General Public     *
+ *   License along with this program; if not, write to the                 *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
+
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <inttypes.h>
 #include <sys/time.h>
 #include "../lib/libplctag.h"
@@ -14,7 +37,6 @@
 
 #define MAX_THREADS (300)
 
-
 /*
  * This test program creates a lot of threads that read the same tag in
  * the plc.  They all hit the exact same underlying tag data structure.
@@ -24,7 +46,8 @@
 
 
 /* global to cheat on passing it to threads. */
-plc_tag tag;
+volatile int32_t tag;
+volatile int done = 0;
 
 
 
@@ -40,7 +63,7 @@ void *thread_func(void *data)
     int64_t start;
     int64_t end;
 
-    while(1) {
+    while(!done) {
         /* capture the starting time */
         start = util_time_ms();
 
@@ -69,7 +92,7 @@ void *thread_func(void *data)
 
         fprintf(stderr,"%" PRId64 " Thread %d got result %d with return code %s in %dms\n",util_time_ms(),tid,value,plc_tag_decode_error(rc),(int)(end-start));
 
-        util_sleep_ms(10);
+        util_sleep_ms(1);
     }
 
     return NULL;
@@ -78,6 +101,7 @@ void *thread_func(void *data)
 
 int main(int argc, char **argv)
 {
+    int rc = PLCTAG_STATUS_OK;
     pthread_t thread[MAX_THREADS];
     int num_threads;
     int thread_id = 0;
@@ -87,6 +111,7 @@ int main(int argc, char **argv)
         return 0;
     }
 
+
     num_threads = (int)strtol(argv[1],NULL, 10);
 
     if(num_threads < 1 || num_threads > MAX_THREADS) {
@@ -95,32 +120,25 @@ int main(int argc, char **argv)
     }
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(100);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state.\n");
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
-
 
     /* create the read threads */
-
     fprintf(stderr,"Creating %d threads.\n",num_threads);
 
     for(thread_id=0; thread_id < num_threads; thread_id++) {
-        pthread_create(&thread[thread_id], NULL, &thread_func, (void *)(intptr_t)thread_id);
+        pthread_create(&thread[thread_id], NULL, thread_func, (void *)(intptr_t)thread_id);
     }
 
     /* wait until ^C */
@@ -128,6 +146,13 @@ int main(int argc, char **argv)
         util_sleep_ms(100);
     }
 
+    done = 1;
+
+    for(thread_id = 0; thread_id < num_threads; thread_id++) {
+        pthread_join(thread[thread_id], NULL);
+    }
+
+    plc_tag_destroy(tag);
+
     return 0;
 }
-

@@ -11,7 +11,7 @@
 
 int main(int argc, char **argv)
 {
-    plc_tag tag = PLC_TAG_NULL;
+    int32_t tag = 0;
     int rc;
     int i;
 
@@ -19,31 +19,25 @@ int main(int argc, char **argv)
     (void)argv;
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
-    }
-
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(100);
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
         fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+        plc_tag_destroy(tag);
         return 0;
     }
 
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-
+        plc_tag_destroy(tag);
         return 0;
     }
 
@@ -64,20 +58,18 @@ int main(int argc, char **argv)
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-
+        plc_tag_destroy(tag);
         return 0;
     }
 
 
     /* get the data again*/
     rc = plc_tag_read(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-
+        plc_tag_destroy(tag);
         return 0;
     }
 
