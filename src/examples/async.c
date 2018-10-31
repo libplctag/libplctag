@@ -37,7 +37,7 @@
 
 int main()
 {
-    plc_tag tag[NUM_TAGS];
+    int32_t tag[NUM_TAGS];
     int rc;
     int i;
     int64_t timeout = DATA_TIMEOUT + util_time_ms();
@@ -52,10 +52,10 @@ int main()
 
         fprintf(stderr, "Attempting to create tag with attribute string '%s'\n",tmp_tag_path);
 
-        tag[i]  = plc_tag_create(tmp_tag_path);
+        tag[i]  = plc_tag_create(tmp_tag_path, DATA_TIMEOUT);
 
-        if(!tag[i]) {
-            fprintf(stderr,"Error: could not create tag %d\n",i);
+        if(tag[i] < 0) {
+            fprintf(stderr,"Error %s: could not create tag %d\n",plc_tag_decode_error(tag[i]), i);
         }
     }
 

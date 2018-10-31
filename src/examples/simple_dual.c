@@ -37,38 +37,55 @@
 
 int main()
 {
-    plc_tag tag1 = PLC_TAG_NULL;
-    plc_tag tag2 = PLC_TAG_NULL;
+    int32_t tag1 = 0;
+    int32_t tag2 = 0;
     int rc1,rc2;
     int i;
+    int done = 0;
 
-    /* create the tag */
-    tag1 = plc_tag_create(TAG_PATH1);
-    tag2 = plc_tag_create(TAG_PATH2);
+    /* create the tag, async */
+    tag1 = plc_tag_create(TAG_PATH1, 0);
+    tag2 = plc_tag_create(TAG_PATH2, 0);
 
     /* everything OK? */
-    if(!tag1) {
+    if(tag1 < 0) {
         fprintf(stderr,"ERROR: Could not create tag1!\n");
-
         return 0;
     }
 
-    if(!tag2) {
+    if(tag2 < 0) {
         fprintf(stderr,"ERROR: Could not create tag2!\n");
-
         return 0;
     }
 
     /* wait for tags to finish setting up */
     util_sleep_ms(1000);
 
-    if(plc_tag_status(tag1) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag1)));
+    do {
+        done = 1;
+        rc1 = plc_tag_status(tag1);
+        rc2 = plc_tag_status(tag2);
+
+        if(rc1 == PLCTAG_STATUS_PENDING) {
+            done = 0;
+        }
+
+        if(rc2 == PLCTAG_STATUS_PENDING) {
+            done = 0;
+        }
+
+        if(!done) {
+            util_sleep_ms(5);
+        }
+    } while(!done);
+
+    if(rc1 != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc1));
         return 0;
     }
 
-    if(plc_tag_status(tag2) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(plc_tag_status(tag2)));
+    if(rc2 != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc2));
         return 0;
     }
 
@@ -116,12 +133,7 @@ int main()
 
     /* we are done, clean up tag 2 first */
     plc_tag_destroy(tag2);
-
-    util_sleep_ms(1000);
-
     plc_tag_destroy(tag1);
-
-    util_sleep_ms(1000);
 
     return 0;
 }

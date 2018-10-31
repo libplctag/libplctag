@@ -40,41 +40,37 @@
 
 int main()
 {
-    plc_tag tag = PLC_TAG_NULL;
+    int32_t tag = 0;
     int rc;
     int i;
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
+    if(tag < 0) {
         fprintf(stderr,"ERROR: Could not create tag!\n");
         return 0;
     }
 
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(100);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
 
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
 
     /* print out the data */
     for(i=0; i < ELEM_COUNT; i++) {
         int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-        char str[83] = {0};
+        char str[ELEM_SIZE] = {0};
         int j;
 
         for(j=0; j<str_size; j++) {

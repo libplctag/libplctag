@@ -41,25 +41,21 @@
 
 
 
-plc_tag create_tag(const char *path)
+int32_t create_tag(const char *path)
 {
-    plc_tag tag = PLC_TAG_NULL;
+    int rc = PLCTAG_STATUS_OK;
+    int32_t tag = 0;
 
-    tag = plc_tag_create(path);
+    tag = plc_tag_create(path, DATA_TIMEOUT);
 
-    if(!tag) {
-        fprintf(stdout, "Error creating tag!\n");
-        return PLC_TAG_NULL;
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        return tag;
     }
 
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(100);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
         fprintf(stdout,"Error setting up tag internal state.\n");
-        return PLC_TAG_NULL;
+        return rc;
     }
 
     return tag;
@@ -67,7 +63,7 @@ plc_tag create_tag(const char *path)
 
 
 
-int dump_strings(plc_tag tag)
+int dump_strings(int32_t tag)
 {
     char str_data[STRING_DATA_SIZE];
     int str_index;
@@ -99,7 +95,7 @@ int dump_strings(plc_tag tag)
 
 
 
-void update_string(plc_tag tag, int i, char *str)
+void update_string(int32_t tag, int i, char *str)
 {
     int str_len;
     int base_offset = i * ELEM_SIZE;
@@ -128,11 +124,11 @@ int main()
 {
     int i;
     char str[STRING_DATA_SIZE] = {0};
-    plc_tag tag = create_tag(TAG_PATH);
+    int32_t tag = create_tag(TAG_PATH);
     int rc;
 
-    if(!tag) {
-        fprintf(stdout,"ERROR: Unable to create tag!\n");
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
