@@ -40,24 +40,24 @@
 static int match_channel(const char **p, int *dhp_channel)
 {
     switch(**p) {
-        case 'A':
-        case 'a':
-        case '2':
-            *dhp_channel = 1;
-            *p = *p + 1;
-            return 1;
-            break;
-        case 'B':
-        case 'b':
-        case '3':
-            *dhp_channel = 2;
-            *p = *p + 1;
-            return 1;
-            break;
+    case 'A':
+    case 'a':
+    case '2':
+        *dhp_channel = 1;
+        *p = *p + 1;
+        return 1;
+        break;
+    case 'B':
+    case 'b':
+    case '3':
+        *dhp_channel = 2;
+        *p = *p + 1;
+        return 1;
+        break;
 
-        default:
-            return 0;
-            break;
+    default:
+        return 0;
+        break;
     }
 
     return 0;
@@ -161,7 +161,6 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
 int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest)
 {
     int ioi_size=0;
-    int link_index=0;
     int last_is_dhp=0;
     int has_dhp=0;
     int dhp_channel=0;
@@ -179,6 +178,8 @@ int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_
     }
 
     if(links != NULL) {
+        int link_index=0;
+
         /* work along each string. */
         link = links[link_index];
 
@@ -313,28 +314,7 @@ int cip_encode_path(const char *path, int needs_connection, int plc_type, uint8_
 
 
 
-
-
-
-#ifdef START
-#undef START
-#endif
-#define START 1
-
-#ifdef ARRAY
-#undef ARRAY
-#endif
-#define ARRAY 2
-
-#ifdef DOT
-#undef DOT
-#endif
-#define DOT 3
-
-#ifdef NAME
-#undef NAME
-#endif
-#define NAME 4
+typedef enum { START, ARRAY, DOT, NAME } encode_state_t;
 
 /*
  * cip_encode_tag_name()
@@ -350,7 +330,7 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
     uint8_t *word_count = NULL;
     uint8_t *dp = NULL;
     uint8_t *name_len;
-    int state;
+    encode_state_t state;
 
     /* reserve room for word count for IOI string. */
     word_count = data;
@@ -360,117 +340,117 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
 
     while(*p && (dp - data) < MAX_TAG_NAME) {
         switch(state) {
-            case START:
+        case START:
 
-                /* must start with an alpha character or _ or :. */
-                if(isalpha(*p) || *p == '_' || *p == ':') {
-                    state = NAME;
-                } else if(*p == '.') {
-                    state = DOT;
-                } else if(*p == '[') {
-                    state = ARRAY;
-                } else {
+            /* must start with an alpha character or _ or :. */
+            if(isalpha(*p) || *p == '_' || *p == ':') {
+                state = NAME;
+            } else if(*p == '.') {
+                state = DOT;
+            } else if(*p == '[') {
+                state = ARRAY;
+            } else {
+                return 0;
+            }
+
+            break;
+
+        case NAME:
+            *dp = 0x91; /* start of ASCII name */
+            dp++;
+            name_len = dp;
+            *name_len = 0;
+            dp++;
+
+            while(isalnum(*p) || *p == '_' || *p == ':') {
+                *dp = (uint8_t)*p;
+                dp++;
+                p++;
+                (*name_len)++;
+            }
+
+            /* must pad the name to a multiple of two bytes */
+            if(*name_len & 0x01) {
+                *dp = 0;
+                dp++;
+            }
+
+            state = START;
+
+            break;
+
+        case ARRAY:
+            /* move the pointer past the [ character */
+            p++;
+
+            do {
+                uint32_t val;
+                char *np = NULL;
+                val = (uint32_t)strtol(p,&np,0);
+
+                if(np == p) {
+                    /* we must have a number */
                     return 0;
                 }
 
-                break;
+                p = np;
 
-            case NAME:
-                *dp = 0x91; /* start of ASCII name */
-                dp++;
-                name_len = dp;
-                *name_len = 0;
-                dp++;
-
-                while(isalnum(*p) || *p == '_' || *p == ':') {
-                    *dp = (uint8_t)*p;
-                    dp++;
-                    p++;
-                    (*name_len)++;
-                }
-
-                /* must pad the name to a multiple of two bytes */
-                if(*name_len & 0x01) {
+                if(val > 0xFFFF) {
+                    *dp = 0x2A;
+                    dp++;  /* 4-byte value */
                     *dp = 0;
+                    dp++;     /* padding */
+
+                    /* copy the value in little-endian order */
+                    *dp = val & 0xFF;
                     dp++;
+                    *dp = (uint8_t)((val >> 8) & 0xFF);
+                    dp++;
+                    *dp = (uint8_t)((val >> 16) & 0xFF);
+                    dp++;
+                    *dp = (uint8_t)((val >> 24) & 0xFF);
+                    dp++;
+                } else if(val > 0xFF) {
+                    *dp = 0x29;
+                    dp++;  /* 2-byte value */
+                    *dp = 0;
+                    dp++;     /* padding */
+
+                    /* copy the value in little-endian order */
+                    *dp = val & 0xFF;
+                    dp++;
+                    *dp = (uint8_t)((val >> 8) & 0xFF);
+                    dp++;
+                } else {
+                    *dp = 0x28;
+                    dp++;  /* 1-byte value */
+                    *dp = (uint8_t)val;
+                    dp++;     /* value */
                 }
 
-                state = START;
+                /* eat up whitespace */
+                while(isspace(*p)) p++;
+            } while(*p == ',');
 
-                break;
-
-            case ARRAY:
-                /* move the pointer past the [ character */
-                p++;
-
-                do {
-                    uint32_t val;
-                    char *np = NULL;
-                    val = (uint32_t)strtol(p,&np,0);
-
-                    if(np == p) {
-                        /* we must have a number */
-                        return 0;
-                    }
-
-                    p = np;
-
-                    if(val > 0xFFFF) {
-                        *dp = 0x2A;
-                        dp++;  /* 4-byte value */
-                        *dp = 0;
-                        dp++;     /* padding */
-
-                        /* copy the value in little-endian order */
-                        *dp = val & 0xFF;
-                        dp++;
-                        *dp = (uint8_t)((val >> 8) & 0xFF);
-                        dp++;
-                        *dp = (uint8_t)((val >> 16) & 0xFF);
-                        dp++;
-                        *dp = (uint8_t)((val >> 24) & 0xFF);
-                        dp++;
-                    } else if(val > 0xFF) {
-                        *dp = 0x29;
-                        dp++;  /* 2-byte value */
-                        *dp = 0;
-                        dp++;     /* padding */
-
-                        /* copy the value in little-endian order */
-                        *dp = val & 0xFF;
-                        dp++;
-                        *dp = (uint8_t)((val >> 8) & 0xFF);
-                        dp++;
-                    } else {
-                        *dp = 0x28;
-                        dp++;  /* 1-byte value */
-                        *dp = (uint8_t)val;
-                        dp++;     /* value */
-                    }
-
-                    /* eat up whitespace */
-                    while(isspace(*p)) p++;
-                } while(*p == ',');
-
-                if(*p != ']')
-                    return 0;
-
-                p++;
-
-                state = START;
-
-                break;
-
-            case DOT:
-                p++;
-                state = START;
-                break;
-
-            default:
-                /* this should never happen */
+            if(*p != ']')
                 return 0;
 
-                break;
+            p++;
+
+            state = START;
+
+            break;
+
+        case DOT:
+            p++;
+            state = START;
+            break;
+
+        default:
+            /* this should never happen */
+            return 0;
+
+            break;
         }
     }
 
