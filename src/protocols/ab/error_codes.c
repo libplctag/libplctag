@@ -25,11 +25,11 @@
 
 
 struct error_code_entry {
-	int primary_code;
-	int secondary_code;
+    int primary_code;
+    int secondary_code;
     int translated_code;
-	const char *short_desc;
-	const char *long_desc;
+    const char *short_desc;
+    const char *long_desc;
 };
 
 
@@ -48,7 +48,7 @@ struct error_code_entry {
 
 
 static struct error_code_entry error_code_table[] = {
-	{0x01, 0x0100, PLCTAG_ERR_DUPLICATE, "Connection In Use/Duplicate Forward Open", "A connection is already established from the target device sending a Forward Open request or the target device has sent multiple forward open request. This could be caused by poor network traffic. Check the cabling, switches and connections."},
+    {0x01, 0x0100, PLCTAG_ERR_DUPLICATE, "Connection In Use/Duplicate Forward Open", "A connection is already established from the target device sending a Forward Open request or the target device has sent multiple forward open request. This could be caused by poor network traffic. Check the cabling, switches and connections."},
     {0x01, 0x0103, PLCTAG_ERR_UNSUPPORTED, "Transport Class/Trigger Combination not supported", "The Transport class and trigger combination is not supported. The Productivity Suite CPU only supports Class 1 and Class 3 transports and triggers: Change of State and Cyclic."},
     {0x01, 0x0106, PLCTAG_ERR_NOT_ALLOWED, "Owner Conflict", "An existing exclusive owner has already configured a connection to this Connection Point. Check to see if other Scanner devices are connected to this adapter or verify that Multicast is supported by adapter device if Multicast is selected for Forward Open. This could be caused by poor network traffic. Check the cabling, switches and connections."},
     {0x01, 0x0107, PLCTAG_ERR_NOT_FOUND, "Target Connection Not Found", "This occurs if a device sends a Forward Close on a connection and the device can't find this connection. This could occur if one of these devices has powered down or if the connection timed out on a bad connection. This could be caused by poor network traffic. Check the cabling, switches and connections."},
@@ -121,155 +121,107 @@ static struct error_code_entry error_code_table[] = {
     {0x01, 0x0813, PLCTAG_ERR_UNSUPPORTED, "Not Configured for Off-subnet Multicast", "The producer has been requested to support a Multicast connection for a consumer on a different subnet and does not support this functionality."},
     {0x01, 0x0814, PLCTAG_ERR_BAD_DATA, "Invalid Produce/Consume Data format", "Information in the data segment not consistent with the format of the data in the consumed or produced data. Errors 0x0130 and 0x0131 are typically used for this situation in most devices now."},
     {0x02, -1, PLCTAG_ERR_NO_RESOURCES, "Resource Unavailable for Unconnected Send", "The Target device does not have the resources to process the Unconnected Send request."},
-	{0x03, -1, PLCTAG_ERR_BAD_PARAM, "Parameter value invalid.", ""},
+    {0x03, -1, PLCTAG_ERR_BAD_PARAM, "Parameter value invalid.", ""},
     {0x04, -1, PLCTAG_ERR_BAD_DATA,"IOI could not be deciphered or tag does not exist.", "The path segment identifier or the segment syntax was not understood by the target device."},
     {0x05, -1, PLCTAG_ERR_BAD_PARAM, "Path Destination Error", "The Class, Instance or Attribute value specified in the Unconnected Explicit Message request is incorrect or not supported in the Target device. Check the manufacturer's documentation for the correct codes to use."},
-	{0x06, -1, PLCTAG_ERR_TOO_LARGE, "Data requested would not fit in response packet.", "The data to be read/written needs to be broken up into multiple packets.0x070000 Connection lost: The messaging connection was lost."},
-	{0x07, -1, PLCTAG_ERR_BAD_CONNECTION, "Connection lost", "The messaging connection was lost."},
-	{0x08, -1, PLCTAG_ERR_UNSUPPORTED, "Unsupported service.", ""},
+    {0x06, -1, PLCTAG_ERR_TOO_LARGE, "Data requested would not fit in response packet.", "The data to be read/written needs to be broken up into multiple packets.0x070000 Connection lost: The messaging connection was lost."},
+    {0x07, -1, PLCTAG_ERR_BAD_CONNECTION, "Connection lost", "The messaging connection was lost."},
+    {0x08, -1, PLCTAG_ERR_UNSUPPORTED, "Unsupported service.", ""},
     {0x09, -1, PLCTAG_ERR_BAD_DATA, "Error in Data Segment", "This error code is returned when an error is encountered in the Data segment portion of a Forward Open message. The Extended Status value is the offset in the Data segment where the error was encountered."},
-	{0x0A, -1, PLCTAG_ERR_BAD_STATUS, "Attribute list error", "An attribute in the Get_Attribute_List or Set_Attribute_List response has a non-zero status."},
-	{0x0B, -1, PLCTAG_ERR_DUPLICATE, "Already in requested mode/state", "The object is already in the mode/state being requested by the service."},
+    {0x0A, -1, PLCTAG_ERR_BAD_STATUS, "Attribute list error", "An attribute in the Get_Attribute_List or Set_Attribute_List response has a non-zero status."},
+    {0x0B, -1, PLCTAG_ERR_DUPLICATE, "Already in requested mode/state", "The object is already in the mode/state being requested by the service."},
     {0x0C, -1, PLCTAG_ERR_BAD_STATUS, "Object State Error", "This error is returned from the Target device when the current state of the Object requested does not allow it to be returned. The current state can be specified in the Optional Extended Error status field."},
-	{0x0D, -1, PLCTAG_ERR_DUPLICATE, "Object already exists.", "The requested instance of object to be created already exists."},
-	{0x0E, -1, PLCTAG_ERR_NOT_ALLOWED, "Attribute not settable", "A request to modify non-modifiable attribute was received."},
-	{0x0F, -1, PLCTAG_ERR_NOT_ALLOWED, "Permission denied.", ""},
+    {0x0D, -1, PLCTAG_ERR_DUPLICATE, "Object already exists.", "The requested instance of object to be created already exists."},
+    {0x0E, -1, PLCTAG_ERR_NOT_ALLOWED, "Attribute not settable", "A request to modify non-modifiable attribute was received."},
+    {0x0F, -1, PLCTAG_ERR_NOT_ALLOWED, "Permission denied.", ""},
     {0x10, -1, PLCTAG_ERR_BAD_STATUS, "Device State Error", "This error is returned from the Target device when the current state of the Device requested does not allow it to be returned. The current state can be specified in the Optional Extended Error status field. Check your configured connections points for other Client devices using this same connection."},
-	{0x11, -1, PLCTAG_ERR_TOO_LARGE, "Reply data too large", "The data to be transmitted in the response buffer is larger than the allocated response buffer."},
-	{0x12, -1, PLCTAG_ERR_NOT_ALLOWED, "Fragmentation of a primitive value", "The service specified an operation that is going to fragment a primitive data value. For example, trying to send a 2 byte value to a REAL data type (4 byte)."},
+    {0x11, -1, PLCTAG_ERR_TOO_LARGE, "Reply data too large", "The data to be transmitted in the response buffer is larger than the allocated response buffer."},
+    {0x12, -1, PLCTAG_ERR_NOT_ALLOWED, "Fragmentation of a primitive value", "The service specified an operation that is going to fragment a primitive data value. For example, trying to send a 2 byte value to a REAL data type (4 byte)."},
     {0x13, -1, PLCTAG_ERR_TOO_SMALL, "Not Enough Data", "Not enough data was supplied in the service request specified."},
-	{0x14, -1, PLCTAG_ERR_UNSUPPORTED, "Attribute not supported.", "The attribute specified in the request is not supported."},
+    {0x14, -1, PLCTAG_ERR_UNSUPPORTED, "Attribute not supported.", "The attribute specified in the request is not supported."},
     {0x15, -1, PLCTAG_ERR_TOO_LARGE, "Too Much Data", "Too much data was supplied in the service request specified."},
-	{0x16, -1, PLCTAG_ERR_NOT_FOUND, "Object does not exist.", "The object specified does not exist in the device."},
-	{0x17, -1, PLCTAG_ERR_NOT_ALLOWED, "Service fragmentation sequence not in progress.", "The fragmentation sequence for this service is not currently active for this data."},
-	{0x18, -1, PLCTAG_ERR_NO_DATA, "No stored attribute data.", "The attribute data of this object was not saved prior to the requested service."},
-	{0x19, -1, PLCTAG_ERR_REMOTE_ERR, "Store operation failure.", "The attribute data of this object was not saved due to a failure during the attempt."},
-	{0x1A, -1, PLCTAG_ERR_TOO_LARGE, "Routing failure, request packet too large.", "The service request packet was too large for transmission on a network in the path to the destination."},
-	{0x1B, -1, PLCTAG_ERR_TOO_LARGE, "Routing failure, response packet too large.", "The service reponse packet was too large for transmission on a network in the path from the destination."},
-	{0x1C, -1, PLCTAG_ERR_NO_DATA, "Missing attribute list entry data.", "The service did not supply an attribute in a list of attributes that was needed by the service to perform the requested behavior."},
-	{0x1D, -1, PLCTAG_ERR_BAD_DATA, "Invalid attribute value list.", "The service is returning the list of attributes supplied with status information for those attributes that were invalid."},
-	{0x20, -1, PLCTAG_ERR_BAD_PARAM, "Invalid parameter.", "A parameter associated with the request was invalid. This code is used when a parameter does meet the requirements defined in an Application Object specification."},
-	{0x21, -1, PLCTAG_ERR_DUPLICATE, "Write-once value or medium already written.", "An attempt was made to write to a write-once-medium that has already been written or to modify a value that cannot be change once established."},
-	{0x22, -1, PLCTAG_ERR_BAD_REPLY, "Invalid Reply Received", "An invalid reply is received (example: service code sent doesn't match service code received.)."},
-	{0x25, -1, PLCTAG_ERR_BAD_PARAM, "Key failure in path", "The key segment was included as the first segment in the path does not match the destination module."},
-	{0x26, -1, PLCTAG_ERR_BAD_PARAM, "The number of IOI words specified does not match IOI word count.", "Check the tag length against what was sent."},
-	{0x27, -1, PLCTAG_ERR_BAD_PARAM, "Unexpected attribute in list", "An attempt was made to set an attribute that is not able to be set at this time."},
-	{0x28, -1, PLCTAG_ERR_BAD_PARAM, "Invalid Member ID.", "The Member ID specified in the request does not exist in the specified Class/Instance/Attribute."},
-	{0x29, -1, PLCTAG_ERR_NOT_ALLOWED, "Member not writable.", "A request to modify a non-modifiable member was received."},
-	{0xFF, 0x2104, PLCTAG_ERR_OUT_OF_BOUNDS, "Address is out of range.",""},
-	{0xFF, 0x2105, PLCTAG_ERR_OUT_OF_BOUNDS, "Attempt to access beyond the end of the data object.", ""},
-	{0xFF, 0x2107, PLCTAG_ERR_BAD_PARAM, "The data type is invalid or not supported.", ""},
-	{-1, -1, PLCTAG_ERR_REMOTE_ERR, "Unknown error code.", "Unknown error code."} };
+    {0x16, -1, PLCTAG_ERR_NOT_FOUND, "Object does not exist.", "The object specified does not exist in the device."},
+    {0x17, -1, PLCTAG_ERR_NOT_ALLOWED, "Service fragmentation sequence not in progress.", "The fragmentation sequence for this service is not currently active for this data."},
+    {0x18, -1, PLCTAG_ERR_NO_DATA, "No stored attribute data.", "The attribute data of this object was not saved prior to the requested service."},
+    {0x19, -1, PLCTAG_ERR_REMOTE_ERR, "Store operation failure.", "The attribute data of this object was not saved due to a failure during the attempt."},
+    {0x1A, -1, PLCTAG_ERR_TOO_LARGE, "Routing failure, request packet too large.", "The service request packet was too large for transmission on a network in the path to the destination."},
+    {0x1B, -1, PLCTAG_ERR_TOO_LARGE, "Routing failure, response packet too large.", "The service reponse packet was too large for transmission on a network in the path from the destination."},
+    {0x1C, -1, PLCTAG_ERR_NO_DATA, "Missing attribute list entry data.", "The service did not supply an attribute in a list of attributes that was needed by the service to perform the requested behavior."},
+    {0x1D, -1, PLCTAG_ERR_BAD_DATA, "Invalid attribute value list.", "The service is returning the list of attributes supplied with status information for those attributes that were invalid."},
+    {0x20, -1, PLCTAG_ERR_BAD_PARAM, "Invalid parameter.", "A parameter associated with the request was invalid. This code is used when a parameter does meet the requirements defined in an Application Object specification."},
+    {0x21, -1, PLCTAG_ERR_DUPLICATE, "Write-once value or medium already written.", "An attempt was made to write to a write-once-medium that has already been written or to modify a value that cannot be change once established."},
+    {0x22, -1, PLCTAG_ERR_BAD_REPLY, "Invalid Reply Received", "An invalid reply is received (example: service code sent doesn't match service code received.)."},
+    {0x25, -1, PLCTAG_ERR_BAD_PARAM, "Key failure in path", "The key segment was included as the first segment in the path does not match the destination module."},
+    {0x26, -1, PLCTAG_ERR_BAD_PARAM, "The number of IOI words specified does not match IOI word count.", "Check the tag length against what was sent."},
+    {0x27, -1, PLCTAG_ERR_BAD_PARAM, "Unexpected attribute in list", "An attempt was made to set an attribute that is not able to be set at this time."},
+    {0x28, -1, PLCTAG_ERR_BAD_PARAM, "Invalid Member ID.", "The Member ID specified in the request does not exist in the specified Class/Instance/Attribute."},
+    {0x29, -1, PLCTAG_ERR_NOT_ALLOWED, "Member not writable.", "A request to modify a non-modifiable member was received."},
+    {0xFF, 0x2104, PLCTAG_ERR_OUT_OF_BOUNDS, "Address is out of range.",""},
+    {0xFF, 0x2105, PLCTAG_ERR_OUT_OF_BOUNDS, "Attempt to access beyond the end of the data object.", ""},
+    {0xFF, 0x2107, PLCTAG_ERR_BAD_PARAM, "The data type is invalid or not supported.", ""},
+    {-1, -1, PLCTAG_ERR_REMOTE_ERR, "Unknown error code.", "Unknown error code."}
+};
 
 
 
 
 
+static int lookup_error_code(uint8_t *data)
+{
+    int index = 0;
+    int primary_code = 0;
+    int secondary_code = 0;
+
+    /* build the error status */
+    primary_code = (int)*data;
+
+    if(primary_code != 0) {
+        int num_status_words = 0;
+
+        data++;
+        num_status_words = (int)*data;
+
+        if(num_status_words > 0) {
+            data++;
+            secondary_code = (int)data[0] + (int)(data[1] << 8);
+        }
+    }
+
+    while(error_code_table[index].primary_code != -1) {
+        if(error_code_table[index].primary_code == primary_code) {
+            if(error_code_table[index].secondary_code == secondary_code || error_code_table[index].secondary_code == -1) {
+                break;
+            }
+        }
+
+        index++;
+    }
+
+    return index;
+}
 
 
 
 
 const char *decode_cip_error_short(uint8_t *data)
 {
-	int index = 0;
-	int primary_code = 0;
-	int secondary_code = 0;
-	int num_status_words = 0;
+    int index = lookup_error_code(data);
 
-	/* build the error status */
-	primary_code = (int)*data;
-
-	if(primary_code != 0) {
-		data++;
-		num_status_words = (int)*data;
-
-		if(num_status_words > 0) {
-			data++;
-			secondary_code = (int)data[0] + (int)(data[1] << 8);
-		}
-	}
-
-	while(error_code_table[index].primary_code != -1) {
-		if(error_code_table[index].primary_code == primary_code) {
-			if(error_code_table[index].secondary_code == secondary_code || error_code_table[index].secondary_code == -1) {
-				break;
-			}
-		}
-
-		index++;
-	}
-
-	return error_code_table[index].short_desc;
+    return error_code_table[index].short_desc;
 }
 
 
 const char *decode_cip_error_long(uint8_t *data)
 {
-	int index = 0;
-	int primary_code = 0;
-	int secondary_code = 0;
-	int num_status_words = 0;
+    int index = lookup_error_code(data);
 
-	/* build the error status */
-	primary_code = (int)*data;
-
-	if(primary_code != 0) {
-		data++;
-		num_status_words = (int)*data;
-
-		if(num_status_words > 0) {
-			data++;
-			secondary_code = (int)data[0] + (int)(data[1] << 8);
-		}
-	}
-
-    //pdebug(DEBUG_DETAIL, "decoding error with primary code %d and secondary code %d", primary_code, secondary_code);
-
-	while(error_code_table[index].primary_code != -1) {
-		if(error_code_table[index].primary_code == primary_code) {
-			if(error_code_table[index].secondary_code == secondary_code || error_code_table[index].secondary_code == -1) {
-                //pdebug(DEBUG_DETAIL,"matched entry with index %d and primary code %d and secondary code %d", index, error_code_table[index].primary_code, error_code_table[index].secondary_code);
-				break;
-			}
-		}
-
-		index++;
-	}
-
-	return error_code_table[index].long_desc;
+    return error_code_table[index].long_desc;
 }
 
 
 int decode_cip_error_code(uint8_t *data)
 {
-	int index = 0;
-	int primary_code = 0;
-	int secondary_code = 0;
-	int num_status_words = 0;
+    int index = lookup_error_code(data);
 
-	/* build the error status */
-	primary_code = (int)*data;
-
-	if(primary_code != 0) {
-		data++;
-		num_status_words = (int)*data;
-
-		if(num_status_words > 0) {
-			data++;
-			secondary_code = (int)data[0] + (int)(data[1] << 8);
-		}
-	}
-
-	while(error_code_table[index].primary_code != -1) {
-		if(error_code_table[index].primary_code == primary_code) {
-			if(error_code_table[index].secondary_code == secondary_code || error_code_table[index].secondary_code == -1) {
-				break;
-			}
-		}
-
-		index++;
-	}
-
-	return error_code_table[index].translated_code;
+    return error_code_table[index].translated_code;
 }
-
