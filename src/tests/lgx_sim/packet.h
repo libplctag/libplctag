@@ -34,6 +34,10 @@
 #define CPF_ITEM_UDI ((uint16_t)0x00B2) /* Unconnected data item */
 
 #define CIP_SYMBOLIC_SEGMENT  ((uint8_t)0x91)
+#define CIP_NUMERIC_SEGMENT_ONE_BYTE  ((uint8_t)0x28)
+#define CIP_NUMERIC_SEGMENT_TWO_BYTES  ((uint8_t)0x29)
+#define CIP_NUMERIC_SEGMENT_FOUR_BYTES  ((uint8_t)0x2A)
+
 
 
 
