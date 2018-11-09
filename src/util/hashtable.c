@@ -109,6 +109,9 @@ void *hashtable_get(hashtable_p table, int64_t key)
     index = find_key(table, key);
     if(index != PLCTAG_ERR_NOT_FOUND) {
         result = table->entries[index].data;
+        pdebug(DEBUG_SPEW,"found data %p", result);
+    } else {
+        pdebug(DEBUG_SPEW, "key not found!");
     }
 
     pdebug(DEBUG_SPEW,"Done");
@@ -131,7 +134,7 @@ int hashtable_put(hashtable_p table, int64_t key, void  *data)
 
     /* try to find a slot to put the new entry */
     index = find_empty(table, key);
-    while(index != PLCTAG_ERR_NOT_FOUND) {
+    while(index == PLCTAG_ERR_NOT_FOUND) {
         rc = expand_table(table);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to expand table!");
@@ -141,9 +144,13 @@ int hashtable_put(hashtable_p table, int64_t key, void  *data)
         index = find_empty(table, key);
     }
 
+    pdebug(DEBUG_SPEW, "Putting value at index %d", index);
+
     table->entries[index].key = key;
     table->entries[index].data = data;
     table->used_entries++;
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -270,21 +277,31 @@ int hashtable_destroy(hashtable_p table)
 int find_key(hashtable_p table, int64_t key)
 {
     /* get the index */
-    int rc = PLCTAG_ERR_NOT_FOUND;
     uint32_t hash_val = hash((uint8_t*)&key, sizeof(key), (uint32_t)(intptr_t)table);
     int index = (int)(hash_val % (uint32_t)table->total_entries);
+    int iteration;
+
+    pdebug(DEBUG_SPEW, "Starting.");
 
     /* search for the hash value. */
-    for(int iteration=1; iteration < MAX_ITERATIONS; iteration++) {
+    for(iteration=1; iteration < MAX_ITERATIONS; iteration++) {
         if(table->entries[index].key == key) {
-            rc = index;
             break;
         }
 
         index = (index + iteration) % table->total_entries;
     }
 
-    return rc;
+    if(iteration == MAX_ITERATIONS) {
+        pdebug(DEBUG_SPEW, "Key not found!");
+        return PLCTAG_ERR_NOT_FOUND;
+    } else {
+        pdebug(DEBUG_SPEW, "Key found at index %d.", index);
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return index;
 }
 
 
@@ -304,7 +321,7 @@ int find_empty(hashtable_p table, int64_t key)
         index = (index + iteration) % table->total_entries;
     }
 
-    if(!table->entries[index].data) {
+    if(table->entries[index].data) {
         pdebug(DEBUG_DETAIL,"No empty entry found in %d iterations!", MAX_ITERATIONS);
         return PLCTAG_ERR_NOT_FOUND;
     }
