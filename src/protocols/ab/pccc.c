@@ -324,7 +324,6 @@ uint16_t CRC16Bytes[] = {
 uint16_t pccc_calculate_crc16(uint8_t *data, int size)
 {
     uint16_t running_crc = 0;
-    uint8_t running_byte = 0;
     int i;
 
     /* for each byte in the data... */
@@ -336,7 +335,7 @@ uint16_t pccc_calculate_crc16(uint8_t *data, int size)
          */
 
         /* mask the CRC and XOR with the data byte */
-        running_byte = (uint8_t)(running_crc & 0x00FF) ^ data[i];
+        uint8_t running_byte = (uint8_t)(running_crc & 0x00FF) ^ data[i];
 
         /* calculate the next CRC value by shifting and XORing with
          * the value we get from a table lookup using the running
