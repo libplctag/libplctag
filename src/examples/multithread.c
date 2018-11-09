@@ -59,10 +59,11 @@ void *thread_func(void *data)
     int tid = (int)(intptr_t)data;
     int rc;
     int value;
-    int64_t start;
-    int64_t end;
 
     while(!done) {
+        int64_t start;
+        int64_t end;
+
         /* capture the starting time */
         start = util_time_ms();
 
@@ -165,4 +166,3 @@ int main(int argc, char **argv)
 
     return 0;
 }
-
