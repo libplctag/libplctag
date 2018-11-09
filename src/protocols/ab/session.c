@@ -895,25 +895,25 @@ int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
  * session_remove_request
  *
  * This is a thread-safe version of the above routine.
- */
-int session_remove_request(ab_session_p sess, ab_request_p req)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_DETAIL, "Starting.  session=%p, req=%p", sess, req);
-
-    if(sess == NULL || req == NULL) {
-        return rc;
-    }
-
-    critical_block(sess->mutex) {
-        rc = session_remove_request_unsafe(sess, req);
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return rc;
-}
+// */
+//int session_remove_request(ab_session_p sess, ab_request_p req)
+//{
+//    int rc = PLCTAG_STATUS_OK;
+//
+//    pdebug(DEBUG_DETAIL, "Starting.  session=%p, req=%p", sess, req);
+//
+//    if(sess == NULL || req == NULL) {
+//        return rc;
+//    }
+//
+//    critical_block(sess->mutex) {
+//        rc = session_remove_request_unsafe(sess, req);
+//    }
+//
+//    pdebug(DEBUG_DETAIL, "Done.");
+//
+//    return rc;
+//}
 
 
 
@@ -930,13 +930,13 @@ THREAD_FUNC(session_handler)
     ab_session_p session = arg;
     int rc = PLCTAG_STATUS_OK;
     session_state_t state = SESSION_OPEN_SOCKET;
-    int idle = 0;
+//    int idle = 0;
 //    int64_t timeout_time = 0;
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
     while(!session->terminating) {
-        idle = 0;
+        int idle = 0;
 
         switch(state) {
         case SESSION_OPEN_SOCKET:
@@ -1213,11 +1213,8 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
 {
     eip_cip_co_resp *packed_resp = (eip_cip_co_resp *)(session->data);
     eip_cip_co_resp *unpacked_resp = NULL;
-    cip_multi_resp_header *multi = NULL;
-    uint16_t total_responses = 0;
     uint8_t *pkt_start = NULL;
     uint8_t *pkt_end = NULL;
-    int pkt_len = 0;
     int new_eip_len = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1229,18 +1226,19 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
         pdebug(DEBUG_DETAIL, "Got single response packet.  Copying %d bytes unchanged.", new_eip_len);
         mem_copy(request->data, session->data, new_eip_len);
     } else {
+        cip_multi_resp_header *multi = (cip_multi_resp_header *)(&packed_resp->reply_service);
+        uint16_t total_responses = le2h16(multi->request_count);
+        int pkt_len = 0;
+
         /* this is a packed response. */
         pdebug(DEBUG_DETAIL, "Got multiple response packet, subpacket %d", sub_packet);
 
-        /* fix up the data pointer. */
-        multi = (cip_multi_resp_header *)(&packed_resp->reply_service);
-        total_responses = le2h16(multi->request_count);
-
-        pdebug(DEBUG_DETAIL, "Total responses in this packet: %d", le2h16(multi->request_count));
-
-        for(uint16_t index = 0; index < total_responses; index++) {
-            pdebug(DEBUG_SPEW, "Offset at index %d is %d", index, le2h16(multi->request_offsets[index]));
-        }
+//        /* fix up the data pointer. */
+//        pdebug(DEBUG_DETAIL, "Total responses in this packet: %d", le2h16(multi->request_count));
+//
+//        for(uint16_t index = 0; index < total_responses; index++) {
+//            pdebug(DEBUG_SPEW, "Offset at index %d is %d", index, le2h16(multi->request_offsets[index]));
+//        }
 
         pdebug(DEBUG_DETAIL, "Our result offset is %d bytes.", (int)le2h16(multi->request_offsets[sub_packet]));
 
