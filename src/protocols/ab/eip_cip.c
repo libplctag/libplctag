@@ -370,7 +370,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     uint8_t* data;
     uint8_t* embed_start, *embed_end;
     ab_request_p req = NULL;
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
