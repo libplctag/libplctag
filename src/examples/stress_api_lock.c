@@ -53,10 +53,7 @@ volatile int32_t tag = 0;
 static int open_tag(const char *tag_str)
 {
     int rc = PLCTAG_STATUS_OK;
-    int32_t tag = PLCTAG_ERR_CREATE;
-
-    /* create the tag */
-    tag = plc_tag_create(tag_str, DATA_TIMEOUT);
+    int32_t tag = plc_tag_create(tag_str, DATA_TIMEOUT);
 
     /* everything OK? */
     if(tag < 0) {
@@ -80,13 +77,14 @@ static int open_tag(const char *tag_str)
 void *test_tag(void *data)
 {
     int tid = (int)(intptr_t)data;
-    int32_t value;
-    int64_t start;
-    int64_t end;
-    int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
 
     while(!done) {
+        int rc = PLCTAG_STATUS_OK;
+        int32_t value;
+        int64_t start;
+        int64_t end;
+
         /* capture the starting time */
         start = util_time_ms();
 
@@ -183,4 +181,3 @@ int main(int argc, char **argv)
 
     return 0;
 }
-

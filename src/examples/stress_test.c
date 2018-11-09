@@ -107,10 +107,7 @@ static void *test_cip(void *data)
     int tid = args->tid;
     int num_elems = args->num_elems;
     int32_t value = 0;
-    int64_t start = 0;
-    int64_t end = 0;
     int64_t total_io_time = 0;
-    int64_t timeout = 0;
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
     int iteration = 1;
@@ -126,8 +123,13 @@ static void *test_cip(void *data)
     fprintf(log, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, tid*num_elems);
 
     while(!done) {
+        int64_t start = 0;
+        int64_t end = 0;
+
         while(!tag && !done) {
             if(!first_time) {
+                int64_t timeout = 0;
+
                 /* retry later */
                 timeout = util_time_ms() + TAG_CREATE_TIMEOUT;
                 while(!done && timeout > util_time_ms()) {
