@@ -339,13 +339,6 @@ int tag_read_start(ab_tag_p tag)
 
 static int check_read_status(ab_tag_p tag)
 {
-    pccc_resp *pccc;
-    uint8_t *data;
-    uint8_t *data_end;
-    uint8_t *type_start;
-    uint8_t *type_end;
-    int pccc_res_type;
-    int pccc_res_length;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
 
@@ -367,6 +360,14 @@ static int check_read_status(ab_tag_p tag)
 
     /* fake exceptions */
     do {
+        pccc_resp *pccc;
+        uint8_t *data;
+        uint8_t *data_end;
+        uint8_t *type_start;
+        uint8_t *type_end;
+        int pccc_res_type;
+        int pccc_res_length;
+
         pccc = (pccc_resp*)(req->data);
 
         /* point to the start of the data */
@@ -663,8 +664,6 @@ int tag_write_start(ab_tag_p tag)
  */
 static int check_write_status(ab_tag_p tag)
 {
-    pccc_resp *pccc;
-    uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req;
 
@@ -685,6 +684,9 @@ static int check_write_status(ab_tag_p tag)
 
     /* fake exception */
     do {
+        pccc_resp *pccc;
+        uint8_t *data;
+
         pccc = (pccc_resp*)(req->data);
 
         /* point to the start of the data */
