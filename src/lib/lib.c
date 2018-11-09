@@ -63,7 +63,7 @@ static mutex_p tag_lookup_mutex = NULL;
 static volatile int library_terminating = 0;
 static thread_p tag_tickler_thread = NULL;
 
-mutex_p global_library_mutex = NULL;
+//static mutex_p global_library_mutex = NULL;
 
 
 
@@ -88,15 +88,15 @@ int lib_init(void)
     pdebug(DEBUG_INFO,"Initializing library global mutex.");
 
     /* first see if the mutex is there. */
-    if (!global_library_mutex) {
-        rc = mutex_create((mutex_p*)&global_library_mutex);
-
-        if (rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
-        }
-
-        return rc;
-    }
+//    if (!global_library_mutex) {
+//        rc = mutex_create((mutex_p*)&global_library_mutex);
+//
+//        if (rc != PLCTAG_STATUS_OK) {
+//            pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
+//        }
+//
+//        return rc;
+//    }
 
     pdebug(DEBUG_INFO,"Creating tag hashtable.");
     if((tags = hashtable_create(100, 57)) == NULL) { /* MAGIC */
@@ -139,10 +139,10 @@ void lib_teardown(void)
     pdebug(DEBUG_INFO, "Destroying tag hashtable.");
     hashtable_destroy(tags);
 
-    pdebug(DEBUG_INFO,"Destroying global library mutex.");
-    if(global_library_mutex) {
-        mutex_destroy((mutex_p*)&global_library_mutex);
-    }
+//    pdebug(DEBUG_INFO,"Destroying global library mutex.");
+//    if(global_library_mutex) {
+//        mutex_destroy((mutex_p*)&global_library_mutex);
+//    }
 
     pdebug(DEBUG_INFO,"Done.");
 }
@@ -467,6 +467,9 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         return id;
     }
 
+    /* save this for later. */
+    tag->tag_id = id;
+
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
 
     pdebug(DEBUG_INFO,"Done.");
@@ -615,12 +618,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
     }
 
     critical_block(tag_lookup_mutex) {
-        tag = hashtable_get(tags, tag_id);
-
-        if(tag) {
-            /* found the tag. Remove the entry so no one else gets it. */
-            hashtable_remove(tags, tag_id);
-        }
+        tag = hashtable_remove(tags, tag_id);
     }
 
     if(!tag) {
@@ -1752,6 +1750,8 @@ plc_tag_p lookup_tag(int32_t tag_id)
     critical_block(tag_lookup_mutex) {
         tag = hashtable_get(tags, (int64_t)tag_id);
 
+        pdebug(DEBUG_SPEW, "Found tag %p with id %d.", tag, tag->tag_id);
+
         if(tag && tag->tag_id == tag_id) {
             tag = rc_inc(tag);
         } else {
@@ -1788,6 +1788,8 @@ int add_tag_lookup(plc_tag_p tag)
     int new_id = 0;
     int rc = PLCTAG_ERR_NOT_FOUND;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     critical_block(tag_lookup_mutex) {
         int attempts = 0;
 
@@ -1819,6 +1821,8 @@ int add_tag_lookup(plc_tag_p tag)
     if(rc != PLCTAG_STATUS_OK) {
         new_id = rc;
     }
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return new_id;
 }

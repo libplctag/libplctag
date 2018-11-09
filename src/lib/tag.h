@@ -40,7 +40,7 @@
 #define PLCTAG_DATA_LITTLE_ENDIAN   (0)
 #define PLCTAG_DATA_BIG_ENDIAN      (1)
 
-extern mutex_p global_library_mutex;
+//extern mutex_p global_library_mutex;
 
 typedef struct plc_tag_t *plc_tag_p;
 
