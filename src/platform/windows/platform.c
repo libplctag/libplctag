@@ -590,20 +590,18 @@ struct thread_t {
 
 extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg)
 {
-    /*pdebug("Starting.");*/
-    int debug = 1;
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!t) {
-        //pdebug(debug, "null thread pointer.");
+        pdebug(DEBUG_WARN, "null pointer to thread pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     *t = (thread_p)mem_alloc(sizeof(struct thread_t));
-
     if(! *t) {
         /* FIXME - should not be the same error as above. */
-        //pdebug(debug, "null thread pointer.");
-        return PLCTAG_ERR_NULL_PTR;
+        pdebug(DEBUG_WARN, "Unable to create new thread struct!");
+        return PLCTAG_ERR_NO_MEM;
     }
 
     /* create a thread. */
@@ -616,7 +614,7 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
                          NULL);                  /* do not need thread ID       */
 
     if(!(*t)->h_thread) {
-        //pdebug(debug, "error creating thread.");
+        pdebug(DEBUG_WARN, "error creating thread.");
         mem_free(*t);
         *t=NULL;
 
@@ -626,7 +624,7 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
     /* mark as initialized */
     (*t)->initialized = 1;
 
-    /*pdebug("Done.");*/
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -1008,7 +1006,6 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 extern int socket_read(sock_p s, uint8_t *buf, int size)
 {
     int rc;
-    int err;
 
     if(!s || !buf) {
         return PLCTAG_ERR_NULL_PTR;
@@ -1018,7 +1015,8 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
     rc = recv(s->fd, (char *)buf, size, 0);
 
     if(rc < 0) {
-        err=WSAGetLastError();
+        int err = WSAGetLastError();
+
         if(err == WSAEWOULDBLOCK) {
             return 0;
         } else {
@@ -1034,7 +1032,6 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
 extern int socket_write(sock_p s, uint8_t *buf, int size)
 {
     int rc;
-    int err;
 
     if(!s || !buf) {
         return PLCTAG_ERR_NULL_PTR;
@@ -1044,7 +1041,8 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
     rc = send(s->fd, (char *)buf, size, MSG_NOSIGNAL);
 
     if(rc < 0) {
-        err=WSAGetLastError();
+        int err = WSAGetLastError();
+
         if(err == WSAEWOULDBLOCK) {
             return PLCTAG_ERR_NO_DATA;
         } else {
