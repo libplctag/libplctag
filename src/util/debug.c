@@ -144,11 +144,10 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
 extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
 {
-    int max_row, row, column, offset;
+    int max_row, row, column;
     char prefix[48]; /* MAGIC */
 	int prefix_size;
 	char row_buf[300]; /* MAGIC */
-	int row_offset;
 
     /* build the prefix */
     prefix_size = make_prefix(prefix,(int)sizeof(prefix));
@@ -161,7 +160,8 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
     max_row = (count  + (COLUMNS - 1))/COLUMNS;
 
     for(row = 0; row < max_row; row++) {
-        offset = (row * COLUMNS);
+        int offset = (row * COLUMNS);
+        int row_offset;
 
         /* print the prefix and address */
         row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s %s:%d %05d", prefix, debug_level_name[debug_level], func, line_num, offset);

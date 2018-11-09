@@ -110,8 +110,6 @@ extern attr attr_create_from_str(const char *attr_str)
 {
     char *tmp;
     char *cur;
-    char *name;
-    char *val;
     attr res = NULL;
 
     if(!str_length(attr_str)) {
@@ -138,7 +136,9 @@ extern attr attr_create_from_str(const char *attr_str)
     cur = tmp;
     while(*cur) {
         /* read the name */
-        name = cur;
+        char *name = cur;
+        char *val;
+
         while(*cur && *cur != '=')
             cur++;
 
@@ -422,4 +422,3 @@ extern void attr_destroy(attr a)
 
     mem_free(a);
 }
-

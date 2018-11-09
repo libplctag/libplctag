@@ -36,17 +36,17 @@
  * Handle clean up functions.
  */
 
-typedef struct cleanup_t *cleanup_p;
-
-struct cleanup_t {
-    cleanup_p next;
-    const char *function_name;
-    int line_num;
-    int extra_arg_count;
-    void **extra_args;
-    rc_cleanup_func cleanup_func;
-    void *dummy[]; /* force alignment */
-};
+//typedef struct cleanup_t *cleanup_p;
+//
+//struct cleanup_t {
+//    cleanup_p next;
+//    const char *function_name;
+//    int line_num;
+//    int extra_arg_count;
+//    void **extra_args;
+//    rc_cleanup_func cleanup_func;
+//    void *dummy[]; /* force alignment */
+//};
 
 
 /*
