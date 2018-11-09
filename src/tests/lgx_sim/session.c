@@ -546,7 +546,6 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
     /* read the length in words, convert to bytes. */
     uint8_t *data = buf;
     uint8_t path_len = (uint8_t)((*data)*2); /* translate to bytes */
-    uint8_t name_len = 0;
     int index = 0;
 
     log("read_tag_path() starting with path_len=%d\n", path_len);
@@ -557,6 +556,8 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
 
     /* read the tag path */
     if(buf[index] == CIP_SYMBOLIC_SEGMENT) {
+        uint8_t name_len = 0;
+
         index++;
 
         name_len = buf[index];
@@ -590,14 +591,14 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
     /* is there a numeric segment? */
     if(index < path_len) {
         switch(buf[index]) {
-        case 0x28:
+        case CIP_NUMERIC_SEGMENT_ONE_BYTE:
             /* one byte */
             index++;
             *item_offset = buf[index];
             index++;
             break;
 
-        case 0x29:
+        case CIP_NUMERIC_SEGMENT_TWO_BYTES:
             /* two bytes */
             index += 2; /* type plus padding. */
             *item_offset = buf[index]
@@ -605,7 +606,7 @@ uint8_t *read_tag_path(uint8_t *buf, char **tag_name, int *item_offset)
             index += 2;
             break;
 
-        case 0x2A:
+        case CIP_NUMERIC_SEGMENT_FOUR_BYTES:
             /* four bytes */
             index += 2; /* type plus padding. */
             *item_offset = buf[index]
