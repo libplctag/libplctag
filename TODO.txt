@@ -1,6 +1,19 @@
 TO DO
 
-* merge to 2.0.
+* add code to check Logix tag type.
+  * LINT/LINT array
+  * DINT/DINT array
+  * INT/INT array
+  * SINT/SINT array
+  * STRING
+  * REAL/REAL array
+  * BOOL/BOOL array
 
+* add code to parse PLC/5, SLC, MicroLogix tag types.
+  * N for integer.
+  * B for bit.
+  * F for float.
+  * T for timer.
+  * Control, message, counter...
 
 
