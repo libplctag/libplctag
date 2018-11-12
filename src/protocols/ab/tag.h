@@ -42,6 +42,23 @@
 #include <ab/request.h>
 
 
+typedef enum {
+    AB_TYPE_BOOL,
+    AB_TYPE_BOOL_ARRAY,
+    AB_TYPE_CONTROL,
+    AB_TYPE_COUNTER,
+    AB_TYPE_FLOAT32,
+    AB_TYPE_FLOAT64,
+    AB_TYPE_INT8,
+    AB_TYPE_INT16,
+    AB_TYPE_INT32,
+    AB_TYPE_INT64,
+    AB_TYPE_STRING,
+    AB_TYPE_SHORT_STRING,
+    AB_TYPE_TIMER
+} elem_type_t;
+
+
 struct ab_tag_t {
     /*struct plc_tag_t p_tag;*/
     TAG_BASE_STRUCT;
@@ -74,6 +91,7 @@ struct ab_tag_t {
     int write_data_per_packet;
 
     /* number of elements and size of each in the tag. */
+    elem_type_t elem_type;
     int elem_count;
     int elem_size;
 
@@ -84,14 +102,6 @@ struct ab_tag_t {
     int byte_offset;
 
     int allow_packing;
-
-//    int num_read_requests; /* number of read requests */
-//    int num_write_requests; /* number of write requests */
-//    int max_requests; /* how many can we have without reallocating? */
-//    int *read_req_sizes;
-//    int *write_req_sizes;
-//
-//    ab_request_p *reqs;
 
     /* flags for operations */
     int read_in_progress;
