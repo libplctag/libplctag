@@ -77,6 +77,8 @@ volatile int library_terminating = 0;
 
 
 /* forward declarations*/
+static int get_tag_data_type(ab_tag_p tag, attr attribs);
+
 static void ab_tag_destroy(ab_tag_p tag);
 //static tag_vtable_p set_tag_vtable(ab_tag_p tag);
 static int default_abort(plc_tag_p tag);
@@ -179,6 +181,7 @@ plc_tag_p ab_tag_create(attr attribs)
 {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path = NULL;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO,"Starting.");
 
@@ -216,35 +219,6 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
-    /* AB PLCs are little endian. */
-    tag->endian = PLCTAG_DATA_LITTLE_ENDIAN;
-
-    /* allocate memory for the data */
-    tag->elem_count = attr_get_int(attribs,"elem_count",1);
-    tag->elem_size = attr_get_int(attribs,"elem_size",0);
-    tag->size = (tag->elem_count) * (tag->elem_size);
-
-    if(tag->size == 0) {
-        /* failure! Need data_size! */
-        pdebug(DEBUG_WARN,"Tag size is zero!");
-        tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag_p)tag;
-    }
-
-    tag->data = (uint8_t*)mem_alloc(tag->size);
-
-    if(tag->data == NULL) {
-        pdebug(DEBUG_WARN,"Unable to allocate tag data!");
-        tag->status = PLCTAG_ERR_NO_MEM;
-        return (plc_tag_p)tag;
-    }
-
-    /* special features for Logix tags. */
-    if(tag->protocol_type == AB_PROTOCOL_LGX) {
-        /* default to allow packing */
-        tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
-    }
-
     /* get the connection path.  We need this to make a decision about the PLC. */
     path = attr_get_str(attribs,"path",NULL);
 
@@ -258,7 +232,6 @@ plc_tag_p ab_tag_create(attr attribs)
         } else {
             pdebug(DEBUG_DETAIL, "Setting up PLC/5 via DH+ bridge tag.");
             tag->use_connected_msg = 1;
-//          tag->use_dhp_direct = 1;
             tag->vtable = &eip_dhp_pccc_vtable;
         }
 
@@ -289,6 +262,13 @@ plc_tag_p ab_tag_create(attr attribs)
             return (plc_tag_p)tag;
         }
 
+        rc = get_tag_data_type(tag, attribs);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error getting tag element data type %s!", plc_tag_decode_error(rc));
+            tag->status = rc;
+            return (plc_tag_p)tag;
+        }
+
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
@@ -310,20 +290,39 @@ plc_tag_p ab_tag_create(attr attribs)
         break;
     }
 
+    if(!tag->elem_size) {
+        tag->elem_size = attr_get_int(attribs, "elem_size", 0);
+    }
+    tag->elem_count = attr_get_int(attribs,"elem_count", 1);
+
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
-//    /*
-//     * set up tag vtable.  This is protocol specific
-//     */
-//    tag->vtable = set_tag_vtable(tag);
-//
-//    if(!tag->vtable) {
-//        pdebug(DEBUG_INFO,"Unable to set tag vtable!");
-//        tag->status = PLCTAG_ERR_BAD_PARAM;
-//        return (plc_tag_p)tag;
+    /* AB PLCs are little endian. */
+    tag->endian = PLCTAG_DATA_LITTLE_ENDIAN;
+
+    /* allocate memory for the data */
+    tag->size = (tag->elem_count) * (tag->elem_size);
+    if(tag->size == 0) {
+        /* failure! Need data_size! */
+        pdebug(DEBUG_WARN,"Tag size is zero!");
+        tag->status = PLCTAG_ERR_BAD_PARAM;
+        return (plc_tag_p)tag;
+    }
+
+    tag->data = (uint8_t*)mem_alloc(tag->size);
+
+    if(tag->data == NULL) {
+        pdebug(DEBUG_WARN,"Unable to allocate tag data!");
+        tag->status = PLCTAG_ERR_NO_MEM;
+        return (plc_tag_p)tag;
+    }
+
+//    /* special features for Logix tags. */
+//    if(tag->protocol_type == AB_PROTOCOL_LGX) {
+//        /* default to allow packing */
+//        tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
 //    }
->>>>>>> Removal of independent connections.
 
     /*
      * Find or create a session.
@@ -356,6 +355,160 @@ plc_tag_p ab_tag_create(attr attribs)
     return (plc_tag_p)tag;
 }
 
+
+/*
+ * determine the tag's data type and size.  Or at least guess it.
+ */
+
+int get_tag_data_type(ab_tag_p tag, attr attribs)
+{
+    const char *elem_type = NULL;
+    const char *tag_name = NULL;
+
+    switch(tag->protocol_type) {
+    case AB_PROTOCOL_PLC:
+    case AB_PROTOCOL_LGX_PCCC:
+    case AB_PROTOCOL_MLGX:
+        tag_name = attr_get_str(attribs,"name", NULL);
+
+        /* the first two characters are the important ones. */
+        if(tag_name && str_length(tag_name) >= 2) {
+            switch(tag_name[0]) {
+            case 'b':
+            case 'B':
+                /*bit*/
+                pdebug(DEBUG_DETAIL,"Found tag element type of bit.");
+                tag->elem_size=1;
+                tag->elem_type = AB_TYPE_BOOL;
+                break;
+
+            case 'c':
+            case 'C':
+                /* counter */
+                pdebug(DEBUG_DETAIL,"Found tag element type of counter.");
+                tag->elem_size=6;
+                tag->elem_type = AB_TYPE_COUNTER;
+                break;
+
+            case 'f':
+            case 'F':
+                /* 32-bit float */
+                pdebug(DEBUG_DETAIL,"Found tag element type of float.");
+                tag->elem_size=4;
+                tag->elem_type = AB_TYPE_FLOAT32;
+                break;
+
+            case 'n':
+            case 'N':
+                /* 16-bit integer */
+                pdebug(DEBUG_DETAIL,"Found tag element type of 16-bit integer.");
+                tag->elem_size=2;
+                tag->elem_type = AB_TYPE_INT16;
+                break;
+
+            case 'r':
+            case 'R':
+                /* control */
+                pdebug(DEBUG_DETAIL,"Found tag element type of control.");
+                tag->elem_size=6;
+                tag->elem_type = AB_TYPE_CONTROL;
+                break;
+
+            case 's':
+            case 'S':
+                /* Status or String */
+                if(tag_name[1] == 't' || tag_name[1] == 'T') {
+                    /* string */
+                    pdebug(DEBUG_DETAIL,"Found tag element type of string.");
+                    tag->elem_size = 84;
+                    tag->elem_type = AB_TYPE_STRING;
+                } else {
+                    /* status */
+                    pdebug(DEBUG_DETAIL,"Found tag element type of status word.");
+                    tag->elem_size = 2;
+                    tag->elem_type = AB_TYPE_INT16;
+                }
+                break;
+
+            case 't':
+            case 'T':
+                /* timer */
+                pdebug(DEBUG_DETAIL,"Found tag element type of timer.");
+                tag->elem_size=6;
+                tag->elem_type = AB_TYPE_TIMER;
+                break;
+
+            default:
+                pdebug(DEBUG_DETAIL,"Unknown tag type for tag %s", tag_name);
+                break;
+            }
+
+        }
+
+        break;
+
+    case AB_PROTOCOL_LGX:
+    case AB_PROTOCOL_MLGX800:
+        /* look for the elem_type attribute. */
+        elem_type = attr_get_str(attribs, "elem_type", NULL);
+        if(elem_type) {
+            if(str_cmp_i(elem_type,"lint") == 0 || str_cmp_i(elem_type, "ulint") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of 64-bit integer.");
+                tag->elem_size = 8;
+                tag->elem_type = AB_TYPE_INT64;
+            } else if(str_cmp_i(elem_type,"dint") == 0 || str_cmp_i(elem_type,"udint") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of 32-bit integer.");
+                tag->elem_size = 4;
+                tag->elem_type = AB_TYPE_INT32;
+            } else if(str_cmp_i(elem_type,"int") == 0 || str_cmp_i(elem_type,"uint") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of 16-bit integer.");
+                tag->elem_size = 2;
+                tag->elem_type = AB_TYPE_INT16;
+            } else if(str_cmp_i(elem_type,"sint") == 0 || str_cmp_i(elem_type,"usint") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of 8-bit integer.");
+                tag->elem_size = 1;
+                tag->elem_type = AB_TYPE_INT8;
+            } else if(str_cmp_i(elem_type,"bool") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of bit.");
+                tag->elem_size = 1;
+                tag->elem_type = AB_TYPE_BOOL;
+            } else if(str_cmp_i(elem_type,"bool array") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of bit array.");
+                tag->elem_size = 4;
+                tag->elem_type = AB_TYPE_BOOL_ARRAY;
+            } else if(str_cmp_i(elem_type,"real") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of 32-bit float.");
+                tag->elem_size = 4;
+                tag->elem_type = AB_TYPE_FLOAT32;
+            } else if(str_cmp_i(elem_type,"lreal") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of 64-bit float.");
+                tag->elem_size = 8;
+                tag->elem_type = AB_TYPE_FLOAT64;
+            } else if(str_cmp_i(elem_type,"string") == 0) {
+                pdebug(DEBUG_DETAIL,"Fount tag element type of string.");
+                tag->elem_size = 88;
+                tag->elem_type = AB_TYPE_STRING;
+            } else if(str_cmp_i(elem_type,"short string") == 0) {
+                pdebug(DEBUG_DETAIL,"Found tag element type of short string.");
+                tag->elem_size = 256; /* FIXME */
+                tag->elem_type = AB_TYPE_SHORT_STRING;
+            } else {
+                pdebug(DEBUG_DETAIL, "Unknown tag type %s", elem_type);
+            }
+        }
+
+        break;
+
+    default:
+        pdebug(DEBUG_WARN, "Unknown PLC type!");
+        return PLCTAG_ERR_BAD_CONFIG;
+        break;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
 
 
 
@@ -411,12 +564,12 @@ int default_write(plc_tag_p tag)
 
 
 /*
- * ab_tag_abort
- *
- * This does the work of stopping any inflight requests.
- * This is not thread-safe.  It must be called from a function
- * that locks the tag's mutex or only from a single thread.
- */
+* ab_tag_abort
+*
+* This does the work of stopping any inflight requests.
+* This is not thread-safe.  It must be called from a function
+* that locks the tag's mutex or only from a single thread.
+*/
 
 int ab_tag_abort(ab_tag_p tag)
 {
