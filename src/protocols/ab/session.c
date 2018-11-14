@@ -49,12 +49,7 @@
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PCCC_MSG_SIZE (258)
 
-
-//#define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /* total packet size. */
-
-
-//#define MAX_EIP_CIP_PACKET_SIZE_EX (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX)
-
+/* max PCCC payload? */
 #define MAX_PCCC_PACKET_SIZE (244) /*
                                     * That's what the docs say.
                                     *
@@ -181,6 +176,23 @@ uint64_t session_get_new_seq_id(ab_session_p sess)
     return res;
 }
 
+
+
+int session_get_max_payload(ab_session_p session)
+{
+    int result = 0;
+
+    if(!session) {
+        pdebug(DEBUG_WARN, "Called with null session pointer!");
+        return 0;
+    }
+
+    critical_block(session->mutex) {
+        result = session->max_payload_size;
+    }
+
+    return result;
+}
 
 int session_find_or_create(ab_session_p *tag_session, attr attribs)
 {
@@ -1781,14 +1793,14 @@ int try_forward_open_ex(ab_session_p session, int *packet_size_guess)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req=NULL;
-    int old_max_payload_size = 0;
+    uint16_t old_max_payload_size = 0;
 
 
     pdebug(DEBUG_INFO,"Starting.");
 
     critical_block(session->mutex) {
         old_max_payload_size = session->max_payload_size;
-        session->max_payload_size = *packet_size_guess;
+        session->max_payload_size = (uint16_t)*packet_size_guess;
     }
 
     /* get a request buffer */
