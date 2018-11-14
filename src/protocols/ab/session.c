@@ -26,8 +26,6 @@
 #include <ab/eip.h>
 #include <ab/error_codes.h>
 #include <ab/session.h>
-//#include <ab/connection.h>
-#include <ab/request.h>
 #include <util/debug.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -37,6 +35,32 @@
 
 
 #define MAX_REQUESTS (50)
+
+
+
+#define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
+
+/* WARNING: this must fit within 9 bits! */
+#define MAX_CIP_MSG_SIZE        (0x01FF & 508)
+
+/* Warning, this must fit within 16 bits */
+#define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
+
+/* maximum for PCCC embedded within CIP. */
+#define MAX_CIP_PCCC_MSG_SIZE (258)
+
+
+//#define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /* total packet size. */
+
+
+//#define MAX_EIP_CIP_PACKET_SIZE_EX (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX)
+
+#define MAX_PCCC_PACKET_SIZE (244) /*
+                                    * That's what the docs say.
+                                    *
+                                    * Needs more testing.
+                                    */
+
 
 static ab_session_p session_create_unsafe(const char* host, int gw_port, const char *path, int plc_type, int use_connected_msg);
 static int session_init(ab_session_p session);
@@ -62,13 +86,14 @@ static int recv_eip_response(ab_session_p session, int timeout);
 static int unpack_response(ab_session_p session, ab_request_p request, int sub_packet);
 static int perform_forward_open(ab_session_p session);
 static int perform_forward_close(ab_session_p session);
-//static int try_forward_open_ex(ab_session_p session);
+static int try_forward_open_ex(ab_session_p session, int *max_payload_size_guess);
 static int try_forward_open(ab_session_p session);
 static int send_forward_open_req(ab_session_p session);
-//static int send_forward_open_req_ex(ab_session_p session);
-static int recv_forward_open_resp(ab_session_p session);
+static int send_forward_open_req_ex(ab_session_p session);
+static int recv_forward_open_resp(ab_session_p session, int *max_payload_size_guess);
 static int send_forward_close_req(ab_session_p session);
 static int recv_forward_close_resp(ab_session_p session);
+static void request_destroy(void *req_arg);
 
 
 static volatile mutex_p session_mutex = NULL;
@@ -479,7 +504,7 @@ ab_session_p session_create_unsafe(const char* host, int gw_port, const char *pa
     }
 
     session->plc_type = plc_type;
-    session->data_capacity = EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX;
+    session->data_capacity = MAX_PACKET_SIZE_EX;
     session->use_connected_msg = use_connected_msg;
     session->status = PLCTAG_STATUS_PENDING;
     session->conn_serial_number = (uint16_t)(intptr_t)(session);
@@ -1666,52 +1691,52 @@ int recv_eip_response(ab_session_p session, int timeout)
 int perform_forward_open(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
+    int max_payload_size = session->max_payload_size;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     do {
-        /* FIXME - refactor this mess.   This can't be correct handling.
-         * Pull the max packet size out into a reference local var and
-         * then update it without changing the base packet size in the
-         * session until the end.
+        /*
+         * Try with a large packet if this is a Logix-class PLC
+         * and we are doing connected messaging.
          */
-//        /* Try Forward Open Extended first with a large connection size */
-//        if(session->plc_type == AB_PROTOCOL_LGX && session->use_connected_msg) {
-//            session->max_payload_size = MAX_CIP_MSG_SIZE_EX;
-//        }
-//
-//        rc = try_forward_open_ex(session);
-//        if(rc == PLCTAG_ERR_TOO_LARGE) {
-//            /* we support the Forward Open Extended command, but we need to use a smaller size. */
-//            pdebug(DEBUG_DETAIL,"ForwardOpenEx is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE_EX, session->max_payload_size);
-//
-//            rc = try_forward_open_ex(session);
-//            if(rc != PLCTAG_STATUS_OK) {
-//                pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
-//            } else {
-//                pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", session->max_payload_size);
-//            }
-//        } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
+
+        if(session->plc_type == AB_PROTOCOL_LGX && session->use_connected_msg) {
+            max_payload_size = MAX_CIP_MSG_SIZE_EX;
+        }
+
+        rc = try_forward_open_ex(session, &max_payload_size);
+        if(rc == PLCTAG_ERR_TOO_LARGE) {
+            /* we support the Forward Open Extended command, but we need to use a smaller size. */
+            pdebug(DEBUG_DETAIL,"ForwardOpenEx is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE_EX, max_payload_size);
+
+            rc = try_forward_open_ex(session, &max_payload_size);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
+            } else {
+                pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", session->max_payload_size);
+            }
+        } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
 //            /* the PLC does not support Forward Open Extended.   Try the old request type. */
 //            if(session->max_payload_size == MAX_CIP_MSG_SIZE_EX) {
 //                session->max_payload_size = MAX_CIP_MSG_SIZE;
 //            }
-//
-//            rc = try_forward_open(session);
-//            if(rc == PLCTAG_ERR_TOO_LARGE) {
-//                /* we support the Forward Open Extended command, but we need to use a smaller size. */
-//                pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, session->max_payload_size);
 
-        rc = try_forward_open(session);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
-        } else {
-            pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", session->max_payload_size);
-        }
-//            }
-//        } /*else {
-//            pdebug(DEBUG_WARN, "Unknown error! rc=%d", rc);
-//        }*/
+            rc = try_forward_open(session);
+            if(rc == PLCTAG_ERR_TOO_LARGE) {
+                /* we support the Forward Open Extended command, but we need to use a smaller size. */
+                pdebug(DEBUG_DETAIL,"ForwardOpen is supported but packet size of %d is not, trying %d.", MAX_CIP_MSG_SIZE, session->max_payload_size);
+
+                rc = try_forward_open(session);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_WARN,"Unable to open connection to PLC (%s)!", plc_tag_decode_error(rc));
+                } else {
+                    pdebug(DEBUG_DETAIL,"ForwardOpen succeeded with packet size %d.", session->max_payload_size);
+                }
+            }
+        } /*else {
+            pdebug(DEBUG_WARN, "Unknown error! rc=%d", rc);
+        }*/
     } while(0);
 
     if(rc == PLCTAG_STATUS_OK) {
@@ -1751,45 +1776,58 @@ int perform_forward_close(ab_session_p session)
     return rc;
 }
 
-//
-//int try_forward_open_ex(ab_session_p session)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//    ab_request_p req=NULL;
-//
-//    pdebug(DEBUG_INFO,"Starting.");
-//
-//    /* get a request buffer */
-//    rc = request_create(&req, MAX_CIP_MSG_SIZE);
-//
-//    do {
-//        if(rc != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
-//            rc = 0;
-//            break;
-//        }
-//
-//        /* send the ForwardOpenEx command to the PLC */
-//        if((rc = send_forward_open_req_ex(session)) != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to send ForwardOpenEx packet!");
-//            break;
-//        }
-//
-//        /* check for the ForwardOpen response. */
-//        if((rc = recv_forward_open_resp(session)) != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
-//            break;
-//        }
-//    } while(0);
-//
-//    if(req) {
-//        req = rc_dec(req);
-//    }
-//
-//    pdebug(DEBUG_INFO,"Done.");
-//
-//    return rc;
 
+int try_forward_open_ex(ab_session_p session, int *packet_size_guess)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p req=NULL;
+    int old_max_payload_size = 0;
+
+
+    pdebug(DEBUG_INFO,"Starting.");
+
+    critical_block(session->mutex) {
+        old_max_payload_size = session->max_payload_size;
+        session->max_payload_size = *packet_size_guess;
+    }
+
+    /* get a request buffer */
+    rc = session_create_request(session, &req);
+
+    do {
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+            rc = 0;
+            break;
+        }
+
+        /* send the ForwardOpenEx command to the PLC */
+        if((rc = send_forward_open_req_ex(session)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to send ForwardOpenEx packet!");
+            break;
+        }
+
+        /* check for the ForwardOpen response. */
+        if((rc = recv_forward_open_resp(session, packet_size_guess)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
+            break;
+        }
+    } while(0);
+
+    if(req) {
+        req = rc_dec(req);
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        critical_block(session->mutex) {
+            session->max_payload_size = old_max_payload_size;
+        }
+    }
+
+    pdebug(DEBUG_INFO,"Done.");
+
+    return rc;
+}
 
 
 int try_forward_open(ab_session_p session)
@@ -1800,7 +1838,7 @@ int try_forward_open(ab_session_p session)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = session_create_request(session, &req);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -1816,7 +1854,7 @@ int try_forward_open(ab_session_p session)
         }
 
         /* check for the ForwardOpen response. */
-        if((rc = recv_forward_open_resp(session)) != PLCTAG_STATUS_OK) {
+        if((rc = recv_forward_open_resp(session, NULL)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN,"Unable to use ForwardOpen response!");
             break;
         }
@@ -1904,81 +1942,81 @@ int send_forward_open_req(ab_session_p session)
 }
 
 
-///* new version of Forward Open */
-//int send_forward_open_req_ex(ab_session_p session)
-//{
-//    eip_forward_open_request_ex_t *fo = NULL;
-//    uint8_t *data;
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    pdebug(DEBUG_INFO,"Starting");
-//
-//    mem_set(session->data, 0, (int)(sizeof(*fo) + session->conn_path_size));
-//
-//    fo = (eip_forward_open_request_ex_t*)(session->data);
-//
-//    /* point to the end of the struct */
-//    data = (session->data) + sizeof(eip_forward_open_request_ex_t);
-//
-//    /* set up the path information. */
-//    mem_copy(data, session->conn_path, session->conn_path_size);
-//    data += session->conn_path_size;
-//
-//    /* fill in the static parts */
-//
-//    /* encap header parts */
-//    fo->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
-//    fo->encap_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->interface_handle))); /* total length of packet except for encap header */
-//    fo->encap_session_handle = h2le32(session->session_handle);
-//    fo->encap_sender_context = h2le64(++session->session_seq_id);
-//    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
-//
-//    /* CPF parts */
-//    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
-//    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
-//    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
-//    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
-//    fo->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->cm_service_code))); /* length of remaining data in UC data item */
-//
-//    /* Connection Manager parts */
-//    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
-//    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
-//    fo->cm_req_path[0] = 0x20;                     /* class */
-//    fo->cm_req_path[1] = 0x06;                     /* CM class */
-//    fo->cm_req_path[2] = 0x24;                     /* instance */
-//    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
-//
-//    /* Forward Open Params */
-//    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
-//    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
-//    fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
-//    fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
-//    /* this might need to be globally unique */
-//    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection ID/serial number. */
-//    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
-//    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
-//    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
-//    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
-//    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
-//    fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
-//    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
-//    fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
-//    fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
-//
-//    /* set the size of the request */
-//    session->data_size = (uint32_t)(data - (session->data));
-//
-//    rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
-//
-//    pdebug(DEBUG_INFO, "Done");
-//
-//    return rc;
-//}
-//
+/* new version of Forward Open */
+int send_forward_open_req_ex(ab_session_p session)
+{
+    eip_forward_open_request_ex_t *fo = NULL;
+    uint8_t *data;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO,"Starting");
+
+    mem_set(session->data, 0, (int)(sizeof(*fo) + session->conn_path_size));
+
+    fo = (eip_forward_open_request_ex_t*)(session->data);
+
+    /* point to the end of the struct */
+    data = (session->data) + sizeof(eip_forward_open_request_ex_t);
+
+    /* set up the path information. */
+    mem_copy(data, session->conn_path, session->conn_path_size);
+    data += session->conn_path_size;
+
+    /* fill in the static parts */
+
+    /* encap header parts */
+    fo->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* 0x006F EIP Send RR Data command */
+    fo->encap_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->interface_handle))); /* total length of packet except for encap header */
+    fo->encap_session_handle = h2le32(session->session_handle);
+    fo->encap_sender_context = h2le64(++session->session_seq_id);
+    fo->router_timeout = h2le16(1);                       /* one second is enough ? */
+
+    /* CPF parts */
+    fo->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
+    fo->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* null address item type */
+    fo->cpf_nai_item_length = h2le16(0);             /* no data, zero length */
+    fo->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* unconnected data item, 0x00B2 */
+    fo->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t*)(&fo->cm_service_code))); /* length of remaining data in UC data item */
+
+    /* Connection Manager parts */
+    fo->cm_service_code = AB_EIP_CMD_FORWARD_OPEN_EX; /* 0x54 Forward Open Request or 0x5B for Forward Open Extended */
+    fo->cm_req_path_size = 2;                      /* size of path in 16-bit words */
+    fo->cm_req_path[0] = 0x20;                     /* class */
+    fo->cm_req_path[1] = 0x06;                     /* CM class */
+    fo->cm_req_path[2] = 0x24;                     /* instance */
+    fo->cm_req_path[3] = 0x01;                     /* instance 1 */
+
+    /* Forward Open Params */
+    fo->secs_per_tick = AB_EIP_SECS_PER_TICK;         /* seconds per tick, no used? */
+    fo->timeout_ticks = AB_EIP_TIMEOUT_TICKS;         /* timeout = srd_secs_per_tick * src_timeout_ticks, not used? */
+    fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
+    fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
+    /* this might need to be globally unique */
+    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection ID/serial number. */
+    fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
+    fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
+    fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
+    fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
+    fo->orig_to_targ_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
+    fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
+    fo->targ_to_orig_conn_params_ex = h2le32(AB_EIP_CONN_PARAM_EX | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
+    fo->transport_class = AB_EIP_TRANSPORT_CLASS_T3; /* 0xA3, server transport, class 3, application trigger */
+    fo->path_size = session->conn_path_size/2; /* size in 16-bit words */
+
+    /* set the size of the request */
+    session->data_size = (uint32_t)(data - (session->data));
+
+    rc = send_eip_request(session, SESSION_DEFAULT_TIMEOUT);
+
+    pdebug(DEBUG_INFO, "Done");
+
+    return rc;
+}
 
 
 
-int recv_forward_open_resp(ab_session_p session)
+
+int recv_forward_open_resp(ab_session_p session, int *max_payload_size_guess)
 {
     eip_forward_open_response_t *fo_resp;
     int rc = PLCTAG_STATUS_OK;
@@ -2013,7 +2051,7 @@ int recv_forward_open_resp(ab_session_p session)
             } else {
                 rc = PLCTAG_ERR_REMOTE_ERR;
 
-                if(fo_resp->general_status == 0x01 && fo_resp->status_size >= 2) {
+                if(max_payload_size_guess && fo_resp->general_status == 0x01 && fo_resp->status_size >= 2) {
                     /* we might have an error that tells us the actual size to use. */
                     uint8_t *data = &fo_resp->status_size;
                     int extended_status = data[1] | (data[2] << 8);
@@ -2021,7 +2059,8 @@ int recv_forward_open_resp(ab_session_p session)
 
                     if(extended_status == 0x109) { /* MAGIC */
                         pdebug(DEBUG_WARN,"Error from forward open request, unsupported size, but size %d is supported.", supported_size);
-                        session->max_payload_size = (uint16_t)supported_size;
+                        //session->max_payload_size = (uint16_t)supported_size;
+                        *max_payload_size_guess = supported_size;
                         rc = PLCTAG_ERR_TOO_LARGE;
                     } else {
                         pdebug(DEBUG_WARN,"CIP extended error %x!", extended_status);
@@ -2154,4 +2193,55 @@ int recv_forward_close_resp(ab_session_p session)
     pdebug(DEBUG_INFO,"Done.");
 
     return rc;
+}
+
+
+
+int session_create_request(ab_session_p session, ab_request_p *req)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p res;
+    size_t request_capacity = 0;
+
+    critical_block(session->mutex) {
+        request_capacity = (size_t)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+    }
+
+    pdebug(DEBUG_DETAIL,"Starting.");
+
+    res = (ab_request_p)rc_alloc((int)(sizeof(struct ab_request_t) + request_capacity), request_destroy);
+    if (!res) {
+        *req = NULL;
+        rc = PLCTAG_ERR_NO_MEM;
+    } else {
+        res->request_capacity = (int)request_capacity;
+        res->lock = LOCK_INIT;
+
+        *req = res;
+    }
+
+    pdebug(DEBUG_DETAIL,"Done.");
+
+    return rc;
+}
+
+
+
+
+
+/*
+ * request_destroy
+ *
+ * The request must be removed from any lists before this!
+ */
+//int request_destroy_unsafe(ab_request_p* req_pp)
+void request_destroy(void *req_arg)
+{
+    ab_request_p req = req_arg;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    req->abort_request = 1;
+
+    pdebug(DEBUG_DETAIL, "Done.");
 }

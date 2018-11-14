@@ -280,7 +280,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->session->max_payload_size);
+    rc = session_create_request(tag->session, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -375,7 +375,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_CIP_MSG_SIZE);
+    rc = session_create_request(tag->session, &req);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -513,7 +513,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->session->max_payload_size);
+    rc = session_create_request(tag->session, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -664,7 +664,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = request_create(&req, tag->session->max_payload_size);
+    rc = session_create_request(tag->session, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1422,7 +1422,7 @@ int calculate_write_data_per_packet(ab_tag_p tag)
                     + 4                             /* byte offset, 32-bit int */
                     + 8;                            /* MAGIC fudge factor */
     } else {
-        max_payload_size = MAX_CIP_MSG_SIZE;
+        max_payload_size = tag->session->max_payload_size;
         overhead =  1                               /* service request, one byte */
                     + tag->encoded_name_size        /* full encoded name */
                     + tag->encoded_type_info_size   /* encoded type size */

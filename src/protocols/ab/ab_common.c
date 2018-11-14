@@ -39,9 +39,7 @@
 #include <ab/eip_pccc.h>
 #include <ab/eip_dhp_pccc.h>
 #include <ab/session.h>
-//#include <ab/connection.h>
 #include <ab/tag.h>
-#include <ab/request.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/vector.h>
