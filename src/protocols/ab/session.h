@@ -29,11 +29,13 @@
 #define __PLCTAG_AB_SESSION_H__ 1
 
 #include <ab/ab_common.h>
-#include <ab/request.h>
+#include <ab/defs.h>
 #include <util/rc.h>
 #include <util/vector.h>
 
 #define MAX_SESSION_HOST    (128)
+
+#define MAX_PACKET_SIZE_EX  (44 + 4002)
 
 /* the following are in microseconds*/
 #define SESSION_DEFAULT_PACKET_INTERVAL (5000)
@@ -71,10 +73,6 @@ struct ab_session_t {
     int port;
     char *path;
     sock_p sock;
-//    int is_open;
-//    int is_registered;
-//    int is_connected;
-//    int was_ok;
 
     /* connection variables. */
     int use_connected_msg;
@@ -83,7 +81,8 @@ struct ab_session_t {
     uint16_t conn_seq_num;
     uint16_t conn_serial_number;
 
-    int plc_type;
+    plc_type_t plc_type;
+
     uint16_t max_payload_size;
     uint8_t *conn_path;
     uint8_t conn_path_size;
@@ -95,9 +94,6 @@ struct ab_session_t {
     /* Sequence ID for requests. */
     uint64_t session_seq_id;
 
-    /* current request being sent, only one at a time */
-    //ab_request_p current_request;
-
     /* list of outstanding requests for this session */
     vector_p requests;
 
@@ -106,15 +102,37 @@ struct ab_session_t {
     uint32_t data_offset;
     uint32_t data_capacity;
     uint32_t data_size;
-    uint8_t data[EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX];
-
-    /* connections for this session */
-//    ab_connection_p connections;
+    uint8_t data[MAX_PACKET_SIZE_EX];
 
     thread_p handler_thread;
     int terminating;
     mutex_p mutex;
 };
+
+struct ab_request_t {
+    /* used to force interlocks with other threads. */
+    lock_t lock;
+
+    int status;
+
+    /* flags for communicating with background thread */
+    int resp_received;
+    int abort_request;
+
+    /* allow requests to be packed in the session */
+    int allow_packing;
+    int packing_num;
+
+    /* time stamp for debugging output */
+    int64_t time_sent;
+
+    /* used by the background thread for incrementally getting data */
+    int request_size; /* total bytes, not just data */
+    int request_capacity;
+    uint8_t data[];
+};
+
+
 
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
 uint64_t session_get_new_seq_id(ab_session_p sess);
@@ -123,15 +141,7 @@ extern int session_startup();
 extern void session_teardown();
 
 extern int session_find_or_create(ab_session_p *session, attr attribs);
-//ab_connection_p session_find_connection_by_path_unsafe(ab_session_p session,const char *path);
-//extern int session_add_connection_unsafe(ab_session_p session, ab_connection_p connection);
-//extern int session_add_connection(ab_session_p session, ab_connection_p connection);
-//extern int session_remove_connection_unsafe(ab_session_p session, ab_connection_p connection);
-//extern int session_remove_connection(ab_session_p session, ab_connection_p connection);
-//extern int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
+extern int session_create_request(ab_session_p session, ab_request_p *request);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
-//extern int session_remove_request_unsafe(ab_session_p sess, ab_request_p req);
-//extern int session_remove_request(ab_session_p sess, ab_request_p req);
-
 
 #endif

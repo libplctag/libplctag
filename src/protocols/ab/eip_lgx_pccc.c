@@ -187,10 +187,10 @@ int tag_read_start(ab_tag_p tag)
 
     /* FIXME - this is not correct for this kind of transaction */
 
-    data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
+    data_per_packet = tag->session->max_payload_size - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_PCCC_PACKET_SIZE);
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->session->max_payload_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -200,7 +200,7 @@ int tag_read_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
+    rc = session_create_request(tag->session, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
@@ -517,20 +517,20 @@ int tag_write_start(ab_tag_p tag)
                  + (tag->encoded_name_size)
                  +2; /* actual request size in elements */
 
-    data_per_packet = MAX_PCCC_PACKET_SIZE - overhead;
+    data_per_packet = tag->session->max_payload_size - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, MAX_PCCC_PACKET_SIZE);
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, tag->session->max_payload_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", MAX_PCCC_PACKET_SIZE, overhead, data_per_packet);
+        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->session->max_payload_size, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     /* get a request buffer */
-    rc = request_create(&req, MAX_PCCC_PACKET_SIZE);
+    rc = session_create_request(tag->session, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
