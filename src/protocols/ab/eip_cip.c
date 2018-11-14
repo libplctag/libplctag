@@ -1411,7 +1411,7 @@ int calculate_write_data_per_packet(ab_tag_p tag)
     /* if we are here, then we have all the type data etc. */
     if(tag->use_connected_msg) {
         pdebug(DEBUG_DETAIL,"Connected tag.");
-        max_payload_size = tag->session->max_payload_size;
+        max_payload_size = session_get_max_payload(tag->session);
         overhead =  1                               /* service request, one byte */
                     + tag->encoded_name_size        /* full encoded name */
                     + tag->encoded_type_info_size   /* encoded type size */
@@ -1419,7 +1419,7 @@ int calculate_write_data_per_packet(ab_tag_p tag)
                     + 4                             /* byte offset, 32-bit int */
                     + 8;                            /* MAGIC fudge factor */
     } else {
-        max_payload_size = tag->session->max_payload_size;
+        max_payload_size = session_get_max_payload(tag->session);
         overhead =  1                               /* service request, one byte */
                     + tag->encoded_name_size        /* full encoded name */
                     + tag->encoded_type_info_size   /* encoded type size */

@@ -33,37 +33,15 @@
 #include <util/rc.h>
 #include <util/vector.h>
 
-#define MAX_SESSION_HOST    (128)
+//#define MAX_SESSION_HOST    (128)
+
+#define SESSION_DEFAULT_TIMEOUT (2000)
 
 #define MAX_PACKET_SIZE_EX  (44 + 4002)
-
-/* the following are in microseconds*/
-#define SESSION_DEFAULT_PACKET_INTERVAL (5000)
-#define SESSION_MAX_PACKET_INTERVAL (100000)
-#define SESSION_MIN_PACKET_INTERVAL (3000)
-#define SESSION_PACKET_LOSS_INTERVAL_INC (5000)
-#define SESSION_PACKET_RECEIVE_INTERVAL_DEC (1000)
-
-
-/* resend interval in milliseconds*/
-#define SESSION_DEFAULT_RESEND_INTERVAL_MS (50)
-#define SESSION_MIN_RESEND_INTERVAL  (10)
-
-#define SESSION_NUM_ROUND_TRIP_SAMPLES (5)
-
-/* how long to wait for session registration before timing out. In milliseconds. */
-//#define SESSION_REGISTRATION_TIMEOUT (1500)
-#define SESSION_DEFAULT_TIMEOUT      (2000)
 
 #define SESSION_MIN_REQUESTS    (10)
 #define SESSION_INC_REQUESTS    (10)
 
-/*
- * the queue depth depends on the type of the request.
- */
-
-#define SESSION_MAX_CONNECTED_REQUESTS_IN_FLIGHT (1)
-#define SESSION_MAX_UNCONNECTED_REQUESTS_IN_FLIGHT (4)
 
 struct ab_session_t {
     int status;
@@ -141,6 +119,7 @@ extern int session_startup();
 extern void session_teardown();
 
 extern int session_find_or_create(ab_session_p *session, attr attribs);
+extern int session_get_max_payload(ab_session_p session);
 extern int session_create_request(ab_session_p session, ab_request_p *request);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
 
