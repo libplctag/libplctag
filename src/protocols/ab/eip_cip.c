@@ -844,6 +844,7 @@ static int check_read_status_connected(ab_tag_p tag)
     eip_cip_co_resp* cip_resp;
     uint8_t* data;
     uint8_t* data_end;
+    int partial_data = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -907,6 +908,9 @@ static int check_read_status_connected(ab_tag_p tag)
 
             break;
         }
+
+        /* check to see if this is a partial response. */
+        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
 
         /* the first byte of the response is a type byte. */
         pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
@@ -991,7 +995,7 @@ static int check_read_status_connected(ab_tag_p tag)
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
         /* skip if we are doing a pre-write read. */
-        if (!tag->pre_write_read && tag->byte_offset < tag->size) {
+        if (!tag->pre_write_read && partial_data && tag->byte_offset < tag->size) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
@@ -1037,6 +1041,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
     eip_cip_uc_resp* cip_resp;
     uint8_t* data;
     uint8_t* data_end;
+    int partial_data = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1100,6 +1105,9 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
             break;
         }
+
+        /* check to see if this is a partial response. */
+        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
 
         /* the first byte of the response is a type byte. */
         pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
@@ -1185,7 +1193,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
         /* skip if we are doing a pre-write read. */
-        if (!tag->pre_write_read && tag->byte_offset < tag->size) {
+        if (!tag->pre_write_read && partial_data && tag->byte_offset < tag->size) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
