@@ -25,31 +25,6 @@
 
 
 
-#define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
-
-/* WARNING: this must fit within 9 bits! */
-#define MAX_CIP_MSG_SIZE        (0x01FF & 508)
-
-/* Warning, this must fit within 16 bits */
-//#define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
-/* FIXME - reset to actual value! */
-#define MAX_CIP_MSG_SIZE_EX     (0x01FF & 508)
-
-/* maximum for PCCC embedded within CIP. */
-#define MAX_CIP_PCCC_MSG_SIZE (258)
-
-
-//#define MAX_EIP_PACKET_SIZE (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE) /* total packet size. */
-
-
-//#define MAX_EIP_CIP_PACKET_SIZE_EX (EIP_CIP_PREFIX_SIZE + MAX_CIP_MSG_SIZE_EX)
-
-#define MAX_PCCC_PACKET_SIZE (244) /*
-                                    * That's what the docs say.
-                                    *
-                                    * Needs more testing.
-                                    */
-
 
 #define AB_EIP_PLC5_PARAM ((uint16_t)0x4302)
 #define AB_EIP_SLC_PARAM ((uint16_t)0x4302)
@@ -208,11 +183,13 @@
 
 
 /* Types of AB protocols */
-#define AB_PROTOCOL_PLC         (1)
-#define AB_PROTOCOL_MLGX        (2)
-#define AB_PROTOCOL_LGX         (3)
-#define AB_PROTOCOL_MLGX800     (4)
-#define AB_PROTOCOL_LGX_PCCC    (5)
+//#define AB_PROTOCOL_PLC         (1)
+//#define AB_PROTOCOL_MLGX        (2)
+//#define AB_PROTOCOL_LGX         (3)
+//#define AB_PROTOCOL_MLGX800     (4)
+//#define AB_PROTOCOL_LGX_PCCC    (5)
+
+typedef enum { AB_PROTOCOL_PLC = 1, AB_PROTOCOL_SLC, AB_PROTOCOL_MLGX, AB_PROTOCOL_LGX, AB_PROTOCOL_LGX_PCCC, AB_PROTOCOL_MLGX800 } plc_type_t;
 
 
 /*********************************************************************

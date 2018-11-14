@@ -34,7 +34,6 @@
 #include <ab/pccc.h>
 #include <ab/eip_dhp_pccc.h>
 #include <ab/tag.h>
-//#include <ab/connection.h>
 #include <ab/session.h>
 #include <ab/defs.h>
 #include <ab/eip.h>
@@ -167,7 +166,7 @@ int tag_read_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req, tag->session->max_payload_size);
+    rc = session_create_request(tag->session, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
         return rc;
@@ -289,7 +288,7 @@ int tag_write_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = request_create(&req, tag->session->max_payload_size);
+    rc = session_create_request(tag->session, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to get new request.  rc=%d",rc);
