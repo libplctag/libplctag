@@ -912,6 +912,12 @@ static int check_read_status_connected(ab_tag_p tag)
         /* the first byte of the response is a type byte. */
         pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
 
+
+        /*  FIXME
+         * check to see if there was any data.  In a packed packet, there might not be any
+         * data passed.  Just the CIP header.
+         */
+
         /* copy the type data. */
 
         /* check for a simple/base type */
