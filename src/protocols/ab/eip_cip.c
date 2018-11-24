@@ -912,80 +912,82 @@ static int check_read_status_connected(ab_tag_p tag)
         /* the first byte of the response is a type byte. */
         pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
 
-
-        /*  FIXME
-         * check to see if there was any data.  In a packed packet, there might not be any
-         * data passed.  Just the CIP header.
+        /*
+         * check to see if there is any data to process.  If this is a packed
+         * response, there might not be.
          */
+        if((data_end - data) > 0) {
+            /* We have some data to process. */
 
-        /* copy the type data. */
+            /* handle the data type part.  This can be long. */
 
-        /* check for a simple/base type */
+            /* check for a simple/base type */
+            if ((*data) >= AB_CIP_DATA_BIT && (*data) <= AB_CIP_DATA_STRINGI) {
+                /* copy the type info for later. */
+                if (tag->encoded_type_info_size == 0) {
+                    tag->encoded_type_info_size = 2;
+                    mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
+                }
 
-        if ((*data) >= AB_CIP_DATA_BIT && (*data) <= AB_CIP_DATA_STRINGI) {
-            /* copy the type info for later. */
-            if (tag->encoded_type_info_size == 0) {
-                tag->encoded_type_info_size = 2;
-                mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
+                /* skip the type byte and zero length byte */
+                data += 2;
+            } else if ((*data) == AB_CIP_DATA_ABREV_STRUCT || (*data) == AB_CIP_DATA_ABREV_ARRAY ||
+                       (*data) == AB_CIP_DATA_FULL_STRUCT || (*data) == AB_CIP_DATA_FULL_ARRAY) {
+                /* this is an aggregate type of some sort, the type info is variable length */
+                int type_length = *(data + 1) + 2;  /*
+                                                       * MAGIC
+                                                       * add 2 to get the total length including
+                                                       * the type byte and the length byte.
+                                                       */
+
+                /* check for extra long types */
+                if (type_length > MAX_TAG_TYPE_INFO) {
+                    pdebug(DEBUG_WARN, "Read data type info is too long (%d)!", type_length);
+                    rc = PLCTAG_ERR_TOO_LARGE;
+                    break;
+                }
+
+                /* copy the type info for later. */
+                if (tag->encoded_type_info_size == 0) {
+                    tag->encoded_type_info_size = type_length;
+                    mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
+                }
+
+                data += type_length;
+            } else {
+                pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=%d", *data);
+                rc = PLCTAG_ERR_UNSUPPORTED;
+                break;
             }
 
-            /* skip the type byte and zero length byte */
-            data += 2;
-        } else if ((*data) == AB_CIP_DATA_ABREV_STRUCT || (*data) == AB_CIP_DATA_ABREV_ARRAY ||
-                   (*data) == AB_CIP_DATA_FULL_STRUCT || (*data) == AB_CIP_DATA_FULL_ARRAY) {
-            /* this is an aggregate type of some sort, the type info is variable length */
-            int type_length =
-                *(data + 1) + 2;  /*
-                                   * MAGIC
-                                   * add 2 to get the total length including
-                                   * the type byte and the length byte.
-                                   */
-
-            /* check for extra long types */
-            if (type_length > MAX_TAG_TYPE_INFO) {
-                pdebug(DEBUG_WARN, "Read data type info is too long (%d)!", type_length);
+            /* check data size. */
+            if ((tag->byte_offset + (data_end - data)) > tag->size) {
+                pdebug(DEBUG_WARN,
+                       "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
+                       tag->byte_offset + (int)(data_end - data),
+                       tag->size);
+                pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->byte_offset, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_LARGE;
                 break;
             }
 
-            /* copy the type info for later. */
-            if (tag->encoded_type_info_size == 0) {
-                tag->encoded_type_info_size = type_length;
-                mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
+            pdebug(DEBUG_INFO, "Got %d bytes of data", (data_end - data));
+
+            /*
+             * copy the data, but only if this is not
+             * a pre-read for a subsequent write!  We do not
+             * want to overwrite the data the upstream has
+             * put into the tag's data buffer.
+             */
+            if (!tag->pre_write_read) {
+                mem_copy(tag->data + tag->byte_offset, data, (int)(data_end - data));
             }
 
-            data += type_length;
+            /* bump the byte offset */
+            tag->byte_offset += (int)(data_end - data);
         } else {
-            pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=%d", *data);
-            rc = PLCTAG_ERR_UNSUPPORTED;
-            break;
+            pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
         }
-
-        /* check data size. */
-        if ((tag->byte_offset + (data_end - data)) > tag->size) {
-            pdebug(DEBUG_WARN,
-                   "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
-                   tag->byte_offset + (int)(data_end - data),
-                   tag->size);
-            pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->byte_offset, (int)(data_end - data));
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        pdebug(DEBUG_INFO, "Got %d bytes of data", (data_end - data));
-
-        /*
-         * copy the data, but only if this is not
-         * a pre-read for a subsequent write!  We do not
-         * want to overwrite the data the upstream has
-         * put into the tag's data buffer.
-         */
-        if (!tag->pre_write_read) {
-            mem_copy(tag->data + tag->byte_offset, data, (int)(data_end - data));
-        }
-
-        /* bump the byte offset */
-        tag->byte_offset += (int)(data_end - data);
 
         /* set the return code */
         rc = PLCTAG_STATUS_OK;
