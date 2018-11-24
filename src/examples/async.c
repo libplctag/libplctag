@@ -20,7 +20,7 @@
 
 
 /*
- * This example reads from a large DINT array.  It creates 150 tags that each read from one element of the
+ * This example reads from a large DINT array.  It creates many tags that each read from one element of the
  * array. It fires off all the tags at once and waits for them to complete the reads. In this case, it waits
  * a fixed amount of time and then tries to read the tags.
  */
@@ -31,9 +31,10 @@
 #include "utils.h"
 
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray[%d]&debug=4"
-#define NUM_TAGS 10
-#define DATA_TIMEOUT 5000
+#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[%d]&debug=4"
+#define NUM_TAGS  (10)
+#define NUM_ELEMS (1000)
+#define DATA_TIMEOUT (5000)
 
 int main()
 {
@@ -44,22 +45,23 @@ int main()
     int done = 0;
     int64_t start = 0;
     int64_t end = 0;
+    int num_elems_per_tag = NUM_ELEMS / NUM_TAGS;
 
     /* create the tags */
     for(i=0; i< NUM_TAGS; i++) {
         char tmp_tag_path[256] = {0,};
-        snprintf_platform(tmp_tag_path, sizeof tmp_tag_path,TAG_PATH,i);
+        snprintf_platform(tmp_tag_path, sizeof tmp_tag_path,TAG_ATTRIBS, num_elems_per_tag, i);
 
         fprintf(stderr, "Attempting to create tag with attribute string '%s'\n",tmp_tag_path);
 
-        tag[i]  = plc_tag_create(tmp_tag_path, DATA_TIMEOUT);
+        tag[i]  = plc_tag_create(tmp_tag_path, 0);
 
         if(tag[i] < 0) {
             fprintf(stderr,"Error %s: could not create tag %d\n",plc_tag_decode_error(tag[i]), i);
         }
     }
 
-
+    /* wait for all the tags to complete creation. */
     do {
         done = 1;
 
@@ -112,7 +114,7 @@ int main()
         if(!done) {
             util_sleep_ms(1);
         }
-    } while(timeout > util_time_ms() && !done) ;
+    } while(timeout > util_time_ms() && !done);
 
     if(!done) {
         fprintf(stderr, "Timeout waiting for tags to finish reading!\n");
