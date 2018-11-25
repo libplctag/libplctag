@@ -277,7 +277,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -372,7 +372,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
@@ -510,7 +510,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -662,7 +662,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;

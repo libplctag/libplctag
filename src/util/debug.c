@@ -36,6 +36,15 @@
 
 
 static int debug_level = DEBUG_NONE;
+static lock_t thread_num_lock = LOCK_INIT;
+static volatile uint32_t thread_num = 1;
+
+/*
+ * Keep the thread ID and the tag ID thread local.
+ */
+
+static THREAD_LOCAL uint32_t this_thread_num = 0;
+static THREAD_LOCAL int tag_id = 0;
 
 extern int set_debug_level(int level)
 {
@@ -53,19 +62,26 @@ extern int get_debug_level(void)
 }
 
 
-static lock_t thread_num_lock = LOCK_INIT;
-static volatile uint32_t thread_num = 1;
 
-static THREAD_LOCAL uint32_t this_thread_num = 0;
+void debug_set_tag_id(int t_id)
+{
+    tag_id = t_id;
+}
+
 
 
 static uint32_t get_thread_id()
 {
     if(!this_thread_num) {
-        while(!lock_acquire(&thread_num_lock)) { } /* FIXME - this could hang! just keep trying */
+        spin_block(&thread_num_lock) {
             this_thread_num = thread_num;
             thread_num++;
-        lock_release(&thread_num_lock);
+        }
+//
+//        while(!lock_acquire(&thread_num_lock)) { } /* FIXME - this could hang! just keep trying */
+//            this_thread_num = thread_num;
+//            thread_num++;
+//        lock_release(&thread_num_lock);
     }
 
     return this_thread_num;
@@ -73,7 +89,7 @@ static uint32_t get_thread_id()
 
 static int make_prefix(char *prefix_buf, int prefix_buf_size)
 {
-	struct tm t;
+    struct tm t;
     time_t epoch;
     int64_t epoch_ms;
     int remainder_ms;
@@ -81,8 +97,8 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
 
     /* make sure we have room, MAGIC */
     if(prefix_buf_size < 37) {
-		return 0;
-	}
+        return 0;
+    }
 
     /* build the prefix */
 
@@ -95,17 +111,17 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
     localtime_r(&epoch,&t);
 
     /* create the prefix and format for the file entry. */
-    rc = snprintf(prefix_buf, (size_t)prefix_buf_size,"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%04u)",
-             t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms, get_thread_id());
+    rc = snprintf(prefix_buf, (size_t)prefix_buf_size,"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%d)",
+                  t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms, get_thread_id(), tag_id);
 
     /* enforce zero string termination */
     if(rc > 1 && rc < prefix_buf_size) {
-		prefix_buf[rc] = 0;
-	} else {
-		prefix_buf[prefix_buf_size - 1] = 0;
-	}
+        prefix_buf[rc] = 0;
+    } else {
+        prefix_buf[prefix_buf_size - 1] = 0;
+    }
 
-	return rc;
+    return rc;
 }
 
 
@@ -117,20 +133,20 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     va_list va;
     char output[2048];
     char prefix[48]; /* MAGIC */
-	int prefix_size;
+    int prefix_size;
 
     /* build the prefix */
     prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
 
     if(prefix_size <= 0) {
-		return;
-	}
+        return;
+    }
 
     /* create the output string template */
     snprintf(output, sizeof(output),"%s %s %s:%d %s\n",prefix, debug_level_name[debug_level], func, line_num, templ);
 
-	/* make sure it is zero terminated */
-	output[sizeof(output)-1] = 0;
+    /* make sure it is zero terminated */
+    output[sizeof(output)-1] = 0;
 
     /* print it out. */
     va_start(va,templ);
@@ -147,15 +163,15 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
 {
     int max_row, row, column;
     char prefix[48]; /* MAGIC */
-	int prefix_size;
-	char row_buf[300]; /* MAGIC */
+    int prefix_size;
+    char row_buf[300]; /* MAGIC */
 
     /* build the prefix */
     prefix_size = make_prefix(prefix,(int)sizeof(prefix));
 
     if(prefix_size <= 0) {
-		return;
-	}
+        return;
+    }
 
     /* determine the number of rows we will need to print. */
     max_row = (count  + (COLUMNS - 1))/COLUMNS;

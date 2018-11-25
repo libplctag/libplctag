@@ -154,6 +154,8 @@ THREAD_FUNC(tag_tickler_func)
 {
     (void)arg;
 
+    debug_set_tag_id(0);
+
     pdebug(DEBUG_INFO,"Starting.");
 
     while(!library_terminating) {
@@ -174,9 +176,11 @@ THREAD_FUNC(tag_tickler_func)
                     tag = hashtable_get_index(tags, i);
 
                     if(tag) {
+                        debug_set_tag_id(tag->tag_id);
                         tag = rc_inc(tag);
                     }
                 } else {
+                    debug_set_tag_id(0);
                     tag = NULL;
                 }
             }
@@ -190,6 +194,7 @@ THREAD_FUNC(tag_tickler_func)
             }
 
             if(tag) {
+                debug_set_tag_id(0);
                 rc_dec(tag);
             }
         }
@@ -198,6 +203,8 @@ THREAD_FUNC(tag_tickler_func)
             sleep_ms(1);
         }
     }
+
+    debug_set_tag_id(0);
 
     pdebug(DEBUG_INFO,"Terminating.");
 
@@ -630,6 +637,8 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
     rc_dec(tag);
 
     pdebug(DEBUG_INFO, "Done.");
+
+    debug_set_tag_id(0);
 
     return PLCTAG_STATUS_OK;
 }
@@ -1750,11 +1759,15 @@ plc_tag_p lookup_tag(int32_t tag_id)
     critical_block(tag_lookup_mutex) {
         tag = hashtable_get(tags, (int64_t)tag_id);
 
-        pdebug(DEBUG_SPEW, "Found tag %p with id %d.", tag, tag->tag_id);
+        if(tag) {
+            debug_set_tag_id(tag->tag_id);
+        }
 
         if(tag && tag->tag_id == tag_id) {
+            pdebug(DEBUG_SPEW, "Found tag %p with id %d.", tag, tag->tag_id);
             tag = rc_inc(tag);
         } else {
+            debug_set_tag_id(0);
             tag = NULL;
         }
     }
