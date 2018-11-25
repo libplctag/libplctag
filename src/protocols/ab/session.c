@@ -1113,13 +1113,14 @@ int process_requests(ab_session_p session)
     int num_aborted_requests = 0;
     int remaining_space = 0;
 
+    debug_set_tag_id(0);
+
     pdebug(DEBUG_SPEW, "Starting.");
 
     if(!session) {
         pdebug(DEBUG_WARN, "Null session pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
-
 
     pdebug(DEBUG_SPEW, "Checking for requests to process.");
 
@@ -1158,7 +1159,6 @@ int process_requests(ab_session_p session)
 
                 remaining_space = remaining_space - get_payload_size(request);
 
-                pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests, remaining_space);
 
                 /*
                  * If we have a non-packable request, only queue it if it is the first one.
@@ -1166,6 +1166,7 @@ int process_requests(ab_session_p session)
                  */
 
                 if(num_bundled_requests == 0 || (request->allow_packing && remaining_space > 0)) {
+                    //pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1, remaining_space);
                     bundled_requests[num_bundled_requests] = request;
                     num_bundled_requests++;
 
@@ -1184,6 +1185,8 @@ int process_requests(ab_session_p session)
         for(int i=0; i < num_aborted_requests; i++) {
             request = aborted_requests[i];
 
+            debug_set_tag_id(request->tag_id);
+
             pdebug(DEBUG_DETAIL, "Request %p is aborted.", request);
 
             request->status = PLCTAG_ERR_ABORT;
@@ -1194,9 +1197,11 @@ int process_requests(ab_session_p session)
         }
     }
 
+    debug_set_tag_id(0);
+
     if(num_bundled_requests > 0) {
 
-        pdebug(DEBUG_SPEW, "%d requests to process.", num_bundled_requests);
+        pdebug(DEBUG_DETAIL, "%d requests to process.", num_bundled_requests);
 
         do {
             /* copy and pack the requests into the session buffer. */
@@ -1226,6 +1231,8 @@ int process_requests(ab_session_p session)
 
             /* copy the results back out. Every request gets a copy. */
             for(int i=0; i < num_bundled_requests; i++) {
+                debug_set_tag_id(bundled_requests[i]->tag_id);
+
                 rc = unpack_response(session, bundled_requests[i], i);
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN, "Unable to unpack response!");
@@ -1239,6 +1246,8 @@ int process_requests(ab_session_p session)
             rc = PLCTAG_STATUS_OK;
         } while(0);
     }
+
+    debug_set_tag_id(0);
 
     pdebug(DEBUG_SPEW,"Done.");
 
@@ -1398,6 +1407,8 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    debug_set_tag_id(requests[0]->tag_id);
+
     /* get the header info from the first request. Just copy the whole thing. */
     mem_copy(session->data, requests[0]->data, requests[0]->request_size);
     session->data_size = (uint32_t)requests[0]->request_size;
@@ -1405,6 +1416,9 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     /* special case the case where there is just one request. */
     if(num_requests == 1) {
         pdebug(DEBUG_INFO, "Only one request, so done.");
+
+        debug_set_tag_id(0);
+
         return PLCTAG_STATUS_OK;
     }
 
@@ -1446,6 +1460,8 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
 
     /* now process the rest of the requests. */
     for(int i=1; i<num_requests; i++) {
+        debug_set_tag_id(requests[i]->tag_id);
+
         /* set up the offset */
         multi_header->request_offsets[i] = h2le16((uint16_t)current_offset);
 
@@ -1474,6 +1490,8 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
 
     /* set the total data size */
     session->data_size = (uint32_t)(next_pkt_data - session->data);
+
+    debug_set_tag_id(0);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -1804,7 +1822,7 @@ int try_forward_open_ex(ab_session_p session, int *packet_size_guess)
     }
 
     /* get a request buffer */
-    rc = session_create_request(session, &req);
+    rc = session_create_request(session, 0, &req);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -1850,7 +1868,7 @@ int try_forward_open(ab_session_p session)
     pdebug(DEBUG_INFO,"Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(session, &req);
+    rc = session_create_request(session, 0, &req);
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
@@ -2209,7 +2227,7 @@ int recv_forward_close_resp(ab_session_p session)
 
 
 
-int session_create_request(ab_session_p session, ab_request_p *req)
+int session_create_request(ab_session_p session, int tag_id, ab_request_p *req)
 {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p res;
@@ -2226,6 +2244,7 @@ int session_create_request(ab_session_p session, ab_request_p *req)
         *req = NULL;
         rc = PLCTAG_ERR_NO_MEM;
     } else {
+        res->tag_id = tag_id;
         res->request_capacity = (int)request_capacity;
         res->lock = LOCK_INIT;
 

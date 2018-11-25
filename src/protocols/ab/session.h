@@ -97,6 +97,9 @@ struct ab_request_t {
     int resp_received;
     int abort_request;
 
+    /* debugging info */
+    int tag_id;
+
     /* allow requests to be packed in the session */
     int allow_packing;
     int packing_num;
@@ -120,7 +123,7 @@ extern void session_teardown();
 
 extern int session_find_or_create(ab_session_p *session, attr attribs);
 extern int session_get_max_payload(ab_session_p session);
-extern int session_create_request(ab_session_p session, ab_request_p *request);
+extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
 
 #endif

@@ -37,6 +37,8 @@
 
 extern int set_debug_level(int debug_level);
 extern int get_debug_level(void);
+extern void debug_set_tag_id(int tag_id);
+
 extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...);
 /*#if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
 #define pdebug(d,f,...) \
