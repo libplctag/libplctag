@@ -516,9 +516,10 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
         return rc;
     }
 
-    if(tag->write_data_per_packet == 0) {
-        /* FIXME - check return value! */
-        calculate_write_data_per_packet(tag);
+    rc = calculate_write_data_per_packet(tag);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        return rc;
     }
 
     if(tag->write_data_per_packet < tag->size) {
@@ -667,9 +668,10 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
         return rc;
     }
 
-    if(tag->write_data_per_packet == 0) {
-        /* FIXME - check return value! */
-        calculate_write_data_per_packet(tag);
+    rc = calculate_write_data_per_packet(tag);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        return rc;
     }
 
     if(tag->write_data_per_packet < tag->size) {
@@ -1419,10 +1421,10 @@ int calculate_write_data_per_packet(ab_tag_p tag)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if (tag->write_data_per_packet > 0) {
-        pdebug(DEBUG_DETAIL, "Early termination, write sizes already calculated.");
-        return tag->write_data_per_packet;
-    }
+//    if (tag->write_data_per_packet > 0) {
+//        pdebug(DEBUG_DETAIL, "Early termination, write sizes already calculated.");
+//        return tag->write_data_per_packet;
+//    }
 
     /* if we are here, then we have all the type data etc. */
     if(tag->use_connected_msg) {
