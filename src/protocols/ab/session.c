@@ -1237,6 +1237,9 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
+    /* clear out the request data. */
+    mem_set(request->data, 0, request->request_capacity);
+
     /* change what we do depending on the type. */
     if(packed_resp->reply_service != (AB_EIP_CMD_CIP_MULTI | AB_EIP_CMD_CIP_OK)) {
         /* copy the data back into the request buffer. */
@@ -1248,7 +1251,6 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
             return PLCTAG_ERR_TOO_LARGE;
         }
 
-        mem_set(request->data, 0, request->request_capacity);
         mem_copy(request->data, session->data, new_eip_len);
     } else {
         cip_multi_resp_header *multi = (cip_multi_resp_header *)(&packed_resp->reply_service);
