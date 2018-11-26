@@ -74,7 +74,7 @@ static void close_log(FILE *log)
 static int32_t open_tag(FILE *log, int tid, int num_elems)
 {
     int rc = PLCTAG_STATUS_OK;
-    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.39&path=1,5&cpu=lgx&elem_size=4&elem_count=%d&name=TestBigArray[%d]&debug=4";
+    static const char *tag_str = "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=lgx&elem_size=4&elem_count=%d&name=TestBigArray[%d]&debug=4";
     char buf[250] = {0,};
     int32_t tag = 0;
 
