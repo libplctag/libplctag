@@ -461,7 +461,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
             tag->status = rc;
         }
 
-        pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
+        pdebug(DEBUG_INFO,"tag set up elapsed time %ldms",(time_ms()-start_time));
     }
 
     /* map the tag to a tag ID */
@@ -776,7 +776,7 @@ int plc_tag_status(int32_t id)
 
     rc_dec(tag);
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_SPEW, "Done with rc=%s.", plc_tag_decode_error(rc));
 
     return rc;
 }
