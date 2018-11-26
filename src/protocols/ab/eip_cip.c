@@ -911,15 +911,13 @@ static int check_read_status_connected(ab_tag_p tag)
         /* check to see if this is a partial response. */
         partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
 
-        /* the first byte of the response is a type byte. */
-        pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
-
         /*
          * check to see if there is any data to process.  If this is a packed
          * response, there might not be.
          */
         if((data_end - data) > 0) {
-            /* We have some data to process. */
+            /* the first byte of the response is a type byte. */
+            pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
 
             /* handle the data type part.  This can be long. */
 
@@ -1466,5 +1464,5 @@ int calculate_write_data_per_packet(ab_tag_p tag)
 
     pdebug(DEBUG_DETAIL, "Done.");
 
-    return data_per_packet;
+    return PLCTAG_STATUS_OK;
 }
