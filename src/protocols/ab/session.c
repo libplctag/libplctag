@@ -27,16 +27,12 @@
 #include <ab/error_codes.h>
 #include <ab/session.h>
 #include <util/debug.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <time.h>
 
-
-
-
-#define MAX_REQUESTS (50)
-
-
+#define MAX_REQUESTS (100)
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
@@ -768,6 +764,8 @@ void session_destroy(void *session_arg)
     /* so remove the session from the list so no one else can reference it. */
     remove_session(session);
 
+    pdebug(DEBUG_INFO, "Session sent %"PRId64" packets.", session->packet_count);
+
     /* terminate the thread first. */
     session->terminating = 1;
 
@@ -925,32 +923,6 @@ int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
 
     return rc;
 }
-
-
-
-/*
- * session_remove_request
- *
- * This is a thread-safe version of the above routine.
-// */
-//int session_remove_request(ab_session_p sess, ab_request_p req)
-//{
-//    int rc = PLCTAG_STATUS_OK;
-//
-//    pdebug(DEBUG_DETAIL, "Starting.  session=%p, req=%p", sess, req);
-//
-//    if(sess == NULL || req == NULL) {
-//        return rc;
-//    }
-//
-//    critical_block(sess->mutex) {
-//        rc = session_remove_request_unsafe(sess, req);
-//    }
-//
-//    pdebug(DEBUG_DETAIL, "Done.");
-//
-//    return rc;
-//}
 
 
 
@@ -1270,6 +1242,13 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
         /* copy the data back into the request buffer. */
         new_eip_len = (int)session->data_size;
         pdebug(DEBUG_DETAIL, "Got single response packet.  Copying %d bytes unchanged.", new_eip_len);
+
+        if(new_eip_len > request->request_capacity) {
+            pdebug(DEBUG_WARN,"Request data buffer (%d bytes) smaller than result (%d bytes) from PLC!", request->request_capacity, new_eip_len);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
+        mem_set(request->data, 0, request->request_capacity);
         mem_copy(request->data, session->data, new_eip_len);
     } else {
         cip_multi_resp_header *multi = (cip_multi_resp_header *)(&packed_resp->reply_service);
@@ -1278,13 +1257,6 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
 
         /* this is a packed response. */
         pdebug(DEBUG_DETAIL, "Got multiple response packet, subpacket %d", sub_packet);
-
-//        /* fix up the data pointer. */
-//        pdebug(DEBUG_DETAIL, "Total responses in this packet: %d", le2h16(multi->request_count));
-//
-//        for(uint16_t index = 0; index < total_responses; index++) {
-//            pdebug(DEBUG_SPEW, "Offset at index %d is %d", index, le2h16(multi->request_offsets[index]));
-//        }
 
         pdebug(DEBUG_DETAIL, "Our result offset is %d bytes.", (int)le2h16(multi->request_offsets[sub_packet]));
 
@@ -1306,13 +1278,21 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
         /* copy the header down */
         mem_copy(request->data, session->data, (int)sizeof(eip_cip_co_resp));
 
+        /* size of the new packet */
+        new_eip_len = (uint16_t)(((uint8_t *)(&unpacked_resp->reply_service) + pkt_len) /* end of the packet */
+                                 - (uint8_t *)(request->data));                                      /* start of the packet */
+
+        /* too big? */
+        if(new_eip_len > request->request_capacity) {
+            pdebug(DEBUG_WARN,"Request data buffer (%d bytes) smaller than result (%d bytes) from PLC!", request->request_capacity, new_eip_len);
+            return PLCTAG_ERR_TOO_LARGE;
+        }
+
         /* now copy the packet over that. */
         mem_copy(&unpacked_resp->reply_service, pkt_start, pkt_len);
 
         /* stitch up the packet sizes. */
         unpacked_resp->cpf_cdi_item_length = h2le16((uint16_t)(pkt_len + (int)sizeof(uint16_le))); /* extra for the connection sequence */
-        new_eip_len = (uint16_t)(((uint8_t *)(&unpacked_resp->reply_service) + pkt_len) /* end of the packet */
-                                 - (uint8_t *)(request->data));                                      /* start of the packet */
         unpacked_resp->encap_length = h2le16((uint16_t)(new_eip_len - (uint16_t)sizeof(eip_encap)));
     }
 
@@ -1434,6 +1414,8 @@ int pack_requests(ab_session_p session, ab_request_p *requests, int num_requests
     /* make room in the request packet in the session for the header. */
     pkt_start = (uint8_t *)(&packed_req->cpf_conn_seq_num) + sizeof(packed_req->cpf_conn_seq_num);
     pkt_len = (int)le2h16(packed_req->cpf_cdi_item_length) - (int)sizeof(packed_req->cpf_conn_seq_num);
+
+    pdebug(DEBUG_DETAIL, "packet 0 is of length %d.", pkt_len);
 
     /* point to where we want the current packet to start. */
     first_pkt_data = pkt_start + header_size;
@@ -1584,6 +1566,7 @@ int send_eip_request(ab_session_p session, int timeout)
     pdebug_dump_bytes(DEBUG_DETAIL, session->data, (int)(session->data_size));
 
     session->data_offset = 0;
+    session->packet_count++;
 
     /* send the packet */
     do {
