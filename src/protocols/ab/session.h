@@ -82,6 +82,8 @@ struct ab_session_t {
     uint32_t data_size;
     uint8_t data[MAX_PACKET_SIZE_EX];
 
+    uint64_t packet_count;
+
     thread_p handler_thread;
     int terminating;
     mutex_p mutex;
