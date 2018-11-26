@@ -292,7 +292,7 @@ static int check_read_status(ab_tag_p tag)
     int pccc_res_length;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL,"Starting");
+    pdebug(DEBUG_SPEW,"Starting");
 
     /* PCCC only can have one request outstanding */
     /* is there an outstanding request? */
@@ -383,7 +383,7 @@ static int check_read_status(ab_tag_p tag)
 
     tag->read_in_progress = 0;
 
-    pdebug(DEBUG_INFO,"Done.");
+    pdebug(DEBUG_SPEW,"Done.");
 
     return rc;
 }
@@ -590,7 +590,7 @@ static int check_write_status(ab_tag_p tag)
     uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL,"Starting.");
+    pdebug(DEBUG_SPEW,"Starting.");
 
     /* is there an outstanding request? */
     if(!tag->req) {
@@ -643,7 +643,7 @@ static int check_write_status(ab_tag_p tag)
     tag->req = rc_dec(tag->req);
     tag->write_in_progress = 0;
 
-    pdebug(DEBUG_WARN,"Done.");
+    pdebug(DEBUG_SPEW,"Done.");
 
     /* Success! */
     return rc;
