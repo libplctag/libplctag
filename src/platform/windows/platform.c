@@ -234,7 +234,7 @@ extern int str_length(const char *str)
         return 0;
     }
 
-    return strlen(str);
+    return (int)strlen(str);
 }
 
 
@@ -349,7 +349,7 @@ extern char **str_split(const char *str, const char *sep)
     tmp = (char *)res + sizeof(char *)*(sub_str_count+1);
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
-    str_copy((char *)tmp, (size - ((char*)tmp - (char*)res)), str);
+    str_copy((char *)tmp, (int)(size - ((char*)tmp - (char*)res)), str);
 
     /* set up the pointers */
     sub_str_count=0;
@@ -789,7 +789,7 @@ extern void lock_release(lock_t *lock)
 
 
 struct sock_t {
-    int fd;
+    SOCKET fd;
     int port;
     int is_open;
 };
@@ -848,7 +848,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     u_long non_blocking=1;
     int i = 0;
     int done = 0;
-    int fd;
+    SOCKET fd;
     struct timeval timeout; /* used for timing out connections etc. */
     struct linger so_linger;
 
