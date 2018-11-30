@@ -18,12 +18,6 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/**************************************************************************
- * CHANGE LOG                                                             *
- *                                                                        *
- * 2013-11-19  KRH - Created file.                                        *
- **************************************************************************/
-
 #include <string.h>
 #include <ctype.h>
 #include <lib/libplctag.h>
@@ -34,40 +28,108 @@
 #include <util/debug.h>
 
 
+
+static int parse_pccc_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
+static int parse_pccc_file_type(const char **str, pccc_file_t *file_type);
+static int parse_pccc_file_num(const char **str, int *file_num);
+static int parse_pccc_elem_num(const char **str, int *elem_num);
+static int parse_pccc_subelem_num(const char **str, pccc_file_t file_type, int *subelem_num);
+static void encode_level(uint8_t *data, int *index, int val);
+
+
+
+
 /*
- * convert a string of digits to a number and encode that.  Only numbers as high as 65535 (?) can
- * be encoded like this.
+ * Public functions
  */
 
-static const char *parse_pccc_name_number(const char *name, uint8_t *data, int *size)
-{
-    uint32_t tmp = 0;
 
-    if(!name || !*name || !isdigit(*name)) {
-        return NULL;
-    }
 
-    while(*name && isdigit(*name) && tmp < 65535) {
-        tmp *= (uint32_t)10;
-        tmp += (uint32_t)(*name - '0');
-        name++;
-    }
-
-    if(tmp <= 254) {
-        data[*size] = (uint8_t)tmp;
-        *size = *size + 1;
-    } else {
-        data[*size] = (uint8_t)0xff;
-        data[*size + 1] = (uint8_t)(tmp & 0xff);
-        data[*size + 2] = (uint8_t)((tmp >> 8) & 0xff);
-        *size = *size + 3;
-    }
-
-    return name;
-}
 
 /*
- * Encode the name as a level encoding.
+ * The PLC/5, SLC, and MicroLogix have their own unique way of determining what you are
+ * accessing.   All variables and data are in data-table files.  Each data-table contains
+ * data of one type.
+ *
+ * The main ones are:
+ *
+ * File Type   Name    Structure/Size
+ * ASCII       A       1 byte per character
+ * Bit         B       word
+ * Block-transfer BT   structure/6 words
+ * Counter     C       structure/3 words
+ * BCD         D       word
+ * Float       F       32-bit float
+ * Input       I       word
+ * Output      O       word
+ * Message     MG      structure/56 words
+ * Integer     N       word
+ * PID         PD      structure/41 floats
+ * Control     R       structure/3 words
+ * Status      S       word
+ * SFC         SC      structure/3 words
+ * String      ST      structure/84 bytes
+ * Timer       T       structure/3 words
+ *
+ * Logical address are formulated as follows:
+ *
+ * <data type> <file #> : <element #> <sub-element selector>
+ *
+ * The data type is the "Name" above.
+ *
+ * The file # is the data-table file number.
+ *
+ * The element number is the index (zero based) into the table.
+ *
+ * The sub-element selector is one of three things:
+ *
+ * 1) missing.   A logical address like N7:0 is perfectly fine and selects a full 16-bit integer.
+ * 2) a named field in a timer, counter, control, PID, block transfer, message, or string.
+ * 3) a bit within a word for integers or bits.
+ *
+ * The following are the supported named fields:
+ *
+ * Timer/Counter
+ * Offset   Field
+ * 0        con - control
+ * 1        pre - preset
+ * 2        acc - accumulated
+ *
+ * R/Control
+ * Offset   Field
+ * 0        con - control
+ * 1        len - length
+ * 2        pos - position
+ *
+ * PD/PID
+ * Offset   Field
+ * 0        con - control
+ * 2        sp - SP
+ * 4        kp - Kp
+ * 6        ki - Ki
+ * 8        kd - Kd
+ * 26       pv - PV
+ *
+ * BT
+ * Offset   Field
+ * 0        con - control
+ * 1        rlen - RLEN
+ * 2        dlen - DLEN
+ * 3        df - data file #
+ * 4        elem - element #
+ * 5        rgs - rack/grp/slot
+ *
+ * MG
+ * Offset   Field
+ * 0        con - control
+ * 1        err - error
+ * 2        rlen - RLEN
+ * 3        dlen - DLEN
+ */
+
+
+/*
+ * Encode the logical address as a level encoding.
  *
  * Byte Meaning
  * 0    level flags
@@ -76,185 +138,63 @@ static const char *parse_pccc_name_number(const char *name, uint8_t *data, int *
  * 1-3  level three
  */
 
-int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag_name_size)
+int pccc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size)
 {
-    const char *tmp = name;
-    uint8_t *level_byte = data;
+    int rc = PLCTAG_STATUS_OK;
+    uint8_t level_byte = 0;
+    int file_num = 0;
+    int elem_num = 0;
+    int subelem_num = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!data || !size || !name) {
-        return 0;
+        pdebug(DEBUG_WARN, "Called with null data, or name or zero sized data!");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
     *size = 0;
+    *file_type = PCCC_FILE_UNKNOWN;
 
-    if(!strlen(name)) {
-        return 0;
+    if((rc = parse_pccc_logical_address(name, file_type, &file_num, &elem_num, &subelem_num)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to parse PCCC logical addresss!");
+        return rc;
     }
 
-    if(max_tag_name_size < 10) {
-        return 0;
-    }
-
-    /* get the data type */
-    tmp = name;
-
-    //pdebug(DEBUG_DETAIL,"starting to parse name %s",tmp);
-
-    /* skip to the first number */
-    while(*tmp && !isdigit(*tmp)) {
-        //pdebug(DEBUG_DETAIL,"skipping character '%c'",*tmp);
-        tmp++;
+    /* check for space. */
+    if(max_tag_name_size < (1 + 3 + 3 + 3)) {
+        pdebug(DEBUG_WARN,"Encoded PCCC logical address buffer is too small!");
+        return PLCTAG_ERR_TOO_SMALL;
     }
 
     /* allocate space for the level byte */
     *size = 1;
 
-    /* the next thing is the file number, and we parse that into up to three bytes. */
-    tmp = parse_pccc_name_number(tmp, data, size);
+    /* do the required levels.  Remember we start at the low bit! */
+    level_byte = 0x06; /* level one and two */
 
-    if(!tmp) {
-        /* oops, bad parse! */
-        *size = 0;
-        return 0;
+    /* add in the data file number. */
+    encode_level(data, size, file_num);
+
+    /* add in the element number */
+    encode_level(data, size, elem_num);
+
+    /* check to see if we need to put in a subelement. */
+    if(subelem_num >= 0) {
+        level_byte |= 0x08;
+
+        encode_level(data, size, subelem_num);
     }
 
-    *level_byte |= 0x02;
+    /* store the encoded levels. */
+    data[0] = level_byte;
 
-    if(*tmp != ':') {
-        /* bad parse! */
-        pdebug(DEBUG_WARN,"bad parse of name, failed to fine : after data file number.");
-        *size = 0;
-        return 0;
-    }
+    pdebug(DEBUG_DETAIL,"Done.");
 
-    /* bump past the : character */
-    ++tmp;
-
-    /* now read the element number */
-    tmp = parse_pccc_name_number(tmp, data, size);
-    if(!tmp) {
-        /* oops, bad parse! */
-        *size = 0;
-        return 0;
-    }
-
-    *level_byte |= 0x04;
-
-    /*
-     * if there is a trailing part, it is something like .ACC, so convert that
-     * into the third level, sub-element, of the address/name.
-     */
-
-    if(strlen(tmp) > 0 && (*tmp == '/' || *tmp == '.')) {
-        uint8_t sub_element=255;
-
-        /* bump past the / or . character */
-        ++tmp;
-
-        /*
-         * If there is remaining data, it might be a special
-         * field name.  Or it might be a bit number.
-         *
-         * The fields are:
-         *
-         * Timer/Counter
-         * Offset   Field
-         * 0        con - control
-         * 1        pre - preset
-         * 2        acc - accumulated
-         *
-         * Control
-         * Offset   Field
-         * 0        con - control
-         * 1        len - length
-         * 2        pos - position
-         *
-         * PD/PID
-         * Offset   Field
-         * 0        con - control
-         * 2        sp - SP
-         * 4        kp - Kp
-         * 6        ki - Ki
-         * 8        kd - Kd
-         * 26       pv - PV
-         *
-         * BT
-         * Offset   Field
-         * 0        con - control
-         * 1        rlen - RLEN
-         * 2        dlen - DLEN
-         * 3        df - data file #
-         * 4        elem - element #
-         * 5        rgs - rack/grp/slot
-         *
-         * MG
-         * Offset   Field
-         * 0        con - control
-         * 1        err - error
-         * 2        rlen - RLEN
-         * 3        dlen - DLEN
-         */
-
-        /* test the remaining part of the name */
-        if(!str_cmp_i(tmp,"con")) {
-            sub_element = 0;
-        } else if(!str_cmp_i(tmp,"pre")) {
-            sub_element = 1;
-        } else if(!str_cmp_i(tmp,"acc")) {
-            sub_element = 2;
-        } else if(!str_cmp_i(tmp, "len")) {
-            sub_element = 1;
-        } else if(!str_cmp_i(tmp, "pos")) {
-            sub_element = 2;
-        } else if(!str_cmp_i(tmp, "sp")) {
-            sub_element = 2;
-        } else if(!str_cmp_i(tmp, "kp")) {
-            sub_element = 4;
-        } else if(!str_cmp_i(tmp, "ki")) {
-            sub_element = 6;
-        } else if(!str_cmp_i(tmp, "kd")) {
-            sub_element = 8;
-        } else if(!str_cmp_i(tmp, "pv")) {
-            sub_element = 26;
-        } else if(!str_cmp_i(tmp, "rlen")) {
-            sub_element = 1;
-        } else if(!str_cmp_i(tmp, "dlen")) {
-            sub_element = 2;
-        } else if(!str_cmp_i(tmp, "df")) {
-            sub_element = 3;
-        } else if(!str_cmp_i(tmp, "elem")) {
-            sub_element = 4;
-        } else if(!str_cmp_i(tmp, "rgs")) {
-            sub_element = 5;
-        } else if(!str_cmp_i(tmp, "err")) {
-            sub_element = 1;
-            /* FIXME - missing RLEN and DLEN for MG! */
-        } else {
-            /* FIXME - what to do here? */
-            tmp = parse_pccc_name_number(tmp, data, size);
-            if(!tmp) {
-                /* oops, bad parse! */
-                pdebug(DEBUG_WARN, "Unable to correctly parse PLC/5-style name! %s", name);
-                *size = 0;
-                return 0;
-            }
-
-            /* we do have a fourth element */
-            *level_byte |= 0x08;
-
-            /* guard against the code below */
-            sub_element = 255;
-        }
-
-        if(sub_element != 255) {
-            data[*size] = sub_element;
-            *size = *size + 1;
-            *level_byte |= 0x08;
-        }
-    }
-
-    return 1;
+    return PLCTAG_STATUS_OK;
 }
+
+
 
 
 
@@ -580,3 +520,436 @@ int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t
 
     return (int)(data - dt_byte);
 }
+
+
+
+
+
+/*
+ * Helper functions
+ */
+
+
+
+
+static int parse_pccc_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *subelem_num)
+{
+    int rc = PLCTAG_STATUS_OK;
+    const char *p = name;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        if((rc = parse_pccc_file_type(&p, file_type)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for data-table type! Error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        if((rc = parse_pccc_file_num(&p, file_num)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for file number! Error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        if((rc = parse_pccc_elem_num(&p, elem_num)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for element number! Error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        if((rc = parse_pccc_subelem_num(&p, *file_type, subelem_num)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for subelement number! Error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+    } while(0);
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    return rc;
+}
+
+
+
+int parse_pccc_file_type(const char **str, pccc_file_t *file_type)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    switch((*str)[0]) {
+    case 'A':
+    case 'a': /* ASCII */
+        *file_type = PCCC_FILE_ASCII;
+        (*str)++;
+        break;
+
+    case 'B':
+    case 'b': /* Bit or block transfer */
+        if(isdigit((*str)[1])) {
+            /* Bit */
+            *file_type = PCCC_FILE_BIT;
+            (*str)++;
+            break;
+        } else {
+            if((*str)[1] == 'T' || (*str)[1] == 't') {
+                /* block transfer */
+                *file_type = PCCC_FILE_BLOCK_TRANSFER;
+                (*str) += 2;  /* skip past both characters */
+            } else {
+                *file_type = PCCC_FILE_UNKNOWN;
+                pdebug(DEBUG_WARN, "Bad format or unsupported logical address, expected B or BT!");
+                rc = PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        break;
+
+    case 'C':
+    case 'c': /* Counter */
+        *file_type = PCCC_FILE_COUNTER;
+        (*str)++;
+        break;
+
+    case 'D':
+    case 'd': /* BCD number */
+        *file_type = PCCC_FILE_BCD;
+        (*str)++;
+        break;
+
+    case 'F':
+    case 'f': /* Floating point Number */
+        *file_type = PCCC_FILE_FLOAT;
+        (*str)++;
+        break;
+
+    case 'I':
+    case 'i': /* Input */
+        *file_type = PCCC_FILE_INPUT;
+        (*str)++;
+        break;
+
+    case 'M':
+    case 'm': /* Message */
+        if((*str)[1] == 'G' || (*str)[1] == 'g') {
+            *file_type = PCCC_FILE_MESSAGE;
+            (*str) += 2;  /* skip past both characters */
+        } else {
+            *file_type = PCCC_FILE_UNKNOWN;
+            pdebug(DEBUG_WARN, "Bad format or unsupported logical address, expected MG!");
+            rc = PLCTAG_ERR_BAD_PARAM;
+        }
+
+        break;
+
+    case 'N':
+    case 'n': /* Input */
+        *file_type = PCCC_FILE_INT;
+        (*str)++;
+        break;
+
+    case 'O':
+    case 'o': /* Output */
+        *file_type = PCCC_FILE_OUTPUT;
+        (*str)++;
+        break;
+
+    case 'P':
+    case 'p': /* PID */
+        if((*str)[1] == 'D' || (*str)[1] == 'd') {
+            *file_type = PCCC_FILE_PID;
+            (*str) += 2;  /* skip past both characters */
+        } else {
+            *file_type = PCCC_FILE_UNKNOWN;
+            pdebug(DEBUG_WARN, "Bad format or unsupported logical address, expected PD!");
+            rc = PLCTAG_ERR_BAD_PARAM;
+        }
+
+        break;
+
+    case 'R':
+    case 'r': /* Control */
+        *file_type = PCCC_FILE_CONTROL;
+        (*str)++;
+        break;
+
+    case 'S':
+    case 's': /* Status, SFC or String */
+        if(isdigit((*str)[1])) {
+            /* Status */
+            *file_type = PCCC_FILE_STATUS;
+            (*str)++;
+            break;
+        } else {
+            if((*str)[1] == 'C' || (*str)[1] == 'c') {
+                /* SFC */
+                *file_type = PCCC_FILE_SFC;
+                (*str) += 2;  /* skip past both characters */
+            } else if((*str)[1] == 'T' || (*str)[1] == 't') {
+                /* String */
+                *file_type = PCCC_FILE_STRING;
+                (*str) += 2;  /* skip past both characters */
+            } else {
+                *file_type = PCCC_FILE_UNKNOWN;
+                pdebug(DEBUG_WARN, "Bad format or unsupported logical address, expected string, SFC or status!");
+                rc = PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        break;
+
+    case 'T':
+    case 't': /* Timer */
+        *file_type = PCCC_FILE_TIMER;
+        (*str)++;
+        break;
+
+    default:
+        pdebug(DEBUG_WARN, "Bad format or unsupported logical address %s!", *str);
+        *file_type = PCCC_FILE_UNKNOWN;
+        rc = PLCTAG_ERR_BAD_PARAM;
+        break;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+int parse_pccc_file_num(const char **str, int *file_num)
+{
+    int tmp = 0;
+
+    pdebug(DEBUG_DETAIL,"Starting.");
+
+    if(!str || !*str || !isdigit(**str)) {
+        pdebug(DEBUG_WARN,"Expected data-table file number!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    while(**str && isdigit(**str) && tmp < 65535) {
+        tmp *= 10;
+        tmp += (int)((**str) - '0');
+        (*str)++;
+    }
+
+    *file_num = tmp;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+int parse_pccc_elem_num(const char **str, int *elem_num)
+{
+    int tmp = 0;
+
+    pdebug(DEBUG_DETAIL,"Starting.");
+
+    if(!str || !*str || **str != ':') {
+        pdebug(DEBUG_WARN,"Expected data-table element number!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* step past the : character */
+    (*str)++;
+
+    while(**str && isdigit(**str) && tmp < 65535) {
+        tmp *= 10;
+        tmp += (int)((**str) - '0');
+        (*str)++;
+    }
+
+    *elem_num = tmp;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+int parse_pccc_subelem_num(const char **str, pccc_file_t file_type, int *subelem_num)
+{
+    int tmp = 0;
+
+    pdebug(DEBUG_DETAIL,"Starting.");
+
+    if(!str || !*str) {
+        pdebug(DEBUG_WARN,"Called with bad string pointer!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
+     * if we have a null character we are at the end of the name
+     * and the subelement is not there.  That is not an error.
+     */
+
+    if( (**str) == 0) {
+        pdebug(DEBUG_DETAIL, "No subelement in this name.");
+        *subelem_num = -1;
+        return PLCTAG_STATUS_OK;
+    }
+
+    /*
+     * We do have a character.  It must be . or / to be valid.
+     * The . character is valid before a mnemonic for a field in a structured type.
+     * The / character is valid before a bit number.
+     */
+
+    /* make sure the next character is either / or . and nothing else. */
+    if((**str) != '/' && (**str) != '.') {
+        pdebug(DEBUG_WARN, "Bad subelement field in logical address.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if((**str) == '/') {
+        /* bit number. */
+
+        /* step past the / character */
+        (*str)++;
+
+        /* FIXME - we do this a lot, should be a small routine. */
+        while(**str && isdigit(**str) && tmp < 65535) {
+            tmp *= 10;
+            tmp += (int)((**str) - '0');
+            (*str)++;
+        }
+
+        *subelem_num = tmp;
+
+        pdebug(DEBUG_DETAIL, "Done.");
+
+        return PLCTAG_STATUS_OK;
+    } else {
+        /* mnemonic. */
+
+        /* step past the . character */
+        (*str)++;
+
+        /* this depends on the data-table file type. */
+        switch(file_type) {
+        case PCCC_FILE_BLOCK_TRANSFER:
+            if(str_cmp_i(*str,"con") == 0) {
+                *subelem_num = 0;
+            } else if(str_cmp_i(*str,"rlen") == 0) {
+                *subelem_num = 1;
+            } else if(str_cmp_i(*str,"dlen") == 0) {
+                *subelem_num = 2;
+            } else if(str_cmp_i(*str,"df") == 0) {
+                *subelem_num = 3;
+            } else if(str_cmp_i(*str,"elem") == 0) {
+                *subelem_num = 4;
+            } else if(str_cmp_i(*str,"rgs") == 0) {
+                *subelem_num = 5;
+            } else {
+                pdebug(DEBUG_WARN,"Unsupported block transfer mnemonic!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+
+            break;
+
+        case PCCC_FILE_COUNTER:
+        case PCCC_FILE_TIMER:
+            if(str_cmp_i(*str,"con") == 0) {
+                *subelem_num = 0;
+            } else if(str_cmp_i(*str,"pre") == 0) {
+                *subelem_num = 1;
+            } else if(str_cmp_i(*str,"acc") == 0) {
+                *subelem_num = 2;
+            } else {
+                pdebug(DEBUG_WARN,"Unsupported %s mnemonic!", (file_type == PCCC_FILE_COUNTER ? "counter" : "timer"));
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+
+            break;
+
+        case PCCC_FILE_CONTROL:
+            if(str_cmp_i(*str,"con") == 0) {
+                *subelem_num = 0;
+            } else if(str_cmp_i(*str,"len") == 0) {
+                *subelem_num = 1;
+            } else if(str_cmp_i(*str,"pos") == 0) {
+                *subelem_num = 2;
+            } else {
+                pdebug(DEBUG_WARN,"Unsupported control mnemonic!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+
+            break;
+
+        case PCCC_FILE_PID:
+            if(str_cmp_i(*str,"con") == 0) {
+                *subelem_num = 0;
+            } else if(str_cmp_i(*str,"sp") == 0) {
+                *subelem_num = 2;
+            } else if(str_cmp_i(*str,"kp") == 0) {
+                *subelem_num = 4;
+            } else if(str_cmp_i(*str,"ki") == 0) {
+                *subelem_num = 6;
+            } else if(str_cmp_i(*str,"kd") == 0) {
+                *subelem_num = 8;
+            } else if(str_cmp_i(*str,"pv") == 0) {
+                *subelem_num = 26;
+            } else {
+                pdebug(DEBUG_WARN,"Unsupported PID mnemonic!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+
+            break;
+
+        case PCCC_FILE_MESSAGE:
+            if(str_cmp_i(*str,"con") == 0) {
+                *subelem_num = 0;
+            } else if(str_cmp_i(*str,"err") == 0) {
+                *subelem_num = 1;
+            } else if(str_cmp_i(*str,"rlen") == 0) {
+                *subelem_num = 2;
+            } else if(str_cmp_i(*str,"dlen") == 0) {
+                *subelem_num = 3;
+            } else {
+                pdebug(DEBUG_WARN,"Unsupported message mnemonic!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+
+            break;
+
+        case PCCC_FILE_STRING:
+            if(str_cmp_i(*str,"len") == 0) {
+                *subelem_num = 0;
+            } else if(str_cmp_i(*str,"data") == 0) {
+                *subelem_num = 1;
+            } else {
+                pdebug(DEBUG_WARN,"Unsupported string mnemonic!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported mnemonic %s!", *str);
+            return PLCTAG_ERR_BAD_PARAM;
+            break;
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+void encode_level(uint8_t *data, int *index, int val)
+{
+    if(val <= 254) {
+        data[*index] = (uint8_t)val;
+        *index = *index + 1;
+    } else {
+        data[*index] = (uint8_t)0xff;
+        data[*index + 1] = (uint8_t)(val & 0xff);
+        data[*index + 2] = (uint8_t)((val >> 8) & 0xff);
+        *index = *index + 3;
+    }
+}
+
+
+

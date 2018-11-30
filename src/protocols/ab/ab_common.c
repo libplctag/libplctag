@@ -646,6 +646,8 @@ int check_cpu(ab_tag_p tag, attr attribs)
 
 int check_tag_name(ab_tag_p tag, const char* name)
 {
+    int rc = PLCTAG_STATUS_OK;
+
     if (!name) {
         pdebug(DEBUG_WARN,"No tag name parameter found!");
         return PLCTAG_ERR_BAD_PARAM;
@@ -656,10 +658,10 @@ int check_tag_name(ab_tag_p tag, const char* name)
     case AB_PROTOCOL_PLC:
     case AB_PROTOCOL_MLGX:
     case AB_PROTOCOL_LGX_PCCC:
-        if (!pccc_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), name, MAX_TAG_NAME)) {
+        if ((rc = pccc_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "parse of PCCC-style tag name %s failed!", name);
 
-            return PLCTAG_ERR_BAD_PARAM;
+            return rc;
         }
 
         break;

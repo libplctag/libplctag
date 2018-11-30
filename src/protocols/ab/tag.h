@@ -38,7 +38,7 @@
 #include <lib/tag.h>
 #include <ab/ab_common.h>
 #include <ab/session.h>
-
+#include <ab/pccc.h>
 
 typedef enum {
     AB_TYPE_BOOL,
@@ -63,9 +63,6 @@ struct ab_tag_t {
 
     /* how do we talk to this device? */
     int protocol_type;
-//    int use_dhp_direct;
-//    uint8_t dhp_src;
-//    uint8_t dhp_dest;
 
     /* pointers back to session */
     ab_session_p session;
@@ -85,6 +82,7 @@ struct ab_tag_t {
     int write_data_per_packet;
 
     /* number of elements and size of each in the tag. */
+    pccc_file_t file_type;
     elem_type_t elem_type;
     int elem_count;
     int elem_size;

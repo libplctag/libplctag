@@ -33,15 +33,17 @@
 #include <lib/tag.h>
 #include <platform.h>
 
+typedef enum { PCCC_FILE_UNKNOWN, PCCC_FILE_ASCII, PCCC_FILE_BIT, PCCC_FILE_BLOCK_TRANSFER, PCCC_FILE_COUNTER,
+               PCCC_FILE_BCD, PCCC_FILE_FLOAT, PCCC_FILE_INPUT, PCCC_FILE_MESSAGE, PCCC_FILE_INT, PCCC_FILE_OUTPUT,
+               PCCC_FILE_PID, PCCC_FILE_CONTROL, PCCC_FILE_STATUS, PCCC_FILE_SFC, PCCC_FILE_STRING, PCCC_FILE_TIMER
+             } pccc_file_t;
 
-#define AB_PCCC_
-
-int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag_name_size);
-uint8_t pccc_calculate_bcc(uint8_t *data,int size);
-uint16_t pccc_calculate_crc16(uint8_t *data, int size);
-const char *pccc_decode_error(int error);
-uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
-int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
+extern int pccc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
+extern uint8_t pccc_calculate_bcc(uint8_t *data,int size);
+extern uint16_t pccc_calculate_crc16(uint8_t *data, int size);
+extern const char *pccc_decode_error(int error);
+extern uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
+extern int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
 
 
 
