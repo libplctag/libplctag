@@ -1053,5 +1053,3 @@ START_PACK typedef struct {
     uint16_le pccc_seq_num;          /* TNSW transaction/connection sequence number */
     //uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC response. */
 } END_PACK pccc_dhp_resp;
-
-
