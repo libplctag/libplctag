@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define MAX_REQUESTS (100)
+#define MAX_REQUESTS (200)
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
