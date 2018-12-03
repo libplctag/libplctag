@@ -137,7 +137,7 @@ int hashtable_put(hashtable_p table, int64_t key, void  *data)
     while(index == PLCTAG_ERR_NOT_FOUND) {
         rc = expand_table(table);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to expand table!");
+            pdebug(DEBUG_WARN, "Unable to expand table to make entry unique!");
             return rc;
         }
 
@@ -293,10 +293,10 @@ int find_key(hashtable_p table, int64_t key)
     }
 
     if(iteration == MAX_ITERATIONS) {
-        pdebug(DEBUG_SPEW, "Key not found!");
+        pdebug(DEBUG_SPEW, "Key not found.");
         return PLCTAG_ERR_NOT_FOUND;
     } else {
-        pdebug(DEBUG_SPEW, "Key found at index %d.", index);
+        pdebug(DEBUG_SPEW, "Key %d found at index %d.", (int)table->entries[index].key, index);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
