@@ -44,6 +44,7 @@ struct hashtable_t {
     int increment;
     int total_entries;
     int used_entries;
+    uint32_t hash_salt;
     struct hashtable_entry_t *entries;
 };
 
@@ -80,6 +81,7 @@ hashtable_p hashtable_create(int initial_size, int increment)
     tab->increment = increment;
     tab->total_entries = initial_size;
     tab->used_entries = 0;
+    tab->hash_salt = (uint32_t)(time_ms()) + (uint32_t)(intptr_t)(tab);
 
     tab->entries = mem_alloc(initial_size * (int)sizeof(struct hashtable_entry_t));
     if(!tab->entries) {
@@ -277,7 +279,7 @@ int hashtable_destroy(hashtable_p table)
 int find_key(hashtable_p table, int64_t key)
 {
     /* get the index */
-    uint32_t hash_val = hash((uint8_t*)&key, sizeof(key), (uint32_t)(intptr_t)table);
+    uint32_t hash_val = hash((uint8_t*)&key, sizeof(key), table->hash_salt);
     int index = (int)(hash_val % (uint32_t)table->total_entries);
     int iteration;
 
@@ -309,7 +311,7 @@ int find_key(hashtable_p table, int64_t key)
 
 int find_empty(hashtable_p table, int64_t key)
 {
-    uint32_t hash_val = hash((uint8_t*)&key, sizeof(key), (uint32_t)(intptr_t)table);
+    uint32_t hash_val = hash((uint8_t*)&key, sizeof(key), table->hash_salt);
     int index = (int)(hash_val % (uint32_t)table->total_entries);
 
     /* search for the hash value. */
@@ -344,6 +346,7 @@ int expand_table(hashtable_p table)
         total_entries += table->increment;
         new_table.total_entries = total_entries;
         new_table.used_entries = 0;
+        new_table.hash_salt = table->hash_salt;
 
         pdebug(DEBUG_DETAIL, "trying new size = %d", total_entries);
 
@@ -353,18 +356,20 @@ int expand_table(hashtable_p table)
             return PLCTAG_ERR_NO_MEM;
         }
 
-        /* copy the old entries. */
+        /* copy the old entries.  Only copy ones that are used. */
         for(int i=0; i < table->total_entries; i++) {
-            index = find_empty(&new_table, table->entries[i].key);
-            if(index == PLCTAG_ERR_NOT_FOUND) {
-                /* oops, still cannot insert all the entries! Try again. */
-                pdebug(DEBUG_WARN, "Unable to insert existing entry into expanded table!");
-                mem_free(new_table.entries);
-                break;
-            } else {
-                /* store the entry into the new table. */
-                new_table.entries[index] = table->entries[i];
-                new_table.used_entries++;
+            if(table->entries[i].data) {
+                index = find_empty(&new_table, table->entries[i].key);
+                if(index == PLCTAG_ERR_NOT_FOUND) {
+                    /* oops, still cannot insert all the entries! Try again. */
+                    pdebug(DEBUG_WARN, "Unable to insert existing entry into expanded table!");
+                    mem_free(new_table.entries);
+                    break;
+                } else {
+                    /* store the entry into the new table. */
+                    new_table.entries[index] = table->entries[i];
+                    new_table.used_entries++;
+                }
             }
         }
     } while(index == PLCTAG_ERR_NOT_FOUND);
@@ -379,4 +384,3 @@ int expand_table(hashtable_p table)
 
     return PLCTAG_STATUS_OK;
 }
-
