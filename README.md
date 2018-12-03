@@ -10,7 +10,8 @@ Please help test if you can!   I have a limited selection of PLCs, networks and 
 libplctag
 =========
 
-This library for Linux and Windows provides a means of accessing PLCs to read and write simple data.
+This library for Linux and Windows provides a means of accessing PLCs to read and write
+simple data.
 
 Stable Version: 2.0
 
@@ -51,9 +52,10 @@ The primary goals of this library are to provide:
 * cross-platform support (currently Windows and Linux).
 * protocol-agnostic access.
 * an easily wrappable library.
-* a portable library for big and little-endian and 32 and 64-bit processors.
+* a portable library for big and little-endian, and 32 and 64-bit processors.
 
-We do not hit all those goals yet.  A lack of big-endian systems is preventing testing there.
+We do not hit all those goals yet.  A lack of big-endian systems is preventing testing
+there.  It has been tested in the past on an emulated big-endian MIPS system in QEMU.
 
 Non Goals
 =========
@@ -81,9 +83,8 @@ We are on version 2.0.  That includes:
 
 * CMake build system for better cross-platform support.
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).
-* native support for multiple data types:
   * read/write 8, 16, 32, and 64-bit signed and unsigned integers.
-  * read/write single booleans under some circumstances (BOOL arrays are still pending).
+  * read/write single booleans under some circumstances (BOOL arrays are still tricky).
   * read/write 32-bit IEEE format (little endian) floating point.
   * raw support for user-defined structures (you need to pull out the data piece by piece)
   * read/write arrays of the above.
@@ -105,27 +106,21 @@ We are on version 2.0.  That includes:
   * read/write of 16-bit INT.
   * read/write of 32-bit floating point.
   * read/write of arrays of the above.
-* support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04, 14.04, 15.04, 16.04 tested).
+* support for 32 and 64-bit x86 Linux (Ubuntu 12.04-18.10 tested).
 * support for maxOS is marginal.  It did work, but we do not have Macs.
-* support for Windows 10 64-bit builds with Visual Studio 2017, not well tested (help very welcome!). Support is basic because:
+* Windows 7 x86 and Windows 10 x64 builds with Visual Studio, not well tested (help very welcome!). Support is basic because:
   * we do not use Windows for our deployments.
   * only the tag_rw example program has been tested (though that tests most of the API)
-* tested support AB ControlLogix (version 16, 20 and version 31 firmware).
+* tested support AB ControlLogix (version 16, 20 and 31 firmware).
 * sample code.
-* a fairly stable API.  It has only had minor additions in four years.  *WARNING* the API has changed in 2.0!
-* a fairly solid wrapper for Java and Python.  Contributors have given wrappers for C#, C++ and other languages.
+* a fairly stable API.  The release of 2.0 is the first breaking change in over four years.
 * we have deployed this in customer environments.
 * we have reports of successful use on ARM-based systems including the RaspberryPi boards.
 * Other groups use this library (if you do, please let us know).
 
-Version 2.0 supports the following changes:
-* support for larger packet sizes on newer PLCs (4000 bytes instead of about 500).
-* support for multiple request bundling within a single request packet.
-
-These two changes are very significant and increase performance very much over the 1.5 version of the library.
-
-PLC5, SLC 500, MicroLogix, CompactLogix and ControlLogix are trademarks of Rockwell/Allen Bradley.  Windows and Visual Studio are trademarks
-of Microsoft.  Please let us know if we missed some so that we can get all the attributions correct!
+PLC5, SLC 500, MicroLogix, Micro8X0, CompactLogix and ControlLogix are trademarks of Rockwell/Allen Bradley.
+Windows and Visual Studio are trademarks of Microsoft.  Please let us know if we missed some so
+that we can get all the attributions correct!
 
 We need and welcome help with the following:
 
@@ -133,7 +128,7 @@ We need and welcome help with the following:
 * other protocols like Modbus, SBus etc.
 * other platforms like Android, iOS, macOS etc.
 * other versions of Windows.
-* more language wrappers like Python, Ruby, VB, C++ etc.
+* more language wrappers!
 
 
 Portability
@@ -149,28 +144,30 @@ issue for some compilers:
 * threading.  We tried to avoid this, but at least Allen-Bradley/Rockwell's protocol is very much asynchronous.
 * we still have one spot where we use inline variable declaration.   This is about the only remaining C99 requirement.
 
-We do not have access to any big-endian machines.  We would love to have someone
-with such access let us know if it is working.  We have put in byte swapping
-code everywhere we think it will be a problem, but without a test platform...
-
 We have limited access to some types of PLCs and most of our testing
 has been on PLC5 and ControlLogix machines.
 
 We are trying to keep things as simple as possible so that this can be easily
 deployed in embedded systems.  We have limited the API "surface area" as much
 as possible.  We also have made an effort to limit internal use of things
-like malloc and free.  If you wrap the library, you will need to make sure that finalizers take care
-of calling the destruction functions to deallocate internally allocated
-memory.
+like malloc and free.  If you wrap the library, you will need to make sure that
+finalizers take care of calling the destruction functions to deallocate internally
+allocated memory.
 
 
 Threading
 =========
 
-We have added lock/unlock API calls that use mutexes, but if you are using the library
-wrapped in another language, you should use that language's synchronization primitives to prevent simultaneous access.
+Access to the C API is thread-safe.  All threads hit a mutex when going through any API call.
 
-There is example code (C POSIX only) showing how to use the tag lock and unlock API functions.
+Trying to share a tag between threads is possible, but access in only controlled within a
+single API call.  If you do something like update tag data in one thread and call the read
+function in another thread, the order of the operations will be determined by the actual
+chronological order in which the threads executed them.
+
+For this reason, we added additional lock/unlock API calls that allow you to synchronize
+access to a tag across multiple API calls.  If you are using the library wrapped in another
+programming language you should use that languages synchronization mechanisms instead.
 
 The Allen-Bradley EIP protocol is very asynchronous and the part of it that we
 have implemented does use a thread internally.  We kept it to just one thread and
@@ -186,7 +183,7 @@ few functions in the API.
 These functions operation on all types of tags (version 1.5 shown):
 
 ```c
-    plc_tag plc_tag_create(const char *attrib_str);
+    plc_tag plc_tag_create(const char *attrib_str, int timeout);
     int plc_tag_lock(plc_tag tag);
     int plc_tag_unlock(plc_tag tag);
     int plc_tag_abort(plc_tag tag);
@@ -217,7 +214,12 @@ local data.  Note that after you set something, you must
 still call plc_tag_write(tag) to push it to the PLC.
 
 ```c
-    /* version 1.5 */
+    uint64_t plc_tag_get_uint64(plc_tag tag, int offset);
+    int plc_tag_set_uint64(plc_tag tag, int offset, uint64_t val);
+
+    int64_t plc_tag_get_int64(plc_tag tag, int offset);
+    int plc_tag_set_int64(plc_tag, int offset, int64_t val);
+
     uint32_t plc_tag_get_uint32(plc_tag tag, int offset);
     int plc_tag_set_uint32(plc_tag tag, int offset, uint32_t val);
 
@@ -235,6 +237,9 @@ still call plc_tag_write(tag) to push it to the PLC.
 
     int8_t plc_tag_get_int8(plc_tag tag, int offset);
     int plc_tag_set_int8(plc_tag, int offset, int8_t val);
+
+    float plc_tag_get_float64(plc_tag tag, int offset);
+    int plc_tag_set_float64(plc_tag tag, int offset, double val);
 
     float plc_tag_get_float32(plc_tag tag, int offset);
     int plc_tag_set_float32(plc_tag tag, int offset, float val);
@@ -292,53 +297,49 @@ then writes them back out and rereads them from a tag named myDINTArray
 in a Logix-class Allen-Bradley PLC located at IP 192.168.1.42.  The PLC
 processor is located at slot zero in the backplane.
 
-This example is for Linux.
+This example is for Linux.  It reads 200 DINTs (32-bit integers) from a tag, increments
+the values of each one and writes them back.
 
 Version 1.5:
 
 ```c
 #include <stdio.h>
-#include <unistd.h>
-#include <libplctag.h>
+#include "../lib/libplctag.h"
+#include "utils.h"
 
 
-#define TAG_PATH "protocol=ab_eip&gateway=192.168.1.42&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=myDINTArray"
-#define ELEM_COUNT 10
+#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,5&cpu=micro800&elem_type=DINT&elem_count=200&name=TestBigArray&debug=4"
+#define ELEM_COUNT 200
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 5000
 
-int main(int argc, char **argv)
+
+int main()
 {
-    plc_tag tag = PLC_TAG_NULL;
+    int32_t tag = 0;
     int rc;
     int i;
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(!tag) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
-    /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        sleep(1);
-    }
-
-    if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state.\n");
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
 
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
 
@@ -359,20 +360,18 @@ int main(int argc, char **argv)
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
-
 
     /* get the data again*/
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d\n",rc);
-
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
         return 0;
     }
 
@@ -386,6 +385,7 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
 
 ```
 
