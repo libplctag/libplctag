@@ -26,7 +26,7 @@
 #include <string.h>
 #include <util/debug.h>
 #include <platform.h>
-
+#include <lib/libplctag.h>
 
 
 
@@ -93,11 +93,11 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
     time_t epoch;
     int64_t epoch_ms;
     int remainder_ms;
-    int rc;
+    int rc = PLCTAG_STATUS_OK;
 
     /* make sure we have room, MAGIC */
     if(prefix_buf_size < 37) {
-        return 0;
+        return PLCTAG_ERR_TOO_SMALL;
     }
 
     /* build the prefix */
@@ -137,7 +137,6 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
     /* build the prefix */
     prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
-
     if(prefix_size <= 0) {
         return;
     }
