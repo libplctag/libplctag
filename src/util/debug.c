@@ -77,11 +77,6 @@ static uint32_t get_thread_id()
             this_thread_num = thread_num;
             thread_num++;
         }
-//
-//        while(!lock_acquire(&thread_num_lock)) { } /* FIXME - this could hang! just keep trying */
-//            this_thread_num = thread_num;
-//            thread_num++;
-//        lock_release(&thread_num_lock);
     }
 
     return this_thread_num;
