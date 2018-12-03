@@ -1748,6 +1748,9 @@ plc_tag_p lookup_tag(int32_t tag_id)
 
         if(tag) {
             debug_set_tag_id(tag->tag_id);
+        } else {
+            /* FIXME - remove this. */
+            pdebug(DEBUG_WARN, "Tag with ID %d not found.", tag_id);
         }
 
         if(tag && tag->tag_id == tag_id) {
