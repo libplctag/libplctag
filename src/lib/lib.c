@@ -85,29 +85,16 @@ int lib_init(void)
 
     pdebug(DEBUG_INFO,"Setting up global library data.");
 
-    pdebug(DEBUG_INFO,"Initializing library global mutex.");
-
-    /* first see if the mutex is there. */
-//    if (!global_library_mutex) {
-//        rc = mutex_create((mutex_p*)&global_library_mutex);
-//
-//        if (rc != PLCTAG_STATUS_OK) {
-//            pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
-//        }
-//
-//        return rc;
-//    }
-
     pdebug(DEBUG_INFO,"Creating tag hashtable.");
-    if((tags = hashtable_create(100, 57)) == NULL) { /* MAGIC */
+    if((tags = hashtable_create(103, 57)) == NULL) { /* MAGIC */
         pdebug(DEBUG_ERROR, "Unable to create tag hashtable!");
         return PLCTAG_ERR_NO_MEM;
     }
 
-    pdebug(DEBUG_INFO,"Creating tag vector mutex.");
+    pdebug(DEBUG_INFO,"Creating tag hashtable mutex.");
     rc = mutex_create((mutex_p*)&tag_lookup_mutex);
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to create tag vector mutex!");
+        pdebug(DEBUG_ERROR, "Unable to create tag hashtable mutex!");
     }
 
     pdebug(DEBUG_INFO,"Creating tag tickler thread.");
@@ -1798,8 +1785,8 @@ int tag_id_inc(int id)
 
 int add_tag_lookup(plc_tag_p tag)
 {
-    int new_id = 0;
     int rc = PLCTAG_ERR_NOT_FOUND;
+    int new_id = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1811,24 +1798,30 @@ int add_tag_lookup(plc_tag_p tag)
 
         do {
             new_id = tag_id_inc(new_id);
+
             if(new_id <=0) {
                 pdebug(DEBUG_WARN,"ID %d is illegal!", new_id);
                 attempts = MAX_TAG_MAP_ATTEMPTS;
                 break;
             }
 
+            pdebug(DEBUG_SPEW,"Trying new ID %d.", new_id);
+
             if(!hashtable_get(tags,(int64_t)new_id)) {
                 pdebug(DEBUG_DETAIL,"Found unused ID %d", new_id);
                 break;
             }
+
             attempts++;
         } while(attempts < MAX_TAG_MAP_ATTEMPTS);
 
-        if(attempts != MAX_TAG_MAP_ATTEMPTS) {
+        if(attempts < MAX_TAG_MAP_ATTEMPTS) {
             rc = hashtable_put(tags, (int64_t)new_id, tag);
         } else {
             rc = PLCTAG_ERR_NO_RESOURCES;
         }
+
+        next_tag_id = new_id;
     }
 
     if(rc != PLCTAG_STATUS_OK) {
