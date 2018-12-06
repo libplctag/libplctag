@@ -147,25 +147,109 @@ int pccc_encode_tag_name(uint8_t *data, int *size, const char *name, int max_tag
      */
 
     if(strlen(tmp) > 0 && (*tmp == '/' || *tmp == '.')) {
-        uint8_t sub_element=0;
+        uint8_t sub_element=255;
 
         /* bump past the / or . character */
         ++tmp;
 
+        /*
+         * If there is remaining data, it might be a special
+         * field name.  Or it might be a bit number.
+         *
+         * The fields are:
+         *
+         * Timer/Counter
+         * Offset   Field
+         * 0        con - control
+         * 1        pre - preset
+         * 2        acc - accumulated
+         *
+         * Control
+         * Offset   Field
+         * 0        con - control
+         * 1        len - length
+         * 2        pos - position
+         *
+         * PD/PID
+         * Offset   Field
+         * 0        con - control
+         * 2        sp - SP
+         * 4        kp - Kp
+         * 6        ki - Ki
+         * 8        kd - Kd
+         * 26       pv - PV
+         *
+         * The following are NOT handled correctly!
+         *
+         * BT
+         * Offset   Field
+         * 0        con - control
+         * 1        rlen - RLEN
+         * 2        dlen - DLEN
+         * 3        df - data file #
+         * 4        elem - element #
+         * 5        rgs - rack/grp/slot
+         *
+         * MG
+         * Offset   Field
+         * 0        con - control
+         * 1        err - error
+         * 2        rlen - RLEN
+         * 3        dlen - DLEN
+         */
+
         /* test the remaining part of the name */
-        if(!str_cmp_i(tmp,"acc")) {
+        if(!str_cmp_i(tmp,"con")) {
+            sub_element = 0;
+        } else if(!str_cmp_i(tmp,"pre")) {
+            sub_element = 1;
+        } else if(!str_cmp_i(tmp,"acc")) {
             sub_element = 2;
-        } else if(!str_cmp_i(tmp,"len")) {
+        } else if(!str_cmp_i(tmp, "len")) {
             sub_element = 1;
         } else if(!str_cmp_i(tmp, "pos")) {
             sub_element = 2;
-        } else if(!str_cmp_i(tmp, "pre")) {
+        } else if(!str_cmp_i(tmp, "sp")) {
+            sub_element = 2;
+        } else if(!str_cmp_i(tmp, "kp")) {
+            sub_element = 4;
+        } else if(!str_cmp_i(tmp, "ki")) {
+            sub_element = 6;
+        } else if(!str_cmp_i(tmp, "kd")) {
+            sub_element = 8;
+        } else if(!str_cmp_i(tmp, "pv")) {
+            sub_element = 26;
+        } else if(!str_cmp_i(tmp, "rlen")) {
             sub_element = 1;
+        } else if(!str_cmp_i(tmp, "dlen")) {
+            sub_element = 2;
+        } else if(!str_cmp_i(tmp, "df")) {
+            sub_element = 3;
+        } else if(!str_cmp_i(tmp, "elem")) {
+            sub_element = 4;
+        } else if(!str_cmp_i(tmp, "rgs")) {
+            sub_element = 5;
+        } else if(!str_cmp_i(tmp, "err")) {
+            sub_element = 1;
+            /* FIXME - missing RLEN and DLEN for MG! */
         } else {
             /* FIXME - what to do here? */
+            tmp = parse_pccc_name_number(tmp, data, size);
+            if(!tmp) {
+                /* oops, bad parse! */
+                pdebug(DEBUG_WARN, "Unable to correctly parse PLC/5-style name! %s", name);
+                *size = 0;
+                return 0;
+            }
+
+            /* we do have a fourth element */
+            *level_byte |= 0x08;
+
+            /* guard against the code below */
+            sub_element = 255;
         }
 
-        if(sub_element) {
+        if(sub_element != 255) {
             data[*size] = sub_element;
             *size = *size + 1;
             *level_byte |= 0x08;
