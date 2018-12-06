@@ -1,4 +1,2 @@
 TO DO
 
-* add new code from 1.6 for short circuiting reading more tag data when no partial error
-occurs.   This is to support strings that may be sent shorter than the maximum length.

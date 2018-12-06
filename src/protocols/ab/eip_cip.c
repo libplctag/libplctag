@@ -344,14 +344,11 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-//        request_release(req);
-//        tag->reqs[slot] = rc_dec(req);
         tag->req = rc_dec(req);
         return rc;
     }
 
     /* save the request for later */
-//    tag->reqs[slot] = req;
     tag->req = req;
 
     pdebug(DEBUG_INFO, "Done");
@@ -378,9 +375,6 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
-
-//    req->num_retries_left = tag->num_retries;
-//    req->retry_interval = tag->default_retry_interval;
 
     /* point the request struct at the buffer */
     cip = (eip_cip_uc_req*)(req->data);
@@ -470,9 +464,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
 
-    /* mark it as ready to send */
-    //req->send_request = 1;
-
+    /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
@@ -480,14 +472,11 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-//        request_release(req);
-//        tag->reqs[slot] = rc_dec(req);
         tag->req = rc_dec(req);
         return rc;
     }
 
     /* save the request for later */
-//    tag->reqs[slot] = req;
     tag->req = req;
 
     pdebug(DEBUG_INFO, "Done");
@@ -611,18 +600,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
 
-    /* mark it as ready to send */
-    //req->send_request = 1;
-
-    /* store the connection */
-//    req->connection = tag->connection;
-
-    /* mark the request as a connected request */
-    //req->connected_request = 1;
-
-//    if(tag->allow_packing) {
-//        request_allow_packing(req);
-//    }
+    /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
@@ -630,14 +608,11 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-//        request_release(req);
-//        tag->reqs[slot] = rc_dec(req);
         tag->req = rc_dec(req);
         return rc;
     }
 
     /* save the request for later */
-//    tag->reqs[slot] = req;
     tag->req = req;
 
     pdebug(DEBUG_INFO, "Done");
@@ -797,12 +772,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
 
-    /* mark it as ready to send */
-    //req->send_request = 1;
-
-//    if(tag->allow_packing) {
-//        request_allow_packing(req);
-//    }
+    /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
@@ -1243,7 +1213,6 @@ static int check_read_status_unconnected(ab_tag_p tag)
  * status of a write operation.  If the write is done, it triggers the clean up.
  */
 
-
 static int check_write_status_connected(ab_tag_p tag)
 {
     eip_cip_co_resp* cip_resp;
@@ -1419,11 +1388,6 @@ int calculate_write_data_per_packet(ab_tag_p tag)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-//    if (tag->write_data_per_packet > 0) {
-//        pdebug(DEBUG_DETAIL, "Early termination, write sizes already calculated.");
-//        return tag->write_data_per_packet;
-//    }
-
     /* if we are here, then we have all the type data etc. */
     if(tag->use_connected_msg) {
         pdebug(DEBUG_DETAIL,"Connected tag.");
@@ -1435,6 +1399,7 @@ int calculate_write_data_per_packet(ab_tag_p tag)
                     + 4                             /* byte offset, 32-bit int */
                     + 8;                            /* MAGIC fudge factor */
     } else {
+        pdebug(DEBUG_DETAIL,"Unconnected tag.");
         max_payload_size = session_get_max_payload(tag->session);
         overhead =  1                               /* service request, one byte */
                     + tag->encoded_name_size        /* full encoded name */
