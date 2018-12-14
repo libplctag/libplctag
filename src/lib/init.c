@@ -33,7 +33,7 @@
  * The version string.
  */
 
-const char *VERSION="2.0.0";
+const char *VERSION="2.0.1";
 
 
 /*
