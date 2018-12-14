@@ -47,7 +47,7 @@
 #include <ab/ab.h>
 
 
-#define INITIAL_TAG_TABLE_SIZE (10)
+#define INITIAL_TAG_TABLE_SIZE (201)
 
 #define TAG_ID_MASK (0xFFFFFFF)
 
