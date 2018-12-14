@@ -32,8 +32,8 @@
  * Note that it will readjust its size if enough entries are made.
  */
 
-//#define TABLE_INC       (57)
 #define MAX_ITERATIONS  (10)
+#define MAX_INCREMENT (10000)
 
 struct hashtable_entry_t {
     void *data;
@@ -41,7 +41,6 @@ struct hashtable_entry_t {
 };
 
 struct hashtable_t {
-    int increment;
     int total_entries;
     int used_entries;
     uint32_t hash_salt;
@@ -51,23 +50,19 @@ struct hashtable_t {
 
 typedef struct hashtable_entry_t *hashtable_entry_p;
 
-//static int find_entry(hashtable_p table, void *key, int key_len, uint32_t *bucket_index, vector_p *bucket, uint32_t *index, hashtable_entry_p *entry_ref);
-//static int entry_cmp(hashtable_entry_p entry_ref, void *key, int key_len);
-//static hashtable_entry_p hashtable_entry_create(void *key, int key_len, void * data_ref);
-//void hashtable_entry_destroy(int num_args, void **args);
-
+//static int next_highest_prime(int x);
 static int find_key(hashtable_p table, int64_t key);
 static int find_empty(hashtable_p table, int64_t key);
 static int expand_table(hashtable_p table);
 
 
-hashtable_p hashtable_create(int initial_size, int increment)
+hashtable_p hashtable_create(int initial_capacity)
 {
     hashtable_p tab = NULL;
 
     pdebug(DEBUG_INFO,"Starting");
 
-    if(initial_size <= 0) {
+    if(initial_capacity <= 0) {
         pdebug(DEBUG_WARN,"Size is less than or equal to zero!");
         return NULL;
     }
@@ -78,12 +73,11 @@ hashtable_p hashtable_create(int initial_size, int increment)
         return NULL;
     }
 
-    tab->increment = increment;
-    tab->total_entries = initial_size;
+    tab->total_entries = initial_capacity;
     tab->used_entries = 0;
     tab->hash_salt = (uint32_t)(time_ms()) + (uint32_t)(intptr_t)(tab);
 
-    tab->entries = mem_alloc(initial_size * (int)sizeof(struct hashtable_entry_t));
+    tab->entries = mem_alloc(initial_capacity * (int)sizeof(struct hashtable_entry_t));
     if(!tab->entries) {
         pdebug(DEBUG_ERROR,"Unable to allocate entry array!");
         hashtable_destroy(tab);
@@ -276,29 +270,39 @@ int hashtable_destroy(hashtable_p table)
  *************************** Helper Functions **************************
  **********************************************************************/
 
+
+#define KEY_TO_INDEX(t, k) (uint32_t)((hash((uint8_t*)&k, sizeof(k), t->hash_salt)) % (uint32_t)(t->total_entries))
+
+
 int find_key(hashtable_p table, int64_t key)
 {
-    /* get the index */
-    uint32_t hash_val = hash((uint8_t*)&key, sizeof(key), table->hash_salt);
-    int index = (int)(hash_val % (uint32_t)table->total_entries);
-    int iteration;
+    uint32_t initial_index = KEY_TO_INDEX(table, key);
+    int index = 0;
+    int iteration = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    /* search for the hash value. */
-    for(iteration=1; iteration < MAX_ITERATIONS; iteration++) {
+    /*
+     * search for the hash value.
+     *
+     * Note: do NOT stop if we find a NULL entry.  That might be the result
+     * of a removed entry and there could still be entries past that point
+     * that are for the initial slot.
+     */
+    for(iteration=0; iteration < MAX_ITERATIONS; iteration++) {
+        index = ((int)initial_index + iteration) % table->total_entries;
+
         if(table->entries[index].key == key) {
             break;
         }
-
-        index = (index + iteration) % table->total_entries;
     }
 
-    if(iteration == MAX_ITERATIONS) {
-        pdebug(DEBUG_SPEW, "Key not found.");
+    if(iteration >= MAX_ITERATIONS) {
+        /* FIXME - does not work on Windows. */
+        //pdebug(DEBUG_SPEW, "Key %ld not found.", key);
         return PLCTAG_ERR_NOT_FOUND;
     } else {
-        pdebug(DEBUG_SPEW, "Key %d found at index %d.", (int)table->entries[index].key, index);
+        //pdebug(DEBUG_SPEW, "Key %d found at index %d.", (int)table->entries[index].key, index);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -311,22 +315,28 @@ int find_key(hashtable_p table, int64_t key)
 
 int find_empty(hashtable_p table, int64_t key)
 {
-    uint32_t hash_val = hash((uint8_t*)&key, sizeof(key), table->hash_salt);
-    int index = (int)(hash_val % (uint32_t)table->total_entries);
+    uint32_t initial_index = KEY_TO_INDEX(table, key);
+    int index = 0;
+    int iteration = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
 
     /* search for the hash value. */
-    for(int iteration=1; iteration < MAX_ITERATIONS; iteration++) {
+    for(iteration=0; iteration < MAX_ITERATIONS; iteration++) {
+        index = ((int)initial_index + iteration) % table->total_entries;
+
+        pdebug(DEBUG_SPEW, "Trying index %d for key %ld.", index, key);
         if(table->entries[index].data == NULL) {
             break;
         }
-
-        index = (index + iteration) % table->total_entries;
     }
 
-    if(table->entries[index].data) {
-        pdebug(DEBUG_DETAIL,"No empty entry found in %d iterations!", MAX_ITERATIONS);
+    if(iteration >= MAX_ITERATIONS) {
+        pdebug(DEBUG_SPEW,"No empty entry found in %d iterations!", MAX_ITERATIONS);
         return PLCTAG_ERR_NOT_FOUND;
     }
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return index;
 }
@@ -340,15 +350,19 @@ int expand_table(hashtable_p table)
     int total_entries = table->total_entries;
     int index = PLCTAG_ERR_NOT_FOUND;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    pdebug(DEBUG_SPEW, "Table using %d entries of %d.", table->used_entries, table->total_entries);
 
     do {
-        total_entries += table->increment;
+        /* double entries unless already at max doubling, then increment. */
+        total_entries += (total_entries < MAX_INCREMENT ? total_entries : MAX_INCREMENT);
+
         new_table.total_entries = total_entries;
         new_table.used_entries = 0;
         new_table.hash_salt = table->hash_salt;
 
-        pdebug(DEBUG_DETAIL, "trying new size = %d", total_entries);
+        pdebug(DEBUG_SPEW, "trying new size = %d", total_entries);
 
         new_table.entries = mem_alloc(total_entries * (int)sizeof(struct hashtable_entry_t));
         if(!new_table.entries) {
@@ -380,7 +394,7 @@ int expand_table(hashtable_p table)
     table->total_entries = new_table.total_entries;
     table->used_entries = new_table.used_entries;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
