@@ -21,13 +21,15 @@
 #ifndef __UTIL_HASHTABLE_H__
 #define __UTIL_HASHTABLE_H__ 1
 
+#include <stdint.h>
+
 //struct hashtable_entry_t;
 //
 
 
 typedef struct hashtable_t *hashtable_p;
 
-extern hashtable_p hashtable_create(int size, int increment);
+extern hashtable_p hashtable_create(int size);
 extern void *hashtable_get(hashtable_p table, int64_t key);
 extern int hashtable_put(hashtable_p table, int64_t key, void *arg);
 extern void *hashtable_get_index(hashtable_p table, int index);
