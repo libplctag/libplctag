@@ -200,8 +200,29 @@ if (WIN32)
     #target_link_libraries(plctag_static ws2_32)
 endif()
 
-# add the examples
+# add the examples and tests
 if (UNIX)
+    # Logix simulator
+    set ( lgx_sim_FILES "${test_SRC_PATH}/lgx_sim/log.h"
+                        "${test_SRC_PATH}/lgx_sim/main.c"
+                        "${test_SRC_PATH}/lgx_sim/packet.h"
+                        "${test_SRC_PATH}/lgx_sim/main.c"
+                        "${test_SRC_PATH}/lgx_sim/session.c"
+                        "${test_SRC_PATH}/lgx_sim/session.h"
+                        "${test_SRC_PATH}/lgx_sim/tags.c"
+                        "${test_SRC_PATH}/lgx_sim/tags.h" )
+
+    foreach ( file ${lgx_sim_FILES} )
+        set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${BASE_FLAGS} -std=c11")
+    endforeach ( file )
+
+    add_executable ( lgx_sim ${lgx_sim_FILES} )
+    target_link_libraries ( lgx_sim pthread )
+
+    add_executable(test_hashtable "${test_SRC_PATH}/hashtable/test_hashtable.c" "${util_SRC_PATH}/hashtable.h" "${util_SRC_PATH}/debug.h")
+    target_link_libraries(test_hashtable plctag pthread)
+
+
     set ( example_PROGRAMS async
                            data_dumper
                            multithread
@@ -223,22 +244,6 @@ if (UNIX)
     set ( example_PROG_UTIL utils_posix.c )
     set ( example_LIBRARIES plctag pthread )
 
-    # Logix simulator
-    set ( lgx_sim_FILES "${test_SRC_PATH}/lgx_sim/log.h"
-                        "${test_SRC_PATH}/lgx_sim/main.c"
-                        "${test_SRC_PATH}/lgx_sim/packet.h"
-                        "${test_SRC_PATH}/lgx_sim/main.c"
-                        "${test_SRC_PATH}/lgx_sim/session.c"
-                        "${test_SRC_PATH}/lgx_sim/session.h"
-                        "${test_SRC_PATH}/lgx_sim/tags.c"
-                        "${test_SRC_PATH}/lgx_sim/tags.h" )
-
-    foreach ( file ${lgx_sim_FILES} )
-        set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${BASE_FLAGS} -std=c11")
-    endforeach ( file )
-
-    add_executable ( lgx_sim ${lgx_sim_FILES} )
-    target_link_libraries ( lgx_sim pthread )
 
 elseif(WIN32)
     set ( example_PROGRAMS async
