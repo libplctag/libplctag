@@ -47,10 +47,9 @@
 #include <ab/ab.h>
 
 
+#define INITIAL_TAG_TABLE_SIZE (10)
+
 #define TAG_ID_MASK (0xFFFFFFF)
-//#define TAG_INDEX_MASK (0x3FFF)
-//#define MAX_TAG_ENTRIES (TAG_INDEX_MASK + 1)
-//#define TAG_ID_ERROR INT_MIN
 
 #define MAX_TAG_MAP_ATTEMPTS (50)
 
@@ -86,7 +85,7 @@ int lib_init(void)
     pdebug(DEBUG_INFO,"Setting up global library data.");
 
     pdebug(DEBUG_INFO,"Creating tag hashtable.");
-    if((tags = hashtable_create(103, 57)) == NULL) { /* MAGIC */
+    if((tags = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) { /* MAGIC */
         pdebug(DEBUG_ERROR, "Unable to create tag hashtable!");
         return PLCTAG_ERR_NO_MEM;
     }
@@ -463,6 +462,8 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     /* save this for later. */
     tag->tag_id = id;
+
+    debug_set_tag_id(id);
 
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
 
