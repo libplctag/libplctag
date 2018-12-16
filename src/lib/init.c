@@ -30,13 +30,6 @@
 
 
 /*
- * The version string.
- */
-
-const char *VERSION="2.0.1";
-
-
-/*
  * The following maps attributes to the tag creation functions.
  */
 

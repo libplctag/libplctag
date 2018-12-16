@@ -31,8 +31,9 @@ project (libplctag_project)
 # the project is version 2.0
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 0)
-set (libplctag_VERSION_PATCH 1)
+set (libplctag_VERSION_PATCH 2)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
+
 
 
 message("MSVC = ${MSVC}")
@@ -58,6 +59,11 @@ set ( ab_SRC_PATH "${protocol_SRC_PATH}/ab" )
 set ( util_SRC_PATH "${base_SRC_PATH}/util" )
 set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
+
+# set up the version file automatically
+configure_file("${lib_SRC_PATH}/version.c.in" "${lib_SRC_PATH}/version.c")
+
+
 
 # OS-specific files for the platform code.
 # FIXME - does this work for macOS?
@@ -133,6 +139,8 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${lib_SRC_PATH}/libplctag.h"
                      "${lib_SRC_PATH}/lib.c"
                      "${lib_SRC_PATH}/tag.h"
+                     "${lib_SRC_PATH}/version.c"
+                     "${lib_SRC_PATH}/version.h"
                      "${ab_SRC_PATH}/ab.h"
                      "${ab_SRC_PATH}/ab_common.c"
                      "${ab_SRC_PATH}/ab_common.h"

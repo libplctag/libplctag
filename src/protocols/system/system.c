@@ -25,6 +25,7 @@
 #include <lib/libplctag.h>
 #include <system/tag.h>
 #include <lib/init.h>
+#include <lib/version.h>
 #include <util/rc.h>
 
 
