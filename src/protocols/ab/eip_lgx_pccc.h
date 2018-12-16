@@ -26,5 +26,4 @@
 /* Logix with tags mapped onto PCCC */
 extern struct tag_vtable_t eip_lgx_pccc_vtable;
 
-
 #endif
