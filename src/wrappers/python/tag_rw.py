@@ -2,6 +2,9 @@ import argparse
 from plctag import libplctag
 import time
 
+CREATE_TIMEOUT = 2000
+OP_TIMEOUT = 2000
+
 PLC_TYPE_UINT8 = 'uint8'
 PLC_TYPE_SINT8 = 'sint8'
 PLC_TYPE_UINT16 = 'uint16'
@@ -65,9 +68,9 @@ def main():
             exit(-1)
 
     plc_path = args.path.lower()
-    tag = libplctag.plc_tag_create(plc_path)
-    if not tag:
-        print 'ERROR: error creating tag!'
+    tag = libplctag.plc_tag_create(plc_path, CREATE_TIMEOUT)
+    if tag < 0:
+        print ('ERROR: error creating tag %s!' % libplctag.plc_tag_decode_error(tag))
         exit(-1)
 
     end = time.time() + 5.0
@@ -78,14 +81,14 @@ def main():
 
     rc = libplctag.plc_tag_status(tag)
     if rc != libplctag.PLCTAG_STATUS_OK:
-        print 'ERROR: tag creation error, tag status: %d' % (rc)
+        print 'ERROR: tag creation error, tag status: %s' % (libplctag.plc_tag_decode_error(rc))
         libplctag.plc_tag_destroy(tag)
         exit(-1)
 
     if not is_write:
         rc = libplctag.plc_tag_read(tag, DATA_TIMEOUT)
         if rc != libplctag.PLCTAG_STATUS_OK:
-            print 'ERROR: tag read error, tag status: %d' % (rc)
+            print 'ERROR: tag creation error, tag status: %s' % (libplctag.plc_tag_decode_error(rc))
             libplctag.plc_tag_destroy(tag)
             exit(-1)
 
@@ -122,7 +125,7 @@ def main():
                 data = libplctag.plc_tag_get_float32(tag, index)
                 print 'data[%d]=%f' % (i, data)
                 index = index + 4
-            
+
             i = i+1
     else:
         if plc_type == PLC_TYPE_UINT8:
@@ -151,7 +154,7 @@ def main():
     # End if write or read
 
 
-    if tag:
+    if tag > 0:
         libplctag.plc_tag_destroy(tag)
 
     print 'Done'

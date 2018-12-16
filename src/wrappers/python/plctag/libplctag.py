@@ -11,17 +11,6 @@ PLCTAG_STATUS_OK      = 0
 # Fundamental data types secion and all about Foreign functions
 
 
-# This is the creator function for the public plc_tag_create()
-# method.  This method returns a ctypes c_void_p, because we
-# need to keep a C pointer to the plc_tag struct defining the tag
-# session for future calls.
-
-def definePointerFunc(name, args):
-    func = name
-    func.restype = ctypes.c_void_p
-    func.argtypes = args
-    return func
-
 
 # This is the creator function for all public methods returning
 # a ctypes c_int type, a standard 32-bit int in C code.
@@ -32,14 +21,24 @@ def defineIntFunc(name, args):
     func.argtypes = args
     return func
 
-
-# The following are creator functions for the data accessors that
-# return unsigned and smaller types
+# other creator functions for non 32-bit int values
 
 def defineUIntFunc(name, args):
     func = name
     func.restype = ctypes.c_uint
     func.argtypes = args
+    return func
+
+def defineLongFunc(name, args):
+    func = name
+    func.restype = ctypes.c_int64
+    func.argstypes = args
+    return func
+
+def defineULongFunc(name, args):
+    func = name
+    func.restype = ctypes.c_uint64
+    func.argstypes = args
     return func
 
 def defineShortFunc(name, args):
@@ -72,6 +71,18 @@ def defineFloatFunc(name, args):
     func.argtypes = args
     return func
 
+def defineDoubleFunc(name, args):
+    func = name
+    func.restype = ctypes.c_double
+    func.argtypes = args
+    return func
+
+def defineStringFunc(name, args):
+    func = name
+    func.restype = ctypes.c_char_p
+    func.argtypes = args
+    return func
+
 
 
 # Load the C library; should be platform independent.  This must
@@ -85,66 +96,76 @@ lib = ctypes.cdll.LoadLibrary(library)
 
 # Create the tag functions below
 
-plcTagCreate  = definePointerFunc(lib.plc_tag_create, [ctypes.c_char_p])
-plcTagLock    = defineIntFunc(lib.plc_tag_lock, [ctypes.c_char_p])
-plcTagUnlock  = defineIntFunc(lib.plc_tag_unlock, [ctypes.c_char_p])
-plcTagAbort   = defineIntFunc(lib.plc_tag_abort, [ctypes.c_void_p])
-plcTagDestroy = defineIntFunc(lib.plc_tag_destroy, [ctypes.c_void_p])
-plcTagRead    = defineIntFunc(lib.plc_tag_read, [ctypes.c_void_p, ctypes.c_int])
-plcTagStatus  = defineIntFunc(lib.plc_tag_status, [ctypes.c_void_p])
-plcTagWrite   = defineIntFunc(lib.plc_tag_write, [ctypes.c_void_p, ctypes.c_int])
+plcTagDecodeError = defineStringFunc(lib.plc_tag_decode_error, [ctypes.c_int])
+plcTagCreate  = defineIntFunc(lib.plc_tag_create, [ctypes.c_char_p, ctypes.c_int])
+plcTagLock    = defineIntFunc(lib.plc_tag_lock, [ctypes.c_int])
+plcTagUnlock  = defineIntFunc(lib.plc_tag_unlock, [ctypes.c_int])
+plcTagAbort   = defineIntFunc(lib.plc_tag_abort, [ctypes.c_int])
+plcTagDestroy = defineIntFunc(lib.plc_tag_destroy, [ctypes.c_int])
+plcTagRead    = defineIntFunc(lib.plc_tag_read, [ctypes.c_int, ctypes.c_int])
+plcTagStatus  = defineIntFunc(lib.plc_tag_status, [ctypes.c_int])
+plcTagWrite   = defineIntFunc(lib.plc_tag_write, [ctypes.c_int, ctypes.c_int])
 
 
 # Create the tag data accessor functions below:
 
-plcTagGetSize = defineIntFunc(lib.plc_tag_get_size, [ctypes.c_void_p])
+plcTagGetSize = defineIntFunc(lib.plc_tag_get_size, [ctypes.c_int])
 
+# create the 64-bit tag data accessors
+plcTagGetInt64 = defineLongFunc(lib.plc_tag_get_int64, [ctypes.c_int, ctypes.c_int])
+plcTagSetInt64 = defineIntFunc(lib.plc_tag_set_int64, [ctypes.c_int, ctypes.c_int, ctypes.c_int64])
+
+plcTagGetUInt64 = defineULongFunc(lib.plc_tag_get_uint64, [ctypes.c_int, ctypes.c_int])
+plcTagSetUInt64 = defineIntFunc(lib.plc_tag_set_uint64, [ctypes.c_int, ctypes.c_int, ctypes.c_int64])
 
 # Create the 32-bit tag data accessors
 
 # Creates UIntFunc because it returns a uint32_t type
-plcTagGetUInt32 = defineUIntFunc(lib.plc_tag_get_uint32, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetUInt32 = defineUIntFunc(lib.plc_tag_get_uint32, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, but notice it takes a uint for the val
-plcTagSetUInt32 = defineIntFunc(lib.plc_tag_set_uint32, [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint])
+plcTagSetUInt32 = defineIntFunc(lib.plc_tag_set_uint32, [ctypes.c_int, ctypes.c_int, ctypes.c_uint])
 
 # Creates IntFunc because it returns a int32_t type
-plcTagGetInt32  = defineIntFunc(lib.plc_tag_get_int32, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetInt32  = defineIntFunc(lib.plc_tag_get_int32, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, and sets int for the value
-plcTagSetInt32  = defineIntFunc(lib.plc_tag_set_int32, [ctypes.c_void_p, ctypes.c_int, ctypes.c_int])
+plcTagSetInt32  = defineIntFunc(lib.plc_tag_set_int32, [ctypes.c_int, ctypes.c_int, ctypes.c_int])
 
 
 # Create the 16-bit tag data accessors
 
 # Creates UShortFunc because it returns a uint16_t type
-plcTagGetUInt16 = defineUShortFunc(lib.plc_tag_get_uint16, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetUInt16 = defineUShortFunc(lib.plc_tag_get_uint16, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, but notice it takes a ushort for the val
-plcTagSetUInt16 = defineIntFunc(lib.plc_tag_set_uint16, [ctypes.c_void_p, ctypes.c_int, ctypes.c_ushort])
+plcTagSetUInt16 = defineIntFunc(lib.plc_tag_set_uint16, [ctypes.c_int, ctypes.c_int, ctypes.c_ushort])
 
 # Creates ShortFunc because it returns a int16_t type
-plcTagGetInt16  = defineShortFunc(lib.plc_tag_get_int16, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetInt16  = defineShortFunc(lib.plc_tag_get_int16, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, but notice it takes a short for the val
-plcTagSetInt16  = defineIntFunc(lib.plc_tag_set_int16, [ctypes.c_void_p, ctypes.c_int, ctypes.c_short])
+plcTagSetInt16  = defineIntFunc(lib.plc_tag_set_int16, [ctypes.c_int, ctypes.c_int, ctypes.c_short])
 
 
 # Create the 8-bit tag data accessors
 
 # Creates UByteFunc because it returns a uint8_t type
-plcTagGetUInt8 = defineUByteFunc(lib.plc_tag_get_uint8, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetUInt8 = defineUByteFunc(lib.plc_tag_get_uint8, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, but notice it takes a ubyte for the val
-plcTagSetUInt8 = defineIntFunc(lib.plc_tag_set_uint8, [ctypes.c_void_p, ctypes.c_int, ctypes.c_ubyte])
+plcTagSetUInt8 = defineIntFunc(lib.plc_tag_set_uint8, [ctypes.c_int, ctypes.c_int, ctypes.c_ubyte])
 
 # Creates ByteFunc because it returns a int8_t type
-plcTagGetInt8  = defineByteFunc(lib.plc_tag_get_int8, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetInt8  = defineByteFunc(lib.plc_tag_get_int8, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, but notice it takes a byte for the val
-plcTagSetInt8  = defineIntFunc(lib.plc_tag_set_int8, [ctypes.c_void_p, ctypes.c_int, ctypes.c_byte])
+plcTagSetInt8  = defineIntFunc(lib.plc_tag_set_int8, [ctypes.c_int, ctypes.c_int, ctypes.c_byte])
 
 
 # Create the floating point tag data accessors
 
+plcTagGetFloat64 = defineDoubleFunc(lib.plc_tag_get_float64, [ctypes.c_int, ctypes.c_int])
+plcTagSetFloat64 = defineIntFunc(lib.plc_tag_set_float64, [ctypes.c_int, ctypes.c_int, ctypes.c_double])
+
 # Creates FloatFunc because it returns a float type
-plcTagGetFloat32 = defineFloatFunc(lib.plc_tag_get_float32, [ctypes.c_void_p, ctypes.c_int])
+plcTagGetFloat32 = defineFloatFunc(lib.plc_tag_get_float32, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, but notice it takes a float for the val
-plcTagSetFloat32 = defineIntFunc(lib.plc_tag_set_float32, [ctypes.c_void_p, ctypes.c_int, ctypes.c_float])
+plcTagSetFloat32 = defineIntFunc(lib.plc_tag_set_float32, [ctypes.c_int, ctypes.c_int, ctypes.c_float])
 
 
 
@@ -164,18 +185,26 @@ plcTagSetFloat32 = defineIntFunc(lib.plc_tag_set_float32, [ctypes.c_void_p, ctyp
 #
 # These are implemented in a protocol-specific manner.
 
+
+# plc_tag_decode_error
+#
+# decode the passed error integer value into a C string.
+#
+def plc_tag_decode_error(errCode):
+    return plcTagDecodeError(errCode)
+
 # plc_tag_create
-# 
+#
 # Create a new tag based on the passed attributed string.  The attributes
 # are protocol-specific.  The only required part of the string is the key-
 # value pair "protocol=XXX" where XXX is one of the supported protocol
 # types.
 #
-# An opaque pointer is returned on success.  NULL is returned on allocation
-# failure.  Other failures will set the tag status.
+# An handle integer is returned on success.  If negative, the return provides
+# the status.
 #
-def plc_tag_create(attributeString):
-    return plcTagCreate(attributeString)
+def plc_tag_create(attributeString, timeout=0):
+    return plcTagCreate(attributeString, timeout)
 
 # plc_tag_lock
 #
@@ -214,7 +243,7 @@ def plc_tag_abort(tag):
     return plcTagAbort(tag)
 
 # plc_tag_destroy
-# 
+#
 # This frees all resources associated with the tag.  Internally, it may result in closed
 # connections etc.   This calls through to a protocol-specific function.
 #
@@ -265,6 +294,21 @@ def plc_tag_write(tag, timeout):
 def plc_tag_get_size(tag):
     return plcTagGetSize(tag)
 
+# 64-bit
+def plc_tag_get_uint64(tag, offset):
+    return plcTagGetUInt64(tag, offset)
+
+def plc_tag_set_uint64(tag, offset, value):
+    return plcTagSetUInt64(tag, offset, value)
+
+def plc_tag_get_int64(tag, offset):
+    return plcTagGetInt64(tag, offset)
+
+def plc_tag_set_int64(tag, offset, value):
+    return plcTagSetInt64(tag, offset, value)
+
+
+
 # 32-bit
 
 def plc_tag_get_uint32(tag, offset):
@@ -309,6 +353,12 @@ def plc_tag_set_int8(tag, offset, value):
 
 
 # Floating point (real)
+
+def plc_tag_get_float64(tag, offset):
+    return plcTagGetFloat64(tag, offset)
+
+def plc_tag_set_float64(tag, offset, value):
+    return plcTagSetFloat64(tag, offset, value)
 
 def plc_tag_get_float32(tag, offset):
     return plcTagGetFloat32(tag, offset)
