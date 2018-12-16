@@ -25,5 +25,3 @@
 
 const char *VERSION="@VERSION@";
 
-/* @libplctag_project_VERSION@ */
-/* @VERSION@ */
