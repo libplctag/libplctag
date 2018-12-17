@@ -205,7 +205,7 @@ def plc_tag_decode_error(errCode):
 #
 def plc_tag_create(attributeString, timeout):
     # print ("Creating tag with attributes '%s' and timeout %d" % (attributeString, timeout))
-    return plcTagCreate(attributeString, timeout)
+    return plcTagCreate(attributeString.encode(), timeout)
 
 # plc_tag_lock
 #
