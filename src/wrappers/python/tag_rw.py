@@ -36,7 +36,7 @@ def main():
                                                            'of the data to be read/written to the named tag.  The\n' +
                                                            'types starting with \"u\" are unsigned and with \"s\" are signed.\n' +
                                                            'For floating point, use \"' + PLC_TYPE_REAL32 + '\".')
-    parser.add_argument('-p','--path', required=True, help='The path to the device containing the named data.')
+    parser.add_argument('-p','--path', required=True, help='The path to the device containing the named data.', type=str)
     parser.add_argument('-w','--val', required=False, help='The value to write.  Must be formatted appropriately\n' +
                                                            'for the data type.',
                                                       type=str)
