@@ -90,7 +90,7 @@ def defineStringFunc(name, args):
 # to load the compiled libplctag C library from the current environment
 # or LD_LIBRARY path.
 system = platform.system()
-library = "libplctag.dll" if system == "Windows" else "libplctag.so"
+library = "plctag.dll" if system == "Windows" else "libplctag.so"
 lib = ctypes.cdll.LoadLibrary(library)
 
 
@@ -203,7 +203,8 @@ def plc_tag_decode_error(errCode):
 # An handle integer is returned on success.  If negative, the return provides
 # the status.
 #
-def plc_tag_create(attributeString, timeout=0):
+def plc_tag_create(attributeString, timeout):
+    # print ("Creating tag with attributes '%s' and timeout %d" % (attributeString, timeout))
     return plcTagCreate(attributeString, timeout)
 
 # plc_tag_lock

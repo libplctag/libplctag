@@ -48,7 +48,7 @@ def main():
 
     plc_type = args.type.lower()
     if plc_type not in PLC_TYPES:
-        print 'ERROR: Invalid value for type'
+        print ('ERROR: Invalid value for type')
         parser.print_help()
         exit(-1)
 
@@ -64,7 +64,7 @@ def main():
             else:
                 write_value = int(args.val)
         except:
-            print 'ERROR: cannot convert incoming write value %s' % (args.val)
+            print ('ERROR: cannot convert incoming write value %s' % (args.val))
             exit(-1)
 
     plc_path = args.path.lower()
@@ -81,14 +81,14 @@ def main():
 
     rc = libplctag.plc_tag_status(tag)
     if rc != libplctag.PLCTAG_STATUS_OK:
-        print 'ERROR: tag creation error, tag status: %s' % (libplctag.plc_tag_decode_error(rc))
+        print ('ERROR: tag creation error, tag status: %s' % (libplctag.plc_tag_decode_error(rc)))
         libplctag.plc_tag_destroy(tag)
         exit(-1)
 
     if not is_write:
         rc = libplctag.plc_tag_read(tag, DATA_TIMEOUT)
         if rc != libplctag.PLCTAG_STATUS_OK:
-            print 'ERROR: tag creation error, tag status: %s' % (libplctag.plc_tag_decode_error(rc))
+            print ('ERROR: tag creation error, tag status: %s' % (libplctag.plc_tag_decode_error(rc)))
             libplctag.plc_tag_destroy(tag)
             exit(-1)
 
@@ -99,31 +99,31 @@ def main():
         while index < tag_size:
             if plc_type == PLC_TYPE_UINT8:
                 data = libplctag.plc_tag_get_uint8(tag, index)
-                print 'data[%d]=%u (%X)' % (i, data, data)
+                print( 'data[%d]=%u (%X)' % (i, data, data))
                 index = index + 1
             elif plc_type == PLC_TYPE_UINT16:
                 data = libplctag.plc_tag_get_uint16(tag, index)
-                print 'data[%d]=%u (%X)' % (i, data, data)
+                print ('data[%d]=%u (%X)' % (i, data, data))
                 index = index + 2
             elif plc_type == PLC_TYPE_UINT32:
                 data = libplctag.plc_tag_get_uint32(tag, index)
-                print 'data[%d]=%u (%X)' % (i, data, data)
+                print ('data[%d]=%u (%X)' % (i, data, data))
                 index = index + 4
             elif plc_type == PLC_TYPE_SINT8:
                 data = libplctag.plc_tag_get_int8(tag, index)
-                print 'data[%d]=%d (%X)' % (i, data, data)
+                print ('data[%d]=%d (%X)' % (i, data, data))
                 index = index + 1
             elif plc_type == PLC_TYPE_SINT16:
                 data = libplctag.plc_tag_get_int16(tag, index)
-                print 'data[%d]=%d (%X)' % (i, data, data)
+                print ('data[%d]=%d (%X)' % (i, data, data))
                 index = index + 2
             elif plc_type == PLC_TYPE_SINT32:
                 data = libplctag.plc_tag_get_int32(tag, index)
-                print 'data[%d]=%d (%X)' % (i, data, data)
+                print ('data[%d]=%d (%X)' % (i, data, data))
                 index = index + 4
             elif plc_type == PLC_TYPE_REAL32:
                 data = libplctag.plc_tag_get_float32(tag, index)
-                print 'data[%d]=%f' % (i, data)
+                print ('data[%d]=%f' % (i, data))
                 index = index + 4
 
             i = i+1
@@ -147,9 +147,9 @@ def main():
         rc = libplctag.plc_tag_write(tag, DATA_TIMEOUT)
 
         if rc != libplctag.PLCTAG_STATUS_OK:
-            print 'ERROR: error writing the data: %d!' % (rc)
+            print ('ERROR: error writing the data: %d!' % (libplctag.plc_tag_decode_error(rc)))
         else:
-            print 'Wrote %s' % (str(write_value))
+            print ('Wrote %s' % (str(write_value)))
 
     # End if write or read
 
@@ -157,7 +157,7 @@ def main():
     if tag > 0:
         libplctag.plc_tag_destroy(tag)
 
-    print 'Done'
+    print ('Done')
     exit(0)
 
 
