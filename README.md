@@ -1,11 +1,18 @@
+NOTICE
+======
+
+Version 2.0 is almost out.  It should be out by the end of 2018.   *It has breaking API changes!*
+
+The release plan is to get 2.0 out, but not on the master branch.  Within a couple of week, I will move the existing stable release to the 1.5 branch and move 2.0 to master.
+
+
+
 libplctag
 =========
 
 This library for Linux and Windows (not heavily tested) provides a means of accessing PLCs to read and write simple data.
 
 Stable Version: 1.5
-
-Old Stable Version: 1.0
 
 Future Version: 2.0
 
