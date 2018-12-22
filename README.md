@@ -1,11 +1,11 @@
-NOTICE
-======
+2.0 is nearly here!
+===================
 
 Version 2.0 is almost out.  It should be out by the end of 2018.   *It has breaking API changes!*
 
-The release plan is to get 2.0 out, but not on the master branch.  Within a couple of week, I will move the existing stable release to the 1.5 branch and move 2.0 to master.
+The release plan is to get 2.0 out, but not on the master branch.  Within a couple of weeks, I will move the existing stable release to the 1.5 branch and move 2.0 to master.   For a little while there will be two stable releases.
 
-
+Please help test if you can!   I have a limited selection of PLCs, networks and operating systems.   
 
 libplctag
 =========
