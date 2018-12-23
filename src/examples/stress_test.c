@@ -78,7 +78,7 @@ static int32_t open_tag(FILE *log, int tid, int num_elems)
     char buf[250] = {0,};
     int32_t tag = 0;
 
-    snprintf(buf, sizeof(buf), tag_str, num_elems, tid*num_elems);
+    snprintf(buf, sizeof(buf), tag_str, num_elems, (tid-1)*num_elems);
 
     fprintf(log,"--- Test %d, Creating tag (%d, %d) with string %s\n", tid, tid, num_elems, buf);
 
@@ -113,14 +113,15 @@ static void *test_cip(void *data)
     int iteration = 1;
     int first_time = 1;
     FILE *log = NULL;
+    int start_index = (tid-1)*num_elems;
 
     /* a hack to allow threads to start. */
     util_sleep_ms(tid);
 
     log = open_log(tid);
 
-    fprintf(stderr, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, tid*num_elems);
-    fprintf(log, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, tid*num_elems);
+    fprintf(stderr, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, start_index);
+    fprintf(log, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, start_index);
 
     while(!done) {
         int64_t start = 0;
@@ -217,12 +218,22 @@ int main(int argc, char **argv)
         num_threads = atoi(argv[1]);
         num_elems = atoi(argv[2]);
         seconds = atoi(argv[3]);
-
-        fprintf(stderr, "--- starting run with %d threads each handling %d elements running for %ld seconds\n", num_threads, num_elems, seconds);
     } else {
         fprintf(stderr,"Usage: stress_test <num threads> <elements per thread> <seconds to run>\n");
-        return 0;
+        return 1;
     }
+
+    if(num_threads > MAX_THREADS) {
+        fprintf(stderr, "Too many threads.  A maximum of %d threads are supported.\n", MAX_THREADS);
+        return 1;
+    }
+
+    if(num_threads * num_elems > 1000) {
+        fprintf(stderr, "#threads * #elems must be less than 1000.\n");
+        return 1;
+    }
+
+    fprintf(stderr, "--- starting run with %d threads each handling %d elements running for %ld seconds\n", num_threads, num_elems, seconds);
 
     /* create the test threads */
     for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
