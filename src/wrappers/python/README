@@ -1,4 +1,4 @@
-Python wrapper contributed by Matt McPheeters.  
+Python wrapper contributed by Matt McPheeters.
 
 This contains a Python wrapper and a reimplementation of the tag_rw example!  Thanks!!!
 
@@ -16,5 +16,8 @@ You can make this totally available on GitHub.  But it needs some level of
 test and verification.  Should just have to install Python 2.7.10, ./run.sh, after
 replacing the "TODO:attribute.." with a known good attribute string from your pure
 C testing.
+
+KRH: 2018/12/16 Updated code to work with new API and both Python 2.7 and 3.7.
+
 
 
