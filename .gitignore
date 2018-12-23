@@ -44,3 +44,5 @@ Ankh.NoLoad
 .vs/ProjectSettings.json
 .vs/slnx.sqlite
 .vs/VSWorkspaceState.json
+src/lib/version.c
+temp.c
