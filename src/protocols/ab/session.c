@@ -795,7 +795,6 @@ void session_destroy(void *session_arg)
         session_close_socket(session);
     }
 
-    /* remove any remaining requests, they are dead */
     if(session->requests) {
         for(int i=0; i < vector_length(session->requests); i++) {
             rc_dec(vector_get(session->requests, i));
@@ -1217,6 +1216,18 @@ int process_requests(ab_session_p session)
 
             rc = PLCTAG_STATUS_OK;
         } while(0);
+
+        /* problem? clean up the pending requests and dump everything. */
+        if(rc != PLCTAG_STATUS_OK) {
+            for(int i=0; i < num_bundled_requests; i++) {
+                if(bundled_requests[i]) {
+                    bundled_requests[i]->status = rc;
+                    bundled_requests[i]->request_size = 0;
+                    bundled_requests[i]->resp_received = 1;
+                    bundled_requests[i] = rc_dec(bundled_requests[i]);
+                }
+            }
+        }
     }
 
     debug_set_tag_id(0);
