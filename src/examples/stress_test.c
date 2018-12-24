@@ -31,7 +31,7 @@
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[%d]&debug=3"
 
-#define DATA_TIMEOUT 1500
+#define DATA_TIMEOUT 2000
 #define TAG_CREATE_TIMEOUT 5000
 
 
@@ -184,6 +184,7 @@ static void *test_cip(void *data)
             tag = 0;
         } else {
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems, (int)(end-start));
+            util_sleep_ms(1);
         }
 
         iteration++;
