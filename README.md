@@ -1,9 +1,9 @@
-2.0 is nearly here!
-===================
+2.0 is here!
+============
 
-Version 2.0 is almost out.  It should be out by the end of 2018.   *It has breaking API changes!*
+Version 2.0 is out!
 
-The release plan is to get 2.0 out, but not on the master branch.  Within a couple of weeks, I will move the existing stable release to the 1.5 branch and move 2.0 to master.   For a little while there will be two stable releases.
+The release plan is to keep 2.0 on a separate branch for a few weeks or less if I hear back from the external wrapper owners.  For now, version 2.0 will be on the 2.0 branch and 1.5 will be on both master and 1.5.  After all porters have a chance to take up the changes in 2.0, I will switch this and 2.0 will be on master and 1.5 will live on its own branch.  I intend to support 1.5 for a while with just urgent bug fixes.   It will depend on what kind of bugs are filed how long that keeps going.   
 
 Please help test if you can!   I have a limited selection of PLCs, networks and operating systems.   
 
@@ -12,9 +12,9 @@ libplctag
 
 This library for Linux and Windows (not heavily tested) provides a means of accessing PLCs to read and write simple data.
 
-Stable Version: 1.5
+Old Stable Version: 1.5
 
-Future Version: 2.0
+New Stable Version: 2.0 - please checkout branch 2.0 to get this!
 
 WARNING - DISCLAIMER
 ====================
@@ -78,14 +78,14 @@ Take a look at the [test page](https://github.com/kyle-github/libplctag/wiki/PLC
 
 The library has been in production use for several years and is in use by multiple organizations including some very large ones.
 
-We are on version 1.5.  That includes:
+We are on version 1.5/2.0.  That includes:
 
 * CMake build system for better cross-platform support.
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).
 * native support for multiple data types:
-  * read/write 8, 16, and 32-bit signed and unsigned integers.
+  * read/write 8, 16, 32, and 64-bit signed and unsigned integers.
   * read/write single booleans.
-  * read/write 32-bit IEEE format (little endian) floating point.
+  * read/write 32-bit and 64-bit IEEE format (little endian) floating point.
   * raw support for user-defined structures (you need to pull out the data piece by piece)
   * read/write arrays of the above.
 * preliminary support for Rockwell/Allen-Bradley MicroLogix 850 PLCs.
@@ -104,19 +104,22 @@ We are on version 1.5.  That includes:
   * read/write of arrays of the above.
 * support for 32 and 64-bit x86 Linux (Ubuntu 11.10, 12.04, 14.04, 15.04, 16.04 tested).
 * support for maxOS is marginal.  It did work, but we do not have Macs.
-* basic support for Windows 7 x86 (32-bit) builds with Visual Studio, not well tested (help very welcome!). Support is basic because:
+* support for Windows 10 64-bit builds with Visual Studio 2017, not well tested (help very welcome!). Support is basic because:
   * we do not use Windows for our deployments.
   * only the tag_rw example program has been tested (though that tests most of the API)
-* tested support AB ControlLogix (version 16 and version 20 firmware).
+* tested support AB ControlLogix (version 16, 20 and version 31 firmware).
 * sample code.
-* a fairly stable API.  It has only had minor additions in four years.
-* a fairly solid wrapper for Java.  Contributed wrappers for Python and C++.
+* a fairly stable API.  It has only had minor additions in four years.  *WARNING* the API has changed in 2.0!
+* a fairly solid wrapper for Java and Python.  Contributors have given wrappers for C#, C++ and other languages.
 * we have deployed this in customer environments.
 * we have reports of successful use on ARM-based systems including the RaspberryPi boards.
 * Other groups use this library (if you do, please let us know).
 
-Planning for version 2.0 has started.  Please see the contact section at the bottom for a link to the
-Google forum (Google Groups) for discussion.
+Version 2.0 supports the following changes:
+* support for larger packet sizes on newer PLCs (4000 bytes instead of about 500).
+* support for multiple request bundling within a single request packet.
+
+These two changes are very significant and increase performance very much over the 1.5 version of the library.
 
 PLC5, SLC 500, MicroLogix, CompactLogix and ControlLogix are trademarks of Rockwell/Allen Bradley.  Windows and Visual Studio are trademarks
 of Microsoft.  Please let us know if we missed some so that we can get all the attributions correct!
@@ -126,7 +129,6 @@ We need and welcome help with the following:
 * bug fixes and reports.
 * other protocols like Modbus, SBus etc.
 * other platforms like Android, iOS, macOS etc.
-* 64-bit Windows.
 * other versions of Windows.
 * more language wrappers like Python, Ruby, VB, C++ etc.
 
@@ -138,11 +140,11 @@ We have tried to maintain a high level of portability.  For the most part the
 code conforms to C99.  However, we do the following things that may be an
 issue for some compilers:
 
-* we make assumptions about the bit layout of 32-bit IEEE floating point numbers in memory.  x86-based processors handle this fine, but nothing else has been tested.
-* opaque pointers may be an issue on some compilers.
+* we make assumptions about the bit layout of IEEE floating point numbers in memory.  x86-based processors handle this fine, but nothing else has been tested.
+* opaque pointers may be an issue on some compilers, but this is generally not an issue with 2.0 as it no longer presents opaque pointers through the library API.
 * we use packed structures and access structure elements off of alignment boundaries.
 * threading.  We tried to avoid this, but at least Allen-Bradley/Rockwell's protocol is very much asynchronous.
-* we still have one spot where we use inline variable declaration.
+* we still have one spot where we use inline variable declaration.   This is about the only remaining C99 requirement.
 
 We do not have access to any big-endian machines.  We would love to have someone
 with such access let us know if it is working.  We have put in byte swapping
@@ -162,15 +164,10 @@ memory.
 Threading
 =========
 
-Access to the C tag data structure is not
-thread-safe.  We have added lock/unlock API calls that use mutexes, but if you are using the library
+We have added lock/unlock API calls that use mutexes, but if you are using the library
 wrapped in another language, you should use that language's synchronization primitives to prevent simultaneous access.
 
 There is example code (C POSIX only) showing how to use the tag lock and unlock API functions.
-
-If you share a tag between two threads, you are
-going to get undefined behavior (almost certainly a crash) unless you serialize access.  We tried to keep the tag
-data structure as lightweight as possible.
 
 The Allen-Bradley EIP protocol is very asynchronous and the part of it that we
 have implemented does use a thread internally.  We kept it to just one thread and
@@ -183,7 +180,7 @@ The API
 The library uses opaque pointers with accessor functions.  There are only a
 few functions in the API.
 
-These functions operation on all types of tags:
+These functions operation on all types of tags (version 1.5 shown):
 
 ```c
     plc_tag plc_tag_create(const char *attrib_str);
@@ -197,11 +194,27 @@ These functions operation on all types of tags:
     int plc_tag_get_size(plc_tag tag);
 ```
 
+Version 2.0 changes these.   The main differences are that the tag creation routine, plc_tag_create(), takes two arguments and that tags are references as integer handles.  The new second argument to plc_tag_create() makes this a selectable asynchronous or synchronous function call.
+
+```c
+    int32_t plc_tag_create(const char *attrib_str, int timeout);
+    int plc_tag_lock(int32_t tag_id);
+    int plc_tag_unlock(int32_t tag_d);
+    int plc_tag_abort(int32_t tag_id);
+    int plc_tag_destroy(int32_t tag_id);
+    int plc_tag_read(int32_t tag_id, int timeout);
+    int plc_tag_status(int32_t tag_id);
+    int plc_tag_write(int32_t tag_id, int timeout);
+    int plc_tag_get_size(int32_t tag_id);
+```
+
+
 The following functions get and set data within a tag's
 local data.  Note that after you set something, you must
 still call plc_tag_write(tag) to push it to the PLC.
 
 ```c
+    /* version 1.5 */
     uint32_t plc_tag_get_uint32(plc_tag tag, int offset);
     int plc_tag_set_uint32(plc_tag tag, int offset, uint32_t val);
 
@@ -224,6 +237,41 @@ still call plc_tag_write(tag) to push it to the PLC.
     int plc_tag_set_float32(plc_tag tag, int offset, float val);
 ```
 
+Version 2.0:
+
+```c
+    /* version 2.0 */
+    uint64_t plc_tag_get_uint64(int32_t tag_id, int offset);
+    int plc_tag_set_uint64(int32_t tag_id, int offset, uint64_t val);
+
+    int64_t plc_tag_get_int64(int32_t tag_id, int offset);
+    int plc_tag_set_int64(int32_t tag_id, int offset, int64_t val);
+
+    uint32_t plc_tag_get_uint32(int32_t tag_id, int offset);
+    int plc_tag_set_uint32(int32_t tag_id, int offset, uint32_t val);
+
+    int32_t plc_tag_get_int32(int32_t tag_id, int offset);
+    int plc_tag_set_int32(int32_t tag_id, int offset, int32_t val);
+
+    uint16_t plc_tag_get_uint16(int32_t tag_id, int offset);
+    int plc_tag_set_uint16(int32_t tag_id, int offset, uint16_t val);
+
+    int16_t plc_tag_get_int16(int32_t tag_id, int offset);
+    int plc_tag_set_int16(int32_t tag_id, int offset, int16_t val);
+
+    uint8_t plc_tag_get_uint8(int32_t tag_id, int offset);
+    int plc_tag_set_uint8(int32_t tag_id, int offset, uint8_t val);
+
+    int8_t plc_tag_get_int8(int32_t tag_id, int offset);
+    int plc_tag_set_int8(int32_t tag_id, int offset, int8_t val);
+
+    double plc_tag_get_float64(int32_t tag_id, int offset);
+    int plc_tag_set_float64(int32_t tag_id, int offset, double val);
+
+    float plc_tag_get_float32(int32_t tag_id, int offset);
+    int plc_tag_set_float32(int32_t tag_id, int offset, float val);
+```
+
 Most of the functions in the API are for data access.
 
 See the [API](https://github.com/kyle-github/libplctag/wiki/API "API Wiki Page") for more information.
@@ -242,6 +290,8 @@ in a Logix-class Allen-Bradley PLC located at IP 192.168.1.42.  The PLC
 processor is located at slot zero in the backplane.
 
 This example is for Linux.
+
+Version 1.5:
 
 ```c
 #include <stdio.h>
@@ -337,6 +387,96 @@ int main(int argc, char **argv)
 ```
 
 
+Version 2.0:
+
+```c
+#include <stdio.h>
+#include "../lib/libplctag.h"
+#include "utils.h"
+
+
+#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,5&cpu=micro800&elem_size=4&elem_count=200&name=TestBigArray&debug=4"
+#define ELEM_COUNT 200
+#define ELEM_SIZE 4
+#define DATA_TIMEOUT 5000
+
+
+int main()
+{
+    int32_t tag = 0;
+    int rc;
+    int i;
+
+    /* create the tag */
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
+
+    /* everything OK? */
+    if(tag < 0) {
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        return 0;
+    }
+
+    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 0;
+    }
+
+    /* get the data */
+    rc = plc_tag_read(tag, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 0;
+    }
+
+    /* print out the data */
+    for(i=0; i < ELEM_COUNT; i++) {
+        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+    }
+
+    /* now test a write */
+    for(i=0; i < ELEM_COUNT; i++) {
+        int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+
+        val = val+1;
+
+        fprintf(stderr,"Setting element %d to %d\n",i,val);
+
+        plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
+    }
+
+    rc = plc_tag_write(tag, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 0;
+    }
+
+    /* get the data again*/
+    rc = plc_tag_read(tag, DATA_TIMEOUT);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return 0;
+    }
+
+    /* print out the data */
+    for(i=0; i < ELEM_COUNT; i++) {
+        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+    }
+
+    /* we are done */
+    plc_tag_destroy(tag);
+
+    return 0;
+}
+```
+
+
+
+
 Future Work
 ===========
 
@@ -351,11 +491,6 @@ That said, we have some longer term things in mind:
 * increase portability.  This will be ongoing.
 * make parts of the library optional.
 * add more protocols.  We hope that the API will be able to support most of the commonly used PLC data access protocols.
-
-Current work is starting on version 2.0 of the library. We are using a type of semantic versioning,
-so the API will have breaking changes in 2.0.  We will continue to support 1.5 after 2.0 is released
-for some period of time.  At this point, we do not expect the conversion to 2.0 to be difficult as
-the changes generally simplify the API and make it a little easier to use.
 
 
 History
