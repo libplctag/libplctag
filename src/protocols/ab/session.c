@@ -1200,6 +1200,33 @@ int process_requests(ab_session_p session)
                 break;
             }
 
+            /*
+             * check the CIP status, but only if this is a bundled
+             * response.   If it is a singleton, then we pass the
+             * status back to the tag.
+             */
+            if(num_bundled_requests > 1) {
+                if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
+                    eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
+                    pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",resp->encap_sender_context);
+
+                    if(resp->status != AB_EIP_OK) {
+                        rc = decode_cip_error_code(&(resp->status));
+                        pdebug(DEBUG_WARN,"Command failed! %s", plc_tag_decode_error(rc));
+                        break;
+                    }
+                } else if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
+                    eip_cip_co_resp *resp = (eip_cip_co_resp *)(session->data);
+                    pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
+
+                    if(resp->status != AB_EIP_OK) {
+                        rc = decode_cip_error_code(&(resp->status));
+                        pdebug(DEBUG_WARN,"Command failed! %s", plc_tag_decode_error(rc));
+                        break;
+                    }
+                }
+            }
+
             /* copy the results back out. Every request gets a copy. */
             for(int i=0; i < num_bundled_requests; i++) {
                 debug_set_tag_id(bundled_requests[i]->tag_id);
@@ -1703,24 +1730,6 @@ int recv_eip_response(ab_session_p session, int timeout)
     /* check status. */
     if(le2h32(((eip_encap *)(session->data))->encap_status) != AB_EIP_OK) {
         rc = PLCTAG_ERR_BAD_STATUS;
-    } else {
-        if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
-            eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
-            pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",resp->encap_sender_context);
-
-            if(resp->status != AB_EIP_OK) {
-                rc = decode_cip_error_code(&(resp->status));
-                pdebug(DEBUG_WARN,"Command failed! %s", plc_tag_decode_error(rc));
-            }
-        } else if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
-            eip_cip_co_resp *resp = (eip_cip_co_resp *)(session->data);
-            pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
-
-            if(resp->status != AB_EIP_OK) {
-                rc = decode_cip_error_code(&(resp->status));
-                pdebug(DEBUG_WARN,"Command failed! %s", plc_tag_decode_error(rc));
-            }
-        }
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
