@@ -191,7 +191,9 @@ static void *test_cip(void *data)
         iteration++;
     }
 
-    plc_tag_destroy(tag);
+    if(tag > 0) {
+        plc_tag_destroy(tag);
+    }
 
     fprintf(log, "*** Test %d terminating after %d iterations and an average of %dms per iteration.\n", tid, iteration, (int)(total_io_time/iteration));
 
