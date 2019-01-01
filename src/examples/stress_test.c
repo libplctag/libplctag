@@ -26,6 +26,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <sys/time.h>
+#include <signal.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
@@ -190,7 +191,9 @@ static void *test_cip(void *data)
         iteration++;
     }
 
-    plc_tag_destroy(tag);
+    if(tag > 0) {
+        plc_tag_destroy(tag);
+    }
 
     fprintf(log, "*** Test %d terminating after %d iterations and an average of %dms per iteration.\n", tid, iteration, (int)(total_io_time/iteration));
 
@@ -199,6 +202,13 @@ static void *test_cip(void *data)
     return NULL;
 }
 
+
+
+void sigpipe_handler(int unused)
+{
+    (void)unused;
+    done = 1;
+}
 
 
 
@@ -214,6 +224,12 @@ int main(int argc, char **argv)
     int num_elems = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
+    struct sigaction sigpipe = {0,};
+
+    sigpipe.sa_handler = sigpipe_handler;
+
+    /* catch broken pipe signals */
+    sigaction(SIGPIPE, &sigpipe, NULL);
 
     if(argc == 4) {
         num_threads = atoi(argv[1]);
