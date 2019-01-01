@@ -39,7 +39,6 @@ extern "C"
 //#include <ab/connection.h>
 #include <ab/session.h>
 #include <ab/defs.h>
-#include <ab/eip.h>
 #include <ab/error_codes.h>
 #include <util/debug.h>
 
@@ -293,17 +292,44 @@ static int check_read_status(ab_tag_p tag)
 
     pdebug(DEBUG_SPEW,"Starting");
 
-    /* PCCC only can have one request outstanding */
-    /* is there an outstanding request? */
-    if(!tag->req) {
+    /* is there a request in flight? */
+    if (!tag->req) {
         tag->read_in_progress = 0;
-        pdebug(DEBUG_WARN,"Read in progress but no requests in flight!");
-        return PLCTAG_ERR_NULL_PTR;
+        tag->byte_offset = 0;
+
+        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
+
+        return PLCTAG_ERR_READ;
     }
 
-    if(!tag->req->resp_received) {
-        return PLCTAG_STATUS_PENDING;
+    /* request can be used by two threads at once. */
+    spin_block(&tag->req->lock) {
+        if(!tag->req->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(tag->req->status != PLCTAG_STATUS_OK) {
+            rc = tag->req->status;
+            tag->req->abort_request = 1;
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+
+            tag->req = rc_dec(tag->req);
+
+            tag->read_in_progress = 0;
+            tag->byte_offset = 0;
+
+            break;
+        }
     }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        return rc;
+    }
+
+    /* the request is ours exclusively. */
 
     pccc = (pccc_resp*)(tag->req->data);
 
@@ -587,15 +613,43 @@ static int check_write_status(ab_tag_p tag)
     pdebug(DEBUG_SPEW,"Starting.");
 
     /* is there an outstanding request? */
-    if(!tag->req) {
+    if (!tag->req) {
         tag->write_in_progress = 0;
-        pdebug(DEBUG_WARN,"Write in progress but not requests in flight!");
-        return PLCTAG_ERR_NULL_PTR;
+        tag->byte_offset = 0;
+
+        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
+
+        return PLCTAG_ERR_WRITE;
     }
 
-    if(!tag->req->resp_received) {
-        return PLCTAG_STATUS_PENDING;
+    /* request can be used by two threads at once. */
+    spin_block(&tag->req->lock) {
+        if(!tag->req->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(tag->req->status != PLCTAG_STATUS_OK) {
+            rc = tag->req->status;
+            tag->req->abort_request = 1;
+
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+            tag->req = rc_dec(tag->req);
+
+            tag->write_in_progress = 0;
+            tag->byte_offset = 0;
+
+            break;
+        }
     }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        return rc;
+    }
+
+    /* the request is ours exclusively. */
 
     pccc = (pccc_resp*)(tag->req->data);
 

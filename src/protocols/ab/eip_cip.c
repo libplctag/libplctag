@@ -824,13 +824,41 @@ static int check_read_status_connected(ab_tag_p tag)
 
     if (!tag->req) {
         tag->read_in_progress = 0;
+        tag->byte_offset = 0;
+
         pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
+
         return PLCTAG_ERR_READ;
     }
 
-    if(!tag->req->resp_received) {
-        return PLCTAG_STATUS_PENDING;
+    /* request can be used by two threads at once. */
+    spin_block(&tag->req->lock) {
+        if(!tag->req->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(tag->req->status != PLCTAG_STATUS_OK) {
+            rc = tag->req->status;
+            tag->req->abort_request = 1;
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+
+            tag->req = rc_dec(tag->req);
+
+            tag->read_in_progress = 0;
+            tag->byte_offset = 0;
+
+            break;
+        }
     }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        return rc;
+    }
+
+    /* the request is ours exclusively. */
 
     /* point to the data */
     cip_resp = (eip_cip_co_resp*)(tag->req->data);
@@ -1027,13 +1055,41 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
     if (!tag->req) {
         tag->read_in_progress = 0;
+        tag->byte_offset = 0;
+
         pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
-        return PLCTAG_ERR_NULL_PTR;
+
+        return PLCTAG_ERR_READ;
     }
 
-    if(!tag->req->resp_received) {
-        return PLCTAG_STATUS_PENDING;
+    /* request can be used by two threads at once. */
+    spin_block(&tag->req->lock) {
+        if(!tag->req->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(tag->req->status != PLCTAG_STATUS_OK) {
+            rc = tag->req->status;
+            tag->req->abort_request = 1;
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+
+            tag->req = rc_dec(tag->req);
+
+            tag->read_in_progress = 0;
+            tag->byte_offset = 0;
+
+            break;
+        }
     }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        return rc;
+    }
+
+    /* the request is ours exclusively. */
 
     /* point to the data */
     cip_resp = (eip_cip_uc_resp*)(tag->req->data);
@@ -1225,16 +1281,43 @@ static int check_write_status_connected(ab_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* is there an outstanding request? */
-    if(!tag->req) {
+    if (!tag->req) {
         tag->write_in_progress = 0;
-        pdebug(DEBUG_INFO, "Write in progress but no outstanding write request!");
-        return PLCTAG_ERR_NULL_PTR;
+        tag->byte_offset = 0;
+
+        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
+
+        return PLCTAG_ERR_WRITE;
     }
 
-    if (!tag->req->resp_received) {
-        return PLCTAG_STATUS_PENDING;
+    /* request can be used by two threads at once. */
+    spin_block(&tag->req->lock) {
+        if(!tag->req->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(tag->req->status != PLCTAG_STATUS_OK) {
+            rc = tag->req->status;
+            tag->req->abort_request = 1;
+
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+            tag->req = rc_dec(tag->req);
+
+            tag->write_in_progress = 0;
+            tag->byte_offset = 0;
+
+            break;
+        }
     }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        return rc;
+    }
+
+    /* the request is ours exclusively. */
 
     /* point to the data */
     cip_resp = (eip_cip_co_resp*)(tag->req->data);
@@ -1309,16 +1392,43 @@ static int check_write_status_unconnected(ab_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* is there an outstanding request? */
-    if(!tag->req) {
+    if (!tag->req) {
         tag->write_in_progress = 0;
-        pdebug(DEBUG_INFO, "Write in progress but no outstanding write request!");
-        return PLCTAG_ERR_NULL_PTR;
+        tag->byte_offset = 0;
+
+        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
+
+        return PLCTAG_ERR_WRITE;
     }
 
-    if (!tag->req->resp_received) {
-        return PLCTAG_STATUS_PENDING;
+    /* request can be used by two threads at once. */
+    spin_block(&tag->req->lock) {
+        if(!tag->req->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(tag->req->status != PLCTAG_STATUS_OK) {
+            rc = tag->req->status;
+            tag->req->abort_request = 1;
+
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+            tag->req = rc_dec(tag->req);
+
+            tag->write_in_progress = 0;
+            tag->byte_offset = 0;
+
+            break;
+        }
     }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        return rc;
+    }
+
+    /* request is exclusively ours. */
 
     /* point to the data */
     cip_resp = (eip_cip_uc_resp*)(tag->req->data);

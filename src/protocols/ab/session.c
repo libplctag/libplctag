@@ -23,7 +23,6 @@
 #include <ab/ab_common.h>
 #include <ab/cip.h>
 #include <ab/defs.h>
-#include <ab/eip.h>
 #include <ab/error_codes.h>
 #include <ab/session.h>
 #include <util/debug.h>
@@ -1343,8 +1342,8 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
 
     /* notify the reading thread that the request is ready */
     spin_block(&request->lock) {
+        request->status = PLCTAG_STATUS_OK;
         request->request_size = new_eip_len;
-        //request->packing_num = sub_packet;
         request->resp_received = 1;
     }
 
