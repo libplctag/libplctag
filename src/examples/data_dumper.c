@@ -37,7 +37,7 @@
 //#define DATA_TIMEOUT 1000
 
 
-#define MAX_TAGS 1000
+#define MAX_TAGS 5000
 
 
 typedef enum { UNKNOWN, DINT, INT, SINT, REAL } data_type_t;
