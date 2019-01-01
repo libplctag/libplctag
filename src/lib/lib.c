@@ -91,7 +91,7 @@ int lib_init(void)
     }
 
     pdebug(DEBUG_INFO,"Creating tag hashtable mutex.");
-    rc = mutex_create((mutex_p*)&tag_lookup_mutex);
+    rc = mutex_create((mutex_p *)&tag_lookup_mutex);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to create tag hashtable mutex!");
     }
@@ -214,7 +214,7 @@ THREAD_FUNC(tag_tickler_func)
 
 
 
-LIB_EXPORT const char* plc_tag_decode_error(int rc)
+LIB_EXPORT const char *plc_tag_decode_error(int rc)
 {
     switch(rc) {
     case PLCTAG_STATUS_PENDING:
@@ -295,6 +295,8 @@ LIB_EXPORT const char* plc_tag_decode_error(int rc)
         return "PLCTAG_ERR_WINSOCK";
     case PLCTAG_ERR_WRITE:
         return "PLCTAG_ERR_WRITE";
+    case PLCTAG_ERR_PARTIAL:
+        return "PLCTAG_ERR_PARTIAL";
 
     default:
         return "Unknown error.";
@@ -444,7 +446,13 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
             pdebug(DEBUG_WARN,"Timeout waiting for tag to be ready!");
             tag->vtable->abort(tag);
             rc = PLCTAG_ERR_TIMEOUT;
-            tag->status = rc;
+        }
+
+        /* check to see if there was an error during tag creation. */
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
+            rc_dec(tag);
+            return rc;
         }
 
         pdebug(DEBUG_INFO,"tag set up elapsed time %ldms",(time_ms()-start_time));
