@@ -108,6 +108,7 @@ extern "C" {
     #define PLCTAG_ERR_UNSUPPORTED      (-35)
     #define PLCTAG_ERR_WINSOCK          (-36)
     #define PLCTAG_ERR_WRITE            (-37)
+    #define PLCTAG_ERR_PARTIAL          (-38)
 
 
 

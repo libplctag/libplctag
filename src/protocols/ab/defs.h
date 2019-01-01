@@ -80,6 +80,7 @@
 #define AB_CIP_STATUS_FRAG              ((uint8_t)0x06)
 
 #define AB_CIP_ERR_UNSUPPORTED_SERVICE  ((uint8_t)0x08)
+#define AB_CIP_ERR_PARTIAL_ERROR  ((uint8_t)0x1e)
 
 /* PCCC commands */
 #define AB_EIP_PCCC_TYPED_CMD ((uint8_t)0x0F)
