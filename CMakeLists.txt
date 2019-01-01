@@ -31,7 +31,7 @@ project (libplctag_project)
 # the project is version 2.0
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 0)
-set (libplctag_VERSION_PATCH 3)
+set (libplctag_VERSION_PATCH 4)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 
@@ -139,8 +139,6 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${ab_SRC_PATH}/cip.c"
                      "${ab_SRC_PATH}/cip.h"
                      "${ab_SRC_PATH}/defs.h"
-                     "${ab_SRC_PATH}/eip.c"
-                     "${ab_SRC_PATH}/eip.h"
                      "${ab_SRC_PATH}/eip_cip.c"
                      "${ab_SRC_PATH}/eip_cip.h"
                      "${ab_SRC_PATH}/eip_dhp_pccc.c"
