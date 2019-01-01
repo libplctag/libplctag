@@ -1210,18 +1210,20 @@ int process_requests(ab_session_p session)
                     eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
                     pdebug(DEBUG_INFO,"Received unconnected packet with session sequence ID %llx",resp->encap_sender_context);
 
-                    if(resp->status != AB_EIP_OK) {
+                    /* punt if we got an overall error or it is not a partial/bundled error. */
+                    if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
                         rc = decode_cip_error_code(&(resp->status));
-                        pdebug(DEBUG_WARN,"Command failed! %s", plc_tag_decode_error(rc));
+                        pdebug(DEBUG_WARN,"Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
                     }
                 } else if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
                     eip_cip_co_resp *resp = (eip_cip_co_resp *)(session->data);
                     pdebug(DEBUG_INFO,"Received connected packet with connection ID %x and sequence ID %u(%x)",le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
 
-                    if(resp->status != AB_EIP_OK) {
+                    /* punt if we got an overall error or it is not a partial/bundled error. */
+                    if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
                         rc = decode_cip_error_code(&(resp->status));
-                        pdebug(DEBUG_WARN,"Command failed! %s", plc_tag_decode_error(rc));
+                        pdebug(DEBUG_WARN,"Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
                     }
                 }

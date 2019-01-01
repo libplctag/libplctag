@@ -295,6 +295,8 @@ LIB_EXPORT const char *plc_tag_decode_error(int rc)
         return "PLCTAG_ERR_WINSOCK";
     case PLCTAG_ERR_WRITE:
         return "PLCTAG_ERR_WRITE";
+    case PLCTAG_ERR_PARTIAL:
+        return "PLCTAG_ERR_PARTIAL";
 
     default:
         return "Unknown error.";
