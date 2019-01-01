@@ -33,7 +33,6 @@
 #include <ab/pccc.h>
 #include <ab/cip.h>
 #include <ab/defs.h>
-#include <ab/eip.h>
 #include <ab/eip_cip.h>
 #include <ab/eip_lgx_pccc.h>
 #include <ab/eip_pccc.h>
