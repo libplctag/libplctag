@@ -32,8 +32,9 @@
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[%d]&debug=3"
 
-#define DATA_TIMEOUT 2000
-#define TAG_CREATE_TIMEOUT 5000
+#define DATA_TIMEOUT (2000)
+#define TAG_CREATE_TIMEOUT (5000)
+#define RETRY_TIMEOUT (10000)
 
 
 
@@ -69,6 +70,23 @@ static void close_log(FILE *log)
 {
     fflush(log);
     fclose(log);
+}
+
+
+static int wait_ms(int timeout_ms)
+{
+    int64_t timeout = 0;
+
+    timeout = util_time_ms() + timeout_ms;
+    while(!done && timeout > util_time_ms()) {
+        util_sleep_ms(5);
+    }
+
+    if(!done) {
+        return PLCTAG_STATUS_OK;
+    } else {
+        return PLCTAG_ERR_ABORT;
+    }
 }
 
 
@@ -128,22 +146,16 @@ static void *test_cip(void *data)
         int64_t start = 0;
         int64_t end = 0;
 
-        while(!tag && !done) {
+        while(tag <= 0 && !done) {
             if(!first_time) {
-                int64_t timeout = 0;
-
-                /* retry later */
-                timeout = util_time_ms() + TAG_CREATE_TIMEOUT;
-                while(!done && timeout > util_time_ms()) {
-                    util_sleep_ms(5);
-                }
+                wait_ms(RETRY_TIMEOUT);
             }
 
             first_time = 0;
 
             tag = open_tag(log, tid, num_elems);
             if(tag < 0) {
-                fprintf(log,"!!! Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration, plc_tag_decode_error(tag), TAG_CREATE_TIMEOUT);
+                fprintf(log,"!!! Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration, plc_tag_decode_error(tag), RETRY_TIMEOUT);
             }
         }
 
@@ -180,9 +192,9 @@ static void *test_cip(void *data)
         total_io_time += (end - start);
 
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(log,"!!! Test %d, iteration %d, closing tag due to error %s, will retry in %dms.\n", tid, iteration, plc_tag_decode_error(rc), TAG_CREATE_TIMEOUT);
-            plc_tag_destroy(tag);
-            tag = 0;
+            fprintf(log,"!!! Test %d, iteration %d, error %s, will retry in %dms.\n", tid, iteration, plc_tag_decode_error(rc), RETRY_TIMEOUT);
+
+            wait_ms(RETRY_TIMEOUT);
         } else {
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems, (int)(end-start));
             util_sleep_ms(1);
@@ -193,6 +205,7 @@ static void *test_cip(void *data)
 
     if(tag > 0) {
         plc_tag_destroy(tag);
+        tag = 0;
     }
 
     fprintf(log, "*** Test %d terminating after %d iterations and an average of %dms per iteration.\n", tid, iteration, (int)(total_io_time/iteration));
