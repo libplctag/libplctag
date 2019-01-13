@@ -51,6 +51,13 @@
                                     * Needs more testing.
                                     */
 
+/*
+ * Number of milliseconds to wait to try to set up the session again
+ * after a failure.
+ */
+#define RETRY_WAIT_MS (5000)
+
+
 
 static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, int plc_type, int use_connected_msg);
 static int session_init(ab_session_p session);
@@ -266,7 +273,7 @@ int get_plc_type(attr attribs)
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
 
     if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
-            !str_cmp_i(cpu_type, "slc500")) {
+        !str_cmp_i(cpu_type, "slc500")) {
         return AB_PROTOCOL_PLC;
     } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
                !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
@@ -929,7 +936,7 @@ int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
  ****************************************************************/
 
 
-typedef enum { SESSION_OPEN_SOCKET, SESSION_REGISTER, SESSION_CONNECT, SESSION_IDLE, SESSION_DISCONNECT, SESSION_UNREGISTER, SESSION_CLOSE_SOCKET, SESSION_TERMINATE } session_state_t;
+typedef enum { SESSION_OPEN_SOCKET, SESSION_REGISTER, SESSION_CONNECT, SESSION_IDLE, SESSION_DISCONNECT, SESSION_UNREGISTER, SESSION_CLOSE_SOCKET, SESSION_START_RETRY, SESSION_WAIT_RETRY } session_state_t;
 
 
 THREAD_FUNC(session_handler)
@@ -937,8 +944,7 @@ THREAD_FUNC(session_handler)
     ab_session_p session = arg;
     int rc = PLCTAG_STATUS_OK;
     session_state_t state = SESSION_OPEN_SOCKET;
-//    int idle = 0;
-//    int64_t timeout_time = 0;
+    int64_t timeout_time = 0;
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
@@ -954,7 +960,7 @@ THREAD_FUNC(session_handler)
             if ((rc = session_open_socket(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "session connect failed %s!", plc_tag_decode_error(rc));
                 session->status = rc;
-                state = SESSION_TERMINATE;
+                state = SESSION_CLOSE_SOCKET;
             } else {
                 state = SESSION_REGISTER;
             }
@@ -1032,16 +1038,33 @@ THREAD_FUNC(session_handler)
                 session->status = rc;
             }
 
-            state = SESSION_TERMINATE;
+            state = SESSION_START_RETRY;
             break;
 
-        case SESSION_TERMINATE:
-            pdebug(DEBUG_SPEW,"in SESSION_TERMINATE state.");
+        case SESSION_START_RETRY:
+            pdebug(DEBUG_DETAIL,"in SESSION_START_RETRY state.");
 
+            /* set up timer for retry. */
+
+            /* FIXME - make this a tag attribute. */
+            timeout_time = time_ms() + RETRY_WAIT_MS;
+
+            /* start waiting. */
+            state = SESSION_WAIT_RETRY;
+
+            break;
+
+        case SESSION_WAIT_RETRY:
+            pdebug(DEBUG_SPEW, "in SESSION_WAIT_RETRY state.");
+
+            /* make us sleep on each iteration. */
             idle = 1;
-            session->status = PLCTAG_ERR_BAD_CONNECTION;
 
-            /* else just hang here until we are cleaned up. */
+            if(timeout_time < time_ms()) {
+                pdebug(DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET.");
+                state = SESSION_OPEN_SOCKET;
+            }
+
             break;
 
         default:
@@ -1060,9 +1083,7 @@ THREAD_FUNC(session_handler)
 
         /*
          * give up the CPU a bit, but only if we are not
-         * doing some linked states (like setting up the CIP
-         * session or terminating one, or terminating the whole
-         * session.
+         * doing some linked states.
          */
         if(idle && !session->terminating) {
             sleep_ms(1);
@@ -1124,26 +1145,31 @@ int process_requests(ab_session_p session)
 
             remaining_space = session->max_payload_size - (int)sizeof(cip_multi_req_header);
 
-            do {
-                request = vector_get(session->requests, 0);
+            /* if there are still requests after purging all the aborted requests, process them. */
+            if(vector_length(session->requests)) {
+                do {
+                    request = vector_get(session->requests, 0);
 
-                remaining_space = remaining_space - get_payload_size(request);
+                    remaining_space = remaining_space - get_payload_size(request);
 
 
-                /*
-                 * If we have a non-packable request, only queue it if it is the first one.
-                 * If the request is packable, keep queuing as long as there is space.
-                 */
+                    /*
+                     * If we have a non-packable request, only queue it if it is the first one.
+                     * If the request is packable, keep queuing as long as there is space.
+                     */
 
-                if(num_bundled_requests == 0 || (request->allow_packing && remaining_space > 0)) {
-                    //pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1, remaining_space);
-                    bundled_requests[num_bundled_requests] = request;
-                    num_bundled_requests++;
+                    if(num_bundled_requests == 0 || (request->allow_packing && remaining_space > 0)) {
+                        //pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1, remaining_space);
+                        bundled_requests[num_bundled_requests] = request;
+                        num_bundled_requests++;
 
-                    /* remove it from the queue. */
-                    vector_remove(session->requests, 0);
-                }
-            } while(vector_length(session->requests) && remaining_space > 0 && num_bundled_requests < MAX_REQUESTS && request->allow_packing);
+                        /* remove it from the queue. */
+                        vector_remove(session->requests, 0);
+                    }
+                } while(vector_length(session->requests) && remaining_space > 0 && num_bundled_requests < MAX_REQUESTS && request->allow_packing);
+            } else {
+                pdebug(DEBUG_DETAIL, "All requests in queue were aborted, nothing to do.");
+            }
         }
     }
 
@@ -1680,8 +1706,6 @@ int recv_eip_response(ab_session_p session, int timeout)
         rc = socket_read(session->sock, session->data + session->data_offset,
                          (int)(data_needed - session->data_offset));
 
-        /*pdebug(DEBUG_DETAIL,"socket_read rc=%d",rc);*/
-
         if (rc < 0) {
             /* error! */
             pdebug(DEBUG_WARN,"Error reading socket! rc=%d",rc);
@@ -1769,11 +1793,6 @@ int perform_forward_open(ab_session_p session)
                 pdebug(DEBUG_DETAIL,"ForwardOpenEx succeeded with packet size %d.", session->max_payload_size);
             }
         } else if(rc == PLCTAG_ERR_UNSUPPORTED) {
-//            /* the PLC does not support Forward Open Extended.   Try the old request type. */
-//            if(session->max_payload_size == MAX_CIP_MSG_SIZE_EX) {
-//                session->max_payload_size = MAX_CIP_MSG_SIZE;
-//            }
-
             rc = try_forward_open(session);
             if(rc == PLCTAG_ERR_TOO_LARGE) {
                 /* we support the Forward Open Extended command, but we need to use a smaller size. */
@@ -1812,13 +1831,13 @@ int perform_forward_close(ab_session_p session)
     do {
         rc = send_forward_close_req(session);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL,"Sending forward close failed! rc=%d",rc);
+            pdebug(DEBUG_DETAIL,"Sending forward close failed, %s!",plc_tag_decode_error(rc));
             break;
         }
 
         rc = recv_forward_close_resp(session);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL,"Forward close not received! rc=%d", rc);
+            pdebug(DEBUG_DETAIL,"Forward close not received, %s!", plc_tag_decode_error(rc));
             break;
         }
     } while(0);
@@ -1848,7 +1867,7 @@ int try_forward_open_ex(ab_session_p session, int *packet_size_guess)
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+            pdebug(DEBUG_WARN,"Unable to get new request, %s!",plc_tag_decode_error(rc));
             rc = 0;
             break;
         }
@@ -1894,7 +1913,7 @@ int try_forward_open(ab_session_p session)
 
     do {
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+            pdebug(DEBUG_WARN,"Unable to get new request, %s!",plc_tag_decode_error(rc));
             rc = 0;
             break;
         }
@@ -2212,7 +2231,7 @@ int recv_forward_close_resp(ab_session_p session)
 
     rc = recv_eip_response(session, 150); /* MAGIC, something short */
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to receive Forward Close response! rc=%d", rc);
+        pdebug(DEBUG_WARN, "Unable to receive Forward Close response, %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
