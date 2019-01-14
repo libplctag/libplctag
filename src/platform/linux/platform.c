@@ -951,7 +951,10 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-    rc = (int)write(s->fd,buf, (size_t)size);
+//    rc = (int)write(s->fd,buf, (size_t)size);
+    /* make sure we do not get a signal if the remove connection is closed. */
+    /* FIXME - does this work on *BSD? */
+    rc = (int)send(s->fd,buf, (size_t)size, MSG_NOSIGNAL);
 
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
