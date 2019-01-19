@@ -35,7 +35,6 @@ set (libplctag_VERSION_PATCH 7)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 
-
 message("MSVC = ${MSVC}")
 if(MSVC)
     message("CMAKE generator: ${CMAKE_GENERATOR}")
