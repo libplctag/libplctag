@@ -57,6 +57,8 @@
  */
 #define RETRY_WAIT_MS (5000)
 
+#define SESSION_DISCONNECT_TIMEOUT (5000)
+
 
 
 static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, int plc_type, int use_connected_msg);
@@ -964,9 +966,9 @@ THREAD_FUNC(session_handler)
                 state = SESSION_CLOSE_SOCKET;
             } else {
                 /* set the timeout for disconnect. */
-                if(session->auto_disconnect_enabled) {
-                    auto_disconnect_time = time_ms() + session->auto_disconnect_timeout_ms;
-                }
+                //if(session->auto_disconnect_enabled) {
+                    auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
+                //}
 
                 state = SESSION_REGISTER;
             }
@@ -1008,7 +1010,7 @@ THREAD_FUNC(session_handler)
             /* if there is work to do, make sure we do not disconnect. */
             critical_block(session->mutex) {
                 if(vector_length(session->requests) > 0) {
-                    auto_disconnect_time = time_ms() + session->auto_disconnect_timeout_ms;
+                    auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
                 }
             }
 
@@ -1024,7 +1026,7 @@ THREAD_FUNC(session_handler)
             }
 
             /* check if we should disconnect */
-            if(session->auto_disconnect_enabled) {
+            //if(session->auto_disconnect_enabled) {
                 if(auto_disconnect_time < time_ms()) {
                     pdebug(DEBUG_DETAIL, "Disconnecting due to inactivity.");
 
@@ -1037,7 +1039,7 @@ THREAD_FUNC(session_handler)
                         state = SESSION_UNREGISTER;
                     }
                 }
-            }
+            //}
 
             break;
 
