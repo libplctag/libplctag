@@ -242,6 +242,7 @@ if (UNIX)
                            stress_api_lock
                            stress_test
                            string
+                           test_reconnect
                            test_special
                            toggle_bool
                            write_string
