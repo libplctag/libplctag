@@ -87,6 +87,10 @@ struct ab_session_t {
     thread_p handler_thread;
     int terminating;
     mutex_p mutex;
+
+    /* disconnect handling */
+    int auto_disconnect_enabled;
+    int auto_disconnect_timeout_ms;
 };
 
 struct ab_request_t {
