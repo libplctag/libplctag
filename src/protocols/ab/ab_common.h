@@ -59,4 +59,7 @@ extern vector_p find_read_group_tags(ab_tag_p tag);
 
 THREAD_FUNC(request_handler_func);
 
+
+#define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
+
 #endif
