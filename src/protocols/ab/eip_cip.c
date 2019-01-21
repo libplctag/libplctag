@@ -842,10 +842,8 @@ static int check_read_status_connected(ab_tag_p tag)
         if(tag->req->status != PLCTAG_STATUS_OK) {
             rc = tag->req->status;
             tag->req->abort_request = 1;
+
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-
-            tag->req = rc_dec(tag->req);
 
             tag->read_in_progress = 0;
             tag->byte_offset = 0;
@@ -855,6 +853,11 @@ static int check_read_status_connected(ab_tag_p tag)
     }
 
     if(rc != PLCTAG_STATUS_OK) {
+        if(rc_is_error(rc)) {
+            /* the request is dead, from session side. */
+            tag->req = rc_dec(tag->req);
+        }
+
         return rc;
     }
 
@@ -1073,10 +1076,8 @@ static int check_read_status_unconnected(ab_tag_p tag)
         if(tag->req->status != PLCTAG_STATUS_OK) {
             rc = tag->req->status;
             tag->req->abort_request = 1;
+
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-
-            tag->req = rc_dec(tag->req);
 
             tag->read_in_progress = 0;
             tag->byte_offset = 0;
@@ -1086,6 +1087,11 @@ static int check_read_status_unconnected(ab_tag_p tag)
     }
 
     if(rc != PLCTAG_STATUS_OK) {
+        if(rc_is_error(rc)) {
+            /* the request is dead, from session side. */
+            tag->req = rc_dec(tag->req);
+        }
+
         return rc;
     }
 
@@ -1304,8 +1310,6 @@ static int check_write_status_connected(ab_tag_p tag)
 
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
-            tag->req = rc_dec(tag->req);
-
             tag->write_in_progress = 0;
             tag->byte_offset = 0;
 
@@ -1314,6 +1318,11 @@ static int check_write_status_connected(ab_tag_p tag)
     }
 
     if(rc != PLCTAG_STATUS_OK) {
+        if(rc_is_error(rc)) {
+            /* the request is dead, from session side. */
+            tag->req = rc_dec(tag->req);
+        }
+
         return rc;
     }
 
@@ -1415,8 +1424,6 @@ static int check_write_status_unconnected(ab_tag_p tag)
 
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
-            tag->req = rc_dec(tag->req);
-
             tag->write_in_progress = 0;
             tag->byte_offset = 0;
 
@@ -1425,6 +1432,11 @@ static int check_write_status_unconnected(ab_tag_p tag)
     }
 
     if(rc != PLCTAG_STATUS_OK) {
+        if(rc_is_error(rc)) {
+            /* the request is dead, from session side. */
+            tag->req = rc_dec(tag->req);
+        }
+
         return rc;
     }
 
