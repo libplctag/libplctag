@@ -25,7 +25,7 @@
 #include "utils.h"
 
 
-#define TAG_PATH "protocol=ab-eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray&debug=4"
+#define TAG_PATH "protocol=ab-eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_size=4&elem_count=1&auto_disconnect_ms=10000&name=TestBigArray&debug=4"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 5000

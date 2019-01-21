@@ -208,8 +208,16 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
     int rc = PLCTAG_STATUS_OK;
+    int auto_disconnect_enabled = 0;
+    int auto_disconnect_timeout_ms = INT_MAX;
 
     pdebug(DEBUG_DETAIL, "Starting");
+
+    auto_disconnect_timeout_ms = attr_get_int(attribs, "auto_disconnect_ms", INT_MAX);
+    if(auto_disconnect_timeout_ms != INT_MAX) {
+        pdebug(DEBUG_DETAIL,"Setting auto-disconnect after %dms.", auto_disconnect_timeout_ms);
+        auto_disconnect_enabled = 1;
+    }
 
     if(plc_type == AB_PROTOCOL_PLC && str_length(session_path) > 0) {
         /* this means it is DH+ */
@@ -234,9 +242,22 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
                 rc = PLCTAG_ERR_BAD_GATEWAY;
             } else {
+                session->auto_disconnect_enabled = auto_disconnect_enabled;
+                session->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
+
                 new_session = 1;
             }
         } else {
+            /* turn on auto disconnect if we need to. */
+            if(!session->auto_disconnect_enabled && auto_disconnect_enabled) {
+                session->auto_disconnect_enabled = auto_disconnect_enabled;
+            }
+
+            /* disconnect period always goes down. */
+            if(session->auto_disconnect_enabled && session->auto_disconnect_timeout_ms > auto_disconnect_timeout_ms) {
+                session->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
+            }
+
             pdebug(DEBUG_DETAIL,"Reusing existing session.");
         }
     }
@@ -442,33 +463,6 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
     return NULL;
 }
 
-//    session = sessions;
-//
-//    while(session) {
-//        /* scan past any that are in the process of being deleted. */
-//        while(session && !rc_inc(session)) {
-//            session = session->next;
-//        }
-//
-//        if(!session) {
-//            break;
-//        }
-//
-//        if(session_match_valid(host, path, session)) {
-//            /* this is the one! */
-//            break;
-//        }
-//
-//        /* we are not going to use this session, release it. */
-//        rc_dec(session);
-//
-//        /* try the next one. */
-//        session = session->next;
-//    }
-//
-//    return session;
-//}
-//
 
 
 ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, int plc_type, int use_connected_msg)
@@ -936,7 +930,11 @@ int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
  ****************************************************************/
 
 
-typedef enum { SESSION_OPEN_SOCKET, SESSION_REGISTER, SESSION_CONNECT, SESSION_IDLE, SESSION_DISCONNECT, SESSION_UNREGISTER, SESSION_CLOSE_SOCKET, SESSION_START_RETRY, SESSION_WAIT_RETRY } session_state_t;
+typedef enum { SESSION_OPEN_SOCKET, SESSION_REGISTER, SESSION_CONNECT,
+               SESSION_IDLE, SESSION_DISCONNECT, SESSION_UNREGISTER,
+               SESSION_CLOSE_SOCKET, SESSION_START_RETRY, SESSION_WAIT_RETRY,
+               SESSION_WAIT_RECONNECT
+             } session_state_t;
 
 
 THREAD_FUNC(session_handler)
@@ -945,6 +943,9 @@ THREAD_FUNC(session_handler)
     int rc = PLCTAG_STATUS_OK;
     session_state_t state = SESSION_OPEN_SOCKET;
     int64_t timeout_time = 0;
+    int64_t auto_disconnect_time = 0;
+    int auto_disconnect = 0;
+
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
@@ -962,6 +963,11 @@ THREAD_FUNC(session_handler)
                 session->status = rc;
                 state = SESSION_CLOSE_SOCKET;
             } else {
+                /* set the timeout for disconnect. */
+                if(session->auto_disconnect_enabled) {
+                    auto_disconnect_time = time_ms() + session->auto_disconnect_timeout_ms;
+                }
+
                 state = SESSION_REGISTER;
             }
             break;
@@ -999,6 +1005,13 @@ THREAD_FUNC(session_handler)
             idle = 1;
             session->status = PLCTAG_STATUS_OK;
 
+            /* if there is work to do, make sure we do not disconnect. */
+            critical_block(session->mutex) {
+                if(vector_length(session->requests) > 0) {
+                    auto_disconnect_time = time_ms() + session->auto_disconnect_timeout_ms;
+                }
+            }
+
             if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error while processing requests %s!", plc_tag_decode_error(rc));
                 session->status = rc;
@@ -1009,6 +1022,23 @@ THREAD_FUNC(session_handler)
                     state = SESSION_UNREGISTER;
                 }
             }
+
+            /* check if we should disconnect */
+            if(session->auto_disconnect_enabled) {
+                if(auto_disconnect_time < time_ms()) {
+                    pdebug(DEBUG_DETAIL, "Disconnecting due to inactivity.");
+
+                    auto_disconnect = 1;
+                    idle = 0;
+
+                    if(session->use_connected_msg) {
+                        state = SESSION_DISCONNECT;
+                    } else {
+                        state = SESSION_UNREGISTER;
+                    }
+                }
+            }
+
             break;
 
         case SESSION_DISCONNECT:
@@ -1038,11 +1068,16 @@ THREAD_FUNC(session_handler)
                 session->status = rc;
             }
 
-            state = SESSION_START_RETRY;
+            if(auto_disconnect) {
+                state = SESSION_WAIT_RECONNECT;
+            } else {
+                state = SESSION_START_RETRY;
+            }
+
             break;
 
         case SESSION_START_RETRY:
-            pdebug(DEBUG_DETAIL,"in SESSION_START_RETRY state.");
+            pdebug(DEBUG_DETAIL, "in SESSION_START_RETRY state.");
 
             /* set up timer for retry. */
 
@@ -1066,6 +1101,26 @@ THREAD_FUNC(session_handler)
             }
 
             break;
+
+        case SESSION_WAIT_RECONNECT:
+            /* wait for at least one request to queue before reconnecting. */
+            pdebug(DEBUG_SPEW, "in SESSION_WAIT_RECONNECT state.");
+
+            idle = 1;
+            auto_disconnect = 0;
+
+            /* if there is work to do, reconnect.. */
+            critical_block(session->mutex) {
+                if(vector_length(session->requests) > 0) {
+                    pdebug(DEBUG_DETAIL, "There are requests waiting, reopening connection to PLC.");
+
+                    idle = 0;
+                    state = SESSION_OPEN_SOCKET;
+                }
+            }
+
+            break;
+
 
         default:
             pdebug(DEBUG_ERROR, "Unknown state %d!",state);
