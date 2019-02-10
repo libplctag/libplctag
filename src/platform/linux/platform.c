@@ -604,7 +604,11 @@ void thread_stop(void)
 void thread_kill(thread_p t)
 {
     if(t) {
+#ifdef __ANDROID__
+        pthread_kill(t->p_thread, 0);
+#else
         pthread_cancel(t->p_thread);
+#endif /* __ANDROID__ */
     }
 }
 
