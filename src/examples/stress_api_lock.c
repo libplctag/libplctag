@@ -81,15 +81,17 @@ void *test_tag(void *data)
 
     while(!done) {
         int rc = PLCTAG_STATUS_OK;
-        int32_t value;
-        int64_t start;
-        int64_t end;
+        int32_t value = 0;
+        int64_t start = 0;
+        int64_t end = 0;
 
         /* capture the starting time */
         start = util_time_ms();
 
         /* read the tag */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
+
+        end = util_time_ms();
 
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr,"Test %d, terminating test, read resulted in error %s\n", tid, plc_tag_decode_error(rc));
@@ -109,12 +111,10 @@ void *test_tag(void *data)
             if(rc != PLCTAG_STATUS_OK) {
                 fprintf(stderr,"Test %d, terminating test, write resulted in error %s\n", tid, plc_tag_decode_error(rc));
                 done = 1;
+            } else {
+                fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
             }
         }
-
-        end = util_time_ms();
-
-        fprintf(stderr,"Test %d, iteration %d, got result %d with return code %s in %dms\n",tid, iteration, value, plc_tag_decode_error(rc), (int)(end-start));
 
         iteration++;
     }
@@ -133,7 +133,7 @@ int main(int argc, char **argv)
     pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
-    int64_t seconds = 30;  /* default 1 hour */
+    int64_t seconds = 30;  /* default 30 seconds */
     int num_threads = 0;
 
     if(argc==2) {
