@@ -81,7 +81,7 @@ void *test_tag(void *data)
 
     while(!done) {
         int rc = PLCTAG_STATUS_OK;
-        int32_t value;
+        int32_t value = 0;
         int64_t start;
         int64_t end;
 
