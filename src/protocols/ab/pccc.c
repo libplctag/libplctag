@@ -34,7 +34,8 @@ static int parse_pccc_file_type(const char **str, pccc_file_t *file_type);
 static int parse_pccc_file_num(const char **str, int *file_num);
 static int parse_pccc_elem_num(const char **str, int *elem_num);
 static int parse_pccc_subelem_num(const char **str, pccc_file_t file_type, int *subelem_num);
-static void encode_level(uint8_t *data, int *index, int val);
+static void encode_data(uint8_t *data, int *index, int val);
+static int encode_file_type(pccc_file_t file_type);
 
 
 
@@ -129,7 +130,7 @@ static void encode_level(uint8_t *data, int *index, int val);
 
 
 /*
- * Encode the logical address as a level encoding.
+ * Encode the logical address as a level encoding for use with PLC/5 PLCs.
  *
  * Byte Meaning
  * 0    level flags
@@ -138,7 +139,7 @@ static void encode_level(uint8_t *data, int *index, int val);
  * 1-3  level three
  */
 
-int pccc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size)
+int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size)
 {
     int rc = PLCTAG_STATUS_OK;
     uint8_t level_byte = 0;
@@ -174,20 +175,85 @@ int pccc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const
     level_byte = 0x06; /* level one and two */
 
     /* add in the data file number. */
-    encode_level(data, size, file_num);
+    encode_data(data, size, file_num);
 
     /* add in the element number */
-    encode_level(data, size, elem_num);
+    encode_data(data, size, elem_num);
 
     /* check to see if we need to put in a subelement. */
     if(subelem_num >= 0) {
         level_byte |= 0x08;
 
-        encode_level(data, size, subelem_num);
+        encode_data(data, size, subelem_num);
     }
 
     /* store the encoded levels. */
     data[0] = level_byte;
+
+    pdebug(DEBUG_DETAIL,"Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+
+/*
+ * Encode the logical address as a file/type/element/subelement struct.
+ *
+ * element  Meaning
+ * file     Data file #.
+ * type     Data file type.
+ * element  element # within data file.
+ * sub      field/sub-element within data file for structured data.
+ */
+
+int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int file_num = 0;
+    int encoded_file_type = 0;
+    int elem_num = 0;
+    int subelem_num = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!data || !size || !name) {
+        pdebug(DEBUG_WARN, "Called with null data, or name or zero sized data!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    *size = 0;
+    *file_type = PCCC_FILE_UNKNOWN;
+
+    if((rc = parse_pccc_logical_address(name, file_type, &file_num, &elem_num, &subelem_num)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to parse SLC logical addresss!");
+        return rc;
+    }
+
+    /* check for space. */
+    if(max_tag_name_size < (3 + 1 + 3 + 3)) {
+        pdebug(DEBUG_WARN,"Encoded SLC logical address buffer is too small!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    encoded_file_type = encode_file_type(*file_type);
+    if(encoded_file_type == 0) {
+        pdebug(DEBUG_WARN,"SLC file type %d cannot be decoded!", *file_type);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* encode the file number */
+    encode_data(data, size, file_num);
+
+    /* encode the data file type. */
+    encode_data(data, size, encoded_file_type);
+
+    /* add in the element number */
+    encode_data(data, size, elem_num);
+
+    /* add in the sub-element number */
+    encode_data(data, size, (subelem_num < 0 ? 0 : subelem_num));
 
     pdebug(DEBUG_DETAIL,"Done.");
 
@@ -349,7 +415,7 @@ const char *pccc_decode_error(int error)
         break;
 
     case 0x0E:
-        return "Shutdown could not be executed.";
+        return "Command could not be executed.";
         break;
 
     case 0x0F:
@@ -938,7 +1004,7 @@ int parse_pccc_subelem_num(const char **str, pccc_file_t file_type, int *subelem
 }
 
 
-void encode_level(uint8_t *data, int *index, int val)
+void encode_data(uint8_t *data, int *index, int val)
 {
     if(val <= 254) {
         data[*index] = (uint8_t)val;
@@ -952,4 +1018,33 @@ void encode_level(uint8_t *data, int *index, int val)
 }
 
 
+
+
+
+int encode_file_type(pccc_file_t file_type)
+{
+    switch(file_type) {
+        case PCCC_FILE_ASCII: return 0x8e; break;
+        case PCCC_FILE_BIT: return 0x85; break;
+        case PCCC_FILE_BLOCK_TRANSFER: break;
+        case PCCC_FILE_COUNTER: return 0x87; break;
+        case PCCC_FILE_BCD: return 0x8f; break;
+        case PCCC_FILE_FLOAT: return 0x8a; break;
+        case PCCC_FILE_INPUT: return 0x8c; break;
+        case PCCC_FILE_MESSAGE: break;
+        case PCCC_FILE_INT: return 0x89; break;
+        case PCCC_FILE_OUTPUT: return 0x8b; break;
+        case PCCC_FILE_PID: break;
+        case PCCC_FILE_CONTROL: return 0x88; break;
+        case PCCC_FILE_STATUS: return 0x84; break;
+        case PCCC_FILE_SFC: break;
+        case PCCC_FILE_STRING: return 0x8d; break;
+        case PCCC_FILE_TIMER: return 0x86; break;
+        default:
+             return 0x00;
+             break;
+    }
+
+    return 0x00;
+}
 

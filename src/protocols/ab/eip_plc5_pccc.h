@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2019 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -18,21 +18,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/**************************************************************************
- * CHANGE LOG                                                             *
- *                                                                        *
- * 2013-11-19  KRH - Created file.                                        *
- **************************************************************************/
-
-#ifndef __LIBPLCTAG_AB_EIP_PCCC_H__
-#define __LIBPLCTAG_AB_EIP_PCCC_H__
+#pragma once
 
 #include <ab/ab_common.h>
 
 
 
-/* PCCC with DH+ last hop */
-extern struct tag_vtable_t eip_pccc_vtable;
+/* PLC-5  */
+extern struct tag_vtable_t plc5_vtable;
 
-
-#endif

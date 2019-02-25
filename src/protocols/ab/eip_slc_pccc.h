@@ -25,5 +25,5 @@
 
 
 /* PLC-5  */
-extern struct tag_vtable_t lgx_pccc_vtable;
+extern struct tag_vtable_t slc_vtable;
 
