@@ -35,7 +35,8 @@
 #include <ab/defs.h>
 #include <ab/eip_cip.h>
 #include <ab/eip_lgx_pccc.h>
-#include <ab/eip_pccc.h>
+#include <ab/eip_plc5_pccc.h>
+#include <ab/eip_slc_pccc.h>
 #include <ab/eip_dhp_pccc.h>
 #include <ab/session.h>
 #include <ab/tag.h>
@@ -86,10 +87,10 @@ static int default_write(plc_tag_p tag);
 
 /* vtables for different kinds of tags */
 struct tag_vtable_t default_vtable = { default_abort, default_read, default_status, default_tickler, default_write };
-struct tag_vtable_t cip_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_cip_tag_read_start, eip_cip_tag_status, eip_cip_tag_write_start }*/;
-struct tag_vtable_t plc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_pccc_tag_read_start, eip_pccc_tag_status, eip_pccc_tag_write_start }*/;
-struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
-struct tag_vtable_t lgx_pccc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
+//struct tag_vtable_t cip_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_cip_tag_read_start, eip_cip_tag_status, eip_cip_tag_write_start }*/;
+//struct tag_vtable_t plc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_pccc_tag_read_start, eip_pccc_tag_status, eip_pccc_tag_write_start }*/;
+//struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
+//struct tag_vtable_t lgx_pccc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
 
 
 /* declare this so that the library initializer can pass it to atexit() */
@@ -223,9 +224,9 @@ plc_tag_p ab_tag_create(attr attribs)
     switch(tag->protocol_type) {
     case AB_PROTOCOL_PLC:
         if(!path) {
-            pdebug(DEBUG_DETAIL, "Setting up PLC/5, SLC tag.");
+            pdebug(DEBUG_DETAIL, "Setting up PLC/5 tag.");
             tag->use_connected_msg = 0;
-            tag->vtable = &eip_pccc_vtable;
+            tag->vtable = &plc5_vtable;
         } else {
             pdebug(DEBUG_DETAIL, "Setting up PLC/5 via DH+ bridge tag.");
             tag->use_connected_msg = 1;
@@ -235,18 +236,19 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->allow_packing = 0;
         break;
 
+    case AB_PROTOCOL_SLC:
+    case AB_PROTOCOL_MLGX:
+        pdebug(DEBUG_DETAIL, "Setting up SLC, MicroLogix tag.");
+        tag->use_connected_msg = 0;
+        tag->allow_packing = 0;
+        tag->vtable = &slc_vtable;
+        break;
+
     case AB_PROTOCOL_LGX_PCCC:
         pdebug(DEBUG_DETAIL, "Setting up PCCC-mapped Logix tag.");
         tag->use_connected_msg = 0;
         tag->allow_packing = 0;
-        tag->vtable = &eip_lgx_pccc_vtable;
-        break;
-
-    case AB_PROTOCOL_MLGX:
-        pdebug(DEBUG_DETAIL, "Setting up MicroLogix tag.");
-        tag->use_connected_msg = 0;
-        tag->allow_packing = 0;
-        tag->vtable = &eip_pccc_vtable;
+        tag->vtable = &lgx_pccc_vtable;
         break;
 
     case AB_PROTOCOL_LGX:
@@ -684,10 +686,19 @@ int check_tag_name(ab_tag_p tag, const char* name)
     /* attempt to parse the tag name */
     switch (tag->protocol_type) {
     case AB_PROTOCOL_PLC:
-    case AB_PROTOCOL_MLGX:
     case AB_PROTOCOL_LGX_PCCC:
-        if ((rc = pccc_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "parse of PCCC-style tag name %s failed!", name);
+        if ((rc = plc5_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "parse of PLC/5-style tag name %s failed!", name);
+
+            return rc;
+        }
+
+        break;
+
+    case AB_PROTOCOL_SLC:
+    case AB_PROTOCOL_MLGX:
+        if ((rc = slc_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "parse of SLC-style tag name %s failed!", name);
 
             return rc;
         }

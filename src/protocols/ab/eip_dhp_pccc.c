@@ -214,7 +214,7 @@ int tag_read_start(ab_tag_p tag)
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = /*h2le16(conn_seq_id)*/ h2le16((uint16_t)(intptr_t)(tag->session));
-    pccc->pccc_function = AB_EIP_PCCC_TYPED_READ_FUNC;
+    pccc->pccc_function = AB_EIP_PLC5_TYPED_READ_FUNC;
     pccc->pccc_transfer_size = h2le16((uint16_t)(tag->elem_count)); /* This is not in the docs, but it is in the data. */
 
     /* get ready to add the request to the queue for this session */
@@ -380,7 +380,7 @@ int tag_write_start(ab_tag_p tag)
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16((uint16_t)(intptr_t)(tag->session));
-    pccc->pccc_function = AB_EIP_PCCC_TYPED_WRITE_FUNC;
+    pccc->pccc_function = AB_EIP_PLC5_TYPED_WRITE_FUNC;
     pccc->pccc_transfer_size = h2le16((uint16_t)(tag->elem_count)); /* This is not in the docs, but it is in the data. */
 
     /* get ready to add the request to the queue for this session */

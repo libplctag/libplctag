@@ -84,8 +84,10 @@
 
 /* PCCC commands */
 #define AB_EIP_PCCC_TYPED_CMD ((uint8_t)0x0F)
-#define AB_EIP_PCCC_TYPED_READ_FUNC ((uint8_t)0x68)
-#define AB_EIP_PCCC_TYPED_WRITE_FUNC ((uint8_t)0x67)
+#define AB_EIP_PLC5_TYPED_READ_FUNC ((uint8_t)0x68)
+#define AB_EIP_PLC5_TYPED_WRITE_FUNC ((uint8_t)0x67)
+#define AB_EIP_SLC_TYPED_READ_FUNC ((uint8_t)0xA2)
+#define AB_EIP_SLC_TYPED_WRITE_FUNC ((uint8_t)0xAA)
 
 
 /* PCCC defs */
@@ -869,48 +871,48 @@ START_PACK typedef struct {
 } END_PACK eip_cip_uc_resp;
 
 
-
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
-    uint16_le encap_length;          /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
-    uint32_le encap_status;          /* always _sent_ as 0 */
-    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le encap_options;         /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle;      /* ALWAYS 0 */
-    uint16_le router_timeout;        /* in seconds, 5 or 10 seems to be good.*/
-
-    /* Common Packet Format - CPF Unconnected */
-    uint16_le cpf_item_count;        /* ALWAYS 2 */
-    uint16_le cpf_nai_item_type;     /* ALWAYS 0 */
-    uint16_le cpf_nai_item_length;   /* ALWAYS 0 */
-    uint16_le cpf_udi_item_type;     /* ALWAYS 0x00B2 - Unconnected Data Item */
-    uint16_le cpf_udi_item_length;   /* REQ: fill in with length of remaining data. */
-
-    /* PCCC Command Req Routing */
-    uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
-    uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
-    uint8_t req_path[4];            /* ALWAYS 0x20,0x67,0x24,0x01 for PCCC */
-    uint8_t request_id_size;        /* ALWAYS 7 */
-    uint16_le vendor_id;             /* Our CIP Vendor ID */
-    uint32_le vendor_serial_number;  /* Our CIP Vendor Serial Number */
-
-    /* PCCC Command */
-    uint8_t pccc_command;           /* CMD read, write etc. */
-    uint8_t pccc_status;            /* STS 0x00 in request */
-    uint16_le pccc_seq_num;          /* TNS transaction/sequence id */
-    uint8_t pccc_function;          /* FNC sub-function of command */
-    uint16_le pccc_offset;           /* offset of requested in total request */
-    uint16_le pccc_transfer_size;    /* total number of words requested */
-    //uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
-} END_PACK pccc_req;
-
+//
+//START_PACK typedef struct {
+//    /* encap header */
+//    uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
+//    uint16_le encap_length;          /* packet size in bytes - 24 */
+//    uint32_le encap_session_handle;  /* from session set up */
+//    uint32_le encap_status;          /* always _sent_ as 0 */
+//    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
+//                                     * identifying responses when more than one
+//                                     * are in flight at once.
+//                                     */
+//    uint32_le encap_options;         /* 0, reserved for future use */
+//
+//    /* Interface Handle etc. */
+//    uint32_le interface_handle;      /* ALWAYS 0 */
+//    uint16_le router_timeout;        /* in seconds, 5 or 10 seems to be good.*/
+//
+//    /* Common Packet Format - CPF Unconnected */
+//    uint16_le cpf_item_count;        /* ALWAYS 2 */
+//    uint16_le cpf_nai_item_type;     /* ALWAYS 0 */
+//    uint16_le cpf_nai_item_length;   /* ALWAYS 0 */
+//    uint16_le cpf_udi_item_type;     /* ALWAYS 0x00B2 - Unconnected Data Item */
+//    uint16_le cpf_udi_item_length;   /* REQ: fill in with length of remaining data. */
+//
+//    /* PCCC Command Req Routing */
+//    uint8_t service_code;           /* ALWAYS 0x4B, Execute PCCC */
+//    uint8_t req_path_size;          /* ALWAYS 0x02, in 16-bit words */
+//    uint8_t req_path[4];            /* ALWAYS 0x20,0x67,0x24,0x01 for PCCC */
+//    uint8_t request_id_size;        /* ALWAYS 7 */
+//    uint16_le vendor_id;             /* Our CIP Vendor ID */
+//    uint32_le vendor_serial_number;  /* Our CIP Vendor Serial Number */
+//
+//    /* PCCC Command */
+//    uint8_t pccc_command;           /* CMD read, write etc. */
+//    uint8_t pccc_status;            /* STS 0x00 in request */
+//    uint16_le pccc_seq_num;          /* TNS transaction/sequence id */
+//    uint8_t pccc_function;          /* FNC sub-function of command */
+////    uint16_le pccc_offset;           /* offset of requested in total request */
+//    uint8_t pccc_transfer_size;    /* total number of bytes requested */
+//    //uint8_t pccc_data[ZLA_SIZE];   /* send_data for request */
+//} END_PACK pccc_req;
+//
 
 
 START_PACK typedef struct {
