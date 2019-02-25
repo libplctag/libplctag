@@ -651,9 +651,10 @@ int check_cpu(ab_tag_p tag, attr attribs)
 {
     const char* cpu_type = attr_get_str(attribs, "cpu", "NONE");
 
-    if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
-        !str_cmp_i(cpu_type, "slc500")) {
+    if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
         tag->protocol_type = AB_PROTOCOL_PLC;
+    } else if (!str_cmp_i(cpu_type, "slc") || !str_cmp_i(cpu_type, "slc500")) {
+        tag->protocol_type = AB_PROTOCOL_SLC;
     } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") ||
                !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5")) {
         tag->protocol_type = AB_PROTOCOL_LGX_PCCC;
