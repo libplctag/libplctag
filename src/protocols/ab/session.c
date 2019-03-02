@@ -43,15 +43,8 @@
 
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PLC5_MSG_SIZE (244)
-#define MAX_CIP_SLC_MSG_SIZE (94)
+#define MAX_CIP_SLC_MSG_SIZE (222)
 #define MAX_CIP_MLGX_MSG_SIZE (244)
-
-/* max PCCC payload? */
-//#define MAX_PCCC_PACKET_SIZE (244) /*
-//                                    * That's what the docs say.
-//                                    *
-//                                    * Needs more testing.
-//                                    */
 
 /*
  * Number of milliseconds to wait to try to set up the session again
