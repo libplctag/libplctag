@@ -235,7 +235,7 @@ int tag_read_start(ab_tag_p tag)
     embed_pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     embed_pccc->pccc_status = 0;  /* STS 0 in request */
     embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
-    embed_pccc->pccc_function = AB_EIP_PLC5_TYPED_READ_FUNC;
+    embed_pccc->pccc_function = AB_EIP_PCCCLGX_TYPED_READ_FUNC;
     embed_pccc->pccc_transfer_size = h2le16((uint16_t)tag->elem_count); /* This is the offset items */
 
     /* point to the end of the struct */
@@ -595,7 +595,7 @@ int tag_write_start(ab_tag_p tag)
     embed_pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     embed_pccc->pccc_status = 0;  /* STS 0 in request */
     embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
-    embed_pccc->pccc_function = AB_EIP_PLC5_TYPED_WRITE_FUNC;
+    embed_pccc->pccc_function = AB_EIP_PCCCLGX_TYPED_WRITE_FUNC;
     embed_pccc->pccc_offset = h2le16(0);
     embed_pccc->pccc_transfer_size = h2le16((uint16_t)tag->elem_count); /* This is the offset items */
 

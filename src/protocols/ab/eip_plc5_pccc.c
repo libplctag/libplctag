@@ -48,8 +48,6 @@ struct tag_vtable_t plc5_vtable = {
 static int check_read_status(ab_tag_p tag);
 static int check_write_status(ab_tag_p tag);
 
-static int encode_file_type(pccc_file_t file_type);
-
 START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
@@ -86,8 +84,8 @@ START_PACK typedef struct {
     uint8_t pccc_status;            /* STS 0x00 in request */
     uint16_le pccc_seq_num;          /* TNS transaction/sequence id */
     uint8_t pccc_function;          /* FNC sub-function of command */
-    uint16_le pccc_offset;           /* offset of requested in total request */
-    uint16_le pccc_transfer_size;    /* total number of bytes requested */
+    uint16_le pccc_transfer_offset;           /* offset of requested in total request */
+    uint16_le pccc_transfer_size;    /* total number of elements requested */
 } END_PACK pccc_req;
 
 
@@ -180,26 +178,10 @@ int tag_read_start(ab_tag_p tag)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    /* how many packets will we need? How much overhead? */
-    //overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
-
-    /* calculate based on the response. */
-    overhead =   1      /* reply code */
-                 +1      /* reserved */
-                 +1      /* general status */
-                 +1      /* status size */
-                 +1      /* request ID size */
-                 +2      /* vendor ID */
-                 +4      /* vendor serial number */
-                 +1      /* PCCC command */
-                 +1      /* PCCC status */
-                 +2      /* PCCC sequence number */
-                 +1      /* type byte */
-                 +2      /* maximum extended type. */
-                 +2      /* maximum extended size. */
-                 +1      /* secondary type byte if type was array. */
-                 +2      /* maximum extended type. */
-                 +2;     /* maximum extended size. */
+    /* What is the overhead in the _response_ */
+    overhead =   1  /* pccc command */
+                +1  /* pccc status */
+                +2;  /* pccc sequence num */
 
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
@@ -243,8 +225,9 @@ int tag_read_start(ab_tag_p tag)
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
-    pccc->pccc_function = AB_EIP_PLC5_TYPED_READ_FUNC;
-    pccc->pccc_transfer_size = h2le16((uint16_t)(tag->elem_count)); /* This is not in the docs, but it is in the data. */
+    pccc->pccc_function = AB_EIP_PLC5_RANGE_READ_FUNC;
+    pccc->pccc_transfer_offset = h2le16((uint16_t)0);
+    pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
 
     /* point to the end of the struct */
     data = ((uint8_t *)pccc) + sizeof(pccc_req);
@@ -253,9 +236,9 @@ int tag_read_start(ab_tag_p tag)
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* we need the count twice? */
-    *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count)); /* FIXME - bytes or INTs? */
-    data += sizeof(uint16_le);
+    /* amount of data to get this time */
+    *data = (uint8_t)(tag->elem_size * tag->elem_count); /* bytes for this transfer */
+    data++;
 
     /*
      * after the embedded packet, we need to tell the message router
@@ -318,8 +301,6 @@ static int check_read_status(ab_tag_p tag)
     pccc_resp *pccc;
     uint8_t *data;
     uint8_t *data_end;
-    int pccc_res_type;
-    int pccc_res_length;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_SPEW,"Starting");
@@ -399,26 +380,6 @@ static int check_read_status(ab_tag_p tag)
             break;
         }
 
-        if(!(data = pccc_decode_dt_byte(data,(int)(data_end - data), &pccc_res_type,&pccc_res_length))) {
-            pdebug(DEBUG_WARN,"Unable to decode PCCC response data type and data size!");
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        /* this gives us the overall type of the response and the number of bytes remaining in it.
-         * If the type is an array, then we need to decode another one of these words
-         * to get the type of each element and the size of each element.  We will
-         * need to adjust the size if we care.
-         */
-
-        if(pccc_res_type == AB_PCCC_DATA_ARRAY) {
-            if(!(data = pccc_decode_dt_byte(data,(int)(data_end - data), &pccc_res_type,&pccc_res_length))) {
-                pdebug(DEBUG_WARN,"Unable to decode PCCC response array element data type and data size!");
-                rc = PLCTAG_ERR_BAD_DATA;
-                break;
-            }
-        }
-
         /* did we get the right amount of data? */
         if((data_end - data) != tag->size) {
             if((int)(data_end - data) > tag->size) {
@@ -459,35 +420,22 @@ int tag_write_start(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     pccc_req *pccc;
     uint8_t *data;
-    uint8_t element_def[16];
-    int element_def_size;
-    uint8_t array_def[16];
-    int array_def_size;
-    int pccc_data_type;
-    //uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
     uint8_t *embed_start;
     int overhead, data_per_packet;
     ab_request_p req = NULL;
 
     pdebug(DEBUG_INFO,"Starting.");
 
-    /* how many packets will we need? How much overhead? */
-
-    /* overhead comes from the request in this case */
-    overhead =   1  /* CIP PCCC command */
-                 +2  /* UCMM path size for PCCC command */
-                 +4  /* path to PCCC command object */
-                 +1  /* request ID size */
-                 +2  /* vendor ID */
-                 +4  /* vendor serial number */
-                 +1  /* PCCC command */
-                 +1  /* PCCC status */
-                 +2  /* PCCC sequence number */
-                 +1  /* PCCC function */
-                 +2  /* request offset */
-                 +2  /* request total transfer size in elements. */
-                 + (tag->encoded_name_size)
-                 +2; /* actual request size in elements */
+    /* How much overhead? */
+    overhead =   1  /* pccc command */
+                +1  /* pccc status */
+                +2  /* pccc sequence num */
+                +1  /* pccc function */
+                +2  /* transfer offset, in words? */
+                +2  /* total transfer size in words */
+                +tag->encoded_name_size
+                +1; /* size in bytes of this write */
 
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
@@ -516,44 +464,9 @@ int tag_write_start(ab_tag_p tag)
     /* point to the end of the struct */
     data = (req->data) + sizeof(pccc_req);
 
-    /* copy laa into the request */
+    /* copy encoded tag name into the request */
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
     data += tag->encoded_name_size;
-
-    /* translate the data type. */
-    pccc_data_type = encode_file_type(tag->file_type);
-
-    /* type is valid? */
-    if(pccc_data_type != 0) {
-        pdebug(DEBUG_WARN,"Unsupported data type: %d",tag->file_type);
-        rc_dec(req);
-        return PLCTAG_ERR_NOT_ALLOWED;
-    }
-
-    /* generate the data type/data size fields, first the element part so that
-     * we can get the size for the array part.
-     */
-    if(!(element_def_size = pccc_encode_dt_byte(element_def,sizeof(element_def),(uint32_t)pccc_data_type,(uint32_t)(tag->elem_size)))) {
-        pdebug(DEBUG_WARN,"Unable to encode PCCC request array element data type and size fields!");
-        //~ request_destroy(&req);
-        rc_dec(req);
-        return PLCTAG_ERR_ENCODE;
-    }
-
-    if(!(array_def_size = pccc_encode_dt_byte(array_def,sizeof(array_def),AB_PCCC_DATA_ARRAY, (uint32_t)(element_def_size + tag->size)))) {
-        pdebug(DEBUG_WARN,"Unable to encode PCCC request data type and size fields!");
-        //~ request_destroy(&req);
-        rc_dec(req);
-        return PLCTAG_ERR_ENCODE;
-    }
-
-    /* copy the array data first. */
-    mem_copy(data,array_def,array_def_size);
-    data += array_def_size;
-
-    /* copy the element data */
-    mem_copy(data,element_def,element_def_size);
-    data += element_def_size;
 
     /* now copy the data to write */
     mem_copy(data,tag->data,tag->size);
@@ -562,7 +475,7 @@ int tag_write_start(ab_tag_p tag)
     /* now fill in the rest of the structure. */
 
     /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);    /* ALWAYS 0x0070 Unconnected Send*/
+    pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
 
     /* router timeout */
     pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
@@ -590,16 +503,13 @@ int tag_write_start(ab_tag_p tag)
     /* PCCC Command */
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
-    //pccc->pccc_seq_num = h2le16(tag->connection->conn_seq_num);
-    pccc->pccc_function = AB_EIP_PLC5_TYPED_WRITE_FUNC;
-    pccc->pccc_transfer_size = h2le16((uint16_t)(tag->elem_count));
-
+    pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
+    pccc->pccc_function = AB_EIP_PLC5_RANGE_WRITE_FUNC;
+    pccc->pccc_transfer_offset = h2le16((uint16_t)0);
+    pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
 
     /* get ready to add the request to the queue for this session */
     req->request_size = (int)(data - (req->data));
-    //req->send_request = 1;
-    //req->conn_seq = conn_seq_id;
-
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
@@ -729,33 +639,4 @@ static int check_write_status(ab_tag_p tag)
 
     /* Success! */
     return rc;
-}
-
-
-
-int encode_file_type(pccc_file_t file_type)
-{
-    switch(file_type) {
-        case PCCC_FILE_ASCII: break;
-        case PCCC_FILE_BIT: return AB_PCCC_DATA_BIT; break;
-        case PCCC_FILE_BLOCK_TRANSFER: break;
-        case PCCC_FILE_COUNTER: return AB_PCCC_DATA_COUNTER; break;
-        case PCCC_FILE_BCD: return AB_PCCC_DATA_BCD; break;
-        case PCCC_FILE_FLOAT: return AB_PCCC_DATA_REAL; break;
-        case PCCC_FILE_INPUT: break;
-        case PCCC_FILE_MESSAGE: break;
-        case PCCC_FILE_INT: return AB_PCCC_DATA_INT; break;
-        case PCCC_FILE_OUTPUT: break;
-        case PCCC_FILE_PID: break;
-        case PCCC_FILE_CONTROL: return AB_PCCC_DATA_CONTROL; break;
-        case PCCC_FILE_STATUS: break;
-        case PCCC_FILE_SFC: break;
-        case PCCC_FILE_STRING: return AB_PCCC_DATA_BYTE_STRING; break;
-        case PCCC_FILE_TIMER: return AB_PCCC_DATA_TIMER; break;
-        default:
-             return 0;
-             break;
-    }
-
-    return 0;
 }
