@@ -42,14 +42,16 @@
 #define MAX_CIP_MSG_SIZE_EX     (0xFFFF & 4002)
 
 /* maximum for PCCC embedded within CIP. */
-#define MAX_CIP_PCCC_MSG_SIZE (258)
+#define MAX_CIP_PLC5_MSG_SIZE (244)
+#define MAX_CIP_SLC_MSG_SIZE (94)
+#define MAX_CIP_MLGX_MSG_SIZE (244)
 
 /* max PCCC payload? */
-#define MAX_PCCC_PACKET_SIZE (244) /*
-                                    * That's what the docs say.
-                                    *
-                                    * Needs more testing.
-                                    */
+//#define MAX_PCCC_PACKET_SIZE (244) /*
+//                                    * That's what the docs say.
+//                                    *
+//                                    * Needs more testing.
+//                                    */
 
 /*
  * Number of milliseconds to wait to try to set up the session again
@@ -539,10 +541,17 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
 
     /* guess the max CIP payload size. */
     switch(plc_type) {
-    case AB_PROTOCOL_PLC:
+    case AB_PROTOCOL_SLC:
+        session->max_payload_size = MAX_CIP_SLC_MSG_SIZE;
+        break;
+
     case AB_PROTOCOL_MLGX:
+        session->max_payload_size = MAX_CIP_MLGX_MSG_SIZE;
+        break;
+
+    case AB_PROTOCOL_PLC:
     case AB_PROTOCOL_LGX_PCCC:
-        session->max_payload_size = MAX_CIP_PCCC_MSG_SIZE;
+        session->max_payload_size = MAX_CIP_PLC5_MSG_SIZE;
         break;
 
     case AB_PROTOCOL_LGX:
