@@ -212,11 +212,11 @@ int tag_read_start(ab_tag_p tag)
     }
 
     /* point the struct pointers to the buffer*/
-    lgx_pccc = (eip_cip_uc_req*)(req->data);
-    embed_pccc = (embedded_pccc*)(lgx_pccc + 1);
+    lgx_pccc = (eip_cip_uc_req *)(req->data);
+    embed_pccc = (embedded_pccc *)(lgx_pccc + 1);
 
     /* set up the embedded PCCC packet */
-    embed_start = (uint8_t*)(embed_pccc);
+    embed_start = (uint8_t *)(embed_pccc);
 
     /* Command Routing */
     embed_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
@@ -236,6 +236,7 @@ int tag_read_start(ab_tag_p tag)
     embed_pccc->pccc_status = 0;  /* STS 0 in request */
     embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
     embed_pccc->pccc_function = AB_EIP_PCCCLGX_TYPED_READ_FUNC;
+    embed_pccc->pccc_offset = h2le16((uint16_t)0);
     embed_pccc->pccc_transfer_size = h2le16((uint16_t)tag->elem_count); /* This is the offset items */
 
     /* point to the end of the struct */
@@ -246,7 +247,7 @@ int tag_read_start(ab_tag_p tag)
     data += tag->encoded_name_size;
 
     /* FIXME - This is the total items */
-    *((uint16_le*)data) = h2le16((uint16_t)tag->elem_count); /* FIXME - bytes or INTs? */
+    *((uint16_le *)data) = h2le16((uint16_t)tag->elem_count); /* elements */
     data += sizeof(uint16_le);
 
     /* if this is not an multiple of 16-bit chunks, pad it out */
@@ -299,7 +300,7 @@ int tag_read_start(ab_tag_p tag)
     }
 
     /* how big is the unconnected data item? */
-    lgx_pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - (uint8_t*)(&lgx_pccc->cm_service_code)));
+    lgx_pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
 
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
@@ -402,7 +403,7 @@ static int check_read_status(ab_tag_p tag)
         int pccc_res_type;
         int pccc_res_length;
 
-        pccc = (pccc_resp*)(req->data);
+        pccc = (pccc_resp *)(req->data);
 
         /* point to the start of the data */
         data = (uint8_t *)pccc + sizeof(*pccc);
@@ -422,7 +423,7 @@ static int check_read_status(ab_tag_p tag)
         }
 
         if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"PCCC command failed, response code: (%d) %s", pccc->general_status, decode_cip_error_long((uint8_t*)&(pccc->general_status)));
+            pdebug(DEBUG_WARN,"PCCC command failed, response code: (%d) %s", pccc->general_status, decode_cip_error_long((uint8_t *)&(pccc->general_status)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -572,11 +573,11 @@ int tag_write_start(ab_tag_p tag)
     }
 
     /* point the struct pointers to the buffer*/
-    lgx_pccc = (eip_cip_uc_req*)(req->data);
-    embed_pccc = (embedded_pccc*)(lgx_pccc + 1);
+    lgx_pccc = (eip_cip_uc_req *)(req->data);
+    embed_pccc = (embedded_pccc *)(lgx_pccc + 1);
 
     /* set up the embedded PCCC packet */
-    embed_start = (uint8_t*)(embed_pccc);
+    embed_start = (uint8_t *)(embed_pccc);
 
     /* Command Routing */
     embed_pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
@@ -662,7 +663,7 @@ int tag_write_start(ab_tag_p tag)
     }
 
     /* how big is the unconnected data item? */
-    lgx_pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - (uint8_t*)(&lgx_pccc->cm_service_code)));
+    lgx_pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
 
     /* get ready to add the request to the queue for this session */
     req->request_size = (int)(data - (req->data));
@@ -750,7 +751,7 @@ static int check_write_status(ab_tag_p tag)
         pccc_resp *pccc;
         uint8_t *data;
 
-        pccc = (pccc_resp*)(req->data);
+        pccc = (pccc_resp *)(req->data);
 
         /* point to the start of the data */
         data = (uint8_t *)pccc + sizeof(*pccc);
