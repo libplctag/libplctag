@@ -180,8 +180,8 @@ int tag_read_start(ab_tag_p tag)
 
     /* What is the overhead in the _response_ */
     overhead =   1  /* pccc command */
-                +1  /* pccc status */
-                +2;  /* pccc sequence num */
+                 +1  /* pccc status */
+                 +2;  /* pccc sequence num */
 
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
@@ -203,10 +203,10 @@ int tag_read_start(ab_tag_p tag)
     }
 
     /* point the struct pointers to the buffer*/
-    pccc = (pccc_req*)(req->data);
+    pccc = (pccc_req *)(req->data);
 
     /* set up the embedded PCCC packet */
-    embed_start = (uint8_t*)(&pccc->service_code);
+    embed_start = (uint8_t *)(&pccc->service_code);
 
     /* Command Routing */
     pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
@@ -237,7 +237,7 @@ int tag_read_start(ab_tag_p tag)
     data += tag->encoded_name_size;
 
     /* amount of data to get this time */
-    *data = (uint8_t)(tag->elem_size * tag->elem_count); /* bytes for this transfer */
+    *data = (uint8_t)(tag->size); /* bytes for this transfer */
     data++;
 
     /*
@@ -347,7 +347,7 @@ static int check_read_status(ab_tag_p tag)
 
     /* the request is ours exclusively. */
 
-    pccc = (pccc_resp*)(tag->req->data);
+    pccc = (pccc_resp *)(tag->req->data);
 
     /* point to the start of the data */
     data = (uint8_t *)pccc + sizeof(*pccc);
@@ -369,7 +369,7 @@ static int check_read_status(ab_tag_p tag)
         }
 
         if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"PCCC command failed, response code: (%d) %s", pccc->general_status, decode_cip_error_long((uint8_t*)&(pccc->general_status)));
+            pdebug(DEBUG_WARN,"PCCC command failed, response code: (%d) %s", pccc->general_status, decode_cip_error_long((uint8_t *)&(pccc->general_status)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -429,13 +429,13 @@ int tag_write_start(ab_tag_p tag)
 
     /* How much overhead? */
     overhead =   1  /* pccc command */
-                +1  /* pccc status */
-                +2  /* pccc sequence num */
-                +1  /* pccc function */
-                +2  /* transfer offset, in words? */
-                +2  /* total transfer size in words */
-                +tag->encoded_name_size
-                +1; /* size in bytes of this write */
+                 +1  /* pccc status */
+                 +2  /* pccc sequence num */
+                 +1  /* pccc function */
+                 +2  /* transfer offset, in words? */
+                 +2  /* total transfer size in words */
+                 +tag->encoded_name_size
+                 +1; /* size in bytes of this write */
 
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
@@ -456,10 +456,10 @@ int tag_write_start(ab_tag_p tag)
         return rc;
     }
 
-    pccc = (pccc_req*)(req->data);
+    pccc = (pccc_req *)(req->data);
 
     /* set up the embedded PCCC packet */
-    embed_start = (uint8_t*)(&pccc->service_code);
+    embed_start = (uint8_t *)(&pccc->service_code);
 
     /* point to the end of the struct */
     data = (req->data) + sizeof(pccc_req);
@@ -595,7 +595,7 @@ static int check_write_status(ab_tag_p tag)
 
     /* the request is ours exclusively. */
 
-    pccc = (pccc_resp*)(tag->req->data);
+    pccc = (pccc_resp *)(tag->req->data);
 
     /* point to the start of the data */
     data = (uint8_t *)pccc + sizeof(*pccc);
