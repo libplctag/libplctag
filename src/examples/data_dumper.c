@@ -31,13 +31,9 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-//#define TAG_PATH "protocol=ab_eip&gateway=192.168.1.7&path=1,0&cpu=LGX&elem_size=4&elem_count=125&name=LogData"
-//#define ELEM_COUNT 125
-//#define ELEM_SIZE 4
-//#define DATA_TIMEOUT 1000
-
 
 #define MAX_TAGS 5000
+#define RECONNECT_DELAY_MS 5000
 
 
 typedef enum { UNKNOWN, DINT, INT, SINT, REAL } data_type_t;
@@ -492,44 +488,43 @@ int main(int argc, char **argv)
         int64_t start, end;
 
         start = util_time_ms();
+        
+        rc = start_reads();
+        
+        if(rc == PLCTAG_STATUS_OK) {
+            /* reads kicked off successfully */
+            
+            /* wait for the reads to complete */
+            while((rc = check_tags()) == PLCTAG_STATUS_PENDING) {
+                util_sleep_ms(1);
+            }
 
-        if((rc = start_reads()) != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "Error starting reads!\n");
-            destroy_tags();
-            return 1;
-        }
+            end = util_time_ms();
 
-        /* wait for the reads to complete */
-        while((rc = check_tags()) == PLCTAG_STATUS_PENDING) {
-            util_sleep_ms(1);
-        }
+            if(rc == PLCTAG_STATUS_OK) {
+                /* tags are ready. */
 
-        if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "Error waiting for tags to finish reading!\n");
-            destroy_tags();
-            return 1;
-        }
+                for(int t=0; t<num_tags; t++) {
+                    if(tags[t].reading) {
+                        num_tags_read++;
+                    }
+                }
 
-        end = util_time_ms();
-
-        for(int t=0; t<num_tags; t++) {
-            if(tags[t].reading) {
-                num_tags_read++;
+                if(num_tags_read > 0) {
+                    printf("Read %d tags in %dms\n", num_tags_read, (int)(end-start));
+                }
+                
+                rc = log_data();
             }
         }
-
-        if(num_tags_read > 0) {
-            printf("Read %d tags in %dms\n", num_tags_read, (int)(end-start));
+        
+        if(rc != PLCTAG_STATUS_OK) {
+            /* delay a long delay to let the library reconnect. */
+            util_sleep_ms(RECONNECT_DELAY_MS);
+        } else {
+            /* delay a tiny bit. */
+            util_sleep_ms(1);
         }
-
-        if((rc = log_data()) != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "Error logging data!\n");
-            destroy_tags();
-            return 1;
-        }
-
-        /* delay a tiny bit. */
-        util_sleep_ms(1);
     }
 
     printf("Terminating!\n");

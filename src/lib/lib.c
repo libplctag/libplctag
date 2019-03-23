@@ -718,9 +718,17 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
              *
              * Abort the operation and set the status to show the timeout.
              */
-            if(rc == PLCTAG_STATUS_PENDING) {
-                tag->vtable->abort(tag);
-                rc = PLCTAG_ERR_TIMEOUT;
+            if(rc != PLCTAG_STATUS_OK) {
+                /* abort the request. */
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
+                
+                /* translate error if we are still pending. */
+                if(rc == PLCTAG_STATUS_PENDING) {
+                    pdebug(DEBUG_WARN, "Read operation timed out.");
+                    rc = PLCTAG_ERR_TIMEOUT;
+                }
             }
 
             pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
@@ -847,10 +855,17 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
              *
              * Abort the operation and set the status to show the timeout.
              */
-            if(rc == PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_WARN, "Write operation timed out.");
-                tag->vtable->abort(tag);
-                rc = PLCTAG_ERR_TIMEOUT;
+            if(rc != PLCTAG_STATUS_OK) {
+                /* abort the request. */
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
+                
+                /* translate error if we are still pending. */
+                if(rc == PLCTAG_STATUS_PENDING) {
+                    pdebug(DEBUG_WARN, "Write operation timed out.");
+                    rc = PLCTAG_ERR_TIMEOUT;
+                }
             }
 
             pdebug(DEBUG_INFO,"elapsed time %lldms",(time_ms()-start_time));

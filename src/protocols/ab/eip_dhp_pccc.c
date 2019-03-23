@@ -66,31 +66,37 @@ struct tag_vtable_t eip_dhp_pccc_vtable = {
  */
 int tag_status(ab_tag_p tag)
 {
-    int rc = PLCTAG_STATUS_OK;
-    int session_rc = PLCTAG_STATUS_OK;
+   int rc = PLCTAG_STATUS_OK;
+//    int session_rc = PLCTAG_STATUS_OK;
 
-    if(tag->read_in_progress) {
+    if (tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
 
-    if(tag->write_in_progress) {
+    if (tag->write_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
 
-    /* propagate the status up. */
-    if (tag->session) {
-        session_rc = tag->session->status;
+//    if (tag->session) {
+//        session_rc = tag->session->status;
+//    } else {
+//        /* this is not OK.  This is fatal! */
+//        session_rc = PLCTAG_ERR_CREATE;
+//    }
+
+    if(tag->session) {
+        rc = tag->status;
     } else {
         /* this is not OK.  This is fatal! */
-        session_rc = PLCTAG_ERR_CREATE;
+        rc = PLCTAG_ERR_CREATE;
     }
 
-    /* now collect the status.  Highest level wins. */
-    rc = session_rc;
-
-    if(rc == PLCTAG_STATUS_OK) {
-        rc = tag->status;
-    }
+//    /* now collect the status.  Highest level wins. */
+//    rc = session_rc;
+//
+//    if(rc == PLCTAG_STATUS_OK) {
+//        rc = tag->status;
+//    }
 
     return rc;
 }

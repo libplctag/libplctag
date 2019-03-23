@@ -573,8 +573,10 @@ int ab_tag_abort(ab_tag_p tag)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag->req) {
-        //request_abort(tag->req);
-        tag->req->abort_request = 1;
+        spin_block(&tag->req->lock) {
+            tag->req->abort_request = 1;
+        }
+        
         tag->req = rc_dec(tag->req);
     }
 
