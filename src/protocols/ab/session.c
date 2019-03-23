@@ -430,7 +430,12 @@ int session_match_valid(const char *host, const char *path, ab_session_p session
         return 0;
     }
 
-    if(session->status !=  PLCTAG_STATUS_OK && session->status != PLCTAG_STATUS_PENDING) {
+//    if(session->status !=  PLCTAG_STATUS_OK && session->status != PLCTAG_STATUS_PENDING) {
+//        return 0;
+//    }
+
+    /* don't use sessions that failed immediately. */
+    if(session->failed) {
         return 0;
     }
 
@@ -516,7 +521,8 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
     session->plc_type = plc_type;
     session->data_capacity = MAX_PACKET_SIZE_EX;
     session->use_connected_msg = use_connected_msg;
-    session->status = PLCTAG_STATUS_PENDING;
+//    session->status = PLCTAG_STATUS_PENDING;
+    session->failed = 0;
     session->conn_serial_number = (uint16_t)(intptr_t)(session);
 
     /* check for ID set up. This does not need to be thread safe since we just need a random value. */
@@ -590,13 +596,13 @@ int session_init(ab_session_p session)
 
     if((rc = mutex_create(&(session->mutex))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create session mutex!");
-        session->status = rc;
+        session->failed = 1;
         return rc;
     }
 
     if((rc = thread_create((thread_p *)&(session->handler_thread), session_handler, 32*1024, session)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create session thread!");
-        session->status = rc;
+        session->failed = 1;
         return rc;
     }
 
@@ -957,12 +963,12 @@ THREAD_FUNC(session_handler)
         switch(state) {
         case SESSION_OPEN_SOCKET:
             pdebug(DEBUG_DETAIL,"in SESSION_OPEN_SOCKET state.");
-            session->status = PLCTAG_STATUS_PENDING;
+//            session->status = PLCTAG_STATUS_PENDING;
 
             /* we must connect to the gateway*/
             if ((rc = session_open_socket(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "session connect failed %s!", plc_tag_decode_error(rc));
-                session->status = rc;
+//                session->status = rc;
                 state = SESSION_CLOSE_SOCKET;
             } else {
                 /* set the timeout for disconnect. */
@@ -978,7 +984,7 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL,"in SESSION_REGISTER state.");
             if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "session registration failed %s!", plc_tag_decode_error(rc));
-                session->status = rc;
+//                session->status = rc;
                 state = SESSION_CLOSE_SOCKET;
             } else {
                 if(session->use_connected_msg) {
@@ -993,7 +999,7 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL,"in SESSION_CONNECT state.");
             if((rc = perform_forward_open(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Forward open failed %s!", plc_tag_decode_error(rc));
-                session->status = rc;
+//                session->status = rc;
                 state = SESSION_UNREGISTER;
             } else {
                 pdebug(DEBUG_DETAIL,"forward open succeeded, going to idle state.");
@@ -1005,7 +1011,7 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_SPEW, "in SESSION_IDLE state.");
 
             idle = 1;
-            session->status = PLCTAG_STATUS_OK;
+//            session->status = PLCTAG_STATUS_OK;
 
             /* if there is work to do, make sure we do not disconnect. */
             critical_block(session->mutex) {
@@ -1016,7 +1022,7 @@ THREAD_FUNC(session_handler)
 
             if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error while processing requests %s!", plc_tag_decode_error(rc));
-                session->status = rc;
+//                session->status = rc;
                 idle = 0;
                 if(session->use_connected_msg) {
                     state = SESSION_DISCONNECT;
@@ -1047,7 +1053,7 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL,"in SESSION_DISCONNECT state.");
             if((rc = perform_forward_close(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Forward close failed %s!", plc_tag_decode_error(rc));
-                session->status = rc;
+//                session->status = rc;
             }
 
             state = SESSION_UNREGISTER;
@@ -1057,7 +1063,7 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL,"in SESSION_UNREGISTER state.");
             if((rc = session_unregister(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Unregistering session failed %s!", plc_tag_decode_error(rc));
-                session->status = rc;
+//                session->status = rc;
             }
 
             state = SESSION_CLOSE_SOCKET;
@@ -1067,7 +1073,7 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL,"in SESSION_CLOSE_SOCKET state.");
             if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Closing session socket failed %s!", plc_tag_decode_error(rc));
-                session->status = rc;
+//                session->status = rc;
             }
 
             if(auto_disconnect) {
@@ -1110,6 +1116,7 @@ THREAD_FUNC(session_handler)
 
             idle = 1;
             auto_disconnect = 0;
+//            session->status = PLCTAG_STATUS_OK; /* no error, just waiting. */
 
             /* if there is work to do, reconnect.. */
             critical_block(session->mutex) {
