@@ -101,34 +101,20 @@ START_PACK typedef struct {
 
 int tag_status(ab_tag_p tag)
 {
-    int rc = PLCTAG_STATUS_OK;
-    int session_rc = PLCTAG_STATUS_OK;
+    if (!tag->session) {
+        /* this is not OK.  This is fatal! */
+        return PLCTAG_ERR_CREATE;
+    }
 
     if(tag->read_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
 
-
     if(tag->write_in_progress) {
         return PLCTAG_STATUS_PENDING;
     }
 
-    /* propagate the status up */
-    if (tag->session) {
-        session_rc = tag->session->status;
-    } else {
-        /* this is not OK.  This is fatal! */
-        session_rc = PLCTAG_ERR_CREATE;
-    }
-
-    /* now collect the status.  Highest level wins. */
-    rc = session_rc;
-
-    if(rc == PLCTAG_STATUS_OK) {
-        rc = tag->status;
-    }
-
-    return rc;
+    return tag->status;
 }
 
 
