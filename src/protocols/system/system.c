@@ -23,6 +23,7 @@
 #include <util/attr.h>
 #include <lib/tag.h>
 #include <lib/libplctag.h>
+#include <lib/version.h>
 #include <system/tag.h>
 #include <lib/init.h>
 #include <util/rc.h>
@@ -30,11 +31,11 @@
 
 /* we'll need to set these per protocol type.
 struct tag_vtable_t {
-    tag_abort_func          abort;
-    tag_destroy_func        destroy;
-    tag_read_func           read;
-    tag_status_func         status;
-    tag_write_func          write;
+    tag_vtable_func abort;
+    tag_vtable_func read;
+    tag_vtable_func status;
+    tag_vtable_func tickler;
+    tag_vtable_func write;
 };
 */
 
@@ -46,7 +47,13 @@ static int system_tag_read(plc_tag_p tag);
 static int system_tag_status(plc_tag_p tag);
 static int system_tag_write(plc_tag_p tag);
 
-struct tag_vtable_t system_tag_vtable = { system_tag_abort, /* system_tag_destroy, */ system_tag_read, system_tag_status, (tag_vtable_func)(intptr_t)(0), system_tag_write};
+struct tag_vtable_t system_tag_vtable = {
+        /* abort */     system_tag_abort,
+        /* read */      system_tag_read,
+        /* status */    system_tag_status,
+        /* tickler */   (tag_vtable_func)(intptr_t)(0),
+        /* write */     system_tag_write
+    };
 
 
 plc_tag_p system_tag_create(attr attribs)

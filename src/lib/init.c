@@ -29,12 +29,6 @@
 #include <lib/init.h>
 
 
-/*
- * The version string.
- */
-
-const char *VERSION="2.0.14";
-
 
 
 /*
