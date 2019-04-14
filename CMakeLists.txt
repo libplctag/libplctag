@@ -127,12 +127,17 @@ set(BASE_CXX_FLAGS "${BASE_FLAGS}")
 MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
 MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
+# generate version file from CMake info.
+CONFIGURE_FILE("${lib_SRC_PATH}/version.c.in" "${lib_SRC_PATH}/version.c" @ONLY)
+
 # set up the library sources
 set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${lib_SRC_PATH}/init.h"
                      "${lib_SRC_PATH}/libplctag.h"
                      "${lib_SRC_PATH}/lib.c"
                      "${lib_SRC_PATH}/tag.h"
+                     "${lib_SRC_PATH}/version.h"
+                     "${lib_SRC_PATH}/version.c"
                      "${ab_SRC_PATH}/ab.h"
                      "${ab_SRC_PATH}/ab_common.c"
                      "${ab_SRC_PATH}/ab_common.h"
