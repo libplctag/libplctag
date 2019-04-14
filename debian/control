@@ -1,0 +1,29 @@
+Source: libplctag
+Priority: optional
+Maintainer: Kyle Hayes <kyle.hayes@gmail.com>
+Build-Depends: debhelper (>= 10)
+Standards-Version: 4.1.2
+Section: libs
+Homepage: https://github.com/kyle-github/libplctag
+Vcs-Git: https://anonscm.debian.org/cgit/collab-maint/libplctag.git
+Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/libplctag.git
+
+Package: libplctag2-dev
+Section: libdevel
+Architecture: any
+Multi-Arch: same
+Depends: libplctag2 (= ${binary:Version}), ${misc:Depends}
+Description: C library for communicating with Allen-Bradley/Rockwell PLCs.
+ This library allows reading and writing tags in Allen-Bradley/Rockwell PLCs that use
+ both the PCCC and CIP protocols.  This includes PLC/5, SLC 500, MicroLogix, ControlLogix,
+ CompactLogix and Micro800 PLCs.
+
+Package: libplctag2
+Section: libs
+Architecture: any
+Multi-Arch: same
+Depends: libc6 (>= 2.0), ${shlibs:Depends}, ${misc:Depends}
+Description: C library for communicating with Allen-Bradley/Rockwell PLCs.
+ This library allows reading and writing tags in Allen-Bradley/Rockwell PLCs that use
+ both the PCCC and CIP protocols.  This includes PLC/5, SLC 500, MicroLogix, ControlLogix,
+ CompactLogix and Micro800 PLCs.

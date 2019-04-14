@@ -1,0 +1,8 @@
+libplctag for Debian
+-------------------
+
+This library allows reading and writing tags in Allen-Bradley/Rockwell PLCs that use
+both the PCCC and CIP protocols.  This includes PLC/5, SLC 500, MicroLogix, ControlLogix,
+CompactLogix and Micro800 PLCs.
+
+ -- Kyle Hayes <kyle.hayes@gmail.com>  Sat, 13 Apr 2019 20:30:09 -0700

@@ -1,0 +1,4 @@
+libplctag2-dbgsym_2.0.14-1_amd64.ddeb debug optional
+libplctag2-dev_2.0.14-1_amd64.deb libdevel optional
+libplctag2_2.0.14-1_amd64.deb libs optional
+libplctag_2.0.14-1_amd64.buildinfo libs optional
