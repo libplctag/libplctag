@@ -166,7 +166,11 @@ ENDFOREACH()
 
 # shared library
 add_library(plctag SHARED ${libplctag_SRCS} )
+set_property(TARGET plctag PROPERTY VERSION "${VERSION}")
+set_property(TARGET plctag PROPERTY SOVERSION "${libplctag_VERSION_MAJOR}")
 
+# set up the full version and symlink
+# SET_TARGET_PROPERTIES(plctag PROPERTIES VERSION "${VERSION}" SOVERSION "${libplctag_VERSION_MAJOR}")
 
 #if(THREADS_HAVE_PTHREAD_ARG)
 #  set_property(TARGET plctag PROPERTY COMPILE_OPTIONS "-pthread")
