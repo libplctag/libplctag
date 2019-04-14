@@ -34,20 +34,8 @@ set (libplctag_VERSION_MINOR 0)
 set (libplctag_VERSION_PATCH 15)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
-
-message("MSVC = ${MSVC}")
-if(MSVC)
-    message("CMAKE generator: ${CMAKE_GENERATOR}")
-    message("CMAKE generator version: ${MSVC_VERSION}")
-
-    if(${MSVC_VERSION} EQUAL 1800)
-        set(COMPILE_AS_C 0)
-    else()
-        set(COMPILE_AS_C 1)
-    endif()
-endif()
-
-
+# we need threads
+find_package(Threads REQUIRED)
 
 
 # set the main paths.
@@ -72,15 +60,6 @@ endif()
 include_directories("${base_SRC_PATH}")
 include_directories("${platform_SRC_PATH}")
 include_directories("${protocol_SRC_PATH}")
-
-
-MESSAGE("base_SRC_PATH=${base_SRC_PATH}")
-MESSAGE("platform_SRC_PATH=${platform_SRC_PATH}")
-MESSAGE("protocol_SRC_PATH=${protocol_SRC_PATH}")
-
-MESSAGE("CMAKE_C_COMPILER_ID=${CMAKE_C_COMPILER_ID}")
-MESSAGE("CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}")
-
 
 # C compiler specific settings
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
@@ -107,25 +86,22 @@ else()
     set(BASE_FLAGS "${BASE_RELEASE_FLAGS}")
 endif()
 
-MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
+#MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
 
 if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-    # MSVC 2012 can compile the library as C++, but not C
-    if(COMPILE_AS_C)
-        message("MSVC can handle C99, compiling code as C")
-        set(BASE_C_FLAGS "${BASE_FLAGS} /c")
-    else()
+    # check MSVC version, only newer versions than 2012 support C99 things we need
+    if(${MSVC_VERSION} EQUAL 1800)
         message("MSVC cannot handle C99, compiling code as C++")
         set(BASE_C_FLAGS "${BASE_FLAGS}")
+    else()
+        message("MSVC can handle C99, compiling code as C")
+        set(BASE_C_FLAGS "${BASE_FLAGS} /c")
     endif()
 else()
     set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99")
 endif()
 
 set(BASE_CXX_FLAGS "${BASE_FLAGS}")
-
-MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
-MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
 # generate version file from CMake info.
 CONFIGURE_FILE("${lib_SRC_PATH}/version.c.in" "${lib_SRC_PATH}/version.c" @ONLY)
@@ -191,26 +167,22 @@ ENDFOREACH()
 # shared library
 add_library(plctag SHARED ${libplctag_SRCS} )
 
-# static Library
-#SET(BUILD_SHARED_LIBS OFF)
-#add_library(plctag STATIC ${libplctag_SRCS} )
-#SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-#SET(CMAKE_EXE_LINKER_FLAGS "-static")
 
+#if(THREADS_HAVE_PTHREAD_ARG)
+#  set_property(TARGET plctag PROPERTY COMPILE_OPTIONS "-pthread")
+#  set_property(TARGET plctag PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
+#endif()
 
-
-# static Library
-#SET(BUILD_SHARED_LIBS OFF)
-#add_library(plctag STATIC ${libplctag_SRCS} )
-#SET(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-#SET(CMAKE_EXE_LINKER_FLAGS "-static")
-
-
+# make sure we link with the threading library.
+if (UNIX)
+    if(CMAKE_THREAD_LIBS_INIT)
+      target_link_libraries(plctag "${CMAKE_THREAD_LIBS_INIT}")
+    endif()
+endif()
 
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
     target_link_libraries(plctag ws2_32)
-    #target_link_libraries(plctag_static ws2_32)
 endif()
 
 # add the examples and tests
