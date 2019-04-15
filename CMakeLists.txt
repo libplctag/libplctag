@@ -39,6 +39,7 @@ find_package(Threads REQUIRED)
 
 
 # set the main paths.
+set ( doc_SRC_PATH "${PROJECT_SOURCE_DIR}/doc" )
 set ( base_SRC_PATH "${PROJECT_SOURCE_DIR}/src" )
 set ( lib_SRC_PATH "${base_SRC_PATH}/lib" )
 set ( protocol_SRC_PATH "${base_SRC_PATH}/protocols" )
@@ -261,10 +262,16 @@ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BI
 
 # for installation
 if(UNIX)
+    # install the library
     install(TARGETS plctag DESTINATION lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE})
+
+    #install the include file, and package config info.
     install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE}/pkgconfig")
+
+    # install the man page.
+    INSTALL(FILES ${doc_SRC_PATH}/libplctag.3 DESTINATION ${CMAKE_INSTALL_PREFIX}/share/man/man3)
 endif()
 
 # for source tarball creation
