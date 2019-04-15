@@ -169,14 +169,6 @@ add_library(plctag SHARED ${libplctag_SRCS} )
 set_property(TARGET plctag PROPERTY VERSION "${VERSION}")
 set_property(TARGET plctag PROPERTY SOVERSION "${libplctag_VERSION_MAJOR}")
 
-# set up the full version and symlink
-# SET_TARGET_PROPERTIES(plctag PROPERTIES VERSION "${VERSION}" SOVERSION "${libplctag_VERSION_MAJOR}")
-
-#if(THREADS_HAVE_PTHREAD_ARG)
-#  set_property(TARGET plctag PROPERTY COMPILE_OPTIONS "-pthread")
-#  set_property(TARGET plctag PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
-#endif()
-
 # make sure we link with the threading library.
 if (UNIX)
     if(CMAKE_THREAD_LIBS_INIT)
@@ -268,6 +260,18 @@ endforeach(example)
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" @ONLY)
 
 # for installation
-install(TARGETS plctag DESTINATION lib${LIB_SUFFIX})
-install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+if(UNIX)
+    install(TARGETS plctag DESTINATION lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE})
+    install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE}/pkgconfig")
+endif()
+
+# for source tarball creation
+set(CPACK_PACKAGE_VERSION_MAJOR "${libplctag_VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR "${libplctag_VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_PATCH "${libplctag_VERSION_PATCH}")
+set(CPACK_SOURCE_GENERATOR "TGZ")
+set(CPACK_SOURCE_PACKAGE_FILE_NAME "libplctag_${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.orig")
+set(CPACK_SOURCE_IGNORE_FILES "*build*;cmake-build*;.codelite/;.vscode;*.tmp;.clang*;.git*;~$;${CPACK_SOURCE_IGNORE_FILES}")
+include(CPack)

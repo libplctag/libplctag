@@ -1,6 +1,6 @@
 libplctag (2.0.17-1) UNRELEASED; urgency=low
 
-   * Initial Release. Closes: #1
+   * Initial Release. Closes: #10000
    * This is my first Debian package.
 
  -- Kyle Hayes <kyle.hayes@gmail.com>  Sat, 13 Apr 2019 20:30:09 -0700

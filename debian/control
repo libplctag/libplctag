@@ -14,9 +14,9 @@ Architecture: any
 Multi-Arch: same
 Depends: libplctag (= ${binary:Version}), ${misc:Depends}
 Description: C library for communicating with Allen-Bradley/Rockwell PLCs.
- This library allows reading and writing tags in Allen-Bradley/Rockwell PLCs that use
- both the PCCC and CIP protocols.  This includes PLC/5, SLC 500, MicroLogix, ControlLogix,
- CompactLogix and Micro800 PLCs.
+ This library allows reading and writing tags in Allen-Bradley/Rockwell PLCs
+ that use both the PCCC and CIP protocols.  This includes PLC/5, SLC 500,
+ MicroLogix, ControlLogix, CompactLogix and Micro800 PLCs.
 
 Package: libplctag
 Section: libs
@@ -24,6 +24,6 @@ Architecture: any
 Multi-Arch: same
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: C library for communicating with Allen-Bradley/Rockwell PLCs.
- This library allows reading and writing tags in Allen-Bradley/Rockwell PLCs that use
- both the PCCC and CIP protocols.  This includes PLC/5, SLC 500, MicroLogix, ControlLogix,
- CompactLogix and Micro800 PLCs.
+ This library allows reading and writing tags in Allen-Bradley/Rockwell PLCs
+ that use both the PCCC and CIP protocols.  This includes PLC/5, SLC 500,
+ MicroLogix, ControlLogix, CompactLogix and Micro800 PLCs.
