@@ -34,6 +34,9 @@ set (libplctag_VERSION_MINOR 0)
 set (libplctag_VERSION_PATCH 17)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
+# set the library name
+set (libname "plctag${libplctag_VERSION_MAJOR}")
+
 # we need threads
 find_package(Threads REQUIRED)
 
@@ -166,20 +169,19 @@ FOREACH( lib_src ${libplctag_SRCS} )
 ENDFOREACH()
 
 # shared library
-add_library(plctag SHARED ${libplctag_SRCS} )
-set_property(TARGET plctag PROPERTY VERSION "${VERSION}")
-set_property(TARGET plctag PROPERTY SOVERSION "${libplctag_VERSION_MAJOR}")
+add_library("${libname}" SHARED ${libplctag_SRCS} )
+set_target_properties("${libname}" PROPERTIES VERSION "${VERSION}" SOVERSION "${libplctag_VERSION_MAJOR}" )
 
 # make sure we link with the threading library.
 if (UNIX)
     if(CMAKE_THREAD_LIBS_INIT)
-      target_link_libraries(plctag "${CMAKE_THREAD_LIBS_INIT}")
+      target_link_libraries("${libname}" "${CMAKE_THREAD_LIBS_INIT}")
     endif()
 endif()
 
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
-    target_link_libraries(plctag ws2_32)
+    target_link_libraries("${libname}" ws2_32)
 endif()
 
 # add the examples and tests
@@ -202,7 +204,7 @@ if (UNIX)
     target_link_libraries ( lgx_sim pthread )
 
     add_executable(test_hashtable "${test_SRC_PATH}/hashtable/test_hashtable.c" "${util_SRC_PATH}/hashtable.h" "${util_SRC_PATH}/debug.h")
-    target_link_libraries(test_hashtable plctag pthread)
+    target_link_libraries(test_hashtable "${libname}" pthread)
 
 
     set ( example_PROGRAMS async
@@ -225,7 +227,7 @@ if (UNIX)
                            tag_rw )
 
     set ( example_PROG_UTIL utils_posix.c )
-    set ( example_LIBRARIES plctag pthread )
+    set ( example_LIBRARIES "${libname}" pthread )
 
 
 elseif(WIN32)
@@ -241,7 +243,7 @@ elseif(WIN32)
                            tag_rw )
 
     set ( example_PROG_UTIL utils_windows.c)
-    set ( example_LIBRARIES plctag ws2_32 )
+    set ( example_LIBRARIES "${libname}" ws2_32 )
 endif()
 
 # simple.cpp is different because it is C++
@@ -258,17 +260,17 @@ endforeach(example)
 
 
 # Generate files from templates
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/lib${libname}.pc" @ONLY)
 
 # for installation
 if(UNIX)
     # install the library
-    install(TARGETS plctag DESTINATION lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE})
+    install(TARGETS "${libname}" DESTINATION lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE})
 
     #install the include file, and package config info.
     install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
-    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE}/pkgconfig")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/lib${libname}.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/lib${libname}.pc" DESTINATION "lib${LIB_SUFFIX}/${CMAKE_LIBRARY_ARCHITECTURE}/pkgconfig")
 
     # install the man page.
     INSTALL(FILES ${doc_SRC_PATH}/libplctag.3 DESTINATION ${CMAKE_INSTALL_PREFIX}/share/man/man3)
@@ -280,5 +282,5 @@ set(CPACK_PACKAGE_VERSION_MINOR "${libplctag_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${libplctag_VERSION_PATCH}")
 set(CPACK_SOURCE_GENERATOR "TGZ")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME "libplctag_${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.orig")
-set(CPACK_SOURCE_IGNORE_FILES "*build*;cmake-build*;.codelite/;.vscode;*.tmp;.clang*;.git*;~$;${CPACK_SOURCE_IGNORE_FILES}")
+set(CPACK_SOURCE_IGNORE_FILES "build*/;cmake-build*/;.codelite/;.vscode;*.tmp;.clang*;.git*;~$;${CPACK_SOURCE_IGNORE_FILES}")
 include(CPack)
