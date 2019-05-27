@@ -58,7 +58,7 @@ int main(int argc, char **argv)
         usage();
     }
 
-    snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&name=@tags&debug=4",argv[1], argv[2]);
+    snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=@tags&debug=4",argv[1], argv[2]);
 
     printf("Using tag string: %s\n", tag_string);
 
