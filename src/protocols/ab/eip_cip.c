@@ -71,7 +71,7 @@ CIP Tag Info command
 START_PACK typedef struct {
     uint8_t request_service;    /* AB_EIP_CMD_CIP_LIST_TAGS=0x55 */
     uint8_t request_path_size;  /* 3 word = 6 bytes */
-    uint8_t request_path[6];    /* MAGIC
+    uint8_t request_path[4];    /* MAGIC
                                     0x20    get class
                                     0x6B    tag info/symbol class
                                     0x25    get instance (16-bit)
@@ -79,6 +79,7 @@ START_PACK typedef struct {
                                     0x00    instance byte 0
                                     0x00    instance byte 1
                                 */
+    uint16_le instance_id;      /* actually last two bytes above */
     uint16_le num_attributes;   /* 0x04    number of attributes to get */
     uint16_le requested_attributes[4];  /*
                                             0x02 attribute #2 - symbol type
@@ -89,10 +90,22 @@ START_PACK typedef struct {
 
 } END_PACK tag_list_req;
 
-//int allocate_request_slot(ab_tag_p tag);
-//int allocate_read_request_slot(ab_tag_p tag);
-//int allocate_write_request_slot(ab_tag_p tag);
-//int multi_tag_read_start(ab_tag_p tag);
+/*
+ * This is a pseudo UDT structure for each tag entry when listing all the tags
+ * in a PLC.
+ */
+
+START_PACK typedef struct {
+        uint32_le instance_id;  /* monotonically increasing but not contiguous */
+        uint16_le symbol_type;   /* type of the symbol. */
+        uint16_le element_length; /* length of one array element in bytes. */
+        uint32_le array_dims[3];  /* array dimensions. */
+        uint16_le string_len;   /* string length count. */
+        uint8_t string_name[82]; /* MAGIC string name bytes (string_len of them, zero padded) */
+} END_PACK tag_list_entry;
+
+
+
 static int build_read_request_connected(ab_tag_p tag, int byte_offset);
 static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_request_connected(ab_tag_p tag, int byte_offset);
@@ -101,19 +114,9 @@ static int check_read_status_connected(ab_tag_p tag);
 static int check_read_status_unconnected(ab_tag_p tag);
 static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
-//int calculate_write_sizes(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
 
-/*
-    tag_vtable_func abort;
-    tag_vtable_func read;
-    tag_vtable_func status;
-    tag_vtable_func tickler;
-    tag_vtable_func write;
-*/
-
 static int tag_read_start(ab_tag_p tag);
-static int tag_status(ab_tag_p tag);
 static int tag_tickler(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
 
@@ -121,7 +124,7 @@ static int tag_write_start(ab_tag_p tag);
 struct tag_vtable_t eip_cip_vtable = {
     (tag_vtable_func)ab_tag_abort, /* shared */
     (tag_vtable_func)tag_read_start,
-    (tag_vtable_func)tag_status,
+    (tag_vtable_func)ab_tag_status, /* shared */
     (tag_vtable_func)tag_tickler,
     (tag_vtable_func)tag_write_start
 };
@@ -132,50 +135,6 @@ struct tag_vtable_t eip_cip_vtable = {
 /*************************************************************************
  **************************** API Functions ******************************
  ************************************************************************/
-
-/*
- * tag_status
- *
- * CIP-specific status.  This functions as a "tickler" routine
- * to check on the completion of async requests.
- */
-int tag_status(ab_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
-//    int session_rc = PLCTAG_STATUS_OK;
-
-    if (tag->read_in_progress) {
-        return PLCTAG_STATUS_PENDING;
-    }
-
-    if (tag->write_in_progress) {
-        return PLCTAG_STATUS_PENDING;
-    }
-
-//    if (tag->session) {
-//        session_rc = tag->session->status;
-//    } else {
-//        /* this is not OK.  This is fatal! */
-//        session_rc = PLCTAG_ERR_CREATE;
-//    }
-
-    if(tag->session) {
-        rc = tag->status;
-    } else {
-        /* this is not OK.  This is fatal! */
-        rc = PLCTAG_ERR_CREATE;
-    }
-
-//    /* now collect the status.  Highest level wins. */
-//    rc = session_rc;
-//
-//    if(rc == PLCTAG_STATUS_OK) {
-//        rc = tag->status;
-//    }
-
-    return rc;
-}
-
 
 
 int tag_tickler(ab_tag_p tag)
@@ -276,6 +235,13 @@ int tag_write_start(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting");
+
+    /* check to make sure that this kind of tag can be written. */
+    if(tag->tag_list) {
+        pdebug(DEBUG_WARN, "A tag list cannot be written!");
+
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
 
     /*
      * if the tag has not been read yet, read it.
@@ -388,6 +354,96 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
 
     /* set the session so that we know what session the request is aiming at */
     //req->session = tag->session;
+
+    req->allow_packing = tag->allow_packing;
+
+    /* add the request to the session's list. */
+    rc = session_add_request(tag->session, req);
+
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        tag->req = rc_dec(req);
+        return rc;
+    }
+
+    /* save the request for later */
+    tag->req = req;
+
+    pdebug(DEBUG_INFO, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+int build_tag_list_request_connected(ab_tag_p tag, int byte_offset)
+{
+    eip_cip_co_req* cip = NULL;
+    tag_list_req *list_req = NULL;
+    ab_request_p req = NULL;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
+        return rc;
+    }
+
+    /* point the request struct at the buffer */
+    cip = (eip_cip_co_req*)(req->data);
+
+    /* point to the end of the struct */
+    list_req = (tag_list_req *)(cip + 1);
+
+    /*
+     * set up the embedded CIP tag list request packet
+        uint8_t request_service;    AB_EIP_CMD_CIP_LIST_TAGS=0x55
+        uint8_t request_path_size;  3 word = 6 bytes
+        uint8_t request_path[6];        0x20    get class
+                                        0x6B    tag info/symbol class
+                                        0x25    get instance (16-bit)
+                                        0x00    padding
+                                        0x00    instance byte 0
+                                        0x00    instance byte 1
+        uint16_le instance_id;      NOTE! this is the last two bytes above for convenience!
+        uint16_le num_attributes;   0x04    number of attributes to get
+        uint16_le requested_attributes[4];      0x02 attribute #2 - symbol type
+                                                0x07 attribute #7 - base type size (array element) in bytes
+                                                0x08    attribute #8 - array dimensions (3xu32)
+                                                0x01    attribute #1 - symbol name
+    */
+
+    list_req->request_service = AB_EIP_CMD_CIP_LIST_TAGS;
+    list_req->request_path_size = 3; /* MAGIC */
+    list_req->request_path[0] = 0x20; /* class type */
+    list_req->request_path[1] = 0x6B; /* tag info/symbol class */
+    list_req->request_path[2] = 0x25; /* 16-bit instance ID type */
+    list_req->request_path[3] = 0x00; /* padding */
+    list_req->instance_id = h2le16((uint16_t)byte_offset);
+    list_req->num_attributes = h2le16(4); /* MAGIC, 4 attributes to get */
+    list_req->requested_attributes[0] = h2le16(0x02); /* MAGIC, symbol type */
+    list_req->requested_attributes[1] = h2le16(0x07); /* MAGIC, base type size */
+    list_req->requested_attributes[2] = h2le16(0x08); /* MAGIC, array dimensions, 3x u32 */
+    list_req->requested_attributes[3] = h2le16(0x01); /* MAGIC, symbol name */
+
+    /* now we go back and fill in the fields of the static part */
+
+    /* encap fields */
+    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
+
+    /* router timeout */
+    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
+
+    /* Common Packet Format fields for unconnected send. */
+    cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
+    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
+    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_length = h2le16((uint16_t)(sizeof(*list_req))); /* REQ: fill in with length of remaining data. */
+
+    /* set the size of the request */
+    req->request_size = (int)(sizeof(*cip) + sizeof(*list_req));
 
     req->allow_packing = tag->allow_packing;
 

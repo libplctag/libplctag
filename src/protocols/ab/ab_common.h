@@ -51,6 +51,7 @@ typedef struct ab_request_t *ab_request_p;
 
 
 int ab_tag_abort(ab_tag_p tag);
+int ab_tag_status(ab_tag_p tag);
 //int ab_tag_destroy(ab_tag_p p_tag);
 int check_cpu(ab_tag_p tag, attr attribs);
 int check_tag_name(ab_tag_p tag, const char *name);
