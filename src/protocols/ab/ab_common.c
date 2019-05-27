@@ -106,41 +106,6 @@ int ab_init(void)
 
     pdebug(DEBUG_INFO,"Initializing AB protocol library.");
 
-    /* set up the vtables. */
-//    lgx_pccc_vtable.abort    = (tag_abort_func)ab_tag_abort;
-//    lgx_pccc_vtable.read     = (tag_read_func)eip_lgx_pccc_tag_read_start;
-//    lgx_pccc_vtable.status   = (tag_status_func)eip_lgx_pccc_tag_status;
-//    lgx_pccc_vtable.write    = (tag_write_func)eip_lgx_pccc_tag_write_start;
-//
-//    plc_dhp_vtable.abort    = (tag_vtable_func)ab_tag_abort;
-//    //plc_dhp_vtable.destroy  = (tag_destroy_func)ab_tag_destroy;
-//    plc_dhp_vtable.read     = (tag_vtable_func)eip_dhp_pccc_tag_read_start;
-//    plc_dhp_vtable.status   = (tag_vtable_func)eip_dhp_pccc_tag_status;
-//    plc_dhp_vtable.tickler  = (tag_vtable_func)eip_dhp_pccc_tag_tickler;
-//    plc_dhp_vtable.write    = (tag_vtable_func)eip_dhp_pccc_tag_write_start;
-
-//    plc_vtable.abort        = (tag_vtable_func)ab_tag_abort;
-//    //plc_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
-//    plc_vtable.read         = (tag_vtable_func)eip_pccc_tag_read_start;
-//    plc_vtable.status       = (tag_vtable_func)eip_pccc_tag_status;
-//    plc_vtable.tickler      = (tag_vtable_func)eip_pccc_tag_tickler;
-//    plc_vtable.write        = (tag_vtable_func)eip_pccc_tag_write_start;
-
-//    cip_vtable.abort        = (tag_vtable_func)ab_tag_abort;
-//    //cip_vtable.destroy      = (tag_destroy_func)ab_tag_destroy;
-//    cip_vtable.read         = (tag_vtable_func)eip_cip_tag_read_start;
-//    cip_vtable.status       = (tag_vtable_func)eip_cip_tag_status;
-//    cip_vtable.tickler      = (tag_vtable_func)eip_cip_tag_tickler;
-//    cip_vtable.write        = (tag_vtable_func)eip_cip_tag_write_start;
-
-    /* this is a mutex used to synchronize most activities in this protocol */
-//    rc = mutex_create((mutex_p*)&global_session_mut);
-
-    if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to create global tag mutex!");
-        return rc;
-    }
-
     if((rc = session_startup()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to initialize session library!");
         return rc;
@@ -578,7 +543,7 @@ int ab_tag_abort(ab_tag_p tag)
         spin_block(&tag->req->lock) {
             tag->req->abort_request = 1;
         }
-        
+
         tag->req = rc_dec(tag->req);
     }
 
