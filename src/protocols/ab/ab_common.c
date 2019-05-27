@@ -452,6 +452,17 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
             } else {
                 pdebug(DEBUG_DETAIL, "Unknown tag type %s", elem_type);
             }
+        } else {
+            /* just for Logix, check for tag listing */
+            if(tag->protocol_type == AB_PROTOCOL_LGX) {
+                const char *tag_name = attr_get_str(attribs, "name", NULL);
+                if(tag_name && str_cmp_i("@tags",tag_name) == 0) {
+                    tag->tag_list = 1;
+                    tag->elem_type = AB_TYPE_TAG_ENTRY;
+                    tag->elem_count = AB_TAG_LIST_DEFAULT_ELEMENT_COUNT;
+                    tag->elem_size = AB_TAG_LIST_ENTRY_SIZE;  /* tag list entry size ~ 104 bytes. */
+                }
+            }
         }
 
         break;

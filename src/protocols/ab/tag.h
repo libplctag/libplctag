@@ -53,7 +53,8 @@ typedef enum {
     AB_TYPE_INT64,
     AB_TYPE_STRING,
     AB_TYPE_SHORT_STRING,
-    AB_TYPE_TIMER
+    AB_TYPE_TIMER,
+    AB_TYPE_TAG_ENTRY /* not a real AB type, but a pseudo UDT. */
 } elem_type_t;
 
 
@@ -90,6 +91,7 @@ struct ab_tag_t {
     elem_type_t elem_type;
     int elem_count;
     int elem_size;
+    int tag_list;
 
     /* requests */
     int pre_write_read;
