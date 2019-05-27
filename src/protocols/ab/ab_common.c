@@ -247,10 +247,13 @@ plc_tag_p ab_tag_create(attr attribs)
         break;
     }
 
-    if(!tag->elem_size) {
-        tag->elem_size = attr_get_int(attribs, "elem_size", 0);
+    /* determine the total tag size if this is not a tag list. */
+    if(!tag->tag_list) {
+        if(!tag->elem_size) {
+            tag->elem_size = attr_get_int(attribs, "elem_size", 0);
+        }
+        tag->elem_count = attr_get_int(attribs,"elem_count", 1);
     }
-    tag->elem_count = attr_get_int(attribs,"elem_count", 1);
 
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
@@ -267,6 +270,7 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
+    /* this may be changed in the future if this is a tag list request. */
     tag->data = (uint8_t*)mem_alloc(tag->size);
 
     if(tag->data == NULL) {
@@ -298,7 +302,7 @@ plc_tag_p ab_tag_create(attr attribs)
      * check the tag name, this is protocol specific.
      */
 
-    if(check_tag_name(tag, attr_get_str(attribs,"name",NULL)) != PLCTAG_STATUS_OK) {
+    if(!tag->tag_list && check_tag_name(tag, attr_get_str(attribs,"name",NULL)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Bad tag name!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
@@ -553,7 +557,7 @@ int ab_tag_abort(ab_tag_p tag)
 
     tag->read_in_progress = 0;
     tag->write_in_progress = 0;
-    tag->byte_offset = 0;
+    tag->offset = 0;
 
     pdebug(DEBUG_DETAIL, "Done.");
 

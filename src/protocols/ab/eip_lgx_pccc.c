@@ -335,7 +335,7 @@ static int check_read_status(ab_tag_p tag)
     /* check for request in flight. */
     if (!tag->req) {
         tag->read_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
 
         pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
 
@@ -357,7 +357,7 @@ static int check_read_status(ab_tag_p tag)
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->read_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             break;
         }
@@ -688,7 +688,7 @@ static int check_write_status(ab_tag_p tag)
     /* is there an outstanding request? */
     if (!tag->req) {
         tag->write_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
 
         pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
 
@@ -710,7 +710,7 @@ static int check_write_status(ab_tag_p tag)
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->write_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             break;
         }

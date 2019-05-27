@@ -92,12 +92,13 @@ struct ab_tag_t {
     int elem_count;
     int elem_size;
     int tag_list;
+    uint32_t next_id;
 
     /* requests */
     int pre_write_read;
     int first_read;
     ab_request_p req;
-    int byte_offset;
+    int offset;
 
     int allow_packing;
 

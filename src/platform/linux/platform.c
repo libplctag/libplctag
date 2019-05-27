@@ -76,6 +76,20 @@ extern void *mem_alloc(int size)
 
 
 /*
+ * mem_realloc
+ *
+ * This is a wrapper around the platform's memory re-allocation routine.
+ *
+ * It will return NULL on failure.
+ */
+extern void *mem_realloc(void *orig, int size)
+{
+    return realloc(orig, (size_t)size);
+}
+
+
+
+/*
  * mem_free
  *
  * Free the allocated memory passed in.  If the passed pointer is

@@ -107,10 +107,12 @@ START_PACK typedef struct {
 
 
 static int build_read_request_connected(ab_tag_p tag, int byte_offset);
+static int build_tag_list_request_connected(ab_tag_p tag);
 static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_request_connected(ab_tag_p tag, int byte_offset);
 static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
 static int check_read_status_connected(ab_tag_p tag);
+static int check_read_tag_list_status_connected(ab_tag_p tag);
 static int check_read_status_unconnected(ab_tag_p tag);
 static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
@@ -145,7 +147,11 @@ int tag_tickler(ab_tag_p tag)
 
     if (tag->read_in_progress) {
         if(tag->use_connected_msg) {
-            rc = check_read_status_connected(tag);
+            if(tag->tag_list) {
+                rc = check_read_tag_list_status_connected(tag);
+            } else {
+                rc = check_read_status_connected(tag);
+            }
         } else {
             rc = check_read_status_unconnected(tag);
         }
@@ -200,9 +206,13 @@ int tag_read_start(ab_tag_p tag)
 
     /* i is the index of the first new request */
     if(tag->use_connected_msg) {
-        rc = build_read_request_connected(tag, tag->byte_offset);
+        if(tag->tag_list) {
+            rc = build_tag_list_request_connected(tag);
+        } else {
+            rc = build_read_request_connected(tag, tag->offset);
+        }
     } else {
-        rc = build_read_request_unconnected(tag, tag->byte_offset);
+        rc = build_read_request_unconnected(tag, tag->offset);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -267,9 +277,9 @@ int tag_write_start(ab_tag_p tag)
     tag->write_in_progress = 1;
 
     if(tag->use_connected_msg) {
-        rc = build_write_request_connected(tag, tag->byte_offset);
+        rc = build_write_request_connected(tag, tag->offset);
     } else {
-        rc = build_write_request_unconnected(tag, tag->byte_offset);
+        rc = build_write_request_unconnected(tag, tag->offset);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -374,7 +384,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
     return PLCTAG_STATUS_OK;
 }
 
-int build_tag_list_request_connected(ab_tag_p tag, int byte_offset)
+int build_tag_list_request_connected(ab_tag_p tag)
 {
     eip_cip_co_req* cip = NULL;
     tag_list_req *list_req = NULL;
@@ -420,7 +430,7 @@ int build_tag_list_request_connected(ab_tag_p tag, int byte_offset)
     list_req->request_path[1] = 0x6B; /* tag info/symbol class */
     list_req->request_path[2] = 0x25; /* 16-bit instance ID type */
     list_req->request_path[3] = 0x00; /* padding */
-    list_req->instance_id = h2le16((uint16_t)byte_offset);
+    list_req->instance_id = h2le16((uint16_t)tag->next_id);
     list_req->num_attributes = h2le16(4); /* MAGIC, 4 attributes to get */
     list_req->requested_attributes[0] = h2le16(0x02); /* MAGIC, symbol type */
     list_req->requested_attributes[1] = h2le16(0x07); /* MAGIC, base type size */
@@ -440,7 +450,7 @@ int build_tag_list_request_connected(ab_tag_p tag, int byte_offset)
     cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
     cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)(sizeof(*list_req))); /* REQ: fill in with length of remaining data. */
+    cip->cpf_cdi_item_length = h2le16((uint16_t)(sizeof(*list_req) + sizeof(cip->cpf_conn_seq_num)));
 
     /* set the size of the request */
     req->request_size = (int)(sizeof(*cip) + sizeof(*list_req));
@@ -673,16 +683,16 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     }
 
     /* how much data to write? */
-    write_size = tag->size - tag->byte_offset;
+    write_size = tag->size - tag->offset;
 
     if(write_size > tag->write_data_per_packet) {
         write_size = tag->write_data_per_packet;
     }
 
     /* now copy the data to write */
-    mem_copy(data, tag->data + tag->byte_offset, write_size);
+    mem_copy(data, tag->data + tag->offset, write_size);
     data += write_size;
-    tag->byte_offset += write_size;
+    tag->offset += write_size;
 
     /* need to pad data to multiple of 16-bits */
     if (write_size & 0x01) {
@@ -813,16 +823,16 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     }
 
     /* how much data to write? */
-    write_size = tag->size - tag->byte_offset;
+    write_size = tag->size - tag->offset;
 
     if(write_size > tag->write_data_per_packet) {
         write_size = tag->write_data_per_packet;
     }
 
     /* now copy the data to write */
-    mem_copy(data, tag->data + tag->byte_offset, write_size);
+    mem_copy(data, tag->data + tag->offset, write_size);
     data += write_size;
-    tag->byte_offset += write_size;
+    tag->offset += write_size;
 
     /* need to pad data to multiple of 16-bits */
     if (write_size & 0x01) {
@@ -913,8 +923,6 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
  * locked!
  */
 
-
-
 static int check_read_status_connected(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
@@ -932,7 +940,7 @@ static int check_read_status_connected(ab_tag_p tag)
 
     if (!tag->req) {
         tag->read_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
 
         pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
 
@@ -954,7 +962,7 @@ static int check_read_status_connected(ab_tag_p tag)
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->read_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             break;
         }
@@ -1070,12 +1078,12 @@ static int check_read_status_connected(ab_tag_p tag)
             }
 
             /* check data size. */
-            if ((tag->byte_offset + (data_end - data)) > tag->size) {
+            if ((tag->offset + (data_end - data)) > tag->size) {
                 pdebug(DEBUG_WARN,
                        "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
-                       tag->byte_offset + (int)(data_end - data),
+                       tag->offset + (int)(data_end - data),
                        tag->size);
-                pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->byte_offset, (int)(data_end - data));
+                pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->offset, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_LARGE;
                 break;
             }
@@ -1089,11 +1097,11 @@ static int check_read_status_connected(ab_tag_p tag)
              * put into the tag's data buffer.
              */
             if (!tag->pre_write_read) {
-                mem_copy(tag->data + tag->byte_offset, data, (int)(data_end - data));
+                mem_copy(tag->data + tag->offset, data, (int)(data_end - data));
             }
 
             /* bump the byte offset */
-            tag->byte_offset += (int)(data_end - data);
+            tag->offset += (int)(data_end - data);
         } else {
             pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
         }
@@ -1109,14 +1117,14 @@ static int check_read_status_connected(ab_tag_p tag)
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
         /* skip if we are doing a pre-write read. */
-        if (!tag->pre_write_read && partial_data && tag->byte_offset < tag->size) {
+        if (!tag->pre_write_read && partial_data && tag->offset < tag->size) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
         } else {
             /* done! */
             tag->first_read = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
             if (tag->pre_write_read) {
@@ -1135,6 +1143,249 @@ static int check_read_status_connected(ab_tag_p tag)
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         /* error ! */
         pdebug(DEBUG_WARN, "Error received!");
+
+        /* clean up everything. */
+        ab_tag_abort(tag);
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+
+/*
+ * check_read_tag_list_status_connected
+ *
+ * This routine checks for any outstanding tag list requests.  It will
+ * terminate when there is no data in the response and the error is not "more data".
+ *
+ * This is not thread-safe!  It should be called with the tag mutex
+ * locked!
+ */
+
+static int check_read_tag_list_status_connected(ab_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    eip_cip_co_resp* cip_resp;
+    uint8_t* data;
+    uint8_t* data_end;
+    int partial_data = 0;
+    int current_entry = tag->offset; /* alias this for clarity */
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if (!tag->req) {
+        tag->read_in_progress = 0;
+        tag->offset = 0;
+
+        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
+
+        return PLCTAG_ERR_READ;
+    }
+
+    /* request can be used by two threads at once. */
+    spin_block(&tag->req->lock) {
+        if(!tag->req->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(tag->req->status != PLCTAG_STATUS_OK) {
+            rc = tag->req->status;
+            tag->req->abort_request = 1;
+
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+            tag->read_in_progress = 0;
+            tag->offset = 0;
+            tag->next_id = 0;
+            tag->size = tag->elem_count * tag->elem_size;
+
+            break;
+        }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        if(rc_is_error(rc)) {
+            /* the request is dead, from session side. */
+            tag->req = rc_dec(tag->req);
+        }
+
+        return rc;
+    }
+
+    /* the request is ours exclusively. */
+
+    /* point to the data */
+    cip_resp = (eip_cip_co_resp*)(tag->req->data);
+
+    /* point to the start of the data */
+    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+
+    /* point the end of the data */
+    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+
+    /* check the status */
+    do {
+        if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
+            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
+        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+        }
+
+        if (cip_resp->reply_service != (AB_EIP_CMD_CIP_LIST_TAGS | AB_EIP_CMD_CIP_OK) ) {
+            pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
+        if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
+            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+            break;
+        }
+
+        /* check to see if this is a partial response. */
+        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+
+        /*
+         * check to see if there is any data to process.  If this is a packed
+         * response, there might not be.
+         */
+        if((data_end - data) > 0) {
+            /*
+             * build instances of tag_list_entry in the tag, but only up to the amount in the
+             * response and the space available in the tag data buffer.
+             */
+
+            /* loop over the available data. */
+            while((data_end - data) > 0) {
+                tag_list_entry *input_entry = (tag_list_entry *)data;
+                tag_list_entry *output_entries = (tag_list_entry *)(tag->data);
+                int name_length = 0;
+
+                /* check the available space. */
+                if(current_entry >= tag->elem_count) {
+                    tag->elem_count += AB_TAG_LIST_DEFAULT_ELEMENT_COUNT;
+                    tag->data = (uint8_t*)mem_realloc(tag->data, tag->elem_count * tag->elem_size);
+                    tag->size = tag->elem_count * tag->elem_size;
+
+                    if(!tag->data) {
+                        pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
+                        rc = PLCTAG_ERR_NO_MEM;
+                        break;
+                    }
+                }
+
+                /* clear the data in the output entry */
+                mem_set(&output_entries[current_entry], 0, sizeof(output_entries[current_entry]));
+
+                /* copy data into the new entry. */
+                output_entries[current_entry].instance_id = input_entry->instance_id;
+                data += sizeof(input_entry->instance_id);
+
+                /* set up the next ID in case we need to read more. */
+                tag->next_id = le2h32(input_entry->instance_id) + 1;
+
+                output_entries[current_entry].symbol_type = input_entry->symbol_type;
+                data += sizeof(input_entry->symbol_type);
+
+                output_entries[current_entry].element_length = input_entry->element_length;
+                data += sizeof(input_entry->element_length);
+
+                output_entries[current_entry].array_dims[0] = input_entry->array_dims[0];
+                output_entries[current_entry].array_dims[1] = input_entry->array_dims[1];
+                output_entries[current_entry].array_dims[2] = input_entry->array_dims[2];
+                data += 3 * sizeof(input_entry->array_dims[0]);
+
+                output_entries[current_entry].string_len = input_entry->string_len;
+                data += sizeof(input_entry->string_len);
+
+                name_length = le2h16(input_entry->string_len);
+
+                for(int name_index=0; name_index < name_length; name_index++) {
+                    output_entries[current_entry].string_name[name_index] = input_entry->string_name[name_index];
+                    data += 1;
+                }
+
+                /* handle the next entry */
+                current_entry++;
+            }
+
+            /* we could have failed in the while loop */
+            if(rc != PLCTAG_STATUS_OK) {
+                break;
+            }
+
+            /* the first byte of the response is a type byte. */
+            pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
+
+            /* bump the current entry */
+            tag->offset = current_entry;
+        } else {
+            pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
+        }
+
+        /* set the return code */
+        rc = PLCTAG_STATUS_OK;
+    } while(0);
+
+    /* clean up the request */
+    tag->req->abort_request = 1;
+    tag->req = rc_dec(tag->req);
+
+    /* are we actually done? */
+    if (rc == PLCTAG_STATUS_OK) {
+        /* keep going if we are not done yet. */
+        if (partial_data) {
+            /* call read start again to get the next piece */
+            pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
+            rc = tag_read_start(tag);
+        } else {
+            /* done! */
+            pdebug(DEBUG_DETAIL, "Done reading tag list data!");
+
+            tag->first_read = 0;
+            tag->offset = 0;
+            tag->next_id = 0;
+            tag->read_in_progress = 0;
+
+            /* trim down the data */
+            tag->data = (uint8_t*)mem_realloc(tag->data, current_entry * tag->elem_size);
+            tag->elem_count = current_entry;
+
+            pdebug(DEBUG_DETAIL, "Tag current entry: %d.", current_entry);
+            pdebug(DEBUG_DETAIL, "Tag element size: %d (%d).", tag->elem_size, (int)sizeof(tag_list_entry));
+
+
+            pdebug(DEBUG_DETAIL, "Tag size before, %d, and after, %d.", tag->size, tag->elem_count * tag->elem_size);
+
+            tag->size = tag->elem_count * tag->elem_size;
+        }
+    }
+
+    /* this is not an else clause because the above if could result in bad rc. */
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        /* error ! */
+        pdebug(DEBUG_WARN, "Error received: %s!", plc_tag_decode_error(rc));
+
+        tag->offset = 0;
+        tag->next_id = 0;
 
         /* clean up everything. */
         ab_tag_abort(tag);
@@ -1166,7 +1417,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
     if (!tag->req) {
         tag->read_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
 
         pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
 
@@ -1188,7 +1439,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->read_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             break;
         }
@@ -1301,12 +1552,12 @@ static int check_read_status_unconnected(ab_tag_p tag)
         }
 
         /* copy data into the tag. */
-        if ((tag->byte_offset + (data_end - data)) > tag->size) {
+        if ((tag->offset + (data_end - data)) > tag->size) {
             pdebug(DEBUG_WARN,
                    "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
-                   tag->byte_offset + (int)(data_end - data),
+                   tag->offset + (int)(data_end - data),
                    tag->size);
-            pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->byte_offset, (int)(data_end - data));
+            pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->offset, (int)(data_end - data));
             rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
@@ -1320,11 +1571,11 @@ static int check_read_status_unconnected(ab_tag_p tag)
          * put into the tag's data buffer.
          */
         if (!tag->pre_write_read) {
-            mem_copy(tag->data + tag->byte_offset, data, (int)(data_end - data));
+            mem_copy(tag->data + tag->offset, data, (int)(data_end - data));
         }
 
         /* bump the byte offset */
-        tag->byte_offset += (int)(data_end - data);
+        tag->offset += (int)(data_end - data);
 
         /* set the return code */
         rc = PLCTAG_STATUS_OK;
@@ -1338,14 +1589,14 @@ static int check_read_status_unconnected(ab_tag_p tag)
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
         /* skip if we are doing a pre-write read. */
-        if (!tag->pre_write_read && partial_data && tag->byte_offset < tag->size) {
+        if (!tag->pre_write_read && partial_data && tag->offset < tag->size) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
         } else {
             /* done! */
             tag->first_read = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
             if (tag->pre_write_read) {
@@ -1397,7 +1648,7 @@ static int check_write_status_connected(ab_tag_p tag)
 
     if (!tag->req) {
         tag->write_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
 
         pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
 
@@ -1419,7 +1670,7 @@ static int check_write_status_connected(ab_tag_p tag)
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->write_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             break;
         }
@@ -1472,20 +1723,20 @@ static int check_write_status_connected(ab_tag_p tag)
     tag->req = rc_dec(tag->req);
 
     if(rc == PLCTAG_STATUS_OK) {
-        if(tag->byte_offset < tag->size) {
+        if(tag->offset < tag->size) {
 
             pdebug(DEBUG_DETAIL, "Write not complete, triggering next round.");
             rc = tag_write_start(tag);
         } else {
             /* only clear this if we are done. */
             tag->write_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
         }
     } else {
         pdebug(DEBUG_WARN,"Write failed!");
 
         tag->write_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -1511,7 +1762,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
 
     if (!tag->req) {
         tag->write_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
 
         pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
 
@@ -1533,7 +1784,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->write_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
 
             break;
         }
@@ -1586,20 +1837,20 @@ static int check_write_status_unconnected(ab_tag_p tag)
     tag->req = rc_dec(tag->req);
 
     if(rc == PLCTAG_STATUS_OK) {
-        if(tag->byte_offset < tag->size) {
+        if(tag->offset < tag->size) {
 
             pdebug(DEBUG_DETAIL, "Write not complete, triggering next round.");
             rc = tag_write_start(tag);
         } else {
             /* only clear this if we are done. */
             tag->write_in_progress = 0;
-            tag->byte_offset = 0;
+            tag->offset = 0;
         }
     } else {
         pdebug(DEBUG_WARN,"Write failed!");
 
         tag->write_in_progress = 0;
-        tag->byte_offset = 0;
+        tag->offset = 0;
     }
 
     pdebug(DEBUG_SPEW, "Done.");
