@@ -210,6 +210,7 @@ if (UNIX)
 
     set ( example_PROGRAMS async
                            data_dumper
+                           list_tags
                            multithread
                            multithread_cached_read
                            multithread_plc5
