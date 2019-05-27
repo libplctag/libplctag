@@ -78,7 +78,6 @@ volatile int library_terminating = 0;
 static int get_tag_data_type(ab_tag_p tag, attr attribs);
 
 static void ab_tag_destroy(ab_tag_p tag);
-//static tag_vtable_p set_tag_vtable(ab_tag_p tag);
 static int default_abort(plc_tag_p tag);
 static int default_read(plc_tag_p tag);
 static int default_status(plc_tag_p tag);
@@ -87,13 +86,7 @@ static int default_write(plc_tag_p tag);
 
 /* vtables for different kinds of tags */
 struct tag_vtable_t default_vtable = { default_abort, default_read, default_status, default_tickler, default_write };
-//struct tag_vtable_t cip_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_cip_tag_read_start, eip_cip_tag_status, eip_cip_tag_write_start }*/;
-//struct tag_vtable_t plc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_pccc_tag_read_start, eip_pccc_tag_status, eip_pccc_tag_write_start }*/;
-//struct tag_vtable_t plc_dhp_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
-//struct tag_vtable_t lgx_pccc_vtable = {0}/*= { ab_tag_abort, ab_tag_destroy, eip_dhp_pccc_tag_read_start, eip_dhp_pccc_tag_status, eip_dhp_pccc_tag_write_start}*/;
 
-
-/* declare this so that the library initializer can pass it to atexit() */
 
 /*
  * Public functions.
