@@ -560,6 +560,41 @@ int ab_tag_abort(ab_tag_p tag)
     return PLCTAG_STATUS_OK;
 }
 
+
+
+
+/*
+ * ab_tag_status
+ *
+ * Generic status checker.   May be overridden by individual PLC types.
+ */
+int ab_tag_status(ab_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    if (tag->read_in_progress) {
+        return PLCTAG_STATUS_PENDING;
+    }
+
+    if (tag->write_in_progress) {
+        return PLCTAG_STATUS_PENDING;
+    }
+
+    if(tag->session) {
+        rc = tag->status;
+    } else {
+        /* this is not OK.  This is fatal! */
+        rc = PLCTAG_ERR_CREATE;
+    }
+
+    return rc;
+}
+
+
+
+
+
+
 /*
  * ab_tag_destroy
  *
