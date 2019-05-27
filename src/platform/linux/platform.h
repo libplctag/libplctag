@@ -76,6 +76,7 @@
 
 /* memory functions/defs */
 extern void *mem_alloc(int size);
+extern void *mem_realloc(void *orig, int size);
 extern void mem_free(const void *mem);
 extern void mem_set(void *dest, int c, int size);
 extern void mem_copy(void *dest, void *src, int size);
