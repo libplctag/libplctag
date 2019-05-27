@@ -49,6 +49,46 @@
 #include <util/vector.h>
 
 
+/* packet format is as follows:
+
+CIP Tag Info command
+    uint8_t request_service    0x55
+    uint8_t request_path_size  3 - 6 bytes
+    uint8_t   0x20    get class
+    uint8_t   0x6B    tag info/symbol class
+    uint8_t   0x25    get instance (16-bit)
+    uint8_t   0x00    padding
+    uint8_t   0x00    instance byte 0
+    uint8_t   0x00    instance byte 1
+    uint16_t  0x04    number of attributes to get
+    uint16_t  0x02    attribute #2 - symbol type
+    uint16_t  0x07    attribute #7 - base type size (array element) in bytes
+    uint16_t  0x08    attribute #8 - array dimensions (3xu32)
+    uint16_t  0x01    attribute #1 - symbol name
+
+*/
+
+START_PACK typedef struct {
+    uint8_t request_service;    /* AB_EIP_CMD_CIP_LIST_TAGS=0x55 */
+    uint8_t request_path_size;  /* 3 word = 6 bytes */
+    uint8_t request_path[6];    /* MAGIC
+                                    0x20    get class
+                                    0x6B    tag info/symbol class
+                                    0x25    get instance (16-bit)
+                                    0x00    padding
+                                    0x00    instance byte 0
+                                    0x00    instance byte 1
+                                */
+    uint16_le num_attributes;   /* 0x04    number of attributes to get */
+    uint16_le requested_attributes[4];  /*
+                                            0x02 attribute #2 - symbol type
+                                            0x07 attribute #7 - base type size (array element) in bytes
+                                            0x08    attribute #8 - array dimensions (3xu32)
+                                            0x01    attribute #1 - symbol name
+                                        */
+
+} END_PACK tag_list_req;
+
 //int allocate_request_slot(ab_tag_p tag);
 //int allocate_read_request_slot(ab_tag_p tag);
 //int allocate_write_request_slot(ab_tag_p tag);
@@ -85,6 +125,8 @@ struct tag_vtable_t eip_cip_vtable = {
     (tag_vtable_func)tag_tickler,
     (tag_vtable_func)tag_write_start
 };
+
+
 
 
 /*************************************************************************

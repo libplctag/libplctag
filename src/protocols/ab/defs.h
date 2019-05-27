@@ -72,6 +72,7 @@
 #define AB_EIP_CMD_CIP_WRITE            ((uint8_t)0x4D)
 #define AB_EIP_CMD_CIP_READ_FRAG        ((uint8_t)0x52)
 #define AB_EIP_CMD_CIP_WRITE_FRAG       ((uint8_t)0x53)
+#define AB_EIP_CMD_CIP_LIST_TAGS        ((uint8_t)0x55)
 
 /* flag set when command is OK */
 #define AB_EIP_CMD_CIP_OK               ((uint8_t)0x80)
