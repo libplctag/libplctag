@@ -38,18 +38,6 @@
 //0100 001 0 0000 0000  0000 0100 0000 0000
 //0x42000400
 
-#define AB_TAG_LIST_ENTRY_SIZE (104)
-/* pseudo UDT:
-        uint32_t instance_id    monotonically increasing but not contiguous
-        uint16_t symbol_type    type of the symbol.
-        uint16_t element_length length of one array element in bytes.
-        uint32_t array_dims[3]  array dimensions.
-        uint16_t string_len     string length count.
-        uint8_t[82] string_data string bytes (string_len of them, zero padded)
-*/
-
-/* a default guess for how many tags the PLC has. */
-#define AB_TAG_LIST_DEFAULT_ELEMENT_COUNT (100)
 
 #define DEFAULT_MAX_REQUESTS (10)   /* number of requests and request sizes to allocate by default. */
 
