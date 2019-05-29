@@ -463,8 +463,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 if(tag_name && str_cmp_i("@tags",tag_name) == 0) {
                     tag->tag_list = 1;
                     tag->elem_type = AB_TYPE_TAG_ENTRY;
-                    tag->elem_count = AB_TAG_LIST_DEFAULT_ELEMENT_COUNT;
-                    tag->elem_size = AB_TAG_LIST_ENTRY_SIZE;  /* tag list entry size ~ 104 bytes. */
+                    tag->elem_count = 1;  /* place holder */
+                    tag->elem_size = 1;
                 }
             }
         }

@@ -59,7 +59,7 @@ int main(int argc, char **argv)
         usage();
     }
 
-    snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=@tags&debug=4",argv[1], argv[2]);
+    snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=@tags",argv[1], argv[2]);
 
     printf("Using tag string: %s\n", tag_string);
 
@@ -74,8 +74,6 @@ int main(int argc, char **argv)
         printf("Unable to read tag!  Return code %s\n",plc_tag_decode_error(tag));
         usage();
     }
-
-    printf("Total tags returned: %d.\n", plc_tag_get_size(tag)/104);
 
     do {
         uint32_t tag_instance_id = 0;
@@ -93,7 +91,7 @@ int main(int argc, char **argv)
         uint16_t element_length length of one array element in bytes.
         uint32_t array_dims[3]  array dimensions.
         uint16_t string_len     string length count.
-        uint8_t string_data[82]   string bytes (string_len of them)
+        uint8_t string_data[]   string bytes (string_len of them)
         */
 
         tag_instance_id = plc_tag_get_uint32(tag, offset);
@@ -123,9 +121,9 @@ int main(int argc, char **argv)
 
         index++;
 
-        offset = index * 104;
+        //offset = index * 104;
 
-        printf("offset %d: Tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n",offset, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
+        printf("index %d: Tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
     } while(rc == PLCTAG_STATUS_OK && offset < plc_tag_get_size(tag));
 
     plc_tag_destroy(tag);

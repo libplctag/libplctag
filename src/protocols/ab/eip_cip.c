@@ -101,7 +101,7 @@ START_PACK typedef struct {
         uint16_le element_length; /* length of one array element in bytes. */
         uint32_le array_dims[3];  /* array dimensions. */
         uint16_le string_len;   /* string length count. */
-        uint8_t string_name[82]; /* MAGIC string name bytes (string_len of them, zero padded) */
+        //uint8_t string_name[82]; /* MAGIC string name bytes (string_len of them, zero padded) */
 } END_PACK tag_list_entry;
 
 
@@ -1172,7 +1172,9 @@ static int check_read_tag_list_status_connected(ab_tag_p tag)
     uint8_t* data;
     uint8_t* data_end;
     int partial_data = 0;
-    int current_entry = tag->offset; /* alias this for clarity */
+
+    static int symbol_index=0;
+
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1235,6 +1237,8 @@ static int check_read_tag_list_status_connected(ab_tag_p tag)
 
     /* check the status */
     do {
+        ptrdiff_t payload_size = (data_end - data);
+
         if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
@@ -1267,76 +1271,45 @@ static int check_read_tag_list_status_connected(ab_tag_p tag)
          * check to see if there is any data to process.  If this is a packed
          * response, there might not be.
          */
-        if((data_end - data) > 0) {
-            /*
-             * build instances of tag_list_entry in the tag, but only up to the amount in the
-             * response and the space available in the tag data buffer.
-             */
+        if(payload_size > 0) {
+            uint8_t *current_entry_data = data;
 
-            /* loop over the available data. */
-            while((data_end - data) > 0) {
-                tag_list_entry *input_entry = (tag_list_entry *)data;
-                tag_list_entry *output_entries = (tag_list_entry *)(tag->data);
-                int name_length = 0;
+            /* copy the data into the tag and realloc if we need more space. */
 
-                /* check the available space. */
-                if(current_entry >= tag->elem_count) {
-                    tag->elem_count += AB_TAG_LIST_DEFAULT_ELEMENT_COUNT;
-                    tag->data = (uint8_t*)mem_realloc(tag->data, tag->elem_count * tag->elem_size);
-                    tag->size = tag->elem_count * tag->elem_size;
+            if(payload_size + tag->offset > tag->size) {
+                pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
 
-                    if(!tag->data) {
-                        pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
-                        rc = PLCTAG_ERR_NO_MEM;
-                        break;
-                    }
+                tag->elem_count = tag->size = (int)payload_size + tag->offset;
+                tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
+
+                if(!tag->data) {
+                    pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
+                    rc = PLCTAG_ERR_NO_MEM;
+                    break;
                 }
-
-                /* clear the data in the output entry */
-                mem_set(&output_entries[current_entry], 0, sizeof(output_entries[current_entry]));
-
-                /* copy data into the new entry. */
-                output_entries[current_entry].instance_id = input_entry->instance_id;
-                data += sizeof(input_entry->instance_id);
-
-                /* set up the next ID in case we need to read more. */
-                tag->next_id = le2h32(input_entry->instance_id) + 1;
-
-                output_entries[current_entry].symbol_type = input_entry->symbol_type;
-                data += sizeof(input_entry->symbol_type);
-
-                output_entries[current_entry].element_length = input_entry->element_length;
-                data += sizeof(input_entry->element_length);
-
-                output_entries[current_entry].array_dims[0] = input_entry->array_dims[0];
-                output_entries[current_entry].array_dims[1] = input_entry->array_dims[1];
-                output_entries[current_entry].array_dims[2] = input_entry->array_dims[2];
-                data += 3 * sizeof(input_entry->array_dims[0]);
-
-                output_entries[current_entry].string_len = input_entry->string_len;
-                data += sizeof(input_entry->string_len);
-
-                name_length = le2h16(input_entry->string_len);
-
-                for(int name_index=0; name_index < name_length; name_index++) {
-                    output_entries[current_entry].string_name[name_index] = input_entry->string_name[name_index];
-                    data += 1;
-                }
-
-                /* handle the next entry */
-                current_entry++;
             }
 
-            /* we could have failed in the while loop */
-            if(rc != PLCTAG_STATUS_OK) {
-                break;
+            /* copy the data into the tag's data buffer. */
+            mem_copy(tag->data + tag->offset, data, (int)payload_size);
+
+            tag->offset += (int)payload_size;
+
+            pdebug(DEBUG_DETAIL, "current offset %d", tag->offset);
+
+            /* scan through the data to get the next ID to use. */
+            while((data_end - current_entry_data) > 0) {
+                tag_list_entry *current_entry = (tag_list_entry*)current_entry_data;
+
+                /* first element is the symbol instance ID */
+                tag->next_id = (uint16_t)(le2h32(current_entry->instance_id) + 1);
+
+                pdebug(DEBUG_DETAIL, "Next ID: %d", tag->next_id);
+
+                /* skip past to the next instance. */
+                current_entry_data += (sizeof(*current_entry) + le2h16(current_entry->string_len));
+
+                symbol_index++;
             }
-
-            /* the first byte of the response is a type byte. */
-            pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
-
-            /* bump the current entry */
-            tag->offset = current_entry;
         } else {
             pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
         }
@@ -1360,22 +1333,14 @@ static int check_read_tag_list_status_connected(ab_tag_p tag)
             /* done! */
             pdebug(DEBUG_DETAIL, "Done reading tag list data!");
 
+            pdebug(DEBUG_DETAIL, "total symbols: %d", symbol_index);
+
+            tag->elem_count = tag->offset;
+
             tag->first_read = 0;
             tag->offset = 0;
             tag->next_id = 0;
             tag->read_in_progress = 0;
-
-            /* trim down the data */
-            tag->data = (uint8_t*)mem_realloc(tag->data, current_entry * tag->elem_size);
-            tag->elem_count = current_entry;
-
-            pdebug(DEBUG_DETAIL, "Tag current entry: %d.", current_entry);
-            pdebug(DEBUG_DETAIL, "Tag element size: %d (%d).", tag->elem_size, (int)sizeof(tag_list_entry));
-
-
-            pdebug(DEBUG_DETAIL, "Tag size before, %d, and after, %d.", tag->size, tag->elem_count * tag->elem_size);
-
-            tag->size = tag->elem_count * tag->elem_size;
         }
     }
 
