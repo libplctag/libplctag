@@ -234,6 +234,7 @@ if (UNIX)
 
 elseif(WIN32)
     set ( example_PROGRAMS async
+                           list_tags
                            plc5
                            simple
                            simple_dual
