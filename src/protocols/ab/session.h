@@ -117,7 +117,7 @@ struct ab_request_t {
     /* used by the background thread for incrementally getting data */
     int request_size; /* total bytes, not just data */
     int request_capacity;
-    uint8_t data[];
+    uint8_t *data;
 };
 
 

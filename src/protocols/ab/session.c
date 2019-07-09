@@ -88,6 +88,7 @@ static int recv_forward_open_resp(ab_session_p session, int *max_payload_size_gu
 static int send_forward_close_req(ab_session_p session);
 static int recv_forward_close_resp(ab_session_p session);
 static void request_destroy(void *req_arg);
+static int session_request_increase_buffer(ab_request_p request, int new_capacity);
 
 
 static volatile mutex_p session_mutex = NULL;
@@ -1360,6 +1361,7 @@ int process_requests(ab_session_p session)
 
 int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
 {
+    int rc = PLCTAG_STATUS_OK;
     eip_cip_co_resp *packed_resp = (eip_cip_co_resp *)(session->data);
     eip_cip_co_resp *unpacked_resp = NULL;
     uint8_t *pkt_start = NULL;
@@ -1378,8 +1380,25 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
         pdebug(DEBUG_DETAIL, "Got single response packet.  Copying %d bytes unchanged.", new_eip_len);
 
         if(new_eip_len > request->request_capacity) {
-            pdebug(DEBUG_WARN,"Request data buffer (%d bytes) smaller than result (%d bytes) from PLC!", request->request_capacity, new_eip_len);
-            return PLCTAG_ERR_TOO_LARGE;
+            int request_capacity = 0;
+
+            pdebug(DEBUG_DETAIL, "Request buffer too small, allocating larger buffer.");
+
+            critical_block(session->mutex) {
+                request_capacity = (size_t)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+            }
+
+            /* make sure it will fit. */
+            if(new_eip_len > request_capacity) {
+                pdebug(DEBUG_WARN, "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len, request_capacity);
+                return PLCTAG_ERR_TOO_LARGE;
+            }
+
+            rc = session_request_increase_buffer(request, request_capacity);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to increase request buffer size to %d bytes!", request_capacity);
+                return rc;
+            }
         }
 
         mem_copy(request->data, session->data, new_eip_len);
@@ -1405,6 +1424,30 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
 
         pkt_len = (int)(pkt_end - pkt_start);
 
+        /* replace the request buffer if it is not big enough. */
+        new_eip_len = pkt_len + (int)sizeof(eip_cip_co_generic_response);
+        if(new_eip_len > request->request_capacity) {
+            int request_capacity = 0;
+
+            pdebug(DEBUG_DETAIL, "Request buffer too small, allocating larger buffer.");
+
+            critical_block(session->mutex) {
+                request_capacity = (size_t)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+            }
+
+            /* make sure it will fit. */
+            if(new_eip_len > request_capacity) {
+                pdebug(DEBUG_WARN, "something is very wrong, packet length is %d but allowable capacity is %d!", new_eip_len, request_capacity);
+                return PLCTAG_ERR_TOO_LARGE;
+            }
+
+            rc = session_request_increase_buffer(request, request_capacity);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to increase request buffer size to %d bytes!", request_capacity);
+                return rc;
+            }
+        }
+
         /* point to the response buffer in a structured way. */
         unpacked_resp = (eip_cip_co_resp *)(request->data);
 
@@ -1414,12 +1457,6 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
         /* size of the new packet */
         new_eip_len = (uint16_t)(((uint8_t *)(&unpacked_resp->reply_service) + pkt_len) /* end of the packet */
                                  - (uint8_t *)(request->data));                                      /* start of the packet */
-
-        /* too big? */
-        if(new_eip_len > request->request_capacity) {
-            pdebug(DEBUG_WARN,"Request data buffer (%d bytes) smaller than result (%d bytes) from PLC!", request->request_capacity, new_eip_len);
-            return PLCTAG_ERR_TOO_LARGE;
-        }
 
         /* now copy the packet over that. */
         mem_copy(&unpacked_resp->reply_service, pkt_start, pkt_len);
@@ -2339,6 +2376,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req)
     int rc = PLCTAG_STATUS_OK;
     ab_request_p res;
     size_t request_capacity = 0;
+    uint8_t *buffer = NULL;
 
     critical_block(session->mutex) {
         request_capacity = (size_t)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
@@ -2346,11 +2384,20 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req)
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
-    res = (ab_request_p)rc_alloc((int)(sizeof(struct ab_request_t) + request_capacity), request_destroy);
+    buffer = (uint8_t*)mem_alloc((int)request_capacity);
+    if(!buffer) {
+        pdebug(DEBUG_WARN, "Unable to allocate request buffer!");
+        *req = NULL;
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    res = (ab_request_p)rc_alloc((int)sizeof(struct ab_request_t), request_destroy);
     if (!res) {
+        mem_free(buffer);
         *req = NULL;
         rc = PLCTAG_ERR_NO_MEM;
     } else {
+        res->data = buffer;
         res->tag_id = tag_id;
         res->request_capacity = (int)request_capacity;
         res->lock = LOCK_INIT;
@@ -2372,7 +2419,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req)
  *
  * The request must be removed from any lists before this!
  */
-//int request_destroy_unsafe(ab_request_p* req_pp)
+
 void request_destroy(void *req_arg)
 {
     ab_request_p req = req_arg;
@@ -2381,5 +2428,33 @@ void request_destroy(void *req_arg)
 
     req->abort_request = 1;
 
+    if(req->data) {
+        mem_free(req->data);
+        req->data = NULL;
+    }
+
     pdebug(DEBUG_DETAIL, "Done.");
 }
+
+
+int session_request_increase_buffer(ab_request_p request, int new_capacity)
+{
+    uint8_t *old_buffer = NULL;
+    uint8_t *new_buffer = NULL;
+
+    new_buffer = (uint8_t*)mem_alloc(new_capacity);
+    if(!new_buffer) {
+        pdebug(DEBUG_WARN,"Unable to allocate larger request buffer!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    spin_block(&request->lock) {
+        old_buffer = request->data;
+        request->data = new_buffer;
+    }
+
+    mem_free(old_buffer);
+
+    return PLCTAG_STATUS_OK;
+}
+

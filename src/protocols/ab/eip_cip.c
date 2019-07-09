@@ -1277,11 +1277,11 @@ static int check_read_tag_list_status_connected(ab_tag_p tag)
             /* copy the data into the tag and realloc if we need more space. */
 
             if(payload_size + tag->offset > tag->size) {
+                tag->elem_count = tag->size = (int)payload_size + tag->offset;
+
                 pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
 
-                tag->elem_count = tag->size = (int)payload_size + tag->offset;
                 tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
-
                 if(!tag->data) {
                     pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
                     rc = PLCTAG_ERR_NO_MEM;
