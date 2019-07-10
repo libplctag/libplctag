@@ -2450,6 +2450,7 @@ int session_request_increase_buffer(ab_request_p request, int new_capacity)
 
     spin_block(&request->lock) {
         old_buffer = request->data;
+        request->request_capacity = new_capacity;
         request->data = new_buffer;
     }
 
