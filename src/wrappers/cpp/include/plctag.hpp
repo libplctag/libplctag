@@ -5,15 +5,9 @@
 
 #include <string>
 #include <vector>
-#include <iostream>
-#include <ctime>
-#include <iomanip>
 #include <libplctag.h>
+#include "logging.hpp"
 
-#define INFO std::cout << std::put_time(std::localtime(&time_now), "%y-%m-%d %OH:%OM:%OS") << " [INFO] " << __FILE__ << "(" << __FUNCTION__ << ":" << __LINE__ << ") >> "
-#define ERROR std::cout << std::put_time(std::localtime(&time_now), "%y-%m-%d %OH:%OM:%OS") << " [ERROR] " << __FILE__ << "(" << __FUNCTION__ << ":" << __LINE__ << ") >> "
-
-static std::time_t time_now = std::time(nullptr);
 
 class plctag
 {

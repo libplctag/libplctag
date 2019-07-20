@@ -1,8 +1,13 @@
+/*
+ * This file is subject to the terms and conditions defined in
+ * file 'LICENSE.txt', which is part of this source code bundle.
+ */
+ 
 #include "../include/ping.hpp"
 
 int system_ping::ping_ip_address(std::string ip_address, int max_attempts, std::string& details)
 {
-	INFO << "started" << std::endl;
+	//INFO << "started";		// causing multiple log files?
 
 	std::stringstream ss;
 	std::string command;
@@ -16,7 +21,7 @@ int system_ping::ping_ip_address(std::string ip_address, int max_attempts, std::
 
 		if(!(in = popen(command.c_str(), "r")))	// open process as read only
 		{
-			ERROR << "popen error = " << std::strerror(errno) << std::endl;
+			ERROR << "popen error = " << std::strerror(errno);	
 			return -1;
 		}
 
@@ -31,18 +36,18 @@ int system_ping::ping_ip_address(std::string ip_address, int max_attempts, std::
 	}
 	catch (const std::exception &e)
 	{
-		ERROR << "e.what() = " << e.what() << std::endl;
+		ERROR << "e.what() = " << e.what();		
 		throw -1;
 	}
 
-	INFO << "ended" << std::endl;
+	//INFO << "ended";			// causing multiple log files?
 
 	return (exit_code == 0);
 }
 
 int system_ping::test_connection (std::string ip_address, int max_attempts, bool check_eth_port, int eth_port_number)
 {
-	INFO << "started" << std::endl;	
+	INFO << "started";	
 	
 	int eth_conn_status_int;
 	std::string details;
@@ -56,26 +61,26 @@ int system_ping::test_connection (std::string ip_address, int max_attempts, bool
 			eth_conn_status >> eth_conn_status_int;	// 0: not connected; 1: connected
 			if (eth_conn_status_int != 1)
 			{
-				ERROR << "eth" << std::to_string(eth_port_number) << " unplugged" << std::endl;		
+				ERROR << "eth" << std::to_string(eth_port_number) << " unplugged";		
 				return -1;
 			}
 		}
 		
 		if (ping_ip_address(ip_address, max_attempts, details) != 1)
 		{
-			ERROR << "cannot ping " << ip_address << " >> " << details << std::endl;
+			ERROR << "cannot ping " << ip_address << " >> " << details;
 			return -2;
 		}
 	}
 	catch (const std::exception &e)
 	{
-		ERROR << "e.what() = " << e.what() << std::endl;	
+		ERROR << "e.what() = " << e.what();	
 		throw -1;
 	}
 	
-	INFO << "ping " << ip_address << " OK" << std::endl;
+	INFO << "ping " << ip_address << " OK";			
 			
-	INFO << "ended" << std::endl;	
+	INFO << "ended";	
 
 	return 0;
 }
