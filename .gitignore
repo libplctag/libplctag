@@ -38,6 +38,10 @@ ipch/
 [Dd]ebug*/
 [Rr]elease*/
 Ankh.NoLoad
+*.o
+*.ipch
+*.log
+main
 
 .vs/libplctag/v15/Browse.VC.db
 .vs/libplctag/v15/Browse.VC.opendb
