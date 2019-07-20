@@ -1,6 +1,10 @@
+cmake-build*
+*.project
+*.workspace
 .cproject
 .project
 .settings
+.codelit*/*
 *~
 */*~
 */*/*~
@@ -9,6 +13,8 @@
 *.user
 *.aps
 *.pch
+.vscod*/*
+build_win/*
 *.vspscc
 *.vssscc
 *_i.c
@@ -33,3 +39,10 @@ ipch/
 [Rr]elease*/
 Ankh.NoLoad
 
+.vs/libplctag/v15/Browse.VC.db
+.vs/libplctag/v15/Browse.VC.opendb
+.vs/ProjectSettings.json
+.vs/slnx.sqlite
+.vs/VSWorkspaceState.json
+src/lib/version.c
+temp.c
