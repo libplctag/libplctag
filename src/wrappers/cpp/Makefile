@@ -42,7 +42,7 @@ endif
 LIBS = -lplctag -pthread
 
 #################### define the C source files ####################
-SRCS = src/main.cpp src/plctag.cpp
+SRCS = src/main.cpp src/plctag.cpp src/ping.cpp
 
 # define the C object files 
 OBJS = $(addprefix obj/, $(notdir $(SRCS:.cpp=.o)))
