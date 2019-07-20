@@ -1,0 +1,10 @@
+A simple Go wrapper for libplctag
+
+1. Build and install libplctag.
+2. Set GOPATH to take into account this directory.
+
+$ export GOPATH=$(pwd):$GOPATH
+
+3. Run examples in go
+
+$ go run examples/toogle_bool.go
