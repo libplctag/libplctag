@@ -1,6 +1,8 @@
 #include "../include/plctag.hpp"
 #include "../include/ping.hpp"
 
+// Note: create folder "obj" first for Makefile then run command "make"
+
 system_ping _system_ping;	
 plctag _plctag;	
 
