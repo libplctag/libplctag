@@ -41,6 +41,9 @@ endif
 # start with -l, don't put lib in the name or an extension
 LIBS = -lplctag
 
+# Boost
+LIBS += -lboost_system -lboost_thread -lboost_timer
+
 # Boost Logging
 LIBS += -DBOOST_LOG_DYN_LINK -lboost_log_setup -lboost_log -lpthread
 

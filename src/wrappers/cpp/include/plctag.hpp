@@ -8,7 +8,6 @@
 #include <libplctag.h>
 #include "logging.hpp"
 
-
 class plctag
 {
 	public:
