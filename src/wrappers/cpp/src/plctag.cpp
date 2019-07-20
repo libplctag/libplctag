@@ -80,7 +80,7 @@ void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_a
 			}
 			default:
 			{
-				ERROR << "plc_prot unhandled = " << plc_prot;;
+				ERROR << "plc_prot unhandled = " << plc_prot;
 				throw - 2;
 			}
 		}
@@ -102,12 +102,12 @@ void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_a
 		// connect tag to PLC
 		tag.at(tag_num) = plc_tag_create(tag_path.c_str(), timeout);
 		if (tag.at(tag_num) < 0) {
-			ERROR << "tag.at(" << tag_num << ") >> could not create tag >> error = " << plc_tag_decode_error(tag.at(tag_num)) << "; tag_path = " << tag_path;;
+			ERROR << "tag.at(" << tag_num << ") >> could not create tag >> error = " << plc_tag_decode_error(tag.at(tag_num)) << "; tag_path = " << tag_path;
 			throw - 3;
 		}
 		status = plc_tag_status(tag.at(tag_num));
 		if (status != PLCTAG_STATUS_OK) {
-			ERROR << "tag.at(" << tag_num << ") >> error setting up tag internal state >> error = " << plc_tag_decode_error(tag.at(tag_num)) << "; tag_path = " << tag_path;;
+			ERROR << "tag.at(" << tag_num << ") >> error setting up tag internal state >> error = " << plc_tag_decode_error(tag.at(tag_num)) << "; tag_path = " << tag_path;
 			throw - 4;
 		}
 	}
@@ -135,7 +135,7 @@ void plctag::close_tag(int tag_num)
 		status = plc_tag_destroy(tag.at(tag_num));
 		if (status != PLCTAG_STATUS_OK)
 		{
-			ERROR << "tag.at(" << tag_num << ") >> plc_tag_destroy >> error = " << plc_tag_decode_error(status);;
+			ERROR << "tag.at(" << tag_num << ") >> plc_tag_destroy >> error = " << plc_tag_decode_error(status);
 			throw - 2;
 		}
 	}
@@ -167,7 +167,7 @@ void plctag::close_all_tags(void)
 				status = plc_tag_destroy(tag.at(i));
 				if (status != PLCTAG_STATUS_OK)
 				{
-					ERROR << "tag.at(" << i << ") >> plc_tag_destroy >> error = " << plc_tag_decode_error(status);;
+					ERROR << "tag.at(" << i << ") >> plc_tag_destroy >> error = " << plc_tag_decode_error(status);
 				}
 			}
 		}
@@ -198,7 +198,7 @@ void plctag::error_recovery(int tag_num, int plc_prot, int timeout, std::string 
 		}
 		catch (int error)
 		{
-			ERROR << "close_all_tags >> error = " << error;;
+			ERROR << "close_all_tags >> error = " << error;
 			throw - 2;
 		}
 
@@ -209,7 +209,7 @@ void plctag::error_recovery(int tag_num, int plc_prot, int timeout, std::string 
 		}
 		catch (int error)
 		{
-			ERROR << "create_tag >> error = " << error;;
+			ERROR << "create_tag >> error = " << error;
 			throw - 3;
 		}
 
@@ -220,7 +220,7 @@ void plctag::error_recovery(int tag_num, int plc_prot, int timeout, std::string 
 		}
 		catch (int error)
 		{
-			ERROR << "read_tag >> error = " << error;;
+			ERROR << "read_tag >> error = " << error;
 			throw - 4;
 		}
 
@@ -231,7 +231,7 @@ void plctag::error_recovery(int tag_num, int plc_prot, int timeout, std::string 
 		}
 		catch (int error)
 		{
-			ERROR << "write_tag >> error = " << error;;
+			ERROR << "write_tag >> error = " << error;
 			throw - 5;
 		}
 
@@ -242,7 +242,7 @@ void plctag::error_recovery(int tag_num, int plc_prot, int timeout, std::string 
 		}
 		catch (int error)
 		{
-			ERROR << "close_tag >> error = " << error;;
+			ERROR << "close_tag >> error = " << error;
 			throw - 6;
 		}
 	}
@@ -266,11 +266,11 @@ void plctag::initialize_tags(int plc_prot, std::string ip_address)
 	{
 		create_tag(1, plc_prot, 5000, ip_address, "test_string", ELE_STRING, 5);
 		create_tag(2, plc_prot, 5000, ip_address, "test_string[0]", ELE_STRING, 1);
-		create_tag(3, plc_prot, 5000, ip_address, "test_float", ELE_FLOAT, 5);		
+		create_tag(3, plc_prot, 5000, ip_address, "test_float", ELE_FLOAT, 5); 
 	}
 	catch (int error)
 	{
-		ERROR << "create_tag >> error = " << error;;
+		ERROR << "create_tag >> error = " << error;
 		throw - 2;
 	}
 	catch (const std::exception &e)
@@ -305,7 +305,7 @@ std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, 
 		status = plc_tag_read(tag.at(tag_num), timeout); // timeout (ms)
 		if (status != PLCTAG_STATUS_OK)
 		{
-			ERROR << "tag.at(" << tag_num << ") >> plc_tag_read >> error = " << plc_tag_decode_error(status);;
+			ERROR << "tag.at(" << tag_num << ") >> plc_tag_read >> error = " << plc_tag_decode_error(status);
 			throw - 2;
 		}
 
@@ -320,7 +320,7 @@ std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, 
 					status = plc_tag_status(tag.at(tag_num));
 					if (status != PLCTAG_STATUS_OK)
 					{
-						ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);;
+						ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);
 						throw - 3;
 					}
 					fvec.push_back(fval);
@@ -335,7 +335,7 @@ std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, 
 					status = plc_tag_status(tag.at(tag_num));
 					if (status != PLCTAG_STATUS_OK)
 					{
-						ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);;
+						ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);
 						throw - 3;
 					}
 					fvec.push_back(fval);
@@ -344,7 +344,7 @@ std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, 
 			}
 			default:
 			{
-				ERROR << "element_size unhandled >> " << element_size;;
+				ERROR << "element_size unhandled >> " << element_size;
 				throw - 2;
 			}
 		}
