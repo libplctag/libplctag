@@ -1,3 +1,8 @@
+/*
+ * This file is subject to the terms and conditions defined in
+ * file 'LICENSE.txt', which is part of this source code bundle.
+ */
+
 #ifndef PING_HPP
 #define PING_HPP
 
@@ -10,7 +15,7 @@
 #include <cstring>
 #include <memory>
 
-#include "plctag.hpp"
+#include "logging.hpp"	// Boost logging
 
 class system_ping
 {

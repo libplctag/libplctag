@@ -21,7 +21,7 @@ CC = ccache g++
 # -Wno-write-strings: gets rid of this warning: deprecated conversion from string constant to ‘char*’ [-Wwrite-strings]
 # -O#: optimizer, makes code faster by disabling debugging features; 3 is fastest
 # -j #: make # files at the same time (1 for each core, found with lscpu)
-CFLAGS = -Wall -std=c++11 -O3
+CFLAGS = -Wall -O3 -std=c++11
 CFLAGS += -DBOOST_LOG_DYN_LINK
 ifeq ($(32_BIT_CPU),1)
 	CFLAGS += -m32
@@ -32,17 +32,20 @@ endif
 #################### define library paths, start with -L ####################
 LFLAGS = -L/usr/local/lib -L/usr/lib
 ifeq ($(32_BIT_CPU),1)
-	LFLAGS += -L/usr/lib/i386-linux-gnu -L/lib/i386-linux-gnu
+	LFLAGS += -L32_lib -L/usr/lib/i386-linux-gnu -L/lib/i386-linux-gnu
 else
-	LFLAGS += -L/usr/lib/x86_64-linux-gnu -L/lib/x86_64-linux-gnu
+	LFLAGS += -L64_lib -L/usr/lib/x86_64-linux-gnu -L/lib/x86_64-linux-gnu
 endif
 
 #################### define libraries (.so, .a) to link into executable ####################
 # start with -l, don't put lib in the name or an extension
-LIBS = -lplctag -pthread
+LIBS = -lplctag
+
+# Boost Logging
+LIBS += -DBOOST_LOG_DYN_LINK -lboost_log_setup -lboost_log -lpthread
 
 #################### define the C source files ####################
-SRCS = src/main.cpp src/plctag.cpp src/ping.cpp
+SRCS = src/main.cpp src/plctag.cpp src/ping.cpp src/logging.cpp
 
 # define the C object files 
 OBJS = $(addprefix obj/, $(notdir $(SRCS:.cpp=.o)))
