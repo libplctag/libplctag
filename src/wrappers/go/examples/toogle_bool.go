@@ -17,67 +17,71 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-
 package main
 
 import (
 	"fmt"
 	"os"
 	"plctag"
-	"time"
 )
 
 const (
-	TAG_PATH = "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=1&elem_count=1&debug=1&name=pcomm_test_bool"
+	TAG_PATH     = "protocol=ab_eip&gateway=192.168.0.250&path=1,0&cpu=LGX&elem_size=1&elem_count=1&debug=1&name=pcomm_test_bool"
 	DATA_TIMEOUT = 5000
 )
 
 func main() {
-	tag := plctag.Create(TAG_PATH, DATA_TIMEOUT);
-	if (tag < 0) {
-		tag := int(tag) // XXX: plctag.Create returns int32 for tags but DecodeError,Exit expects int
-		fmt.Printf("ERROR %s: Could not create tag!\n", plctag.DecodeError(tag))
-		os.Exit(tag)
+	/* create the tag */
+	tag := plctag.Create(TAG_PATH, DATA_TIMEOUT)
+	if tag < 0 {
+		fmt.Printf("ERROR %s: Could not create tag!\n", plctag.DecodeError(int(tag)))
+		os.Exit(0)
 	}
 
-	var status int
-	for {
-		status = plctag.Status(tag)
-		if status != plctag.STATUS_PENDING {
-			break
-		}
-		time.Sleep(100)
-	}
-	if status != plctag.STATUS_OK {
-		fmt.Printf("Error setting up tag internal state. Error %s\n", plctag.DecodeError(status))
-		os.Exit(status)
+	/* everything OK? */
+	if rc := plctag.Status(tag); rc != plctag.STATUS_OK {
+		fmt.Printf("ERROR %s: Error setting up tag internal state.\n", plctag.DecodeError(rc))
+		plctag.Destroy(tag)
+		os.Exit(0)
 	}
 
-	result := plctag.Read(tag, DATA_TIMEOUT)
-	if result != plctag.STATUS_OK {
-		fmt.Printf("ERROR: Unable to read the data! Got error code %d: %s\n", result, plctag.DecodeError(result))
-		os.Exit(result)
+	/* get the data */
+	if rc := plctag.Read(tag, DATA_TIMEOUT); rc != plctag.STATUS_OK {
+		fmt.Printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plctag.DecodeError(rc))
+		plctag.Destroy(tag)
+		os.Exit(0)
 	}
+
 	b := plctag.GetUint8(tag, 0)
-	fmt.Printf("bool = %d\n", b)
-	if b == 0 {
-		b = 255
-	} else if b == 255 {
+	if b > 0 {
 		b = 0
+		fmt.Printf("bool = ON\n")
+	} else {
+		b = 255
+		fmt.Printf("bool = OFF\n")
 	}
+
 	plctag.SetUint8(tag, 0, b)
-	result = plctag.Write(tag, DATA_TIMEOUT)
-	if result != plctag.STATUS_OK {
-		fmt.Printf("ERROR: Unable to write the data! Got error code %d: %s\n", result, plctag.DecodeError(result))
-		os.Exit(result)
+	if rc := plctag.Write(tag, DATA_TIMEOUT); rc != plctag.STATUS_OK {
+		fmt.Printf("ERROR: Unable to write the data! Got error code %d: %s\n", rc, plctag.DecodeError(rc))
+		os.Exit(0)
 	}
-	result = plctag.Read(tag, DATA_TIMEOUT)
-	if result != plctag.STATUS_OK {
-		fmt.Printf("ERROR: Unable to read the data! Got error code %d: %s\n", result, plctag.DecodeError(result))
-		os.Exit(result)
+
+	/* get the data */
+	if rc := plctag.Read(tag, DATA_TIMEOUT); rc != plctag.STATUS_OK {
+		fmt.Printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plctag.DecodeError(rc))
+		plctag.Destroy(tag)
+		os.Exit(0)
 	}
+
 	b = plctag.GetUint8(tag, 0)
-	fmt.Printf("bool = %d\n", b)
+	if b > 0 {
+		b = 0
+		fmt.Printf("bool = ON\n")
+	} else {
+		b = 255
+		fmt.Printf("bool = OFF\n")
+	}
 
 	plctag.Destroy(tag)
 }
