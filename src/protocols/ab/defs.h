@@ -629,92 +629,92 @@ START_PACK typedef struct {
 
 
 /* PCCC Request PLC5 DH+ Only */
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
-    uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle;  /* from session set up */
-    uint32_le encap_status;          /* always _sent_ as 0 */
-    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;               /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle;      /* ALWAYS 0 */
-    uint16_le router_timeout;        /* in seconds, zero for Connected Sends! */
-
-    /* Common Packet Format - CPF Connected */
-    uint16_le cpf_item_count;        /* ALWAYS 2 */
-    uint16_le cpf_cai_item_type;     /* ALWAYS 0x00A1 Connected Address Item */
-    uint16_le cpf_cai_item_length;   /* ALWAYS 2 ? */
-    uint32_le cpf_targ_conn_id;           /* the connection id from Forward Open */
-    uint16_le cpf_cdi_item_type;     /* ALWAYS 0x00B1, Connected Data Item type */
-    uint16_le cpf_cdi_item_length;   /* length in bytes of the rest of the packet */
-
-    /* Connection sequence number */
-    uint16_le cpf_conn_seq_num;      /* connection sequence ID, inc for each message */
-
-    /* PLC5 DH+ Routing */
-    uint16_le dest_link;
-    uint16_le dest_node;
-    uint16_le src_link;
-    uint16_le src_node;
-
-    /* PCCC Command */
-    uint8_t pccc_command;           /* CMD read, write etc. */
-    uint8_t pccc_status;            /* STS 0x00 in request */
-    uint16_le pccc_seq_num;          /* TNSW transaction/sequence id */
-    uint8_t pccc_function;          /* FNC sub-function of command */
-    uint16_le pccc_offset;           /* offset of this request? */
-    uint16_le pccc_transfer_size;    /* number of elements requested */
-    //uint8_t pccc_data[ZLA_SIZE];    /* send_data for request */
-} END_PACK pccc_dhp_co_req;
-
+//START_PACK typedef struct {
+//    /* encap header */
+//    uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
+//    uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
+//    uint32_le encap_session_handle;  /* from session set up */
+//    uint32_le encap_status;          /* always _sent_ as 0 */
+//    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
+//                                     * identifying responses when more than one
+//                                     * are in flight at once.
+//                                     */
+//    uint32_le options;               /* 0, reserved for future use */
+//
+//    /* Interface Handle etc. */
+//    uint32_le interface_handle;      /* ALWAYS 0 */
+//    uint16_le router_timeout;        /* in seconds, zero for Connected Sends! */
+//
+//    /* Common Packet Format - CPF Connected */
+//    uint16_le cpf_item_count;        /* ALWAYS 2 */
+//    uint16_le cpf_cai_item_type;     /* ALWAYS 0x00A1 Connected Address Item */
+//    uint16_le cpf_cai_item_length;   /* ALWAYS 2 ? */
+//    uint32_le cpf_targ_conn_id;           /* the connection id from Forward Open */
+//    uint16_le cpf_cdi_item_type;     /* ALWAYS 0x00B1, Connected Data Item type */
+//    uint16_le cpf_cdi_item_length;   /* length in bytes of the rest of the packet */
+//
+//    /* Connection sequence number */
+//    uint16_le cpf_conn_seq_num;      /* connection sequence ID, inc for each message */
+//
+//    /* PLC5 DH+ Routing */
+//    uint16_le dest_link;
+//    uint16_le dest_node;
+//    uint16_le src_link;
+//    uint16_le src_node;
+//
+//    /* PCCC Command */
+//    uint8_t pccc_command;           /* CMD read, write etc. */
+//    uint8_t pccc_status;            /* STS 0x00 in request */
+//    uint16_le pccc_seq_num;          /* TNSW transaction/sequence id */
+//    uint8_t pccc_function;          /* FNC sub-function of command */
+//    uint16_le pccc_transfer_offset;           /* offset of this request? */
+//    uint16_le pccc_transfer_size;    /* number of elements requested */
+//    //uint8_t pccc_data[ZLA_SIZE];    /* send_data for request */
+//} END_PACK pccc_dhp_co_req;
+//
 
 
 
 /* PCCC PLC5 DH+ Only Response */
-START_PACK typedef struct {
-    /* encap header */
-    uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
-    uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle;  /* from session set up */
-    uint32_le encap_status;          /* always _sent_ as 0 */
-    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
-                                     * identifying responses when more than one
-                                     * are in flight at once.
-                                     */
-    uint32_le options;               /* 0, reserved for future use */
-
-    /* Interface Handle etc. */
-    uint32_le interface_handle;      /* ALWAYS 0 */
-    uint16_le router_timeout;        /* in seconds, zero for Connected Sends! */
-
-    /* Common Packet Format - CPF Connected */
-    uint16_le cpf_item_count;        /* ALWAYS 2 */
-    uint16_le cpf_cai_item_type;     /* ALWAYS 0x00A1 Connected Address Item */
-    uint16_le cpf_cai_item_length;   /* ALWAYS 2 ? */
-    uint32_le cpf_targ_conn_id;           /* the connection id from Forward Open */
-    uint16_le cpf_cdi_item_type;     /* ALWAYS 0x00B1, Connected Data Item type */
-    uint16_le cpf_cdi_item_length;   /* length in bytes of the rest of the packet */
-
-    /* connection ID from request */
-    uint16_le cpf_conn_seq_num;      /* connection sequence ID, inc for each message */
-
-    /* PLC5 DH+ Routing */
-    uint16_le dest_link;
-    uint16_le dest_node;
-    uint16_le src_link;
-    uint16_le src_node;
-
-    /* PCCC Command */
-    uint8_t pccc_command;           /* CMD read, write etc. */
-    uint8_t pccc_status;            /* STS 0x00 in request */
-    uint16_le pccc_seq_num;         /* TNSW transaction/connection sequence number */
-    //uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC request. */
-} END_PACK pccc_dhp_co_resp;
+//START_PACK typedef struct {
+//    /* encap header */
+//    uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
+//    uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
+//    uint32_le encap_session_handle;  /* from session set up */
+//    uint32_le encap_status;          /* always _sent_ as 0 */
+//    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
+//                                     * identifying responses when more than one
+//                                     * are in flight at once.
+//                                     */
+//    uint32_le options;               /* 0, reserved for future use */
+//
+//    /* Interface Handle etc. */
+//    uint32_le interface_handle;      /* ALWAYS 0 */
+//    uint16_le router_timeout;        /* in seconds, zero for Connected Sends! */
+//
+//    /* Common Packet Format - CPF Connected */
+//    uint16_le cpf_item_count;        /* ALWAYS 2 */
+//    uint16_le cpf_cai_item_type;     /* ALWAYS 0x00A1 Connected Address Item */
+//    uint16_le cpf_cai_item_length;   /* ALWAYS 2 ? */
+//    uint32_le cpf_targ_conn_id;           /* the connection id from Forward Open */
+//    uint16_le cpf_cdi_item_type;     /* ALWAYS 0x00B1, Connected Data Item type */
+//    uint16_le cpf_cdi_item_length;   /* length in bytes of the rest of the packet */
+//
+//    /* connection ID from request */
+//    uint16_le cpf_conn_seq_num;      /* connection sequence ID, inc for each message */
+//
+//    /* PLC5 DH+ Routing */
+//    uint16_le dest_link;
+//    uint16_le dest_node;
+//    uint16_le src_link;
+//    uint16_le src_node;
+//
+//    /* PCCC Command */
+//    uint8_t pccc_command;           /* CMD read, write etc. */
+//    uint8_t pccc_status;            /* STS 0x00 in request */
+//    uint16_le pccc_seq_num;         /* TNSW transaction/connection sequence number */
+//    //uint8_t pccc_data[ZLA_SIZE];    /* data for PCCC request. */
+//} END_PACK pccc_dhp_co_resp;
 
 
 
