@@ -159,7 +159,7 @@ int tag_read_start(ab_tag_p tag)
     uint8_t *data;
     uint8_t *embed_start;
 
-    pdebug(DEBUG_INFO,"Starting");
+    pdebug(DEBUG_INFO, "Starting");
 
     /* What is the overhead in the _response_ */
     overhead =   1  /* pccc command */
@@ -169,19 +169,19 @@ int tag_read_start(ab_tag_p tag)
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_DETAIL,"Unable to send request: Tag size is %d, write overhead is %d, and write data per packet is %d!", tag->size, overhead, data_per_packet);
+        pdebug(DEBUG_DETAIL, "Unable to send request: Tag size is %d, write overhead is %d, and write data per packet is %d!", tag->size, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+        pdebug(DEBUG_WARN, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
@@ -216,7 +216,7 @@ int tag_read_start(ab_tag_p tag)
     data = ((uint8_t *)pccc) + sizeof(pccc_req);
 
     /* copy encoded tag name into the request */
-    mem_copy(data,tag->encoded_name,tag->encoded_name_size);
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
     /* amount of data to get this time */
@@ -286,14 +286,14 @@ static int check_read_status(ab_tag_p tag)
     uint8_t *data_end;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW,"Starting");
+    pdebug(DEBUG_SPEW, "Starting");
 
     /* is there a request in flight? */
     if (!tag->req) {
         tag->read_in_progress = 0;
         tag->offset = 0;
 
-        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
+        pdebug(DEBUG_WARN, "Read in progress, but no request in flight!");
 
         return PLCTAG_ERR_READ;
     }
@@ -310,7 +310,7 @@ static int check_read_status(ab_tag_p tag)
             rc = tag->req->status;
             tag->req->abort_request = 1;
 
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+            pdebug(DEBUG_WARN, "Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->read_in_progress = 0;
             tag->offset = 0;
@@ -335,24 +335,25 @@ static int check_read_status(ab_tag_p tag)
     /* point to the start of the data */
     data = (uint8_t *)pccc + sizeof(*pccc);
 
+    /* point to the end of the data */
     data_end = (tag->req->data + le2h16(pccc->encap_length) + sizeof(eip_encap));
 
     /* fake exceptions */
     do {
         if(le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",pccc->encap_command);
+            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", pccc->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(pccc->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",le2h32(pccc->encap_status));
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(pccc->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"PCCC command failed, response code: (%d) %s", pccc->general_status, decode_cip_error_long((uint8_t *)&(pccc->general_status)));
+            pdebug(DEBUG_WARN, "PCCC command failed, response code: (%d) %s", pccc->general_status, decode_cip_error_long((uint8_t *)&(pccc->general_status)));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -366,10 +367,10 @@ static int check_read_status(ab_tag_p tag)
         /* did we get the right amount of data? */
         if((data_end - data) != tag->size) {
             if((int)(data_end - data) > tag->size) {
-                pdebug(DEBUG_WARN,"Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
+                pdebug(DEBUG_WARN, "Too much data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_LARGE;
             } else {
-                pdebug(DEBUG_WARN,"Too little data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
+                pdebug(DEBUG_WARN, "Too little data received!  Expected %d bytes but got %d bytes!", tag->size, (int)(data_end - data));
                 rc = PLCTAG_ERR_TOO_SMALL;
             }
             break;
@@ -387,7 +388,7 @@ static int check_read_status(ab_tag_p tag)
 
     tag->read_in_progress = 0;
 
-    pdebug(DEBUG_SPEW,"Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -408,7 +409,7 @@ int tag_write_start(ab_tag_p tag)
     int overhead, data_per_packet;
     ab_request_p req = NULL;
 
-    pdebug(DEBUG_INFO,"Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* How much overhead? */
     overhead =   1  /* pccc command */
@@ -423,19 +424,19 @@ int tag_write_start(ab_tag_p tag)
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", session_get_max_payload(tag->session), overhead, data_per_packet);
+        pdebug(DEBUG_DETAIL, "Tag size is %d, write overhead is %d, and write data per packet is %d.", session_get_max_payload(tag->session), overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+        pdebug(DEBUG_WARN, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
@@ -448,11 +449,11 @@ int tag_write_start(ab_tag_p tag)
     data = (req->data) + sizeof(pccc_req);
 
     /* copy encoded tag name into the request */
-    mem_copy(data,tag->encoded_name,tag->encoded_name_size);
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
     /* now copy the data to write */
-    mem_copy(data,tag->data,tag->size);
+    mem_copy(data, tag->data, tag->size);
     data += tag->size;
 
     /* now fill in the rest of the structure. */
@@ -534,14 +535,14 @@ static int check_write_status(ab_tag_p tag)
     uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW,"Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     /* is there an outstanding request? */
     if (!tag->req) {
         tag->write_in_progress = 0;
         tag->offset = 0;
 
-        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
+        pdebug(DEBUG_WARN, "Write in progress, but no request in flight!");
 
         return PLCTAG_ERR_WRITE;
     }
@@ -558,7 +559,7 @@ static int check_write_status(ab_tag_p tag)
             rc = tag->req->status;
             tag->req->abort_request = 1;
 
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+            pdebug(DEBUG_WARN, "Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
             tag->write_in_progress = 0;
             tag->offset = 0;
@@ -587,25 +588,25 @@ static int check_write_status(ab_tag_p tag)
     do {
         /* check the response status */
         if( le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_WARN,"EIP unexpected response packet type: %d!",pccc->encap_command);
+            pdebug(DEBUG_WARN, "EIP unexpected response packet type: %d!", pccc->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
 
         if(le2h32(pccc->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"EIP command failed, response code: %d",le2h32(pccc->encap_status));
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(pccc->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(pccc->general_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN,"PCCC command failed, response code: %d",pccc->general_status);
+            pdebug(DEBUG_WARN, "PCCC command failed, response code: %d", pccc->general_status);
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
 
         if(pccc->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s",pccc->pccc_status, pccc_decode_error(*data));
+            pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s", pccc->pccc_status, pccc_decode_error(*data));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -618,7 +619,7 @@ static int check_write_status(ab_tag_p tag)
     tag->req = rc_dec(tag->req);
     tag->write_in_progress = 0;
 
-    pdebug(DEBUG_SPEW,"Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     /* Success! */
     return rc;
