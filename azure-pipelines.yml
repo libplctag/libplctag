@@ -5,10 +5,12 @@ strategy:
   matrix:
     linux:
       imageName: 'ubuntu-latest'
+      artifactSuffix: 'ubuntu'
     #mac:
     #  imageName: 'macos-latest'
     windows:
       imageName: 'windows-latest'
+      artifactSuffix: 'ubuntu'
 
 pool:
   vmImage: $(imageName)
@@ -28,6 +30,11 @@ steps:
   inputs:
     contents: 'build/**/*plctag.*'
     targetFolder: $(Build.ArtifactStagingDirectory)
+
+- task: CopyFiles@2
+  inputs:
+    contents: 'src/lib/libplctag.h'
+    targetFolder: $(Build.ArtifactStagingDirectory)
     
 - publish: '$(Build.ArtifactStagingDirectory)'
-  artifact: LibPLCTag
+  artifact: LibPLCTag-$(artifactSuffix)
