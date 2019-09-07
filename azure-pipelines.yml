@@ -29,7 +29,5 @@ steps:
     contents: 'build/**/*plctag.*'
     targetFolder: $(Build.ArtifactStagingDirectory)
     
-- task: PublishBuildArtifacts@1
-  inputs:
-    pathToPublish: $(Build.ArtifactStagingDirectory)
-    artifactName: BuildArtifacts
+- publish: '$(System.ArtifactStagingDirectory)/*'
+  artifact: LibPLCTag
