@@ -1,4 +1,6 @@
 
+[![Build Status](https://dev.azure.com/kylehayes0387/kylehayes/_apis/build/status/kyle-github.libplctag?branchName=master)](https://dev.azure.com/kylehayes0387/kylehayes/_build/latest?definitionId=1&branchName=master)
+
 libplctag
 =========
 
