@@ -5,8 +5,8 @@ strategy:
   matrix:
     linux:
       imageName: 'ubuntu-latest'
-    mac:
-      imageName: 'macos-latest'
+    #mac:
+    #  imageName: 'macos-latest'
     windows:
       imageName: 'windows-latest'
 
@@ -24,4 +24,12 @@ steps:
     workingDirectory: 'build'
     cmakeArgs: '--build .'    
 
+- task: CopyFiles@2
+  inputs:
+    contents: 'build/**/*plctag.*'
+    targetFolder: $(Build.ArtifactStagingDirectory)
+    
 - task: PublishBuildArtifacts@1
+  inputs:
+    pathToPublish: $(Build.ArtifactStagingDirectory)
+    artifactName: BuildArtifacts
