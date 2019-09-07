@@ -1,0 +1,20 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- script: mkdir -p build
+- script: cd build
+
+- task: CMake@1
+  inputs:
+    workingDirectory: 'build'
+    cmakeArgs: '..'
+
+- script: make
+  workingDirectory: 'build'
+
+- publish: 'build/'
+  artifact: build
