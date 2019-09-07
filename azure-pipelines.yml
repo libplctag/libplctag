@@ -1,20 +1,27 @@
 trigger:
 - master
 
+strategy:
+  matrix:
+    linux:
+      imageName: 'ubuntu-latest'
+    mac:
+      imageName: 'macos-latest'
+    windows:
+      imageName: 'windows-latest'
+
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: $(imageName)
 
 steps:
-- script: mkdir -p build
-- script: cd build
-
 - task: CMake@1
   inputs:
-    workingDirectory: 'build'
+    workingDirectory: '$(System.DefaultWorkingDirectory)'
     cmakeArgs: '..'
+    
+- task: CMake@1
+  inputs:
+    workingDirectory: '$(System.DefaultWorkingDirectory)'
+    cmakeArgs: '--build .'    
 
-- script: make
-  workingDirectory: 'build'
-
-- publish: 'build/'
-  artifact: build
+- task: PublishBuildArtifacts@1
