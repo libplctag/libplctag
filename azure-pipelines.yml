@@ -16,12 +16,12 @@ pool:
 steps:
 - task: CMake@1
   inputs:
-    workingDirectory: '$(System.DefaultWorkingDirectory)'
+    workingDirectory: 'build'
     cmakeArgs: '..'
     
 - task: CMake@1
   inputs:
-    workingDirectory: '$(System.DefaultWorkingDirectory)'
+    workingDirectory: 'build'
     cmakeArgs: '--build .'    
 
 - task: PublishBuildArtifacts@1
