@@ -289,4 +289,4 @@ macro(print_all_variables)
 endmacro()
 
 # Debugging
-# print_all_variables()
+print_all_variables()
