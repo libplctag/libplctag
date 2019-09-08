@@ -28,6 +28,11 @@ endif()
 # this is the root libplctag project
 project (libplctag_project)
 
+# make sure our output are going somewhere sane
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 # the project is version 2.0
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 0)
@@ -64,8 +69,8 @@ include_directories("${protocol_SRC_PATH}")
 # C compiler specific settings
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra -Wc++-compat -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # using GCC
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
@@ -90,7 +95,7 @@ endif()
 
 if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # check MSVC version, only newer versions than 2012 support C99 things we need
-    if(${MSVC_VERSION} EQUAL 1800)
+    if((${MSVC_VERSION} EQUAL 1800) OR (${MSVC_VERSION} LESS 1800))
         message("MSVC cannot handle C99, compiling code as C++")
         set(BASE_C_FLAGS "${BASE_FLAGS}")
     else()
@@ -98,6 +103,7 @@ if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
         set(BASE_C_FLAGS "${BASE_FLAGS} /c")
     endif()
 else()
+    #set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99 -Wc++-compat ")
     set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99")
 endif()
 
@@ -166,6 +172,7 @@ ENDFOREACH()
 
 # shared library
 add_library(plctag SHARED ${libplctag_SRCS} )
+add_library(plctag_static STATIC ${libplctag_SRCS} )
 
 
 #if(THREADS_HAVE_PTHREAD_ARG)
@@ -263,9 +270,22 @@ endforeach(example)
 
 
 # Generate files from templates
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
 # for installation
 install(TARGETS plctag DESTINATION lib${LIB_SUFFIX})
+install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
 install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+
+
+macro(print_all_variables)
+    message(STATUS "print_all_variables------------------------------------------{")
+    get_cmake_property(_variableNames VARIABLES)
+    foreach (_variableName ${_variableNames})
+        message(STATUS "${_variableName}=${${_variableName}}")
+    endforeach()
+    message(STATUS "print_all_variables------------------------------------------}")
+endmacro()
+
+print_all_variables()
