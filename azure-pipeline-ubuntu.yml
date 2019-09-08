@@ -5,16 +5,25 @@ pool:
   vmImage: 'ubuntu-latest'
 
 steps:
-- script: mkdir -p build
-- script: cd build
-
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
     cmakeArgs: '..'
+    
+- task: CMake@1
+  inputs:
+    workingDirectory: 'build'
+    cmakeArgs: '--build .'    
 
-- script: make
-  workingDirectory: 'build'
+- task: CopyFiles@2
+  inputs:
+    contents: 'build/**/*plctag.*'
+    targetFolder: $(Build.ArtifactStagingDirectory)
 
-- publish: 'build/'
-  artifact: build
+- task: CopyFiles@2
+  inputs:
+    contents: 'src/lib/libplctag.h'
+    targetFolder: $(Build.ArtifactStagingDirectory)
+    
+- publish: '$(Build.ArtifactStagingDirectory)'
+  artifact: LibPLCTag-Ubuntu
