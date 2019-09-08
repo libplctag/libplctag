@@ -15,15 +15,28 @@ steps:
     workingDirectory: 'build'
     cmakeArgs: '--build .'
 
-- task: CopyFiles@2
+- task: ArchiveFiles@2
   inputs:
-    contents: 'build/**/*plctag.*'
-    targetFolder: $(Build.ArtifactStagingDirectory)
+    rootFolderOrFile: '$(Build.BinariesDirectory)/libplctag.so'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_$(Build.BuildId).zip'
+    replaceExistingArchive: false
 
-- task: CopyFiles@2
+- task: ArchiveFiles@2
   inputs:
-    contents: 'src/lib/libplctag.h'
-    targetFolder: $(Build.ArtifactStagingDirectory)
+    rootFolderOrFile: '$(Build.BinariesDirectory)/libplctag.pc'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_$(Build.BuildId).zip'
+    replaceExistingArchive: false
 
-- publish: '$(Build.ArtifactStagingDirectory)'
-  artifact: LibPLCTag-Ubuntu-x64
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: '$(Build.SourcesDirectory)/src/lib/libplctag.h'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_$(Build.BuildId).zip'
+    replaceExistingArchive: false
+
+
