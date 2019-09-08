@@ -17,26 +17,10 @@ steps:
 
 - task: ArchiveFiles@2
   inputs:
-    rootFolderOrFile: '$(Build.BinariesDirectory)/lib/libplctag.so'
+    rootFolderOrFile: '$(Build.BinariesDirectory)/bin'
     includeRootFolder: false
     archiveType: 'zip'
-    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_$(Build.BuildId).zip'
-    replaceExistingArchive: false
-
-- task: ArchiveFiles@2
-  inputs:
-    rootFolderOrFile: '$(Build.BinariesDirectory)/lib/libplctag_static.a'
-    includeRootFolder: false
-    archiveType: 'zip'
-    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_$(Build.BuildId).zip'
-    replaceExistingArchive: false
-
-- task: ArchiveFiles@2
-  inputs:
-    rootFolderOrFile: '$(Build.BinariesDirectory)/lib/libplctag.pc'
-    includeRootFolder: false
-    archiveType: 'zip'
-    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_$(Build.BuildId).zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_x64_$(Build.BuildId).zip'
     replaceExistingArchive: false
 
 - task: ArchiveFiles@2
@@ -44,7 +28,5 @@ steps:
     rootFolderOrFile: '$(Build.SourcesDirectory)/src/lib/libplctag.h'
     includeRootFolder: false
     archiveType: 'zip'
-    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_$(Build.BuildId).zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_x64_$(Build.BuildId).zip'
     replaceExistingArchive: false
-
-
