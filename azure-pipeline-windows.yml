@@ -15,15 +15,18 @@ steps:
     workingDirectory: 'build'
     cmakeArgs: '--build .'
 
-- task: CopyFiles@2
+- task: ArchiveFiles@2
   inputs:
-    contents: 'build/**/*plctag.*'
-    targetFolder: $(Build.ArtifactStagingDirectory)
+    rootFolderOrFile: '$(Build.BinariesDirectory)/bin'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_windows_x64_$(Build.BuildId).zip'
+    replaceExistingArchive: false
 
-- task: CopyFiles@2
+- task: ArchiveFiles@2
   inputs:
-    contents: 'src/lib/libplctag.h'
-    targetFolder: $(Build.ArtifactStagingDirectory)
-
-- publish: '$(Build.ArtifactStagingDirectory)'
-  artifact: LibPLCTag-Windows-x64
+    rootFolderOrFile: '$(Build.SourcesDirectory)/src/lib/libplctag.h'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_windows_x64_$(Build.BuildId).zip'
+    replaceExistingArchive: false
