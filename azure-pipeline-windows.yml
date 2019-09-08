@@ -2,7 +2,7 @@ trigger:
 - master
 
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: 'windows-latest'
 
 steps:
 - task: CMake@1
@@ -26,4 +26,4 @@ steps:
     targetFolder: $(Build.ArtifactStagingDirectory)
 
 - publish: '$(Build.ArtifactStagingDirectory)'
-  artifact: LibPLCTag-Ubuntu-x64
+  artifact: LibPLCTag-Windows-x64
