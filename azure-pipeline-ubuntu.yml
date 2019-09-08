@@ -30,3 +30,8 @@ steps:
     archiveType: 'zip'
     archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_x64_$(Build.BuildId).zip'
     replaceExistingArchive: false
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    pathtoPublish: '$(Build.ArtifactStagingDirectory)/libplctag_ubuntu_x64_$(Build.BuildId).zip'
+    artifactName: libplctag_ubuntu_x64_$(Build.BuildId)
