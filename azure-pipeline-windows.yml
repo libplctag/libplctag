@@ -17,7 +17,7 @@ steps:
 
 - task: ArchiveFiles@2
   inputs:
-    rootFolderOrFile: '$(System.DefaultWorkingDirectory)/build'
+    rootFolderOrFile: '$(System.DefaultWorkingDirectory)/build/bin_dist'
     includeRootFolder: false
     archiveType: 'zip'
     archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_windows_x64_$(Build.BuildId).zip'
