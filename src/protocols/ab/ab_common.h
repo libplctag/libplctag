@@ -45,17 +45,13 @@ typedef struct ab_request_t *ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 
-//extern volatile ab_session_p sessions;
-//extern volatile mutex_p global_session_mut;
-//extern volatile thread_p io_handler_thread;
-
-
-int ab_tag_abort(ab_tag_p tag);
-int ab_tag_status(ab_tag_p tag);
+extern int ab_tag_abort(ab_tag_p tag);
+extern int ab_tag_status(ab_tag_p tag);
 //int ab_tag_destroy(ab_tag_p p_tag);
-int check_cpu(ab_tag_p tag, attr attribs);
-int check_tag_name(ab_tag_p tag, const char *name);
-int check_mutex(int debug);
+extern int get_plc_type(attr attribs);
+extern int check_cpu(ab_tag_p tag, attr attribs);
+extern int check_tag_name(ab_tag_p tag, const char *name);
+extern int check_mutex(int debug);
 extern vector_p find_read_group_tags(ab_tag_p tag);
 
 THREAD_FUNC(request_handler_func);

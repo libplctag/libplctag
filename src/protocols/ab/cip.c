@@ -109,12 +109,12 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
     const char *p = dhp_str;
 
     if(!match_channel(&p, dhp_channel)) {
-        pdebug(DEBUG_INFO, "Bad syntax in DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
+        pdebug(DEBUG_INFO, "Not DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
         return 0;
     }
 
     if(!match_colon(&p)) {
-        pdebug(DEBUG_INFO, "Bad syntax in DH+ route.  Expected : in route.");
+        pdebug(DEBUG_INFO, "Not DH+ route.  Expected : in route.");
         return 0;
     }
 
@@ -331,6 +331,7 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
     uint8_t *dp = NULL;
     uint8_t *name_len;
     encode_state_t state;
+    int first_num = 1;
 
     /* reserve room for word count for IOI string. */
     word_count = data;
@@ -384,14 +385,31 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
             p++;
 
             do {
-                uint32_t val;
+                long int val;
                 char *np = NULL;
-                val = (uint32_t)strtol(p,&np,0);
+
+                /* skip past a commas. */
+                if(!first_num && *p == ',') {
+                    p++;
+                }
+
+                /* get the numeric value. */
+                val = strtol(p, &np, 10);
 
                 if(np == p) {
                     /* we must have a number */
+                    pdebug(DEBUG_WARN, "Expected number in tag name string!");
+                    return 0;
+                } else {
+                    pdebug(DEBUG_DETAIL, "got number %ld.", val);
+                }
+
+                if(val < 0) {
+                    pdebug(DEBUG_WARN, "Array index must be greater than or equal to zero!");
                     return 0;
                 }
+
+                first_num = 0;
 
                 p = np;
 
@@ -402,7 +420,7 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
                     dp++;     /* padding */
 
                     /* copy the value in little-endian order */
-                    *dp = val & 0xFF;
+                    *dp = (uint8_t)val & 0xFF;
                     dp++;
                     *dp = (uint8_t)((val >> 8) & 0xFF);
                     dp++;
@@ -417,7 +435,7 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
                     dp++;     /* padding */
 
                     /* copy the value in little-endian order */
-                    *dp = val & 0xFF;
+                    *dp = (uint8_t)val & 0xFF;
                     dp++;
                     *dp = (uint8_t)((val >> 8) & 0xFF);
                     dp++;
@@ -428,12 +446,15 @@ int cip_encode_tag_name(ab_tag_p tag,const char *name)
                     dp++;     /* value */
                 }
 
-                /* eat up whitespace */
-                while(isspace(*p)) p++;
+                /* eat spaces */
+                while(*p == ' ') {
+                    p++;
+                }
             } while(*p == ',');
 
-            if(*p != ']')
+            if(*p != ']') {
                 return 0;
+            }
 
             p++;
 

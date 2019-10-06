@@ -58,7 +58,7 @@
 
 static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, int plc_type, int use_connected_msg);
 static int session_init(ab_session_p session);
-static int get_plc_type(attr attribs);
+//static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
 static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path);
@@ -285,34 +285,34 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
 }
 
 
-
-
-int get_plc_type(attr attribs)
-{
-    const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
-
-    if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
-            !str_cmp_i(cpu_type, "slc500")) {
-        return AB_PROTOCOL_PLC;
-    } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
-               !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
-        return AB_PROTOCOL_LGX_PCCC;
-    } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
-        return AB_PROTOCOL_MLGX800;
-    } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
-        return AB_PROTOCOL_MLGX;
-    } else if (!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx") ||
-               !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") ||
-               !str_cmp_i(cpu_type, "flexlogix") || !str_cmp_i(cpu_type, "flgx")) {
-        return AB_PROTOCOL_LGX;
-    } else {
-        pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);
-
-        return PLCTAG_ERR_BAD_DEVICE;
-    }
-
-    return PLCTAG_STATUS_OK;
-}
+///* FIXME - This duplicates check_cpu in ab_common.c:check_cpu()!!! */
+//
+//int get_plc_type(attr attribs)
+//{
+//    const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
+//
+//    if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
+//            !str_cmp_i(cpu_type, "slc500")) {
+//        return AB_PROTOCOL_PLC;
+//    } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
+//               !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
+//        return AB_PROTOCOL_LGX_PCCC;
+//    } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
+//        return AB_PROTOCOL_MLGX800;
+//    } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
+//        return AB_PROTOCOL_MLGX;
+//    } else if (!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx") ||
+//               !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") ||
+//               !str_cmp_i(cpu_type, "logix") || !str_cmp_i(cpu_type, "flgx")) {
+//        return AB_PROTOCOL_LGX;
+//    } else {
+//        pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);
+//
+//        return PLCTAG_ERR_BAD_DEVICE;
+//    }
+//
+//    return PLCTAG_STATUS_OK;
+//}
 
 
 int add_session_unsafe(ab_session_p session)
