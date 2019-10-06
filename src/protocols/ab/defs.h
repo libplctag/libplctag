@@ -194,7 +194,7 @@
 //#define AB_PROTOCOL_MLGX800     (4)
 //#define AB_PROTOCOL_LGX_PCCC    (5)
 
-typedef enum { AB_PROTOCOL_PLC = 1, AB_PROTOCOL_SLC, AB_PROTOCOL_MLGX, AB_PROTOCOL_LGX, AB_PROTOCOL_LGX_PCCC, AB_PROTOCOL_MLGX800 } plc_type_t;
+typedef enum { AB_PROTOCOL_NONE = 0, AB_PROTOCOL_PLC = 1, AB_PROTOCOL_SLC, AB_PROTOCOL_MLGX, AB_PROTOCOL_LGX, AB_PROTOCOL_LGX_PCCC, AB_PROTOCOL_MLGX800 } plc_type_t;
 
 
 /*********************************************************************
