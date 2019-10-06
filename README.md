@@ -76,6 +76,7 @@ Wrappers exist for:
 * Java (included)
 * Python (included)
 * Go (included)
+* Pascal (included)
 * .Net/C#
   * [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet) supports .Net Core.
   * [Mesta Automation](https://github.com/mesta1/libplctag-csharp)
