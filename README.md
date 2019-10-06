@@ -1,3 +1,4 @@
+Build status:
 Ubuntu: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Ubuntu?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=3&branchName=master)
 Windows: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Windows?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=4&branchName=master)
 
@@ -42,7 +43,7 @@ Goals
 The primary goals of this library are to provide:
 
 * a simple, consistent way to access PLCs or similar devices of various types.
-* cross-platform support (currently Windows and Linux).
+* cross-platform support (currently Windows and Linux), X86, x86-64, ARM and ARM64 (not well tested).
 * protocol-agnostic access.
 * an easily wrappable library.
 * high performance.   We want to take advantage of PLC/protocol features that allow higher performance where possible.
@@ -75,7 +76,7 @@ Wrappers exist for:
 * Java (included)
 * Python (included)
 * Go (included)
-* .Net (see [Meta Automation](https://github.com/mesta1/libplctag-csharp))
+* .Net (see [Mesta Automation](https://github.com/mesta1/libplctag-csharp))
 * Labview (see [here](https://github.com/dirtyb15/libplctag-labview))
 
 

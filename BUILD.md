@@ -1,5 +1,7 @@
 The build system uses CMake to bootstrap a local build.  On Linux.  On Windows, this makes a Visual Studio project.
 
+Note that as of version 2.0.22, pre-built binaries are included in the GitHub releases.
+
 
 # Instructions for Linux
 
@@ -63,6 +65,9 @@ Run make
 $ make
 ```
 
+The binaries will be in the `build/bin_dist` directory.   This includes the libraries (static and dynamic) and the
+executables for the test and example programs.
+
 ## Alternate compilers
 
 If you want to use Clang instead, install Clang first.
@@ -78,11 +83,49 @@ $ make
 
 # Instructions for Windows using Microsoft Visual Studio
 
-The build process on Windows is a little involved.  I welcome any contributions on how to make this cleaner.  Other than installing
+The build process on Windows is a little involved if it is an older version of Visual Studio.  I welcome any contributions on how to make this cleaner.  Other than installing
 the software, there is one step that needs to be done on the command line, but only the first time you build the system.  After that,
 you do not need to do that step.
 
-## Install MS Visual Studio
+Use the latest version of Visual Studio if at all possible!   As of Visual Studio Community 2019, GitHub and CMake are integrated into the VS build
+system and it is really seamless and pleasant to use (thanks, Microsoft!).
+
+# Visual Studio Community 2019 with Windows 10 (19.03)
+
+Microsoft has integrated GitHub and CMake into VS 2019 very nicely.  It is highly recommended to use at least this version as the integration
+has made the process much easier than in the past!
+
+* Download at least Visual Studio 2019.  I use the Community, free, version.
+* Make sure that you select the C++ command line parts when selecting the components to install.   This installs the C part too.
+* After installation, start VS 2019.
+* Select "Clone or Check out code" over on the top right of the splash/start up screen.
+* Enter the link information for the libplctag GitHub project.
+* This churns for a while (at least in a VM on a fast laptop with a NVMe drive, your wait time may vary).
+* VS 2019 will notice that this is a CMake-based project and automatically start setting everything up.
+* Once this is done, you should be able to build the project.
+* Project binaries may take a little bit of a hunt to find.   If anyone has any tips on how to instruct VS through CMake to do something a little more obvious here, I would love to know!
+
+## ARM Windows builds
+
+It is possible to build for ARM Windows.   The following is how I was able to do this and tested by a user with a 32-bit Raspberry Pi:
+
+* Get at least Visual Studio 2019 Community Edition.
+* After installing the normal C++ stuff, I went into the installer and selected the ARM-specific packages.  There were some for ARM32 and ARM64.  I installed those.
+* I opened VS 2019.
+* I created a project from "Clone or Check out code" over on the top right of the splash/start up screen.
+* I entered the GitHub info for libplctag.
+* Wait while this churns for a bit.
+* Then VS notices that this is a CMake based file and starts processing it.   After a period of time you should see the Solution Explorer etc. all ready to go.
+* Project -> CMake Settings
+* I clicked on the big green "+" to create a new build type.
+* I selected x64-Debug
+* In the right hand side of that, I renamed it to "ARM".
+* little further down in the list of options, in "Toolset" I selected "msvc-ARM".
+* ^S to save.
+* Then I did a full clean and rebuilt my project.
+* Your binaries should be ARM binaries now.
+
+# Visual Studio Community 2015
 
 Testing was done using Visual Studio Community Edition 2015 on Windows 7 SP1 (not terribly up to date).
 
@@ -97,7 +140,7 @@ Install the compilers first!  CMake gets unhappy when it cannot find the compile
 
 ## Install CMake for Windows
 
-Go to the cmake web site and download the installer.  Install cmake.  __NOTE__ install CMake so that it is usable either by all users or the current user.  The default is to 
+Go to the cmake web site and download the installer.  Install cmake.  __NOTE__ install CMake so that it is usable either by all users or the current user.  The default is to
 not install it directly for any user! (Thanks to Nate Miller for pointing this out!)
 
 ## Install Git
@@ -110,8 +153,6 @@ Instructions for this depend on what Git client you use.  I have Windows in a VM
 Any contributions to the instructions here greatly appreciated!
 
 ## Open a Developer command prompt
-
-
 
 (I am not sure you need to do this, it looks like you do not if you have CMake properly installed.) Open a Developer Command Prompt (usually Start Menu > Visual Studio 20xx > Visual Studio Tools > Developer Command Prompt for VS20xx).
 
