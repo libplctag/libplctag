@@ -97,7 +97,7 @@ We are on API version 2.0.  That includes:
   * raw support for user-defined structures (you need to pull out the data piece by piece)
   * read/write arrays of the above.
   * multiple-request support per packet.
-  * packet size negotiation with newer firmward (version 20+).
+  * packet size negotiation with newer firmware (version 20+).
 * support for accessing Logix-class PLCs via PLC/5 protocol.
   * support for INT and REAL read and write.
 * support for Rockwell/Allen-Bradley MicroLogix 850 PLCs.
