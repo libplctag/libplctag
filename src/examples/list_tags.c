@@ -31,43 +31,45 @@
 #define TAG_STRING_SIZE (200)
 #define TIMEOUT_MS (5000)
 
+struct program_entry_s {
+    struct program_entry_s *next;
+    char *program_name;
+};
+
 void usage()
 {
     printf("Usage: list_tags <PLC IP> <PLC path>\nExample: list_tags 10.1.2.3 1,0\n");
     exit(1);
 }
 
-int main(int argc, char **argv)
+int32_t setup_tag(char *plc_ip, char *path, char *program)
 {
-    int32_t tag;
-    int rc = PLCTAG_STATUS_OK;
-    int offset = 0;
-    int index = 0;
+    int32_t tag = PLCTAG_ERR_CREATE;
     char tag_string[TAG_STRING_SIZE] = {0,};
 
-    if(argc < 3) {
-        usage();
+    if(!program || strlen(program) == 0) {
+        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=@tags&debug=4", plc_ip, path);
+    } else {
+        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=%s.@tags&debug=4", plc_ip, path, program);
     }
-
-    if(!argv[1] || strlen(argv[1]) == 0) {
-        printf("Hostname or IP address must not be zero length!\n");
-        usage();
-    }
-
-    if(!argv[2] || strlen(argv[2]) == 0) {
-        printf("PLC path must not be zero length!\n");
-        usage();
-    }
-
-    snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=@tags",argv[1], argv[2]);
 
     printf("Using tag string: %s\n", tag_string);
 
     tag = plc_tag_create(tag_string, TIMEOUT_MS);
     if(tag < 0) {
-        printf("Unable to open tag!  Return code %s\n",plc_tag_decode_error(tag));
+        printf("Unable to open tag!  Return code %s\n", plc_tag_decode_error(tag));
         usage();
     }
+
+    return tag;
+}
+
+
+void get_list(int32_t tag, struct program_entry_s **head)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int offset = 0;
+    int index = 0;
 
     rc = plc_tag_read(tag, TIMEOUT_MS);
     if(rc != PLCTAG_STATUS_OK) {
@@ -121,12 +123,72 @@ int main(int argc, char **argv)
 
         index++;
 
-        //offset = index * 104;
-
         printf("index %d: Tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
+
+        if(head && strncmp(tag_name, "Program:", strlen("Program:")) == 0) {
+            struct program_entry_s *entry = malloc(sizeof(*entry));
+
+            if(!entry) {
+                fprintf(stderr,"Unable to allocate memory for program entry!\n");
+                usage();
+            }
+
+            printf("\tFound program: %s\n", tag_name);
+
+            entry->next = *head;
+            entry->program_name = strdup(tag_name);
+
+            *head = entry;
+        }
     } while(rc == PLCTAG_STATUS_OK && offset < plc_tag_get_size(tag));
 
     plc_tag_destroy(tag);
+}
+
+
+
+
+int main(int argc, char **argv)
+{
+    int32_t tag;
+    struct program_entry_s *programs = NULL;
+
+    if(argc < 3) {
+        usage();
+    }
+
+    if(!argv[1] || strlen(argv[1]) == 0) {
+        printf("Hostname or IP address must not be zero length!\n");
+        usage();
+    }
+
+    if(!argv[2] || strlen(argv[2]) == 0) {
+        printf("PLC path must not be zero length!\n");
+        usage();
+    }
+
+    /* get the controller tags first. */
+
+    printf("Getting controller tags.\n");
+
+    tag = setup_tag(argv[1], argv[2], NULL);
+
+    get_list(tag, &programs);
+
+    while(programs) {
+        struct program_entry_s *program = programs;
+
+        printf("\n\nGetting tags for program: %s.\n", program->program_name);
+        tag = setup_tag(argv[1], argv[2], program->program_name);
+        get_list(tag, NULL);
+
+        /* go to the next one */
+        programs = programs->next;
+
+        /* now clean up */
+        free(program->program_name);
+        free(program);
+    }
 
     return 0;
 }
