@@ -37,4 +37,8 @@
 
 extern struct tag_vtable_t eip_cip_vtable;
 
+/* tag listing helpers */
+extern int setup_tag_listing(ab_tag_p tag, const char *name);
+
+
 #endif

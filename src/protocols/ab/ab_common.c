@@ -84,6 +84,8 @@ static int default_status(plc_tag_p tag);
 static int default_tickler(plc_tag_p tag);
 static int default_write(plc_tag_p tag);
 
+
+
 /* vtables for different kinds of tags */
 struct tag_vtable_t default_vtable = { default_abort, default_read, default_status, default_tickler, default_write };
 
@@ -460,11 +462,11 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
             /* just for Logix, check for tag listing */
             if(tag->protocol_type == AB_PROTOCOL_LGX) {
                 const char *tag_name = attr_get_str(attribs, "name", NULL);
-                if(tag_name && str_cmp_i("@tags",tag_name) == 0) {
-                    tag->tag_list = 1;
-                    tag->elem_type = AB_TYPE_TAG_ENTRY;
-                    tag->elem_count = 1;  /* place holder */
-                    tag->elem_size = 1;
+                int tag_listing_rc = setup_tag_listing(tag, tag_name);
+
+                if(tag_listing_rc == PLCTAG_ERR_BAD_PARAM) {
+                    pdebug(DEBUG_WARN, "Tag listing request is malformed!");
+                    return PLCTAG_ERR_BAD_PARAM;
                 }
             }
         }
