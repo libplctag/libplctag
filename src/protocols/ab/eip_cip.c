@@ -2057,6 +2057,7 @@ int setup_tag_listing(ab_tag_p tag, const char *name)
                 return PLCTAG_ERR_BAD_PARAM;
             }
         } else {
+            mem_free(tag_parts);
             pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
             return PLCTAG_ERR_NOT_FOUND;
         }
