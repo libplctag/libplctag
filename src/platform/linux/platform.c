@@ -752,6 +752,9 @@ struct sock_t {
 
 
 #define MAX_IPS (8)
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET -1
+#endif
 
 extern int socket_create(sock_p *s)
 {
@@ -763,6 +766,7 @@ extern int socket_create(sock_p *s)
     }
 
     *s = (sock_p)mem_alloc(sizeof(struct sock_t));
+    (*s)->fd = INVALID_SOCKET;
 
     if(! *s) {
         pdebug(DEBUG_ERROR, "Failed to allocate memory for socket.");
@@ -1006,6 +1010,9 @@ extern int socket_close(sock_p s)
 
     if(!s)
         return PLCTAG_ERR_NULL_PTR;
+
+    if(s->fd == INVALID_SOCKET)
+		return PLCTAG_STATUS_OK;
 
     return close(s->fd);
 }
