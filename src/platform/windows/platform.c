@@ -1027,6 +1027,11 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    if(!s->is_open) {
+        pdebug(DEBUG_WARN, "Socket is not open!");
+        return PLCTAG_ERR_READ;
+    }
+
     /* The socket is non-blocking. */
     rc = recv(s->fd, (char *)buf, size, 0);
 
@@ -1053,6 +1058,11 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    if(!s->is_open) {
+        pdebug(DEBUG_WARN, "Socket is not open!");
+        return PLCTAG_ERR_WRITE;
+    }
+
     /* The socket is non-blocking. */
     rc = send(s->fd, (char *)buf, size, MSG_NOSIGNAL);
 
@@ -1074,8 +1084,9 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
 
 extern int socket_close(sock_p s)
 {
-    if(!s)
+    if(!s) {
         return PLCTAG_ERR_NULL_PTR;
+    }
 
     if(!s->is_open) {
         return PLCTAG_STATUS_OK;
