@@ -216,6 +216,8 @@ if (UNIX)
 
 
     set ( example_PROGRAMS async
+                           async_stress
+                           busy_test
                            data_dumper
                            list_tags
                            multithread

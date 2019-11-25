@@ -297,6 +297,8 @@ LIB_EXPORT const char *plc_tag_decode_error(int rc)
         return "PLCTAG_ERR_WRITE";
     case PLCTAG_ERR_PARTIAL:
         return "PLCTAG_ERR_PARTIAL";
+    case PLCTAG_ERR_BUSY:
+        return "PLCTAG_ERR_BUSY";
 
     default:
         return "Unknown error.";
@@ -629,6 +631,18 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
         return PLCTAG_ERR_NOT_FOUND;
     }
 
+    /* abort anything in flight */
+    pdebug(DEBUG_DETAIL, "Aborting any in-flight operations.");
+
+    critical_block(tag->api_mutex) {
+        if(!tag->vtable || !tag->vtable->abort) {
+            pdebug(DEBUG_WARN,"Tag does not have a abort function!");
+        }
+
+        /* Force a clean up. */
+        tag->vtable->abort(tag);
+    }
+
     /* release the reference outside the mutex. */
     rc_dec(tag);
 
@@ -723,7 +737,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
                 if(tag->vtable->abort) {
                     tag->vtable->abort(tag);
                 }
-                
+
                 /* translate error if we are still pending. */
                 if(rc == PLCTAG_STATUS_PENDING) {
                     pdebug(DEBUG_WARN, "Read operation timed out.");
@@ -860,7 +874,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 if(tag->vtable->abort) {
                     tag->vtable->abort(tag);
                 }
-                
+
                 /* translate error if we are still pending. */
                 if(rc == PLCTAG_STATUS_PENDING) {
                     pdebug(DEBUG_WARN, "Write operation timed out.");

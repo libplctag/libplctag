@@ -611,7 +611,6 @@ int ab_tag_status(ab_tag_p tag)
 
 void ab_tag_destroy(ab_tag_p tag)
 {
-//    ab_connection_p connection = NULL;
     ab_session_p session = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -619,7 +618,7 @@ void ab_tag_destroy(ab_tag_p tag)
     /* already destroyed? */
     if (!tag) {
         pdebug(DEBUG_WARN,"Tag pointer is null!");
-        //~ break;
+
         return;
     }
 
