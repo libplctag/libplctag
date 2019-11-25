@@ -164,6 +164,13 @@ int tag_read_start(ab_tag_p tag)
 
     pdebug(DEBUG_INFO,"Starting");
 
+    if(tag->read_in_progress || tag->write_in_progress) {
+        pdebug(DEBUG_WARN, "Read or write operation already in flight!");
+        return PLCTAG_ERR_BUSY;
+    }
+
+    tag->read_in_progress = 1;
+
     /* how many packets will we need? How much overhead? */
     //overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
@@ -176,11 +183,13 @@ int tag_read_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
+        tag->read_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_DETAIL,"Unable to send request: Tag size is %d, write overhead is %d, and write data per packet is %d!", tag->size, overhead, data_per_packet);
+        tag->read_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -188,6 +197,7 @@ int tag_read_start(ab_tag_p tag)
     rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+        tag->read_in_progress = 0;
         return rc;
     }
 
@@ -253,6 +263,8 @@ int tag_read_start(ab_tag_p tag)
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
         req->abort_request = 1;
+        tag->read_in_progress = 0;
+
         tag->req = rc_dec(req);
 
         return rc;
@@ -260,8 +272,7 @@ int tag_read_start(ab_tag_p tag)
 
     /* save the request for later */
     tag->req = req;
-    tag->read_in_progress = 1;
-    tag->status = PLCTAG_STATUS_PENDING;
+//    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -411,6 +422,13 @@ int tag_write_start(ab_tag_p tag)
 
     pdebug(DEBUG_INFO,"Starting.");
 
+    if(tag->read_in_progress || tag->write_in_progress) {
+        pdebug(DEBUG_WARN, "Read or write operation already in flight!");
+        return PLCTAG_ERR_BUSY;
+    }
+
+    tag->write_in_progress = 1;
+
     /* overhead comes from the request*/
     overhead =    1  /* PCCC command */
                  +1  /* PCCC status */
@@ -423,11 +441,13 @@ int tag_write_start(ab_tag_p tag)
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
+        tag->write_in_progress =0;
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", session_get_max_payload(tag->session), overhead, data_per_packet);
+        tag->write_in_progress =0;
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -435,6 +455,7 @@ int tag_write_start(ab_tag_p tag)
     rc = session_create_request(tag->session, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
+        tag->write_in_progress =0;
         return rc;
     }
 
@@ -497,7 +518,10 @@ int tag_write_start(ab_tag_p tag)
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
         req->abort_request = 1;
+        tag->write_in_progress =0;
+
         tag->req = rc_dec(req);
+
         return rc;
     }
 
@@ -507,12 +531,10 @@ int tag_write_start(ab_tag_p tag)
     /* save the request for later */
     tag->req = req;
 
-    tag->status = PLCTAG_STATUS_PENDING;
-
     /* save the request for later */
     tag->req = req;
 
-    tag->status = PLCTAG_STATUS_PENDING;
+//    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 

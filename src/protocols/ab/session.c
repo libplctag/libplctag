@@ -70,6 +70,7 @@ static int session_register(ab_session_p session);
 static int session_close_socket(ab_session_p session);
 static int session_unregister(ab_session_p session);
 static THREAD_FUNC(session_handler);
+static int purge_aborted_requests_unsafe(ab_session_p session);
 static int process_requests(ab_session_p session);
 //static int check_packing(ab_session_p session, ab_request_p request);
 static int get_payload_size(ab_request_p request);
@@ -751,6 +752,7 @@ void session_destroy(void *session_arg)
         session->handler_thread = NULL;
     }
 
+    /* close off the connection if is one. This helps the PLC clean up. */
     if(session->targ_connection_id) {
         /*
          * we do not want the internal loop to immediately
@@ -762,6 +764,7 @@ void session_destroy(void *session_arg)
         session->terminating = 1;
     }
 
+    /* try to be nice and un-register the session */
     if(session->session_handle) {
         session_unregister(session);
     }
@@ -770,6 +773,7 @@ void session_destroy(void *session_arg)
         session_close_socket(session);
     }
 
+    /* release all the requests that are in the queue. */
     if(session->requests) {
         for(int i=0; i < vector_length(session->requests); i++) {
             rc_dec(vector_get(session->requests, i));
@@ -921,6 +925,16 @@ THREAD_FUNC(session_handler)
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
+    /*
+     * Do this on every cycle.   This keeps the queue clean(ish).
+     *
+     * Make sure we get rid of all the aborted requests queued.
+     * This keeps the overall memory usage lower.
+     */
+    critical_block(session->mutex) {
+        purge_aborted_requests_unsafe(session);
+    }
+
     while(!session->terminating) {
         int idle = 0;
 
@@ -944,6 +958,7 @@ THREAD_FUNC(session_handler)
 
         case SESSION_REGISTER:
             pdebug(DEBUG_DETAIL, "in SESSION_REGISTER state.");
+
             if ((rc = session_register(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "session registration failed %s!", plc_tag_decode_error(rc));
                 state = SESSION_CLOSE_SOCKET;
@@ -958,6 +973,7 @@ THREAD_FUNC(session_handler)
 
         case SESSION_CONNECT:
             pdebug(DEBUG_DETAIL, "in SESSION_CONNECT state.");
+
             if((rc = perform_forward_open(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Forward open failed %s!", plc_tag_decode_error(rc));
                 state = SESSION_UNREGISTER;
@@ -1009,6 +1025,7 @@ THREAD_FUNC(session_handler)
 
         case SESSION_DISCONNECT:
             pdebug(DEBUG_DETAIL, "in SESSION_DISCONNECT state.");
+
             if((rc = perform_forward_close(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Forward close failed %s!", plc_tag_decode_error(rc));
             }
@@ -1018,6 +1035,7 @@ THREAD_FUNC(session_handler)
 
         case SESSION_UNREGISTER:
             pdebug(DEBUG_DETAIL, "in SESSION_UNREGISTER state.");
+
             if((rc = session_unregister(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Unregistering session failed %s!", plc_tag_decode_error(rc));
             }
@@ -1027,6 +1045,7 @@ THREAD_FUNC(session_handler)
 
         case SESSION_CLOSE_SOCKET:
             pdebug(DEBUG_DETAIL, "in SESSION_CLOSE_SOCKET state.");
+
             if((rc = session_close_socket(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Closing session socket failed %s!", plc_tag_decode_error(rc));
             }
@@ -1108,7 +1127,59 @@ THREAD_FUNC(session_handler)
         }
     }
 
+    /*
+     * One last time before we exit.
+     */
+    critical_block(session->mutex) {
+        purge_aborted_requests_unsafe(session);
+    }
+
     THREAD_RETURN(0);
+}
+
+
+
+/*
+ * This must be called with the session mutex held!
+ */
+int purge_aborted_requests_unsafe(ab_session_p session)
+{
+    int purge_count = 0;
+    ab_request_p request = NULL;
+
+    /* remove the aborted requests. */
+    for(int i=0; i < vector_length(session->requests); i++) {
+        request = vector_get(session->requests, i);
+
+        /* filter out the aborts. */
+        if(request && request->abort_request) {
+            purge_count++;
+
+            /* remove it from the queue. */
+            vector_remove(session->requests, i);
+
+            /* set the debug tag to the owning tag. */
+            debug_set_tag_id(request->tag_id);
+
+            pdebug(DEBUG_DETAIL, "Session thread releasing aborted request %p.", request);
+
+            request->status = PLCTAG_ERR_ABORT;
+            request->request_size = 0;
+            request->resp_received = 1;
+
+            /* release our hold on it. */
+            request = rc_dec(request);
+
+            /* vector size has changed, back up one. */
+            i--;
+        }
+    }
+
+    if(purge_count > 0) {
+        pdebug(DEBUG_DETAIL, "Removed %d aborted requests.", purge_count);
+    }
+
+    return purge_count;
 }
 
 
@@ -1118,8 +1189,6 @@ int process_requests(ab_session_p session)
     ab_request_p request = NULL;
     ab_request_p bundled_requests[MAX_REQUESTS] = {NULL};
     int num_bundled_requests = 0;
-    ab_request_p aborted_requests[MAX_REQUESTS] = {NULL};
-    int num_aborted_requests = 0;
     int remaining_space = 0;
 
     debug_set_tag_id(0);
@@ -1142,34 +1211,19 @@ int process_requests(ab_session_p session)
     critical_block(session->mutex) {
         /* is there anything to do? */
         if(vector_length(session->requests)) {
-            //int blocked = 0;
-
-            /* remove the aborted requests. */
-            for(int i=0; i < vector_length(session->requests) && num_aborted_requests < MAX_REQUESTS; i++) {
-                request = vector_get(session->requests, i);
-
-                /* filter out the aborts. */
-                if(request && request->abort_request) {
-                    aborted_requests[num_aborted_requests] = request;
-                    num_aborted_requests++;
-
-                    /* remove it from the queue. */
-                    vector_remove(session->requests, i);
-
-                    /* vector size has changed, back up one. */
-                    i--;
-                }
-            }
-
-            remaining_space = session->max_payload_size - (int)sizeof(cip_multi_req_header);
+            /* get rid of all aborted requests. */
+            purge_aborted_requests_unsafe(session);
 
             /* if there are still requests after purging all the aborted requests, process them. */
+
+            /* how much space do we have to work with. */
+            remaining_space = session->max_payload_size - (int)sizeof(cip_multi_req_header);
+
             if(vector_length(session->requests)) {
                 do {
                     request = vector_get(session->requests, 0);
 
                     remaining_space = remaining_space - get_payload_size(request);
-
 
                     /*
                      * If we have a non-packable request, only queue it if it is the first one.
@@ -1191,26 +1245,7 @@ int process_requests(ab_session_p session)
         }
     }
 
-    /* this can cause destroy actions so do this outside the mutex. */
-    if(num_aborted_requests > 0) {
-
-        pdebug(DEBUG_SPEW, "%d requests to abort.", num_aborted_requests);
-
-        for(int i=0; i < num_aborted_requests; i++) {
-            request = aborted_requests[i];
-
-            debug_set_tag_id(request->tag_id);
-
-            pdebug(DEBUG_DETAIL, "Request %p is aborted.", request);
-
-            request->status = PLCTAG_ERR_ABORT;
-            request->request_size = 0;
-            request->resp_received = 1;
-
-            aborted_requests[i] = rc_dec(request);
-        }
-    }
-
+    /* output debug display as no particular tag. */
     debug_set_tag_id(0);
 
     if(num_bundled_requests > 0) {

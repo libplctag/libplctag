@@ -151,8 +151,12 @@ int tag_read_start(ab_tag_p tag)
 
     pdebug(DEBUG_INFO,"Starting");
 
-    /* how many packets will we need? How much overhead? */
-    ///overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
+    if(tag->read_in_progress || tag->write_in_progress) {
+        pdebug(DEBUG_WARN, "Read or write operation already in flight!");
+        return PLCTAG_ERR_BUSY;
+    }
+
+    tag->read_in_progress = 1;
 
     /* calculate based on the response. */
     overhead =   1      /* reply code */
@@ -177,11 +181,13 @@ int tag_read_start(ab_tag_p tag)
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
+        tag->read_in_progress = 0;
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
+        tag->read_in_progress = 0;
         pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->size, overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -190,6 +196,7 @@ int tag_read_start(ab_tag_p tag)
     rc = session_create_request(tag->session, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
+        tag->read_in_progress = 0;
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
@@ -297,16 +304,15 @@ int tag_read_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-//        request_release(req);
         tag->req = rc_dec(req);
+        tag->read_in_progress = 0;
+
         return rc;
     }
 
     /* save the request for later */
     tag->req = req;
     req = NULL;
-
-    tag->read_in_progress = 1;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -506,18 +512,23 @@ int tag_write_start(ab_tag_p tag)
     uint8_t *embed_start;
     int overhead, data_per_packet;
 
+    pdebug(DEBUG_INFO,"Starting.");
+
+    if(tag->read_in_progress || tag->write_in_progress) {
+        pdebug(DEBUG_WARN, "Read or write operation already in flight!");
+        return PLCTAG_ERR_BUSY;
+    }
+
+    tag->write_in_progress = 1;
+
     if (tag->first_read) {
         pdebug(DEBUG_DETAIL, "No read has completed yet, doing pre-read to get type information.");
 
         tag->pre_write_read = 1;
+        tag->write_in_progress = 0;
 
         return tag_read_start(tag);
     }
-
-    pdebug(DEBUG_INFO,"Starting.");
-
-    /* how many packets will we need? How much overhead? */
-    //overhead = sizeof(pccc_resp) + 4 + tag->encoded_name_size; /* MAGIC 4 = fudge */
 
     /* overhead comes from the request in this case */
     overhead =   1  /* CIP PCCC command */
@@ -538,11 +549,13 @@ int tag_write_start(ab_tag_p tag)
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
+        tag->write_in_progress = 0;
         pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
+        tag->write_in_progress = 0;
         pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", session_get_max_payload(tag->session), overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -551,6 +564,7 @@ int tag_write_start(ab_tag_p tag)
     rc = session_create_request(tag->session, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
+        tag->write_in_progress = 0;
         pdebug(DEBUG_WARN,"Unable to get new request.  rc=%d",rc);
         return rc;
     }
@@ -656,15 +670,13 @@ int tag_write_start(ab_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        tag->write_in_progress = 0;
         tag->req = rc_dec(req);
         return rc;
     }
 
     /* save the request for later */
     tag->req = req;
-
-    /* the write is now pending */
-    tag->write_in_progress = 1;
 
     pdebug(DEBUG_INFO, "Done.");
 
