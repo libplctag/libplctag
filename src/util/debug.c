@@ -27,6 +27,7 @@
 #include <util/debug.h>
 #include <platform.h>
 #include <lib/libplctag.h>
+#include <lib/version.h>
 
 
 
@@ -51,6 +52,10 @@ extern int set_debug_level(int level)
     int old_level = debug_level;
 
     debug_level = level;
+
+    if(debug_level >= DEBUG_DETAIL) {
+        fprintf(stderr, "libplctag version %s.\n", VERSION);
+    }
 
     return old_level;
 }
