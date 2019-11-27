@@ -47,15 +47,17 @@ static volatile uint32_t thread_num = 1;
 static THREAD_LOCAL uint32_t this_thread_num = 0;
 static THREAD_LOCAL int tag_id = 0;
 
+
+/* only output the version once */
+static THREAD_LOCAL int printed_version = 0;
+
+
+
 extern int set_debug_level(int level)
 {
     int old_level = debug_level;
 
     debug_level = level;
-
-    if(debug_level >= DEBUG_DETAIL) {
-        fprintf(stderr, "libplctag version %s.\n", VERSION);
-    }
 
     return old_level;
 }
@@ -138,6 +140,13 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
     if(prefix_size <= 0) {
         return;
+    }
+
+    if(!printed_version && debug_level >= DEBUG_INFO) {
+        /* create the output string template */
+        fprintf(stderr,"%s INFO libplctag version %s\n",prefix, VERSION);
+
+        printed_version = 1;
     }
 
     /* create the output string template */
