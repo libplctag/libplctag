@@ -925,18 +925,18 @@ THREAD_FUNC(session_handler)
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
-    /*
-     * Do this on every cycle.   This keeps the queue clean(ish).
-     *
-     * Make sure we get rid of all the aborted requests queued.
-     * This keeps the overall memory usage lower.
-     */
-    critical_block(session->mutex) {
-        purge_aborted_requests_unsafe(session);
-    }
-
     while(!session->terminating) {
         int idle = 0;
+
+        /*
+         * Do this on every cycle.   This keeps the queue clean(ish).
+         *
+         * Make sure we get rid of all the aborted requests queued.
+         * This keeps the overall memory usage lower.
+         */
+        critical_block(session->mutex) {
+            purge_aborted_requests_unsafe(session);
+        }
 
         switch(state) {
         case SESSION_OPEN_SOCKET:
@@ -1062,6 +1062,7 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL, "in SESSION_START_RETRY state.");
 
             /* set up timer for retry. */
+            idle = 0;
 
             /* FIXME - make this a tag attribute. */
             timeout_time = time_ms() + RETRY_WAIT_MS;
@@ -1147,6 +1148,8 @@ int purge_aborted_requests_unsafe(ab_session_p session)
     int purge_count = 0;
     ab_request_p request = NULL;
 
+    pdebug(DEBUG_SPEW, "Starting.");
+
     /* remove the aborted requests. */
     for(int i=0; i < vector_length(session->requests); i++) {
         request = vector_get(session->requests, i);
@@ -1178,6 +1181,8 @@ int purge_aborted_requests_unsafe(ab_session_p session)
     if(purge_count > 0) {
         pdebug(DEBUG_DETAIL, "Removed %d aborted requests.", purge_count);
     }
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return purge_count;
 }
