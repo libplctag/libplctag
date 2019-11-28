@@ -555,6 +555,8 @@ int ab_tag_abort(ab_tag_p tag)
         }
 
         tag->req = rc_dec(tag->req);
+    } else {
+        pdebug(DEBUG_DETAIL, "Called without a request in flight.");
     }
 
     tag->read_in_progress = 0;
