@@ -359,8 +359,15 @@ uint16_t pccc_calculate_crc16(uint8_t *data, int size)
 
 
 
-const char *pccc_decode_error(int error)
+const char *pccc_decode_error(uint8_t *error_ptr)
 {
+    uint8_t error = *error_ptr;
+
+    /* extended error? */
+    if(error == 0xF0) {
+        error = *(error_ptr + 3);
+    }
+
     switch(error) {
     case 1:
         return "Error converting block address.";
