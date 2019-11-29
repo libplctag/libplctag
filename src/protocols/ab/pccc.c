@@ -415,7 +415,7 @@ const char *pccc_decode_error(int error)
         break;
 
     case 0x0E:
-        return "Command could not be executed.";
+        return "Command could not be executedpccc_decode_error.";
         break;
 
     case 0x0F:

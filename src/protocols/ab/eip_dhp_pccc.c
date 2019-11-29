@@ -517,7 +517,7 @@ static int check_read_status(ab_tag_p tag)
         }
 
         if(resp->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s", *data, pccc_decode_error(*data));
+            pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s", resp->pccc_status, pccc_decode_error(resp->pccc_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -555,7 +555,7 @@ static int check_read_status(ab_tag_p tag)
 static int check_write_status(ab_tag_p tag)
 {
     pccc_dhp_co_resp *pccc_resp;
-    uint8_t *data = NULL;
+//    uint8_t *data = NULL;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -608,7 +608,7 @@ static int check_write_status(ab_tag_p tag)
     pccc_resp = (pccc_dhp_co_resp *)(tag->req->data);
 
     /* point data just past the header */
-    data = (uint8_t *)pccc_resp + sizeof(*pccc_resp);
+//    data = (uint8_t *)pccc_resp + sizeof(*pccc_resp);
 
     /* fake exception */
     do {
@@ -626,7 +626,7 @@ static int check_write_status(ab_tag_p tag)
         }
 
         if(pccc_resp->pccc_status != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s", pccc_resp->pccc_status, pccc_decode_error(*data));
+            pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s", pccc_resp->pccc_status, pccc_decode_error(pccc_resp->pccc_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
