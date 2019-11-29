@@ -415,7 +415,7 @@ const char *pccc_decode_error(int error)
         break;
 
     case 0x0E:
-        return "Command could not be executedpccc_decode_error.";
+        return "Command could not be executed PCCC decode error.";
         break;
 
     case 0x0F:
@@ -423,25 +423,58 @@ const char *pccc_decode_error(int error)
         break;
 
     case 0x10:
-        return "Histogram overflow.";
+        return "Illegal command or format.";
         break;
 
-    case 0x11:
-        return "Illegal data type.";
+    case 0x20:
+        return "Host has a problem and will not communicate.";
         break;
 
-    case 0x12:
-        return "Bad parameter.";
+    case 0x30:
+        return "Remote node host is missing, disconnected, or shut down.";
         break;
 
-    case 0x13:
-        return "Address reference exists to deleted data table.";
+    case 0x40:
+        return "Host could not complete function due to hardware fault.";
+        break;
+
+    case 0x50:
+        return "Addressing problem or memory protect rungs.";
+        break;
+
+    case 0x60:
+        return "Function not allowed due to command protection selection.";
+        break;
+
+    case 0x70:
+        return "Processor is in Program mode.";
+        break;
+
+    case 0x80:
+        return "Compatibility mode file missing or communication zone problem.";
+        break;
+
+    case 0x90:
+        return "Remote node cannot buffer command.";
+        break;
+
+    case 0xA0:
+        return "Wait ACK (1775-KA buffer full).";
+        break;
+
+    case 0xB0:
+        return "Remote node problem due to download.";
+        break;
+
+    case 0xC0:
+        return "Wait ACK (1775-KA buffer full).";  /* why is this duplicate? */
         break;
 
     default:
         return "Unknown error response.";
         break;
     }
+
 
     return "Unknown error response.";
 }
