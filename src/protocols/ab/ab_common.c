@@ -281,12 +281,6 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
-//    /* special features for Logix tags. */
-//    if(tag->protocol_type == AB_PROTOCOL_LGX) {
-//        /* default to allow packing */
-//        tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
-//    }
-
     /*
      * Find or create a session.
      *
@@ -330,6 +324,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
     switch(tag->protocol_type) {
     case AB_PROTOCOL_PLC:
+    case AB_PROTOCOL_SLC:
     case AB_PROTOCOL_LGX_PCCC:
     case AB_PROTOCOL_MLGX:
         tag_name = attr_get_str(attribs,"name", NULL);
@@ -662,19 +657,26 @@ int get_plc_type(attr attribs)
 {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
 
-    if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
-            !str_cmp_i(cpu_type, "slc500")) {
+    if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
+        pdebug(DEBUG_DETAIL,"Found PLC/5 PLC.");
         return AB_PROTOCOL_PLC;
+    } else if ( !str_cmp_i(cpu_type, "slc") || !str_cmp_i(cpu_type, "slc500")) {
+        pdebug(DEBUG_DETAIL,"Found SLC 500 PLC.");
+        return AB_PROTOCOL_SLC;
     } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
                !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
+        pdebug(DEBUG_DETAIL,"Found Logix-class PLC using PCCC protocol.");
         return AB_PROTOCOL_LGX_PCCC;
     } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
+        pdebug(DEBUG_DETAIL,"Found Micro8xx PLC.");
         return AB_PROTOCOL_MLGX800;
     } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
+        pdebug(DEBUG_DETAIL,"Found MicroLogix PLC.");
         return AB_PROTOCOL_MLGX;
     } else if (!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx") ||
                !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") ||
                !str_cmp_i(cpu_type, "logix")) {
+        pdebug(DEBUG_DETAIL,"Found ControlLogix/CompactLogix PLC.");
         return AB_PROTOCOL_LGX;
     } else {
         pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);

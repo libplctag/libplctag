@@ -35,10 +35,11 @@
 #include <stdarg.h>
 
 /* common definitions */
-#define ZLA_SIZE    0
 #define START_PACK
 #define END_PACK __attribute__((__packed__))
+
 #define ZLA_SIZE 0
+
 #define USE_GNU_VARARG_MACROS 1
 
 #ifndef COUNT_NARG

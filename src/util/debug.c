@@ -49,7 +49,7 @@ static THREAD_LOCAL int tag_id = 0;
 
 
 /* only output the version once */
-static THREAD_LOCAL int printed_version = 0;
+static volatile lock_t printed_version = LOCK_INIT;
 
 
 
@@ -142,11 +142,13 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
         return;
     }
 
+    /* print only once */
+    /* FIXME - this may not be safe. */
     if(!printed_version && debug_level >= DEBUG_INFO) {
-        /* create the output string template */
-        fprintf(stderr,"%s INFO libplctag version %s\n",prefix, VERSION);
-
-        printed_version = 1;
+        if(lock_acquire_try((lock_t*)&printed_version)) {
+            /* create the output string template */
+            fprintf(stderr,"%s INFO libplctag version %s\n",prefix, VERSION);
+        }
     }
 
     /* create the output string template */
