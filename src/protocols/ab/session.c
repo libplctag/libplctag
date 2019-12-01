@@ -1376,7 +1376,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
             pdebug(DEBUG_DETAIL, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->mutex) {
-                request_capacity = (size_t)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+                request_capacity = (int)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
@@ -1423,7 +1423,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
             pdebug(DEBUG_DETAIL, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->mutex) {
-                request_capacity = (size_t)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+                request_capacity = (int)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
