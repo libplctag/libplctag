@@ -106,7 +106,7 @@ static int make_prefix(char *prefix_buf, int prefix_buf_size)
 
     /* get the time parts */
     epoch_ms = time_ms();
-    epoch = epoch_ms/1000;
+    epoch = (time_t)(epoch_ms/1000);
     remainder_ms = (int)(epoch_ms % 1000);
 
     /* FIXME - should capture error return! */

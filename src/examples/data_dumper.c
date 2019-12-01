@@ -307,7 +307,7 @@ int make_prefix(char *prefix_buf, int prefix_buf_size)
 
     /* get the time parts */
     epoch_ms = util_time_ms();
-    epoch = epoch_ms/1000;
+    epoch = (time_t)(epoch_ms/1000);
     remainder_ms = (int)(epoch_ms % 1000);
 
     /* FIXME - should capture error return! */
@@ -488,12 +488,12 @@ int main(int argc, char **argv)
         int64_t start, end;
 
         start = util_time_ms();
-        
+
         rc = start_reads();
-        
+
         if(rc == PLCTAG_STATUS_OK) {
             /* reads kicked off successfully */
-            
+
             /* wait for the reads to complete */
             while((rc = check_tags()) == PLCTAG_STATUS_PENDING) {
                 util_sleep_ms(1);
@@ -513,11 +513,11 @@ int main(int argc, char **argv)
                 if(num_tags_read > 0) {
                     printf("Read %d tags in %dms\n", num_tags_read, (int)(end-start));
                 }
-                
+
                 rc = log_data();
             }
         }
-        
+
         if(rc != PLCTAG_STATUS_OK) {
             /* delay a long delay to let the library reconnect. */
             util_sleep_ms(RECONNECT_DELAY_MS);

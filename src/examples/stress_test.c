@@ -233,7 +233,7 @@ int main(int argc, char **argv)
     int64_t start_time;
     int64_t end_time;
     int num_threads = 0;
-    int64_t seconds = 0;
+    int seconds = 0;
     int num_elems = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
@@ -263,7 +263,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    fprintf(stderr, "--- starting run with %d threads each handling %d elements running for %ld seconds\n", num_threads, num_elems, seconds);
+    fprintf(stderr, "--- starting run with %d threads each handling %d elements running for %d seconds\n", num_threads, num_elems, seconds);
 
     /* create the test threads */
     for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
@@ -276,7 +276,7 @@ int main(int argc, char **argv)
     }
 
     start_time = util_time_ms();
-    end_time = start_time + (seconds * 1000);
+    end_time = start_time + (int64_t)(seconds * 1000);
 
     while(!done && util_time_ms() < end_time) {
         util_sleep_ms(100);
