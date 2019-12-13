@@ -150,7 +150,7 @@ char **split_string(const char *str, const char *sep)
 /*
  * line format:
  *
- * <name>,<rpi>,<type>,<tag string>
+ * <name>\t<type>\t<rpi>\t<tag string>
  */
 int process_line(const char *line)
 {
@@ -159,7 +159,15 @@ int process_line(const char *line)
     parts = split_string(line, "\t");
     if(!parts) {
         fprintf(stderr,"Splitting string failed for string %s!", line);
-        return 0;
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    /* make sure we got 4 pieces. */
+    for(int i=0; i < 4; i++) {
+        if(parts[i] == NULL) {
+            fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
+            return PLCTAG_ERR_BAD_CONFIG;
+        }
     }
 
     tags[num_tags].name = strdup(parts[0]);
@@ -450,6 +458,20 @@ void SIGINT_handler(int not_used)
     terminate = 1;
 }
 
+void usage(void)
+{
+    fprintf(stderr, "Usage: data_dumper <config file>\n");
+    fprintf(stderr, "The config file must contain tab-delimited rows in the following format:\n");
+    fprintf(stderr, "\t<name>\\t<type>\\t<rpi>\\t<tag string>\n");
+    fprintf(stderr, "\t<name> = a name used when outputting the data.\n");
+    fprintf(stderr, "\t<type> = The type of the tag.  One of 'dint', 'int', 'sint', 'real'.\n");
+    fprintf(stderr, "\t<rpi> = The number of milliseconds between reads of the tag.\n");
+    fprintf(stderr, "\t<tag string> = The tag attribute string for this tag.  E.g.:\n");
+    fprintf(stderr, "\t\tprotocol=ab-eip&gateway=10.206.1.40&path=1,4&cpu=lgx&elem_size=4&elem_count=10&name=TestDINTArray[0]\n");
+    fprintf(stderr, "Example:\n");
+    fprintf(stderr, "TestData\tdint\t100\tprotocol=ab-eip&gateway=10.206.1.40&path=1,4&cpu=lgx&elem_size=4&elem_count=10&name=TestDINTArray[0]\n");
+}
+
 
 int main(int argc, char **argv)
 {
@@ -460,9 +482,9 @@ int main(int argc, char **argv)
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
 
+    if(argc < 2) {
+        usage();
 
-    if(argc<1) {
-        fprintf(stderr, "You must pass the path to the configuration file as the argument.\n");
         return 1;
     }
 
