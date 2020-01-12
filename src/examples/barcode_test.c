@@ -19,16 +19,24 @@ static int mark_barcode_processed(void);
 int main(int argc, const char **argv)
 {
     int rc = PLCTAG_STATUS_OK;
+    int64_t last_read = util_time_ms();
+    int64_t first_read = last_read;
 
     (void)argc;
     (void)argv;
 
     while(1) {
+        int64_t new_time;
         TRY(wait_for_new_barcode())
 
         TRY(read_barcode())
 
         TRY(mark_barcode_processed())
+
+        new_time = util_time_ms();
+
+        printf("Iteration took %ldms, total elapsed time is %ldms.\n",(new_time-last_read),(new_time - first_read));
+        last_read = new_time;
     }
 
     return rc;
@@ -62,7 +70,7 @@ int wait_for_new_barcode(void)
                 rc = PLCTAG_STATUS_OK;
             } else {
                 rc = PLCTAG_STATUS_PENDING;
-                util_sleep_ms(100);
+                util_sleep_ms(4000);
             }
         }
     } while(rc == PLCTAG_STATUS_PENDING);
