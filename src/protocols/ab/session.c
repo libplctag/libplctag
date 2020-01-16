@@ -435,7 +435,6 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
 
 ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, int plc_type, int use_connected_msg)
 {
-    static volatile uint32_t srand_setup = 0;
     static volatile uint32_t connection_id = 0;
 
     int rc = PLCTAG_STATUS_OK;
@@ -486,11 +485,6 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
     session->conn_serial_number = (uint16_t)(intptr_t)(session);
 
     /* check for ID set up. This does not need to be thread safe since we just need a random value. */
-    if(srand_setup == 0) {
-        srand((unsigned int)time_ms());
-        srand_setup = 1;
-    }
-
     if(connection_id == 0) {
         connection_id = (uint32_t)rand();
     }

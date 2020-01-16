@@ -149,6 +149,9 @@ int initialize_modules(void)
     }
 
     if(!library_initialized) {
+        /* initialize a random seed value. */
+        srand((unsigned int)time_ms());
+
         pdebug(DEBUG_INFO,"Initialized library modules.");
         rc = lib_init();
 
