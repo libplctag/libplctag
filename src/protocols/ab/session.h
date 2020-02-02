@@ -86,7 +86,7 @@ struct ab_session_t {
     uint64_t packet_count;
 
     thread_p handler_thread;
-    int terminating;
+    volatile int terminating;
     mutex_p mutex;
 
     /* disconnect handling */
