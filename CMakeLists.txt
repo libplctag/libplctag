@@ -286,6 +286,7 @@ if (UNIX)
 
 elseif(WIN32)
     set ( example_PROGRAMS async
+                           async_stress
                            list_tags
                            plc5
                            simple
