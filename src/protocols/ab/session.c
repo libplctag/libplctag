@@ -721,7 +721,6 @@ int session_close_socket(ab_session_p session)
 void session_destroy(void *session_arg)
 {
     ab_session_p session = session_arg;
-//    ab_request_p req = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -736,45 +735,48 @@ void session_destroy(void *session_arg)
 
     pdebug(DEBUG_INFO, "Session sent %"PRId64" packets.", session->packet_count);
 
-    /* terminate the thread first. */
-    session->terminating = 1;
-
-    /* get rid of the handler thread. */
-    if(session->handler_thread) {
-        thread_join(session->handler_thread);
-        thread_destroy(&(session->handler_thread));
-        session->handler_thread = NULL;
-    }
-
-    /* close off the connection if is one. This helps the PLC clean up. */
-    if(session->targ_connection_id) {
-        /*
-         * we do not want the internal loop to immediately
-         * return, so set the flag like we are not terminating.
-         * There is still a timeout that applies.
-         */
-        session->terminating = 0;
-        perform_forward_close(session);
+    /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
+    critical_block(session->mutex) {
+        /* terminate the thread first. */
         session->terminating = 1;
-    }
 
-    /* try to be nice and un-register the session */
-    if(session->session_handle) {
-        session_unregister(session);
-    }
-
-    if(session->sock) {
-        session_close_socket(session);
-    }
-
-    /* release all the requests that are in the queue. */
-    if(session->requests) {
-        for(int i=0; i < vector_length(session->requests); i++) {
-            rc_dec(vector_get(session->requests, i));
+        /* get rid of the handler thread. */
+        if (session->handler_thread) {
+            thread_join(session->handler_thread);
+            thread_destroy(&(session->handler_thread));
+            session->handler_thread = NULL;
         }
 
-        vector_destroy(session->requests);
-        session->requests = NULL;
+        /* close off the connection if is one. This helps the PLC clean up. */
+        if (session->targ_connection_id) {
+            /*
+             * we do not want the internal loop to immediately
+             * return, so set the flag like we are not terminating.
+             * There is still a timeout that applies.
+             */
+            session->terminating = 0;
+            perform_forward_close(session);
+            session->terminating = 1;
+        }
+
+        /* try to be nice and un-register the session */
+        if (session->session_handle) {
+            session_unregister(session);
+        }
+
+        if (session->sock) {
+            session_close_socket(session);
+        }
+
+        /* release all the requests that are in the queue. */
+        if (session->requests) {
+            for (int i = 0; i < vector_length(session->requests); i++) {
+                rc_dec(vector_get(session->requests, i));
+            }
+
+            vector_destroy(session->requests);
+            session->requests = NULL;
+        }
     }
 
     /* we are done with the mutex, finally destroy it. */
