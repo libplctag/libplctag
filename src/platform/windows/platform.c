@@ -486,7 +486,7 @@ int mutex_lock(mutex_p m)
 {
     DWORD dwWaitResult;
 
-    //pdebug("Starting");
+    pdebug(DEBUG_SPEW,"locking mutex %p", m);
 
     if(!m) {
         /*pdebug("null mutex pointer.");*/
@@ -513,7 +513,7 @@ int mutex_try_lock(mutex_p m)
 {
     DWORD dwWaitResult;
 
-    //pdebug("Starting");
+    pdebug(DEBUG_SPEW,"trying to lock mutex %p", m);
 
     if(!m) {
         /*pdebug("null mutex pointer.");*/
@@ -537,7 +537,7 @@ int mutex_try_lock(mutex_p m)
 
 int mutex_unlock(mutex_p m)
 {
-    //pdebug("Starting.");
+    pdebug(DEBUG_SPEW,"unlocking mutex %p", m);
 
     if(!m) {
         /*pdebug("null mutex pointer.");*/
@@ -563,7 +563,7 @@ int mutex_unlock(mutex_p m)
 
 int mutex_destroy(mutex_p *m)
 {
-    /*pdebug("Starting.");*/
+    pdebug(DEBUG_SPEW,"destroying mutex %p", m);
 
     if(!m) {
         /*pdebug("null mutex pointer.");*/
@@ -691,7 +691,7 @@ int thread_join(thread_p t)
 
     /* FIXME - check for uninitialized threads */
 
-    if(WaitForSingleObject(t->h_thread, (DWORD)1000)) { /* FIXME - magic timeout */
+    if(WaitForSingleObject(t->h_thread, (DWORD)INFINITE)) {
         /*pdebug("Error joining thread.");*/
         return PLCTAG_ERR_THREAD_JOIN;
     }
@@ -951,7 +951,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     }
 
 
-    /* 
+    /*
      * now try to connect to the remote gateway.  We may need to
      * try several of the IPs we have.
      */
