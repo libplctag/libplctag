@@ -36,7 +36,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project is version 2.0
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 0)
-set (libplctag_VERSION_PATCH 29)
+set (libplctag_VERSION_PATCH 30)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 # we need threads
@@ -75,14 +75,14 @@ if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra -Wc99-c11-compat -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-	
+
 	set(C11_SUPPORT true)
 	set(C99_FLAGS "-std=c99" )
 elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # using GCC
-	
+
 	SET(C11_CHECK "")
-	
+
 	# get GCC version
 	if(${CMAKE_VERSION} VERSION_GREATER 2.8.9)
 		MESSAGE(STATUS "CMake is newer, using a sane way to get the GCC version..")
@@ -93,8 +93,8 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 		EXECUTE_PROCESS(COMMAND ${CMAKE_C_COMPILER} -dumpversion OUTPUT_VARIABLE COMPILER_VERSION)
 		MESSAGE(STATUS "COMPILER_VERSION=" ${COMPILER_VERSION})
 	endif()
-	
-	if(${COMPILER_VERSION} VERSION_GREATER 5.1 OR ${COMPILER_VERSION} VERSION_GREATER 5.1) 
+
+	if(${COMPILER_VERSION} VERSION_GREATER 5.1 OR ${COMPILER_VERSION} VERSION_GREATER 5.1)
 		# The compiler has the C99-c11-compat check.
 		MESSAGE(STATUS "Compiler supports C99/C11 compatibility check." )
 		SET(C11_CHECK "-Wc99-c11-compat" )
@@ -102,10 +102,10 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 	else()
 		MESSAGE(STATUS "Compiler does not support C99/C11 compatibility check." )
 	endif()
-	
+
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-	set(C99_FLAGS "-std=c99" )	
+	set(C99_FLAGS "-std=c99" )
 elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     # using Intel C/C++
     MESSAGE("Intel C compiler not supported!")
@@ -245,8 +245,8 @@ if (UNIX)
 	endif()
 
 	# hashtable test
-	set(test_hashtable_FILES "${test_SRC_PATH}/hashtable/test_hashtable.c" 
-							 "${util_SRC_PATH}/hashtable.h" 
+	set(test_hashtable_FILES "${test_SRC_PATH}/hashtable/test_hashtable.c"
+							 "${util_SRC_PATH}/hashtable.h"
 							 "${util_SRC_PATH}/debug.h" )
 
 	foreach ( file ${test_hashtable_FILES} )
