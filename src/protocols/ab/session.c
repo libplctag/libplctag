@@ -735,18 +735,19 @@ void session_destroy(void *session_arg)
 
     pdebug(DEBUG_INFO, "Session sent %"PRId64" packets.", session->packet_count);
 
+    /* terminate the session thread first. */
+    session->terminating = 1;
+
+    /* get rid of the handler thread. */
+    if (session->handler_thread) {
+        thread_join(session->handler_thread);
+        thread_destroy(&(session->handler_thread));
+        session->handler_thread = NULL;
+    }
+
+
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
     critical_block(session->mutex) {
-        /* terminate the thread first. */
-        session->terminating = 1;
-
-        /* get rid of the handler thread. */
-        if (session->handler_thread) {
-            thread_join(session->handler_thread);
-            thread_destroy(&(session->handler_thread));
-            session->handler_thread = NULL;
-        }
-
         /* close off the connection if is one. This helps the PLC clean up. */
         if (session->targ_connection_id) {
             /*
@@ -930,6 +931,8 @@ THREAD_FUNC(session_handler)
          * Make sure we get rid of all the aborted requests queued.
          * This keeps the overall memory usage lower.
          */
+
+        pdebug(DEBUG_DETAIL,"Critical block.");
         critical_block(session->mutex) {
             purge_aborted_requests_unsafe(session);
         }
@@ -985,6 +988,7 @@ THREAD_FUNC(session_handler)
             idle = 1;
 
             /* if there is work to do, make sure we do not disconnect. */
+            pdebug(DEBUG_DETAIL,"Critical block.");
             critical_block(session->mutex) {
                 if(vector_length(session->requests) > 0) {
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
@@ -1089,6 +1093,7 @@ THREAD_FUNC(session_handler)
             auto_disconnect = 0;
 
             /* if there is work to do, reconnect.. */
+            pdebug(DEBUG_DETAIL,"Critical block.");
             critical_block(session->mutex) {
                 if(vector_length(session->requests) > 0) {
                     pdebug(DEBUG_DETAIL, "There are requests waiting, reopening connection to PLC.");
@@ -1127,6 +1132,7 @@ THREAD_FUNC(session_handler)
     /*
      * One last time before we exit.
      */
+    pdebug(DEBUG_DETAIL,"Critical block.");
     critical_block(session->mutex) {
         purge_aborted_requests_unsafe(session);
     }
