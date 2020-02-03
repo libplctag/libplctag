@@ -740,9 +740,14 @@ void session_destroy(void *session_arg)
 
     /* get rid of the handler thread. */
     if (session->handler_thread) {
+        /* this cannot be guarded by the mutex since the session thread also locks it. */
         thread_join(session->handler_thread);
-        thread_destroy(&(session->handler_thread));
-        session->handler_thread = NULL;
+
+        /* FIXME - is this critical block needed? */
+        critical_block(session->mutex) {
+            thread_destroy(&(session->handler_thread));
+            session->handler_thread = NULL;
+        }
     }
 
 
