@@ -449,7 +449,7 @@ int mutex_create(mutex_p *m)
 
 int mutex_lock(mutex_p m)
 {
-    /*pdebug(DEBUG_DETAIL,"locking mutex %p",m);*/
+    pdebug(DEBUG_SPEW,"locking mutex %p", m);
 
     if(!m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
@@ -473,7 +473,7 @@ int mutex_lock(mutex_p m)
 
 int mutex_try_lock(mutex_p m)
 {
-    /*pdebug(DEBUG_DETAIL,"locking mutex %p",m);*/
+    pdebug(DEBUG_SPEW,"trying to lock mutex %p", m);
 
     if(!m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
@@ -498,7 +498,7 @@ int mutex_try_lock(mutex_p m)
 
 int mutex_unlock(mutex_p m)
 {
-    /*pdebug(DEBUG_DETAIL, "unlocking mutex %p",m);*/
+    pdebug(DEBUG_SPEW, "unlocking mutex %p", m);
 
     if(!m) {
         pdebug(DEBUG_WARN,"null mutex pointer.");
