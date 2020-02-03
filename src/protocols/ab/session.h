@@ -33,7 +33,7 @@
 #include <util/rc.h>
 #include <util/vector.h>
 
-//#define MAX_SESSION_HOST    (128)
+/* #define MAX_SESSION_HOST    (128) */
 
 #define SESSION_DEFAULT_TIMEOUT (2000)
 
