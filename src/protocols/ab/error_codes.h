@@ -21,6 +21,8 @@
 #ifndef __AB_PROTOCOL_ERROR_CODES_H__
 #define __AB_PROTOCOL_ERROR_CODES_H__ 1
 
+#include <stdint.h>
+
 extern const char *decode_cip_error_short(uint8_t *data);
 extern const char *decode_cip_error_long(uint8_t *data);
 extern int decode_cip_error_code(uint8_t *data);

@@ -23,6 +23,7 @@
 
 
 #include <util/attr.h>
+#include <lib/tag.h>
 
 extern int initialize_modules(void);
 

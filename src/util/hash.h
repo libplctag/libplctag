@@ -31,5 +31,6 @@
  */
 
 #include <stdint.h>
+#include <stddef.h>
 
 extern uint32_t hash(uint8_t *k, size_t length, uint32_t initval);
