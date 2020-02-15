@@ -41,6 +41,35 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+/***************************************************************************
+ * On OSX, sys/socket.h is defined with:                                   *
+ * ...                                                                     *
+ * #if !defined(_POSIX_C_SOURCE) || defined(_DARWIN_C_SOURCE)              *
+ * #define SO_LABEL        0x1010                                          *
+ * #define SO_PEERLABEL    0x1011                                          *
+ * #ifdef __APPLE__                                                        *
+ * #define SO_NREAD        0x1020                                          *
+ * #define SO_NKE          0x1021                                          *
+ * #define SO_NOSIGPIPE    0x1022                                          *
+ * #define SO_NOADDRERR    0x1023                                          *
+ * #define SO_NWRITE       0x1024                                          *
+ * #define SO_REUSESHAREUID        0x1025                                  *
+ * #ifdef __APPLE_API_PRIVATE                                              *
+ * #define SO_NOTIFYCONFLICT       0x1026                                  *
+ * #define SO_UPCALLCLOSEWAIT      0x1027                                  *
+ * #endif                                                                  *
+ * #define SO_LINGER_SEC   0x1080                                          *
+ * #define SO_RANDOMPORT   0x1082                                          *
+ * #define SO_NP_EXTENSIONS                                                *
+ * #endif                                                                  *
+ *                                                                         *
+ * If we compile with -D__USE_POSIX=1, SO_NOSIGPIPE won't be defined. So,  *
+ * we just re-define it here.                                              *
+****************************************************************************/
+#ifdef __APPLE__
+#define SO_NOSIGPIPE 0x1022
+#endif
+
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>

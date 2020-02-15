@@ -52,8 +52,6 @@ set ( util_SRC_PATH "${base_SRC_PATH}/util" )
 set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
 
-# OS-specific files for the platform code.
-# FIXME - does this work for macOS?
 if (UNIX)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/linux" )
 elseif (WIN32)
