@@ -53,7 +53,10 @@
 
 
 #if defined(__APPLE__) || defined(__FreeBSD__) ||  defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
-#define BSD_OS_TYPE
+    #define BSD_OS_TYPE
+    #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+        #define _DARWIN_C_SOURCE _POSIX_C_SOURCE
+    #endif
 #endif
 
 
