@@ -52,6 +52,11 @@
 
 
 
+#if defined(__APPLE__) || defined(__FreeBSD__) ||  defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
+#define BSD_OS_TYPE
+#endif
+
+
 /***************************************************************************
  ******************************* Memory ************************************
  **************************************************************************/
@@ -808,11 +813,11 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         return PLCTAG_ERR_OPEN;
     }
 
-#ifdef SO_NOSIGPIPE
-    /* On *BSD and macOS, set the socket option to prevent SIGPIPE. */
+#ifdef BSD_OS_TYPE
+    /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
     if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
         close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket SIGPIPE suppression option, errno: %d",errno);
+        pdebug(DEBUG_ERROR, "Error setting socket SIGPIPE suppression option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 #endif
@@ -989,7 +994,7 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-#ifdef SO_NOSIGPIPE
+#ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
     rc = (int)write(s->fd, buf, (size_t)size);
 #else
