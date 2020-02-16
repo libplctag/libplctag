@@ -1,4 +1,5 @@
 The build system uses CMake to bootstrap a local build.  On Linux.  On Windows, this makes a Visual Studio project.
+CMake is also used to create a build on macOS.
 
 Note that as of version 2.0.22, pre-built binaries are included in the GitHub releases.
 
