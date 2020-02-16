@@ -63,7 +63,7 @@ struct ab_tag_t {
     TAG_BASE_STRUCT;
 
     /* how do we talk to this device? */
-    int protocol_type;
+    plc_type_t protocol_type;
 
     /* pointers back to session */
     ab_session_p session;

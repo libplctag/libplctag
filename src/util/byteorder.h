@@ -30,12 +30,17 @@ START_PACK typedef struct {
     } val;
 } END_PACK uint16_le;
 
+#define UINT16_LE_INIT(v) {.val = {.u_val = ((uint16_t)(v))}}
+
 START_PACK typedef struct {
     union {
         uint8_t b_val[4];
         uint32_t u_val;
     } val;
 } END_PACK uint32_le;
+
+#define UINT32LE_INIT(v) {.val = {.u_val = ((uint32_t)(v))}}
+
 
 START_PACK typedef struct {
     union {
@@ -44,6 +49,7 @@ START_PACK typedef struct {
     } val;
 } END_PACK uint64_le;
 
+#define UINT64_LE_INIT(v) {.val = {.u_val = ((uint64_t)(v))}}
 
 
 

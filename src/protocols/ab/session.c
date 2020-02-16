@@ -56,7 +56,7 @@
 
 
 
-static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, int plc_type, int use_connected_msg);
+static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int use_connected_msg);
 static int session_init(ab_session_p session);
 //static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
@@ -202,7 +202,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     const char *session_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
     int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
-    int plc_type = get_plc_type(attribs);
+    plc_type_t plc_type = get_plc_type(attribs);
     ab_session_p session = AB_SESSION_NULL;
     int new_session = 0;
     int shared_session = attr_get_int(attribs, "share_session", 1); /* share the session by default. */
@@ -433,7 +433,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
 
 
 
-ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, int plc_type, int use_connected_msg)
+ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int use_connected_msg)
 {
     static volatile uint32_t connection_id = 0;
 

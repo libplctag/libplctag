@@ -36,7 +36,7 @@
 #define RECONNECT_DELAY_MS 5000
 
 
-typedef enum { UNKNOWN, DINT, INT, SINT, REAL } data_type_t;
+typedef enum { UNKNOWN = 0, DINT, INT, SINT, REAL } data_type_t;
 
 struct {
     const char *name;
@@ -51,7 +51,7 @@ struct {
         int8_t SINT_val;
         float REAL_val;
     } val;
-} tags[MAX_TAGS] = {0,};
+} tags[MAX_TAGS];
 
 int num_tags = 0;
 
@@ -481,6 +481,8 @@ int main(int argc, char **argv)
     /* set up signal handler first. */
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
+
+    memset(&tags, 0, sizeof(tags));
 
     if(argc < 2) {
         usage();
