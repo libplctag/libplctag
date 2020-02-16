@@ -1,0 +1,37 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'macos-latest'
+
+steps:
+- task: CMake@1
+  inputs:
+    workingDirectory: 'build'
+    cmakeArgs: '-DCMAKE_BUILD_TYPE=Release ..'
+
+- task: CMake@1
+  inputs:
+    workingDirectory: 'build'
+    cmakeArgs: '--build .'
+
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: '$(System.DefaultWorkingDirectory)/build/bin_dist'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_macos_x64_$(Build.BuildId).zip'
+    replaceExistingArchive: false
+
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: '$(Build.SourcesDirectory)/src/lib/libplctag.h'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/libplctag_macos_x64_$(Build.BuildId).zip'
+    replaceExistingArchive: false
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    pathtoPublish: '$(Build.ArtifactStagingDirectory)/libplctag_macos_x64_$(Build.BuildId).zip'
+    artifactName: libplctag_macos_x64_$(Build.BuildId)
