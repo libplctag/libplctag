@@ -653,7 +653,7 @@ void ab_tag_destroy(ab_tag_p tag)
 
 
 
-int get_plc_type(attr attribs)
+plc_type_t get_plc_type(attr attribs)
 {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
 
@@ -689,7 +689,7 @@ int get_plc_type(attr attribs)
 
 int check_cpu(ab_tag_p tag, attr attribs)
 {
-    int result = get_plc_type(attribs);
+    plc_type_t result = get_plc_type(attribs);
 
     if(result != AB_PROTOCOL_NONE) {
         tag->protocol_type = result;

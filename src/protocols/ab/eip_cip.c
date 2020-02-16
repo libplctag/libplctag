@@ -433,7 +433,7 @@ int build_tag_list_request_connected(ab_tag_p tag)
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;
-    uint16_le tmp_u16 = {0,};
+    uint16_le tmp_u16 = UINT16_LE_INIT(0);
 
     pdebug(DEBUG_INFO, "Starting.");
 

@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/time.h>
 #include <signal.h>
 #include "../lib/libplctag.h"
@@ -237,7 +238,9 @@ int main(int argc, char **argv)
     int num_elems = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
-    struct sigaction sigpipe = {0,};
+    struct sigaction sigpipe;
+
+    memset(&sigpipe, 0, sizeof(sigpipe));
 
     sigpipe.sa_handler = sigpipe_handler;
 

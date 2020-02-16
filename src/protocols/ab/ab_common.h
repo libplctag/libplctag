@@ -25,9 +25,9 @@
  *                                                                        *
  **************************************************************************/
 
-#ifndef __PLCTAG_AB_AB_COMMON_H__
-#define __PLCTAG_AB_AB_COMMON_H__ 1
+#pragma once
 
+#include <ab/defs.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <util/vector.h>
@@ -48,7 +48,7 @@ typedef struct ab_request_t *ab_request_p;
 extern int ab_tag_abort(ab_tag_p tag);
 extern int ab_tag_status(ab_tag_p tag);
 //int ab_tag_destroy(ab_tag_p p_tag);
-extern int get_plc_type(attr attribs);
+extern plc_type_t get_plc_type(attr attribs);
 extern int check_cpu(ab_tag_p tag, attr attribs);
 extern int check_tag_name(ab_tag_p tag, const char *name);
 extern int check_mutex(int debug);
@@ -59,4 +59,3 @@ THREAD_FUNC(request_handler_func);
 
 #define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
 
-#endif
