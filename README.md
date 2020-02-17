@@ -1,6 +1,8 @@
 Build status:
 Ubuntu: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Ubuntu?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=3&branchName=master)
 Windows: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Windows?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=4&branchName=master)
+(experimental) macOS: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20macOS?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=5&branchName=master)
+
 
 libplctag
 =========
@@ -43,7 +45,7 @@ Goals
 The primary goals of this library are to provide:
 
 * a simple, consistent way to access PLCs or similar devices of various types.
-* cross-platform support (currently Windows and Linux), X86, x86-64, ARM and ARM64 (not well tested).
+* cross-platform support (currently Windows, macOS and Linux), X86, x86-64, ARM and ARM64 (not well tested).
 * protocol-agnostic access.
 * an easily wrappable library.
 * high performance.   We want to take advantage of PLC/protocol features that allow higher performance where possible.
@@ -78,8 +80,9 @@ Wrappers exist for:
 * Go (included)
 * Pascal (included)
 * .Net/C#
-  * [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet) supports .Net Core.
-  * [Mesta Automation](https://github.com/mesta1/libplctag-csharp)
+  * [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet) supports .Net Core and is on Nuget!
+  * [Mesta Automation](https://github.com/mesta1/libplctag-csharp).
+  * [possibly experimental by timyhac, libplctag.Net](https://github.com/timyhac/libplctag.NET).   A relatively thin wrapper but loads the correct binary DLL at runtime.
 * Labview (see [here](https://github.com/dirtyb15/libplctag-labview))
 
 
@@ -93,6 +96,7 @@ The library has been in production use since 2012 and is in use by multiple orga
 We are on API version 2.0.  That includes:
 
 * CMake build system for better cross-platform support.
+* Binary releases built for Ubuntu 18.04, macOS 10.14 and Windows 10.  All 64-bit.
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).   Firmware versions 16, 20 and 31.
   * read/write 8, 16, 32, and 64-bit signed and unsigned integers.
   * read/write single booleans under some circumstances (BOOL arrays are still tricky).
@@ -117,8 +121,8 @@ We are on API version 2.0.  That includes:
   * read/write of 16-bit INT.
   * read/write of 32-bit floating point.
   * read/write of arrays of the above.
-* support for 32 and 64-bit x86 Linux (Ubuntu 12.04-18.10 tested).
-* Windows 7 x86 and Windows 10 x64 builds with Visual Studio, not well tested (help very welcome!). Support is basic because:
+* support for 32 and 64-bit x86 Linux (Ubuntu 12.04-19.10 tested).
+* Windows 7 x86 and Windows 10 x64 builds with Visual Studio. Support is basic because:
   * we do not use Windows for our deployments.
   * only the tag_rw example program has been tested (though that tests most of the API).
 * sample code.
@@ -136,9 +140,9 @@ that we can get all the attributions correct!
 
 We need and welcome help with the following:
 
-* bug fixes and reports.
+* bug fixes and reports!
 * other protocols like Modbus, SBus etc.
-* other platforms like Android, iOS, macOS etc.
+* other platforms like Android, iOS etc.
 * other versions of Windows.
 * more language wrappers!
 
@@ -174,14 +178,14 @@ Access to the C API is thread-safe.  All threads hit a mutex when going through 
 By "thread safe" we mean that you should not be able to crash the library by sharing a tag object
 between threads.  That does not mean that you will get useful results!
 
-Trying to share a tag between threads is possible, but access in only controlled within a
-single API call.  If you do something like update tag data in one thread and call the read
+Trying to share a tag between threads is possible, but access is only controlled within a
+single API call.  If you do something such as updating tag data in one thread and calling the read
 function in another thread, the order of the operations will be determined by the actual
 chronological order in which the threads executed them.
 
 For this reason, we added additional lock/unlock API calls that allow you to synchronize
 access to a tag across multiple API calls.  If you are using the library wrapped in another
-programming language you should use that languages synchronization mechanisms instead.
+programming language you should use that language's synchronization mechanisms instead.
 
 The Allen-Bradley EIP protocol is very asynchronous and the part of it that we
 have implemented does use threading internally.  The library uses one thread for all tags
@@ -277,10 +281,10 @@ the values of each one and writes them back.
 #include "utils.h"
 
 
-#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,5&cpu=micro800&elem_size=4&elem_count=200&name=TestBigArray&debug=4"
+#define TAG_PATH "protocol=ab-eip&gateway=192.168.56.121&path=1,5&cpu=LGX&elem_size=4&elem_count=200&name=TestBigArray&debug=4"
 #define ELEM_COUNT 200
 #define ELEM_SIZE 4
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT 5000 /* 5000 milliseconds */
 
 
 int main()
@@ -314,12 +318,12 @@ int main()
 
     /* print out the data */
     for(i=0; i < ELEM_COUNT; i++) {
-        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+        fprintf(stderr,"data[%d]=%d\n", i, plc_tag_get_int32(tag, (i*ELEM_SIZE)));
     }
 
-    /* now test a write */
+    /* now test a write, increment each element by one. */
     for(i=0; i < ELEM_COUNT; i++) {
-        int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+        int32_t val = plc_tag_get_int32(tag, (i*ELEM_SIZE));
 
         val = val+1;
 
@@ -371,8 +375,8 @@ That said, we have some longer term things in mind:
 * increase portability.  This will be ongoing.
 * make parts of the library optional.
 * add more protocols.  We hope that the API will be able to support most of the commonly used PLC data access protocols.
-  * Modbus is next.
-  * Perhaps Siemens or other protocol after that.
+  * Siemens S7 is next.
+  * Perhaps ModBus or other protocol after that.
 * Embedded support.  This involves reducing memory requirements and finding alternate solutions for for threading.
 
 
@@ -391,7 +395,7 @@ If you have general questions or comments about the
 library or its use, please join and post on the Google group [libplctag](https://groups.google.com/forum/#!forum/libplctag).
 The forum is open to all, but is by request only to keep the spammers down.  The traffic is fairly
 light with usually a small number of emails per month.  It is our primary means for users to
-ask questions and for discussions to happen.
+ask questions and for discussions to happen.   Announcements about released happen on the forum.
 
 If you find bugs or need specific features, please file them on GitHub's issue tracker for
 the project.
