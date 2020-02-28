@@ -90,7 +90,9 @@ def defineStringFunc(name, args):
 # to load the compiled libplctag C library from the current environment
 # or LD_LIBRARY path.
 system = platform.system()
-library = "plctag.dll" if system == "Windows" else "libplctag.so"
+library = "libplctag.so"
+if system == "Windows": library = "plctag.dll"
+if system == "Darwin": library = "libplctag.dylib"
 lib = ctypes.cdll.LoadLibrary(library)
 
 
