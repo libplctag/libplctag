@@ -49,9 +49,11 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 #endif
 */
 
-#ifdef _WIN32
-#define __func__ __FUNCTION__
+#if defined(_WIN32) && defined(_MSC_VER)
+    /* MinGW on Windows does not need this. */
+    #define __func__ __FUNCTION__
 #endif
+
 
 #define pdebug(dbg,...)                                                \
    do { if((dbg) && (dbg) <= get_debug_level()) pdebug_impl(__func__, __LINE__, dbg, __VA_ARGS__); } while(0)

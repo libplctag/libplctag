@@ -75,17 +75,25 @@ extern "C"
 /* WinSock does not define this or support signals */
 #define MSG_NOSIGNAL 0
 
-#define START_PACK __pragma( pack(push, 1) )
-#define END_PACK __pragma( pack(pop) )
+#ifdef _MSC_VER
+    /* MS Visual Studio C compiler. */
+    #define START_PACK __pragma( pack(push, 1) )
+    #define END_PACK   __pragma( pack(pop) )
+    #define __PRETTY_FUNCTION__ __FUNCTION__
+#else
+    /* MinGW on Windows. */
+    #define START_PACK
+    #define END_PACK  __attribute__((packed))
+    #define __PRETTY_FUNCTION__  __func__
+#endif
 
 /* VS C++ uses foo[] to denote a zero length array. */
-#define ZLA_SIZE    0
+#define ZLA_SIZE
 
 /* export definitions. */
 
 #define USE_STD_VARARG_MACROS 1
 
-#define __PRETTY_FUNCTION__ __FUNCTION__
 
 
 

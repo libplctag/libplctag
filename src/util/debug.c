@@ -49,7 +49,7 @@ static THREAD_LOCAL int tag_id = 0;
 
 
 /* only output the version once */
-static volatile lock_t printed_version = LOCK_INIT;
+static lock_t printed_version = LOCK_INIT;
 
 
 
