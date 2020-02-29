@@ -25,6 +25,14 @@ if(${CMAKE_VERSION} VERSION_GREATER 3.1)
     cmake_policy(SET CMP0054 NEW)
 endif()
 
+# set compiler and flags for MinGW builds
+if (MINGW)
+    SET(CMAKE_C_COMPILER gcc.exe)
+    SET(CMAKE_C_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
+    SET(CMAKE_CXX_COMPILER g++.exe)
+    SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
+endif()
+
 # this is the root libplctag project
 project (libplctag_project)
 
@@ -36,7 +44,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project is version 2.0
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 0)
-set (libplctag_VERSION_PATCH 32)
+set (libplctag_VERSION_PATCH 33)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 # we need threads
