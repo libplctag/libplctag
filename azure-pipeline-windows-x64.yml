@@ -8,12 +8,12 @@ steps:
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
-    cmakeArgs: '.. -DCMAKE_BUILD_TYPE=Release'
+    cmakeArgs: '.. -G "Visual Studio 16 2019" -A x64'
 
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
-    cmakeArgs: '--build --config Release .'
+    cmakeArgs: '--build . --config Release'
 
 - task: ArchiveFiles@2
   inputs:
