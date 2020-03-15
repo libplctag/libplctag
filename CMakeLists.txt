@@ -94,6 +94,8 @@ if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
 
 	set(C11_SUPPORT true)
 	set(C99_FLAGS "-std=c99" )
+    set(BUILD_32_BIT "-m32")
+    set(BUILD_64_BIT "-m64")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # using GCC
 
@@ -122,6 +124,8 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 	set(C99_FLAGS "-std=c99" )
+    set(BUILD_32_BIT "-m32")
+    set(BUILD_64_BIT "-m64")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     # using Intel C/C++
     MESSAGE("Intel C compiler not supported!")

@@ -8,7 +8,7 @@ steps:
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
-    cmakeArgs: '..'
+    cmakeArgs: '.. -DCMAKE_GENERATOR_PLATFORM=x86 -DCMAKE_BUILD_TYPE=Release'
 
 - task: CMake@1
   inputs:
