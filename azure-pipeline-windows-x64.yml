@@ -8,12 +8,12 @@ steps:
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
-    cmakeArgs: '..  -A "X64-Release" -DCMAKE_CONFIGURATION_TYPES="Release" -DCMAKE_BUILD_TYPE=Release'
+    cmakeArgs: '.. -DCMAKE_BUILD_TYPE=Release'
 
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
-    cmakeArgs: '--build .'
+    cmakeArgs: '--build -DCMAKE_BUILD_TYPE=Release .'
 
 - task: ArchiveFiles@2
   inputs:
