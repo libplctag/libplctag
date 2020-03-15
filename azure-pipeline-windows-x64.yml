@@ -13,7 +13,7 @@ steps:
 - task: CMake@1
   inputs:
     workingDirectory: 'build'
-    cmakeArgs: '--build -DCMAKE_BUILD_TYPE=Release .'
+    cmakeArgs: '--build --config Release .'
 
 - task: ArchiveFiles@2
   inputs:
