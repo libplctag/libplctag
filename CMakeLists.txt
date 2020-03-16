@@ -33,6 +33,10 @@ if (${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
 endif()
 
+
+# default setting for 32-bit builds
+set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
+
 # this is the root libplctag project
 project (libplctag_project)
 
@@ -94,8 +98,15 @@ if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
 
 	set(C11_SUPPORT true)
 	set(C99_FLAGS "-std=c99" )
-    set(BUILD_32_BIT "-m32")
-    set(BUILD_64_BIT "-m64")
+
+    # check to see if we are building 32-bit or 64-bit
+    if(BUILD_32_BIT)
+        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -m32")
+        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -m32")
+        set(BASE_LINK_FLAGS "-m32")
+    else()
+        set(BASE_LINK_FLAGS "")
+    endif()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # using GCC
 
@@ -124,8 +135,15 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 	set(C99_FLAGS "-std=c99" )
-    set(BUILD_32_BIT "-m32")
-    set(BUILD_64_BIT "-m64")
+
+    # check to see if we are building 32-bit or 64-bit
+    if(BUILD_32_BIT and not BUILD_64_BIT)
+        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -m32")
+        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -m32")
+        set(BASE_LINK_FLAGS "-m32")
+    else()
+        set(BASE_LINK_FLAGS "")
+    endif()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     # using Intel C/C++
     MESSAGE("Intel C compiler not supported!")
@@ -223,13 +241,16 @@ ENDFOREACH()
 
 # shared library
 add_library(plctag SHARED ${libplctag_SRCS} )
+
+if(BASE_LINK_FLAGS)
+    set_target_properties(plctag PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+endif()
+
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 
-
-#if(THREADS_HAVE_PTHREAD_ARG)
-#  set_property(TARGET plctag PROPERTY COMPILE_OPTIONS "-pthread")
-#  set_property(TARGET plctag PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
-#endif()
+if(BASE_LINK_FLAGS)
+    set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+endif()
 
 # make sure we link with the threading library.
 if (UNIX)
@@ -245,36 +266,36 @@ endif()
 
 # add the examples and tests
 if (UNIX)
-	if(C11_SUPPORT)
-		# Logix simulator
-		set ( lgx_sim_FILES "${test_SRC_PATH}/lgx_sim/log.h"
-							"${test_SRC_PATH}/lgx_sim/main.c"
-							"${test_SRC_PATH}/lgx_sim/packet.h"
-							"${test_SRC_PATH}/lgx_sim/main.c"
-							"${test_SRC_PATH}/lgx_sim/session.c"
-							"${test_SRC_PATH}/lgx_sim/session.h"
-							"${test_SRC_PATH}/lgx_sim/tags.c"
-							"${test_SRC_PATH}/lgx_sim/tags.h" )
-
-		foreach ( file ${lgx_sim_FILES} )
-			set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${BASE_FLAGS} -std=c11")
-		endforeach ( file )
-
-		add_executable ( lgx_sim ${lgx_sim_FILES} )
-		target_link_libraries ( lgx_sim pthread )
-	endif()
+#	if(C11_SUPPORT)
+#		# Logix simulator
+#		set ( lgx_sim_FILES "${test_SRC_PATH}/lgx_sim/log.h"
+#							"${test_SRC_PATH}/lgx_sim/main.c"
+#							"${test_SRC_PATH}/lgx_sim/packet.h"
+#							"${test_SRC_PATH}/lgx_sim/main.c"
+#							"${test_SRC_PATH}/lgx_sim/session.c"
+#							"${test_SRC_PATH}/lgx_sim/session.h"
+#							"${test_SRC_PATH}/lgx_sim/tags.c"
+#							"${test_SRC_PATH}/lgx_sim/tags.h" )
+#
+#		foreach ( file ${lgx_sim_FILES} )
+#			set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${BASE_FLAGS} -std=c11")
+#		endforeach ( file )
+#
+#		add_executable ( lgx_sim ${lgx_sim_FILES} )
+#		target_link_libraries ( lgx_sim pthread )
+#	endif()
 
 	# hashtable test
-	set(test_hashtable_FILES "${test_SRC_PATH}/hashtable/test_hashtable.c"
-							 "${util_SRC_PATH}/hashtable.h"
-							 "${util_SRC_PATH}/debug.h" )
-
-	foreach ( file ${test_hashtable_FILES} )
-		set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_FLAGS}")
-	endforeach ( file )
-
-    add_executable(test_hashtable ${test_hashtable_FILES} )
-    target_link_libraries(test_hashtable plctag pthread)
+#	set(test_hashtable_FILES "${test_SRC_PATH}/hashtable/test_hashtable.c"
+#							 "${util_SRC_PATH}/hashtable.h"
+#							 "${util_SRC_PATH}/debug.h" )
+#
+#	foreach ( file ${test_hashtable_FILES} )
+#		set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_FLAGS}")
+#	endforeach ( file )
+#
+#    add_executable(test_hashtable ${test_hashtable_FILES} )
+#    target_link_libraries(test_hashtable plctag pthread)
 
 	# example programs
     set ( example_PROGRAMS async
@@ -322,17 +343,31 @@ elseif(WIN32)
     set ( example_LIBRARIES plctag ws2_32 )
 endif()
 
-# simple.cpp is different because it is C++
-set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS ${BASE_CXX_FLAGS})
-add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-target_link_libraries (simple_cpp ${example_LIBRARIES} )
+# set the compile flags for the utilities file.
+set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
 
-
+# set the compile and link properties for all examples.
 foreach ( example ${example_PROGRAMS} )
     set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
     add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
     target_link_libraries(${example} ${example_LIBRARIES} )
+
+    if(BASE_LINK_FLAGS)
+        set_target_properties(${example} PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+    endif()
 endforeach(example)
+
+# simple.cpp is different because it is C++
+message("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
+set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS "${BASE_CXX_FLAGS}")
+add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
+
+target_link_libraries (simple_cpp ${example_LIBRARIES} )
+
+if(BASE_LINK_FLAGS)
+    message("BASE_LINK_FLAGS=${BASE_LINK_FLAGS}")
+    set_target_properties(simple_cpp PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+endif()
 
 
 # Generate files from templates
