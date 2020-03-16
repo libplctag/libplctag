@@ -5,7 +5,7 @@ pool:
   vmImage: 'ubuntu-latest'
 
 steps:
-- bash: 'sudo apt-get -y --force-yes install gcc-multilib g++-multilib'
+- bash: 'sudo apt update; sudo apt-get -y --force-yes install gcc-multilib g++-multilib'
 
 - task: CMake@1
   inputs:
