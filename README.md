@@ -1,7 +1,8 @@
-Build status:
-Ubuntu: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Ubuntu?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=3&branchName=master)
-Windows: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Windows?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=4&branchName=master)
-(experimental) macOS: [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20macOS?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=5&branchName=master)
+|   OS   | Version | 64-bit | 32-bit |
+|   --:  |   :-:   |   :-:  |   :-:  |
+|Ubuntu  |  18.04  | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Ubuntu%20x64?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=8&branchName=master) | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Ubuntu%20x86?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=9&branchName=master) |
+|Windows |  1909   | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Windows%20x64?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=6&branchName=master) | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Windows%20x86?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=7&branchName=master) |
+|macOS   |  10.14  | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20macOS?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=5&branchName=master) | Not Supported |
 
 
 libplctag
