@@ -137,7 +137,7 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 	set(C99_FLAGS "-std=c99" )
 
     # check to see if we are building 32-bit or 64-bit
-    if(BUILD_32_BIT and not BUILD_64_BIT)
+    if(BUILD_32_BIT)
         set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -m32")
         set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -m32")
         set(BASE_LINK_FLAGS "-m32")
