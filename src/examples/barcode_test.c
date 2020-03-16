@@ -1,7 +1,8 @@
-
-#include "../lib/libplctag.h"
+#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "../lib/libplctag.h"
 #include "utils.h"
 
 #define TIMEOUT_MS (15000) /* a loooooong timeout */
@@ -27,6 +28,9 @@ int main(int argc, const char **argv)
 
     while(1) {
         int64_t new_time;
+        int64_t diff_time;
+        int64_t total_time;
+
         TRY(wait_for_new_barcode())
 
         TRY(read_barcode())
@@ -35,7 +39,11 @@ int main(int argc, const char **argv)
 
         new_time = util_time_ms();
 
-        printf("Iteration took %ldms, total elapsed time is %ldms.\n",(new_time-last_read),(new_time - first_read));
+        diff_time = new_time - last_read;
+        total_time = new_time - first_read;
+
+        printf("Iteration took " PRId64 "ms, total elapsed time is " PRId64 "ms.\n", diff_time, total_time);
+
         last_read = new_time;
     }
 
