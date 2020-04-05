@@ -20,6 +20,7 @@
 
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
@@ -29,6 +30,7 @@
  * unconnected packet format.
  */
 
+#define REQUIRED_VERSION 2,1,0
 
 #define TAG_PATH1 "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=TestDINTArray&debug=1"
 #define TAG_PATH2 "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=4&elem_size=4&name=F8:0&debug=1"
@@ -42,6 +44,12 @@ int main()
     int rc1,rc2;
     int i;
     int done = 0;
+
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
 
     /* create the tag, async */
     tag1 = plc_tag_create(TAG_PATH1, 0);

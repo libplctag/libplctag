@@ -27,10 +27,12 @@
 
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
 
+#define REQUIRED_VERSION 2,1,0
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[%d]&debug=4"
 #define NUM_TAGS  (30)
 #define NUM_ELEMS (1000)
@@ -42,105 +44,119 @@ int main()
     int rc;
     int i;
     int64_t timeout = DATA_TIMEOUT + util_time_ms();
+    int failed = 0;
     int done = 0;
     int64_t start = 0;
     int64_t end = 0;
     int num_elems_per_tag = NUM_ELEMS / NUM_TAGS;
 
-    /* create the tags */
-    for(i=0; i< NUM_TAGS; i++) {
-        char tmp_tag_path[256] = {0,};
-        snprintf_platform(tmp_tag_path, sizeof tmp_tag_path,TAG_ATTRIBS, num_elems_per_tag, i);
-
-        fprintf(stderr, "Attempting to create tag with attribute string '%s'\n",tmp_tag_path);
-
-        tag[i]  = plc_tag_create(tmp_tag_path, 0);
-
-        if(tag[i] < 0) {
-            fprintf(stderr,"Error %s: could not create tag %d\n",plc_tag_decode_error(tag[i]), i);
-        }
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
     }
 
-    /* wait for all the tags to complete creation. */
     do {
-        done = 1;
+        /* create the tags */
+        for(i=0; i< NUM_TAGS; i++) {
+            char tmp_tag_path[256] = {0,};
+            snprintf_platform(tmp_tag_path, sizeof tmp_tag_path,TAG_ATTRIBS, num_elems_per_tag, i);
 
-        for(i=0; i < NUM_TAGS; i++) {
-            rc = plc_tag_status(tag[i]);
-            if(rc != PLCTAG_STATUS_OK) {
-                done = 0;
+            fprintf(stderr, "Attempting to create tag with attribute string '%s'\n",tmp_tag_path);
+
+            tag[i]  = plc_tag_create(tmp_tag_path, 0);
+
+            if(tag[i] < 0) {
+                fprintf(stderr,"Error %s: could not create tag %d\n",plc_tag_decode_error(tag[i]), i);
+                tag[i] = 0;
+                failed = 1;
             }
         }
 
+        /* did any tags fail? */
+        if(failed) {
+            rc = PLCTAG_ERR_CREATE;
+            break;
+        }
+
+        /* wait for all the tags to complete creation. */
+        do {
+            done = 1;
+
+            for(i=0; i < NUM_TAGS; i++) {
+                rc = plc_tag_status(tag[i]);
+                if(rc != PLCTAG_STATUS_OK) {
+                    done = 0;
+                }
+            }
+
+            if(!done) {
+                util_sleep_ms(1);
+            }
+        } while(timeout > util_time_ms() && !done) ;
+
         if(!done) {
-            util_sleep_ms(1);
+            fprintf(stderr, "Timeout waiting for tags to be ready!\n");
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
         }
-    } while(timeout > util_time_ms() && !done) ;
 
-    if(!done) {
-        fprintf(stderr, "Timeout waiting for tags to be ready!\n");
+        start = util_time_ms();
 
+        /* get the data */
         for(i=0; i < NUM_TAGS; i++) {
-            plc_tag_destroy(tag[i]);
-        }
+            rc = plc_tag_read(tag[i], 0);
 
-        return 1;
-    }
-
-    start = util_time_ms();
-
-    /* get the data */
-    for(i=0; i < NUM_TAGS; i++) {
-        rc = plc_tag_read(tag[i], 0);
-
-        if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-            fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-
-            return 0;
-        }
-    }
-
-    /* wait for all to finish */
-    do {
-        done = 1;
-
-        for(i=0; i < NUM_TAGS; i++) {
-            rc = plc_tag_status(tag[i]);
-            if(rc != PLCTAG_STATUS_OK) {
-                done = 0;
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+                fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+                break;
             }
         }
 
+        /* wait for all to finish */
+        do {
+            done = 1;
+
+            for(i=0; i < NUM_TAGS; i++) {
+                rc = plc_tag_status(tag[i]);
+                if(rc != PLCTAG_STATUS_OK) {
+                    done = 0;
+                }
+            }
+
+            if(!done) {
+                util_sleep_ms(1);
+            }
+        } while(timeout > util_time_ms() && !done);
+
         if(!done) {
-            util_sleep_ms(1);
+            fprintf(stderr, "Timeout waiting for tags to finish reading!\n");
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
         }
-    } while(timeout > util_time_ms() && !done);
 
-    if(!done) {
-        fprintf(stderr, "Timeout waiting for tags to finish reading!\n");
+        end = util_time_ms();
 
+        /* get any data we can */
         for(i=0; i < NUM_TAGS; i++) {
-            plc_tag_destroy(tag[i]);
+            /* read complete! */
+            fprintf(stderr,"Tag %d data[0]=%d\n",i,plc_tag_get_int32(tag[i],0));
         }
-
-        return 1;
-    }
-
-    end = util_time_ms();
-
-    /* get any data we can */
-    for(i=0; i < NUM_TAGS; i++) {
-        /* read complete! */
-        fprintf(stderr,"Tag %d data[0]=%d\n",i,plc_tag_get_int32(tag[i],0));
-    }
+    } while(0);
 
 
     /* we are done */
     for(i=0; i < NUM_TAGS; i++) {
-        plc_tag_destroy(tag[i]);
+        if(tag[i] != 0) {
+            plc_tag_destroy(tag[i]);
+        }
     }
 
-    fprintf(stderr, "Read %d tags in %dms\n", NUM_TAGS, (int)(end - start));
+    if(rc == PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Read %d tags in %dms\n", NUM_TAGS, (int)(end - start));
+    } else {
+        fprintf(stderr, "Error found: %s\n", plc_tag_decode_error(rc));
+    }
 
-    return 0;
+    return rc;
 }

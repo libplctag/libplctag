@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2019 by Kyle Hayes                                      *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -20,9 +20,21 @@
 
 #pragma once
 
+#include <stdint.h>
+
 /*
- * The version string.
+ * The library version in various ways.
+ *
+ * The defines are for building in specific versions and then
+ * checking them against a dynamically linked library.
  */
 
-extern const char *VERSION;
+#define LIB_VER_STRING "@VERSION@"
+#define LIB_VER_MAJOR (@libplctag_VERSION_MAJOR@)
+#define LIB_VER_MINOR (@libplctag_VERSION_MINOR@)
+#define LIB_VER_PATCH (@libplctag_VERSION_PATCH@)
 
+extern const char *VERSION;
+extern const uint64_t version_major;
+extern const uint64_t version_minor;
+extern const uint64_t version_patch;

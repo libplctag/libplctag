@@ -14,10 +14,24 @@ class plctag
 		plctag();	// class constructor
 		~plctag();	// class destructor
 
+        // library control.
+        static int32_t version(void);
+
+        enum DEBUG_LEVEL // Debug levels, see libplctag.h
+        {
+            DEBUG_NONE = PLCTAG_DEBUG_NONE,
+            DEBUG_ERROR = PLCTAG_DEBUG_ERROR,
+            DEBUG_WARN = PLCTAG_DEBUG_WARN,
+            DEBUG_INFO = PLCTAG_DEBUG_INFO,
+            DEBUG_DETAIL = PLCTAG_DEBUG_DETAIL,
+            DEBUG_SPEW = PLCTAG_DEBUG_SPEW
+        };
+        static void set_debug_level(DEBUG_LEVEL debug_level);
+
 		// Connection
 		void error_recovery (int tag_num, int plc_prot, int timeout, std::string ip_address, std::string element_name, int element_size, int element_count);
 		void initialize_tags (int plc_prot, std::string ip_address);
-		
+
 		// Read
 		std::vector <float> read_tag (int tag_num, int timeout, int element_size, int element_count);
 		std::vector <std::string> read_tag_str (int tag_num, int timeout, int element_size, int element_count);

@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -18,16 +18,6 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-/**************************************************************************
- * CHANGE LOG                                                             *
- *                                                                        *
- * 2012-02-23  KRH - Created file.                                        *
- *                                                                        *
- * 2012-06-24  KRH - Updated plc_err() calls for new API.                 *
- *                                                                        *
- * 2013-12-24  KRH - Various munging to make this compile under VS2012    *
- *                                                                        *
- **************************************************************************/
 
 
 #define LIBPLCTAGDLL_EXPORTS 1
@@ -37,6 +27,7 @@
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <lib/init.h>
+#include <lib/version.h>
 #include <platform.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -124,11 +115,6 @@ void lib_teardown(void)
 
     pdebug(DEBUG_INFO, "Destroying tag hashtable.");
     hashtable_destroy(tags);
-
-//    pdebug(DEBUG_INFO,"Destroying global library mutex.");
-//    if(global_library_mutex) {
-//        mutex_destroy((mutex_p*)&global_library_mutex);
-//    }
 
     pdebug(DEBUG_INFO,"Done.");
 }
@@ -310,6 +296,56 @@ LIB_EXPORT const char *plc_tag_decode_error(int rc)
 
 
 
+
+
+/*
+ * Set the debug level.
+ *
+ * This function takes values from the defined debug levels.  It sets
+ * the debug level to the passed value.  Higher numbers output increasing amounts
+ * of information.   Input values not defined will be ignored.
+ */
+
+LIB_EXPORT void plc_tag_set_debug_level(int debug_level)
+{
+	if (debug_level >= PLCTAG_DEBUG_NONE && debug_level <= PLCTAG_DEBUG_SPEW) {
+		set_debug_level(debug_level);
+	}
+}
+
+
+
+
+/*
+ * Check that the library supports the required API version.
+ *
+ * PLCTAG_STATUS_OK is returned if the version matches.  If it does not,
+ * PLCTAG_ERR_UNSUPPORTED is returned.
+ */
+
+LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_patch)
+{
+    /* encode these with 16-bits per version part. */
+    uint64_t lib_encoded_version = (((uint64_t)version_major) << 32u)
+                                 + (((uint64_t)version_minor) << 16u)
+                                   + (uint64_t)version_patch;
+
+    uint64_t req_encoded_version = (((uint64_t)req_major) << 32u)
+                                 + (((uint64_t)req_minor) << 16u)
+                                   + (uint64_t)req_patch;
+
+    if(version_major == (uint64_t)req_major && lib_encoded_version >= req_encoded_version) {
+        return PLCTAG_STATUS_OK;
+    } else {
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+}
+
+
+
+
+
+
 /*
  * plc_tag_create()
  *
@@ -326,6 +362,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     int rc = PLCTAG_STATUS_OK;
     int read_cache_ms = 0;
     tag_create_function tag_constructor;
+	int debug_level = -1;
 
     pdebug(DEBUG_INFO,"Starting");
 
@@ -346,7 +383,10 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     }
 
     /* set debug level */
-    set_debug_level(attr_get_int(attribs, "debug", DEBUG_NONE));
+	debug_level = attr_get_int(attribs, "debug", -1);
+	if (debug_level > DEBUG_NONE) {
+		set_debug_level(debug_level);
+	}
 
     /*
      * create the tag, this is protocol specific.
@@ -928,6 +968,62 @@ LIB_EXPORT int plc_tag_get_size(int32_t id)
 
 
 
+LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit)
+{
+    int res = PLCTAG_ERR_OUT_OF_BOUNDS;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        /* is there a function? */
+        if(!tag->vtable->get_bit) {
+            pdebug(DEBUG_WARN,"Tag does not support get bit operation!");
+            res = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
+        res = tag->vtable->get_bit(tag, offset_bit);
+    }
+
+    rc_dec(tag);
+
+    return res;
+}
+
+
+LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val)
+{
+    int res = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        /* is there a function? */
+        if(!tag->vtable->get_bit) {
+            pdebug(DEBUG_WARN,"Tag does not support set bit operation!");
+            res = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
+        res = tag->vtable->set_bit(tag, offset_bit, val);
+    }
+
+    rc_dec(tag);
+
+    return res;
+}
 
 
 
@@ -944,27 +1040,13 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_uint64) {
+            pdebug(DEBUG_WARN,"Tag does not support get uint64 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint64_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = ((uint64_t)(tag->data[offset])) +
-              ((uint64_t)(tag->data[offset+1]) << 8) +
-              ((uint64_t)(tag->data[offset+2]) << 16) +
-              ((uint64_t)(tag->data[offset+3]) << 24) +
-              ((uint64_t)(tag->data[offset+4]) << 32) +
-              ((uint64_t)(tag->data[offset+5]) << 40) +
-              ((uint64_t)(tag->data[offset+6]) << 48) +
-              ((uint64_t)(tag->data[offset+7]) << 56);
-
+        res = tag->vtable->get_uint64(tag, offset);
     }
 
     rc_dec(tag);
@@ -987,29 +1069,14 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_uint64) {
+            pdebug(DEBUG_WARN,"Tag does not support set uint64 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint64_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        /* write the data. */
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
-        tag->data[offset+4] = (uint8_t)((val >> 32) & 0xFF);
-        tag->data[offset+5] = (uint8_t)((val >> 40) & 0xFF);
-        tag->data[offset+6] = (uint8_t)((val >> 48) & 0xFF);
-        tag->data[offset+7] = (uint8_t)((val >> 56) & 0xFF);
+        rc = tag->vtable->set_uint64(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1020,7 +1087,7 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
 
 
 
-LIB_EXPORT int64_t  plc_tag_get_int64(int32_t id, int offset)
+LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
 {
     int64_t res = INT64_MIN;
     plc_tag_p tag = lookup_tag(id);
@@ -1033,26 +1100,13 @@ LIB_EXPORT int64_t  plc_tag_get_int64(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_int64) {
+            pdebug(DEBUG_WARN,"Tag does not support get int64 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int64_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = (int64_t)(((uint64_t)(tag->data[offset])) +
-                        ((uint64_t)(tag->data[offset+1]) << 8) +
-                        ((uint64_t)(tag->data[offset+2]) << 16) +
-                        ((uint64_t)(tag->data[offset+3]) << 24) +
-                        ((uint64_t)(tag->data[offset+4]) << 32) +
-                        ((uint64_t)(tag->data[offset+5]) << 40) +
-                        ((uint64_t)(tag->data[offset+6]) << 48) +
-                        ((uint64_t)(tag->data[offset+7]) << 56));
+        res = tag->vtable->get_int64(tag, offset);
     }
 
     rc_dec(tag);
@@ -1062,9 +1116,8 @@ LIB_EXPORT int64_t  plc_tag_get_int64(int32_t id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
+LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t val)
 {
-    uint64_t val = (uint64_t)(ival);
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
 
@@ -1076,28 +1129,14 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_int64) {
+            pdebug(DEBUG_WARN,"Tag does not support set int64 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int64_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
-        tag->data[offset+4] = (uint8_t)((val >> 32) & 0xFF);
-        tag->data[offset+5] = (uint8_t)((val >> 40) & 0xFF);
-        tag->data[offset+6] = (uint8_t)((val >> 48) & 0xFF);
-        tag->data[offset+7] = (uint8_t)((val >> 56) & 0xFF);
+        rc = tag->vtable->set_int64(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1126,22 +1165,13 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_uint32) {
+            pdebug(DEBUG_WARN,"Tag does not support get uint32 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint32_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = ((uint32_t)(tag->data[offset])) +
-              ((uint32_t)(tag->data[offset+1]) << 8) +
-              ((uint32_t)(tag->data[offset+2]) << 16) +
-              ((uint32_t)(tag->data[offset+3]) << 24);
+        res = tag->vtable->get_uint32(tag, offset);
     }
 
     rc_dec(tag);
@@ -1164,25 +1194,14 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_uint32) {
+            pdebug(DEBUG_WARN,"Tag does not support set uint32 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint32_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        /* write the data. */
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+        rc = tag->vtable->set_uint32(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1206,22 +1225,13 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_int32) {
+            pdebug(DEBUG_WARN,"Tag does not support get int32 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int32_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = (int32_t)(((uint32_t)(tag->data[offset])) +
-                        ((uint32_t)(tag->data[offset+1]) << 8) +
-                        ((uint32_t)(tag->data[offset+2]) << 16) +
-                        ((uint32_t)(tag->data[offset+3]) << 24));
+        res = tag->vtable->get_int32(tag, offset);
     }
 
     rc_dec(tag);
@@ -1231,9 +1241,8 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
+LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t val)
 {
-    uint32_t val = (uint32_t)(ival);
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
 
@@ -1245,24 +1254,14 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_int32) {
+            pdebug(DEBUG_WARN,"Tag does not support set int32 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int32_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+        rc = tag->vtable->set_int32(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1291,20 +1290,13 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_uint16) {
+            pdebug(DEBUG_WARN,"Tag does not support get uint16 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint16_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = (uint16_t)((tag->data[offset]) +
-                         ((tag->data[offset+1]) << 8));
+        res = tag->vtable->get_uint16(tag, offset);
     }
 
     rc_dec(tag);
@@ -1328,22 +1320,14 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_uint16) {
+            pdebug(DEBUG_WARN,"Tag does not support set uint16 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint16_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+        rc = tag->vtable->set_uint16(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1372,20 +1356,13 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_int16) {
+            pdebug(DEBUG_WARN,"Tag does not support get int16 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int16_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = (int16_t)(((tag->data[offset])) +
-                        ((tag->data[offset+1]) << 8));
+        res = tag->vtable->get_int16(tag, offset);
     }
 
     rc_dec(tag);
@@ -1396,9 +1373,8 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
+LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t val)
 {
-    uint16_t val = (uint16_t)(ival);
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
 
@@ -1410,22 +1386,14 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_int16) {
+            pdebug(DEBUG_WARN,"Tag does not support set int16 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int16_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+        rc = tag->vtable->set_int16(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1453,19 +1421,13 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_uint8) {
+            pdebug(DEBUG_WARN,"Tag does not support get uint8 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint8_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = tag->data[offset];
+        res = tag->vtable->get_uint8(tag, offset);
     }
 
     rc_dec(tag);
@@ -1489,21 +1451,14 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_uint8) {
+            pdebug(DEBUG_WARN,"Tag does not support set uint8 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(uint8_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset] = val;
+        rc = tag->vtable->set_uint8(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1528,19 +1483,13 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_int8) {
+            pdebug(DEBUG_WARN,"Tag does not support get int8 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int8_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        res = (int8_t)(tag->data[offset]);
+        res = tag->vtable->get_int8(tag, offset);
     }
 
     rc_dec(tag);
@@ -1551,9 +1500,8 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
+LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t val)
 {
-    uint8_t val = (uint8_t)(ival);
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
 
@@ -1565,21 +1513,14 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_int8) {
+            pdebug(DEBUG_WARN,"Tag does not support set int8 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(int8_t)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset] = (uint8_t)val;
+        rc = tag->vtable->set_int8(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1594,7 +1535,6 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
 
 LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 {
-    uint64_t ures = 0;
     double res = DBL_MAX;
     plc_tag_p tag = lookup_tag(id);
 
@@ -1606,32 +1546,16 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_float64) {
+            pdebug(DEBUG_WARN,"Tag does not support get float64 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(ures)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        ures = ((uint64_t)(tag->data[offset])) +
-               ((uint64_t)(tag->data[offset+1]) << 8) +
-               ((uint64_t)(tag->data[offset+2]) << 16) +
-               ((uint64_t)(tag->data[offset+3]) << 24) +
-               ((uint64_t)(tag->data[offset+4]) << 32) +
-               ((uint64_t)(tag->data[offset+5]) << 40) +
-               ((uint64_t)(tag->data[offset+6]) << 48) +
-               ((uint64_t)(tag->data[offset+7]) << 56);
+        res = tag->vtable->get_float64(tag, offset);
     }
 
     rc_dec(tag);
-
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
 
     return res;
 }
@@ -1639,10 +1563,9 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
+LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double val)
 {
     int rc = PLCTAG_STATUS_OK;
-    uint64_t val = 0;
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -1652,31 +1575,15 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    mem_copy(&val, &fval, sizeof(val));
-
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_float64) {
+            pdebug(DEBUG_WARN,"Tag does not support set float64 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(val)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
-        tag->data[offset+4] = (uint8_t)((val >> 32) & 0xFF);
-        tag->data[offset+5] = (uint8_t)((val >> 40) & 0xFF);
-        tag->data[offset+6] = (uint8_t)((val >> 48) & 0xFF);
-        tag->data[offset+7] = (uint8_t)((val >> 56) & 0xFF);
+        rc = tag->vtable->set_float64(tag, offset, val);
     }
 
     rc_dec(tag);
@@ -1688,7 +1595,6 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
 LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 {
-    uint32_t ures;
     float res = FLT_MAX;
     plc_tag_p tag = lookup_tag(id);
 
@@ -1700,28 +1606,16 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
     }
 
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
+        /* is there a function? */
+        if(!tag->vtable->get_float32) {
+            pdebug(DEBUG_WARN,"Tag does not support get float32 operation!");
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(ures)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            break;
-        }
-
-        ures = ((uint32_t)(tag->data[offset])) +
-               ((uint32_t)(tag->data[offset+1]) << 8) +
-               ((uint32_t)(tag->data[offset+2]) << 16) +
-               ((uint32_t)(tag->data[offset+3]) << 24);
+        res = tag->vtable->get_float32(tag, offset);
     }
 
     rc_dec(tag);
-
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
 
     return res;
 }
@@ -1729,10 +1623,9 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 
 
 
-LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
+LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float val)
 {
     int rc = PLCTAG_STATUS_OK;
-    uint32_t val = 0;
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -1742,27 +1635,15 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    mem_copy(&val, &fval, sizeof(val));
-
     critical_block(tag->api_mutex) {
-        /* is there data? */
-        if(!tag->data) {
-            pdebug(DEBUG_WARN,"Tag has no data!");
-            rc = PLCTAG_ERR_NO_DATA;
+        /* is there a function? */
+        if(!tag->vtable->set_float32) {
+            pdebug(DEBUG_WARN,"Tag does not support set float32 operation!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
 
-        /* is there enough data */
-        if((offset < 0) || (offset + ((int)sizeof(val)) > tag->size)) {
-            pdebug(DEBUG_WARN,"Data offset out of bounds.");
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-            break;
-        }
-
-        tag->data[offset]   = (uint8_t)(val & 0xFF);
-        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+        rc = tag->vtable->set_float32(tag, offset, val);
     }
 
     rc_dec(tag);

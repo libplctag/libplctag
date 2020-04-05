@@ -29,6 +29,8 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
+#define REQUIRED_VERSION 2,1,0
+
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=testDINT"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 4
@@ -115,11 +117,16 @@ int main(int argc, char **argv)
     int num_threads;
     int thread_id = 0;
 
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
+
     if(argc != 2) {
         fprintf(stderr,"ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n",argc);
         return 0;
     }
-
 
     num_threads = (int)strtol(argv[1],NULL, 10);
 

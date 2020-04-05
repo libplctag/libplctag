@@ -69,6 +69,7 @@
 #define AB_EIP_CMD_CIP_MULTI            ((uint8_t)0x0A)
 #define AB_EIP_CMD_CIP_READ             ((uint8_t)0x4C)
 #define AB_EIP_CMD_CIP_WRITE            ((uint8_t)0x4D)
+#define AB_EIP_CMD_CIP_RMW              ((uint8_t)0x4E)
 #define AB_EIP_CMD_CIP_READ_FRAG        ((uint8_t)0x52)
 #define AB_EIP_CMD_CIP_WRITE_FRAG       ((uint8_t)0x53)
 #define AB_EIP_CMD_CIP_LIST_TAGS        ((uint8_t)0x55)

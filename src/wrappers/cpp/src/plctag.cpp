@@ -39,6 +39,21 @@ plctag::~plctag(void) // class destructor
 	INFO << "ended";
 }
 
+/// Static methods
+
+// return the library version as an encoded integer.
+int32_t plctag::version(void)
+{
+    return plc_tag_get_lib_version();
+}
+
+// set the debug level.  Use values from 1-5.
+void plctag::set_debug_level(plctag::DEBUG_LEVEL debug_level)
+{
+    plc_tag_set_debug_level(debug_level);
+}
+
+
 /// Connection
 
 void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_address, std::string element_name, int element_size, int element_count)
@@ -266,7 +281,7 @@ void plctag::initialize_tags(int plc_prot, std::string ip_address)
 	{
 		create_tag(1, plc_prot, 5000, ip_address, "test_string", ELE_STRING, 5);
 		create_tag(2, plc_prot, 5000, ip_address, "test_string[0]", ELE_STRING, 1);
-		create_tag(3, plc_prot, 5000, ip_address, "test_float", ELE_FLOAT, 5); 
+		create_tag(3, plc_prot, 5000, ip_address, "test_float", ELE_FLOAT, 5);
 	}
 	catch (int error)
 	{

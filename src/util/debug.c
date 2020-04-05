@@ -36,7 +36,7 @@
  */
 
 
-static int debug_level = DEBUG_NONE;
+static int global_debug_level = DEBUG_NONE;
 static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
 
@@ -53,19 +53,19 @@ static lock_t printed_version = LOCK_INIT;
 
 
 
-extern int set_debug_level(int level)
+int set_debug_level(int level)
 {
-    int old_level = debug_level;
+    int old_level = global_debug_level;
 
-    debug_level = level;
+    global_debug_level = level;
 
     return old_level;
 }
 
 
-extern int get_debug_level(void)
+int get_debug_level(void)
 {
-    return debug_level;
+    return global_debug_level;
 }
 
 
@@ -147,7 +147,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     if(!printed_version && debug_level >= DEBUG_INFO) {
         if(lock_acquire_try((lock_t*)&printed_version)) {
             /* create the output string template */
-            fprintf(stderr,"%s INFO libplctag version %s\n",prefix, VERSION);
+            fprintf(stderr,"%s INFO libplctag version %s, debug level %d.\n",prefix, VERSION, get_debug_level());
         }
     }
 

@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Author Kyle Hayes kyle.hayes@gmail.com                                *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -27,11 +27,15 @@
 
 #define REQUIRED_VERSION 2,1,0
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=1&elem_count=1&debug=1&name=pcomm_test_bool"
+/*
+ * the name TestDINTArray[3].17 picks a specific bit out of the TestDINTArray tag element 3.  This is a bit-valued tag
+ * and is only considered to be a single bit.
+ */
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[3].17"
 #define DATA_TIMEOUT 5000
 
 /*
- * Read a boolean value and toggle it.
+ * Read a bit value and toggle it.
  */
 
 
@@ -76,11 +80,18 @@ int main()
         return 0;
     }
 
-    /* print out the data */
-    b = plc_tag_get_uint8(tag,0);
-    fprintf(stderr,"bool = %d\n", b);
+    /*
+     * Read the bit value.   For a bit tag like this, always use offset of zero.
+     */
+    b = plc_tag_get_bit(tag, 0);
+    fprintf(stderr,"Before bool = %d\n", b);
 
-    plc_tag_set_uint8(tag, 0, (b ? 0 : 255));
+    plc_tag_set_bit(tag, 0, (b ? 0 : 1));
+
+    /*
+     * Because this is a single bit tag, the write will use the CIP Read-Modify-Write command to safely (we hope)
+     * update the single bit value.
+     */
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
 
@@ -99,8 +110,8 @@ int main()
     }
 
     /* print out the data */
-    b = plc_tag_get_uint8(tag,0);
-    fprintf(stderr,"bool = %d\n", b);
+    b = plc_tag_get_bit(tag, 0);
+    fprintf(stderr,"After bool = %d\n", b);
 
     /* we are done */
     plc_tag_destroy(tag);

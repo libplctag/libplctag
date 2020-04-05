@@ -28,7 +28,7 @@ using namespace std;
 
 // Uses the libplctag, has to link with external C option to allow linking correctly in C++
 extern "C" {
-#include "libplctag.h"
+#include "libplctag2.h"
 }
 
 // Define different data types

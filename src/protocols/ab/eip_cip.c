@@ -91,28 +91,28 @@ CIP Tag Info command
 
 */
 
-
-START_PACK typedef struct {
-    uint8_t request_service;    /* AB_EIP_CMD_CIP_LIST_TAGS=0x55 */
-    uint8_t request_path_size;  /* 3 word = 6 bytes */
-    uint8_t request_path[4];    /* MAGIC
-                                    0x20    get class
-                                    0x6B    tag info/symbol class
-                                    0x25    get instance (16-bit)
-                                    0x00    padding
-                                    0x00    instance byte 0
-                                    0x00    instance byte 1
-                                */
-    uint16_le instance_id;      /* actually last two bytes above */
-    uint16_le num_attributes;   /* 0x04    number of attributes to get */
-    uint16_le requested_attributes[4];  /*
-                                            0x02 attribute #2 - symbol type
-                                            0x07 attribute #7 - base type size (array element) in bytes
-                                            0x08    attribute #8 - array dimensions (3xu32)
-                                            0x01    attribute #1 - symbol name
-                                        */
-
-} END_PACK tag_list_req_DEAD;
+//
+//START_PACK typedef struct {
+//    uint8_t request_service;    /* AB_EIP_CMD_CIP_LIST_TAGS=0x55 */
+//    uint8_t request_path_size;  /* 3 word = 6 bytes */
+//    uint8_t request_path[4];    /* MAGIC
+//                                    0x20    get class
+//                                    0x6B    tag info/symbol class
+//                                    0x25    get instance (16-bit)
+//                                    0x00    padding
+//                                    0x00    instance byte 0
+//                                    0x00    instance byte 1
+//                                */
+//    uint16_le instance_id;      /* actually last two bytes above */
+//    uint16_le num_attributes;   /* 0x04    number of attributes to get */
+//    uint16_le requested_attributes[4];  /*
+//                                            0x02 attribute #2 - symbol type
+//                                            0x07 attribute #7 - base type size (array element) in bytes
+//                                            0x08    attribute #8 - array dimensions (3xu32)
+//                                            0x01    attribute #1 - symbol name
+//                                        */
+//
+//} END_PACK tag_list_req_DEAD;
 
 /*
  * This is a pseudo UDT structure for each tag entry when listing all the tags
@@ -135,6 +135,8 @@ static int build_tag_list_request_connected(ab_tag_p tag);
 static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_request_connected(ab_tag_p tag, int byte_offset);
 static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
+static int build_write_bit_request_connected(ab_tag_p tag);
+static int build_write_bit_request_unconnected(ab_tag_p tag);
 static int check_read_status_connected(ab_tag_p tag);
 static int check_read_tag_list_status_connected(ab_tag_p tag);
 static int check_read_status_unconnected(ab_tag_p tag);
@@ -152,7 +154,41 @@ struct tag_vtable_t eip_cip_vtable = {
     (tag_vtable_func)tag_read_start,
     (tag_vtable_func)ab_tag_status, /* shared */
     (tag_vtable_func)tag_tickler,
-    (tag_vtable_func)tag_write_start
+    (tag_vtable_func)tag_write_start,
+
+    /* data accessors */
+    ab_get_bit,
+    ab_set_bit,
+
+    ab_get_uint64,
+    ab_set_uint64,
+
+    ab_get_int64,
+    ab_set_int64,
+
+    ab_get_uint32,
+    ab_set_uint32,
+
+    ab_get_int32,
+    ab_set_int32,
+
+    ab_get_uint16,
+    ab_set_uint16,
+
+    ab_get_int16,
+    ab_set_int16,
+
+    ab_get_uint8,
+    ab_set_uint8,
+
+    ab_get_int8,
+    ab_set_int8,
+
+    ab_get_float64,
+    ab_set_float64,
+
+    ab_get_float32,
+    ab_set_float32
 };
 
 
@@ -690,6 +726,416 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
 
 
 
+int build_write_bit_request_connected(ab_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    eip_cip_co_req* cip = NULL;
+    uint8_t* data = NULL;
+    ab_request_p req = NULL;
+    int i;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
+        return rc;
+    }
+
+    rc = calculate_write_data_per_packet(tag);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    if(tag->write_data_per_packet < (tag->size * 2) + 2) {  /* 2 masks plus a count word. */
+        pdebug(DEBUG_ERROR,"Insufficient space to write bit masks!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    cip = (eip_cip_co_req*)(req->data);
+
+    /* point to the end of the struct */
+    data = (req->data) + sizeof(eip_cip_co_req);
+
+    /*
+     * set up the embedded CIP read packet
+     * The format is:
+     *
+     * uint8_t cmd
+     * LLA formatted name
+     * uint16_t # size of a mask element
+     * OR mask
+     * AND mask
+     */
+
+    /*
+     * set up the CIP Read-Modify-Write request type.
+     */
+    *data = AB_EIP_CMD_CIP_RMW;
+    data++;
+
+    /* copy the tag name into the request */
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+    data += tag->encoded_name_size;
+
+    /* write an INT of the mask size. */
+    *data = (uint8_t)(tag->elem_size & 0xFF); data++;
+    *data = (uint8_t)((tag->elem_size >> 8) & 0xFF); data++;
+
+    /* write the OR mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit/8) == i && tag->data[i] != 0) {
+            /*
+             * this is the byte containing the bit we care about.
+             * And it is set.
+             */
+
+            *data = (uint8_t)((1 << (tag->bit % 8)) & 0xFF);
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0;
+            data++;
+        }
+    }
+
+    /* write the AND mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit/8) == i && tag->data[i] == 0) {
+            /*
+             * this is the byte containing the bit we care about.
+             * And it is not set.
+             */
+            uint8_t mask_byte = (uint8_t)((1 << (tag->bit % 8)) & 0xFF);
+
+            /* we want to clear it, so invert. */
+            *data = ~mask_byte;
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0xFF;
+            data++;
+        }
+    }
+
+    /* let the rest of the system know that the write is complete after this. */
+    tag->offset = tag->size;
+
+
+//    /* copy encoded type info */
+//    if (tag->encoded_type_info_size) {
+//        mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
+//        data += tag->encoded_type_info_size;
+//    } else {
+//        pdebug(DEBUG_WARN,"Data type unsupported!");
+//        return PLCTAG_ERR_UNSUPPORTED;
+//    }
+//
+//    /* copy the item count, little endian */
+//    *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count));
+//    data += sizeof(uint16_le);
+//
+//    if (multiple_requests) {
+//        /* put in the byte offset */
+//        *((uint32_le*)data) = h2le32((uint32_t)(byte_offset));
+//        data += sizeof(uint32_le);
+//    }
+//
+//    /* how much data to write? */
+//    write_size = tag->size - tag->offset;
+//
+//    if(write_size > tag->write_data_per_packet) {
+//        write_size = tag->write_data_per_packet;
+//    }
+//
+//    /* now copy the data to write */
+//    mem_copy(data, tag->data + tag->offset, write_size);
+//    data += write_size;
+//    tag->offset += write_size;
+//
+//    /* need to pad data to multiple of 16-bits */
+//    if (write_size & 0x01) {
+//        *data = 0;
+//        data++;
+//    }
+
+    /* now we go back and fill in the fields of the static part */
+
+    /* encap fields */
+    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Unconnected Send*/
+
+    /* router timeout */
+    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
+
+    /* Common Packet Format fields for unconnected send. */
+    cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
+    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
+    cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
+    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
+    cip->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t*)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
+
+    /* set the size of the request */
+    req->request_size = (int)(data - (req->data));
+
+    /* allow packing if the tag allows it. */
+    req->allow_packing = tag->allow_packing;
+
+    /* add the request to the session's list. */
+    rc = session_add_request(tag->session, req);
+
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        tag->req = rc_dec(req);
+        return rc;
+    }
+
+    /* save the request for later */
+    tag->req = req;
+
+    pdebug(DEBUG_INFO, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+
+int build_write_bit_request_unconnected(ab_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    eip_cip_uc_req* cip = NULL;
+    uint8_t* data = NULL;
+    uint8_t *embed_start = NULL;
+    uint8_t *embed_end = NULL;
+    ab_request_p req = NULL;
+    int i = 0;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* get a request buffer */
+    rc = session_create_request(tag->session, tag->tag_id, &req);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
+        return rc;
+    }
+
+    rc = calculate_write_data_per_packet(tag);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to calculate valid write data per packet!.  rc=%s", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    if(tag->write_data_per_packet < (tag->size * 2) + 2) {  /* 2 masks plus a count word. */
+        pdebug(DEBUG_ERROR,"Insufficient space to write bit masks!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    cip = (eip_cip_uc_req*)(req->data);
+
+    /* point to the end of the struct */
+    data = (req->data) + sizeof(eip_cip_uc_req);
+
+    embed_start = data;
+
+    /*
+     * set up the embedded CIP read packet
+     * The format is:
+     *
+     * uint8_t cmd
+     * LLA formatted name
+     * uint16_t # number of bytes of mask elements
+     * OR mask
+     * AND mask
+     */
+
+    /*
+     * set up the CIP Read-Modify-Write type.
+     */
+    *data = AB_EIP_CMD_CIP_RMW;
+    data++;
+
+    /* copy the tag name into the request */
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+    data += tag->encoded_name_size;
+
+    /*
+     * set up the embedded CIP read packet
+     * The format is:
+     *
+     * uint8_t cmd
+     * LLA formatted name
+     * uint16_t # size of a mask element
+     * OR mask
+     * AND mask
+     */
+
+    /*
+     * set up the CIP Read-Modify-Write request type.
+     */
+    *data = AB_EIP_CMD_CIP_RMW;
+    data++;
+
+    /* copy the tag name into the request */
+    mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+    data += tag->encoded_name_size;
+
+    /* write an INT of the mask size. */
+    *data = (uint8_t)(tag->elem_size & 0xFF); data++;
+    *data = (uint8_t)((tag->elem_size >> 8) & 0xFF); data++;
+
+    /* write the OR mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit/8) == i && tag->data[i] != 0) {
+            /*
+             * this is the byte containing the bit we care about.
+             * And it is set.
+             */
+
+            *data = (uint8_t)((1 << (tag->bit % 8)) & 0xFF);
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0;
+            data++;
+        }
+    }
+
+    /* write the AND mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit/8) == i && tag->data[i] == 0) {
+            /*
+             * this is the byte containing the bit we care about.
+             * And it is not set.
+             */
+            uint8_t mask_byte = (uint8_t)((1 << (tag->bit % 8)) & 0xFF);
+
+            /* we want to clear it, so invert. */
+            *data = ~mask_byte;
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0xFF;
+            data++;
+        }
+    }
+
+    /* let the rest of the system know that the write is complete after this. */
+    tag->offset = tag->size;
+
+//    /* copy encoded type info */
+//    if (tag->encoded_type_info_size) {
+//        mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
+//        data += tag->encoded_type_info_size;
+//    } else {
+//        pdebug(DEBUG_WARN,"Data type unsupported!");
+//        return PLCTAG_ERR_UNSUPPORTED;
+//    }
+//
+//    /* copy the item count, little endian */
+//    *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count));
+//    data += sizeof(uint16_le);
+//
+//    if (multiple_requests) {
+//        /* put in the byte offset */
+//        *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
+//        data += sizeof(uint32_le);
+//    }
+//
+//    /* how much data to write? */
+//    write_size = tag->size - tag->offset;
+//
+//    if(write_size > tag->write_data_per_packet) {
+//        write_size = tag->write_data_per_packet;
+//    }
+//
+//    /* now copy the data to write */
+//    mem_copy(data, tag->data + tag->offset, write_size);
+//    data += write_size;
+//    tag->offset += write_size;
+//
+//    /* need to pad data to multiple of 16-bits */
+//    if (write_size & 0x01) {
+//        *data = 0;
+//        data++;
+//    }
+
+    /* now we go back and fill in the fields of the static part */
+    /* mark the end of the embedded packet */
+    embed_end = data;
+
+    /*
+     * after the embedded packet, we need to tell the message router
+     * how to get to the target device.
+     */
+
+    /* Now copy in the routing information for the embedded message */
+    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    data++;
+    *data = 0;
+    data++;
+    mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
+    data += tag->session->conn_path_size;
+
+    /* now fill in the rest of the structure. */
+
+    /* encap fields */
+    cip->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND); /* ALWAYS 0x006F Unconnected Send*/
+
+    /* router timeout */
+    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
+
+    /* Common Packet Format fields for unconnected send. */
+    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
+    cip->cpf_nai_item_type = h2le16(AB_EIP_ITEM_NAI); /* ALWAYS 0 */
+    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
+    cip->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
+    cip->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t*)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
+
+    /* CM Service Request - Connection Manager */
+    cip->cm_service_code = AB_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
+    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
+    cip->cm_req_path[0] = 0x20;                         /* class */
+    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
+    cip->cm_req_path[2] = 0x24;                         /* instance */
+    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
+
+    /* Unconnected send needs timeout information */
+    cip->secs_per_tick = AB_EIP_SECS_PER_TICK; /* seconds per tick */
+    cip->timeout_ticks = AB_EIP_TIMEOUT_TICKS; /* timeout = srd_secs_per_tick * src_timeout_ticks */
+
+    /* size of embedded packet */
+    cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
+
+    /* set the size of the request */
+    req->request_size = (int)(data - (req->data));
+
+    /* allow packing if the tag allows it. */
+    req->allow_packing = tag->allow_packing;
+
+    /* add the request to the session's list. */
+    rc = session_add_request(tag->session, req);
+
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        tag->req = rc_dec(req);
+        return rc;
+    }
+
+    /* save the request for later */
+    tag->req = req;
+
+    pdebug(DEBUG_INFO, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+
+
+
 
 int build_write_request_connected(ab_tag_p tag, int byte_offset)
 {
@@ -701,6 +1147,10 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
     int write_size = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
+
+    if(tag->is_bit) {
+        return build_write_bit_request_connected(tag);
+    }
 
     /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &req);
@@ -839,6 +1289,10 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
     int write_size = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
+
+    if(tag->is_bit) {
+        return build_write_bit_request_unconnected(tag);
+    }
 
     /* get a request buffer */
     rc = session_create_request(tag->session, tag->tag_id, &req);
@@ -1761,7 +2215,8 @@ static int check_write_status_connected(ab_tag_p tag)
         }
 
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
-            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)) {
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_RMW | AB_EIP_CMD_CIP_OK)) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
@@ -1876,11 +2331,13 @@ static int check_write_status_unconnected(ab_tag_p tag)
         }
 
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
-            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)) {
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)
+            && cip_resp->reply_service != (AB_EIP_CMD_CIP_RMW | AB_EIP_CMD_CIP_OK)) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
+
 
         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
             pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
@@ -2060,7 +2517,7 @@ int setup_tag_listing(ab_tag_p tag, const char *name)
             }
 
             /* we have a program tag request! */
-            if(!cip_encode_tag_name(tag, tag_parts[0])) {
+            if(cip_encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
                 mem_free(tag_parts);
                 pdebug(DEBUG_WARN, "Tag program listing, %s, is not able to be encoded!", name);
                 return PLCTAG_ERR_BAD_PARAM;

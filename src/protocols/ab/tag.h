@@ -73,11 +73,7 @@ struct ab_tag_t {
     uint8_t encoded_name[MAX_TAG_NAME];
     int encoded_name_size;
 
-    const char *read_group;
-
-    /* the connection IOI path */
-//    uint8_t conn_path[MAX_CONN_PATH];
-//    uint8_t conn_path_size;
+//    const char *read_group;
 
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
@@ -89,10 +85,15 @@ struct ab_tag_t {
     /* number of elements and size of each in the tag. */
     pccc_file_t file_type;
     elem_type_t elem_type;
+
     int elem_count;
     int elem_size;
+
     int tag_list;
     uint32_t next_id;
+
+    int is_bit;
+    uint8_t bit;
 
     /* requests */
     int pre_write_read;

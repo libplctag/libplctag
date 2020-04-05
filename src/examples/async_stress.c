@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2015 by OmanTek                                         *
- *   Author Kyle Hayes  kylehayes@omantek.com                              *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -39,6 +39,8 @@
 #include "utils.h"
 
 
+#define REQUIRED_VERSION 2,1,0
+
 //#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&use_connected_msg=0&elem_size=4&elem_count=1&name=TestBigArray[0]&debug=4"
 //#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_size=4&elem_count=1&name=F8:0&debug=4"
 #define NUM_TAGS  (10)
@@ -69,17 +71,17 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
     switch (fdwCtrlType)
     {
-        // Handle the CTRL-C signal. 
+        // Handle the CTRL-C signal.
     case CTRL_C_EVENT:
         done = 1;
         return TRUE;
 
-        // CTRL-CLOSE: confirm that the user wants to exit. 
+        // CTRL-CLOSE: confirm that the user wants to exit.
     case CTRL_CLOSE_EVENT:
         done = 1;
         return TRUE;
 
-        // Pass other signals to the next handler. 
+        // Pass other signals to the next handler.
     case CTRL_BREAK_EVENT:
         done = 1;
         return FALSE;
@@ -163,6 +165,12 @@ int main(int argc, char **argv)
     int64_t end = 0;
     int tags_done = 0;
     int creation_failed = 0;
+
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
 
     /* check the command line arguments */
     if(argc < 2 || !argv[1] || strlen(argv[1]) == 0) {

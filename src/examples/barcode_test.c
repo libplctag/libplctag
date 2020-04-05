@@ -1,9 +1,32 @@
+/***************************************************************************
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU Library General Public License as       *
+ *   published by the Free Software Foundation; either version 2 of the    *
+ *   License, or (at your option) any later version.                       *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU Library General Public     *
+ *   License along with this program; if not, write to the                 *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
 #include <inttypes.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
 #include "../lib/libplctag.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "utils.h"
+
+#define REQUIRED_VERSION 2,1,0
 
 #define TIMEOUT_MS (15000) /* a loooooong timeout */
 
@@ -26,6 +49,13 @@ int main(int argc, const char **argv)
     (void)argc;
     (void)argv;
 
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
+
+
     while(1) {
         int64_t new_time;
         int64_t diff_time;
@@ -42,7 +72,7 @@ int main(int argc, const char **argv)
         diff_time = new_time - last_read;
         total_time = new_time - first_read;
 
-        printf("Iteration took " PRId64 "ms, total elapsed time is " PRId64 "ms.\n", diff_time, total_time);
+        printf("Iteration took %" PRId64 "ms, total elapsed time is %" PRId64 "ms.\n", diff_time, total_time);
 
         last_read = new_time;
     }
