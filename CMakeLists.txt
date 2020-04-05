@@ -1,5 +1,5 @@
 #
-#   Copyright 2018, Kyle Hayes
+#   Copyright 2020, Kyle Hayes
 #   Author: Kyle Hayes
 #
 #    This library is free software; you can redistribute it and/or
@@ -290,34 +290,6 @@ endif()
 
 # add the examples and tests
 if (UNIX)
-	set(test_hashtable_FILES "${test_SRC_PATH}/hashtable/test_hashtable.c"
-							 "${util_SRC_PATH}/hashtable.h"
-							 "${util_SRC_PATH}/debug.h" )
-
-	foreach ( file ${test_hashtable_FILES} )
-		set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_FLAGS}")
-	endforeach ( file )
-
-    add_executable(test_hashtable ${test_hashtable_FILES} )
-    target_link_libraries(test_hashtable plctag pthread)
-
-# regression tests
-#    set ( regression_test_FILES "${test_SRC_PATH}/regression/test.c"
-#                                "${test_SRC_PATH}/regression/logix.c"
-#                                "${test_SRC_PATH}/regression/logix.h"
-#                                "${test_SRC_PATH}/regression/packet.c"
-#                                "${test_SRC_PATH}/regression/packet.h"
-#                                "${test_SRC_PATH}/regression/util.c"
-#                                "${test_SRC_PATH}/regression/util.h" )
-#
-#
-#    foreach ( file ${regression_test_FILES} )
-#        set_source_files_properties("${file}" PROPERTIES COMPILE_FLAGS "${BASE_FLAGS} -std=c11")
-#    endforeach ( file )
-#
-#    add_executable ( ab_regression ${regression_test_FILES} )
-#    target_link_libraries ( ab_regression plctag_dyn pthread )
-
 	# example programs
     set ( example_PROGRAMS async
                            async_stress
