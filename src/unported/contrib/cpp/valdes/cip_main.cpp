@@ -7,7 +7,7 @@
 
 #include <iostream>
 extern "C" {
-#include "libplctag.h"
+#include "libplctag2.h"
 }
 #include <cip.h>
 
@@ -87,7 +87,7 @@ for (int i=0; i< cip.GetTagsCount(); i++)
 
 int main(int argc, char *argv[])
 {
- testingCIP(); 
+ testingCIP();
  return 0;
 }
 

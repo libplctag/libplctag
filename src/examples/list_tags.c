@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2017 by Kyle Hayes                                      *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -27,6 +27,7 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
+#define REQUIRED_VERSION 2,1,0
 
 #define TAG_STRING_SIZE (200)
 #define TIMEOUT_MS (5000)
@@ -152,6 +153,12 @@ int main(int argc, char **argv)
 {
     int32_t tag;
     struct program_entry_s *programs = NULL;
+
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
 
     if(argc < 3) {
         usage();

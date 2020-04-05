@@ -21,16 +21,22 @@
 
 package libplctag;
 
-import com.sun.jna.Library;
-import com.sun.jna.Native;
-import com.sun.jna.NativeLibrary;
+import dev.java.net.jna.Library;
+import dev.java.net.jna.Native;
+import dev.java.net.jna.NativeLibrary;
 
 public class Tag implements Library {
     // static native library stuff
-    public static final String JNA_LIBRARY_NAME = "plctag";
+    public static final String JNA_LIBRARY_NAME = "plctag2";
     public static final NativeLibrary JNA_NATIVE_LIB = NativeLibrary.getInstance(Tag.JNA_LIBRARY_NAME);
-    static {
+
+static {
         Native.register(Tag.JNA_LIBRARY_NAME);
+
+        if(!Tag.checkLibraryVersion(2, 1, 0)) {
+            System.err.printLn("Library must be compatible with version 2.1.0!");
+            System.abort();
+        }
     }
 
     // error codes
@@ -74,6 +80,19 @@ public class Tag implements Library {
     public static final int PLCTAG_ERR_UNSUPPORTED     = (-35);
     public static final int PLCTAG_ERR_WINSOCK         = (-36);
     public static final int PLCTAG_ERR_WRITE           = (-37);
+    public static final int PLCTAG_ERR_PARTIAL         = (-38);
+    public static final int PLCTAG_ERR_BUSY            = (-39);
+
+    // debug levels
+    public static final int PLCTAG_DEBUG_NONE          = (0);
+    public static final int PLCTAG_DEBUG_ERROR         = (1);
+    public static final int PLCTAG_DEBUG_WARN          = (2);
+    public static final int PLCTAG_DEBUG_INFO          = (3);
+    public static final int PLCTAG_DEBUG_DETAIL        = (4);
+    public static final int PLCTAG_DEBUG_SPEW          = (5);
+
+    private static final int PLCTAG_DEBUG_LAST         = (6);
+
 
 
     private int tag_id;
@@ -83,6 +102,56 @@ public class Tag implements Library {
 
     /*
      * Public API
+     */
+
+
+
+    /* static helper methods. */
+
+    public static void setDebugLevel(int level) {
+        if(level >= 0 && level < PLCTAG_DEBUG_LAST) {
+            Tag.plc_tag_set_debug_level(level);
+        }
+    }
+
+
+
+    /*
+     * Check that the library supports the required API version.
+     *
+     * The version is passed as integers.   The three arguments are:
+     *
+     * ver_major - the major version of the library.  This must be an exact match.
+     * ver_minor - the minor version of the library.   The library must have a minor
+     *             version greater than or equal to the requested version.
+     * ver_patch - the patch version of the library.   The library must have a patch
+     *             version greater than or equal to the requested version if the minor
+     *             version is the same as that requested.   If the library minor version
+     *             is greater than that requested, any patch version will be accepted.
+     *
+     * PLCTAG_STATUS_OK is returned if the version is compatible.  If it does not,
+     * PLCTAG_ERR_UNSUPPORTED is returned.
+     *
+     * Examples:
+     *
+     * To match version 2.1.4, call plc_tag_check_lib_version(2, 1, 4).
+     *
+     */
+
+    public static boolean checkLibraryVersion(int req_major, int req_minor, int req_patch) {
+        if(Tag.plc_tag_check_lib_version(req_major, req_minor, req_patch) == Tag.PLCTAG_STATUS_OK) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+
+
+    /*
+     * Public constructor for a tag.
+     *
+     * pass in the same arguments you would pass in for the native C library.
      */
 
     public Tag(String attributes, int timeout) {
@@ -111,7 +180,7 @@ public class Tag implements Library {
 
         return rc;
     }
-    
+
     public String decodeError(int rc) {
     	return Tag.plc_tag_decode_error(rc);
     }
@@ -245,8 +314,67 @@ public class Tag implements Library {
     /**
      * The following are the wrapped native functions of the C library.
      */
-    
+
+
+    /**
+     * helper functions for using the library.
+     */
+
+
+    /**
+     * decode error codes into strings.
+     */
+
     private static native String plc_tag_decode_error(int rc);
+
+
+
+    /**
+     * Set the debug level.   See the PLCTAG_DEBUG_xxx values above.
+     */
+
+    private static native void plc_tag_set_debug_level(int debug_level);
+
+
+    /**
+     * return the library version as an encoded 32-bit integer.
+     *
+     * The version is encoded in the lower three bytes of the return value.
+     * The bytes are the patch version, the minor version and the major version.
+     *
+     * 0x00020104 is version 2.1.4
+     */
+
+    private static native int plc_tag_get_lib_version(void);
+
+
+    /**
+     * Check that the library supports the required API version.
+     *
+     * The version is passed as an encoded integer.   The encoding is the same
+     * as for plc_tag_get_lib_version().   The lower three bytes of the version
+     * are (from the least significant byte:
+     *
+     * ver_patch - the patch version of the library.   The library must have a patch
+     *             version greater than or equal to the requested version if the minor
+     *             version is the same as that requested.   If the library minor version
+     *             is greater than that requested, any patch version will be accepted.
+     * ver_minor - the minor version of the library.   The library must have a minor
+     *             version greater than or equal to the requested version.
+     * ver_major - the major version of the library.  This must be an exact match.
+     *
+     * PLCTAG_STATUS_OK is returned if the version matches.  If it does not, PLCTAG_ERR_UNSUPPORTED
+     * is returned.
+     *
+     * Examples:
+     *
+     * To match version 2.1.4, pass the encoded integer 0x00020104.
+     *
+     */
+
+    private static native int plc_tag_check_lib_version(int encoded_version);
+
+
 
 
     /**

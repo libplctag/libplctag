@@ -40,14 +40,6 @@ extern int get_debug_level(void);
 extern void debug_set_tag_id(int tag_id);
 
 extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...);
-/*#if defined(USE_STD_VARARG_MACROS) || defined(_WIN32)
-#define pdebug(d,f,...) \
-   do { if((d) <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__,f,__VA_ARGS__); } while(0)
-#else
-#define pdebug(d,f,a...) \
-   do{ if((d) <= get_debug_level()) pdebug_impl(__PRETTY_FUNCTION__,__LINE__, f, ##a ); } while(0)
-#endif
-*/
 
 #if defined(_WIN32) && defined(_MSC_VER)
     /* MinGW on Windows does not need this. */
@@ -56,8 +48,8 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
 
 #define pdebug(dbg,...)                                                \
-   do { if((dbg) && (dbg) <= get_debug_level()) pdebug_impl(__func__, __LINE__, dbg, __VA_ARGS__); } while(0)
+   do { if((dbg) != DEBUG_NONE && (dbg) <= get_debug_level()) pdebug_impl(__func__, __LINE__, dbg, __VA_ARGS__); } while(0)
 
 extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count);
-#define pdebug_dump_bytes(dbg, d,c)  do { if((dbg) && (dbg) <= get_debug_level()) pdebug_dump_bytes_impl(__func__, __LINE__,dbg,d,c); } while(0)
+#define pdebug_dump_bytes(dbg, d,c)  do { if((dbg) != DEBUG_NONE && (dbg) <= get_debug_level()) pdebug_dump_bytes_impl(__func__, __LINE__,dbg,d,c); } while(0)
 

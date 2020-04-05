@@ -25,6 +25,7 @@
 #include <lib/libplctag.h>
 #include <lib/version.h>
 #include <system/tag.h>
+#include <ab/ab_common.h>
 #include <lib/init.h>
 #include <util/rc.h>
 
@@ -48,12 +49,46 @@ static int system_tag_status(plc_tag_p tag);
 static int system_tag_write(plc_tag_p tag);
 
 struct tag_vtable_t system_tag_vtable = {
-        /* abort */     system_tag_abort,
-        /* read */      system_tag_read,
-        /* status */    system_tag_status,
-        /* tickler */   (tag_vtable_func)(intptr_t)(0),
-        /* write */     system_tag_write
-    };
+    /* abort */     system_tag_abort,
+    /* read */      system_tag_read,
+    /* status */    system_tag_status,
+    /* tickler */   (tag_vtable_func)(intptr_t)(0),
+    /* write */     system_tag_write,
+
+    /* data accessors */
+    ab_get_bit,
+    ab_set_bit,
+
+    ab_get_uint64,
+    ab_set_uint64,
+
+    ab_get_int64,
+    ab_set_int64,
+
+    ab_get_uint32,
+    ab_set_uint32,
+
+    ab_get_int32,
+    ab_set_int32,
+
+    ab_get_uint16,
+    ab_set_uint16,
+
+    ab_get_int16,
+    ab_set_int16,
+
+    ab_get_uint8,
+    ab_set_uint8,
+
+    ab_get_int8,
+    ab_set_int8,
+
+    ab_get_float64,
+    ab_set_float64,
+
+    ab_get_float32,
+    ab_set_float32
+};
 
 
 plc_tag_p system_tag_create(attr attribs)

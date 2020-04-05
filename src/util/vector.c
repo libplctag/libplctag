@@ -25,7 +25,6 @@
 #include <util/debug.h>
 #include <util/vector.h>
 
-
 struct vector_t {
     int len;
     int capacity;

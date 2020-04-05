@@ -733,7 +733,7 @@ void session_destroy(void *session_arg)
     /* so remove the session from the list so no one else can reference it. */
     remove_session(session);
 
-    pdebug(DEBUG_INFO, "Session sent %"PRId64" packets.", session->packet_count);
+    pdebug(DEBUG_INFO, "Session sent %" PRId64 " packets.", session->packet_count);
 
     /* terminate the session thread first. */
     session->terminating = 1;

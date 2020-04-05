@@ -70,7 +70,41 @@ struct tag_vtable_t lgx_pccc_vtable = {
     (tag_vtable_func)tag_read_start,
     (tag_vtable_func)tag_status,
     (tag_vtable_func)tag_tickler,
-    (tag_vtable_func)tag_write_start
+    (tag_vtable_func)tag_write_start,
+
+    /* data accessors */
+    ab_get_bit,
+    ab_set_bit,
+
+    ab_get_uint64,
+    ab_set_uint64,
+
+    ab_get_int64,
+    ab_set_int64,
+
+    ab_get_uint32,
+    ab_set_uint32,
+
+    ab_get_int32,
+    ab_set_int32,
+
+    ab_get_uint16,
+    ab_set_uint16,
+
+    ab_get_int16,
+    ab_set_int16,
+
+    ab_get_uint8,
+    ab_set_uint8,
+
+    ab_get_int8,
+    ab_set_int8,
+
+    ab_get_float64,
+    ab_set_float64,
+
+    ab_get_float32,
+    ab_set_float32
 };
 
 static int check_read_status(ab_tag_p tag);

@@ -39,7 +39,7 @@ int main(int argc, const char **argv)
 
     pdebug(DEBUG_INFO,"Starting hashtable tests.");
 
-    set_debug_level(DEBUG_SPEW);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_SPEW);
 
     /* create a hashtable */
     pdebug(DEBUG_INFO,"Creating hashtable with at least capacity %d.", START_CAPACITY);

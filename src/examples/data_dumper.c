@@ -31,6 +31,7 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
+#define REQUIRED_VERSION 2,1,0
 
 #define MAX_TAGS 5000
 #define RECONNECT_DELAY_MS 5000
@@ -477,6 +478,12 @@ int main(int argc, char **argv)
 {
     int rc;
     struct sigaction act;
+
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
 
     /* set up signal handler first. */
     act.sa_handler = SIGINT_handler;

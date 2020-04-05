@@ -27,9 +27,11 @@
 
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
+#define REQUIRED_VERSION 2,1,0
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[%d]&debug=4"
 #define NUM_TAGS  (5)
@@ -46,6 +48,12 @@ int main()
     int64_t start = 0;
     int64_t end = 0;
     int num_elems_per_tag = NUM_ELEMS / NUM_TAGS;
+
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
 
     /* create the tags */
     for(i=0; i< NUM_TAGS; i++) {
