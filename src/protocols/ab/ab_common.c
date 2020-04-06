@@ -709,14 +709,9 @@ int ab_get_bit(plc_tag_p raw_tag, int offset_bit)
         return PLCTAG_ERR_NO_DATA;
     }
 
-    /* if this is a single bit, then make sure the offset is zero. */
+    /* if this is a single bit, then make sure the offset is the tag bit. */
     if(tag->is_bit) {
-        if(offset_bit != 0) {
-            pdebug(DEBUG_WARN, "Offset must be zero for single bit tags.");
-            return PLCTAG_ERR_OUT_OF_BOUNDS;
-        } else {
-            real_offset = tag->bit;
-        }
+        real_offset = tag->bit;
     } else {
         real_offset = offset_bit;
     }
@@ -728,7 +723,7 @@ int ab_get_bit(plc_tag_p raw_tag, int offset_bit)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    pdebug(DEBUG_DETAIL, "selecting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8), tag->data[real_offset / 8]);
+    pdebug(DEBUG_SPEW, "selecting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8), tag->data[real_offset / 8]);
 
     res = !!(((1 << (real_offset % 8)) & 0xFF) & (tag->data[real_offset / 8]));
 
@@ -750,14 +745,9 @@ int ab_set_bit(plc_tag_p raw_tag, int offset_bit, int val)
         return PLCTAG_ERR_NO_DATA;
     }
 
-    /* if this is a single bit, then make sure the offset is zero. */
+    /* if this is a single bit, then make sure the offset is the tag bit. */
     if(tag->is_bit) {
-        if(offset_bit != 0) {
-            pdebug(DEBUG_WARN, "Offset must be zero for single bit tags.");
-            return PLCTAG_ERR_OUT_OF_BOUNDS;
-        } else {
-            real_offset = tag->bit;
-        }
+        real_offset = tag->bit;
     } else {
         real_offset = offset_bit;
     }
@@ -788,31 +778,34 @@ uint64_t ab_get_uint64(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting uint64 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
         return res;
     }
 
-    /* is there enough data */
+    /* is there enough data? */
     if((offset < 0) || (offset + ((int)sizeof(uint64_t)) > tag->size)) {
         pdebug(DEBUG_WARN,"Data offset out of bounds.");
         return res;
     }
 
-    res = ((uint64_t)(tag->data[offset])) +
-          ((uint64_t)(tag->data[offset+1]) << 8) +
-          ((uint64_t)(tag->data[offset+2]) << 16) +
-          ((uint64_t)(tag->data[offset+3]) << 24) +
-          ((uint64_t)(tag->data[offset+4]) << 32) +
-          ((uint64_t)(tag->data[offset+5]) << 40) +
-          ((uint64_t)(tag->data[offset+6]) << 48) +
-          ((uint64_t)(tag->data[offset+7]) << 56);
+    if(!tag->is_bit) {
+        res = ((uint64_t)(tag->data[offset])) +
+              ((uint64_t)(tag->data[offset+1]) << 8) +
+              ((uint64_t)(tag->data[offset+2]) << 16) +
+              ((uint64_t)(tag->data[offset+3]) << 24) +
+              ((uint64_t)(tag->data[offset+4]) << 32) +
+              ((uint64_t)(tag->data[offset+5]) << 40) +
+              ((uint64_t)(tag->data[offset+6]) << 48) +
+              ((uint64_t)(tag->data[offset+7]) << 56);
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -825,11 +818,6 @@ int ab_set_uint64(plc_tag_p raw_tag, int offset, uint64_t val)
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
     pdebug(DEBUG_SPEW, "Starting.");
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting uint64 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
 
     /* is there data? */
     if(!tag->data) {
@@ -844,14 +832,22 @@ int ab_set_uint64(plc_tag_p raw_tag, int offset, uint64_t val)
     }
 
     /* write the data. */
-    tag->data[offset]   = (uint8_t)(val & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
-    tag->data[offset+4] = (uint8_t)((val >> 32) & 0xFF);
-    tag->data[offset+5] = (uint8_t)((val >> 40) & 0xFF);
-    tag->data[offset+6] = (uint8_t)((val >> 48) & 0xFF);
-    tag->data[offset+7] = (uint8_t)((val >> 56) & 0xFF);
+    if(!tag->is_bit) {
+        tag->data[offset]   = (uint8_t)(val & 0xFF);
+        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
+        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+        tag->data[offset+4] = (uint8_t)((val >> 32) & 0xFF);
+        tag->data[offset+5] = (uint8_t)((val >> 40) & 0xFF);
+        tag->data[offset+6] = (uint8_t)((val >> 48) & 0xFF);
+        tag->data[offset+7] = (uint8_t)((val >> 56) & 0xFF);
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -866,11 +862,6 @@ int64_t ab_get_int64(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting int64 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -883,14 +874,22 @@ int64_t ab_get_int64(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (int64_t)(((uint64_t)(tag->data[offset])) +
-                    ((uint64_t)(tag->data[offset+1]) << 8) +
-                    ((uint64_t)(tag->data[offset+2]) << 16) +
-                    ((uint64_t)(tag->data[offset+3]) << 24) +
-                    ((uint64_t)(tag->data[offset+4]) << 32) +
-                    ((uint64_t)(tag->data[offset+5]) << 40) +
-                    ((uint64_t)(tag->data[offset+6]) << 48) +
-                    ((uint64_t)(tag->data[offset+7]) << 56));
+    if(!tag->is_bit) {
+        res = (int64_t)(((uint64_t)(tag->data[offset])) +
+                        ((uint64_t)(tag->data[offset+1]) << 8) +
+                        ((uint64_t)(tag->data[offset+2]) << 16) +
+                        ((uint64_t)(tag->data[offset+3]) << 24) +
+                        ((uint64_t)(tag->data[offset+4]) << 32) +
+                        ((uint64_t)(tag->data[offset+5]) << 40) +
+                        ((uint64_t)(tag->data[offset+6]) << 48) +
+                        ((uint64_t)(tag->data[offset+7]) << 56));
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -905,11 +904,6 @@ int ab_set_int64(plc_tag_p raw_tag, int offset, int64_t ival)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting int64 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -922,14 +916,22 @@ int ab_set_int64(plc_tag_p raw_tag, int offset, int64_t ival)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset]   = (uint8_t)(val & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
-    tag->data[offset+4] = (uint8_t)((val >> 32) & 0xFF);
-    tag->data[offset+5] = (uint8_t)((val >> 40) & 0xFF);
-    tag->data[offset+6] = (uint8_t)((val >> 48) & 0xFF);
-    tag->data[offset+7] = (uint8_t)((val >> 56) & 0xFF);
+    if(!tag->is_bit) {
+        tag->data[offset]   = (uint8_t)(val & 0xFF);
+        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
+        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+        tag->data[offset+4] = (uint8_t)((val >> 32) & 0xFF);
+        tag->data[offset+5] = (uint8_t)((val >> 40) & 0xFF);
+        tag->data[offset+6] = (uint8_t)((val >> 48) & 0xFF);
+        tag->data[offset+7] = (uint8_t)((val >> 56) & 0xFF);
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -949,11 +951,6 @@ uint32_t ab_get_uint32(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting uint32 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -966,10 +963,18 @@ uint32_t ab_get_uint32(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = ((uint32_t)(tag->data[offset])) +
-          ((uint32_t)(tag->data[offset+1]) << 8) +
-          ((uint32_t)(tag->data[offset+2]) << 16) +
-          ((uint32_t)(tag->data[offset+3]) << 24);
+    if(!tag->is_bit) {
+        res = ((uint32_t)(tag->data[offset])) +
+              ((uint32_t)(tag->data[offset+1]) << 8) +
+              ((uint32_t)(tag->data[offset+2]) << 16) +
+              ((uint32_t)(tag->data[offset+3]) << 24);
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -982,11 +987,6 @@ int ab_set_uint32(plc_tag_p raw_tag, int offset, uint32_t val)
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
     pdebug(DEBUG_SPEW, "Starting.");
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting uint32 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
 
     /* is there data? */
     if(!tag->data) {
@@ -1001,10 +1001,18 @@ int ab_set_uint32(plc_tag_p raw_tag, int offset, uint32_t val)
     }
 
     /* write the data. */
-    tag->data[offset]   = (uint8_t)(val & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+    if(!tag->is_bit) {
+        tag->data[offset]   = (uint8_t)(val & 0xFF);
+        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
+        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -1019,11 +1027,6 @@ int32_t ab_get_int32(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting int32 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1036,10 +1039,18 @@ int32_t ab_get_int32(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (int32_t)(((uint32_t)(tag->data[offset])) +
-                    ((uint32_t)(tag->data[offset+1]) << 8) +
-                    ((uint32_t)(tag->data[offset+2]) << 16) +
-                    ((uint32_t)(tag->data[offset+3]) << 24));
+    if(!tag->is_bit) {
+        res = (int32_t)(((uint32_t)(tag->data[offset])) +
+                        ((uint32_t)(tag->data[offset+1]) << 8) +
+                        ((uint32_t)(tag->data[offset+2]) << 16) +
+                        ((uint32_t)(tag->data[offset+3]) << 24));
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -1054,11 +1065,6 @@ int ab_set_int32(plc_tag_p raw_tag, int offset, int32_t ival)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting int32 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1071,10 +1077,18 @@ int ab_set_int32(plc_tag_p raw_tag, int offset, int32_t ival)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset]   = (uint8_t)(val & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+    if(!tag->is_bit) {
+        tag->data[offset]   = (uint8_t)(val & 0xFF);
+        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+        tag->data[offset+2] = (uint8_t)((val >> 16) & 0xFF);
+        tag->data[offset+3] = (uint8_t)((val >> 24) & 0xFF);
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -1094,11 +1108,6 @@ uint16_t ab_get_uint16(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting uint16 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1111,8 +1120,16 @@ uint16_t ab_get_uint16(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (uint16_t)((tag->data[offset]) +
-                     ((tag->data[offset+1]) << 8));
+    if(!tag->is_bit) {
+        res = (uint16_t)((tag->data[offset]) +
+                        ((tag->data[offset+1]) << 8));
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -1127,11 +1144,6 @@ int ab_set_uint16(plc_tag_p raw_tag, int offset, uint16_t val)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting uint16 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1144,8 +1156,16 @@ int ab_set_uint16(plc_tag_p raw_tag, int offset, uint16_t val)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset]   = (uint8_t)(val & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+    if(!tag->is_bit) {
+        tag->data[offset]   = (uint8_t)(val & 0xFF);
+        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -1165,11 +1185,6 @@ int16_t  ab_get_int16(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting int16 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1182,8 +1197,16 @@ int16_t  ab_get_int16(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (int16_t)(((tag->data[offset])) +
-                    ((tag->data[offset+1]) << 8));
+    if(!tag->is_bit) {
+        res = (int16_t)(((tag->data[offset])) +
+                        ((tag->data[offset+1]) << 8));
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -1199,11 +1222,6 @@ int ab_set_int16(plc_tag_p raw_tag, int offset, int16_t ival)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting int16 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1216,8 +1234,16 @@ int ab_set_int16(plc_tag_p raw_tag, int offset, int16_t ival)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset]   = (uint8_t)(val & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+    if(!tag->is_bit) {
+        tag->data[offset]   = (uint8_t)(val & 0xFF);
+        tag->data[offset+1] = (uint8_t)((val >> 8) & 0xFF);
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -1231,11 +1257,6 @@ uint8_t ab_get_uint8(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting uint8 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1248,7 +1269,15 @@ uint8_t ab_get_uint8(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = tag->data[offset];
+    if(!tag->is_bit) {
+        res = tag->data[offset];
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -1263,11 +1292,6 @@ int ab_set_uint8(plc_tag_p raw_tag, int offset, uint8_t val)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting uint8 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1280,7 +1304,15 @@ int ab_set_uint8(plc_tag_p raw_tag, int offset, uint8_t val)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset] = val;
+    if(!tag->is_bit) {
+        tag->data[offset] = val;
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -1296,11 +1328,6 @@ int8_t ab_get_int8(plc_tag_p raw_tag, int offset)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting int8 value is unsupported on a bit tag!");
-        return res;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1313,7 +1340,15 @@ int8_t ab_get_int8(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (int8_t)(tag->data[offset]);
+    if(!tag->is_bit) {
+        res = (int8_t)(tag->data[offset]);
+    } else {
+        if(ab_get_bit(raw_tag, 0)) {
+            res = 1;
+        } else {
+            res = 0;
+        }
+    }
 
     return res;
 }
@@ -1329,11 +1364,6 @@ int ab_set_int8(plc_tag_p raw_tag, int offset, int8_t ival)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting int8 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
     /* is there data? */
     if(!tag->data) {
         pdebug(DEBUG_WARN,"Tag has no data!");
@@ -1346,7 +1376,15 @@ int ab_set_int8(plc_tag_p raw_tag, int offset, int8_t ival)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset] = (uint8_t)val;
+    if(!tag->is_bit) {
+        tag->data[offset] = (uint8_t)val;
+    } else {
+        if(!val) {
+            rc = ab_set_bit(raw_tag, 0, 0);
+        } else {
+            rc = ab_set_bit(raw_tag, 0, 1);
+        }
+    }
 
     return rc;
 }
@@ -1408,7 +1446,7 @@ int ab_set_float64(plc_tag_p raw_tag, int offset, double fval)
     pdebug(DEBUG_SPEW, "Starting.");
 
     if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting float64 value is unsupported on a bit tag!");
+        pdebug(DEBUG_WARN, "Setting float64 value is unsupported on a bit tag!");
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -1488,7 +1526,7 @@ int ab_set_float32(plc_tag_p raw_tag, int offset, float fval)
     pdebug(DEBUG_SPEW, "Starting.");
 
     if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting float32 value is unsupported on a bit tag!");
+        pdebug(DEBUG_WARN, "Setting float32 value is unsupported on a bit tag!");
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
