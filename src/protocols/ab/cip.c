@@ -359,7 +359,7 @@ int cip_encode_tag_name(ab_tag_p tag, const char *name)
                     pdebug(DEBUG_DETAIL, "Found bit identifier %u.", tag->bit);
                     break;
                 } else {
-                    pdebug(DEBUG_WARN, "Expected a symbolic segment or a bit identifier at position %d in tag name %s", name_index);
+                    pdebug(DEBUG_WARN, "Expected a symbolic segment or a bit identifier at position %d in tag name %s", name_index, name);
                     return PLCTAG_ERR_BAD_PARAM;
                 }
             } else {
@@ -434,8 +434,13 @@ int parse_bit_segment(ab_tag_p tag, const char *name, int *name_index)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if((val < 0) || (val >= (tag->size * 8))) {
+    if((val < 0) || (val >= (tag->elem_size * 8))) {
         pdebug(DEBUG_WARN,"Bit identifier must be between 0 and %d, inclusive, was %d!", tag->size * 8, (int)val);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(tag->elem_count != 1) {
+        pdebug(DEBUG_WARN, "Bit tags must have only one element!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
