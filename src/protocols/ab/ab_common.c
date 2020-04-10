@@ -289,36 +289,50 @@ plc_tag_p ab_tag_create(attr attribs)
         break;
     }
 
-    /* determine the total tag size if this is not a tag list. */
-    if(!tag->tag_list) {
-        if(!tag->elem_size) {
-            tag->elem_size = attr_get_int(attribs, "elem_size", 0);
-        }
-        tag->elem_count = attr_get_int(attribs,"elem_count", 1);
-    }
-
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
-    /* AB PLCs are little endian. */
-    tag->endian = PLCTAG_DATA_LITTLE_ENDIAN;
+    /* determine the total tag size if this is not a tag list. */
+//    if(!tag->tag_list) {
+//        if(!tag->elem_size) {
+//            tag->elem_size = attr_get_int(attribs, "elem_size", 0);
+//        }
+//        tag->elem_count = attr_get_int(attribs,"elem_count", 1);
+//    }
 
-    /* allocate memory for the data */
-    tag->size = (tag->elem_count) * (tag->elem_size);
-    if(tag->size == 0) {
-        /* failure! Need data_size! */
-        pdebug(DEBUG_WARN,"Tag size is zero!");
-        tag->status = PLCTAG_ERR_BAD_PARAM;
-        return (plc_tag_p)tag;
-    }
 
-    /* this may be changed in the future if this is a tag list request. */
-    tag->data = (uint8_t*)mem_alloc(tag->size);
+    /* get the element count, default to 1 if missing. */
+    tag->elem_count = attr_get_int(attribs,"elem_count", 1);
 
-    if(tag->data == NULL) {
-        pdebug(DEBUG_WARN,"Unable to allocate tag data!");
-        tag->status = PLCTAG_ERR_NO_MEM;
-        return (plc_tag_p)tag;
+    /* we still need size on non Logix-class PLCs */
+    if(tag->protocol_type != AB_PROTOCOL_LGX && tag->protocol_type != AB_PROTOCOL_MLGX800) {
+        /* get the element size if it is not already set. */
+        if(!tag->elem_size) {
+            tag->elem_size = attr_get_int(attribs, "elem_size", 0);
+        }
+
+        /* allocate memory for the data */
+        tag->size = (tag->elem_count) * (tag->elem_size);
+        if(tag->size == 0) {
+            /* failure! Need data_size! */
+            pdebug(DEBUG_WARN,"Tag size is zero!");
+            tag->status = PLCTAG_ERR_BAD_PARAM;
+            return (plc_tag_p)tag;
+        }
+
+        /* this may be changed in the future if this is a tag list request. */
+        tag->data = (uint8_t*)mem_alloc(tag->size);
+
+        if(tag->data == NULL) {
+            pdebug(DEBUG_WARN,"Unable to allocate tag data!");
+            tag->status = PLCTAG_ERR_NO_MEM;
+            return (plc_tag_p)tag;
+        }
+    } else {
+        /* fill this in when we read the tag. */
+        tag->elem_size = 0;
+        tag->size = 0;
+        tag->data = NULL;
     }
 
     /*
@@ -346,6 +360,11 @@ plc_tag_p ab_tag_create(attr attribs)
 
     /* trigger the first read. */
     tag->first_read = 1;
+
+    /* kick off a read to get the tag type and size. */
+    if(tag->vtable->read) {
+        tag->vtable->read((plc_tag_p)tag);
+    }
 
     pdebug(DEBUG_INFO,"Done.");
 
