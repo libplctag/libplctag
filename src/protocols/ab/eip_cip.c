@@ -1657,6 +1657,8 @@ static int check_read_status_connected(ab_tag_p tag)
 
     /* check the status */
     do {
+        ptrdiff_t payload_size = (data_end - data);
+
         if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
@@ -1699,7 +1701,8 @@ static int check_read_status_connected(ab_tag_p tag)
          * check to see if there is any data to process.  If this is a packed
          * response, there might not be.
          */
-        if((data_end - data) > 0) {
+        payload_size = (data_end - data);
+        if(payload_size > 0) {
             /* the first byte of the response is a type byte. */
             pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
 
@@ -1744,18 +1747,25 @@ static int check_read_status_connected(ab_tag_p tag)
                 break;
             }
 
-            /* check data size. */
-            if ((tag->offset + (data_end - data)) > tag->size) {
-                pdebug(DEBUG_WARN,
-                       "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
-                       tag->offset + (int)(data_end - data),
-                       tag->size);
-                pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->offset, (int)(data_end - data));
-                rc = PLCTAG_ERR_TOO_LARGE;
-                break;
+            /* check payload size now that we have bumped past the data type info. */
+            payload_size = (data_end - data);
+
+            /* copy the data into the tag and realloc if we need more space. */
+            if(payload_size + tag->offset > tag->size) {
+                tag->size = (int)payload_size + tag->offset;
+                tag->elem_size = tag->size / tag->elem_count;
+
+                pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
+
+                tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
+                if(!tag->data) {
+                    pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
+                    rc = PLCTAG_ERR_NO_MEM;
+                    break;
+                }
             }
 
-            pdebug(DEBUG_INFO, "Got %d bytes of data", (data_end - data));
+            pdebug(DEBUG_INFO, "Got %d bytes of data", (int)payload_size);
 
             /*
              * copy the data, but only if this is not
@@ -1764,11 +1774,11 @@ static int check_read_status_connected(ab_tag_p tag)
              * put into the tag's data buffer.
              */
             if (!tag->pre_write_read) {
-                mem_copy(tag->data + tag->offset, data, (int)(data_end - data));
+                mem_copy(tag->data + tag->offset, data, (int)(payload_size));
             }
 
             /* bump the byte offset */
-            tag->offset += (int)(data_end - data);
+            tag->offset += (int)(payload_size);
         } else {
             pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
         }
@@ -1787,7 +1797,7 @@ static int check_read_status_connected(ab_tag_p tag)
         tag->read_in_progress = 0;
 
         /* skip if we are doing a pre-write read. */
-        if (!tag->pre_write_read && partial_data && tag->offset < tag->size) {
+        if (!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
@@ -2101,6 +2111,8 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
     /* check the status */
     do {
+        ptrdiff_t payload_size = (data_end - data);
+
         if (le2h16(cip_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
@@ -2185,18 +2197,26 @@ static int check_read_status_unconnected(ab_tag_p tag)
             break;
         }
 
-        /* copy data into the tag. */
-        if ((tag->offset + (data_end - data)) > tag->size) {
-            pdebug(DEBUG_WARN,
-                   "Read data is too long (%d bytes) to fit in tag data buffer (%d bytes)!",
-                   tag->offset + (int)(data_end - data),
-                   tag->size);
-            pdebug(DEBUG_WARN,"byte_offset=%d, data size=%d", tag->offset, (int)(data_end - data));
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
+        /* check payload size now that we have bumped past the data type info. */
+        payload_size = (data_end - data);
+
+        /* copy the data into the tag and realloc if we need more space. */
+        if(payload_size + tag->offset > tag->size) {
+            tag->size = (int)payload_size + tag->offset;
+            tag->elem_size = tag->size / tag->elem_count;
+
+            pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
+
+            tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
+            if(!tag->data) {
+                pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
+                rc = PLCTAG_ERR_NO_MEM;
+                break;
+            }
         }
 
-        pdebug(DEBUG_INFO, "Got %d bytes of data", (data_end - data));
+        pdebug(DEBUG_INFO, "Got %d bytes of data", (int)payload_size);
+
 
         /*
          * copy the data, but only if this is not
@@ -2205,11 +2225,11 @@ static int check_read_status_unconnected(ab_tag_p tag)
          * put into the tag's data buffer.
          */
         if (!tag->pre_write_read) {
-            mem_copy(tag->data + tag->offset, data, (int)(data_end - data));
+            mem_copy(tag->data + tag->offset, data, (int)payload_size);
         }
 
         /* bump the byte offset */
-        tag->offset += (int)(data_end - data);
+        tag->offset += (int)payload_size;
 
         /* set the return code */
         rc = PLCTAG_STATUS_OK;

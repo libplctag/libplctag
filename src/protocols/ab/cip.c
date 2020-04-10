@@ -434,8 +434,8 @@ int parse_bit_segment(ab_tag_p tag, const char *name, int *name_index)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if((val < 0) || (val >= (tag->elem_size * 8))) {
-        pdebug(DEBUG_WARN,"Bit identifier must be between 0 and %d, inclusive, was %d!", tag->size * 8, (int)val);
+    if((val < 0) || (val >= 256)) {
+        pdebug(DEBUG_WARN,"Bit identifier must be between 0 and 255, inclusive, was %d!", (int)val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
