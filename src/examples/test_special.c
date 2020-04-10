@@ -58,7 +58,7 @@ void test_version(void)
 void test_debug(void)
 {
     int32_t tag = 0;
-    int old_debug, new_debug;
+    uint32_t old_debug, new_debug;
 
     fprintf(stderr,"Testing debug tag.\n");
 
@@ -70,31 +70,31 @@ void test_debug(void)
 
     plc_tag_read(tag, 0);
 
-    old_debug = plc_tag_get_int32(tag,0);
+    old_debug = plc_tag_get_uint32(tag,0);
 
     fprintf(stderr,"Current debug level is %d\n",old_debug);
 
     new_debug = (old_debug == 3 ? 4 : 3);
 
-    plc_tag_set_int32(tag, 0, new_debug);
+    plc_tag_set_uint32(tag, 0, new_debug);
 
     plc_tag_write(tag, 0);
 
     plc_tag_read(tag, 0);
 
-    new_debug = plc_tag_get_int32(tag,0);
+    new_debug = plc_tag_get_uint32(tag,0);
 
     fprintf(stderr,"Now debug level is %d\n",new_debug);
 
     new_debug = old_debug;
 
-    plc_tag_set_int32(tag, 0, new_debug);
+    plc_tag_set_uint32(tag, 0, new_debug);
 
     plc_tag_write(tag, 0);
 
     plc_tag_read(tag, 0);
 
-    new_debug = plc_tag_get_int32(tag,0);
+    new_debug = plc_tag_get_uint32(tag,0);
 
     fprintf(stderr,"Reset debug level to %d\n",new_debug);
 
