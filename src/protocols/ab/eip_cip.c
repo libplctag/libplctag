@@ -784,8 +784,8 @@ int build_write_bit_request_connected(ab_tag_p tag)
     *data = (uint8_t)(tag->elem_size & 0xFF); data++;
     *data = (uint8_t)((tag->elem_size >> 8) & 0xFF); data++;
 
-    /* do different things depending on the type of the PLC */
-    if(tag->protocol_type == AB_PROTOCOL_LGX) {
+//    /* do different things depending on the type of the PLC */
+//    if(tag->protocol_type == AB_PROTOCOL_LGX) {
         /* write the OR mask */
         for(i=0; i < tag->elem_size; i++) {
             if((tag->bit/8) == i) {
@@ -835,62 +835,62 @@ int build_write_bit_request_connected(ab_tag_p tag)
                 data++;
             }
         }
-    } else if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
-        /* it looks like the masks are processed in big endian order???!?!? */
-
-        /* write the OR mask */
-        for(i = (tag->elem_size - 1); i >= 0; i--) {
-            if((tag->bit/8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-                /* if the bit is set, then we want to mask it on. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = mask;
-                } else {
-                    *data = (uint8_t)0;
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            } else {
-                /* this is not the data we care about. */
-                *data = (uint8_t)0;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            }
-        }
-
-        /* write the AND mask */
-        for(i = (tag->elem_size - 1); i >= 0; i--) {
-            if((tag->bit / 8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-                /* if the bit is set, then we want to _not_ mask it off. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = (uint8_t)0xFF;
-                } else {
-                    *data = ~mask;
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            } else {
-                /* this is not the data we care about. */
-                *data = (uint8_t)0xFF;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            }
-        }
-    } else {
-        pdebug(DEBUG_WARN, "Write for bit tag called for a PLC type that does not support it!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
+//    } else if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
+//        /* it looks like the masks are processed in big endian order???!?!? */
+//
+//        /* write the OR mask */
+//        for(i = (tag->elem_size - 1); i >= 0; i--) {
+//            if((tag->bit/8) == i) {
+//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+//
+//                /* if the bit is set, then we want to mask it on. */
+//                if(tag->data[tag->bit / 8] & mask) {
+//                    *data = mask;
+//                } else {
+//                    *data = (uint8_t)0;
+//                }
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            } else {
+//                /* this is not the data we care about. */
+//                *data = (uint8_t)0;
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            }
+//        }
+//
+//        /* write the AND mask */
+//        for(i = (tag->elem_size - 1); i >= 0; i--) {
+//            if((tag->bit / 8) == i) {
+//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+//
+//                /* if the bit is set, then we want to _not_ mask it off. */
+//                if(tag->data[tag->bit / 8] & mask) {
+//                    *data = (uint8_t)0xFF;
+//                } else {
+//                    *data = ~mask;
+//                }
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            } else {
+//                /* this is not the data we care about. */
+//                *data = (uint8_t)0xFF;
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            }
+//        }
+//    } else {
+//        pdebug(DEBUG_WARN, "Write for bit tag called for a PLC type that does not support it!");
+//        return PLCTAG_ERR_UNSUPPORTED;
+//    }
 
     /* let the rest of the system know that the write is complete after this. */
     tag->offset = tag->size;
@@ -1036,8 +1036,8 @@ int build_write_bit_request_unconnected(ab_tag_p tag)
     *data = (uint8_t)(tag->elem_size & 0xFF); data++;
     *data = (uint8_t)((tag->elem_size >> 8) & 0xFF); data++;
 
-    /* do different things depending on the type of the PLC */
-    if(tag->protocol_type == AB_PROTOCOL_LGX) {
+//    /* do different things depending on the type of the PLC */
+//    if(tag->protocol_type == AB_PROTOCOL_LGX) {
         /* write the OR mask */
         for(i=0; i < tag->elem_size; i++) {
             if((tag->bit/8) == i) {
@@ -1087,62 +1087,62 @@ int build_write_bit_request_unconnected(ab_tag_p tag)
                 data++;
             }
         }
-    } else if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
-        /* it looks like the masks are processed in big endian order???!?!? */
-
-        /* write the OR mask */
-        for(i = (tag->elem_size - 1); i >= 0; i--) {
-            if((tag->bit/8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-                /* if the bit is set, then we want to mask it on. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = mask;
-                } else {
-                    *data = (uint8_t)0;
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            } else {
-                /* this is not the data we care about. */
-                *data = (uint8_t)0;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            }
-        }
-
-        /* write the AND mask */
-        for(i = (tag->elem_size - 1); i >= 0; i--) {
-            if((tag->bit / 8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-
-                /* if the bit is set, then we want to _not_ mask it off. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = (uint8_t)0xFF;
-                } else {
-                    *data = ~mask;
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            } else {
-                /* this is not the data we care about. */
-                *data = (uint8_t)0xFF;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            }
-        }
-    } else {
-        pdebug(DEBUG_WARN, "Write for bit tag called for a PLC type that does not support it!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
+//    } else if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
+//        /* it looks like the masks are processed in big endian order???!?!? */
+//
+//        /* write the OR mask */
+//        for(i = (tag->elem_size - 1); i >= 0; i--) {
+//            if((tag->bit/8) == i) {
+//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+//
+//                /* if the bit is set, then we want to mask it on. */
+//                if(tag->data[tag->bit / 8] & mask) {
+//                    *data = mask;
+//                } else {
+//                    *data = (uint8_t)0;
+//                }
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            } else {
+//                /* this is not the data we care about. */
+//                *data = (uint8_t)0;
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            }
+//        }
+//
+//        /* write the AND mask */
+//        for(i = (tag->elem_size - 1); i >= 0; i--) {
+//            if((tag->bit / 8) == i) {
+//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+//
+//                /* if the bit is set, then we want to _not_ mask it off. */
+//                if(tag->data[tag->bit / 8] & mask) {
+//                    *data = (uint8_t)0xFF;
+//                } else {
+//                    *data = ~mask;
+//                }
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            } else {
+//                /* this is not the data we care about. */
+//                *data = (uint8_t)0xFF;
+//
+//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+//
+//                data++;
+//            }
+//        }
+//    } else {
+//        pdebug(DEBUG_WARN, "Write for bit tag called for a PLC type that does not support it!");
+//        return PLCTAG_ERR_UNSUPPORTED;
+//    }
 
     /* let the rest of the system know that the write is complete after this. */
     tag->offset = tag->size;
