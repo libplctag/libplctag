@@ -178,6 +178,26 @@ LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_p
 LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
 
 
+
+/*
+ * plc_tag_shutdown
+ * 
+ * Some systems may not call the atexit() handlers.  In those cases, wrappers should
+ * call this function before unloading the library or terminating.   Most OSes will cleanly 
+ * recover all system resources when a process is terminated and this will not be necessary.
+ * 
+ * THIS IS NOT THREAD SAFE!   Do not call this if you have multiple threads running against
+ * the library.  You have been warned.   Close all tags first with plc_tag_destroy() and make 
+ * sure that nothing can call any library functions until this function returns.
+ * 
+ * Normally you do not need to call this function.   This is only for certain wrappers or
+ * operating environments that use libraries in ways that prevent the normal exit handlers
+ * from working.
+ */
+
+LIB_EXPORT void plc_tag_shutdown(void);
+
+
 /*
  * plc_tag_lock
  *
