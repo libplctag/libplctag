@@ -105,16 +105,28 @@ void lib_teardown(void)
 {
     pdebug(DEBUG_INFO,"Tearing down library.");
 
-    pdebug(DEBUG_INFO,"Tearing down tag tickler thread.");
     library_terminating = 1;
-    thread_join(tag_tickler_thread);
-    thread_destroy(&tag_tickler_thread);
 
-    pdebug(DEBUG_INFO,"Tearing down tag lookup mutex.");
-    mutex_destroy(&tag_lookup_mutex);
+    if(tag_tickler_thread) {
+        pdebug(DEBUG_INFO,"Tearing down tag tickler thread.");
+        thread_join(tag_tickler_thread);
+        thread_destroy(&tag_tickler_thread);
+        tag_tickler_thread = NULL;
+    }
 
-    pdebug(DEBUG_INFO, "Destroying tag hashtable.");
-    hashtable_destroy(tags);
+    if(tag_lookup_mutex) {
+        pdebug(DEBUG_INFO,"Tearing down tag lookup mutex.");
+        mutex_destroy(&tag_lookup_mutex);
+        tag_lookup_mutex = NULL;
+    }
+
+    if(tags) {
+        pdebug(DEBUG_INFO, "Destroying tag hashtable.");
+        hashtable_destroy(tags);
+        tags = NULL;
+    }
+
+    library_terminating = 0;
 
     pdebug(DEBUG_INFO,"Done.");
 }
@@ -522,6 +534,21 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     return id;
 }
 
+
+
+
+/*
+ * plc_tag_shutdown
+ * 
+ * Some systems may not be able to call atexit() handlers.  In those cases, wrappers should
+ * call this function before unloading the library or terminating.   Most OSes will cleanly 
+ * recover all system resources when a process is terminated and this will not be necessary.
+ */
+
+LIB_EXPORT void plc_tag_shutdown(void)
+{
+    destroy_modules();
+}
 
 
 /*
