@@ -59,7 +59,7 @@
 /* request/response handling thread */
 volatile thread_p io_handler_thread = NULL;
 
-volatile int library_terminating = 0;
+volatile int ab_protocol_terminating = 0;
 
 
 
@@ -160,7 +160,7 @@ void ab_teardown(void)
 
     pdebug(DEBUG_INFO,"Terminating IO thread.");
     /* kill the IO thread first. */
-    library_terminating = 1;
+    ab_protocol_terminating = 1;
 
     /* wait for the thread to die */
     thread_join(io_handler_thread);
@@ -169,6 +169,8 @@ void ab_teardown(void)
     pdebug(DEBUG_INFO,"Freeing session information.");
 
     session_teardown();
+
+    ab_protocol_terminating = 0;
 
     pdebug(DEBUG_INFO,"Done.");
 }

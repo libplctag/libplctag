@@ -128,6 +128,8 @@ void destroy_modules(void)
     ab_teardown();
 
     lib_teardown();
+
+    library_initialized = 0;
 }
 
 
