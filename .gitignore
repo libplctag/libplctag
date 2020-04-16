@@ -55,3 +55,4 @@ temp.c
 /out/build/x64-Debug
 /out/build/ARM64
 /CMakeSettings.json
+build/*
