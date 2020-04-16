@@ -565,8 +565,8 @@ int mutex_destroy(mutex_p *m)
 {
     pdebug(DEBUG_SPEW,"destroying mutex %p", m);
 
-    if(!m) {
-        /*pdebug("null mutex pointer.");*/
+    if(!m || !*m) {
+        pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -576,7 +576,7 @@ int mutex_destroy(mutex_p *m)
 
     *m = NULL;
 
-    /*pdebug("Done.");*/
+    pdebug(DEBUG_SPEW, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
