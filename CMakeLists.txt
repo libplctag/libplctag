@@ -309,6 +309,7 @@ if (UNIX)
                            stress_test
                            string
                            test_reconnect
+                           test_shutdown
                            test_special
                            toggle_bit
                            toggle_bool
@@ -326,6 +327,7 @@ elseif(WIN32)
                            simple_dual
                            slc500
                            string
+                           test_shutdown
                            test_special
                            toggle_bit
                            toggle_bool

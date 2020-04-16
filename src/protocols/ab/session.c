@@ -127,13 +127,13 @@ void session_teardown()
         }
 
         vector_destroy(sessions);
-
         sessions = NULL;
     }
 
 
     if(session_mutex) {
         mutex_destroy((mutex_p *)&session_mutex);
+        session_mutex = NULL;
     }
 }
 
