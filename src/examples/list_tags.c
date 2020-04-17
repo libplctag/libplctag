@@ -93,11 +93,11 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
 
     /* process each tag entry. */
     do {
-        uint32_t tag_instance_id = 0;
+        /* uint32_t tag_instance_id = 0; */
         uint16_t tag_type = 0;
         uint16_t element_length = 0;
-        uint16_t tag_name_len = 0;
         uint16_t array_dims[3] = {0,};
+        uint16_t tag_name_len = 0;
         char tag_name[TAG_STRING_SIZE * 2] = {0,};
         size_t prefix_size = 0;
         size_t i;
@@ -113,7 +113,9 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         uint8_t string_data[]   string bytes (string_len of them)
         */
 
+        /* we do not actually need this.
         tag_instance_id = plc_tag_get_uint32(tag, offset);
+         */
         offset += 4;
 
         tag_type = plc_tag_get_uint16(tag, offset);
@@ -136,7 +138,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         if(prefix && strlen(prefix) > 0) {
             snprintf(tag_name, sizeof(tag_name), "%s.",prefix);
             prefix_size = strlen(prefix) + 1;
-            printf("Tag name before: %s\n", tag_name);
+            //printf("Tag name before: %s\n", tag_name);
         } else {
             prefix_size = 0;
         }
