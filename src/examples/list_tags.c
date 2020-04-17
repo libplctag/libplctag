@@ -67,7 +67,7 @@ int32_t setup_tag(char *plc_ip, char *path, char *program)
         snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=%s.@tags", plc_ip, path, program);
     }
 
-    printf("Using tag string: %s\n", tag_string);
+    //printf("Using tag string: %s\n", tag_string);
 
     tag = plc_tag_create(tag_string, TIMEOUT_MS);
     if(tag < 0) {
@@ -262,7 +262,7 @@ int main(int argc, char **argv)
 
     /* loop over the tags and output their connection strings. */
     for(struct tag_entry_s *old_tag, *tag = tags; tag; old_tag = tag, tag = tag->next, free(old_tag)) {
-        printf("Tag %s tag string: \n\tprotocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\n", tag->name, host, path, tag->elem_size, tag->elem_count, tag->name);
+        printf("Tag \"%s\": protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\n", tag->name, host, path, tag->elem_size, tag->elem_count, tag->name);
     }
 
     return 0;
