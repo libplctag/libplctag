@@ -64,6 +64,41 @@ static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
 //static int to_tag_index(int id);
 
+
+#if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
+#include <process.h>
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+{
+    switch(fdwReason) {
+        case DLL_PROCESS_ATTACH:
+            fprintf(stderr, "DllMain called with DLL_PROCESS_ATTACH\n");
+            return TRUE;
+            break;
+
+        case DLL_PROCESS_DETACH:
+            fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
+            return TRUE;
+            break;
+
+        case DLL_THREAD_ATTACH:
+            fprintf(stderr, "DllMain called with DLL_THREAD_ATTACH\n");
+            return TRUE;
+            break;
+
+        case DLL_THREAD_DETACH:
+            fprintf(stderr, "DllMain called with DLL_THREAD_DETACH\n");
+            return TRUE;
+            break;
+
+        default:
+            fprintf(stderr, "DllMain called with unexpected code %d!\n", fdwReason);
+            return TRUE;
+            break;
+    }
+}
+
+#endif
+
 /*
  * Initialize the library.  This is called in a threadsafe manner and
  * only called once.
