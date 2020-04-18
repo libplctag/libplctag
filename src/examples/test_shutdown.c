@@ -24,7 +24,7 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,2,0
+#define REQUIRED_VERSION 2,1,3
 
 #define TAG_PATH "protocol=ab-eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray"
 #define DATA_TIMEOUT 5000
