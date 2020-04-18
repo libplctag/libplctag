@@ -50,6 +50,10 @@ struct tag_vtable_t system_tag_vtable = {
     /* write */     system_tag_write,
 
     /* data accessors */
+
+    /* get_int_attrib */ NULL,
+    /* set_int_attrib */ NULL,
+
     /* get_bit */ NULL,
     /* set_bit */ NULL,
 

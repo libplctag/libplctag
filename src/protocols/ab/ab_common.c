@@ -95,6 +95,9 @@ struct tag_vtable_t default_vtable = {
     default_write,
 
     /* data accessors */
+    ab_get_int_attrib,
+    ab_set_int_attrib,
+
     ab_get_bit,
     ab_set_bit,
 
@@ -713,6 +716,32 @@ void ab_tag_destroy(ab_tag_p tag)
 }
 
 
+int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value)
+{
+    int res = default_value;
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* match the attribute. */
+    if(str_cmp_i(attrib_name, "elem_size") == 0) {
+        res = tag->elem_size;
+    } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
+        res = tag->elem_count;
+    }
+
+    return res;
+}
+
+
+int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
+{
+    (void)raw_tag;
+    (void)attrib_name;
+    (void)new_value;
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
 
 
 

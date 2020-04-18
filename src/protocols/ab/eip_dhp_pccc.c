@@ -57,6 +57,9 @@ struct tag_vtable_t eip_dhp_pccc_vtable = {
     (tag_vtable_func)tag_write_start,
 
     /* data accessors */
+    ab_get_int_attrib,
+    ab_set_int_attrib,
+    
     ab_get_bit,
     ab_set_bit,
 

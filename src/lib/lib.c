@@ -1003,6 +1003,113 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
 
 
+
+LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, int default_value)
+{
+    int res = default_value;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* get library attributes */
+    if(id == 0) {
+        if(str_cmp_i(attrib_name, "version_major") == 0) {
+            res = (int)version_major;
+        } else if(str_cmp_i(attrib_name, "version_minor") == 0) {
+            res = (int)version_minor;
+        } else if(str_cmp_i(attrib_name, "version_patch") == 0) {
+            res = (int)version_patch;
+        } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
+            res = (int)get_debug_level();
+        } 
+    } else {
+        tag = lookup_tag(id);
+
+        if(!tag) {
+            pdebug(DEBUG_WARN,"Tag not found.");
+            return default_value;
+        }
+
+        critical_block(tag->api_mutex) {
+            /* match the generic ones first. */
+            if(str_cmp_i(attrib_name, "size") == 0) {
+                res = (int)tag->size;
+            } else if(str_cmp_i(attrib_name, "read_cache_ms") == 0) {
+                /* FIXME - what happens if this overflows? */
+                res = (int)tag->read_cache_ms;
+            } else  {
+                if(tag->vtable->get_int_attrib) {
+                    res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
+                } 
+            }
+
+        }
+
+        rc_dec(tag);
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return res;
+}
+
+
+
+LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, int new_value)
+{
+    int res = PLCTAG_ERR_NOT_FOUND;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* get library attributes */
+    if(id == 0) {
+        if(str_cmp_i(attrib_name, "debug_level") == 0) {
+            if(new_value >= DEBUG_ERROR && new_value < DEBUG_SPEW) {
+                set_debug_level(new_value);
+                res = PLCTAG_STATUS_OK;
+            } else {
+                res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+        } 
+    } else {
+        tag = lookup_tag(id);
+
+        if(!tag) {
+            pdebug(DEBUG_WARN,"Tag not found.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
+
+        critical_block(tag->api_mutex) {
+            /* match the generic ones first. */
+            if(str_cmp_i(attrib_name, "read_cache_ms") == 0) {
+                if(new_value >= 0) {
+                    /* expire the cache. */
+                    tag->read_cache_expire = (int64_t)0;
+                    tag->read_cache_ms = (int64_t)new_value;
+                    res = PLCTAG_STATUS_OK;
+                } else {
+                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+            } else {
+                if(tag->vtable->set_int_attrib) {
+                    res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
+                } 
+            }
+        }
+
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return res;
+}
+
+
+
+
 LIB_EXPORT int plc_tag_get_size(int32_t id)
 {
     int result = 0;

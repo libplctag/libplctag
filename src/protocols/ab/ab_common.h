@@ -46,6 +46,9 @@ extern int ab_tag_abort(ab_tag_p tag);
 extern int ab_tag_status(ab_tag_p tag);
 
 
+extern int ab_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
+extern int ab_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
+
 extern int ab_get_bit(plc_tag_p tag, int offset_bit);
 extern int ab_set_bit(plc_tag_p tag, int offset_bit, int val);
 

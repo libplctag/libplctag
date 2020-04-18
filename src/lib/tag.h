@@ -64,6 +64,8 @@ struct tag_vtable_t {
 
     /* data accessors. */
 //    int (*get_size)(plc_tag_p tag);
+    int (*get_int_attrib)(plc_tag_p tag, const char *attrib_name, int default_value);
+    int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
 
     int (*get_bit)(plc_tag_p tag, int offset_bit);
     int (*set_bit)(plc_tag_p tag, int offset_bit, int val);
