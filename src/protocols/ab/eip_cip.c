@@ -820,7 +820,7 @@ int build_write_bit_request_connected(ab_tag_p tag)
                 if(tag->data[tag->bit / 8] & mask) {
                     *data = (uint8_t)0xFF;
                 } else {
-                    *data = ~mask;
+                    *data = (uint8_t)(~mask);
                 }
 
                 pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
@@ -1072,7 +1072,7 @@ int build_write_bit_request_unconnected(ab_tag_p tag)
                 if(tag->data[tag->bit / 8] & mask) {
                     *data = (uint8_t)0xFF;
                 } else {
-                    *data = ~mask;
+                    *data = (uint8_t)(~mask);
                 }
 
                 pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);

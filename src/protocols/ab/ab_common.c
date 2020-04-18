@@ -780,7 +780,7 @@ int ab_set_bit(plc_tag_p raw_tag, int offset_bit, int val)
     if(val) {
         tag->data[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
     } else {
-        tag->data[real_offset / 8] &= ~((uint8_t)(1 << (real_offset % 8)));
+        tag->data[real_offset / 8] &= (uint8_t)(~(1 << (real_offset % 8)));
     }
 
     res = PLCTAG_STATUS_OK;
