@@ -311,6 +311,10 @@ LIB_EXPORT int plc_tag_write(int32_t tag, int timeout);
  * Tag data accessors.
  */
 
+
+LIB_EXPORT int plc_tag_get_int_attribute(int32_t tag, const char *attrib_name, int default_value);
+LIB_EXPORT int plc_tag_set_int_attribute(int32_t tag, const char *attrib_name, int new_value);
+
 LIB_EXPORT int plc_tag_get_size(int32_t tag);
 
 LIB_EXPORT int plc_tag_get_bit(int32_t tag, int offset_bit);
