@@ -71,30 +71,28 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     switch(fdwReason) {
         case DLL_PROCESS_ATTACH:
-            fprintf(stderr, "DllMain called with DLL_PROCESS_ATTACH\n");
-            return TRUE;
+            //fprintf(stderr, "DllMain called with DLL_PROCESS_ATTACH\n");
             break;
 
         case DLL_PROCESS_DETACH:
             fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
-            return TRUE;
+            destroy_modules();
             break;
 
         case DLL_THREAD_ATTACH:
-            fprintf(stderr, "DllMain called with DLL_THREAD_ATTACH\n");
-            return TRUE;
+            //fprintf(stderr, "DllMain called with DLL_THREAD_ATTACH\n");
             break;
 
         case DLL_THREAD_DETACH:
-            fprintf(stderr, "DllMain called with DLL_THREAD_DETACH\n");
-            return TRUE;
+            //fprintf(stderr, "DllMain called with DLL_THREAD_DETACH\n");
             break;
 
         default:
-            fprintf(stderr, "DllMain called with unexpected code %d!\n", fdwReason);
-            return TRUE;
+            //fprintf(stderr, "DllMain called with unexpected code %d!\n", fdwReason);
             break;
     }
+
+    return TRUE;
 }
 
 #endif
