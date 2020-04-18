@@ -144,7 +144,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         }
 
         /* copy the name string bytes. */
-        for(i=0; i < (int)tag_name_len && (i + prefix_size) < ((TAG_STRING_SIZE*2)-1); i++) {
+        for(i=0; i < (size_t)tag_name_len && (size_t)(i + prefix_size) < (size_t)((TAG_STRING_SIZE*2)-1); i++) {
             tag_name[i + prefix_size] = plc_tag_get_int8(tag,offset);
             offset++;
             tag_name[i + prefix_size +1] = 0;
