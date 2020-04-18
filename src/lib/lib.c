@@ -75,7 +75,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             break;
 
         case DLL_PROCESS_DETACH:
-            fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
+            //fprintf(stderr, "DllMain called with DLL_PROCESS_DETACH\n");
             destroy_modules();
             break;
 
