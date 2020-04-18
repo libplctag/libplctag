@@ -32,9 +32,22 @@
 #define TAG_STRING_SIZE (200)
 #define TIMEOUT_MS (5000)
 
+#define TAG_IS_SYSTEM ((uint16_t)0x1000)
+#define TAG_DIM_MASK ((uint16_t)0x6000)
+
 struct program_entry_s {
     struct program_entry_s *next;
     char *program_name;
+};
+
+struct tag_entry_s {
+    struct tag_entry_s *next;
+    char *name;
+    uint16_t type;
+    uint16_t elem_size;
+    uint16_t elem_count;
+    uint16_t num_dimensions;
+    uint16_t dimensions[3];
 };
 
 void usage()
@@ -49,12 +62,12 @@ int32_t setup_tag(char *plc_ip, char *path, char *program)
     char tag_string[TAG_STRING_SIZE] = {0,};
 
     if(!program || strlen(program) == 0) {
-        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=@tags&debug=4", plc_ip, path);
+        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=@tags", plc_ip, path);
     } else {
-        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=%s.@tags&debug=4", plc_ip, path, program);
+        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&cpu=lgx&name=%s.@tags", plc_ip, path, program);
     }
 
-    printf("Using tag string: %s\n", tag_string);
+    //printf("Using tag string: %s\n", tag_string);
 
     tag = plc_tag_create(tag_string, TIMEOUT_MS);
     if(tag < 0) {
@@ -66,7 +79,7 @@ int32_t setup_tag(char *plc_ip, char *path, char *program)
 }
 
 
-void get_list(int32_t tag, struct program_entry_s **head)
+void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct program_entry_s **prog_list)
 {
     int rc = PLCTAG_STATUS_OK;
     int offset = 0;
@@ -78,13 +91,16 @@ void get_list(int32_t tag, struct program_entry_s **head)
         usage();
     }
 
+    /* process each tag entry. */
     do {
-        uint32_t tag_instance_id = 0;
+        /* uint32_t tag_instance_id = 0; */
         uint16_t tag_type = 0;
         uint16_t element_length = 0;
+        uint16_t array_dims[3] = {0,};
         uint16_t tag_name_len = 0;
-        uint32_t array_dims[3] = {0,};
         char tag_name[TAG_STRING_SIZE * 2] = {0,};
+        size_t prefix_size = 0;
+        size_t i;
 
         //offset = index * 104; /* MAGIC - size of a symbol entry. */
 
@@ -97,7 +113,9 @@ void get_list(int32_t tag, struct program_entry_s **head)
         uint8_t string_data[]   string bytes (string_len of them)
         */
 
+        /* we do not actually need this.
         tag_instance_id = plc_tag_get_uint32(tag, offset);
+         */
         offset += 4;
 
         tag_type = plc_tag_get_uint16(tag, offset);
@@ -106,27 +124,36 @@ void get_list(int32_t tag, struct program_entry_s **head)
         element_length = plc_tag_get_uint16(tag, offset);
         offset += 2;
 
-        array_dims[0] = plc_tag_get_uint32(tag, offset);
+        array_dims[0] = (uint16_t)plc_tag_get_uint32(tag, offset);
         offset += 4;
-        array_dims[1] = plc_tag_get_uint32(tag, offset);
+        array_dims[1] = (uint16_t)plc_tag_get_uint32(tag, offset);
         offset += 4;
-        array_dims[2] = plc_tag_get_uint32(tag, offset);
+        array_dims[2] = (uint16_t)plc_tag_get_uint32(tag, offset);
         offset += 4;
 
         tag_name_len = plc_tag_get_uint16(tag, offset);
         offset += 2;
 
-        for(int i=0;i < (int)tag_name_len && i<((TAG_STRING_SIZE*2)-1);i++) {
-            tag_name[i] = plc_tag_get_int8(tag,offset);
+        /* copy the prefix string. */
+        if(prefix && strlen(prefix) > 0) {
+            snprintf(tag_name, sizeof(tag_name), "%s.",prefix);
+            prefix_size = strlen(prefix) + 1;
+            //printf("Tag name before: %s\n", tag_name);
+        } else {
+            prefix_size = 0;
+        }
+
+        /* copy the name string bytes. */
+        for(i=0; i < (int)tag_name_len && (i + prefix_size) < ((TAG_STRING_SIZE*2)-1); i++) {
+            tag_name[i + prefix_size] = plc_tag_get_int8(tag,offset);
             offset++;
-            tag_name[i+1] = 0;
+            tag_name[i + prefix_size +1] = 0;
         }
 
         index++;
 
-        printf("index %d: Tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
-
-        if(head && strncmp(tag_name, "Program:", strlen("Program:")) == 0) {
+        /* if the tag is actually a program, put it on the program list for later. */
+        if(prog_list && strncmp(tag_name, "Program:", strlen("Program:")) == 0) {
             struct program_entry_s *entry = malloc(sizeof(*entry));
 
             if(!entry) {
@@ -134,12 +161,41 @@ void get_list(int32_t tag, struct program_entry_s **head)
                 usage();
             }
 
-            printf("\tFound program: %s\n", tag_name);
+            //printf("index %d: Found program: %s\n", index, tag_name);
 
-            entry->next = *head;
+            entry->next = *prog_list;
             entry->program_name = strdup(tag_name);
 
-            *head = entry;
+            *prog_list = entry;
+        } else if(!(tag_type & TAG_IS_SYSTEM)) {
+            struct tag_entry_s *tag_entry = calloc(1, sizeof(*tag_entry));
+
+            if(!tag_entry) {
+                fprintf(stderr, "Unable to allocate memory for tag entry!\n");
+                usage();
+            }
+
+            tag_entry->elem_count = 1;
+
+            //printf("index %d: Found tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
+
+            /* fill in the fields. */
+            tag_entry->name = strdup(tag_name);
+            tag_entry->elem_size = element_length;
+            tag_entry->num_dimensions = (uint16_t)((tag_type & TAG_DIM_MASK) >> 13);
+            tag_entry->dimensions[0] = array_dims[0];
+            tag_entry->dimensions[1] = array_dims[1];
+            tag_entry->dimensions[2] = array_dims[2];
+
+            for(uint16_t i=0; i < tag_entry->num_dimensions; i++) {
+                tag_entry->elem_count = (uint16_t)((uint16_t)tag_entry->elem_count * (uint16_t)(tag_entry->dimensions[i]));
+            }
+
+            /* link it up to the list */
+            tag_entry->next = *tag_list;
+            *tag_list = tag_entry;
+        } else {
+            //printf("index %d: Found system tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
         }
     } while(rc == PLCTAG_STATUS_OK && offset < plc_tag_get_size(tag));
 
@@ -151,8 +207,11 @@ void get_list(int32_t tag, struct program_entry_s **head)
 
 int main(int argc, char **argv)
 {
+    char *host = NULL;
+    char *path = NULL;
     int32_t tag;
     struct program_entry_s *programs = NULL;
+    struct tag_entry_s *tags = NULL;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -169,25 +228,29 @@ int main(int argc, char **argv)
         usage();
     }
 
+    host = argv[1];
+
     if(!argv[2] || strlen(argv[2]) == 0) {
         printf("PLC path must not be zero length!\n");
         usage();
     }
 
+    path = argv[2];
+
     /* get the controller tags first. */
 
-    printf("Getting controller tags.\n");
+    fprintf(stderr, "Getting controller tags.\n");
 
-    tag = setup_tag(argv[1], argv[2], NULL);
+    tag = setup_tag(host, path, NULL);
 
-    get_list(tag, &programs);
+    get_list(tag, NULL, &tags, &programs);
 
     while(programs) {
         struct program_entry_s *program = programs;
 
-        printf("\n\nGetting tags for program: %s.\n", program->program_name);
+        fprintf(stderr, "Getting tags for program: %s.\n", program->program_name);
         tag = setup_tag(argv[1], argv[2], program->program_name);
-        get_list(tag, NULL);
+        get_list(tag, program->program_name, &tags, NULL);
 
         /* go to the next one */
         programs = programs->next;
@@ -195,6 +258,11 @@ int main(int argc, char **argv)
         /* now clean up */
         free(program->program_name);
         free(program);
+    }
+
+    /* loop over the tags and output their connection strings. */
+    for(struct tag_entry_s *old_tag, *tag = tags; tag; old_tag = tag, tag = tag->next, free(old_tag)) {
+        printf("Tag \"%s\": protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\n", tag->name, host, path, tag->elem_size, tag->elem_count, tag->name);
     }
 
     return 0;
