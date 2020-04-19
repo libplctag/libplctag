@@ -311,6 +311,7 @@ if (UNIX)
                            test_reconnect
                            test_shutdown
                            test_special
+                           test_tag_attributes
                            toggle_bit
                            toggle_bool
                            write_string
@@ -329,6 +330,7 @@ elseif(WIN32)
                            string
                            test_shutdown
                            test_special
+                           test_tag_attributes
                            toggle_bit
                            toggle_bool
                            write_string
