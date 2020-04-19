@@ -33,7 +33,7 @@
 #include "utils.h"
 
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,1,3
 
 
 #define PLC_LIB_BIT     (0x101)
@@ -95,27 +95,10 @@ void check_version(void)
 
 void print_lib_version(void)
 {
-    int32_t tag = 0;
-    int i, size = 0;
-    char ver[16] = {0,};
-
-    tag = plc_tag_create("make=system&family=library&name=version", DATA_TIMEOUT);
-    if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        return;
-    }
-
-    size = plc_tag_get_size(tag);
-
-    plc_tag_read(tag, 0);
-
-    for(i=0; i < size && i < (int)sizeof(ver); i++) {
-        ver[i] = (char)plc_tag_get_uint8(tag,i);
-    }
-
-    printf("Library version %s.\n", ver);
-
-    plc_tag_destroy(tag);
+    printf("Library version %d.%d.%d.\n", 
+                plc_tag_get_int_attribute(0, "version_major", 0),
+                plc_tag_get_int_attribute(0, "version_minor", 0),
+                plc_tag_get_int_attribute(0, "version_patch", 0));
 }
 
 
