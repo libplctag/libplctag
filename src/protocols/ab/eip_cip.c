@@ -158,8 +158,8 @@ struct tag_vtable_t eip_cip_vtable = {
 
     /* data accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib, 
-    
+    ab_set_int_attrib,
+
     ab_get_bit,
     ab_set_bit,
 
@@ -221,6 +221,11 @@ int tag_tickler(ab_tag_p tag)
 
         tag->status = rc;
 
+        /* if the operation completed, make a note so that the callback will be called. */
+        if(!tag->read_in_progress) {
+            tag->read_complete = 1;
+        }
+
         pdebug(DEBUG_SPEW,"Done.  Read in progress.");
 
         return rc;
@@ -234,6 +239,11 @@ int tag_tickler(ab_tag_p tag)
         }
 
         tag->status = rc;
+
+        /* if the operation completed, make a note so that the callback will be called. */
+        if(!tag->write_in_progress) {
+            tag->write_complete = 1;
+        }
 
         pdebug(DEBUG_SPEW, "Done. Write in progress.");
 

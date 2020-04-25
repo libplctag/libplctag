@@ -207,6 +207,22 @@ THREAD_FUNC(tag_tickler_func)
                     tag->vtable->tickler(tag);
 
                     mutex_unlock(tag->api_mutex);
+
+                    if(tag->read_complete) {
+                        if(tag->callback) {
+                            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, plc_tag_status(tag->tag_id));
+                        }
+
+                        tag->read_complete = 0;
+                    }
+
+                    if(tag->write_complete) {
+                        if(tag->callback) {
+                            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, plc_tag_status(tag->tag_id));
+                        }
+
+                        tag->write_complete = 0;
+                    }
                 }
             }
 
@@ -572,9 +588,9 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
 /*
  * plc_tag_shutdown
- * 
+ *
  * Some systems may not be able to call atexit() handlers.  In those cases, wrappers should
- * call this function before unloading the library or terminating.   Most OSes will cleanly 
+ * call this function before unloading the library or terminating.   Most OSes will cleanly
  * recover all system resources when a process is terminated and this will not be necessary.
  */
 
@@ -582,6 +598,115 @@ LIB_EXPORT void plc_tag_shutdown(void)
 {
     destroy_modules();
 }
+
+
+/*
+ * plc_tag_register_callback
+ *
+ * This function registers the passed callback function with the tag.  Only one callback function
+ * may be registered on a tag at a time!
+ *
+ * Once registered, any of the following operations on or in the tag will result in the callback
+ * being called:
+ *
+ *      * starting a tag read operation.
+ *      * a tag read operation ending.
+ *      * a tag read being aborted.
+ *      * starting a tag write operation.
+ *      * a tag write operation ending.
+ *      * a tag write being aborted.
+ *      * a tag being destroyed
+ *
+ * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
+ * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
+ * This means that YOU are responsible for making sure that all client application data structures the callback
+ * function touches are safe to access by the callback!
+ *
+ * Do not do any operations in the callback that block for any significant time.   This will cause library
+ * performance to be poor or even to start failing!
+ *
+ * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * not guaranteed that they will work and they will possibly hang or fail.
+ *
+ * Return values:
+ *void (*tag_callback_func)(int32_t tag_id, uint32_t event, int status)
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ */
+
+LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status))
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(tag->callback) {
+            rc = PLCTAG_ERR_DUPLICATE;
+        } else {
+            rc = PLCTAG_STATUS_OK;
+            tag->callback = tag_callback_func;
+        }
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+
+
+
+/*
+ * plc_tag_unregister_callback
+ *
+ * This function removes the callback already registered on the tag.
+ *
+ * Return values:
+ *
+ * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
+ * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
+ */
+
+LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(tag->callback) {
+            rc = PLCTAG_STATUS_OK;
+            tag->callback = NULL;
+        } else {
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+
 
 
 /*
@@ -693,6 +818,10 @@ int plc_tag_abort(int32_t id)
         rc = tag->vtable->abort(tag);
     }
 
+    if(tag->callback) {
+        tag->callback(id, PLCTAG_EVENT_ABORTED, PLCTAG_STATUS_OK);
+    }
+
     rc_dec(tag);
 
     pdebug(DEBUG_INFO, "Done.");
@@ -743,6 +872,10 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
         tag->vtable->abort(tag);
     }
 
+    if(tag->callback) {
+        tag->callback(tag_id, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
+    }
+
     /* release the reference outside the mutex. */
     rc_dec(tag);
 
@@ -778,6 +911,10 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
         return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    if(tag->callback) {
+        tag->callback(id, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
     }
 
     critical_block(tag->api_mutex) {
@@ -845,9 +982,20 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
                 }
             }
 
+            /* don't trigger the callback twice. */
+            if(tag->read_complete) {
+                tag->read_complete = 0;
+            }
+
             pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
         }
     } /* end of api mutex block */
+
+    if(tag->callback) {
+        if(timeout) {
+            tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
+        }
+    }
 
     rc_dec(tag);
 
@@ -926,6 +1074,10 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         return PLCTAG_ERR_NOT_FOUND;
     }
 
+    if(tag->callback) {
+        tag->callback(id, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK);
+    }
+
     critical_block(tag->api_mutex) {
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->write(tag);
@@ -982,9 +1134,20 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 }
             }
 
+            /* don't trigger the callback twice. */
+            if(tag->write_complete) {
+                tag->write_complete = 0;
+            }
+
             pdebug(DEBUG_INFO,"elapsed time %lldms",(time_ms()-start_time));
         }
     } /* end of api mutex block */
+
+    if(tag->callback) {
+        if(timeout) {
+            tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
+        }
+    }
 
     rc_dec(tag);
 
@@ -1021,7 +1184,7 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             res = (int)version_patch;
         } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
             res = (int)get_debug_level();
-        } 
+        }
     } else {
         tag = lookup_tag(id);
 
@@ -1040,7 +1203,7 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             } else  {
                 if(tag->vtable->get_int_attrib) {
                     res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
-                } 
+                }
             }
 
         }
@@ -1071,7 +1234,7 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
             } else {
                 res = PLCTAG_ERR_OUT_OF_BOUNDS;
             }
-        } 
+        }
     } else {
         tag = lookup_tag(id);
 
@@ -1094,7 +1257,7 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
             } else {
                 if(tag->vtable->set_int_attrib) {
                     res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
-                } 
+                }
             }
         }
 

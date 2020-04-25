@@ -48,7 +48,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project is version 2.1
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 3)
+set (libplctag_VERSION_PATCH 4)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -308,6 +308,7 @@ if (UNIX)
                            stress_api_lock
                            stress_test
                            string
+                           test_callback
                            test_reconnect
                            test_shutdown
                            test_special
@@ -328,6 +329,7 @@ elseif(WIN32)
                            simple_dual
                            slc500
                            string
+                           test_callback
                            test_shutdown
                            test_special
                            test_tag_attributes

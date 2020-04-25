@@ -46,7 +46,7 @@ struct tag_vtable_t plc5_vtable = {
     /* data accessors */
     ab_get_int_attrib,
     ab_set_int_attrib,
-    
+
     ab_get_bit,
     ab_set_bit,
 
@@ -162,6 +162,12 @@ int tag_tickler(ab_tag_p tag)
         pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
         tag->status = rc;
+
+        /* check to see if the read finished. */
+        if(!tag->read_in_progress) {
+            tag->read_complete = 1;
+        }
+
         return rc;
     }
 
@@ -169,6 +175,12 @@ int tag_tickler(ab_tag_p tag)
         pdebug(DEBUG_SPEW, "Write in progress.");
         rc = check_write_status(tag);
         tag->status = rc;
+
+        /* check to see if the write finished. */
+        if(!tag->write_in_progress) {
+            tag->write_complete = 1;
+        }
+
         return rc;
     }
 

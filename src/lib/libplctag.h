@@ -181,21 +181,92 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
 
 /*
  * plc_tag_shutdown
- * 
+ *
  * Some systems may not call the atexit() handlers.  In those cases, wrappers should
- * call this function before unloading the library or terminating.   Most OSes will cleanly 
+ * call this function before unloading the library or terminating.   Most OSes will cleanly
  * recover all system resources when a process is terminated and this will not be necessary.
- * 
+ *
  * THIS IS NOT THREAD SAFE!   Do not call this if you have multiple threads running against
- * the library.  You have been warned.   Close all tags first with plc_tag_destroy() and make 
+ * the library.  You have been warned.   Close all tags first with plc_tag_destroy() and make
  * sure that nothing can call any library functions until this function returns.
- * 
+ *
  * Normally you do not need to call this function.   This is only for certain wrappers or
  * operating environments that use libraries in ways that prevent the normal exit handlers
  * from working.
  */
 
 LIB_EXPORT void plc_tag_shutdown(void);
+
+
+
+/*
+ * plc_tag_register_callback
+ *
+ * This function registers the passed callback function with the tag.  Only one callback function
+ * may be registered on a tag at a time!
+ *
+ * Once registered, any of the following operations on or in the tag will result in the callback
+ * being called:
+ *
+ *      * starting a tag read operation.
+ *      * a tag read operation ending.
+ *      * a tag read being aborted.
+ *      * starting a tag write operation.
+ *      * a tag write operation ending.
+ *      * a tag write being aborted.
+ *      * a tag being destroyed
+ *
+ * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
+ * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
+ * This means that YOU are responsible for making sure that all client application data structures the callback
+ * function touches are safe to access by the callback!
+ *
+ * Do not do any operations in the callback that block for any significant time.   This will cause library
+ * performance to be poor or even to start failing!
+ *
+ * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * not guaranteed that they will work and they will possibly hang or fail.
+ *
+ * Return values:
+ *
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ */
+
+#define PLCTAG_EVENT_READ_STARTED       (1)
+#define PLCTAG_EVENT_READ_COMPLETED     (2)
+
+#define PLCTAG_EVENT_WRITE_STARTED      (3)
+#define PLCTAG_EVENT_WRITE_COMPLETED    (4)
+
+#define PLCTAG_EVENT_ABORTED            (5)
+
+#define PLCTAG_EVENT_DESTROYED          (6)
+
+LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
+
+
+
+
+
+
+/*
+ * plc_tag_unregister_callback
+ *
+ * This function removes the callback already registered on the tag.
+ *
+ * Return values:
+ *
+ * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
+ * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
+ */
+
+LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
+
+
+
 
 
 /*
@@ -210,6 +281,7 @@ LIB_EXPORT void plc_tag_shutdown(void);
  * This should be used to initially lock a tag when starting operations with it
  * followed by a call to plc_tag_unlock when you have everything you need from the tag.
  */
+
 
 LIB_EXPORT int plc_tag_lock(int32_t tag);
 

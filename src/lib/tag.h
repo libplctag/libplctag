@@ -123,6 +123,9 @@ typedef struct tag_vtable_t *tag_vtable_p;
                         int tag_id; \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \
+                        int read_complete; \
+                        int write_complete; \
+                        void (*callback)(int32_t tag_id, int event, int status); \
                         int size; \
                         uint8_t *data
 
