@@ -197,9 +197,8 @@ plc_tag_p ab_tag_create(attr attribs)
 
     if(!tag) {
         pdebug(DEBUG_ERROR,"Unable to allocate memory for AB EIP tag!");
-        return PLC_TAG_P_NULL;
+        return (plc_tag_p)NULL;
     }
-
 
     pdebug(DEBUG_DETAIL, "tag=%p", tag);
 
@@ -218,8 +217,9 @@ plc_tag_p ab_tag_create(attr attribs)
 
     if(check_cpu(tag, attribs) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"CPU type not valid or missing.");
-        tag->status = PLCTAG_ERR_BAD_DEVICE;
-        return (plc_tag_p)tag;
+        /* tag->status = PLCTAG_ERR_BAD_DEVICE; */
+        rc_dec(tag);
+        return (plc_tag_p)NULL;
     }
 
     /* get the connection path.  We need this to make a decision about the PLC. */
