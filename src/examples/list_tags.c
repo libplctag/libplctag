@@ -181,6 +181,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
 
             /* fill in the fields. */
             tag_entry->name = strdup(tag_name);
+            tag_entry->type = tag_type;
             tag_entry->elem_size = element_length;
             tag_entry->num_dimensions = (uint16_t)((tag_type & TAG_DIM_MASK) >> 13);
             tag_entry->dimensions[0] = array_dims[0];
@@ -262,7 +263,25 @@ int main(int argc, char **argv)
 
     /* loop over the tags and output their connection strings. */
     for(struct tag_entry_s *old_tag, *tag = tags; tag; old_tag = tag, tag = tag->next, free(old_tag)) {
-        printf("Tag \"%s\": protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\n", tag->name, host, path, tag->elem_size, tag->elem_count, tag->name);
+        printf("Tag \"%s", tag->name);
+        switch(tag->num_dimensions) {
+            case 1:
+                printf("[%d]", tag->dimensions[0]);
+                break;
+
+            case 2:
+                printf("[%d,%d]", tag->dimensions[0], tag->dimensions[1]);
+                break;
+
+            case 3:
+                printf("[%d,%d,%d]", tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
+                break;
+
+            default:
+                break;
+        }
+
+        printf("\" (%04x): protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\n", tag->type, host, path, tag->elem_size, tag->elem_count, tag->name);
     }
 
     return 0;
