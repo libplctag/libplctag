@@ -937,7 +937,7 @@ THREAD_FUNC(session_handler)
          * This keeps the overall memory usage lower.
          */
 
-        pdebug(DEBUG_DETAIL,"Critical block.");
+        pdebug(DEBUG_SPEW,"Critical block.");
         critical_block(session->mutex) {
             purge_aborted_requests_unsafe(session);
         }
@@ -993,7 +993,7 @@ THREAD_FUNC(session_handler)
             idle = 1;
 
             /* if there is work to do, make sure we do not disconnect. */
-            pdebug(DEBUG_DETAIL,"Critical block.");
+            pdebug(DEBUG_SPEW,"Critical block.");
             critical_block(session->mutex) {
                 if(vector_length(session->requests) > 0) {
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
