@@ -176,7 +176,7 @@ THREAD_FUNC(tag_tickler_func)
     pdebug(DEBUG_INFO,"Starting.");
 
     while(!library_terminating) {
-        int max_index;
+        int max_index = 0;
 
         critical_block(tag_lookup_mutex) {
             max_index = hashtable_capacity(tags);

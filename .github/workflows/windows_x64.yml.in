@@ -1,0 +1,39 @@
+name: Windows x64 CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build_x64:
+
+    runs-on: windows-latest
+
+    env:
+      VERSION: "@VERSION@"
+      ARTIFACT: "libplctag_@VERSION@_windows_x64.zip"
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Create build directory
+      run: mkdir ${{ env.BUILD }}
+
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+
+    - name: Test
+      run: echo "no-op for now"
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}

@@ -1,17 +1,17 @@
 |   OS   | Version | 64-bit | 32-bit |
 |   --:  |   :-:   |   :-:  |   :-:  |
-|Ubuntu  |  18.04  | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Ubuntu%20x64?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=8&branchName=master) | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Ubuntu%20x86?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=9&branchName=master) |
-|Windows |  1909   | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Windows%20x64?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=6&branchName=master) | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20Windows%20x86?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=7&branchName=master) |
-|macOS   |  10.14  | [![Build Status](https://dev.azure.com/kylehayes0607/libplctag/_apis/build/status/kyle-github.libplctag%20macOS?branchName=master)](https://dev.azure.com/kylehayes0607/libplctag/_build/latest?definitionId=5&branchName=master) | Not Supported |
+|Ubuntu  |  18.04  | ![Ubuntu x64 CI](https://github.com/kyle-github/libplctag/workflows/Ubuntu%20x64%20CI/badge.svg) | ![Ubuntu x86 CI](https://github.com/kyle-github/libplctag/workflows/Ubuntu%20x86%20CI/badge.svg) |
+|Windows |  10 (Server 19) | ![Windows x64 CI](https://github.com/kyle-github/libplctag/workflows/Windows%20x64%20CI/badge.svg) | ![Windows x86 CI](https://github.com/kyle-github/libplctag/workflows/Windows%20x86%20CI/badge.svg) |
+|macOS   |  10.15  | ![macOS x64 CI](https://github.com/kyle-github/libplctag/workflows/macOS%20x64%20CI/badge.svg) | Not Supported |
 
 
 libplctag
 =========
 
-This library for Linux and Windows provides a means of accessing PLCs to read and write
+This library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
 simple data.
 
-Stable Version: 2.0
+Stable Version: 2.1
 
 Old Stable Version: 1.5
 
@@ -82,7 +82,7 @@ Wrappers exist for:
 * Pascal (included)
 * .Net/C#
   * [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet) supports .Net Core and is on Nuget!
-  * [Mesta Automation](https://github.com/mesta1/libplctag-csharp).
+  * [Mesta Automation](https://github.com/mesta1/libplctag-csharp).   Very popular with a nice introductory video.
   * [possibly experimental by timyhac, libplctag.Net](https://github.com/timyhac/libplctag.NET).   A relatively thin wrapper but loads the correct binary DLL at runtime.
 * Labview (see [here](https://github.com/dirtyb15/libplctag-labview))
 
@@ -94,10 +94,10 @@ Take a look at the [test page](https://github.com/kyle-github/libplctag/wiki/PLC
 
 The library has been in production use since 2012 and is in use by multiple organizations including some very large ones.
 
-We are on API version 2.0.  That includes:
+We are on API version 2.1.  That includes:
 
 * CMake build system for better cross-platform support.
-* Binary releases built for Ubuntu 18.04, macOS 10.14 and Windows 10.  All 64-bit.
+* Binary releases built for Ubuntu 18.04, macOS 10.15 and Windows 10.  All 64-bit, with 32-bit binary releases for Windows and Ubuntu.
 * support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).   Firmware versions 16, 20 and 31.
   * read/write 8, 16, 32, and 64-bit signed and unsigned integers.
   * read/write single booleans under some circumstances (BOOL arrays are still tricky).
@@ -127,7 +127,7 @@ We are on API version 2.0.  That includes:
   * we do not use Windows for our deployments.
   * only the tag_rw example program has been tested (though that tests most of the API).
 * sample code.
-* a stable API.  The release of 2.0 is the first breaking change in over four years.
+* a stable API.  The release of 2.0 was the first breaking change in over four years.
   * stable C API with wrappers in Python and Java.
   * user-contributed/user-supported wrappers for C# and Pascal.
 * support for request bundling on supporting PLCs (ControlLogix and CompactLogix).  This is automatic within the library.
@@ -136,7 +136,7 @@ We are on API version 2.0.  That includes:
 * other groups use this library (if you do, please let us know).
 
 PLC5, SLC 500, MicroLogix, Micro8X0, CompactLogix and ControlLogix are trademarks of Rockwell/Allen Bradley.
-Windows and Visual Studio are trademarks of Microsoft.  Please let us know if we missed some so
+Windows and Visual Studio are trademarks of Microsoft.  Apple owns the trademark on macOS.  Please let us know if we missed some so
 that we can get all the attributions correct!
 
 We need and welcome help with the following:
@@ -171,11 +171,15 @@ like malloc and free.  If you wrap the library, you will need to make sure that
 finalizers take care of calling the destruction functions to deallocate internally
 allocated memory.
 
+Some platforms or systems may need to explicitly free library internal resources (LabVIEW).
+Most systems will not need to do anything explicit.  Just create and destroy tag objects
+as you need to and the library internals will keep track and release resources when needed.
+
 
 Threading
 =========
 
-Access to the C API is thread-safe.  All threads hit a mutex when going through any API call.
+Access to the C API is thread-safe.  All threads hold a mutex when going through any API call.
 By "thread safe" we mean that you should not be able to crash the library by sharing a tag object
 between threads.  That does not mean that you will get useful results!
 
@@ -196,8 +200,11 @@ and one thread per target PLC.
 The API
 =======
 
-The library uses opaque integer handles with accessor functions.  There are only a
-few functions in the API.
+The library uses integer handles with accessor functions.  The API is designed to be as easy to wrap with other code and
+programming languages as possible.   There are a few exceptions, but generally all data passed to and from the library
+are integers of various forms.  The library supports multiple levels of complexity from very simple synchronous operation
+to fully asynchronous behavior with callback notifications.   Where possible, the library provides as much support for retries
+and other reliability features as possible without getting in the way of your application's logic and control.
 
 These functions operate on all types of tags. API functions that take a timeout argument
 can be used in a synchronous manner or asynchronous manner.   Providing a timeout will
@@ -206,7 +213,12 @@ to start out with the synchronous versions of the API and move to the asynchrono
 you understand it better and need the performance.
 
 ```c
+    void plc_tag_set_debug_level(int debug_level);
+    int plc_tag_check_lib_version(int req_major, int req_minor, int req_patch);
     int32_t plc_tag_create(const char *attrib_str, int timeout);
+    void plc_tag_shutdown(void);
+    int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
+    int plc_tag_unregister_callback(int32_t tag_id);
     int plc_tag_lock(int32_t tag_id);
     int plc_tag_unlock(int32_t tag_d);
     int plc_tag_abort(int32_t tag_id);
@@ -223,7 +235,10 @@ local data.  Note that after you set something, you must
 still call plc_tag_write(tag) to push it to the PLC.
 
 ```c
-    /* version 2.0 */
+    /* version 2.1 */
+    int plc_tag_get_int_attribute(int32_t tag, const char *attrib_name, int default_value);
+    int plc_tag_set_int_attribute(int32_t tag, const char *attrib_name, int new_value);
+
     uint64_t plc_tag_get_uint64(int32_t tag_id, int offset);
     int plc_tag_set_uint64(int32_t tag_id, int offset, uint64_t val);
 
@@ -267,25 +282,24 @@ Oh, wait, you want code!
 
 (this is from simple.c in the examples)
 
-The following code reads 10 32-bit signed integers, updates them,
+The following code reads 200 32-bit signed integers (DINT), updates them,
 then writes them back out and rereads them from a tag named myDINTArray
 in a Logix-class Allen-Bradley PLC located at IP 192.168.1.42.  The PLC
 processor is located at slot zero in the backplane.
 
-This example is for Linux.  It reads 200 DINTs (32-bit integers) from a tag, increments
-the values of each one and writes them back.
-
 
 ```c
 #include <stdio.h>
+#include <stdlib.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
+#define REQUIRED_VERSION 2,1,0
 
 #define TAG_PATH "protocol=ab-eip&gateway=192.168.56.121&path=1,5&cpu=LGX&elem_size=4&elem_count=200&name=TestBigArray&debug=4"
 #define ELEM_COUNT 200
 #define ELEM_SIZE 4
-#define DATA_TIMEOUT 5000 /* 5000 milliseconds */
+#define DATA_TIMEOUT 5000
 
 
 int main()
@@ -293,6 +307,12 @@ int main()
     int32_t tag = 0;
     int rc;
     int i;
+
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        exit(1);
+    }
 
     /* create the tag */
     tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
@@ -319,12 +339,12 @@ int main()
 
     /* print out the data */
     for(i=0; i < ELEM_COUNT; i++) {
-        fprintf(stderr,"data[%d]=%d\n", i, plc_tag_get_int32(tag, (i*ELEM_SIZE)));
+        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
     }
 
-    /* now test a write, increment each element by one. */
+    /* now test a write */
     for(i=0; i < ELEM_COUNT; i++) {
-        int32_t val = plc_tag_get_int32(tag, (i*ELEM_SIZE));
+        int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
 
         val = val+1;
 
@@ -373,6 +393,7 @@ a tag, this library is not for you.
 
 That said, we have some longer term things in mind:
 
+* add more tests to the CI pipeline so that development can move more quickly.
 * increase portability.  This will be ongoing.
 * make parts of the library optional.
 * add more protocols.  We hope that the API will be able to support most of the commonly used PLC data access protocols.
