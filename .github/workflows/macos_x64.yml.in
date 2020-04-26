@@ -1,0 +1,40 @@
+name: macOS x64 CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build_x64:
+
+    runs-on: macos-latest
+
+    env:
+      VERSION: "@VERSION@"
+      ARTIFACT: "libplctag_@VERSION@_macos_x64.zip"
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Create build directory
+      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release ..
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build .
+
+    - name: Test
+      run: echo "no-op for now"
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}
+

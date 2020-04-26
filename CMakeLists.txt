@@ -372,6 +372,17 @@ endif()
 # Generate files from templates
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
+# build all the GitHub Actions config files
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/macos_x64.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/macos_x64.yml" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ubuntu_x64.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ubuntu_x64.yml" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ubuntu_x86.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ubuntu_x86.yml" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x64.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x64.yml" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x86.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x86.yml" @ONLY)
+
+
+# make sure the .h file is in the output directory
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+
 # for installation
 if(UNIX)
 	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
