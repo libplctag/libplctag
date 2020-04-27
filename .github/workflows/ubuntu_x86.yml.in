@@ -13,7 +13,7 @@ jobs:
 
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_ubuntu_x64.zip"
+      ARTIFACT: "libplctag_@VERSION@_ubuntu_x86.zip"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
