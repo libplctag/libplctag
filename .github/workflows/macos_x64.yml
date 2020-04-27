@@ -2,7 +2,7 @@ name: macOS x64 CI
 
 on:
   push:
-    branches: [ test_actions ]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 

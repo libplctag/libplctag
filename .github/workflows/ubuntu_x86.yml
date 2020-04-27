@@ -2,7 +2,7 @@ name: Ubuntu x86 CI
 
 on:
   push:
-    branches: [ test_actions ]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
