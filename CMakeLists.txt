@@ -378,6 +378,7 @@ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ubuntu_x64.yml.in"
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ubuntu_x86.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ubuntu_x86.yml" @ONLY)
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x64.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x64.yml" @ONLY)
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x86.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/windows_x86.yml" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
 
 
 # make sure the .h file is in the output directory
