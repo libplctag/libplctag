@@ -112,7 +112,7 @@ jobs:
 
     env:
       VERSION: "2.1.4"
-      ARTIFACT: "libplctag_2.1.4_windows_x64.zip"
+      ARTIFACT: "libplctag_2.1.4_windows_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
