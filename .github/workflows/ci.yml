@@ -29,8 +29,8 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Set up build environment
-      if: matrix.os == ubuntu
-        if: build_type == x64
+      if: matrix.os == ubuntu &&
+        if: matrix.build_type == x64
             run: sudo apt update; sudo apt-get -y --force-yes install build-essential cmake
         else:
             run: sudo apt update; sudo apt-get -y --force-yes install build-essential cmake gcc-multilib g++-multilib
@@ -40,12 +40,12 @@ jobs:
 
     - name: Configure CMake
       if: matrix.os == ubuntu
-        if: build_type == x64
+        if: matrix.build_type == x64
             run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 ..
         else:
             run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 ..
       if: matrix.os == windows
-        if: build_type == x64
+        if: matrix.build_type == x64
             run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64
         else:
             run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32
