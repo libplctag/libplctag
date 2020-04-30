@@ -2,7 +2,7 @@ name: libplctag CI
 
 on:
   push:
-    branches: [ github-actions ]
+    branches: [ master ]
   pull_request:
     branches: [ master ]
 
