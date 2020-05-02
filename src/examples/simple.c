@@ -24,11 +24,9 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,1,4
 
-#define TAG_PATH "protocol=ab-eip&gateway=192.168.56.121&path=1,5&cpu=LGX&elem_size=4&elem_count=200&name=TestBigArray&debug=4"
-#define ELEM_COUNT 200
-#define ELEM_SIZE 4
+#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=200&name=TestBigArray"
 #define DATA_TIMEOUT 5000
 
 
@@ -37,6 +35,8 @@ int main()
     int32_t tag = 0;
     int rc;
     int i;
+    int elem_size = 0;
+    int elem_count = 0;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -50,13 +50,13 @@ int main()
     /* everything OK? */
     if(tag < 0) {
         fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        return 0;
+        return 1;
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
         fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return 0;
+        return 1;
     }
 
     /* get the data */
@@ -64,30 +64,36 @@ int main()
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return 0;
+        return 1;
     }
 
+    /* get the tag size and element size. */
+    elem_size = plc_tag_get_int_attribute(tag, "elem_size", 0);
+    elem_count = plc_tag_get_int_attribute(tag, "elem_count", 0);
+
+    fprintf(stderr,"Tag has %d elements each of %d bytes.\n", elem_count, elem_size);
+
     /* print out the data */
-    for(i=0; i < ELEM_COUNT; i++) {
-        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+    for(i=0; i < elem_count; i++) {
+        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*elem_size)));
     }
 
     /* now test a write */
-    for(i=0; i < ELEM_COUNT; i++) {
-        int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+    for(i=0; i < elem_count; i++) {
+        int32_t val = plc_tag_get_int32(tag,(i*elem_size));
 
         val = val+1;
 
         fprintf(stderr,"Setting element %d to %d\n",i,val);
 
-        plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
+        plc_tag_set_int32(tag,(i*elem_size),val);
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr,"ERROR: Unable to write the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return 0;
+        return 1;
     }
 
     /* get the data again*/
@@ -96,12 +102,12 @@ int main()
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return 0;
+        return 1;
     }
 
     /* print out the data */
-    for(i=0; i < ELEM_COUNT; i++) {
-        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+    for(i=0; i < elem_count; i++) {
+        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*elem_size)));
     }
 
     /* we are done */
