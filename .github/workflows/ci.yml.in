@@ -2,7 +2,7 @@ name: libplctag CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ github-actions ]
   pull_request:
     branches: [ master ]
 
@@ -34,7 +34,16 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake --build .
 
     - name: Test
-      run: echo "no-op for now"
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
+        sleep 2
+        echo "start tests..."
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/simple
+        echo "test callback use."
+        ${{ env.DIST }}/test_callback
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
