@@ -27,7 +27,7 @@
 
 #define REQUIRED_VERSION 2,1,4
 
-#define TAG_PATH "protocol=ab-eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_count=10&name=TestDINTArray"
+#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
 #define DATA_TIMEOUT 5000
 
 typedef int32_t DINT;
@@ -112,7 +112,7 @@ int main()
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major, version_minor, version_patch);
-        exit(1);
+        return 1;
     }
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
@@ -153,7 +153,8 @@ int main()
     rc = plc_tag_register_callback(tag, tag_callback);
     if(rc != PLCTAG_STATUS_OK) {
         printf( "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
-        free((void*)TestDINTArray);
+        free((void *)TestDINTArray);
+        TestDINTArray = NULL;
         plc_tag_destroy(tag);
         return 1;
     }
@@ -162,7 +163,8 @@ int main()
     rc = plc_tag_register_callback(tag, tag_callback);
     if(rc != PLCTAG_ERR_DUPLICATE) {
         printf( "Got incorrect status when registering callback twice %s!\n", plc_tag_decode_error(rc));
-        free((void*)TestDINTArray);
+        free((void *)TestDINTArray);
+        TestDINTArray = NULL;
         plc_tag_destroy(tag);
         return 1;
     }
