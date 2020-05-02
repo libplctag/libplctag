@@ -375,6 +375,31 @@ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OU
 # build the GitHub Actions config file
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
 
+# build the simulator for testing.
+if(UNIX)
+    set(AB_SERVER_FILES ${test_SRC_PATH}/ab_server/src/cip.c
+                        ${test_SRC_PATH}/ab_server/src/cip.h
+                        ${test_SRC_PATH}/ab_server/src/cpf.c
+                        ${test_SRC_PATH}/ab_server/src/cpf.h
+                        ${test_SRC_PATH}/ab_server/src/eip.c
+                        ${test_SRC_PATH}/ab_server/src/eip.h
+                        ${test_SRC_PATH}/ab_server/src/main.c
+                        ${test_SRC_PATH}/ab_server/src/plc.h
+                        ${test_SRC_PATH}/ab_server/src/slice.h
+                        ${test_SRC_PATH}/ab_server/src/socket.c
+                        ${test_SRC_PATH}/ab_server/src/socket.h
+                        ${test_SRC_PATH}/ab_server/src/tcp_server.c
+                        ${test_SRC_PATH}/ab_server/src/tcp_server.h
+                        ${test_SRC_PATH}/ab_server/src/utils.c
+                        ${test_SRC_PATH}/ab_server/src/utils.h
+    )
+
+#    foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
+#        set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+#    endforeach()
+
+    add_executable(ab_server ${AB_SERVER_FILES})
+endif()
 
 # make sure the .h file is in the output directory
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
