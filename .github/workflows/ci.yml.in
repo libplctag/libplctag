@@ -18,13 +18,14 @@ jobs:
       DIST: "${{ github.workspace }}/build/bin_dist"
 
     steps:
-    - uses: actions/checkout@v2
-
     - name: Set up build environment
       run: sudo apt install build-essential cmake
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v2
 
     - name: Configure CMake
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 ..
