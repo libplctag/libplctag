@@ -128,6 +128,10 @@ void slice_dump(slice_s s)
     size_t max_row, row, column;
     char row_buf[300]; /* MAGIC */
 
+    if(!debug_is_on) {
+        return;
+    }
+
     /* determine the number of rows we will need to print. */
     max_row = (slice_len(s)  + (COLUMNS - 1))/COLUMNS;
 
