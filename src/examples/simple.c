@@ -26,9 +26,9 @@
 
 #define REQUIRED_VERSION 2,1,4
 
-#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=200&name=TestBigArray"
+/* test against a DINT array. */
+#define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=1000&name=TestBigArray"
 #define DATA_TIMEOUT 5000
-
 
 int main()
 {
@@ -50,12 +50,6 @@ int main()
     /* everything OK? */
     if(tag < 0) {
         fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        return 1;
-    }
-
-    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
         return 1;
     }
 
