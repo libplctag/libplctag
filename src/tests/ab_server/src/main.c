@@ -263,7 +263,7 @@ void parse_tag(const char *tag_str, plc_s *plc)
     tag->dimensions[0] = 0;
     tag->dimensions[1] = 0;
     tag->dimensions[2] = 0;
-    num_dims = sscanf(dim_str, "%zu,%zu,%zu,%*zu", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
+    num_dims = sscanf(dim_str, "%zu,%zu,%zu,%*u", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
 
     free(dim_str);
 
@@ -294,7 +294,7 @@ void parse_tag(const char *tag_str, plc_s *plc)
     } else {
         tag->dimensions[2] = 1;
     }
-
+ 
     /* allocate the tag data array. */
     info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
@@ -321,7 +321,7 @@ slice_s request_handler(slice_s input, slice_s output, void *plc)
     if(slice_len(input) >= EIP_HEADER_SIZE) {
         uint16_t eip_len = slice_get_uint16_le(input, 2);
 
-        if(slice_len(input) >= (EIP_HEADER_SIZE + eip_len)) {
+        if(slice_len(input) >= (size_t)(EIP_HEADER_SIZE + eip_len)) {
             return eip_dispatch_request(input, output, (plc_s *)plc);
         }
     }
