@@ -90,7 +90,7 @@ inline static uint16_t slice_get_uint16_le(slice_s input_buf, size_t offset) {
     uint16_t res = 0;
 
     if(slice_in_bounds(input_buf, offset + 1)) {
-        res = ((uint16_t)slice_get_uint8(input_buf, offset) + (uint16_t)(slice_get_uint8(input_buf, offset + 1) << 8));
+        res = (uint16_t)(slice_get_uint8(input_buf, offset) + (slice_get_uint8(input_buf, offset + 1) << 8));
     }
 
     return res;

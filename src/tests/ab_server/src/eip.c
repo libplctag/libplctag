@@ -70,7 +70,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc)
     header.options = slice_get_uint32_le(input, 20);
 
     /* sanity checks */
-    if(slice_len(input) != header.length + EIP_HEADER_SIZE) {
+    if(slice_len(input) != (size_t)(header.length + EIP_HEADER_SIZE)) {
         info("Illegal EIP packet.   Length should be %d but is %d!", header.length + EIP_HEADER_SIZE, slice_len(input));
         return slice_make_err(TCP_SERVER_BAD_REQUEST);
     }
