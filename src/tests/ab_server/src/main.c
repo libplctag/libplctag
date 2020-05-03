@@ -167,10 +167,6 @@ void process_args(int argc, const char **argv, plc_s *plc)
     }
 }
 
-//void parse_plc(const char *plc_str, plc_s *plc)
-//{
-//
-//}
 
 void parse_path(const char *path_str, plc_s *plc)
 {
@@ -209,13 +205,15 @@ void parse_tag(const char *tag_str, plc_s *plc)
     char *type_str = NULL;
     char *dim_str = NULL;
     int num_dims = 0;
+    int rc = 0;
 
     if(!tag) {
         error("Unable to allocate memory for new tag!");
     }
 
-    if(sscanf(tag_str,"%m[a-zA-Z0-9_]:%m[A-Z][%m[0-9,]]", &(tag->name), &type_str, &dim_str) != 3) {
-        fprintf(stderr, "Tag format is incorrect in \"%s\"!\n", tag_str);
+    rc = sscanf(tag_str,"%m[a-zA-Z0-9_]:%m[A-Z][%m[0-9,]]", &(tag->name), &type_str, &dim_str);
+    if(rc != 3) {
+        fprintf(stderr, "Tag format is incorrect in \"%s\", matched %d parts and expected to match 3 parts!\n", tag_str, rc);
         if(tag->name) {
             info("Tag name: %s\n", tag->name);
         }
