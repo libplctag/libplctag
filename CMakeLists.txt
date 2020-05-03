@@ -394,9 +394,9 @@ if(UNIX)
                         ${test_SRC_PATH}/ab_server/src/utils.h
     )
 
-    foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-        set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
-    endforeach()
+#    foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
+#        set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+#    endforeach()
 
     add_executable(ab_server ${AB_SERVER_FILES})
 endif()
