@@ -37,9 +37,8 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray2:DINT[2000] &
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
-        echo "start tests..."
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
         echo "test callback use."
