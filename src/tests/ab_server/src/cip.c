@@ -360,12 +360,12 @@ slice_s handle_read_request(slice_s input, slice_s output, plc_s *plc)
         return make_cip_error(output, read_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
-    if(!process_tag_segment(plc, slice_from_slice(input, offset, tag_segment_size * 2), &tag, &read_start_offset)) {
+    if(!process_tag_segment(plc, slice_from_slice(input, offset, (size_t)(tag_segment_size * 2)), &tag, &read_start_offset)) {
         return make_cip_error(output, read_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
     /* step past the tag segment. */
-    offset += (tag_segment_size * 2);
+    offset += (size_t)(tag_segment_size * 2);
 
     element_count = slice_get_uint16_le(input, offset); offset += 2;
 
@@ -480,12 +480,12 @@ slice_s handle_write_request(slice_s input, slice_s output, plc_s *plc)
         return make_cip_error(output, write_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
-    if(!process_tag_segment(plc, slice_from_slice(input, offset, tag_segment_size * 2), &tag, &write_start_offset)) {
+    if(!process_tag_segment(plc, slice_from_slice(input, offset, (size_t)(tag_segment_size * 2)), &tag, &write_start_offset)) {
         return make_cip_error(output, write_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
     }
 
     /* step past the tag segment. */
-    offset += (tag_segment_size * 2);
+    offset += (size_t)(tag_segment_size * 2);
 
     /* get the tag data type and compare. */
     write_data_type = slice_get_uint16_le(input, offset); offset += 2;
@@ -577,7 +577,7 @@ bool process_tag_segment(plc_s *plc, slice_s input, tag_def_s **tag, size_t *sta
     }
 
     /* bump the offset.   Must be 16-bit aligned, so pad if needed. */
-    offset += name_len + ((name_len & 0x01) ? 1 : 0);
+    offset += (size_t)(name_len + ((name_len & 0x01) ? 1 : 0));
 
     /* try to find the tag. */
     tag_name = slice_from_slice(input, 2, name_len);
@@ -646,7 +646,7 @@ bool process_tag_segment(plc_s *plc, slice_s input, tag_def_s **tag, size_t *sta
 
             /* check in bounds. */
             for(size_t i=0; i < dimension_index; i++) {
-                if(dimensions[i] < 0 || dimensions[i] >= (*tag)->dimensions[i]) {
+                if(dimensions[i] >= (*tag)->dimensions[i]) {
                     info("Dimension %d is out of bounds, must be 0 <= %d < %d", (int)i, dimensions[i], (*tag)->dimensions[i]);
                     return false;
                 }
