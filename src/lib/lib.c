@@ -710,6 +710,53 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id)
 
 
 /*
+ * plc_tag_register_logger
+ *
+ * This function registers the passed callback function with the library.  Only one callback function
+ * may be registered with the library at a time!
+ *
+ * Once registered, the function will be called with any logging message that is normally printed due 
+ * to the current log level setting.
+ *
+ * WARNING: the callback will usually be called when the internal tag API mutex is held.   You cannot
+ * call any tag functions within the callback!
+ *
+ * Return values:
+ *
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ */
+
+LIB_EXPORT int plc_tag_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message))
+{
+    pdebug(DEBUG_DETAIL, "Starting");
+    return debug_register_logger(log_callback_func);
+}
+
+
+
+/*
+ * plc_tag_unregister_logger
+ *
+ * This function removes the logger callback already registered for the library.
+ *
+ * Return values:
+ *
+ * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
+ * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
+ */
+
+LIB_EXPORT int plc_tag_unregister_logger(void)
+{
+    pdebug(DEBUG_DETAIL, "Starting");
+    return debug_unregister_logger();
+}
+
+
+
+/*
  * plc_tag_lock
  *
  * Lock the tag against use by other threads.  Because operations on a tag are
