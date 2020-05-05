@@ -61,7 +61,7 @@ int main()
         return 1;
     }
 
-    /* get the tag size and element size. */
+    /* get the tag size and element size. Do this _AFTER_ reading the tag otherwise we may not know how big the tag is! */
     elem_size = plc_tag_get_int_attribute(tag, "elem_size", 0);
     elem_count = plc_tag_get_int_attribute(tag, "elem_count", 0);
 
