@@ -98,6 +98,11 @@ void tag_callback(int32_t tag_id, int event, int status)
 }
 
 
+void log_callback(int32_t tag_id, int debug_level, const char *message)
+{
+    fprintf(stderr, "Log message of level %d for tag %d: %s", debug_level, tag_id, message);
+}
+
 int main()
 {
     int32_t tag = 0;
@@ -117,18 +122,58 @@ int main()
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
+    /* set up the logger. */
+    printf("Setting up logger callback.\n");
+    rc = plc_tag_register_logger(log_callback);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("ERROR: %s: Could not register log callback!\n", plc_tag_decode_error(rc));
+        return 1;
+    }
+
+    /* try again to see if we get the right error. */
+    printf("Testing duplicate logger callback registration.\n");
+    rc = plc_tag_register_logger(log_callback);
+    if(rc != PLCTAG_ERR_DUPLICATE) {
+        printf("ERROR: %s: Did not get PLCTAG_ERR_DUPLICATE when registering the logger again!\n", plc_tag_decode_error(rc));
+        return 1;
+    }
+
+    /* Remove the logger. */
+    printf("Testing logger callback unregister.\n");
+    rc = plc_tag_unregister_logger();
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("ERROR: %s: Got error when unregistering the log callback!\n", plc_tag_decode_error(rc));
+        return 1;
+    }
+
+    /* Remove the logger again. */
+    printf("Testing duplicate logger callback unregistration.\n");
+    rc = plc_tag_unregister_logger();
+    if(rc != PLCTAG_ERR_NOT_FOUND) {
+        printf("ERROR: %s: Did not get PLCTAG_ERR_NOT_FOUND when unregistering the logger again!\n", plc_tag_decode_error(rc));
+        return 1;
+    }
+
+    /* set up the logger again. */
+    rc = plc_tag_register_logger(log_callback);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("ERROR: %s: Could not register log callback after removing it!\n", plc_tag_decode_error(rc));
+        return 1;
+    }
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+
     /* create the tag */
     tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
-
-    /* everything OK? */
     if(tag < 0) {
         printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 1;
     }
 
-    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        printf("Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
+    printf("Removing logger callback.  Should see regular logging output now.\n");
+    rc = plc_tag_unregister_logger();
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("ERROR: %s: Got error when removing the logger callback!\n", plc_tag_decode_error(rc));
         return 1;
     }
 

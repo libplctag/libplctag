@@ -53,3 +53,5 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count);
 #define pdebug_dump_bytes(dbg, d,c)  do { if((dbg) != DEBUG_NONE && (dbg) <= get_debug_level()) pdebug_dump_bytes_impl(__func__, __LINE__,dbg,d,c); } while(0)
 
+extern int debug_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));
+extern int debug_unregister_logger(void);
