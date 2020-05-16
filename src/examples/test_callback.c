@@ -239,6 +239,9 @@ int main()
         TestDINTArray[i]++;
     }
 
+    printf("Turn off logging.\n");
+    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
+
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
@@ -321,6 +324,8 @@ int main()
      * it when the tag is destroyed.
      */
     plc_tag_destroy(tag);
+
+    printf("SUCCESS!\n");
 
     return 0;
 }
