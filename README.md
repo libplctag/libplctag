@@ -141,13 +141,15 @@ We need and welcome help with the following:
 Sample Code
 ===========
 
-Oh, wait, you want code!   There are many examples in the `src/examples` directory.
+Oh, wait, you want code!   There are many examples in the [examples](https://github.com/libplctag/libplctag/tree/master/src/examples) directory.
 
-A good place to start is [simple.c](https://github.com/libplctag/libplctag/src/examples/simple.c).
+A good place to start is [simple.c](https://github.com/libplctag/libplctag/blob/master/src/examples/simple.c).
 
-This code reads 200 32-bit signed integers (DINT), updates them,
-then writes them back out and rereads them from a tag named myDINTArray
+This code reads several 32-bit signed integers (DINT), updates them,
+then writes them back out and rereads them from a tag named TestBigArray
 in a Logix-class Allen-Bradley PLC.  
+
+The readme file describes some of the more interesting ones.
 
 API
 ===
