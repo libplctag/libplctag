@@ -1,9 +1,10 @@
 |   OS   | Version | 64-bit | 32-bit |
 |   --:  |   :-:   |   :-:  |   :-:  |
-|Ubuntu  |  18.04  | ![Ubuntu x64 CI](https://github.com/kyle-github/libplctag/workflows/Ubuntu%20x64%20CI/badge.svg) | ![Ubuntu x86 CI](https://github.com/kyle-github/libplctag/workflows/Ubuntu%20x86%20CI/badge.svg) |
-|Windows |  10 (Server 19) | ![Windows x64 CI](https://github.com/kyle-github/libplctag/workflows/Windows%20x64%20CI/badge.svg) | ![Windows x86 CI](https://github.com/kyle-github/libplctag/workflows/Windows%20x86%20CI/badge.svg) |
-|macOS   |  10.15  | ![macOS x64 CI](https://github.com/kyle-github/libplctag/workflows/macOS%20x64%20CI/badge.svg) | Not Supported |
+|Ubuntu  |  18.04  | Supported | Supported |
+|Windows |  10 (Server 19) | Supported | Supported |
+|macOS   |  10.15  | Supported | Not Supported |
 
+![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=master)
 
 libplctag
 =========
