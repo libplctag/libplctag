@@ -1,10 +1,17 @@
-This directory contains some examples in C showing how to use the library.
+This directory contains some examples in C showing how to use the library.  Some of the
+examples are described below.
 
 async.c:  This example shows how to set up and fire many tag reads simultaneously,
           and then wait for them to complete.  Cross platform.
 
 data_dumper.c: A simple data logger that outputs formatted text output with one row per sample.
           POSIX only.
+
+list_tags.c: an example using the build-in ability to list out the tags in some AB/Rockwell PLCs.
+          Specifically it will list tags in ControlLogix and CompactLogix PLCs.   Both controller
+          and program tags are listed.   The output gives some information about the tag and a
+          string suitable for using with plc_tag_create() to create a handle to that tag in the 
+          PLC.
 
 multithread.c: A simple example of multithreading using pthreads and the libplctag locking API calls.
           POSIX only.  Provide an argument giving the number of threads to use.  As you increase the
@@ -43,6 +50,12 @@ stress_test.c: Probably not the best code.  Written to stress test the library b
           apps like this!  POSIX only.
 
 string.c: This example shows how to read an array of STRINGs.  Cross platform.
+
+test_callback.c: The library supports callbacks for internal events on tags and a callback for logging.  The
+          latter is useful if you want to capture all logging output and direct it to your language/system
+          instead of stderr.   The former can be used to trigger actions within your application code 
+          when a tag starts a read, finishes a read, starts a write etc.  This can be used to create 
+          transparent wrappers with some languages.
 
 toggle_bool.c: This example reads a boolean tag, inverts it, and writes back
            the new value.  Cross platform.
