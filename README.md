@@ -31,10 +31,11 @@ any purpose.
 
 Be careful!
 
+# Table Of Contents
 
+<!-- TOC -->autoauto- [Table Of Contents](#table-of-contents)auto- [High-Level Features](#high-level-features)auto- [Non-Goals](#non-goals)auto- [License](#license)auto- [Detailed Features](#detailed-features)auto    - [PLC Support](#plc-support)auto    - [Platform Support](#platform-support)auto    - [Alternate Programming Languages](#alternate-programming-languages)auto- [Help Wanted!](#help-wanted)auto- [Sample Code](#sample-code)auto- [API](#api)auto- [History](#history)auto- [Contact](#contact)auto- [Attributions and Trademarks](#attributions-and-trademarks)auto- [End Note](#end-note)autoauto<!-- /TOC -->
 
-High-Level Features
-===================
+# High-Level Features
 
 * Pure C library for portability across Linux, Windows and macOS as well as 32-bit and 64-bit.
 * Very stable API with almost no changes other than feature additions since 2012.
@@ -46,23 +47,20 @@ High-Level Features
 * Open source licensing.
 * Free!
 
-Non-Goals
-=========
+# Non-Goals
 
 This library is not to replace tools such as RSLinx or stacks like OPC.  It
 only reads and writes tags.  Other tools and systems may provide significantly
 more functionality.  We do not want that.  We want to keep it small and simple.
 
-License
-=========
+# License
 
 See the file LICENSE for our legal disclaimers of responsibility, fitness or
 merchantability of this library as well as your rights with regards
 to use of this library.  This code is licensed under the GNU LGPL.
 
 
-Detailed Features
-=================
+# Detailed Features
 
 ## PLC Support
 
@@ -124,8 +122,7 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
 
 
 
-Help Wanted!
-============
+# Help Wanted!
 
 We need and welcome help with the following:
 
@@ -138,8 +135,7 @@ We need and welcome help with the following:
 
 
 
-Sample Code
-===========
+# Sample Code
 
 Oh, wait, you want code!   There are many examples in the [examples](https://github.com/libplctag/libplctag/tree/master/src/examples) directory.
 
@@ -151,8 +147,7 @@ in a Logix-class Allen-Bradley PLC.
 
 The readme file describes some of the more interesting ones.
 
-API
-===
+# API
 
 Most of the functions in the API are for data access.   Direct support for single bits, 8-bit, 16-bit, 32-bit and
 64-bit words (integer and floating point) are provided by the library.
@@ -161,14 +156,12 @@ See the [API](https://github.com/libplctag/libplctag/wiki/API) for more informat
 
 
 
-History
-=======
+# History
 
 See the [wiki history page](https://github.com/libplctag/libplctag/wiki/History) for more details on how libplctag was created and why we built it.
 
 
-Contact
-=======
+# Contact
 
 There are two ways to contact us.
 
@@ -184,8 +177,7 @@ the project.
 If needed, we will initiate private communication from there.
 
 
-Attributions and Trademarks
-===========================
+# Attributions and Trademarks
 
 PLC5, SLC 500, MicroLogix, Micro8X0, CompactLogix and ControlLogix are trademarks of Rockwell/Allen Bradley.
 Windows and Visual Studio are trademarks of Microsoft.  Apple owns the trademark on macOS.  
@@ -193,8 +185,7 @@ Windows and Visual Studio are trademarks of Microsoft.  Apple owns the trademark
 Please let us know if we missed some so that we can get all the attributions correct!
 
 
-End Note
-========
+# End Note
 
 Have fun and let us know if this library is useful to you.  Please send test
 cases if you run into bugs.  As PLC hardware is fairly expensive, we may not
