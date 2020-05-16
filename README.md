@@ -6,8 +6,24 @@
 
 ![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=master)
 
-libplctag
-=========
+- [libplctag](#libplctag)
+- [WARNING - DISCLAIMER](#warning---disclaimer)
+- [High-Level Features](#high-level-features)
+- [Non-Goals](#non-goals)
+- [License](#license)
+- [Detailed Features](#detailed-features)
+  - [PLC Support](#plc-support)
+  - [Platform Support](#platform-support)
+  - [Alternate Programming Languages](#alternate-programming-languages)
+- [Help Wanted!](#help-wanted)
+- [Sample Code](#sample-code)
+- [API](#api)
+- [History](#history)
+- [Contact](#contact)
+- [Attributions and Trademarks](#attributions-and-trademarks)
+- [End Note](#end-note)
+
+# libplctag
 
 This library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
 simple data.  The library has been in production use since 2012 and is in use by multiple organizations for many tasks
@@ -18,9 +34,7 @@ Current Stable Version: 2.1
 
 Old Stable Version: 1.5
 
-
-WARNING - DISCLAIMER
-====================
+# WARNING - DISCLAIMER
 
 Note: *PLCs control many kinds of equipment and loss of property, production
 or even life can happen if mistakes in programming or access are
@@ -30,10 +44,6 @@ We make no claims or warrants about the suitability of this code for
 any purpose.
 
 Be careful!
-
-# Table Of Contents
-
-<!-- TOC -->autoauto- [Table Of Contents](#table-of-contents)auto- [High-Level Features](#high-level-features)auto- [Non-Goals](#non-goals)auto- [License](#license)auto- [Detailed Features](#detailed-features)auto    - [PLC Support](#plc-support)auto    - [Platform Support](#platform-support)auto    - [Alternate Programming Languages](#alternate-programming-languages)auto- [Help Wanted!](#help-wanted)auto- [Sample Code](#sample-code)auto- [API](#api)auto- [History](#history)auto- [Contact](#contact)auto- [Attributions and Trademarks](#attributions-and-trademarks)auto- [End Note](#end-note)autoauto<!-- /TOC -->
 
 # High-Level Features
 
