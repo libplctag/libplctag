@@ -1,21 +1,21 @@
-# libplctag
+# libplctag - a C library for PLC communication
 
-- [libplctag](#libplctag)
-- [WARNING - DISCLAIMER](#warning---disclaimer)
-- [Features](#features)
-  - [High Level Features](#high-level-features)
-  - [Detailed Features](#detailed-features)
-    - [PLC Support](#plc-support)
-    - [Platform Support](#platform-support)
-  - [Alternate Programming Languages](#alternate-programming-languages)
-- [Help Wanted](#help-wanted)
-- [Sample Code](#sample-code)
-- [API](#api)
-- [History](#history)
-- [Contact](#contact)
-- [License](#license)
-- [Attributions and Trademarks](#attributions-and-trademarks)
-- [End Note](#end-note)
+- [libplctag - a C library for PLC communication](#libplctag---a-c-library-for-plc-communication)
+  - [WARNING - DISCLAIMER](#warning---disclaimer)
+  - [Features](#features)
+    - [High Level Features](#high-level-features)
+    - [Detailed Features](#detailed-features)
+      - [PLC Support](#plc-support)
+      - [Platform Support](#platform-support)
+    - [Alternate Programming Languages](#alternate-programming-languages)
+  - [Help Wanted](#help-wanted)
+  - [Sample Code](#sample-code)
+  - [API](#api)
+  - [History](#history)
+  - [Contact](#contact)
+  - [License](#license)
+  - [Attributions and Trademarks](#attributions-and-trademarks)
+  - [End Note](#end-note)
 
 |   OS   | Version | 64-bit | 32-bit |
 |   --:  |   :-:   |   :-:  |   :-:  |
@@ -34,7 +34,7 @@ Current Stable Version: 2.1
 
 Old Stable Version: 1.5
 
-# WARNING - DISCLAIMER
+## WARNING - DISCLAIMER
 
 Note: *PLCs control many kinds of equipment and loss of property, production
 or even life can happen if mistakes in programming or access are
@@ -45,9 +45,9 @@ any purpose.
 
 Be careful!
 
-# Features
+## Features
 
-## High Level Features
+### High Level Features
 
 - Pure C library for portability across Linux, Windows and macOS as well as 32-bit and 64-bit.
 - Very stable API with almost no changes other than feature additions since 2012.
@@ -59,9 +59,9 @@ Be careful!
 - Open source licensing.
 - Free!
 
-## Detailed Features
+### Detailed Features
 
-### PLC Support
+#### PLC Support
 
 - support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP).   Firmware versions 16, 20 and 31.
   - read/write 8, 16, 32, and 64-bit signed and unsigned integers.
@@ -93,7 +93,7 @@ Be careful!
   - reading and writing tags from the command line.
   - getting and setting individual bits as tags.
 
-### Platform Support
+#### Platform Support
 
 - CMake build system for better cross-platform support.
   - Native CMake support in recent versions of Microsoft Visual Studio.
@@ -102,7 +102,7 @@ Be careful!
 - Binary releases built for Ubuntu 18.04, macOS 10.15 and Windows 10.  All 64-bit, with 32-bit binary releases for Windows and Ubuntu.
 - RaspberryPi supported. Both Linux and Windows IoT-based (some effort required to configure Visual Studio to build).
 
-## Alternate Programming Languages
+### Alternate Programming Languages
 
 The C library is designed for easy wrapping.  Wrappers for many other languages exist:
 
@@ -117,7 +117,7 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
   - [possibly experimental by timyhac, libplctag.Net](https://github.com/timyhac/libplctag.NET).   A relatively thin wrapper but loads the correct binary DLL at runtime.
 - Labview (see [here](https://github.com/dirtyb15/libplctag-labview))
 
-# Help Wanted
+## Help Wanted
 
 We need and welcome help with the following:
 
@@ -128,7 +128,7 @@ We need and welcome help with the following:
 - more language wrappers!
 - more tests!
 
-# Sample Code
+## Sample Code
 
 Oh, wait, you want code!   There are many examples in the [examples](https://github.com/libplctag/libplctag/tree/master/src/examples) directory.
 
@@ -140,18 +140,18 @@ in a Logix-class Allen-Bradley PLC.
 
 The readme file describes some of the more interesting ones.
 
-# API
+## API
 
 Most of the functions in the API are for data access.   Direct support for single bits, 8-bit, 16-bit, 32-bit and
 64-bit words (integer and floating point) are provided by the library.
 
 See the [API](https://github.com/libplctag/libplctag/wiki/API) for more information.
 
-# History
+## History
 
 See the [wiki history page](https://github.com/libplctag/libplctag/wiki/History) for more details on how libplctag was created and why we built it.
 
-# Contact
+## Contact
 
 There are two ways to contact us.
 
@@ -166,20 +166,20 @@ the project.
 
 If needed, we will initiate private communication from there.
 
-# License
+## License
 
 See the file LICENSE for our legal disclaimers of responsibility, fitness or
 merchantability of this library as well as your rights with regards
 to use of this library.  This code is licensed under the GNU LGPL.
 
-# Attributions and Trademarks
+## Attributions and Trademarks
 
 PLC5, SLC 500, MicroLogix, Micro8X0, CompactLogix and ControlLogix are trademarks of Rockwell/Allen Bradley.
 Windows and Visual Studio are trademarks of Microsoft.  Apple owns the trademark on macOS.  
 
 Please let us know if we missed some so that we can get all the attributions correct!
 
-# End Note
+## End Note
 
 Have fun and let us know if this library is useful to you.  Please send test
 cases if you run into bugs.  As PLC hardware is fairly expensive, we may not
@@ -192,4 +192,3 @@ LGPL.
 We hope you find this library as useful as we do!
 
 - the libplctag team
-
