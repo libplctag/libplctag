@@ -25,8 +25,8 @@
 
 ![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=master)
 
-This library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
-simple data.  The library has been in production use since 2012 and is in use by multiple organizations for many tasks
+This open source C library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
+simple data.  The library has been in production use since early 2012 and is in use by multiple organizations for many tasks
 including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling
 and many, many more.
 
@@ -49,14 +49,14 @@ Be careful!
 
 ### High Level Features
 
+- Open source licensing under the MPL 2.0 or LGPL 2+.
 - Pure C library for portability across Linux, Windows and macOS as well as 32-bit and 64-bit.
 - Very stable API with almost no changes other than feature additions since 2012.
 - Read and write tags of various types across AB/Rockwell PLCs such as ControlLogix, CompactLogix, Micro800 etc.
 - Low memory use and very high performance and capacity.  Uses protocol-specific features to increase performance.
 - Simple API with minimal use of language-specific data to enable easy wrapping in other languages.
 - Extensive example programs showing use of all library features.
-- Included wrappers for some languages.
-- Open source licensing.
+- Included wrappers for several other languages.
 - Free!
 
 ### Detailed Features
@@ -170,7 +170,7 @@ If needed, we will initiate private communication from there.
 
 See the license files (LICENSE.MPL or LICENSE.LGPL) for our legal disclaimers of responsibility, fitness or
 merchantability of this library as well as your rights with regards
-to use of this library.  This code is dual licensed under the Mozilla Public License 2.0 or the GNU
+to use of this library.  This code is dual licensed under the Mozilla Public License 2.0 (MPL 2.0) or the GNU
 Lesser/Library General Public License 2 or later (LGPL 2+).
 
 ## Attributions and Trademarks
