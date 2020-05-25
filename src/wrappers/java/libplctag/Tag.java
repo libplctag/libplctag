@@ -39,7 +39,7 @@ import dev.java.net.jna.NativeLibrary;
 
 public class Tag implements Library {
     // static native library stuff
-    public static final String JNA_LIBRARY_NAME = "plctag2";
+    public static final String JNA_LIBRARY_NAME = "plctag";
     public static final NativeLibrary JNA_NATIVE_LIB = NativeLibrary.getInstance(Tag.JNA_LIBRARY_NAME);
 
 static {
