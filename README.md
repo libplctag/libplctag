@@ -63,7 +63,7 @@ Be careful!
 
 ### PLC Support
 
-- support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP)(tm?).   Firmware versions 16, 20 and 31.
+- support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP).   Firmware versions 16, 20 and 31.
   - read/write 8, 16, 32, and 64-bit signed and unsigned integers.
   - read/write single bits/booleans under some circumstances (BOOL arrays are still tricky).
   - read/write 32-bit and 64-bit IEEE format (little endian) floating point.
