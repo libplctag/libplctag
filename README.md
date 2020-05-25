@@ -168,9 +168,10 @@ If needed, we will initiate private communication from there.
 
 ## License
 
-See the file LICENSE for our legal disclaimers of responsibility, fitness or
+See the license files (LICENSE.MPL or LICENSE.LGPL) for our legal disclaimers of responsibility, fitness or
 merchantability of this library as well as your rights with regards
-to use of this library.  This code is licensed under the GNU LGPL.
+to use of this library.  This code is dual licensed under the Mozilla Public License 2.0 or the GNU
+Lesser/Library General Public License 2 or later (LGPL 2+).
 
 ## Attributions and Trademarks
 
@@ -185,9 +186,9 @@ Have fun and let us know if this library is useful to you.  Please send test
 cases if you run into bugs.  As PLC hardware is fairly expensive, we may not
 be able to test out your test scenarios.  If possible, please send patches.
 We do not ask that you transfer copyright over to us, but we do ask that you
-make any submitted patches under the same LGPL license we use.  We will not
+make any submitted patches under the same licenses we use.  We will not
 take any patches under the GPL license or licenses that are incompatible with the
-LGPL.
+MPL 2.0 license.
 
 We hope you find this library as useful as we do!
 
