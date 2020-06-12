@@ -30,7 +30,7 @@ BOOST_LOG_GLOBAL_LOGGER_INIT(my_logger, logger_t)
 			keywords::auto_flush = true,
 			keywords::open_mode = std::ios_base::app,
             keywords::format = (
-                    expr::stream << expr::format_date_time <boost::posix_time::ptime> ("TimeStamp", "%y-%m-%d %H:%M:%S.%f")
+                    expr::stream << expr::format_date_time <boost::posix_time::ptime> ("TimeStamp", "%Y-%m-%dT%T.%f")
                     << " [" << expr::attr <boost::log::trivial::severity_level> ("Severity") << "] "
                     << expr::smessage
             )
@@ -40,7 +40,7 @@ BOOST_LOG_GLOBAL_LOGGER_INIT(my_logger, logger_t)
     logging::add_console_log(
             std::cout,
             keywords::format = (
-                    expr::stream << expr::format_date_time <boost::posix_time::ptime> ("TimeStamp", "%y-%m-%d %H:%M:%S.%f")
+                    expr::stream << expr::format_date_time <boost::posix_time::ptime> ("TimeStamp", "%Y-%m-%dT%T.%f")
                     << " [" << expr::attr <boost::log::trivial::severity_level> ("Severity") << "] "
                     << expr::smessage
             )
