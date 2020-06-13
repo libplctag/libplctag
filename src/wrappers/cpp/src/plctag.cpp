@@ -1,19 +1,38 @@
 #include "../include/plctag.hpp"
 
-plctag::plctag(void) // class constructor
+plctag::plctag(int plc_prot, std::string ip_address, bool debug) // class constructor
 {
 	INFO << "started";
 
 	try
 	{
+		this->debug = debug;
+
+		// allocate room for tags in vector
 		for (size_t i = 0; i < 20; i++)
 		{
 			tag.push_back(0);
 		}
+
+		if (debug)
+		{
+			plc_tag_set_debug_level(PLCTAG_DEBUG_SPEW);
+		}
+
+		create_tag(1, plc_prot, 5000, ip_address, "test_string", ELE_STRING, 5);
+		create_tag(2, plc_prot, 5000, ip_address, "test_string[0]", ELE_STRING, 1);
+		create_tag(3, plc_prot, 5000, ip_address, "test_float", ELE_FLOAT, 5);
+
+	}
+	catch (int error)
+	{
+		ERROR << "error = " << error;
+		throw - 2;
 	}
 	catch (const std::exception &e)
 	{
 		ERROR << "e.what() = " << e.what();
+		throw - 1;
 	}
 
 	INFO << "ended";
@@ -21,11 +40,27 @@ plctag::plctag(void) // class constructor
 
 plctag::~plctag(void) // class destructor
 {
+	boost::mutex::scoped_lock lock(mutex); // prevent multiple threads
+
 	INFO << "started";
 
 	try
 	{
-		close_all_tags();
+		// close all tags
+		for (size_t i = 0; i < tag.size(); i++)
+		{
+			if (tag.at(i))
+			{
+				int status = plc_tag_destroy(tag.at(i));
+				if (status != PLCTAG_STATUS_OK)
+				{
+					ERROR << "tag.at(" << i << ") >> plc_tag_destroy >> error = " << plc_tag_decode_error(status);
+				}
+			}
+		}
+
+		// shutdown library
+		plc_tag_shutdown();
 	}
 	catch (int error)
 	{
@@ -39,30 +74,12 @@ plctag::~plctag(void) // class destructor
 	INFO << "ended";
 }
 
-/// Static methods
-
-// return the library version as an encoded integer.
-int32_t plctag::version(void)
-{
-    return plc_tag_get_lib_version();
-}
-
-// set the debug level.  Use values from 1-5.
-void plctag::set_debug_level(plctag::DEBUG_LEVEL debug_level)
-{
-    plc_tag_set_debug_level(debug_level);
-}
-
-
-/// Connection
-
 void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_address, std::string element_name, int element_size, int element_count)
 {
 	boost::mutex::scoped_lock lock(mutex); // prevent multiple threads
 
-	std::string cpu, tag_path;
+	std::string cpu, tag_path, plc_path;
 	int status;
-	bool debug = false;
 
 	if (debug)
 	{
@@ -72,43 +89,49 @@ void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_a
 	try
 	{
 		// build tag path
-		switch (plc_prot) {
-			case PROT_AB_PLC: // 1
-			{
-				cpu = "plc";
-				break;
-			}
-			case PROT_AB_MLGX800: // 2
-			{
-				cpu = "mlgx800";
-				break;
-			}
-			case PROT_AB_MLGX: // 3
-			{
-				cpu = "mlgx";
-				break;
-			}
-			case PROT_AB_LGX: // 4
-			{
-				cpu = "lgx";
-				break;
-			}
-			default:
-			{
-				ERROR << "plc_prot unhandled = " << plc_prot;
-				throw - 2;
-			}
+		switch (plc_prot)
+		{
+		case PROT_AB_PLC: // 1
+		{
+			cpu = "plc";
+			plc_path = "1";
+			break;
+		}
+		case PROT_AB_MLGX800: // 2
+		{
+			cpu = "mlgx800";
+			plc_path = "1";
+			break;
+		}
+		case PROT_AB_MLGX: // 3
+		{
+			cpu = "mlgx";
+			plc_path = "1";
+			break;
+		}
+		case PROT_AB_LGX: // 4
+		{
+			cpu = "lgx";
+			plc_path = "1,0";
+			break;
+		}
+		default:
+		{
+			ERROR << "plc_prot unhandled = " << plc_prot;
+			throw - 2;
+		}
 		}
 		// "protocol=ab_eip&gateway=192.168.1.42&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=myDINTArray"
 		tag_path = "protocol=" + plc_protocol +
 				   "&gateway=" + ip_address +
-				   "&path=" + std::to_string(plc_path) +
+				   "&path=" + plc_path + // backplane slot number
 				   "&cpu=" + cpu +
 				   "&elem_size=" + std::to_string(element_size) +
 				   "&elem_count=" + std::to_string(element_count) +
 				   "&name=" + element_name +
-				   "&share_session=1"; // share same session with other tags
-		if (debug) {
+				   "&share_session=" + std::to_string(share_session);
+		if (debug)
+		{
 			tag_path += "&debug=3"; // enables low level stderr output
 			// Output to file: ./portalogic5 &> output.txt (captures stdout and stderr)
 			INFO << "tag_path = " + tag_path;
@@ -116,12 +139,14 @@ void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_a
 
 		// connect tag to PLC
 		tag.at(tag_num) = plc_tag_create(tag_path.c_str(), timeout);
-		if (tag.at(tag_num) < 0) {
+		if (tag.at(tag_num) < 0)
+		{
 			ERROR << "tag.at(" << tag_num << ") >> could not create tag >> error = " << plc_tag_decode_error(tag.at(tag_num)) << "; tag_path = " << tag_path;
 			throw - 3;
 		}
 		status = plc_tag_status(tag.at(tag_num));
-		if (status != PLCTAG_STATUS_OK) {
+		if (status != PLCTAG_STATUS_OK)
+		{
 			ERROR << "tag.at(" << tag_num << ") >> error setting up tag internal state >> error = " << plc_tag_decode_error(tag.at(tag_num)) << "; tag_path = " << tag_path;
 			throw - 4;
 		}
@@ -137,168 +162,6 @@ void plctag::create_tag(int tag_num, int plc_prot, int timeout, std::string ip_a
 	return;
 }
 
-void plctag::close_tag(int tag_num)
-{
-	boost::mutex::scoped_lock lock(mutex); // prevent multiple threads
-
-	INFO << "started";
-
-	int status = 0;
-
-	try
-	{
-		status = plc_tag_destroy(tag.at(tag_num));
-		if (status != PLCTAG_STATUS_OK)
-		{
-			ERROR << "tag.at(" << tag_num << ") >> plc_tag_destroy >> error = " << plc_tag_decode_error(status);
-			throw - 2;
-		}
-	}
-	catch (const std::exception &e)
-	{
-		ERROR << "e.what() = " << e.what();
-		throw - 1;
-	}
-
-	INFO << "ended";
-
-	return;
-}
-
-void plctag::close_all_tags(void)
-{
-	boost::mutex::scoped_lock lock(mutex); // prevent multiple threads
-
-	INFO << "started";
-
-	int status = 0;
-
-	try
-	{
-		for (size_t i = 0; i < tag.size(); i++)
-		{
-			if (tag.at(i))
-			{
-				status = plc_tag_destroy(tag.at(i));
-				if (status != PLCTAG_STATUS_OK)
-				{
-					ERROR << "tag.at(" << i << ") >> plc_tag_destroy >> error = " << plc_tag_decode_error(status);
-				}
-			}
-		}
-	}
-	catch (const std::exception &e)
-	{
-		ERROR << "e.what() = " << e.what();
-		throw - 1;
-	}
-
-	INFO << "ended";
-
-	return;
-}
-
-void plctag::error_recovery(int tag_num, int plc_prot, int timeout, std::string ip_address, std::string element_name, int element_size, int element_count)
-{
-	INFO << "started";
-
-	std::vector<float> fvec_reset(1, 0);
-
-	try
-	{
-		// 1.  close all tags
-		try
-		{
-			close_all_tags();
-		}
-		catch (int error)
-		{
-			ERROR << "close_all_tags >> error = " << error;
-			throw - 2;
-		}
-
-		// 2. create testing tag
-		try
-		{
-			create_tag(tag_num, plc_prot, timeout, ip_address, element_name, element_size, element_count); // for error recovery
-		}
-		catch (int error)
-		{
-			ERROR << "create_tag >> error = " << error;
-			throw - 3;
-		}
-
-		// 3. attempt read
-		try
-		{
-			read_tag(tag_num, timeout, element_size, element_count);
-		}
-		catch (int error)
-		{
-			ERROR << "read_tag >> error = " << error;
-			throw - 4;
-		}
-
-		// 4.  attempt write
-		try
-		{
-			write_tag(tag_num, timeout, element_size, fvec_reset);
-		}
-		catch (int error)
-		{
-			ERROR << "write_tag >> error = " << error;
-			throw - 5;
-		}
-
-		// 5. close testing tag
-		try
-		{
-			close_tag(tag_num);
-		}
-		catch (int error)
-		{
-			ERROR << "close_tag >> error = " << error;
-			throw - 6;
-		}
-	}
-	catch (const std::exception &e)
-	{
-		ERROR << "e.what() = " << e.what();
-		throw - 1;
-	}
-
-	INFO << "PLC connection recovered";
-	INFO << "ended";
-
-	return;
-}
-
-void plctag::initialize_tags(int plc_prot, std::string ip_address)
-{
-	INFO << "started; plc_prot = " << plc_prot << "; ip_address = " << ip_address;
-
-	try
-	{
-		create_tag(1, plc_prot, 5000, ip_address, "test_string", ELE_STRING, 5);
-		create_tag(2, plc_prot, 5000, ip_address, "test_string[0]", ELE_STRING, 1);
-		create_tag(3, plc_prot, 5000, ip_address, "test_float", ELE_FLOAT, 5);
-	}
-	catch (int error)
-	{
-		ERROR << "create_tag >> error = " << error;
-		throw - 2;
-	}
-	catch (const std::exception &e)
-	{
-		ERROR << "e.what() = " << e.what();
-		throw - 1;
-	}
-
-	INFO << "ended";
-
-	return;
-}
-
 /// Read
 
 std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, int element_count)
@@ -308,9 +171,9 @@ std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, 
 	int status = 0;
 	float fval = 0;
 	std::vector<float> fvec;
-	bool debug = false;
 
-	if (debug) {
+	if (debug)
+	{
 		INFO << "started";
 	}
 
@@ -327,41 +190,41 @@ std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, 
 		// 2. format data
 		switch (element_size)
 		{
-			case ELE_INT:
+		case ELE_INT:
+		{
+			for (int i = 0; i < element_count; i++)
 			{
-				for (int i = 0; i < element_count; i++)
+				fval = plc_tag_get_int16(tag.at(tag_num), (i * element_size)); // tag, offset
+				status = plc_tag_status(tag.at(tag_num));
+				if (status != PLCTAG_STATUS_OK)
 				{
-					fval = plc_tag_get_int16(tag.at(tag_num), (i * element_size)); // tag, offset
-					status = plc_tag_status(tag.at(tag_num));
-					if (status != PLCTAG_STATUS_OK)
-					{
-						ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);
-						throw - 3;
-					}
-					fvec.push_back(fval);
+					ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);
+					throw - 3;
 				}
-				break;
+				fvec.push_back(fval);
 			}
-			case ELE_FLOAT:
+			break;
+		}
+		case ELE_FLOAT:
+		{
+			for (int i = 0; i < element_count; i++)
 			{
-				for (int i = 0; i < element_count; i++)
+				fval = plc_tag_get_float32(tag.at(tag_num), (i * element_size)); // tag, offset
+				status = plc_tag_status(tag.at(tag_num));
+				if (status != PLCTAG_STATUS_OK)
 				{
-					fval = plc_tag_get_float32(tag.at(tag_num), (i * element_size)); // tag, offset
-					status = plc_tag_status(tag.at(tag_num));
-					if (status != PLCTAG_STATUS_OK)
-					{
-						ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);
-						throw - 3;
-					}
-					fvec.push_back(fval);
+					ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_float32 >> error = " << plc_tag_decode_error(status);
+					throw - 3;
 				}
-				break;
+				fvec.push_back(fval);
 			}
-			default:
-			{
-				ERROR << "element_size unhandled >> " << element_size;
-				throw - 2;
-			}
+			break;
+		}
+		default:
+		{
+			ERROR << "element_size unhandled >> " << element_size;
+			throw - 2;
+		}
 		}
 	}
 	catch (const std::exception &e)
@@ -370,7 +233,8 @@ std::vector<float> plctag::read_tag(int tag_num, int timeout, int element_size, 
 		throw - 1;
 	}
 
-	if (debug) {
+	if (debug)
+	{
 		INFO << "ended";
 	}
 
@@ -383,7 +247,6 @@ std::vector<std::string> plctag::read_tag_str(int tag_num, int timeout, int elem
 
 	int status = 0;
 	std::vector<std::string> svec;
-	bool debug = false;
 
 	if (debug)
 		INFO << "started";
@@ -422,7 +285,7 @@ std::vector<std::string> plctag::read_tag_str(int tag_num, int timeout, int elem
 					throw - 4;
 				}
 			}
-			char_str[j] = (char)0;	 // null terminate char array
+			char_str[j] = (char)0;	   // null terminate char array
 			std::string str(char_str); // convert char array to string
 			svec.push_back(str);
 
@@ -471,7 +334,6 @@ void plctag::write_tag(int tag_num, int timeout, int element_size, std::vector<f
 	boost::mutex::scoped_lock lock(mutex); // prevent multiple threads
 
 	int status = 0;
-	bool debug = false;
 
 	if (debug)
 	{
@@ -516,7 +378,6 @@ void plctag::write_tag_str(int tag_num, int timeout, int element_size, std::vect
 	boost::mutex::scoped_lock lock(mutex); // prevent multiple threads
 
 	int status = 0;
-	bool debug = false;
 
 	if (debug)
 		INFO << "started";

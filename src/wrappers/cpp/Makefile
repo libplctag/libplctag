@@ -48,7 +48,7 @@ LIBS += -lboost_system -lboost_thread -lboost_timer
 LIBS += -DBOOST_LOG_DYN_LINK -lboost_log_setup -lboost_log -lpthread
 
 #################### define the C source files ####################
-SRCS = src/main.cpp src/plctag.cpp src/ping.cpp src/logging.cpp
+SRCS = src/main.cpp src/plctag.cpp src/logging.cpp
 
 # define the C object files 
 OBJS = $(addprefix obj/, $(notdir $(SRCS:.cpp=.o)))

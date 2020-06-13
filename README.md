@@ -9,6 +9,7 @@
       - [Platform Support](#platform-support)
     - [Alternate Programming Languages](#alternate-programming-languages)
   - [Help Wanted](#help-wanted)
+    - [How to Contribute](#how-to-contribute)
   - [Sample Code](#sample-code)
   - [API](#api)
   - [History](#history)
@@ -25,8 +26,8 @@
 
 ![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=master)
 
-This library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
-simple data.  The library has been in production use since 2012 and is in use by multiple organizations for many tasks
+This open source (dual MPL 2.0 and LGPL 2+ licensing) C library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
+simple data.  The library has been in production use since early 2012 and is in use by multiple organizations for many tasks
 including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling
 and many, many more.
 
@@ -49,14 +50,14 @@ Be careful!
 
 ### High Level Features
 
+- Open source licensing under the MPL 2.0 or LGPL 2+.
 - Pure C library for portability across Linux, Windows and macOS as well as 32-bit and 64-bit.
 - Very stable API with almost no changes other than feature additions since 2012.
 - Read and write tags of various types across AB/Rockwell PLCs such as ControlLogix, CompactLogix, Micro800 etc.
 - Low memory use and very high performance and capacity.  Uses protocol-specific features to increase performance.
 - Simple API with minimal use of language-specific data to enable easy wrapping in other languages.
 - Extensive example programs showing use of all library features.
-- Included wrappers for some languages.
-- Open source licensing.
+- Included wrappers for several other languages.
 - Free!
 
 ### Detailed Features
@@ -95,10 +96,10 @@ Be careful!
 
 #### Platform Support
 
-- CMake build system for better cross-platform support.
-  - Native CMake support in recent versions of Microsoft Visual Studio.
+- CMake build system for better cross-platform support on Windows, Linux and macOS.
+  - Native CMake support is present in recent versions of Microsoft Visual Studio.
 - Semantic versioning used and supported with specific library APIs for compatibility and feature checking.
-- C library has no dependencies apart from libc and pthreads on some platforms.
+- C library has no dependencies apart from libc (and pthreads on some platforms).
 - Binary releases built for Ubuntu 18.04, macOS 10.15 and Windows 10.  All 64-bit, with 32-bit binary releases for Windows and Ubuntu.
 - RaspberryPi supported. Both Linux and Windows IoT-based (some effort required to configure Visual Studio to build).
 
@@ -121,12 +122,21 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
 
 We need and welcome help with the following:
 
-- bug fixes and reports!
+- bug reports!   We may not have your hardware so your bugs can help us make sure the library works in cases we cannot find!
+- bug fixes.
 - other protocols like Modbus, SBus etc.
 - other platforms like Android, iOS etc.
 - additional compilers.
 - more language wrappers!
 - more tests!
+
+### How to Contribute
+
+We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   We ask that your code contributions to the core library are under the same dual MPL/LGPL license.
+
+The easiest way to contribute to the core library is to raise a PR on GitHub.
+
+Wrappers in other languages are generally split off into separate projects.  Those may have different licenses and contribution processes.  Please look at the documentation for the wrapper in question.
 
 ## Sample Code
 
@@ -168,9 +178,12 @@ If needed, we will initiate private communication from there.
 
 ## License
 
-See the file LICENSE for our legal disclaimers of responsibility, fitness or
+See the license files (LICENSE.MPL or LICENSE.LGPL) for our legal disclaimers of responsibility, fitness or
 merchantability of this library as well as your rights with regards
-to use of this library.  This code is licensed under the GNU LGPL.
+to use of this library.  This code is dual licensed under the Mozilla Public License 2.0 (MPL 2.0) or the GNU
+Lesser/Library General Public License 2 or later (LGPL 2+).
+
+This dual license applies to the core C library.  Additional wrappers for other languages may be under different licenses.   Please see those projects for more information.
 
 ## Attributions and Trademarks
 
@@ -185,9 +198,9 @@ Have fun and let us know if this library is useful to you.  Please send test
 cases if you run into bugs.  As PLC hardware is fairly expensive, we may not
 be able to test out your test scenarios.  If possible, please send patches.
 We do not ask that you transfer copyright over to us, but we do ask that you
-make any submitted patches under the same LGPL license we use.  We will not
+make any submitted patches under the same licenses we use.  We will not
 take any patches under the GPL license or licenses that are incompatible with the
-LGPL.
+MPL 2.0 license.
 
 We hope you find this library as useful as we do!
 
