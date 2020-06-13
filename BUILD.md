@@ -32,7 +32,7 @@ Instructions for other Linux distributions happily accepted.
 Make a work directory in which you want to check out the code.
 
 ```
-$ git clone https://github.com/kyle-github/libplctag.git
+$ git clone https://github.com/libplctag/libplctag.git
 ```
 
 Or you can download one of the releases directly from GitHub.
