@@ -55,7 +55,8 @@
 
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PLC5_MSG_SIZE (244)
-#define MAX_CIP_SLC_MSG_SIZE (222)
+// #define MAX_CIP_SLC_MSG_SIZE (222)
+#define MAX_CIP_SLC_MSG_SIZE (244)
 #define MAX_CIP_MLGX_MSG_SIZE (244)
 
 /*
@@ -2077,7 +2078,7 @@ int send_forward_open_req(ab_session_p session)
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
-    if(session->plc_type == AB_PROTOCOL_PLC && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PROTOCOL_PLC || session->plc_type == AB_PROTOCOL_SLC || session->plc_type == AB_PROTOCOL_MLGX) && session->dhp_dest != 0) {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
@@ -2086,7 +2087,7 @@ int send_forward_open_req(ab_session_p session)
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
-    if(session->plc_type == AB_PROTOCOL_PLC && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PROTOCOL_PLC || session->plc_type == AB_PROTOCOL_SLC || session->plc_type == AB_PROTOCOL_MLGX) && session->dhp_dest != 0) {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
