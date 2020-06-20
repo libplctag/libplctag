@@ -44,7 +44,11 @@
 #include <ab/defs.h>
 #include <util/debug.h>
 
-
+/* Apparently ssize_t is not on Windows. */
+#if defined(_MSC_VER)
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
 
 
 static int skip_whitespace(const char *name, int *name_index);
