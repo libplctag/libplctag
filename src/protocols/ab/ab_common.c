@@ -44,8 +44,9 @@
 #include <ab/eip_cip.h>
 #include <ab/eip_lgx_pccc.h>
 #include <ab/eip_plc5_pccc.h>
+#include <ab/eip_plc5_dhp.h>
 #include <ab/eip_slc_pccc.h>
-#include <ab/eip_dhp_pccc.h>
+#include <ab/eip_slc_dhp.h>
 #include <ab/session.h>
 #include <ab/tag.h>
 #include <util/attr.h>
@@ -242,7 +243,7 @@ plc_tag_p ab_tag_create(attr attribs)
         } else {
             pdebug(DEBUG_DETAIL, "Setting up PLC/5 via DH+ bridge tag.");
             tag->use_connected_msg = 1;
-            tag->vtable = &eip_dhp_pccc_vtable;
+            tag->vtable = &eip_plc5_dhp_vtable;
         }
 
         tag->allow_packing = 0;
@@ -250,10 +251,17 @@ plc_tag_p ab_tag_create(attr attribs)
 
     case AB_PROTOCOL_SLC:
     case AB_PROTOCOL_MLGX:
-        pdebug(DEBUG_DETAIL, "Setting up SLC, MicroLogix tag.");
-        tag->use_connected_msg = 0;
+        if(!path) {
+            pdebug(DEBUG_DETAIL, "Setting up SLC/MicroLogix tag.");
+            tag->use_connected_msg = 0;
+            tag->vtable = &slc_vtable;
+        } else {
+            pdebug(DEBUG_DETAIL, "Setting up SLC/MicroLogix via DH+ bridge tag.");
+            tag->use_connected_msg = 1;
+            tag->vtable = &eip_slc_dhp_vtable;
+        }
+
         tag->allow_packing = 0;
-        tag->vtable = &slc_vtable;
         break;
 
     case AB_PROTOCOL_LGX_PCCC:

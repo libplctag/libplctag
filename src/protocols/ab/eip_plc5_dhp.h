@@ -31,13 +31,10 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_EIP_DHP_PCCC_H__
-#define __LIBPLCTAG_AB_EIP_DHP_PCCC_H__
+#pragma once
 
 #include <ab/ab_common.h>
 
 /* PCCC with DH+ last hop */
-extern struct tag_vtable_t eip_dhp_pccc_vtable;
+extern struct tag_vtable_t eip_plc5_dhp_vtable;
 
-
-#endif
