@@ -338,6 +338,8 @@ int add_session_unsafe(ab_session_p session)
 
     vector_put(sessions, vector_length(sessions), session);
 
+    session->on_list = 1;
+
     pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
@@ -391,8 +393,10 @@ int remove_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    critical_block(session_mutex) {
-        rc = remove_session_unsafe(s);
+    if(s->on_list) {
+        critical_block(session_mutex) {
+            rc = remove_session_unsafe(s);
+        }
     }
 
     pdebug(DEBUG_DETAIL, "Done.");

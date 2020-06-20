@@ -52,6 +52,7 @@
 struct ab_session_t {
 //    int status;
     int failed;
+    int on_list;
 
     /* gateway connection related info */
     char *host;
