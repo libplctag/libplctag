@@ -126,11 +126,11 @@ START_PACK typedef struct {
     /* Connection sequence number */
     uint16_le cpf_conn_seq_num;      /* connection sequence ID, inc for each message */
 
-    // /* PLC5 DH+ Routing */
-    // uint16_le dest_link;
-    // uint16_le dest_node;
-    // uint16_le src_link;
-    // uint16_le src_node;
+    /* SLC DH+ Routing */
+    uint16_le dest_link;
+    uint16_le dest_node;
+    uint16_le src_link;
+    uint16_le src_node;
 
     // /* PCCC Command */
     // uint8_t pccc_command;           /* CMD read, write etc. */
@@ -334,11 +334,11 @@ int tag_read_start(ab_tag_p tag)
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
 
-    // /* DH+ Routing */
-    // pccc->dest_link = h2le16(0);
-    // pccc->dest_node = h2le16(tag->session->dhp_dest);
-    // pccc->src_link = h2le16(0);
-    // pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
+    /* DH+ Routing */
+    pccc->dest_link = h2le16(0);
+    pccc->dest_node = h2le16(tag->session->dhp_dest);
+    pccc->src_link = h2le16(0);
+    pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
     // /* PCCC Command */
     // pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
@@ -407,7 +407,7 @@ int tag_write_start(ab_tag_p tag)
 
     /* how many packets will we need? How much overhead? */
     overhead = 2        /* size of sequence num */
-               //+8        /* DH+ routing */
+               +8        /* DH+ routing */
                +1        /* DF1 command */
                +1        /* status */
                +2        /* PCCC packet sequence number */
@@ -468,11 +468,11 @@ int tag_write_start(ab_tag_p tag)
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
 
-    // /* DH+ Routing */
-    // pccc->dest_link = h2le16(0);
-    // pccc->dest_node = h2le16(tag->session->dhp_dest);
-    // pccc->src_link = h2le16(0);
-    // pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
+    /* DH+ Routing */
+    pccc->dest_link = h2le16(0);
+    pccc->dest_node = h2le16(tag->session->dhp_dest);
+    pccc->src_link = h2le16(0);
+    pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
     // /* PCCC Command */
     // pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
