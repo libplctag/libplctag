@@ -333,6 +333,7 @@ int tag_read_start(ab_tag_p tag)
     pccc->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4 ? */
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
+    pccc->cpf_conn_seq_num = h2le16(conn_seq_id);
 
     /* DH+ Routing */
     pccc->dest_link = h2le16(0);
@@ -467,7 +468,8 @@ int tag_write_start(ab_tag_p tag)
     pccc->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4 ? */
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
-
+    pccc->cpf_conn_seq_num = h2le16(conn_seq_id);
+    
     /* DH+ Routing */
     pccc->dest_link = h2le16(0);
     pccc->dest_node = h2le16(tag->session->dhp_dest);
