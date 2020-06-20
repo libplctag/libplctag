@@ -155,7 +155,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     char prefix[1000]; /* MAGIC */
     int prefix_size = 0;
     char output[1000];
-    int output_size = 0;
+    //int output_size = 0;
 
     /* build the prefix */
     // prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
@@ -203,7 +203,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     va_start(va,templ);
 
     /* FIXME - check the output size */
-    output_size = vsnprintf(output, sizeof(output), prefix, va);
+    /*output_size = */vsnprintf(output, sizeof(output), prefix, va);
     if(log_callback_func) {
         log_callback_func(tag_id, get_debug_level(), output);
     } else {
