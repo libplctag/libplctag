@@ -461,7 +461,7 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
 
     while(isdigit(path[p_index])) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
 
@@ -508,7 +508,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     /* first part, the extended address marker*/
     val = 0;
     while(isdigit(path[p_index])) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
 
@@ -517,11 +517,19 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
         return PLCTAG_ERR_NOT_FOUND;
     }
 
+    if(val == 18) {
+        pdebug(DEBUG_DETAIL, "Extended address on port A.");
+    } else {
+        pdebug(DEBUG_DETAIL, "Extended address on port B.");
+    }
+
     /* is the next character a comma? */
     if(path[p_index] != ',') {
         pdebug(DEBUG_DETAIL, "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".",(int)(ssize_t)p_index, &path[p_index]);
         return PLCTAG_ERR_NOT_FOUND;
     }
+
+    p_index++;
 
     /* start building up the connection path. */
     conn_path[c_index] = (uint8_t)(unsigned int)val;
@@ -532,8 +540,9 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     c_index++;
 
     /* get the first IP address digit. */
+    val = 0;
     while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
         p_index++;
@@ -544,6 +553,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
         pdebug(DEBUG_WARN, "First IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
+
+    pdebug(DEBUG_DETAIL, "First IP segment: %d.", val);
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
@@ -558,8 +569,9 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     (*addr_seg_len)++;
 
     /* get the second part. */
+    val = 0;
     while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
         p_index++;
@@ -570,6 +582,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
         pdebug(DEBUG_WARN, "Second IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
+
+    pdebug(DEBUG_DETAIL, "Second IP segment: %d.", val);
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
@@ -584,8 +598,9 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     (*addr_seg_len)++;
 
     /* get the third part. */
+    val = 0;
     while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
         p_index++;
@@ -596,6 +611,8 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
         pdebug(DEBUG_WARN, "Third IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
+
+    pdebug(DEBUG_DETAIL, "Third IP segment: %d.", val);
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
@@ -610,8 +627,9 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     (*addr_seg_len)++;
 
     /* get the fourth part. */
+    val = 0;
     while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         conn_path[c_index] = (uint8_t)path[p_index];
         c_index++;
         p_index++;
@@ -623,11 +641,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* is the next character a dot? */
-    if(path[p_index] != '.') {
-        pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in fourth IP address part.", path[p_index], p_index);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
+    pdebug(DEBUG_DETAIL, "Fourth IP segment: %d.", val);
 
     /* We need to zero pad if the length is not a multiple of two. */
     if((*addr_seg_len) && (uint8_t)0x01) {
