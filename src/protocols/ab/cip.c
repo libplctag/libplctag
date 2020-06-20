@@ -33,6 +33,7 @@
 
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <lib/libplctag.h>
