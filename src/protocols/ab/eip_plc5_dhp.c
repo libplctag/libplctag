@@ -36,7 +36,7 @@
 #include <lib/libplctag.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>
-#include <ab/eip_dhp_pccc.h>
+#include <ab/eip_plc5_dhp.h>
 #include <ab/tag.h>
 #include <ab/session.h>
 #include <ab/defs.h>
@@ -53,7 +53,7 @@ static int tag_status(ab_tag_p tag);
 static int tag_tickler(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
 
-struct tag_vtable_t eip_dhp_pccc_vtable = {
+struct tag_vtable_t eip_plc5_dhp_vtable = {
     (tag_vtable_func)ab_tag_abort, /* shared */
     (tag_vtable_func)tag_read_start,
     (tag_vtable_func)tag_status,

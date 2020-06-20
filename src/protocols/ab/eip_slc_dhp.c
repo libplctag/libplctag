@@ -36,7 +36,7 @@
 #include <lib/libplctag.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>
-#include <ab/eip_dhp_pccc.h>
+#include <ab/eip_slc_dhp.h>
 #include <ab/tag.h>
 #include <ab/session.h>
 #include <ab/defs.h>
@@ -53,7 +53,7 @@ static int tag_status(ab_tag_p tag);
 static int tag_tickler(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
 
-struct tag_vtable_t eip_dhp_pccc_vtable = {
+struct tag_vtable_t eip_slc_dhp_vtable = {
     (tag_vtable_func)ab_tag_abort, /* shared */
     (tag_vtable_func)tag_read_start,
     (tag_vtable_func)tag_status,
@@ -126,19 +126,27 @@ START_PACK typedef struct {
     /* Connection sequence number */
     uint16_le cpf_conn_seq_num;      /* connection sequence ID, inc for each message */
 
-    /* PLC5 DH+ Routing */
-    uint16_le dest_link;
-    uint16_le dest_node;
-    uint16_le src_link;
-    uint16_le src_node;
+    // /* PLC5 DH+ Routing */
+    // uint16_le dest_link;
+    // uint16_le dest_node;
+    // uint16_le src_link;
+    // uint16_le src_node;
 
-    /* PCCC Command */
+    // /* PCCC Command */
+    // uint8_t pccc_command;           /* CMD read, write etc. */
+    // uint8_t pccc_status;            /* STS 0x00 in request */
+    // uint16_le pccc_seq_num;          /* TNSW transaction/sequence id */
+    // uint8_t pccc_function;          /* FNC sub-function of command */
+    // uint16_le pccc_transfer_offset;           /* offset of this request? */
+    // uint16_le pccc_transfer_size;    /* number of elements requested */
+
+    /* SLC/MicroLogix PCCC Command */
     uint8_t pccc_command;           /* CMD read, write etc. */
     uint8_t pccc_status;            /* STS 0x00 in request */
-    uint16_le pccc_seq_num;          /* TNSW transaction/sequence id */
+    uint16_le pccc_seq_num;         /* TNS transaction/sequence id */
     uint8_t pccc_function;          /* FNC sub-function of command */
-    uint16_le pccc_transfer_offset;           /* offset of this request? */
-    uint16_le pccc_transfer_size;    /* number of elements requested */
+    uint8_t pccc_transfer_size;     /* total number of bytes requested */
+
 } END_PACK pccc_dhp_co_req;
 
 
@@ -257,6 +265,7 @@ int tag_read_start(ab_tag_p tag)
 {
     pccc_dhp_co_req *pccc;
     uint8_t *data = NULL;
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     int data_per_packet = 0;
     int overhead = 0;
     int rc = PLCTAG_STATUS_OK;
@@ -307,9 +316,10 @@ int tag_read_start(ab_tag_p tag)
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* amount of data to get this time */
-    *data = (uint8_t)(tag->size); /* bytes for this transfer */
-    data++;
+    // Old PLC5 command. 
+    // /* amount of data to get this time */
+    // *data = (uint8_t)(tag->size); /* bytes for this transfer */
+    // data++;
 
     /* encap fields */
     pccc->encap_command = h2le16(AB_EIP_CONNECTED_SEND);    /* ALWAYS 0x006F Unconnected Send*/
@@ -324,19 +334,26 @@ int tag_read_start(ab_tag_p tag)
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
 
-    /* DH+ Routing */
-    pccc->dest_link = h2le16(0);
-    pccc->dest_node = h2le16(tag->session->dhp_dest);
-    pccc->src_link = h2le16(0);
-    pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
+    // /* DH+ Routing */
+    // pccc->dest_link = h2le16(0);
+    // pccc->dest_node = h2le16(tag->session->dhp_dest);
+    // pccc->src_link = h2le16(0);
+    // pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
-    /* PCCC Command */
+    // /* PCCC Command */
+    // pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
+    // pccc->pccc_status = 0;  /* STS 0 in request */
+    // pccc->pccc_seq_num = /*h2le16(conn_seq_id)*/ h2le16((uint16_t)(intptr_t)(tag->session));
+    // pccc->pccc_function = AB_EIP_PLC5_RANGE_READ_FUNC;
+    // pccc->pccc_transfer_offset = h2le16((uint16_t)0);
+    // pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
+
+        /* fill in the PCCC command */
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
-    pccc->pccc_seq_num = /*h2le16(conn_seq_id)*/ h2le16((uint16_t)(intptr_t)(tag->session));
-    pccc->pccc_function = AB_EIP_PLC5_RANGE_READ_FUNC;
-    pccc->pccc_transfer_offset = h2le16((uint16_t)0);
-    pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
+    pccc->pccc_seq_num = h2le16(conn_seq_id);
+    pccc->pccc_function = AB_EIP_SLC_RANGE_READ_FUNC;
+    pccc->pccc_transfer_size = (uint8_t)(tag->elem_size * tag->elem_count); /* size to read/write in bytes. */
 
     /* get ready to add the request to the queue for this session */
     req->request_size = (int)(data - (req->data));
@@ -390,7 +407,7 @@ int tag_write_start(ab_tag_p tag)
 
     /* how many packets will we need? How much overhead? */
     overhead = 2        /* size of sequence num */
-               +8        /* DH+ routing */
+               //+8        /* DH+ routing */
                +1        /* DF1 command */
                +1        /* status */
                +2        /* PCCC packet sequence number */
@@ -451,19 +468,25 @@ int tag_write_start(ab_tag_p tag)
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
 
-    /* DH+ Routing */
-    pccc->dest_link = h2le16(0);
-    pccc->dest_node = h2le16(tag->session->dhp_dest);
-    pccc->src_link = h2le16(0);
-    pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
+    // /* DH+ Routing */
+    // pccc->dest_link = h2le16(0);
+    // pccc->dest_node = h2le16(tag->session->dhp_dest);
+    // pccc->src_link = h2le16(0);
+    // pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
-    /* PCCC Command */
+    // /* PCCC Command */
+    // pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
+    // pccc->pccc_status = 0;  /* STS 0 in request */
+    // pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
+    // pccc->pccc_function = AB_EIP_PLC5_RANGE_WRITE_FUNC;
+    // pccc->pccc_transfer_offset = h2le16((uint16_t)0);
+    // pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
+
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
-    pccc->pccc_function = AB_EIP_PLC5_RANGE_WRITE_FUNC;
-    pccc->pccc_transfer_offset = h2le16((uint16_t)0);
-    pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
+    pccc->pccc_function = AB_EIP_SLC_RANGE_WRITE_FUNC;
+    pccc->pccc_transfer_size = (uint8_t)(tag->size);
 
     /* get ready to add the request to the queue for this session */
     req->request_size = (int)(data - (req->data));
