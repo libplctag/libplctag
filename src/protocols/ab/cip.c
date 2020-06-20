@@ -247,7 +247,7 @@ int cip_encode_path(const char *path, int needs_connection, plc_type_t plc_type,
       * whether the last part is DH+.  Only some combinations of
       * DH+ and PLC type work.
       */
-    if(last_is_dhp && plc_type == AB_PROTOCOL_PLC) {
+    if(last_is_dhp && (plc_type == AB_PROTOCOL_PLC || plc_type == AB_PROTOCOL_SLC || plc_type == AB_PROTOCOL_MLGX)) {
         /* We have to make the difference from the more
          * generic case.
          */
