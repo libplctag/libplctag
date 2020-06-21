@@ -31,17 +31,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_H__
-#define __LIBPLCTAG_AB_H__ 1
-
+#pragma once
 
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <util/attr.h>
 
-void ab_teardown(void);
-int ab_init();
-plc_tag_p ab_tag_create(attr attribs);
-
-
-#endif
+void mb_teardown(void);
+int mb_init();
+plc_tag_p mb_tag_create(attr attribs);
