@@ -47,6 +47,7 @@
 #include <util/rc.h>
 #include <util/vector.h>
 #include <ab/ab.h>
+#include <mb/modbus.h>
 
 
 #define INITIAL_TAG_TABLE_SIZE (201)

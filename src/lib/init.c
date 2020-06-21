@@ -38,6 +38,7 @@
 #include <util/attr.h>
 #include <util/debug.h>
 #include <ab/ab.h>
+#include <mb/modbus.h>
 #include <system/system.h>
 #include <lib/init.h>
 
@@ -60,11 +61,14 @@ struct {
     {NULL, "system", "library", NULL, system_tag_create},
     /* Allen-Bradley PLCs */
     {"ab-eip", NULL, NULL, NULL, ab_tag_create},
-    {"ab_eip", NULL, NULL, NULL, ab_tag_create}
+    {"ab_eip", NULL, NULL, NULL, ab_tag_create},
+    {"modbus-tcp", NULL, NULL, NULL, mb_tag_create},
+    {"modbus_tcp", NULL, NULL, NULL, mb_tag_create}
 };
 
 static lock_t library_initialization_lock = LOCK_INIT;
 static volatile int library_initialized = 0;
+static mutex_p lib_mutex = NULL;
 
 
 /*
@@ -140,6 +144,8 @@ void destroy_modules(void)
 {
     ab_teardown();
 
+    mb_teardown();
+
     lib_teardown();
 
     plc_tag_unregister_logger();
@@ -160,32 +166,59 @@ int initialize_modules(void)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    /* loop until we get the lock flag */
-    while (!lock_acquire((lock_t*)&library_initialization_lock)) {
-        sleep_ms(1);
-    }
+    pdebug(DEBUG_INFO, "Starting.");
 
-    if(!library_initialized) {
-        /* initialize a random seed value. */
-        srand((unsigned int)time_ms());
-
-        pdebug(DEBUG_INFO,"Initialized library modules.");
-        rc = lib_init();
-
-        if(rc == PLCTAG_STATUS_OK) {
-            rc = ab_init();
+    /* 
+     * Try to keep busy waiting to a minimum.
+     * If there is no mutex set up, then create one. 
+     * Only one thread allowed at a time through this gate.
+     */
+    spin_block(&library_initialization_lock) {
+        if(lib_mutex == NULL) {
+            rc = mutex_create(&lib_mutex);
         }
-
-        library_initialized = 1;
-
-        /* hook the destructor */
-        atexit(destroy_modules);
-
-        pdebug(DEBUG_INFO,"Done initializing library modules.");
     }
 
-    /* we hold the lock, so clear it.*/
-    lock_release((lock_t*)&library_initialization_lock);
+    /* check the status outside the lock. */
+    if(!lib_mutex || rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to initialize library mutex!  Error %s!", plc_tag_decode_error(rc));
+        return rc;
+    } else {
+        /* 
+        * guard library initialization with a mutex.
+        * 
+        * This prevents busy waiting as would happen with just a spin lock.
+        */
+        critical_block(lib_mutex) {
+            if(!library_initialized) {
+                /* initialize a random seed value. */
+                srand((unsigned int)time_ms());
+
+                pdebug(DEBUG_INFO,"Initialized library modules.");
+                rc = lib_init();
+
+                pdebug(DEBUG_INFO,"Initializing AB module.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = ab_init();
+                }
+
+                pdebug(DEBUG_INFO,"Initializing Modbus module.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = mb_init();
+                }
+
+                /* hook the destructor */
+                atexit(destroy_modules);
+
+                /* do this last */
+                library_initialized = 1;
+
+                pdebug(DEBUG_INFO,"Done initializing library modules.");
+            }
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
