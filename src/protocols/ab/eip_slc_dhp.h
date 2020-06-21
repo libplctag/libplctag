@@ -31,20 +31,10 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_CIP_H__
-#define __LIBPLCTAG_AB_CIP_H__
+#pragma once
 
-#include <lib/libplctag.h>
 #include <ab/ab_common.h>
-#include <ab/defs.h>
 
+/* SLC/MicroLogix with DH+ last hop */
+extern struct tag_vtable_t eip_slc_dhp_vtable;
 
-//int cip_encode_path(ab_tag_p tag, const char *path);
-extern int cip_encode_path(const char *path, int needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest);
-
-//~ char *cip_decode_status(int status);
-extern int cip_encode_tag_name(ab_tag_p tag,const char *name);
-
-
-
-#endif

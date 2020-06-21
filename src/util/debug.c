@@ -1,6 +1,19 @@
 /***************************************************************************
- *   Copyright (C) 2018 by Kyle Hayes                                      *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *                                                                         *
+ * This software is available under either the Mozilla Public License      *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * you choose.                                                             *
+ *                                                                         *
+ * MPL 2.0:                                                                *
+ *                                                                         *
+ *   This Source Code Form is subject to the terms of the Mozilla Public   *
+ *   License, v. 2.0. If a copy of the MPL was not distributed with this   *
+ *   file, You can obtain one at http://mozilla.org/MPL/2.0/.              *
+ *                                                                         *
+ *                                                                         *
+ * LGPL 2:                                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -10,7 +23,7 @@
  *   This program is distributed in the hope that it will be useful,       *
  *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU Library General Public License for more details.                  *
+ *   GNU General Public License for more details.                          *
  *                                                                         *
  *   You should have received a copy of the GNU Library General Public     *
  *   License along with this program; if not, write to the                 *
@@ -142,7 +155,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     char prefix[1000]; /* MAGIC */
     int prefix_size = 0;
     char output[1000];
-    int output_size = 0;
+    //int output_size = 0;
 
     /* build the prefix */
     // prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
@@ -190,7 +203,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     va_start(va,templ);
 
     /* FIXME - check the output size */
-    output_size = vsnprintf(output, sizeof(output), prefix, va);
+    /*output_size = */vsnprintf(output, sizeof(output), prefix, va);
     if(log_callback_func) {
         log_callback_func(tag_id, get_debug_level(), output);
     } else {

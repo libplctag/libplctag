@@ -1,6 +1,19 @@
 /***************************************************************************
- *   Copyright (C) 2018 by Kyle Hayes                                      *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *                                                                         *
+ * This software is available under either the Mozilla Public License      *
+ * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
+ * you choose.                                                             *
+ *                                                                         *
+ * MPL 2.0:                                                                *
+ *                                                                         *
+ *   This Source Code Form is subject to the terms of the Mozilla Public   *
+ *   License, v. 2.0. If a copy of the MPL was not distributed with this   *
+ *   file, You can obtain one at http://mozilla.org/MPL/2.0/.              *
+ *                                                                         *
+ *                                                                         *
+ * LGPL 2:                                                                 *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU Library General Public License as       *
@@ -10,14 +23,13 @@
  *   This program is distributed in the hope that it will be useful,       *
  *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU Library General Public License for more details.                  *
+ *   GNU General Public License for more details.                          *
  *                                                                         *
  *   You should have received a copy of the GNU Library General Public     *
  *   License along with this program; if not, write to the                 *
  *   Free Software Foundation, Inc.,                                       *
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
-
 
 #include <platform.h>
 #include <ab/ab_common.h>
@@ -43,7 +55,8 @@
 
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PLC5_MSG_SIZE (244)
-#define MAX_CIP_SLC_MSG_SIZE (222)
+// #define MAX_CIP_SLC_MSG_SIZE (222)
+#define MAX_CIP_SLC_MSG_SIZE (244)
 #define MAX_CIP_MLGX_MSG_SIZE (244)
 
 /*
@@ -326,6 +339,8 @@ int add_session_unsafe(ab_session_p session)
 
     vector_put(sessions, vector_length(sessions), session);
 
+    session->on_list = 1;
+
     pdebug(DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
@@ -379,8 +394,10 @@ int remove_session(ab_session_p s)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    critical_block(session_mutex) {
-        rc = remove_session_unsafe(s);
+    if(s->on_list) {
+        critical_block(session_mutex) {
+            rc = remove_session_unsafe(s);
+        }
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -457,18 +474,20 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
         return NULL;
     }
 
-    session->path = str_dup(path);
-    if(path && str_length(path) && !session->path) {
-        pdebug(DEBUG_WARN, "Unable to duplicate path string!");
-        rc_dec(session);
-        return NULL;
-    }
+    if(path && str_length(path)) {
+        session->path = str_dup(path);
+        if(path && str_length(path) && !session->path) {
+            pdebug(DEBUG_WARN, "Unable to duplicate path string!");
+            rc_dec(session);
+            return NULL;
+        }
 
-    rc = cip_encode_path(path, use_connected_msg, plc_type, &session->conn_path, &session->conn_path_size, &session->dhp_dest);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO, "Unable to convert path links strings to binary path!");
-        rc_dec(session);
-        return NULL;
+        rc = cip_encode_path(path, use_connected_msg, plc_type, &session->conn_path, &session->conn_path_size, &session->dhp_dest);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_INFO, "Unable to convert path links strings to binary path!");
+            rc_dec(session);
+            return NULL;
+        }
     }
 
     session->requests = vector_create(SESSION_MIN_REQUESTS, SESSION_INC_REQUESTS);
@@ -2061,7 +2080,7 @@ int send_forward_open_req(ab_session_p session)
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
-    if(session->plc_type == AB_PROTOCOL_PLC && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PROTOCOL_PLC || session->plc_type == AB_PROTOCOL_SLC || session->plc_type == AB_PROTOCOL_MLGX) && session->dhp_dest != 0) {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
@@ -2070,7 +2089,7 @@ int send_forward_open_req(ab_session_p session)
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
-    if(session->plc_type == AB_PROTOCOL_PLC && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PROTOCOL_PLC || session->plc_type == AB_PROTOCOL_SLC || session->plc_type == AB_PROTOCOL_MLGX) && session->dhp_dest != 0) {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
