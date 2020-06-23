@@ -31,14 +31,32 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIB_INIT_H__
-#define __LIB_INIT_H__ 1
+#pragma once
 
+#include <lib/tag.h>
 
-#include <util/attr.h>
-extern int initialize_modules(void);
-typedef plc_tag_p (*tag_create_function)(attr attributes);
-extern tag_create_function find_tag_create_func(attr attributes);
-extern void destroy_modules(void);
+struct mb_tag_t {
+    TAG_BASE_STRUCT;
 
-#endif
+    struct mb_tag_t *next;
+
+    int do_abort;
+    int do_read;
+    int do_write;
+
+    int elem_size;
+    int elem_count;
+
+    /* callback handler */
+    uint32_t (*handler)(struct mb_tag_t *tag, uint32_t flags, uint8_t *output_buf, size_t output_buf_size, uint8_t *input_buf, size_t input_buf_size);
+};
+
+typedef struct mb_tag_t *mb_tag_p;
+
+/* flags passed to tag handler. */
+#define NOTHING_TO_DO           ((uint32_t)0)
+#define RESPONSE_BUFFER_FULL    ((uint32_t)((uint32_t)1 << (uint32_t)0))
+#define REQUEST_BUFFER_FULL     ((uint32_t)((uint32_t)1 << (uint32_t)1)) 
+
+extern 
+
