@@ -31,31 +31,56 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
 
-#include <lib/tag.h>
+#include <lib/libplctag.h>
+#include <mb/modbus.h>
+#include <mb/mb_common.h>
+#include <mb/plc.h>
+#include <mb/tag.h>
+#include <util/attr.h>
+#include <util/debug.h>
+#include <util/rc.h>
 
-struct mb_tag_t {
-    TAG_BASE_STRUCT;
+/* Modbus module globals. */
+mutex_p mb_mutex = NULL;
 
-    struct mb_tag_t *next;
+volatile int library_terminating = 0;
 
-    int do_abort;
-    int do_read;
-    int do_write;
 
-    int elem_size;
-    int elem_count;
+void mb_teardown(void)
+{
+    pdebug(DEBUG_INFO, "Starting.");
 
-    /* callback handler */
-    uint32_t (*handler)(struct mb_tag_t *tag, uint32_t flags, uint8_t *output_buf, size_t output_buf_size, uint8_t *input_buf, size_t input_buf_size);
-};
+    library_terminating = 1;
 
-typedef struct mb_tag_t *mb_tag_p;
+    pdebug(DEBUG_DETAIL, "Destroying Modbus mutex.");
+    if(mb_mutex) {
+        mutex_destroy(&mb_mutex);
+        mb_mutex = NULL;
+    }
 
-/* flags passed to tag handler. */
-#define NOTHING_TO_DO           ((uint32_t)0)
-#define RESPONSE_BUFFER_FULL    ((uint32_t)((uint32_t)1 << (uint32_t)0))
-#define REQUEST_BUFFER_FULL     ((uint32_t)((uint32_t)1 << (uint32_t)1)) 
+    pdebug(DEBUG_INFO, "Done.");
+}
 
+
+
+int mb_init()
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_DETAIL, "Setting up mutex.");
+    if(!mb_mutex) {
+        rc = mutex_create(&mb_mutex);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s creating mutex!", plc_tag_decode_error(rc));
+            return rc;
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
 
