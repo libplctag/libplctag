@@ -31,14 +31,54 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIB_INIT_H__
-#define __LIB_INIT_H__ 1
+#pragma once
 
-
+#include <lib/libplctag.h>
+#include <platform.h>
+#include <lib/tag.h>
+#include <mb/mb_common.h>
+#include <mb/tag.h>
 #include <util/attr.h>
-extern int initialize_modules(void);
-typedef plc_tag_p (*tag_create_function)(attr attributes);
-extern tag_create_function find_tag_create_func(attr attributes);
-extern void destroy_modules(void);
 
-#endif
+
+
+#define MODBUS_DEFAULT_PORT (502)
+#define PLC_BUF_SIZE (550)
+
+
+struct mb_plc_t {
+    struct mb_plc_t *next;
+
+    /* state variable for state machine. */
+    int state;
+
+    /* mutex to control access. */
+    mutex_p mutex;
+
+    /* need a thread per PLC to prevent hangs on set up. */
+    int terminate;
+    thread_p thread;
+
+    /* list of tags for this Modbus PLC. */
+    struct mb_tag_t *tags;
+
+    /* host and port for this PLC */
+    const char *host;
+    uint16_t port;
+
+    /* socket and buffers */
+    sock_p sock;
+    uint32_t flags;
+    int input_bytes_read;
+    uint8_t in_buf[PLC_BUF_SIZE];
+    int output_bytes_written;
+    uint8_t out_buf[PLC_BUF_SIZE];
+};
+
+typedef struct mb_plc_t *mb_plc_p;
+
+/* Entry points to the PLC module. */
+extern mb_plc_p find_or_create_plc(attr attribs);
+extern int plc_add_tag(mb_plc_p plc, mb_tag_p tag);
+extern int plc_remove_tag(mb_plc_p plc, mb_tag_p tag);
+

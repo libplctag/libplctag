@@ -31,28 +31,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#pragma once
 
-#include <mb/modbus.h>
+#include <lib/libplctag.h>
+#include <platform.h>
+#include <lib/tag.h>
+#include <util/attr.h>
 
-void mb_teardown(void)
-{
-    /* place holder */
-}
+extern mutex_p mb_mutex;
 
-
-
-int mb_init()
-{
-    /* place holder */
-
-    return PLCTAG_STATUS_OK;
-}
-
-plc_tag_p mb_tag_create(attr attribs)
-{
-    (void)attribs;
-
-    /* place holder */
-
-    return NULL;
-}
