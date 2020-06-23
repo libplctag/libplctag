@@ -37,6 +37,8 @@
 #include <lib/tag.h>
 #include <util/attr.h>
 
+/* these are definitions used outside of the Modbus module. */
+
 void mb_teardown(void);
 int mb_init();
 plc_tag_p mb_tag_create(attr attribs);

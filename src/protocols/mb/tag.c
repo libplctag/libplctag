@@ -31,14 +31,82 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIB_INIT_H__
-#define __LIB_INIT_H__ 1
 
-
+#include <lib/libplctag.h>
+#include <lib/tag.h>
+#include <platform.h>
+#include <mb/tag.h>
 #include <util/attr.h>
-extern int initialize_modules(void);
-typedef plc_tag_p (*tag_create_function)(attr attributes);
-extern tag_create_function find_tag_create_func(attr attributes);
-extern void destroy_modules(void);
+#include <util/debug.h>
+#include <util/rc.h>
 
-#endif
+
+/* local functions. */
+static size_t calc_size(attr attribs);
+static void mb_tag_destroy(void *mb_tag);
+
+
+
+plc_tag_p mb_tag_create(attr attribs)
+{
+    int rc = PLCTAG_STATUS_OK;
+    size_t tag_size = 0;
+    mb_tag_p tag = NULL;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* calculate tag size */
+    tag_size = calc_size(attribs);
+    if(tag_size == 0) {
+        pdebug(DEBUG_WARN, "Tag size is zero, check tag string!");
+        return NULL;
+    }
+
+    /* allocate the memory for the new tag. */
+    tag = (mb_tag_p)rc_alloc((int)(unsigned int)(sizeof(struct mb_tag_t) + tag_size), mb_tag_destroy);
+    if(!tag) {
+        pdebug(DEBUG_ERROR, "Unable to allocate memory for new Modbus tag!");
+        return NULL;
+    }
+
+    /* tag data is immediately past the end of the tag struct. */
+    tag->data = (uint8_t *)(tag + 1);
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return (plc_tag_p)tag;
+}
+
+
+/************ Helper Functions *************/
+
+size_t calc_size(attr attribs)
+{
+    size_t elem_count, elem_size;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    elem_count = (size_t)(unsigned int)attr_get_int(attribs, "elem_count", 1);
+    elem_size = (size_t)(unsigned int)attr_get_int(attribs, "elem_size", 0);
+    if(elem_size == 0) {
+        pdebug(DEBUG_WARN, "Element size must be set with elem_size!");
+        return 0;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return elem_count * elem_size;
+}
+
+
+
+void mb_tag_destroy(void *tag_arg)
+{
+    mb_tag_p tag = (mb_tag_p)tag_arg;
+
+    (void)tag;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_INFO, "Done.");
+}

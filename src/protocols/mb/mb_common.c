@@ -31,14 +31,56 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIB_INIT_H__
-#define __LIB_INIT_H__ 1
 
-
+#include <lib/libplctag.h>
+#include <mb/modbus.h>
+#include <mb/mb_common.h>
+#include <mb/plc.h>
+#include <mb/tag.h>
 #include <util/attr.h>
-extern int initialize_modules(void);
-typedef plc_tag_p (*tag_create_function)(attr attributes);
-extern tag_create_function find_tag_create_func(attr attributes);
-extern void destroy_modules(void);
+#include <util/debug.h>
+#include <util/rc.h>
 
-#endif
+/* Modbus module globals. */
+mutex_p mb_mutex = NULL;
+
+volatile int library_terminating = 0;
+
+
+void mb_teardown(void)
+{
+    pdebug(DEBUG_INFO, "Starting.");
+
+    library_terminating = 1;
+
+    pdebug(DEBUG_DETAIL, "Destroying Modbus mutex.");
+    if(mb_mutex) {
+        mutex_destroy(&mb_mutex);
+        mb_mutex = NULL;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+}
+
+
+
+int mb_init()
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_DETAIL, "Setting up mutex.");
+    if(!mb_mutex) {
+        rc = mutex_create(&mb_mutex);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s creating mutex!", plc_tag_decode_error(rc));
+            return rc;
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
