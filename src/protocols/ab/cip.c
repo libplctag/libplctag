@@ -716,7 +716,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     /* get the source node */
     val = 0;
     while(isdigit(path[p_index])) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
 
@@ -739,7 +739,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     /* get the destination node */
     val = 0;
     while(isdigit(path[p_index])) {
-        val += (val * 10) + (path[p_index] - '0');
+        val = (val * 10) + (path[p_index] - '0');
         p_index++;
     }
 
