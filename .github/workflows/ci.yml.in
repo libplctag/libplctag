@@ -2,9 +2,9 @@ name: libplctag CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ release, prerelease ]
   pull_request:
-    branches: [ master ]
+    branches: [ release, prerelease ]
 
 jobs:
   ubuntu_x64:
