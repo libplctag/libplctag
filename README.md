@@ -73,17 +73,15 @@ Be careful!
   - multiple-request support per packet.
   - packet size negotiation with newer firmware (version 20+) and hardware.
   - tag listing, both controller and program tags.
-- support for accessing Logix-class PLCs via PLC/5 protocol.
-  - support for INT and REAL read and write.
 - support for Rockwell/Allen-Bradley MicroLogix 850 PLCs.
   - Support as for ControlLogix where possible.
-- support for Rockwell/Allen-Bradley PLC5 PLCs (E-series with Ethernet), and SLC 500 with Ethernet via CIP.
+- support for older Rockwell/Allen-Bradley such as PLC5 PLCs (E-series with Ethernet), SLC 500 and MicroLogix with Ethernet via CIP.
   - read/write of 16-bit INT.
   - read/write of 32-bit floating point.
   - read/write of arrays of the above (arrays not tested on SLC 500).
 - support for Rockwell/Allen-Bradley MicroLogix 1100 and 1400 series (not CIP-based)
   - use as per PLC5/SLC above.
-- support for Rockwell/Allen-Bradley PLC5 PLCs accessed over a DH+ bridge (i.e. a LGX chassis with a DHRIO module).
+- support for older Rockwell/Allen-Bradley PLCs accessed over a DH+ bridge (i.e. a LGX chassis with a DHRIO module) such as PLC/5, SLC 500 and MicroLogix.
   - read/write of 16-bit INT.
   - read/write of 32-bit floating point.
   - read/write of arrays of the above.
@@ -148,7 +146,7 @@ This code reads several 32-bit signed integers (DINT), updates them,
 then writes them back out and rereads them from a tag named TestBigArray
 in a Logix-class Allen-Bradley PLC.  
 
-The readme file describes some of the more interesting ones.
+The README file describes some of the more interesting ones.
 
 ## API
 
