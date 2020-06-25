@@ -8,10 +8,12 @@
       - [PLC Support](#plc-support)
       - [Platform Support](#platform-support)
     - [Alternate Programming Languages](#alternate-programming-languages)
+  - [Code](#code)
+    - [How to Get The Code](#how-to-get-the-code)
+    - [Example Code](#example-code)
+    - [API](#api)
   - [Help Wanted](#help-wanted)
     - [How to Contribute](#how-to-contribute)
-  - [Sample Code](#sample-code)
-  - [API](#api)
   - [History](#history)
   - [Contact](#contact)
   - [License](#license)
@@ -53,11 +55,11 @@ Be careful!
 - Open source licensing under the MPL 2.0 or LGPL 2+.
 - Pure C library for portability across Linux, Windows and macOS as well as 32-bit and 64-bit.
 - Very stable API with almost no changes other than feature additions since 2012.
-- Read and write tags of various types across AB/Rockwell PLCs such as ControlLogix, CompactLogix, Micro800 etc.
+- Read and write tags of various types across AB/Rockwell PLCs such as ControlLogix, CompactLogix, Micro800, PLC/5, SLC 500, MicroLogix etc.
 - Low memory use and very high performance and capacity.  Uses protocol-specific features to increase performance.
 - Simple API with minimal use of language-specific data to enable easy wrapping in other languages.
 - Extensive example programs showing use of all library features.
-- Included wrappers for several other languages.
+- Included wrappers for many other languages.
 - Free!
 
 ### Detailed Features
@@ -111,32 +113,26 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
 - Go (included)
 - Pascal (included)
 - .Net/C#
+  - Coming soon, our own C# wrapper, [libplctag.NET](https://github.com/libplctag/libplctag.NET) based on timyhac's version below!
   - [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet) supports .Net Core and is on Nuget!
   - [Mesta Automation](https://github.com/mesta1/libplctag-csharp).   Very popular with a nice introductory video.
   - [possibly experimental by timyhac, libplctag.Net](https://github.com/timyhac/libplctag.NET).   A relatively thin wrapper but loads the correct binary DLL at runtime.
 - Labview (see [here](https://github.com/dirtyb15/libplctag-labview))
+- Julia wrappers via the [PLCTag.jl](https://github.com/libplctag/PLCTag.jl) project!
 
-## Help Wanted
+## Code
 
-We need and welcome help with the following:
+### How to Get The Code
 
-- bug reports!   We may not have your hardware so your bugs can help us make sure the library works in cases we cannot find!
-- bug fixes.
-- other protocols like Modbus, SBus etc.
-- other platforms like Android, iOS etc.
-- additional compilers.
-- more language wrappers!
-- more tests!
+The code for the core library is at [libplctag](https://github.com/libplctag/libplctag).   Stable code is on the default _release_ branch.   If you check out
+code from GitHub, it will default to the _release_ branch.
 
-### How to Contribute
+If you want pre-built binaries, we have them available on the [releases](https://github.com/libplctag/libplctag/releases) page.   Just pick the one you want and download the ZIP file for your system.   We have 32 and 64-bit builds for x86 Linux and Windows and 64-bit builds for x86-64 macOS.
 
-We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   We ask that your code contributions to the core library are under the same dual MPL/LGPL license.
+Go to the main project at the [libplctag organization](https://github.com/libplctag) to see the other wrappers.   We are in a state of transition right now
+as we move more alternate language wrappers into the GitHub organization.
 
-The easiest way to contribute to the core library is to raise a PR on GitHub.
-
-Wrappers in other languages are generally split off into separate projects.  Those may have different licenses and contribution processes.  Please look at the documentation for the wrapper in question.
-
-## Sample Code
+### Example Code
 
 Oh, wait, you want code!   There are many examples in the [examples](https://github.com/libplctag/libplctag/tree/master/src/examples) directory.
 
@@ -148,12 +144,34 @@ in a Logix-class Allen-Bradley PLC.
 
 The README file describes some of the more interesting ones.
 
-## API
+### API
 
 Most of the functions in the API are for data access.   Direct support for single bits, 8-bit, 16-bit, 32-bit and
 64-bit words (integer and floating point) are provided by the library.
 
 See the [API](https://github.com/libplctag/libplctag/wiki/API) for more information.
+
+## Help Wanted
+
+We need and welcome help with the following:
+
+- bug reports!   We may not have your hardware so your bugs can help us make sure the library works in cases we cannot find!
+- bug fixes.
+- other protocols like Modbus, SBus etc.
+- other platforms like Android, iOS etc.
+- additional compilers.
+- more language wrappers!
+- Testing and more testing!   
+
+### How to Contribute
+
+We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   We ask that your code contributions to the core library are under the same dual MPL/LGPL license.
+
+Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch and can also be downloaded from the [releases](https://githubm.com/libplctag/libplctag/releases) page!  We appreciate all the help we get from our users this way.
+
+The easiest way to contribute to the core library is to raise a PR on GitHub.
+
+Wrappers in other languages are generally split off into separate projects.  Those may have different licenses and contribution processes.  Please look at the documentation for the wrapper in question.
 
 ## History
 
