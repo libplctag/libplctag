@@ -161,7 +161,7 @@ We need and welcome help with the following:
 - other platforms like Android, iOS etc.
 - additional compilers.
 - more language wrappers!
-- Testing and more testing!   
+- Testing and more testing!
 
 ### How to Contribute
 
