@@ -89,8 +89,8 @@ struct tag_vtable_t plc5_vtable = {
     ab_get_float64,
     ab_set_float64,
 
-    ab_get_float32,
-    ab_set_float32
+    pccc_get_float32,
+    pccc_set_float32
 };
 
 
