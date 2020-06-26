@@ -41,6 +41,7 @@
 #include <util/attr.h>
 #include <platform.h>
 #include <stdio.h>
+#include <util/debug.h>
 
 
 
@@ -155,8 +156,14 @@ extern attr attr_create_from_str(const char *attr_str)
         while(*cur && *cur != '=')
             cur++;
 
-        /* did we run off the end of the string?
+        /* 
+         * did we run off the end of the string?
          * That is an error because we need to have a value.
+         * 
+         * FIXME - this is actually a bug.   We need to fail
+         * on all malformed attribute.  Not just at the end of a line.
+         *    "foo=&bar=blah"
+         * is malformed.   But the test below will not catch it.
          */
         if(*cur == 0) {
             if(res) attr_destroy(res);
@@ -180,10 +187,15 @@ extern attr attr_create_from_str(const char *attr_str)
             cur++;
         }
 
-        if(attr_set_str(res, name, val)) {
-            if(res) attr_destroy(res);
-            mem_free(tmp);
-            return NULL;
+        /* only set the value if it is not a zero-length string. */
+        if(str_length(val)) {
+            if(attr_set_str(res, name, val)) {
+                if(res) attr_destroy(res);
+                mem_free(tmp);
+                return NULL;
+            }
+        } else {
+            pdebug(DEBUG_WARN, "Malformed attribute string, attribute \"%s\" has no value.", name);
         }
     }
 
@@ -303,6 +315,7 @@ extern const char *attr_get_str(attr attrs, const char *name, const char *def)
 
     e = find_entry(attrs, name);
 
+    /* only return a value if there is one. */
     if(e) {
         return e->val;
     } else {
