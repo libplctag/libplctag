@@ -96,8 +96,11 @@ extern "C"
 
 #define USE_STD_VARARG_MACROS 1
 
-
-
+/* Apparently ssize_t is not on Windows. */
+#if defined(_MSC_VER)
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
 
 
 #ifndef COUNT_NARG
