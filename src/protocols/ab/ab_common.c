@@ -1545,7 +1545,7 @@ int ab_set_float64(plc_tag_p raw_tag, int offset, double fval)
 
 float ab_get_float32(plc_tag_p raw_tag, int offset)
 {
-    uint32_t ures;
+    uint32_t ures = (uint32_t)0;
     float res = FLT_MAX;
     ab_tag_p tag = (ab_tag_p)raw_tag;
 
@@ -1572,6 +1572,8 @@ float ab_get_float32(plc_tag_p raw_tag, int offset)
            ((uint32_t)(tag->data[offset+1]) << 8) +
            ((uint32_t)(tag->data[offset+2]) << 16) +
            ((uint32_t)(tag->data[offset+3]) << 24);
+
+    pdebug(DEBUG_DETAIL, "ures=%lu", ures);
 
     /* copy the data */
     mem_copy(&res,&ures,sizeof(res));
