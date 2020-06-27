@@ -1634,7 +1634,7 @@ float ab_get_float32(plc_tag_p raw_tag, int offset)
            ((uint32_t)(tag->data[offset+2]) << 16) +
            ((uint32_t)(tag->data[offset+3]) << 24);
 
-    pdebug(DEBUG_DETAIL, "ures=%lu", ures);
+    //pdebug(DEBUG_DETAIL, "ures=%lu", ures);
 
     /* copy the data */
     mem_copy(&res,&ures,sizeof(res));
