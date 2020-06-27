@@ -230,14 +230,78 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)NULL;
     }
 
+    /* set up any required settings based on the cpu type. */
+    switch(tag->plc_type) {
+    case AB_PLC_PLC5:
+        tag->use_connected_msg = 0;
+        tag->allow_packing = 0;
+        break;
+
+    case AB_PLC_SLC:
+        tag->use_connected_msg = 0;
+        tag->allow_packing = 0;
+        break;
+
+    case AB_PLC_MLGX:
+        tag->use_connected_msg = 0;
+        tag->allow_packing = 0;
+        break;
+
+    case AB_PLC_LGX_PCCC:
+        tag->use_connected_msg = 0;
+        tag->allow_packing = 0;
+        break;
+
+    case AB_PLC_LGX:
+        /* default to requiring a connection and allowing packing. */
+        tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
+        tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
+        break;
+
+    case AB_PLC_MLGX800:
+        /* we must use connected messaging here. */
+        tag->use_connected_msg = 1;
+
+        /* Micro800 cannot pack requests. */
+        tag->allow_packing = 0;
+        break;
+
+    default:
+        pdebug(DEBUG_WARN, "Unknown PLC type!");
+        tag->status = PLCTAG_ERR_BAD_CONFIG;
+        return (plc_tag_p)tag;
+        break;
+    }
+
+    /* make sure that the connection requirement is forced. */
+    attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
+
     /* get the connection path.  We need this to make a decision about the PLC. */
     path = attr_get_str(attribs,"path",NULL);
 
+    /*
+     * Find or create a session.
+     *
+     * All tags need sessions.  They are the TCP connection to the gateway PLC.
+     */
+    if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO,"Unable to create session!");
+        tag->status = PLCTAG_ERR_BAD_GATEWAY;
+        return (plc_tag_p)tag;
+    }
+
+    pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
+
     /* set up PLC-specific information. */
-    switch(tag->protocol_type) {
-    case AB_PROTOCOL_PLC:
-        if(!path) {
+    switch(tag->plc_type) {
+    case AB_PLC_PLC5:
+        if(!tag->session->dhp_dest) {
             pdebug(DEBUG_DETAIL, "Setting up PLC/5 tag.");
+            
+            if(str_length(path)) {
+                pdebug(DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
+            }
+
             tag->use_connected_msg = 0;
             tag->vtable = &plc5_vtable;
         } else {
@@ -249,9 +313,14 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->allow_packing = 0;
         break;
 
-    case AB_PROTOCOL_SLC:
-    case AB_PROTOCOL_MLGX:
-        if(!path) {
+    case AB_PLC_SLC:
+    case AB_PLC_MLGX:
+        if(!tag->session->dhp_dest) {
+            
+            if(str_length(path)) {
+                pdebug(DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
+            }
+
             pdebug(DEBUG_DETAIL, "Setting up SLC/MicroLogix tag.");
             tag->use_connected_msg = 0;
             tag->vtable = &slc_vtable;
@@ -264,18 +333,18 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->allow_packing = 0;
         break;
 
-    case AB_PROTOCOL_LGX_PCCC:
+    case AB_PLC_LGX_PCCC:
         pdebug(DEBUG_DETAIL, "Setting up PCCC-mapped Logix tag.");
         tag->use_connected_msg = 0;
         tag->allow_packing = 0;
         tag->vtable = &lgx_pccc_vtable;
         break;
 
-    case AB_PROTOCOL_LGX:
+    case AB_PLC_LGX:
         pdebug(DEBUG_DETAIL, "Setting up Logix tag.");
 
         /* Logix tags need a path. */
-        if(path == NULL && tag->protocol_type == AB_PROTOCOL_LGX) {
+        if(path == NULL && tag->plc_type == AB_PLC_LGX) {
             pdebug(DEBUG_WARN,"A path is required for Logix-class PLCs!");
             tag->status = PLCTAG_ERR_BAD_PARAM;
             return (plc_tag_p)tag;
@@ -295,8 +364,13 @@ plc_tag_p ab_tag_create(attr attribs)
 
         break;
 
-    case AB_PROTOCOL_MLGX800:
+    case AB_PLC_MLGX800:
         pdebug(DEBUG_DETAIL, "Setting up Micro8X0 tag.");
+            
+        if(path || str_length(path)) {
+            pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
+        }
+
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
         tag->vtable = &eip_cip_vtable;
@@ -325,7 +399,7 @@ plc_tag_p ab_tag_create(attr attribs)
     tag->elem_count = attr_get_int(attribs,"elem_count", 1);
 
     /* we still need size on non Logix-class PLCs */
-    if(tag->protocol_type != AB_PROTOCOL_LGX && tag->protocol_type != AB_PROTOCOL_MLGX800) {
+    if(tag->plc_type != AB_PLC_LGX && tag->plc_type != AB_PLC_MLGX800) {
         /* get the element size if it is not already set. */
         if(!tag->elem_size) {
             tag->elem_size = attr_get_int(attribs, "elem_size", 0);
@@ -354,19 +428,6 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->size = 0;
         tag->data = NULL;
     }
-
-    /*
-     * Find or create a session.
-     *
-     * All tags need sessions.  They are the TCP connection to the gateway PLC.
-     */
-    if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO,"Unable to create session!");
-        tag->status = PLCTAG_ERR_BAD_GATEWAY;
-        return (plc_tag_p)tag;
-    }
-
-    pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
 
     /*
      * check the tag name, this is protocol specific.
@@ -401,11 +462,11 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
     const char *elem_type = NULL;
     const char *tag_name = NULL;
 
-    switch(tag->protocol_type) {
-    case AB_PROTOCOL_PLC:
-    case AB_PROTOCOL_SLC:
-    case AB_PROTOCOL_LGX_PCCC:
-    case AB_PROTOCOL_MLGX:
+    switch(tag->plc_type) {
+    case AB_PLC_PLC5:
+    case AB_PLC_SLC:
+    case AB_PLC_LGX_PCCC:
+    case AB_PLC_MLGX:
         tag_name = attr_get_str(attribs,"name", NULL);
 
         /* the first two characters are the important ones. */
@@ -484,8 +545,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
         break;
 
-    case AB_PROTOCOL_LGX:
-    case AB_PROTOCOL_MLGX800:
+    case AB_PLC_LGX:
+    case AB_PLC_MLGX800:
         /* look for the elem_type attribute. */
         elem_type = attr_get_str(attribs, "elem_type", NULL);
         if(elem_type) {
@@ -534,7 +595,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
             }
         } else {
             /* just for Logix, check for tag listing */
-            if(tag->protocol_type == AB_PROTOCOL_LGX) {
+            if(tag->plc_type == AB_PLC_LGX) {
                 const char *tag_name = attr_get_str(attribs, "name", NULL);
                 int tag_listing_rc = setup_tag_listing(tag, tag_name);
 
@@ -1629,29 +1690,29 @@ plc_type_t get_plc_type(attr attribs)
 
     if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
         pdebug(DEBUG_DETAIL,"Found PLC/5 PLC.");
-        return AB_PROTOCOL_PLC;
+        return AB_PLC_PLC5;
     } else if ( !str_cmp_i(cpu_type, "slc") || !str_cmp_i(cpu_type, "slc500")) {
         pdebug(DEBUG_DETAIL,"Found SLC 500 PLC.");
-        return AB_PROTOCOL_SLC;
+        return AB_PLC_SLC;
     } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
                !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
         pdebug(DEBUG_DETAIL,"Found Logix-class PLC using PCCC protocol.");
-        return AB_PROTOCOL_LGX_PCCC;
+        return AB_PLC_LGX_PCCC;
     } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
         pdebug(DEBUG_DETAIL,"Found Micro8xx PLC.");
-        return AB_PROTOCOL_MLGX800;
+        return AB_PLC_MLGX800;
     } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
         pdebug(DEBUG_DETAIL,"Found MicroLogix PLC.");
-        return AB_PROTOCOL_MLGX;
+        return AB_PLC_MLGX;
     } else if (!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx") ||
                !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") ||
                !str_cmp_i(cpu_type, "logix")) {
         pdebug(DEBUG_DETAIL,"Found ControlLogix/CompactLogix PLC.");
-        return AB_PROTOCOL_LGX;
+        return AB_PLC_LGX;
     } else {
         pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);
 
-        return AB_PROTOCOL_NONE;
+        return AB_PLC_NONE;
     }
 }
 
@@ -1661,11 +1722,11 @@ int check_cpu(ab_tag_p tag, attr attribs)
 {
     plc_type_t result = get_plc_type(attribs);
 
-    if(result != AB_PROTOCOL_NONE) {
-        tag->protocol_type = result;
+    if(result != AB_PLC_NONE) {
+        tag->plc_type = result;
         return PLCTAG_STATUS_OK;
     } else {
-        tag->protocol_type = result;
+        tag->plc_type = result;
         return PLCTAG_ERR_BAD_DEVICE;
     }
 }
@@ -1680,9 +1741,9 @@ int check_tag_name(ab_tag_p tag, const char* name)
     }
 
     /* attempt to parse the tag name */
-    switch (tag->protocol_type) {
-    case AB_PROTOCOL_PLC:
-    case AB_PROTOCOL_LGX_PCCC:
+    switch (tag->plc_type) {
+    case AB_PLC_PLC5:
+    case AB_PLC_LGX_PCCC:
         if ((rc = plc5_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "parse of PLC/5-style tag name %s failed!", name);
 
@@ -1691,8 +1752,8 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
         break;
 
-    case AB_PROTOCOL_SLC:
-    case AB_PROTOCOL_MLGX:
+    case AB_PLC_SLC:
+    case AB_PLC_MLGX:
         if ((rc = slc_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "parse of SLC-style tag name %s failed!", name);
 
@@ -1701,8 +1762,8 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
         break;
 
-    case AB_PROTOCOL_MLGX800:
-    case AB_PROTOCOL_LGX:
+    case AB_PLC_MLGX800:
+    case AB_PLC_LGX:
         if ((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "parse of CIP-style tag name %s failed!", name);
 
@@ -1713,7 +1774,7 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
     default:
         /* how would we get here? */
-        pdebug(DEBUG_WARN, "unsupported protocol %d", tag->protocol_type);
+        pdebug(DEBUG_WARN, "unsupported PLC type %d", tag->plc_type);
 
         return PLCTAG_ERR_BAD_PARAM;
 
