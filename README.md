@@ -26,7 +26,7 @@
 |Windows |  10 (Server 19) | Supported | Supported |
 |macOS   |  10.15  | Supported | Not Supported |
 
-![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=master)
+![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=release)
 
 This open source (dual MPL 2.0 and LGPL 2+ licensing) C library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
 simple data.  The library has been in production use since early 2012 and is in use by multiple organizations for many tasks
