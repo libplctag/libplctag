@@ -69,7 +69,7 @@
 
 
 
-static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int use_connected_msg);
+static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int *use_connected_msg);
 static int session_init(ab_session_p session);
 //static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
@@ -231,11 +231,11 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
         auto_disconnect_enabled = 1;
     }
 
-    if(plc_type == AB_PROTOCOL_PLC && str_length(session_path) > 0) {
-        /* this means it is DH+ */
-        use_connected_msg = 1;
-        attr_set_int(attribs, "use_connected_msg", 1);
-    }
+    // if(plc_type == AB_PLC_PLC5 && str_length(session_path) > 0) {
+    //     /* this means it is DH+ */
+    //     use_connected_msg = 1;
+    //     attr_set_int(attribs, "use_connected_msg", 1);
+    // }
 
     critical_block(session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
@@ -248,7 +248,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
 
         if (session == AB_SESSION_NULL) {
             pdebug(DEBUG_DETAIL, "Creating new session.");
-            session = session_create_unsafe(session_gw, session_gw_port, session_path, plc_type, use_connected_msg);
+            session = session_create_unsafe(session_gw, session_gw_port, session_path, plc_type, &use_connected_msg);
 
             if (session == AB_SESSION_NULL) {
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
@@ -299,34 +299,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
 }
 
 
-///* FIXME - This duplicates check_cpu in ab_common.c:check_cpu()!!! */
-//
-//int get_plc_type(attr attribs)
-//{
-//    const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
-//
-//    if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5") || !str_cmp_i(cpu_type, "slc") ||
-//            !str_cmp_i(cpu_type, "slc500")) {
-//        return AB_PROTOCOL_PLC;
-//    } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
-//               !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
-//        return AB_PROTOCOL_LGX_PCCC;
-//    } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
-//        return AB_PROTOCOL_MLGX800;
-//    } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
-//        return AB_PROTOCOL_MLGX;
-//    } else if (!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx") ||
-//               !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") ||
-//               !str_cmp_i(cpu_type, "logix") || !str_cmp_i(cpu_type, "flgx")) {
-//        return AB_PROTOCOL_LGX;
-//    } else {
-//        pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);
-//
-//        return PLCTAG_ERR_BAD_DEVICE;
-//    }
-//
-//    return PLCTAG_STATUS_OK;
-//}
 
 
 int add_session_unsafe(ab_session_p session)
@@ -450,7 +422,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
 
 
 
-ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int use_connected_msg)
+ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int *use_connected_msg)
 {
     static volatile uint32_t connection_id = 0;
 
@@ -460,6 +432,12 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
     pdebug(DEBUG_INFO, "Starting");
 
     pdebug(DEBUG_DETAIL, "Warning: not using passed port %d", gw_port);
+
+    if(*use_connected_msg) {
+        pdebug(DEBUG_DETAIL, "Session should use connected messaging.");
+    } else {
+        pdebug(DEBUG_DETAIL, "Session should not use connected messaging.");
+    }
 
     session = (ab_session_p)rc_alloc(sizeof(struct ab_session_t), session_destroy);
     if (!session) {
@@ -499,7 +477,7 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
 
     session->plc_type = plc_type;
     session->data_capacity = MAX_PACKET_SIZE_EX;
-    session->use_connected_msg = use_connected_msg;
+    session->use_connected_msg = *use_connected_msg;
     session->failed = 0;
     session->conn_serial_number = (uint16_t)(intptr_t)(session);
 
@@ -512,24 +490,24 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
 
     /* guess the max CIP payload size. */
     switch(plc_type) {
-    case AB_PROTOCOL_SLC:
+    case AB_PLC_SLC:
         session->max_payload_size = MAX_CIP_SLC_MSG_SIZE;
         break;
 
-    case AB_PROTOCOL_MLGX:
+    case AB_PLC_MLGX:
         session->max_payload_size = MAX_CIP_MLGX_MSG_SIZE;
         break;
 
-    case AB_PROTOCOL_PLC:
-    case AB_PROTOCOL_LGX_PCCC:
+    case AB_PLC_PLC5:
+    case AB_PLC_LGX_PCCC:
         session->max_payload_size = MAX_CIP_PLC5_MSG_SIZE;
         break;
 
-    case AB_PROTOCOL_LGX:
+    case AB_PLC_LGX:
         session->max_payload_size = MAX_CIP_MSG_SIZE;
         break;
 
-    case AB_PROTOCOL_MLGX800:
+    case AB_PLC_MLGX800:
         session->max_payload_size = MAX_CIP_MSG_SIZE;
         break;
 
@@ -1860,7 +1838,7 @@ int perform_forward_open(ab_session_p session)
          * and we are doing connected messaging.
          */
 
-        if(session->plc_type == AB_PROTOCOL_LGX && session->use_connected_msg) {
+        if(session->plc_type == AB_PLC_LGX && session->use_connected_msg) {
             max_payload_size = MAX_CIP_MSG_SIZE_EX;
         }
 
@@ -2080,7 +2058,7 @@ int send_forward_open_req(ab_session_p session)
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
-    if((session->plc_type == AB_PROTOCOL_PLC || session->plc_type == AB_PROTOCOL_SLC || session->plc_type == AB_PROTOCOL_MLGX) && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX) && session->dhp_dest != 0) {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */
@@ -2089,7 +2067,7 @@ int send_forward_open_req(ab_session_p session)
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
-    if((session->plc_type == AB_PROTOCOL_PLC || session->plc_type == AB_PROTOCOL_SLC || session->plc_type == AB_PROTOCOL_MLGX) && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX) && session->dhp_dest != 0) {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_size); /* packet size and some other things, based on protocol/cpu type */

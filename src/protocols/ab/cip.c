@@ -252,7 +252,7 @@ int cip_encode_path_old(const char *path, int needs_connection, plc_type_t plc_t
       * whether the last part is DH+.  Only some combinations of
       * DH+ and PLC type work.
       */
-    if(last_is_dhp && (plc_type == AB_PROTOCOL_PLC || plc_type == AB_PROTOCOL_SLC || plc_type == AB_PROTOCOL_MLGX)) {
+    if(last_is_dhp && (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX)) {
         /* We have to make the difference from the more
          * generic case.
          */
@@ -332,7 +332,7 @@ int cip_encode_path_old(const char *path, int needs_connection, plc_type_t plc_t
 
 
 
-int cip_encode_path(const char *path, int needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest)
+int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest)
 {
     size_t path_len = 0;
     size_t conn_path_index = 0;
@@ -384,7 +384,10 @@ int cip_encode_path(const char *path, int needs_connection, plc_type_t plc_type,
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if(is_dhp && (plc_type == AB_PROTOCOL_PLC || plc_type == AB_PROTOCOL_SLC || plc_type == AB_PROTOCOL_MLGX)) {
+    if(is_dhp && (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX)) {
+        /* DH+ bridging always needs a connection. */
+        *needs_connection = 1;
+
         /* add the special PCCC/DH+ routing on the end. */
         tmp_conn_path[conn_path_index + 0] = 0x20;
         tmp_conn_path[conn_path_index + 1] = 0xA6;
@@ -396,7 +399,7 @@ int cip_encode_path(const char *path, int needs_connection, plc_type_t plc_type,
 
         *dhp_dest = (uint16_t)dhp_dest_node;
     } else if(!is_dhp) {
-        if(needs_connection) {
+        if(*needs_connection) {
             /*
              * we do a generic path to the router
              * object in the PLC.  But only if the PLC is
@@ -424,8 +427,7 @@ int cip_encode_path(const char *path, int needs_connection, plc_type_t plc_type,
     }
 
     /*
-     * zero out the last byte if we need to.
-     * This pads out the path to a multiple of 16-bit
+     * zero pad the path to a multiple of 16-bit
      * words.
      */
     pdebug(DEBUG_DETAIL,"IOI size before %d", conn_path_index);
