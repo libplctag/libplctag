@@ -30,6 +30,15 @@
 #   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
+# the project is version 2.1
+set (libplctag_VERSION_MAJOR 2)
+set (libplctag_VERSION_MINOR 1)
+set (libplctag_VERSION_PATCH 9)
+set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
+
+set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
+
+
 cmake_minimum_required (VERSION 2.8)
 
 # prevent expansion of quoted things that could be variables in if()
@@ -56,14 +65,6 @@ project (libplctag_project)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
-
-# the project is version 2.1
-set (libplctag_VERSION_MAJOR 2)
-set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 8)
-set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
-
-set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 # we need threads
 find_package(Threads REQUIRED)
