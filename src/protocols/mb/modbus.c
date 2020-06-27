@@ -47,6 +47,25 @@ mutex_p mb_mutex = NULL;
 volatile int library_terminating = 0;
 
 
+
+/****** main entry point *******/
+
+plc_tag_p mb_tag_create(attr attribs)
+{
+    (void)attribs;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return NULL;
+}
+
+
+
+/****** Library level functions. *******/
+
 void mb_teardown(void)
 {
     pdebug(DEBUG_INFO, "Starting.");
