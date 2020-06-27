@@ -48,6 +48,9 @@ struct modbus_plc_t {
 
 typedef struct modbus_plc_t *modbus_plc_p;
 
+typedef enum { MB_REG_UNKNOWN, MB_REG_DO, MB_REG_DI, MB_REG_AO, MB_REG_AI } modbus_reg_type_t;
+
+
 struct modbus_tag_t {
     /* base tag parts. */
     TAG_BASE_STRUCT;
@@ -55,16 +58,15 @@ struct modbus_tag_t {
     /* next one in the list for this PLC */
     struct modbus_tag_t *next;
 
+    /* register type. */
+    modbus_reg_type_t reg_type;
+
     /* data for the tag. */
     int elem_count;
     int elem_size;
-    int size;
-    uint8_t data[];
 };
 
 typedef struct modbus_tag_t *modbus_tag_p;
-
-typedef enum { MB_REG_UNKNOWN, MB_REG_DO, MB_REG_DI, MB_REG_AO, MB_REG_AI } modbug_reg_type_t;
 
 
 /* Modbus module globals. */

@@ -39,12 +39,7 @@
 
 /* these are definitions used outside of the Modbus module. */
 
-<<<<<<< HEAD
 extern void mb_teardown(void);
 extern int mb_init();
 extern plc_tag_p mb_tag_create(attr attribs);
-=======
-void mb_teardown(void);
-int mb_init();
-plc_tag_p mb_tag_create(attr attribs);
->>>>>>> e12cb7669773f90e2d29f9244052eccdce142e68
+
