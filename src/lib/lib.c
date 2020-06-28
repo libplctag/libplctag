@@ -989,6 +989,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
         /* if error, return now */
         if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_DETAIL, "Tag status reporting error %s!", plc_tag_decode_error(rc));
             break;
         }
 
