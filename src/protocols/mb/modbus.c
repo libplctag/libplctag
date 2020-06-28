@@ -41,6 +41,13 @@
 #include <util/rc.h>
 
 /* data definitions */
+
+#define PLC_SOCKET_ERR_DELAY (5000)
+#define MODBUS_DEFAULT_PORT (502)
+#define PLC_READ_DATA_LEN (300)
+#define PLC_WRITE_DATA_LEN (300)
+#define MODBUS_MBAP_SIZE (6)
+
 struct modbus_plc_t {
     struct modbus_plc_t *next;
 
@@ -49,22 +56,42 @@ struct modbus_plc_t {
 
     /* hostname/ip and possibly port of the server. */
     char *server;
+    sock_p sock;
+    uint8_t server_id;
 
-    /* flags */
+    /* State */
     struct {
         unsigned int terminate:1;
+        unsigned int response_ready:1;
+        unsigned int write_buffer_empty:1;
     } flags;
+    uint16_t seq_id;
 
     /* thread related state */
     thread_p handler_thread;
     mutex_p mutex;
 
+    /* data buffers. */
+    int read_data_len;
+    uint8_t read_data[PLC_READ_DATA_LEN];
+    int write_data_len;
+    int write_data_offset;
+    uint8_t write_data[PLC_WRITE_DATA_LEN];
 };
 
 typedef struct modbus_plc_t *modbus_plc_p;
 
 typedef enum { MB_REG_UNKNOWN, MB_REG_DO, MB_REG_DI, MB_REG_AO, MB_REG_AI } modbus_reg_type_t;
 
+typedef enum { MB_CMD_READ_DO_MULTI = 0x01,  
+               MB_CMD_READ_DI_MULTI = 0x02,  
+               MB_CMD_READ_AO_MULTI = 0x03, 
+               MB_CMD_READ_AI_MULTI = 0x04,
+               MB_CMD_WRITE_DO_SINGLE = 0x05, 
+               MB_CMD_WRITE_AO_SINGLE = 0x06,
+               MB_CMD_WRITE_DO_MULTI = 0x0F,
+               MB_CMD_WRITE_AO_MULTI = 0x10
+             } modbug_cmd_t;
 
 struct modbus_tag_t {
     /* base tag parts. */
@@ -75,6 +102,7 @@ struct modbus_tag_t {
 
     /* register type. */
     modbus_reg_type_t reg_type;
+    uint16_t reg_base;
 
     /* the PLC we are using */
     modbus_plc_p plc;
@@ -84,11 +112,15 @@ struct modbus_tag_t {
         unsigned int abort:1;
         unsigned int read:1;
         unsigned int write:1;
+        unsigned int busy:1;
     } flags;
 
     /* data for the tag. */
     int elem_count;
     int elem_size;
+
+    /* data for outstanding requests. */
+    uint16_t seq_id;
 };
 
 typedef struct modbus_tag_t *modbus_tag_p;
@@ -107,6 +139,16 @@ static int get_tag_type(attr attribs);
 static void modbus_tag_destructor(void *tag_arg);
 static void modbus_plc_destructor(void *plc_arg);
 static THREAD_FUNC(modbus_plc_handler);
+static int connect_plc(modbus_plc_p plc);
+static int read_packet(modbus_plc_p plc);
+static int write_packet(modbus_plc_p plc);
+static int process_tag(modbus_tag_p tag, modbus_plc_p plc);
+static int check_read_response(modbus_plc_p plc, modbus_tag_p tag);
+static int create_read_request(modbus_plc_p plc, modbus_tag_p tag);
+static int check_write_response(modbus_plc_p plc, modbus_tag_p tag);
+static int create_write_request(modbus_plc_p plc, modbus_tag_p tag);
+static int translate_modbus_error(uint8_t err_code);
+
 
 /* tag vtable functions. */
 
@@ -461,19 +503,87 @@ void modbus_plc_destructor(void *plc_arg)
 
 THREAD_FUNC(modbus_plc_handler)
 {
+    int rc = PLCTAG_STATUS_OK;
     modbus_plc_p plc = (modbus_plc_p)arg;
+    int64_t err_delay = 0;
+
+    pdebug(DEBUG_INFO, "Starting.");
 
     if(!plc) {
         pdebug(DEBUG_WARN, "Null PLC pointer passed!");
         return NULL;
     }
 
-    pdebug(DEBUG_INFO, "Starting.");
-
     while(! plc->flags.terminate) {
         int keep_going = 0;
 
+        if(err_delay < time_ms()) {
+            do {
+                if(! plc->sock) {
+                    /* socket must not be open! */
+                    rc = connect_plc(plc);
+                    if(rc != PLCTAG_STATUS_OK) {
+                        err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
+                        break;
+                    }
+                }
 
+                /* read packet */
+                rc = read_packet(plc);
+                if(rc != PLCTAG_STATUS_OK) {
+                    /* problem, punt! */
+                    err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
+                    break;
+                }
+
+                if(plc->flags.response_ready) {
+                    keep_going = 1;
+                }
+
+                /* write packet */
+                rc = write_packet(plc);
+                if(rc != PLCTAG_STATUS_OK) {
+                    /* oops! */
+                    err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
+                    break;
+                }
+
+                /* run all the tags. */
+                critical_block(plc->mutex) {
+                    /* don't do anything if there are no tags. */
+                    if(plc->tags) {
+                        modbus_tag_p *tag_walker = &(plc->tags);
+
+                        while(*tag_walker) {
+                            modbus_tag_p tag = rc_inc(*tag_walker);
+
+                            /* the tag might be in the destructor. */
+                            if(tag) {
+                                rc = process_tag(tag, plc);
+                                if(rc != PLCTAG_STATUS_OK) {
+                                    pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
+                                }
+                            }
+
+                            tag_walker = &((*tag_walker)->next);
+                        }
+                    }
+                }
+            } while(0);
+
+            if(plc->flags.response_ready) {
+                pdebug(DEBUG_WARN, "Response still pending after full tag pass.  Clearing buffer.");
+
+                plc->flags.response_ready = 0;
+                plc->read_data_len = 0;
+            }
+
+            if(rc != PLCTAG_STATUS_OK) {
+
+            }
+        } else {
+            keep_going = 0;
+        }
 
         if(!keep_going) {
             sleep_ms(1);
@@ -484,6 +594,478 @@ THREAD_FUNC(modbus_plc_handler)
 
     return NULL;
 }
+
+
+
+int connect_plc(modbus_plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    char **server_port = NULL;
+    char *server = NULL;
+    int port = MODBUS_DEFAULT_PORT;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    server_port = str_split(":", plc->server);
+    if(!server_port) {
+        pdebug(DEBUG_WARN, "Unable to split server and port string!");
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    if(server_port[0] == NULL) {
+        pdebug(DEBUG_WARN, "Server string is malformed or empty!");
+        return PLCTAG_ERR_BAD_CONFIG;
+    } else {
+        server = server_port[0];
+    }
+
+    if(server_port[1] != NULL) {
+        rc = str_to_int(server_port[1], &port);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to extract port number from server string \"%s\"!", plc->server);
+            return PLCTAG_ERR_BAD_CONFIG;
+        }
+    } else {
+        port = MODBUS_DEFAULT_PORT;
+    }
+
+    pdebug(DEBUG_DETAIL, "Using server \"%s\" and port %d.", server, port);
+
+    rc = socket_create(&(plc->sock));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create socket object, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* connect to the socket */
+    pdebug(DEBUG_DETAIL, "Connecting...");
+    rc = socket_connect_tcp(plc->sock, server, port);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to connect to the server \"%s\", got error %s!", plc->server, plc_tag_decode_error(rc));
+        socket_destroy(&(plc->sock));
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+int read_packet(modbus_plc_p plc)
+{
+    int rc = 1;
+    int data_needed = 1;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* Loop until we stop getting data or we have all the data. */
+    while(rc > 0 && data_needed > 0) {
+        if(plc->read_data_len >= MODBUS_MBAP_SIZE) {
+            int packet_size = plc->read_data[6] + (plc->read_data[5] << 8);
+            data_needed = (MODBUS_MBAP_SIZE + packet_size) - plc->read_data_len;
+
+            if(data_needed > PLC_READ_DATA_LEN) {
+                pdebug(DEBUG_WARN, "Packet size, %d, greater than buffer size, %d!", data_needed, PLC_READ_DATA_LEN);
+                rc = PLCTAG_ERR_TOO_LARGE;
+            }
+        } else {
+            data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;            
+        }
+
+        rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, PLC_READ_DATA_LEN - plc->read_data_len);
+        if(rc > 0) {
+            /* got data! */
+            plc->read_data_len += rc;
+        } else {
+            pdebug(DEBUG_WARN, "Error, %s, reading socket!", plc_tag_decode_error(rc));
+            break;
+        }
+    } while(rc > 0 && data_needed > 0);
+
+    if(rc >= 0) {
+        if(data_needed == 0) {
+            /* we got our packet. */
+            pdebug(DEBUG_DETAIL, "Received full packet.");
+            pdebug_dump_bytes(DEBUG_DETAIL, plc->read_data, plc->read_data_len);
+            plc->flags.response_ready = 1;
+        }
+
+        rc = PLCTAG_STATUS_OK;
+    } 
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+
+int write_packet(modbus_plc_p plc)
+{
+    int rc = 1;
+    int data_left = plc->write_data_len - plc->write_data_offset;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(plc->flags.write_buffer_empty) {
+        pdebug(DEBUG_SPEW, "Done. Nothing to do.");
+        return PLCTAG_STATUS_OK;
+    }
+
+    while(rc > 0 && data_left > 0) {
+        rc = socket_write(plc->sock, plc->write_data + plc->write_data_offset, data_left);
+        if(rc >= 0) {
+            plc->write_data_offset += rc;
+            data_left = plc->write_data_len - plc->write_data_offset;
+        } else {
+            pdebug(DEBUG_WARN, "Error, %s, writing to socket!", plc_tag_decode_error(rc));
+        }
+    }
+
+    if(rc >= 0) {
+        /* clean up if full write was done. */
+        if(data_left == 0) {
+            pdebug(DEBUG_DETAIL, "Full packet written.");
+            pdebug_dump_bytes(DEBUG_DETAIL, plc->write_data, plc->write_data_len);
+
+            plc->flags.write_buffer_empty = 1;
+            plc->write_data_len = 0;
+            plc->write_data_offset = 0;
+        }
+
+        rc = PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+
+int process_tag(modbus_tag_p tag, modbus_plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* try to get the mutex on the tag. */
+    if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+        /* got the mutex, so we can look at and modify the tag. */
+        if(tag->flags.abort) {
+            pdebug(DEBUG_DETAIL, "Aborting any in flight operations!");
+
+            tag->flags.read = 0;
+            tag->flags.write = 0;
+            tag->flags.busy = 0;
+            tag->flags.abort = 0;
+            tag->seq_id = 0;
+        }
+
+        if(tag->flags.write) {
+            if(tag->flags.busy) {
+                if(plc->flags.response_ready) {
+                    /* we have an outstanding write request. */
+                    rc = check_write_response(plc, tag);
+                    if(rc == PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_SPEW, "Either not our response or we got a response!");
+                    } else {
+                        pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
+                    }
+                } else {
+                    pdebug(DEBUG_SPEW, "No response yet.");
+                }
+            } else {
+                /* we have a write request but it is not in flight. */
+                if(plc->flags.write_buffer_empty) {
+                    rc = create_write_request(plc, tag);
+                } else {
+                    pdebug(DEBUG_SPEW, "No buffer space for a response.");
+                }
+            }
+        }
+
+        if(tag->flags.read) {
+            if(tag->flags.busy) {
+                if(plc->flags.response_ready) {
+                    /* there is a request in flight, is there a response? */
+                    rc = check_read_response(plc, tag);
+                    if(rc == PLCTAG_STATUS_OK) {
+                        /* this is our response. */
+                        pdebug(DEBUG_SPEW, "Either not our response or we got a good response.");
+                    } else {
+                        pdebug(DEBUG_SPEW, "We got an error on our read response check, %s!", plc_tag_decode_error(rc));
+                    }
+                } else {
+                    pdebug(DEBUG_SPEW, "No response yet.");
+                }
+            } else {
+                /* we have a write request but it is not in flight. */
+                if(plc->flags.write_buffer_empty) {
+                    rc = create_read_request(plc, tag);
+                } else {
+                    pdebug(DEBUG_SPEW, "No buffer space for a response.");
+                }
+            }
+        }
+
+        mutex_unlock(tag->api_mutex);
+    }
+
+    /* set the tag status. */
+    tag->status = rc;
+
+    /* does this tag need to do anything? */
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] +(uint16_t)(plc->read_data[0] << 8));
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(seq_id == tag->seq_id) {
+        uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
+
+        if(has_error) {
+            rc = translate_modbus_error(plc->read_data[8]);
+
+            pdebug(DEBUG_WARN, "Got read response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id, plc_tag_decode_error(rc), plc->read_data_len);
+        } else {
+            int payload_size = (int)(unsigned int)plc->read_data[8];
+            int copy_size = (tag->size < payload_size ? tag->size : payload_size);
+
+            /* FIXME - handle tags longer than packet size. */
+
+            /* no error. So copy the data. */
+            pdebug(DEBUG_DETAIL, "Got read response %ud of length %d with payload of size %d.", (int)(unsigned int)seq_id, plc->read_data_len, payload_size);
+
+            mem_copy(tag->data, &plc->read_data[9], copy_size);
+
+            rc = PLCTAG_STATUS_OK;
+        }
+
+        /* either way, clean up the PLC buffer. */
+        plc->read_data_len = 0;
+        plc->flags.response_ready = 0;
+
+        /* clean up tag*/
+        tag->flags.read = 0;
+        tag->flags.busy = 0;
+        tag->seq_id = 0;
+    } else {
+        pdebug(DEBUG_SPEW, "Not our response.");
+
+        rc = PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id)); // disallow zero
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* build the read request.
+     *    Byte  Meaning
+     *      0    High byte of request sequence ID.
+     *      1    Low byte of request sequence ID.
+     *      2    High byte of the protocol version identifier (zero).
+     *      3    Low byte of the protocol version identifier (zero).
+     *      4    High byte of the message length.
+     *      5    Low byte of the message length.
+     *      6    Device address.
+     *      7    Function code.
+     *      8    High byte of first register address.
+     *      9    Low byte of the first register address.
+     *     10    High byte of the register count.
+     *     11    Low byte of the register count.
+     */
+
+    plc->write_data_len = 0;
+
+    /* build the request sequence ID */
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 0) & 0xFF); plc->write_data_len++;
+
+    /* protocol version is always zero */
+    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
+
+    /* request packet length */
+    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 6; plc->write_data_len++;
+
+    /* device address */
+    plc->write_data[plc->write_data_len] = plc->server_id; plc->write_data_len++;
+
+    /* function code depends on the register type. */
+    switch(tag->reg_type) {
+        case MB_REG_DO:
+            plc->write_data[7] = MB_CMD_READ_DO_MULTI; plc->write_data_len++;
+            break;
+
+        case MB_REG_DI:
+            plc->write_data[7] = MB_CMD_READ_DI_MULTI; plc->write_data_len++;
+            break;
+
+        case MB_REG_AO:
+            plc->write_data[7] = MB_CMD_READ_AO_MULTI; plc->write_data_len++;
+            break;
+
+        case MB_REG_AI:
+            plc->write_data[7] = MB_CMD_READ_AI_MULTI; plc->write_data_len++;
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported register type %d!", tag->reg_type);
+            return PLCTAG_ERR_UNSUPPORTED;
+            break;
+    }
+
+    /* register base. */
+    plc->write_data[8] = (uint8_t)((tag->reg_base >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[9] = (uint8_t)((tag->reg_base >> 0) & 0xFF); plc->write_data_len++;
+
+    /* number of elements to read. */
+    plc->write_data[10] = (uint8_t)((tag->elem_count >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[11] = (uint8_t)((tag->elem_count >> 0) & 0xFF); plc->write_data_len++;
+
+    /* ready to go. */
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(seq_id == tag->seq_id) {
+        uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
+
+        if(has_error) {
+            rc = translate_modbus_error(plc->read_data[8]);
+
+            pdebug(DEBUG_WARN, "Got write response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id, plc_tag_decode_error(rc), plc->read_data_len);
+        } else {
+            /* FIXME - handle tags longer than packet size. */
+
+            /* no error. */
+            pdebug(DEBUG_DETAIL, "Got write response %ud of length %d.", (int)(unsigned int)seq_id, plc->read_data_len);
+
+            rc = PLCTAG_STATUS_OK;
+        }
+
+        /* either way, clean up the PLC buffer. */
+        plc->read_data_len = 0;
+        plc->flags.response_ready = 0;
+
+        /* clean up tag*/
+        tag->flags.write = 0;
+        tag->flags.busy = 0;
+        tag->seq_id = 0;
+    } else {
+        pdebug(DEBUG_SPEW, "Not our response.");
+
+        rc = PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id)); // disallow zero
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    rc = PLCTAG_ERR_UNSUPPORTED;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+int translate_modbus_error(uint8_t err_code)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    switch(err_code) {
+        case 0x01:
+            pdebug(DEBUG_WARN, "The received function code can not be processed!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+
+        case 0x02:
+            pdebug(DEBUG_WARN, "The data address specified in the request is not available!");
+            rc = PLCTAG_ERR_NOT_FOUND;
+            break;
+
+        case 0x03:
+            pdebug(DEBUG_WARN, "The value contained in the query data field is an invalid value!");
+            rc = PLCTAG_ERR_BAD_PARAM;
+            break;
+
+        case 0x04:
+            pdebug(DEBUG_WARN, "An unrecoverable error occurred while the server attempted to perform the requested action!");
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+
+        case 0x05:
+            pdebug(DEBUG_WARN, "The server will take a long time processing this request!");
+            rc = PLCTAG_ERR_PARTIAL;
+            break;
+
+        case 0x06:
+            pdebug(DEBUG_WARN, "The server is busy!");
+            rc = PLCTAG_ERR_BUSY;
+            break;
+
+        case 0x07:
+            pdebug(DEBUG_WARN, "The server can not execute the program function specified in the request!");
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+
+        case 0x08:
+            pdebug(DEBUG_WARN, "The slave detected a parity error when reading the extended memory!");
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unknown error response %u received!", (int)(unsigned int)(err_code));
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+    }
+
+    return rc;
+}
+
 
 
 int get_tag_type(attr attribs)
