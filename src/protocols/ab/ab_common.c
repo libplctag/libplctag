@@ -266,6 +266,11 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->allow_packing = 0;
         break;
 
+    case AB_PLC_OMRON_NJNX:
+        tag->use_connected_msg = 1;
+        tag->allow_packing = 0;
+        break;
+
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
         tag->status = PLCTAG_ERR_BAD_CONFIG;
@@ -360,13 +365,25 @@ plc_tag_p ab_tag_create(attr attribs)
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
-        tag->vtable = &eip_cip_vtable;
+        tag->vtable = &eip_cip_frag_vtable;
 
         break;
 
     case AB_PLC_MLGX800:
         pdebug(DEBUG_DETAIL, "Setting up Micro8X0 tag.");
             
+        if(path || str_length(path)) {
+            pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
+        }
+
+        tag->use_connected_msg = 1;
+        tag->allow_packing = 0;
+        tag->vtable = &eip_cip_frag_vtable;
+        break;
+
+    case AB_PLC_OMRON_NJNX:
+        pdebug(DEBUG_DETAIL, "Setting up OMRON NJ/NX Series tag.");
+
         if(path || str_length(path)) {
             pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
         }
@@ -399,7 +416,9 @@ plc_tag_p ab_tag_create(attr attribs)
     tag->elem_count = attr_get_int(attribs,"elem_count", 1);
 
     /* we still need size on non Logix-class PLCs */
-    if(tag->plc_type != AB_PLC_LGX && tag->plc_type != AB_PLC_MLGX800) {
+    if(tag->plc_type != AB_PLC_LGX
+            && tag->plc_type != AB_PLC_MLGX800
+            && tag->plc_type != AB_PLC_OMRON_NJNX) {
         /* get the element size if it is not already set. */
         if(!tag->elem_size) {
             tag->elem_size = attr_get_int(attribs, "elem_size", 0);
@@ -547,6 +566,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
     case AB_PLC_LGX:
     case AB_PLC_MLGX800:
+    case AB_PLC_OMRON_NJNX:
         /* look for the elem_type attribute. */
         elem_type = attr_get_str(attribs, "elem_type", NULL);
         if(elem_type) {
@@ -1709,6 +1729,10 @@ plc_type_t get_plc_type(attr attribs)
                !str_cmp_i(cpu_type, "logix")) {
         pdebug(DEBUG_DETAIL,"Found ControlLogix/CompactLogix PLC.");
         return AB_PLC_LGX;
+    } else if (!str_cmp_i(cpu_type, "omron-njnx") || !str_cmp_i(cpu_type, "omron-nj") || !str_cmp_i(cpu_type, "omron-nx") || !str_cmp_i(cpu_type, "njnx")
+               || !str_cmp_i(cpu_type, "nx1p2")) {
+        pdebug(DEBUG_DETAIL,"Found OMRON NJ/NX Series PLC.");
+        return AB_PLC_OMRON_NJNX;
     } else {
         pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);
 
@@ -1764,6 +1788,7 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
     case AB_PLC_MLGX800:
     case AB_PLC_LGX:
+    case AB_PLC_OMRON_NJNX:
         if ((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "parse of CIP-style tag name %s failed!", name);
 
