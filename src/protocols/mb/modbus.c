@@ -107,13 +107,14 @@ struct modbus_tag_t {
     /* the PLC we are using */
     modbus_plc_p plc;
 
-    /* actions */
+    /* actions and state */
     struct {
-        unsigned int abort:1;
-        unsigned int read:1;
-        unsigned int write:1;
-        unsigned int busy:1;
+        unsigned int _abort:1;
+        unsigned int _read:1;
+        unsigned int _write:1;
+        unsigned int _busy:1;
     } flags;
+    lock_t tag_lock;
 
     /* data for the tag. */
     int elem_count;
@@ -149,6 +150,17 @@ static int check_write_response(modbus_plc_p plc, modbus_tag_p tag);
 static int create_write_request(modbus_plc_p plc, modbus_tag_p tag);
 static int translate_modbus_error(uint8_t err_code);
 
+static int tag_get_abort_flag(modbus_tag_p tag);
+static int tag_set_abort_flag(modbus_tag_p tag, int new_val);
+
+static int tag_get_read_flag(modbus_tag_p tag);
+static int tag_set_read_flag(modbus_tag_p tag, int new_val);
+
+static int tag_get_write_flag(modbus_tag_p tag);
+static int tag_set_write_flag(modbus_tag_p tag, int new_val);
+
+static int tag_get_busy_flag(modbus_tag_p tag);
+static int tag_set_busy_flag(modbus_tag_p tag, int new_val);
 
 /* tag vtable functions. */
 
@@ -798,18 +810,22 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
     /* try to get the mutex on the tag. */
     // if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
         /* got the mutex, so we can look at and modify the tag. */
-        if(tag->flags.abort) {
+        if(tag_get_abort_flag(tag)) {
             pdebug(DEBUG_DETAIL, "Aborting any in flight operations!");
 
-            tag->flags.read = 0;
-            tag->flags.write = 0;
-            tag->flags.busy = 0;
-            tag->flags.abort = 0;
+            /* do this as one block to prevent half-changed state. */
+            spin_block(&tag->tag_lock) {
+                tag->flags._read = 0;
+                tag->flags._write = 0;
+                tag->flags._busy = 0;
+                tag->flags._abort = 0;
+            }
+
             tag->seq_id = 0;
         }
 
-        if(tag->flags.write) {
-            if(tag->flags.busy) {
+        if(tag_get_write_flag(tag)) {
+            if(tag_get_busy_flag(tag)) {
                 if(plc->flags.response_ready) {
                     /* we have an outstanding write request. */
                     rc = check_write_response(plc, tag);
@@ -831,8 +847,8 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
             }
         }
 
-        if(tag->flags.read) {
-            if(tag->flags.busy) {
+        if(tag_get_read_flag(tag)) {
+            if(tag_get_busy_flag(tag)) {
                 if(plc->flags.response_ready) {
                     /* there is a request in flight, is there a response? */
                     rc = check_read_response(plc, tag);
@@ -902,8 +918,8 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
         plc->flags.response_ready = 0;
 
         /* clean up tag*/
-        tag->flags.read = 0;
-        tag->flags.busy = 0;
+        tag_set_read_flag(tag, 0);
+        tag_set_busy_flag(tag, 0);
         tag->seq_id = 0;
     } else {
         pdebug(DEBUG_DETAIL, "Not our response.");
@@ -992,7 +1008,7 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     /* ready to go. */
 
     plc->flags.request_ready = 1;
-    tag->flags.busy = 1;
+    tag_set_busy_flag(tag, 1);
     tag->seq_id = seq_id;
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1029,8 +1045,8 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         plc->flags.response_ready = 0;
 
         /* clean up tag*/
-        tag->flags.write = 0;
-        tag->flags.busy = 0;
+        tag_set_write_flag(tag, 0);
+        tag_set_busy_flag(tag, 0);
         tag->seq_id = 0;
     } else {
         pdebug(DEBUG_SPEW, "Not our response.");
@@ -1145,6 +1161,103 @@ int get_tag_type(attr attribs)
 
 
 
+int tag_get_abort_flag(modbus_tag_p tag)
+{
+    int res = 0;
+
+    spin_block(&tag->tag_lock) {
+        res = tag->flags._abort;
+    }
+
+    return res;
+}
+
+int tag_set_abort_flag(modbus_tag_p tag, int new_val)
+{
+    int old_val = 0;
+
+    spin_block(&tag->tag_lock) {
+        old_val = tag->flags._abort;
+        tag->flags._abort = ((new_val) ? 1 : 0);
+    }
+
+    return old_val;
+}
+
+
+int tag_get_read_flag(modbus_tag_p tag)
+{
+    int res = 0;
+
+    spin_block(&tag->tag_lock) {
+        res = tag->flags._read;
+    }
+
+    return res;
+}
+
+int tag_set_read_flag(modbus_tag_p tag, int new_val)
+{
+    int old_val = 0;
+
+    spin_block(&tag->tag_lock) {
+        old_val = tag->flags._read;
+        tag->flags._read = ((new_val) ? 1 : 0);
+    }
+
+    return old_val;
+}
+
+
+
+int tag_get_write_flag(modbus_tag_p tag)
+{
+    int res = 0;
+
+    spin_block(&tag->tag_lock) {
+        res = tag->flags._write;
+    }
+
+    return res;
+}
+
+int tag_set_write_flag(modbus_tag_p tag, int new_val)
+{
+    int old_val = 0;
+
+    spin_block(&tag->tag_lock) {
+        old_val = tag->flags._write;
+        tag->flags._write = ((new_val) ? 1 : 0);
+    }
+
+    return old_val;
+}
+
+
+
+int tag_get_busy_flag(modbus_tag_p tag)
+{
+    int res = 0;
+
+    spin_block(&tag->tag_lock) {
+        res = tag->flags._busy;
+    }
+
+    return res;
+}
+
+int tag_set_busy_flag(modbus_tag_p tag, int new_val)
+{
+    int old_val = 0;
+
+    spin_block(&tag->tag_lock) {
+        old_val = tag->flags._busy;
+        tag->flags._busy = ((new_val) ? 1 : 0);
+    }
+
+    return old_val;
+}
+
 
 
 
@@ -1160,9 +1273,7 @@ int mb_abort(plc_tag_p p_tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    tag->flags.abort = 1;
-    tag->flags.read = 0;
-    tag->flags.write = 0;
+    tag_set_abort_flag(tag, 1);
 
     return PLCTAG_STATUS_OK;
 }
@@ -1172,6 +1283,7 @@ int mb_abort(plc_tag_p p_tag)
 int mb_read_start(plc_tag_p p_tag)
 {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
+    int op_in_flight = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1180,12 +1292,21 @@ int mb_read_start(plc_tag_p p_tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(tag->flags.abort || tag->flags.read || tag->flags.write) {
+    spin_block(&tag->tag_lock) {
+        if(tag->flags._abort || tag->flags._read || tag->flags._write) {
+            op_in_flight = 1;
+        } else {
+            op_in_flight = 0;
+        }
+    }
+
+    if(op_in_flight) {
         pdebug(DEBUG_WARN, "Operation in progress!");
         return PLCTAG_ERR_BUSY;
     }
 
-    tag->flags.read = 1;
+    tag_set_read_flag(tag, 1);
+
     tag->status = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1198,6 +1319,7 @@ int mb_read_start(plc_tag_p p_tag)
 int mb_tag_status(plc_tag_p p_tag)
 {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
+    int op_in_flight = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1211,7 +1333,15 @@ int mb_tag_status(plc_tag_p p_tag)
         return tag->status;
     }
 
-    if(tag->flags.abort || tag->flags.read || tag->flags.write) {
+    spin_block(&tag->tag_lock) {
+        if(tag->flags._abort || tag->flags._read || tag->flags._write) {
+            op_in_flight = 1;
+        } else {
+            op_in_flight = 0;
+        }
+    }
+
+    if(op_in_flight) {
         pdebug(DEBUG_SPEW, "Operation in progress, returning PLCTAG_STATUS_PENDING.");
         return PLCTAG_STATUS_PENDING;
     }
@@ -1235,6 +1365,7 @@ int mb_tickler(plc_tag_p p_tag)
 int mb_write_start(plc_tag_p p_tag)
 {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
+    int op_in_flight = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1243,12 +1374,20 @@ int mb_write_start(plc_tag_p p_tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(tag->flags.abort || tag->flags.read || tag->flags.write) {
+    spin_block(&tag->tag_lock) {
+        if(tag->flags._abort || tag->flags._read || tag->flags._write) {
+            op_in_flight = 1;
+        } else {
+            op_in_flight = 0;
+        }
+    }
+
+    if(op_in_flight) {
         pdebug(DEBUG_WARN, "Operation in progress!");
         return PLCTAG_ERR_BUSY;
     }
 
-    tag->flags.write = 1;
+    tag_set_write_flag(tag, 1);
     tag->status = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_DETAIL, "Done.");
