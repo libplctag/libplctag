@@ -71,7 +71,8 @@ struct modbus_plc_t {
     thread_p handler_thread;
     mutex_p mutex;
 
-    /* data buffers. */
+    /* data */
+    struct tag_byte_order_t byte_order;
     int read_data_len;
     uint8_t read_data[PLC_READ_DATA_LEN];
     int write_data_len;
@@ -279,6 +280,9 @@ plc_tag_p mb_tag_create(attr attribs)
             tag->next = tag->plc->tags;
             tag->plc->tags = tag;
         }
+
+        /* connect the PLC's byte order data to the tag. */
+        tag->byte_order = &(tag->plc->byte_order);
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
         tag->status = rc;
@@ -388,6 +392,16 @@ void modbus_tag_destructor(void *tag_arg)
         tag->plc = rc_dec(tag->plc);
     }
 
+    if(tag->api_mutex) {
+        mutex_destroy(&(tag->api_mutex));
+        tag->api_mutex = NULL;
+    }
+
+    if(tag->ext_mutex) {
+        mutex_destroy(&(tag->ext_mutex));
+        tag->ext_mutex = NULL;
+    }
+
     pdebug(DEBUG_INFO, "Done.");
 }
 
@@ -456,6 +470,44 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
                 rc = mutex_create(&((*plc)->mutex));
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
+                } else {
+                    /* set up strict big-endian order then override. */
+
+                    /* 16-bit ints */
+                    (*plc)->byte_order.int16_order[0] = 1;
+                    (*plc)->byte_order.int16_order[1] = 0;
+
+                    /* 32-bit ints */
+                    (*plc)->byte_order.int32_order[0] = 3;
+                    (*plc)->byte_order.int32_order[1] = 2;
+                    (*plc)->byte_order.int32_order[2] = 1;
+                    (*plc)->byte_order.int32_order[3] = 0;
+
+                    /* 64-bit ints */
+                    (*plc)->byte_order.int64_order[0] = 7;
+                    (*plc)->byte_order.int64_order[1] = 6;
+                    (*plc)->byte_order.int64_order[2] = 5;
+                    (*plc)->byte_order.int64_order[3] = 4;
+                    (*plc)->byte_order.int64_order[4] = 3;
+                    (*plc)->byte_order.int64_order[5] = 2;
+                    (*plc)->byte_order.int64_order[6] = 1;
+                    (*plc)->byte_order.int64_order[7] = 0;
+
+                    /* 32-bit floats */
+                    (*plc)->byte_order.float32_order[0] = 3;
+                    (*plc)->byte_order.float32_order[1] = 2;
+                    (*plc)->byte_order.float32_order[2] = 1;
+                    (*plc)->byte_order.float32_order[3] = 0;
+
+                    /* 64-bit floats */
+                    (*plc)->byte_order.float64_order[0] = 7;
+                    (*plc)->byte_order.float64_order[1] = 6;
+                    (*plc)->byte_order.float64_order[2] = 5;
+                    (*plc)->byte_order.float64_order[3] = 4;
+                    (*plc)->byte_order.float64_order[4] = 3;
+                    (*plc)->byte_order.float64_order[5] = 2;
+                    (*plc)->byte_order.float64_order[6] = 1;
+                    (*plc)->byte_order.float64_order[7] = 0;
                 }
             }
         }
@@ -785,7 +837,7 @@ int write_packet(modbus_plc_p plc)
  * 
  * The process cannot lock the tag's API mutex.   If the tag user side is
  * blocked in plc_tag_read, plc_tag_write or any other possibly blocking
- * API call, then the API mutex will be help.
+ * API call, then the API mutex will be held.
  * 
  * However, we can ensure that the tag will not be deleted out from underneath
  * us because this function is called under the PLC's mutex.   plc_tag_delete()
@@ -921,6 +973,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
         tag_set_read_flag(tag, 0);
         tag_set_busy_flag(tag, 0);
         tag->seq_id = 0;
+        tag->read_complete = 1;
     } else {
         pdebug(DEBUG_DETAIL, "Not our response.");
 
@@ -998,12 +1051,12 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     }
 
     /* register base. */
-    plc->write_data[8] = (uint8_t)((tag->reg_base >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[9] = (uint8_t)((tag->reg_base >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 0) & 0xFF); plc->write_data_len++;
 
     /* number of elements to read. */
-    plc->write_data[10] = (uint8_t)((tag->elem_count >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[11] = (uint8_t)((tag->elem_count >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 0) & 0xFF); plc->write_data_len++;
 
     /* ready to go. */
 
@@ -1048,6 +1101,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         tag_set_write_flag(tag, 0);
         tag_set_busy_flag(tag, 0);
         tag->seq_id = 0;
+        tag->write_complete = 1;
     } else {
         pdebug(DEBUG_SPEW, "Not our response.");
 
@@ -1064,10 +1118,90 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id)); // disallow zero
+    uint16_t req_len = (uint16_t)((uint16_t)tag->size + (uint16_t)7); /* MAGIC, 7 bytes in write command before the data. */
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    rc = PLCTAG_ERR_UNSUPPORTED;
+    /* build the write request.
+     *    Byte  Meaning
+     *      0    High byte of request sequence ID.
+     *      1    Low byte of request sequence ID.
+     *      2    High byte of the protocol version identifier (zero).
+     *      3    Low byte of the protocol version identifier (zero).
+     *      4    High byte of the message length.
+     *      5    Low byte of the message length.
+     *      6    Device address.
+     *      7    Function code.
+     *      8    High byte of first register address.
+     *      9    Low byte of the first register address.
+     *     10    High byte of the register count.
+     *     11    Low byte of the register count.
+     *     12    Number of bytes of data to write.
+     *     13... Data bytes.
+     */
+
+    plc->write_data_len = 0;
+
+    /* build the request sequence ID */
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 0) & 0xFF); plc->write_data_len++;
+
+    /* protocol version is always zero */
+    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
+
+    /* request packet length */
+    plc->write_data[plc->write_data_len] = (uint8_t)((req_len >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((req_len >> 0) & 0xFF); plc->write_data_len++;
+
+    /* device address */
+    plc->write_data[plc->write_data_len] = plc->server_id; plc->write_data_len++;
+
+    /* function code depends on the register type. */
+    switch(tag->reg_type) {
+        case MB_REG_DO:
+            plc->write_data[7] = MB_CMD_WRITE_DO_MULTI; plc->write_data_len++;
+            break;
+
+        case MB_REG_DI:
+            pdebug(DEBUG_WARN, "You cannot write a discrete input!");
+            return PLCTAG_ERR_UNSUPPORTED;
+            break;
+
+        case MB_REG_AO:
+            plc->write_data[7] = MB_CMD_WRITE_AO_MULTI; plc->write_data_len++;
+            break;
+
+        case MB_REG_AI:
+            pdebug(DEBUG_WARN, "You cannot write an analog input!");
+            return PLCTAG_ERR_UNSUPPORTED;
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported register type %d!", tag->reg_type);
+            return PLCTAG_ERR_UNSUPPORTED;
+            break;
+    }
+
+    /* register base. */
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 0) & 0xFF); plc->write_data_len++;
+
+    /* number of elements to read. */
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 0) & 0xFF); plc->write_data_len++;
+
+    /* number of bytes of data to write. */
+    plc->write_data[plc->write_data_len] = (uint8_t)(tag->size & 0xFF); plc->write_data_len++;
+
+    /* copy the tag data. */
+    mem_copy(&plc->write_data[plc->write_data_len], tag->data, tag->size);
+    plc->write_data_len += tag->size;
+
+    /* ready to go. */
+    plc->flags.request_ready = 1;
+    tag_set_busy_flag(tag, 1);
+    tag->seq_id = seq_id;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1508,14 +1642,14 @@ uint64_t mb_get_uint64(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res =   ((uint64_t)(tag->data[offset+7])) +
-            ((uint64_t)(tag->data[offset+6]) << 8) +
-            ((uint64_t)(tag->data[offset+5]) << 16) +
-            ((uint64_t)(tag->data[offset+4]) << 24) +
-            ((uint64_t)(tag->data[offset+3]) << 32) +
-            ((uint64_t)(tag->data[offset+2]) << 40) +
-            ((uint64_t)(tag->data[offset+1]) << 48) +
-            ((uint64_t)(tag->data[offset+0]) << 56);
+    res =   ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0) +
+            ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8) +
+            ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16) +
+            ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24) +
+            ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32) +
+            ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40) +
+            ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48) +
+            ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56);
 
     return res;
 }
@@ -1542,14 +1676,14 @@ int mb_set_uint64(plc_tag_p raw_tag, int offset, uint64_t val)
     }
 
     /* write the data. */
-    tag->data[offset+7] = (uint8_t)((val >> 0 ) & 0xFF);
-    tag->data[offset+6] = (uint8_t)((val >> 8 ) & 0xFF);
-    tag->data[offset+5] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+4] = (uint8_t)((val >> 24) & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 32) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 40) & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 48) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 56) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
 
     return rc;
 }
@@ -1576,14 +1710,14 @@ int64_t mb_get_int64(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (int64_t)(((uint64_t)(tag->data[offset+7]) << 0 ) +
-                    ((uint64_t)(tag->data[offset+6]) << 8 ) +
-                    ((uint64_t)(tag->data[offset+5]) << 16) +
-                    ((uint64_t)(tag->data[offset+4]) << 24) +
-                    ((uint64_t)(tag->data[offset+3]) << 32) +
-                    ((uint64_t)(tag->data[offset+2]) << 40) +
-                    ((uint64_t)(tag->data[offset+1]) << 48) +
-                    ((uint64_t)(tag->data[offset+0]) << 56));
+    res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0 ) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8 ) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56));
 
     return res;
 }
@@ -1610,14 +1744,14 @@ int mb_set_int64(plc_tag_p raw_tag, int offset, int64_t ival)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset+7] = (uint8_t)((val >> 0 ) & 0xFF);
-    tag->data[offset+6] = (uint8_t)((val >> 8 ) & 0xFF);
-    tag->data[offset+5] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+4] = (uint8_t)((val >> 24) & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 32) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 40) & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 48) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 56) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
+    tag->data[offset + tag->byte_order->int64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
 
     return rc;
 }
@@ -1649,10 +1783,10 @@ uint32_t mb_get_uint32(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res =   ((uint32_t)(tag->data[offset+3]) << 0 ) +
-            ((uint32_t)(tag->data[offset+2]) << 8 ) +
-            ((uint32_t)(tag->data[offset+1]) << 16) +
-            ((uint32_t)(tag->data[offset+0]) << 24);
+    res =   ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0 ) +
+            ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8 ) +
+            ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16) +
+            ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24);
 
     return res;
 }
@@ -1678,10 +1812,10 @@ int mb_set_uint32(plc_tag_p raw_tag, int offset, uint32_t val)
     }
 
     /* write the data. */
-    tag->data[offset+3] = (uint8_t)((val >> 0 ) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 8 ) & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 24) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
 
     return rc;
 }
@@ -1708,10 +1842,10 @@ int32_t mb_get_int32(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (int32_t)(((uint32_t)(tag->data[offset+3]) << 0 ) +
-                    ((uint32_t)(tag->data[offset+2]) << 8 ) +
-                    ((uint32_t)(tag->data[offset+1]) << 16) +
-                    ((uint32_t)(tag->data[offset+0]) << 24));
+    res = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0 ) +
+                    ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8 ) +
+                    ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16) +
+                    ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24));
 
     return res;
 }
@@ -1738,10 +1872,10 @@ int mb_set_int32(plc_tag_p raw_tag, int offset, int32_t ival)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset+3] = (uint8_t)((val >> 0 ) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 8 ) & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 24) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+    tag->data[offset + tag->byte_order->int32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
 
     return rc;
 }
@@ -1767,8 +1901,8 @@ uint16_t mb_get_uint16(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (uint16_t)((tag->data[offset+1]) +
-                    ((tag->data[offset+0]) << 8));
+    res = (uint16_t)((tag->data[offset + tag->byte_order->int16_order[0]]) +
+                    ((tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
 
     return res;
 }
@@ -1795,8 +1929,8 @@ int mb_set_uint16(plc_tag_p raw_tag, int offset, uint16_t val)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset+1] = (uint8_t)((val >> 0) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 8) & 0xFF);
+    tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0) & 0xFF);
+    tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8) & 0xFF);
 
     return rc;
 }
@@ -1824,8 +1958,8 @@ int16_t  mb_get_int16(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    res = (int16_t)(((tag->data[offset+1])) +
-                    ((tag->data[offset+0]) << 8));
+    res = (int16_t)(((tag->data[offset + tag->byte_order->int16_order[0]]) << 0) +
+                    ((tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
 
     return res;
 }
@@ -1853,8 +1987,8 @@ int mb_set_int16(plc_tag_p raw_tag, int offset, int16_t ival)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset+1] = (uint8_t)((val >> 0) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 8) & 0xFF);
+    tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0) & 0xFF);
+    tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8) & 0xFF);
 
     return rc;
 }
@@ -1990,14 +2124,14 @@ double mb_get_float64(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    ures = ((uint64_t)(tag->data[offset+7]) << 0 ) +
-           ((uint64_t)(tag->data[offset+6]) << 8 ) +
-           ((uint64_t)(tag->data[offset+5]) << 16) +
-           ((uint64_t)(tag->data[offset+4]) << 24) +
-           ((uint64_t)(tag->data[offset+3]) << 32) +
-           ((uint64_t)(tag->data[offset+2]) << 40) +
-           ((uint64_t)(tag->data[offset+1]) << 48) +
-           ((uint64_t)(tag->data[offset+0]) << 56);
+    ures = ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[0]]) << 0 ) +
+           ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[1]]) << 8 ) +
+           ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[2]]) << 16) +
+           ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[3]]) << 24) +
+           ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[4]]) << 32) +
+           ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[5]]) << 40) +
+           ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[6]]) << 48) +
+           ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[7]]) << 56);
 
     /* copy the data */
     mem_copy(&res,&ures,sizeof(res));
@@ -2030,14 +2164,14 @@ int mb_set_float64(plc_tag_p raw_tag, int offset, double fval)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset+7] = (uint8_t)((val >> 0 ) & 0xFF);
-    tag->data[offset+6] = (uint8_t)((val >> 8 ) & 0xFF);
-    tag->data[offset+5] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+4] = (uint8_t)((val >> 24) & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 32) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 40) & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 48) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 56) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
+    tag->data[offset + tag->byte_order->float64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
 
     return rc;
 }
@@ -2064,10 +2198,10 @@ float mb_get_float32(plc_tag_p raw_tag, int offset)
         return res;
     }
 
-    ures = ((uint32_t)(tag->data[offset+3]) << 0 ) +
-           ((uint32_t)(tag->data[offset+2]) << 8 ) +
-           ((uint32_t)(tag->data[offset+1]) << 16) +
-           ((uint32_t)(tag->data[offset+0]) << 24);
+    ures = ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[0]]) << 0 ) +
+           ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[1]]) << 8 ) +
+           ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[2]]) << 16) +
+           ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[3]]) << 24);
 
     //pdebug(DEBUG_DETAIL, "ures=%lu", ures);
 
@@ -2101,10 +2235,10 @@ int mb_set_float32(plc_tag_p raw_tag, int offset, float fval)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    tag->data[offset+3] = (uint8_t)((val >> 0 ) & 0xFF);
-    tag->data[offset+2] = (uint8_t)((val >> 8 ) & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 24) & 0xFF);
+    tag->data[offset + tag->byte_order->float32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+    tag->data[offset + tag->byte_order->float32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+    tag->data[offset + tag->byte_order->float32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+    tag->data[offset + tag->byte_order->float32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
 
     return rc;
 }

@@ -258,6 +258,8 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
+    tag->byte_order = &(tag->session->byte_order);
+
     pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
 
     /* set up PLC-specific information. */
