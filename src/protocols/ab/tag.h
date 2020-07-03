@@ -98,7 +98,7 @@ struct ab_tag_t {
     int tag_list;
     uint32_t next_id;
 
-    int is_bit;
+    //int is_bit;
     uint8_t bit;
 
     /* requests */

@@ -114,6 +114,17 @@ struct tag_vtable_t {
 typedef struct tag_vtable_t *tag_vtable_p;
 
 
+/* byte ordering */
+
+struct tag_byte_order_t {
+    uint8_t int16_order[2];
+    uint8_t int32_order[4];
+    uint8_t int64_order[8];
+    uint8_t float32_order[4];
+    uint8_t float64_order[8];
+};
+
+
 /*
  * The base definition of the tag structure.  This is used
  * by the protocol-specific implementations.
@@ -122,22 +133,23 @@ typedef struct tag_vtable_t *tag_vtable_p;
  */
 
 #define TAG_BASE_STRUCT tag_vtable_p vtable; \
-                        mutex_p ext_mutex; \
-                        mutex_p api_mutex; \
                         int status; \
-                        int endian; \
-                        int tag_id; \
-                        int64_t read_cache_expire; \
-                        int64_t read_cache_ms; \
+                        int size; \
+                        int is_bit; \
                         int read_complete; \
                         int write_complete; \
+                        int32_t tag_id; \
+                        mutex_p ext_mutex; \
+                        mutex_p api_mutex; \
+                        struct tag_byte_order_t *byte_order; \
                         void (*callback)(int32_t tag_id, int event, int status); \
-                        int size; \
-                        uint8_t *data
+                        uint8_t *data; \
+                        int64_t read_cache_expire; \
+                        int64_t read_cache_ms
 
-struct plc_tag_dummy {
-    int tag_id;
-};
+// struct plc_tag_dummy {
+//     int tag_id;
+// };
 
 struct plc_tag_t {
     TAG_BASE_STRUCT;
@@ -152,7 +164,5 @@ extern void lib_teardown(void);
 extern int plc_tag_abort_mapped(plc_tag_p tag);
 extern int plc_tag_destroy_mapped(plc_tag_p tag);
 extern int plc_tag_status_mapped(plc_tag_p tag);
-
-
 
 #endif

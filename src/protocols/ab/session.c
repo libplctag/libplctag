@@ -552,6 +552,55 @@ int session_init(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    /* Set up the byte order first before anything else can start up. */
+
+    /* set up strict little-endian order then override. */
+
+    /* 16-bit ints */
+    session->byte_order.int16_order[0] = 0;
+    session->byte_order.int16_order[1] = 1;
+
+    /* 32-bit ints */
+    session->byte_order.int32_order[0] = 0;
+    session->byte_order.int32_order[1] = 1;
+    session->byte_order.int32_order[2] = 2;
+    session->byte_order.int32_order[3] = 3;
+
+    /* 64-bit ints */
+    session->byte_order.int64_order[0] = 0;
+    session->byte_order.int64_order[1] = 1;
+    session->byte_order.int64_order[2] = 2;
+    session->byte_order.int64_order[3] = 3;
+    session->byte_order.int64_order[4] = 4;
+    session->byte_order.int64_order[5] = 5;
+    session->byte_order.int64_order[6] = 6;
+    session->byte_order.int64_order[7] = 7;
+
+    /* 32-bit floats */
+    session->byte_order.float32_order[0] = 0;
+    session->byte_order.float32_order[1] = 1;
+    session->byte_order.float32_order[2] = 2;
+    session->byte_order.float32_order[3] = 3;
+
+    /* 64-bit floats */
+    session->byte_order.float64_order[0] = 0;
+    session->byte_order.float64_order[1] = 1;
+    session->byte_order.float64_order[2] = 2;
+    session->byte_order.float64_order[3] = 3;
+    session->byte_order.float64_order[4] = 4;
+    session->byte_order.float64_order[5] = 5;
+    session->byte_order.float64_order[6] = 6;
+    session->byte_order.float64_order[7] = 7;
+
+    /* special case PLC/5 float handling. */
+    if(session->plc_type == AB_PLC_PLC5) {
+        session->byte_order.float32_order[0] = 2;
+        session->byte_order.float32_order[1] = 3;
+        session->byte_order.float32_order[2] = 0;
+        session->byte_order.float32_order[3] = 1;
+    }
+
+    /* create the session mutex. */
     if((rc = mutex_create(&(session->mutex))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create session mutex!");
         session->failed = 1;

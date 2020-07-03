@@ -142,9 +142,6 @@ plc_tag_p system_tag_create(attr attribs)
     tag->data = &tag->backing_data[0];
     tag->size = (int)sizeof(tag->backing_data);
 
-    /* set the endian-ness */
-    tag->endian = PLCTAG_DATA_LITTLE_ENDIAN;
-
     pdebug(DEBUG_INFO,"Done");
 
     return (plc_tag_p)tag;
