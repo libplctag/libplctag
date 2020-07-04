@@ -135,7 +135,8 @@ struct tag_byte_order_t {
 #define TAG_BASE_STRUCT tag_vtable_p vtable; \
                         int status; \
                         int size; \
-                        int is_bit; \
+                        uint8_t is_bit:1; \
+                        uint8_t bit; \
                         int read_complete; \
                         int write_complete; \
                         int32_t tag_id; \

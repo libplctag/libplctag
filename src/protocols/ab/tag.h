@@ -99,7 +99,7 @@ struct ab_tag_t {
     uint32_t next_id;
 
     //int is_bit;
-    uint8_t bit;
+    //uint8_t bit;
 
     /* requests */
     int pre_write_read;
