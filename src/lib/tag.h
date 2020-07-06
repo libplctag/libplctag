@@ -115,6 +115,9 @@ struct tag_byte_order_t {
     uint8_t float64_order[8];
 };
 
+typedef struct tag_byte_order_s tag_byte_order_t;
+
+
 
 /*
  * The base definition of the tag structure.  This is used

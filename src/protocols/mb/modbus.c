@@ -72,7 +72,6 @@ struct modbus_plc_t {
     mutex_p mutex;
 
     /* data */
-    struct tag_byte_order_t byte_order;
     int read_data_len;
     uint8_t read_data[PLC_READ_DATA_LEN];
     int write_data_len;
@@ -206,6 +205,44 @@ plc_tag_p mb_tag_create(attr attribs)
         return NULL;
     }
 
+    /* Set up the default tag byte order. */
+        
+    /* 16-bit ints. */
+    tag->byte_order.int16_order_0 = 1;
+    tag->byte_order.int16_order_1 = 0;
+
+    /* 32-bit ints */
+    tag->byte_order.int32_order_0 = 3;
+    tag->byte_order.int32_order_1 = 2;
+    tag->byte_order.int32_order_2 = 1;
+    tag->byte_order.int32_order_3 = 0;
+
+    /* 64-bit ints */
+    tag->byte_order.int64_order_0 = 7;
+    tag->byte_order.int64_order_1 = 6;
+    tag->byte_order.int64_order_2 = 5;
+    tag->byte_order.int64_order_3 = 4;
+    tag->byte_order.int64_order_4 = 3;
+    tag->byte_order.int64_order_5 = 2;
+    tag->byte_order.int64_order_6 = 1;
+    tag->byte_order.int64_order_7 = 0;
+
+    /* 32-bit floats. */
+    tag->byte_order.float32_order_0 = 3;
+    tag->byte_order.float32_order_1 = 2;
+    tag->byte_order.float32_order_2 = 1;
+    tag->byte_order.float32_order_3 = 0;
+
+    /* 64-bit floats */
+    tag->byte_order.float64_order_0 = 7;
+    tag->byte_order.float64_order_1 = 6;
+    tag->byte_order.float64_order_2 = 5;
+    tag->byte_order.float64_order_3 = 4;
+    tag->byte_order.float64_order_4 = 3;
+    tag->byte_order.float64_order_5 = 2;
+    tag->byte_order.float64_order_6 = 1;
+    tag->byte_order.float64_order_7 = 0;
+
     /* find the PLC object. */
     rc = find_or_create_plc(attribs, &(tag->plc));
     if(rc == PLCTAG_STATUS_OK) {
@@ -214,9 +251,6 @@ plc_tag_p mb_tag_create(attr attribs)
             tag->next = tag->plc->tags;
             tag->plc->tags = tag;
         }
-
-        /* connect the PLC's byte order data to the tag. */
-        tag->byte_order = &(tag->plc->byte_order);
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
         tag->status = rc;
@@ -404,44 +438,6 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
                 rc = mutex_create(&((*plc)->mutex));
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
-                } else {
-                    /* set up strict big-endian order then override. */
-
-                    /* 16-bit ints */
-                    (*plc)->byte_order.int16_order[0] = 1;
-                    (*plc)->byte_order.int16_order[1] = 0;
-
-                    /* 32-bit ints */
-                    (*plc)->byte_order.int32_order[0] = 3;
-                    (*plc)->byte_order.int32_order[1] = 2;
-                    (*plc)->byte_order.int32_order[2] = 1;
-                    (*plc)->byte_order.int32_order[3] = 0;
-
-                    /* 64-bit ints */
-                    (*plc)->byte_order.int64_order[0] = 7;
-                    (*plc)->byte_order.int64_order[1] = 6;
-                    (*plc)->byte_order.int64_order[2] = 5;
-                    (*plc)->byte_order.int64_order[3] = 4;
-                    (*plc)->byte_order.int64_order[4] = 3;
-                    (*plc)->byte_order.int64_order[5] = 2;
-                    (*plc)->byte_order.int64_order[6] = 1;
-                    (*plc)->byte_order.int64_order[7] = 0;
-
-                    /* 32-bit floats */
-                    (*plc)->byte_order.float32_order[0] = 3;
-                    (*plc)->byte_order.float32_order[1] = 2;
-                    (*plc)->byte_order.float32_order[2] = 1;
-                    (*plc)->byte_order.float32_order[3] = 0;
-
-                    /* 64-bit floats */
-                    (*plc)->byte_order.float64_order[0] = 7;
-                    (*plc)->byte_order.float64_order[1] = 6;
-                    (*plc)->byte_order.float64_order[2] = 5;
-                    (*plc)->byte_order.float64_order[3] = 4;
-                    (*plc)->byte_order.float64_order[4] = 3;
-                    (*plc)->byte_order.float64_order[5] = 2;
-                    (*plc)->byte_order.float64_order[6] = 1;
-                    (*plc)->byte_order.float64_order[7] = 0;
                 }
             }
         }
