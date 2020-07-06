@@ -1470,14 +1470,14 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
-                res =   ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0 ) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8 ) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56);
+                res =   ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_0]) << 0 ) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_1]) << 8 ) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_2]) << 16) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_3]) << 24) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_4]) << 32) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_5]) << 40) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_6]) << 48) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_7]) << 56);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
             }
@@ -1519,14 +1519,14 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
-                tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_2] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_3] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_4] = (uint8_t)((val >> 32) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_5] = (uint8_t)((val >> 40) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_6] = (uint8_t)((val >> 48) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_7] = (uint8_t)((val >> 56) & 0xFF);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -1569,14 +1569,14 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
-                res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0 ) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8 ) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56));
+                res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order.int64_order_0]) << 0 ) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_1]) << 8 ) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_2]) << 16) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_3]) << 24) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_4]) << 32) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_5]) << 40) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_6]) << 48) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_7]) << 56));
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
             }
@@ -1619,14 +1619,14 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
-                tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
-                tag->data[offset + tag->byte_order->int64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_2] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_3] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_4] = (uint8_t)((val >> 32) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_5] = (uint8_t)((val >> 40) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_6] = (uint8_t)((val >> 48) & 0xFF);
+                tag->data[offset + tag->byte_order.int64_order_7] = (uint8_t)((val >> 56) & 0xFF);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -1674,10 +1674,10 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
-                res =   ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0 ) +
-                        ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8 ) +
-                        ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16) +
-                        ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24);
+                res =   ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_0]) << 0 ) +
+                        ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_1]) << 8 ) +
+                        ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_2]) << 16) +
+                        ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_3]) << 24);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
             }
@@ -1719,10 +1719,10 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
-                tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order->int32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_2] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_3] = (uint8_t)((val >> 24) & 0xFF);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -1765,10 +1765,10 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
-                res = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0 ) +
-                                ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8 ) +
-                                ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16) +
-                                ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24));
+                res = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order.int32_order_0]) << 0 ) +
+                                ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_1]) << 8 ) +
+                                ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_2]) << 16) +
+                                ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_3]) << 24));
             }  else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
             }
@@ -1811,10 +1811,10 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
-                tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order->int32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_2] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order.int32_order_3] = (uint8_t)((val >> 24) & 0xFF);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -1860,8 +1860,8 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
-                res =   (uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0 ) +
-                                   ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8 ));
+                res =   (uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order.int16_order_0]) << 0 ) +
+                                   ((uint16_t)(tag->data[offset + tag->byte_order.int16_order_1]) << 8 ));
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
             }
@@ -1904,8 +1904,8 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
-                tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int16_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int16_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -1953,8 +1953,8 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
-                res =   (int16_t)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0 ) +
-                                            ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8 ));
+                res =   (int16_t)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order.int16_order_0]) << 0 ) +
+                                            ((uint16_t)(tag->data[offset + tag->byte_order.int16_order_1]) << 8 ));
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
             }
@@ -1998,8 +1998,8 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
-                tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int16_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order.int16_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -2227,14 +2227,14 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(double)) <= tag->size)) {
-            ures =  ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[0]]) << 0 ) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[1]]) << 8 ) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[2]]) << 16) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[3]]) << 24) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[4]]) << 32) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[5]]) << 40) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[6]]) << 48) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[7]]) << 56);
+            ures =  ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_0]) << 0 ) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_1]) << 8 ) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_2]) << 16) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_3]) << 24) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_4]) << 32) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_5]) << 40) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_6]) << 48) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_7]) << 56);
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
         }
@@ -2280,14 +2280,14 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
-            tag->data[offset + tag->byte_order->float64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-            tag->data[offset + tag->byte_order->float64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
-            tag->data[offset + tag->byte_order->float64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
-            tag->data[offset + tag->byte_order->float64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
-            tag->data[offset + tag->byte_order->float64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
-            tag->data[offset + tag->byte_order->float64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
-            tag->data[offset + tag->byte_order->float64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
-            tag->data[offset + tag->byte_order->float64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_2] = (uint8_t)((val >> 16) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_3] = (uint8_t)((val >> 24) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_4] = (uint8_t)((val >> 32) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_5] = (uint8_t)((val >> 40) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_6] = (uint8_t)((val >> 48) & 0xFF);
+            tag->data[offset + tag->byte_order.float64_order_7] = (uint8_t)((val >> 56) & 0xFF);
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -2327,10 +2327,10 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
-            ures =  (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order->float32_order[0]]) << 0 ) +
-                               ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[1]]) << 8 ) +
-                               ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[2]]) << 16) +
-                               ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[3]]) << 24));
+            ures =  (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order.float32_order_0]) << 0 ) +
+                               ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_1]) << 8 ) +
+                               ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_2]) << 16) +
+                               ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_3]) << 24));
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
         }
@@ -2376,10 +2376,10 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
-            tag->data[offset + tag->byte_order->float32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
-            tag->data[offset + tag->byte_order->float32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
-            tag->data[offset + tag->byte_order->float32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
-            tag->data[offset + tag->byte_order->float32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+            tag->data[offset + tag->byte_order.float32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+            tag->data[offset + tag->byte_order.float32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+            tag->data[offset + tag->byte_order.float32_order_2] = (uint8_t)((val >> 16) & 0xFF);
+            tag->data[offset + tag->byte_order.float32_order_3] = (uint8_t)((val >> 24) & 0xFF);
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
             rc = PLCTAG_ERR_OUT_OF_BOUNDS;

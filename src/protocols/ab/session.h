@@ -89,7 +89,6 @@ struct ab_session_t {
     uint32_t data_capacity;
     uint32_t data_size;
     uint8_t data[MAX_PACKET_SIZE_EX];
-    struct tag_byte_order_t byte_order;
 
     uint64_t packet_count;
 
@@ -118,9 +117,6 @@ struct ab_request_t {
     /* allow requests to be packed in the session */
     int allow_packing;
     int packing_num;
-
-    /* byte ordering. */
-    struct tag_byte_order_t byte_order;
 
     /* time stamp for debugging output */
     int64_t time_sent;

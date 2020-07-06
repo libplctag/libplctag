@@ -51,14 +51,6 @@ static int system_tag_read(plc_tag_p tag);
 static int system_tag_status(plc_tag_p tag);
 static int system_tag_write(plc_tag_p tag);
 
-struct tag_byte_order_t byte_order = {
-    .int16_order = { 0, 1 },
-    .int32_order = { 0, 1, 2, 3 },
-    .int64_order = { 0, 1, 2, 3, 4, 5, 6, 7 },
-    .float32_order = { 0, 1, 2, 3 },
-    .float64_order = { 0, 1, 3, 3, 4, 5, 6, 7 }
-};
-
 struct tag_vtable_t system_tag_vtable = {
     /* abort */     system_tag_abort,
     /* read */      system_tag_read,
@@ -108,7 +100,42 @@ plc_tag_p system_tag_create(attr attribs)
     tag->vtable = &system_tag_vtable;
 
     /* set up the byte order. */
-    tag->byte_order = &byte_order;
+
+    /* 16-bit ints. */
+    tag->byte_order.int16_order_0 = 0;
+    tag->byte_order.int16_order_1 = 1;
+
+    /* 32-bit ints */
+    tag->byte_order.int32_order_0 = 0;
+    tag->byte_order.int32_order_1 = 1;
+    tag->byte_order.int32_order_2 = 2;
+    tag->byte_order.int32_order_3 = 3;
+
+    /* 64-bit ints */
+    tag->byte_order.int64_order_0 = 0;
+    tag->byte_order.int64_order_1 = 1;
+    tag->byte_order.int64_order_2 = 2;
+    tag->byte_order.int64_order_3 = 3;
+    tag->byte_order.int64_order_4 = 4;
+    tag->byte_order.int64_order_5 = 5;
+    tag->byte_order.int64_order_6 = 6;
+    tag->byte_order.int64_order_7 = 7;
+
+    /* 32-bit floats. */
+    tag->byte_order.float32_order_0 = 0;
+    tag->byte_order.float32_order_1 = 1;
+    tag->byte_order.float32_order_2 = 2;
+    tag->byte_order.float32_order_3 = 3;
+
+    /* 64-bit floats */
+    tag->byte_order.float64_order_0 = 0;
+    tag->byte_order.float64_order_1 = 1;
+    tag->byte_order.float64_order_2 = 2;
+    tag->byte_order.float64_order_3 = 3;
+    tag->byte_order.float64_order_4 = 4;
+    tag->byte_order.float64_order_5 = 5;
+    tag->byte_order.float64_order_6 = 6;
+    tag->byte_order.float64_order_7 = 7;
 
     /* get the name and copy it */
     str_copy(tag->name, MAX_SYSTEM_TAG_NAME, name);

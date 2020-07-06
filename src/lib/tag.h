@@ -32,31 +32,21 @@
  ***************************************************************************/
 
 
-#ifndef __LIBPLCTAG_TAG_H__
-#define __LIBPLCTAG_TAG_H__
-
-
+#pragma once
 
 
 #include <lib/libplctag.h>
 #include <platform.h>
 #include <util/attr.h>
+#include <util/debug.h>
 
-#define PLCTAG_CANARY (0xACA7CAFE)
-#define PLCTAG_DATA_LITTLE_ENDIAN   (0)
-#define PLCTAG_DATA_BIG_ENDIAN      (1)
+// #define PLCTAG_CANARY (0xACA7CAFE)
+// #define PLCTAG_DATA_LITTLE_ENDIAN   (0)
+// #define PLCTAG_DATA_BIG_ENDIAN      (1)
 
-//extern mutex_p global_library_mutex;
 
 typedef struct plc_tag_t *plc_tag_p;
 
-
-/* define tag operation functions */
-//typedef int (*tag_abort_func)(plc_tag_p tag);
-//typedef int (*tag_destroy_func)(plc_tag_p tag);
-//typedef int (*tag_read_func)(plc_tag_p tag);
-//typedef int (*tag_status_func)(plc_tag_p tag);
-//typedef int (*tag_write_func)(plc_tag_p tag);
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
@@ -78,13 +68,41 @@ typedef struct tag_vtable_t *tag_vtable_p;
 
 /* byte ordering */
 
-struct tag_byte_order_t {
-    uint8_t int16_order[2];
-    uint8_t int32_order[4];
-    uint8_t int64_order[8];
-    uint8_t float32_order[4];
-    uint8_t float64_order[8];
+struct tag_byte_order_s {
+    unsigned int int16_order_0:1;
+    unsigned int int16_order_1:1;
+
+    unsigned int int32_order_0:2;
+    unsigned int int32_order_1:2;
+    unsigned int int32_order_2:2;
+    unsigned int int32_order_3:2;
+
+    unsigned int float32_order_0:2;
+    unsigned int float32_order_1:2;
+    unsigned int float32_order_2:2;
+    unsigned int float32_order_3:2;
+
+    unsigned int int64_order_0:3;
+    unsigned int int64_order_1:3;
+    unsigned int int64_order_2:3;
+    unsigned int int64_order_3:3;
+    unsigned int int64_order_4:3;
+    unsigned int int64_order_5:3;
+    unsigned int int64_order_6:3;
+    unsigned int int64_order_7:3;
+
+    unsigned int float64_order_0:3;
+    unsigned int float64_order_1:3;
+    unsigned int float64_order_2:3;
+    unsigned int float64_order_3:3;
+    unsigned int float64_order_4:3;
+    unsigned int float64_order_5:3;
+    unsigned int float64_order_6:3;
+    unsigned int float64_order_7:3;
 };
+
+typedef struct tag_byte_order_s tag_byte_order_t;
+
 
 
 /*
@@ -104,7 +122,7 @@ struct tag_byte_order_t {
                         int32_t tag_id; \
                         mutex_p ext_mutex; \
                         mutex_p api_mutex; \
-                        struct tag_byte_order_t *byte_order; \
+                        tag_byte_order_t byte_order; \
                         void (*callback)(int32_t tag_id, int event, int status); \
                         uint8_t *data; \
                         int64_t read_cache_expire; \
@@ -128,4 +146,4 @@ extern int plc_tag_abort_mapped(plc_tag_p tag);
 extern int plc_tag_destroy_mapped(plc_tag_p tag);
 extern int plc_tag_status_mapped(plc_tag_p tag);
 
-#endif
+

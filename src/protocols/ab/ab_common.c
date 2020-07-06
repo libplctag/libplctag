@@ -85,6 +85,7 @@ volatile int ab_protocol_terminating = 0;
 
 /* forward declarations*/
 static int get_tag_data_type(ab_tag_p tag, attr attribs);
+static void set_tag_byte_order(ab_tag_p tag);
 
 static void ab_tag_destroy(ab_tag_p tag);
 static int default_abort(plc_tag_p tag);
@@ -105,39 +106,6 @@ struct tag_vtable_t default_vtable = {
     /* attribute accessors */
     ab_get_int_attrib,
     ab_set_int_attrib
-
-    // ab_get_bit,
-    // ab_set_bit,
-
-    // ab_get_uint64,
-    // ab_set_uint64,
-
-    // ab_get_int64,
-    // ab_set_int64,
-
-    // ab_get_uint32,
-    // ab_set_uint32,
-
-    // ab_get_int32,
-    // ab_set_int32,
-
-    // ab_get_uint16,
-    // ab_set_uint16,
-
-    // ab_get_int16,
-    // ab_set_int16,
-
-    // ab_get_uint8,
-    // ab_set_uint8,
-
-    // ab_get_int8,
-    // ab_set_int8,
-
-    // ab_get_float64,
-    // ab_set_float64,
-
-    // ab_get_float32,
-    // ab_set_float32
 };
 
 
@@ -290,8 +258,6 @@ plc_tag_p ab_tag_create(attr attribs)
         return (plc_tag_p)tag;
     }
 
-    tag->byte_order = &(tag->session->byte_order);
-
     pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
 
     /* set up PLC-specific information. */
@@ -388,14 +354,8 @@ plc_tag_p ab_tag_create(attr attribs)
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
-    /* determine the total tag size if this is not a tag list. */
-//    if(!tag->tag_list) {
-//        if(!tag->elem_size) {
-//            tag->elem_size = attr_get_int(attribs, "elem_size", 0);
-//        }
-//        tag->elem_count = attr_get_int(attribs,"elem_count", 1);
-//    }
-
+    /* set the byte order for the tag. */
+    set_tag_byte_order(tag);
 
     /* get the element count, default to 1 if missing. */
     tag->elem_count = attr_get_int(attribs,"elem_count", 1);
@@ -620,6 +580,55 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
     return PLCTAG_STATUS_OK;
 }
+
+
+
+void set_tag_byte_order(ab_tag_p tag)
+{
+    /* 16-bit ints. */
+    tag->byte_order.int16_order_0 = 0;
+    tag->byte_order.int16_order_1 = 1;
+
+    /* 32-bit ints */
+    tag->byte_order.int32_order_0 = 0;
+    tag->byte_order.int32_order_1 = 1;
+    tag->byte_order.int32_order_2 = 2;
+    tag->byte_order.int32_order_3 = 3;
+
+    /* 64-bit ints */
+    tag->byte_order.int64_order_0 = 0;
+    tag->byte_order.int64_order_1 = 1;
+    tag->byte_order.int64_order_2 = 2;
+    tag->byte_order.int64_order_3 = 3;
+    tag->byte_order.int64_order_4 = 4;
+    tag->byte_order.int64_order_5 = 5;
+    tag->byte_order.int64_order_6 = 6;
+    tag->byte_order.int64_order_7 = 7;
+
+    /* 32-bit floats. */
+    if(tag->plc_type == AB_PLC_PLC5) {
+        tag->byte_order.float32_order_0 = 2;
+        tag->byte_order.float32_order_1 = 3;
+        tag->byte_order.float32_order_2 = 0;
+        tag->byte_order.float32_order_3 = 1;
+    } else {
+        tag->byte_order.float32_order_0 = 0;
+        tag->byte_order.float32_order_1 = 1;
+        tag->byte_order.float32_order_2 = 2;
+        tag->byte_order.float32_order_3 = 3;
+    }
+
+    /* 64-bit floats */
+    tag->byte_order.float64_order_0 = 0;
+    tag->byte_order.float64_order_1 = 1;
+    tag->byte_order.float64_order_2 = 2;
+    tag->byte_order.float64_order_3 = 3;
+    tag->byte_order.float64_order_4 = 4;
+    tag->byte_order.float64_order_5 = 5;
+    tag->byte_order.float64_order_6 = 6;
+    tag->byte_order.float64_order_7 = 7;
+}
+
 
 
 
