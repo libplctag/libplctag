@@ -105,19 +105,6 @@ typedef struct tag_byte_order_s tag_byte_order_t;
 
 
 
-/* byte ordering */
-
-struct tag_byte_order_t {
-    uint8_t int16_order[2];
-    uint8_t int32_order[4];
-    uint8_t int64_order[8];
-    uint8_t float32_order[4];
-    uint8_t float64_order[8];
-};
-
-typedef struct tag_byte_order_s tag_byte_order_t;
-
-
 
 /*
  * The base definition of the tag structure.  This is used
@@ -138,10 +125,11 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         mutex_p api_mutex; \
                         tag_byte_order_t byte_order; \
                         void (*callback)(int32_t tag_id, int event, int status); \
+                        uint8_t *data; \
+                        int64_t read_cache_expire; \
+                        int64_t read_cache_ms
 
-// struct plc_tag_dummy {
-//     int tag_id;
-// };
+
 
 struct plc_tag_t {
     TAG_BASE_STRUCT;
