@@ -47,6 +47,7 @@
 #define PLC_READ_DATA_LEN (300)
 #define PLC_WRITE_DATA_LEN (300)
 #define MODBUS_MBAP_SIZE (6)
+#define MAX_MODBUS_RESPONSE_PAYLOAD (250)
 
 struct modbus_plc_t {
     struct modbus_plc_t *next;
@@ -114,6 +115,8 @@ struct modbus_tag_t {
         unsigned int _write:1;
         unsigned int _busy:1;
     } flags;
+    uint16_t request_num;
+    uint16_t seq_id;
     lock_t tag_lock;
 
     /* data for the tag. */
@@ -121,7 +124,6 @@ struct modbus_tag_t {
     int elem_size;
 
     /* data for outstanding requests. */
-    uint16_t seq_id;
 };
 
 typedef struct modbus_tag_t *modbus_tag_p;
@@ -569,12 +571,16 @@ THREAD_FUNC(modbus_plc_handler)
 
                             /* the tag might be in the destructor. */
                             if(tag) {
+                                debug_set_tag_id(tag->tag_id);
+
                                 pdebug(DEBUG_DETAIL, "Processing tag %d.", tag->tag_id);
 
                                 rc = process_tag(tag, plc);
                                 if(rc != PLCTAG_STATUS_OK) {
                                     pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
                                 }
+
+                                debug_set_tag_id(0);
 
                                 /* release reference. */
                                 tag = rc_dec(tag);
@@ -696,7 +702,7 @@ int read_packet(modbus_plc_p plc)
             /* got data! Or got nothing, but no error. */
             plc->read_data_len += rc;
 
-            pdebug_dump_bytes(DEBUG_DETAIL, plc->read_data, plc->read_data_len);
+            pdebug_dump_bytes(DEBUG_SPEW, plc->read_data, plc->read_data_len);
         } else {
             pdebug(DEBUG_WARN, "Error, %s, reading socket!", plc_tag_decode_error(rc));
             break;
@@ -816,6 +822,8 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                     } else {
                         pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
                     }
+
+                    tag->status = rc;
                 } else {
                     pdebug(DEBUG_SPEW, "No response yet.");
                 }
@@ -826,6 +834,8 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                 } else {
                     pdebug(DEBUG_SPEW, "No buffer space for a response.");
                 }
+
+                tag->status = rc;
             }
         }
 
@@ -840,6 +850,8 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                     } else {
                         pdebug(DEBUG_SPEW, "We got an error on our read response check, %s!", plc_tag_decode_error(rc));
                     }
+
+                    tag->status = rc;
                 } else {
                     pdebug(DEBUG_SPEW, "No response yet.");
                 }
@@ -850,14 +862,16 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                 } else {
                     pdebug(DEBUG_SPEW, "No buffer space for a response.");
                 }
-            }
+    
+                tag->status = rc;
+        }
         }
 
         // mutex_unlock(tag->api_mutex);
     // }
 
     /* set the tag status. */
-    tag->status = rc;
+    // tag->status = rc;
 
     /* does this tag need to do anything? */
 
@@ -867,12 +881,28 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
 }
 
 
+/* Read response.
+ *    Byte  Meaning
+ *      0    High byte of request sequence ID.
+ *      1    Low byte of request sequence ID.
+ *      2    High byte of the protocol version identifier (zero).
+ *      3    Low byte of the protocol version identifier (zero).
+ *      4    High byte of the message length.
+ *      5    Low byte of the message length.
+ *      6    Device address.
+ *      7    Function code.
+ *      8    First byte of the result.
+ *      ...  up to 253 bytes of payload.
+ */
+
+
 int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] +(uint16_t)(plc->read_data[0] << 8));
+    int partial_read = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     if(seq_id == tag->seq_id) {
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
@@ -882,15 +912,31 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
 
             pdebug(DEBUG_WARN, "Got read response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id, plc_tag_decode_error(rc), plc->read_data_len);
         } else {
-            int payload_size = (int)(unsigned int)plc->read_data[8];
-            int copy_size = (tag->size < payload_size ? tag->size : payload_size);
-
-            /* FIXME - handle tags longer than packet size. */
+            int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
+            int register_offset = (tag->request_num * registers_per_request);
+            int byte_offset = (register_offset * tag->elem_size) / 8;
+            uint8_t payload_size = plc->read_data[8];
+            int copy_size = ((tag->size - byte_offset) < payload_size ? (tag->size - byte_offset) : payload_size);
 
             /* no error. So copy the data. */
-            pdebug(DEBUG_DETAIL, "Got read response %ud of length %d with payload of size %d.", (int)(unsigned int)seq_id, plc->read_data_len, payload_size);
+            pdebug(DEBUG_INFO, "Got read response %u of length %d with payload of size %d.", (int)(unsigned int)seq_id, plc->read_data_len, payload_size);
+            pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
+            pdebug(DEBUG_DETAIL, "register_offset = %d", register_offset);
+            pdebug(DEBUG_DETAIL, "byte_offset = %d", byte_offset);
+            pdebug(DEBUG_DETAIL, "copy_size = %d", copy_size);
 
-            mem_copy(tag->data, &plc->read_data[9], copy_size);
+            mem_copy(tag->data + byte_offset, &plc->read_data[9], copy_size);
+
+            /* are we done? */
+            if(tag->size > (byte_offset + copy_size)) {
+                /* Not yet. */
+                pdebug(DEBUG_DETAIL, "Not done reading entire tag.");
+                partial_read = 1;
+            } else {
+                /* read is done. */
+                pdebug(DEBUG_DETAIL, "Read is complete.");
+                partial_read = 0;
+            }
 
             rc = PLCTAG_STATUS_OK;
         }
@@ -900,10 +946,26 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
         plc->flags.response_ready = 0;
 
         /* clean up tag*/
-        tag_set_read_flag(tag, 0);
-        tag_set_busy_flag(tag, 0);
-        tag->seq_id = 0;
-        tag->read_complete = 1;
+        if(!partial_read) {
+            spin_block(&tag->tag_lock) {
+                tag->flags._read = 0;
+                tag->flags._busy = 0;
+                tag->seq_id = 0;
+                tag->read_complete = 1;
+                tag->status = rc;
+            }
+        } else {
+            /* 
+             * keep doing a read, but clear the busy flag so that we 
+             * keep creating new requests.
+             */
+            spin_block(&tag->tag_lock) {
+                tag->flags._read = 1;
+                tag->flags._busy = 0;
+                tag->request_num++;
+                tag->status = rc;
+            }
+        }
     } else {
         pdebug(DEBUG_DETAIL, "Not our response.");
 
@@ -920,8 +982,23 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id)); // disallow zero
+    int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
+    int base_register = tag->reg_base + (tag->request_num * registers_per_request);
+    int register_count = tag->elem_count - (tag->request_num * registers_per_request);
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_DETAIL, "seq_id=%d", seq_id);
+    pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
+    pdebug(DEBUG_DETAIL, "base_register = %d", base_register);
+    pdebug(DEBUG_DETAIL, "register_count = %d", register_count);
+
+    /* clamp the number of registers we ask for to what will fit. */
+    if(register_count > registers_per_request) {
+        register_count = registers_per_request;
+    }
+
+    pdebug(DEBUG_INFO, "preparing read request for %d registers (of %d total) from base register %d.", register_count, tag->elem_count, base_register);
 
     /* build the read request.
      *    Byte  Meaning
@@ -981,18 +1058,21 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     }
 
     /* register base. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 0) & 0xFF); plc->write_data_len++;
 
     /* number of elements to read. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 0) & 0xFF); plc->write_data_len++;
 
-    /* ready to go. */
+    /* ready to go! */
+    spin_block(&tag->tag_lock) {
+        tag->flags._busy = 1;
+        tag->seq_id = seq_id;
+    }
 
+    /* FIXME - could this every be hoisted above the barrier above? */
     plc->flags.request_ready = 1;
-    tag_set_busy_flag(tag, 1);
-    tag->seq_id = seq_id;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1028,10 +1108,13 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         plc->flags.response_ready = 0;
 
         /* clean up tag*/
-        tag_set_write_flag(tag, 0);
-        tag_set_busy_flag(tag, 0);
-        tag->seq_id = 0;
-        tag->write_complete = 1;
+        spin_block(&tag->tag_lock) {
+            tag->flags._write = 0;
+            tag->flags._busy = 0;
+            tag->seq_id = 0;
+            tag->write_complete = 1;
+            tag->status = rc;
+        }
     } else {
         pdebug(DEBUG_SPEW, "Not our response.");
 
@@ -1369,9 +1452,8 @@ int mb_read_start(plc_tag_p p_tag)
         return PLCTAG_ERR_BUSY;
     }
 
-    tag_set_read_flag(tag, 1);
-
     tag->status = PLCTAG_STATUS_OK;
+    tag_set_read_flag(tag, 1);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
