@@ -47,6 +47,7 @@
 #define PLC_READ_DATA_LEN (300)
 #define PLC_WRITE_DATA_LEN (300)
 #define MODBUS_MBAP_SIZE (6)
+#define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
 
 struct modbus_plc_t {
@@ -253,6 +254,9 @@ plc_tag_p mb_tag_create(attr attribs)
             tag->next = tag->plc->tags;
             tag->plc->tags = tag;
         }
+
+        /* trigger a read to get the initial value of the tag. */
+        tag->flags._read = 1;
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
         tag->status = rc;
@@ -953,6 +957,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->seq_id = 0;
                 tag->read_complete = 1;
                 tag->status = rc;
+                tag->request_num = 0;
             }
         } else {
             /* 
@@ -1080,10 +1085,29 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
 }
 
 
+
+
+/* Write response.
+ *    Byte  Meaning
+ *      0    High byte of request sequence ID.
+ *      1    Low byte of request sequence ID.
+ *      2    High byte of the protocol version identifier (zero).
+ *      3    Low byte of the protocol version identifier (zero).
+ *      4    High byte of the message length.
+ *      5    Low byte of the message length.
+ *      6    Device address.
+ *      7    Function code.
+ *      8    High byte of first register address/Error code.
+ *      9    Low byte of the first register address.
+ *     10    High byte of the register count.
+ *     11    Low byte of the register count.
+ */
+
 int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
+    int partial_write = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1095,10 +1119,25 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
 
             pdebug(DEBUG_WARN, "Got write response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id, plc_tag_decode_error(rc), plc->read_data_len);
         } else {
-            /* FIXME - handle tags longer than packet size. */
+            int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
+            int register_offset = (tag->request_num * registers_per_request);
+            int byte_offset = (register_offset * tag->elem_size) / 8;
 
-            /* no error. */
-            pdebug(DEBUG_DETAIL, "Got write response %ud of length %d.", (int)(unsigned int)seq_id, plc->read_data_len);
+            /* no error. So copy the data. */
+            pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
+            pdebug(DEBUG_DETAIL, "register_offset = %d", register_offset);
+            pdebug(DEBUG_DETAIL, "byte_offset = %d", byte_offset);
+
+            /* are we done? */
+            if(tag->size > byte_offset) {
+                /* Not yet. */
+                pdebug(DEBUG_INFO, "Not done writing entire tag.");
+                partial_write = 1;
+            } else {
+                /* read is done. */
+                pdebug(DEBUG_INFO, "Write is complete.");
+                partial_write = 0;
+            }
 
             rc = PLCTAG_STATUS_OK;
         }
@@ -1106,14 +1145,26 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         /* either way, clean up the PLC buffer. */
         plc->read_data_len = 0;
         plc->flags.response_ready = 0;
-
         /* clean up tag*/
-        spin_block(&tag->tag_lock) {
-            tag->flags._write = 0;
-            tag->flags._busy = 0;
-            tag->seq_id = 0;
-            tag->write_complete = 1;
-            tag->status = rc;
+        if(!partial_write) {
+            spin_block(&tag->tag_lock) {
+                tag->flags._write = 0;
+                tag->flags._busy = 0;
+                tag->seq_id = 0;
+                tag->request_num = 0;
+                tag->write_complete = 1;
+                tag->status = rc;
+            }
+        } else {
+            /* 
+             * keep doing a write, but clear the busy flag so that we 
+             * keep creating new requests.
+             */
+            spin_block(&tag->tag_lock) {
+                tag->flags._write = 1;
+                tag->flags._busy = 0;
+                tag->status = rc;
+            }
         }
     } else {
         pdebug(DEBUG_SPEW, "Not our response.");
@@ -1127,32 +1178,55 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
 }
 
 
+/* build the write request.
+ *    Byte  Meaning
+ *      0    High byte of request sequence ID.
+ *      1    Low byte of request sequence ID.
+ *      2    High byte of the protocol version identifier (zero).
+ *      3    Low byte of the protocol version identifier (zero).
+ *      4    High byte of the message length.
+ *      5    Low byte of the message length.
+ *      6    Device address.
+ *      7    Function code.
+ *      8    High byte of first register address.
+ *      9    Low byte of the first register address.
+ *     10    High byte of the register count.
+ *     11    Low byte of the register count.
+ *     12    Number of bytes of data to write.
+ *     13... Data bytes.
+ */
+
 int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id)); // disallow zero
-    uint16_t req_len = (uint16_t)((uint16_t)tag->size + (uint16_t)7); /* MAGIC, 7 bytes in write command before the data. */
+    int registers_per_request = (MAX_MODBUS_REQUEST_PAYLOAD * 8) / tag->elem_size;
+    int base_register = tag->reg_base + (tag->request_num * registers_per_request);
+    int register_count = tag->elem_count - (tag->request_num * registers_per_request);
+    int register_offset = (tag->request_num * registers_per_request);
+    int byte_offset = (register_offset * tag->elem_size) / 8;
+    int request_payload_size = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
-    /* build the write request.
-     *    Byte  Meaning
-     *      0    High byte of request sequence ID.
-     *      1    Low byte of request sequence ID.
-     *      2    High byte of the protocol version identifier (zero).
-     *      3    Low byte of the protocol version identifier (zero).
-     *      4    High byte of the message length.
-     *      5    Low byte of the message length.
-     *      6    Device address.
-     *      7    Function code.
-     *      8    High byte of first register address.
-     *      9    Low byte of the first register address.
-     *     10    High byte of the register count.
-     *     11    Low byte of the register count.
-     *     12    Number of bytes of data to write.
-     *     13... Data bytes.
-     */
+    pdebug(DEBUG_DETAIL, "seq_id=%d", seq_id);
+    pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
+    pdebug(DEBUG_DETAIL, "base_register = %d", base_register);
+    pdebug(DEBUG_DETAIL, "register_count = %d", register_count);
+    pdebug(DEBUG_DETAIL, "register_offset = %d", register_offset);
+    pdebug(DEBUG_DETAIL, "byte_offset = %d", byte_offset);
 
+    /* clamp the number of registers we ask for to what will fit. */
+    if(register_count > registers_per_request) {
+        register_count = registers_per_request;
+    }
+
+    /* how many bytes, rounded up to the nearest byte. */
+    request_payload_size = ((register_count * tag->elem_size) + 7) / 8;
+
+    pdebug(DEBUG_INFO, "preparing write request for %d registers (of %d total) from base register %d of payload size %d in bytes.", register_count, tag->elem_count, base_register, request_payload_size);
+
+    /* FIXME - remove this when we figure out how to push multiple requests. */
     plc->write_data_len = 0;
 
     /* build the request sequence ID */
@@ -1164,8 +1238,8 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
     plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
 
     /* request packet length */
-    plc->write_data[plc->write_data_len] = (uint8_t)((req_len >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((req_len >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)(((request_payload_size + 7) >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)(((request_payload_size + 7) >> 0) & 0xFF); plc->write_data_len++;
 
     /* device address */
     plc->write_data[plc->write_data_len] = plc->server_id; plc->write_data_len++;
@@ -1197,24 +1271,27 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
     }
 
     /* register base. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->reg_base >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 0) & 0xFF); plc->write_data_len++;
 
     /* number of elements to read. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((tag->elem_count >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 8) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 0) & 0xFF); plc->write_data_len++;
 
     /* number of bytes of data to write. */
-    plc->write_data[plc->write_data_len] = (uint8_t)(tag->size & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)(unsigned int)(request_payload_size); plc->write_data_len++;
 
     /* copy the tag data. */
-    mem_copy(&plc->write_data[plc->write_data_len], tag->data, tag->size);
-    plc->write_data_len += tag->size;
+    mem_copy(&plc->write_data[plc->write_data_len], &tag->data[byte_offset], request_payload_size);
+    plc->write_data_len += request_payload_size;
 
     /* ready to go. */
+    spin_block(&tag->tag_lock) {
+        tag->flags._busy = 1;
+        tag->seq_id = (uint16_t)(unsigned int)seq_id;
+        tag->request_num++;
+    }
     plc->flags.request_ready = 1;
-    tag_set_busy_flag(tag, 1);
-    tag->seq_id = seq_id;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
