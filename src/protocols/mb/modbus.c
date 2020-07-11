@@ -1357,7 +1357,6 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         /* either way, clean up the PLC buffer. */
         plc->read_data_len = 0;
         plc->flags.response_ready = 0;
-
         /* clean up tag*/
         if(!partial_write) {
             spin_block(&tag->tag_lock) {

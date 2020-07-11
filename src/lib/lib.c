@@ -1840,11 +1840,8 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) {
                     tag->tag_is_dirty = 1;
-                }
 
                 tag->data[offset + tag->byte_order.int64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_2] = (uint8_t)((val >> 16) & 0xFF);
                 tag->data[offset + tag->byte_order.int64_order_3] = (uint8_t)((val >> 24) & 0xFF);
                 tag->data[offset + tag->byte_order.int64_order_4] = (uint8_t)((val >> 32) & 0xFF);
                 tag->data[offset + tag->byte_order.int64_order_5] = (uint8_t)((val >> 40) & 0xFF);
@@ -1906,12 +1903,10 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
                                 ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_7]) << 56));
 
                 tag->status = PLCTAG_STATUS_OK;
-            } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-            }
-        }
-    } else {
+            } else {
+                pdebug(DEBUG_WARN, "Data offset out of bounds!");
         int rc = plc_tag_get_bit(id, tag->bit);
 
         /* make sure the response is good. */
