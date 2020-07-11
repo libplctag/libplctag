@@ -49,6 +49,7 @@
 #define MODBUS_MBAP_SIZE (6)
 #define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
+#define MAX_MODBUS_PDU_PAYLOAD (253)  /* everything after the server address */
 
 struct modbus_plc_t {
     struct modbus_plc_t *next;
@@ -1630,7 +1631,7 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "elem_size") == 0) {
-        res = tag->elem_size;
+        res = (tag->elem_size + 7)/8; /* return size in bytes! */
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
     } else {
