@@ -231,7 +231,7 @@ extern int str_cmp_i(const char *first, const char *second)
  *
  * It just passes this through to Windows stricmp.
  */
-extern int str_cmp_i(const char *first, const char *second, int count)
+extern int str_cmp_i_n(const char *first, const char *second, int count)
 {
     if(count < 0) {
         pdebug(DEBUG_WARN, "Illegal negative count!");
