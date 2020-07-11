@@ -148,6 +148,13 @@ void destroy_modules(void)
 
     lib_teardown();
 
+    spin_block(&library_initialization_lock) {
+        if(lib_mutex != NULL) {
+            mutex_destroy(&lib_mutex);
+            lib_mutex = NULL;
+        }
+    }
+
     plc_tag_unregister_logger();
 
     library_initialized = 0;
