@@ -83,16 +83,16 @@ struct modbus_plc_t {
 
 typedef struct modbus_plc_t *modbus_plc_p;
 
-typedef enum { MB_REG_UNKNOWN, MB_REG_DO, MB_REG_DI, MB_REG_AO, MB_REG_AI } modbus_reg_type_t;
+typedef enum { MB_REG_UNKNOWN, MB_REG_COIL, MB_REG_DISCRETE_INPUT, MB_REG_HOLDING_REGISTER, MB_REG_INPUT_REGISTER } modbus_reg_type_t;
 
-typedef enum { MB_CMD_READ_DO_MULTI = 0x01,  
-               MB_CMD_READ_DI_MULTI = 0x02,  
-               MB_CMD_READ_AO_MULTI = 0x03, 
-               MB_CMD_READ_AI_MULTI = 0x04,
-               MB_CMD_WRITE_DO_SINGLE = 0x05, 
-               MB_CMD_WRITE_AO_SINGLE = 0x06,
-               MB_CMD_WRITE_DO_MULTI = 0x0F,
-               MB_CMD_WRITE_AO_MULTI = 0x10
+typedef enum { MB_CMD_READ_COIL_MULTI = 0x01,  
+               MB_CMD_READ_DISCRETE_INPUT_MULTI = 0x02,  
+               MB_CMD_READ_HOLDING_REGISTER_MULTI = 0x03, 
+               MB_CMD_READ_INPUT_REGISTER_MULTI = 0x04,
+               MB_CMD_WRITE_COIL_SINGLE = 0x05, 
+               MB_CMD_WRITE_HOLDING_REGISTER_SINGLE = 0x06,
+               MB_CMD_WRITE_COIL_MULTI = 0x0F,
+               MB_CMD_WRITE_HOLDING_REGISTER_MULTI = 0x10
              } modbug_cmd_t;
 
 struct modbus_tag_t {
@@ -288,15 +288,15 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
 
     /* determine register type. */
     switch(reg_type) {
-        case MB_REG_DO:
+        case MB_REG_COIL:
             /* fall through */
-        case MB_REG_DI:
+        case MB_REG_DISCRETE_INPUT:
             reg_size = 1;
             break;
 
-        case MB_REG_AO:
+        case MB_REG_HOLDING_REGISTER:
             /* fall through */
-        case MB_REG_AI:
+        case MB_REG_INPUT_REGISTER:
             reg_size = 16;
             break;
 
@@ -1040,20 +1040,20 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
 
     /* function code depends on the register type. */
     switch(tag->reg_type) {
-        case MB_REG_DO:
-            plc->write_data[7] = MB_CMD_READ_DO_MULTI; plc->write_data_len++;
+        case MB_REG_COIL:
+            plc->write_data[7] = MB_CMD_READ_COIL_MULTI; plc->write_data_len++;
             break;
 
-        case MB_REG_DI:
-            plc->write_data[7] = MB_CMD_READ_DI_MULTI; plc->write_data_len++;
+        case MB_REG_DISCRETE_INPUT:
+            plc->write_data[7] = MB_CMD_READ_DISCRETE_INPUT_MULTI; plc->write_data_len++;
             break;
 
-        case MB_REG_AO:
-            plc->write_data[7] = MB_CMD_READ_AO_MULTI; plc->write_data_len++;
+        case MB_REG_HOLDING_REGISTER:
+            plc->write_data[7] = MB_CMD_READ_HOLDING_REGISTER_MULTI; plc->write_data_len++;
             break;
 
-        case MB_REG_AI:
-            plc->write_data[7] = MB_CMD_READ_AI_MULTI; plc->write_data_len++;
+        case MB_REG_INPUT_REGISTER:
+            plc->write_data[7] = MB_CMD_READ_INPUT_REGISTER_MULTI; plc->write_data_len++;
             break;
 
         default:
@@ -1246,20 +1246,20 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
 
     /* function code depends on the register type. */
     switch(tag->reg_type) {
-        case MB_REG_DO:
-            plc->write_data[7] = MB_CMD_WRITE_DO_MULTI; plc->write_data_len++;
+        case MB_REG_COIL:
+            plc->write_data[7] = MB_CMD_WRITE_COIL_MULTI; plc->write_data_len++;
             break;
 
-        case MB_REG_DI:
+        case MB_REG_DISCRETE_INPUT:
             pdebug(DEBUG_WARN, "You cannot write a discrete input!");
             return PLCTAG_ERR_UNSUPPORTED;
             break;
 
-        case MB_REG_AO:
-            plc->write_data[7] = MB_CMD_WRITE_AO_MULTI; plc->write_data_len++;
+        case MB_REG_HOLDING_REGISTER:
+            plc->write_data[7] = MB_CMD_WRITE_HOLDING_REGISTER_MULTI; plc->write_data_len++;
             break;
 
-        case MB_REG_AI:
+        case MB_REG_INPUT_REGISTER:
             pdebug(DEBUG_WARN, "You cannot write an analog input!");
             return PLCTAG_ERR_UNSUPPORTED;
             break;
@@ -1364,14 +1364,14 @@ int get_tag_type(attr attribs)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* determine register type. */
-    if(str_cmp_i(reg_type, "do") == 0) {
-        res = MB_REG_DO;
+    if(str_cmp_i(reg_type, "co") == 0) {
+        res = MB_REG_COIL;
     } else if(str_cmp_i(reg_type, "di") == 0) {
-        res = MB_REG_DI;
-    } else if(str_cmp_i(reg_type, "ao") == 0) {
-        res = MB_REG_AO;
-    } else if(str_cmp_i(reg_type, "ai") == 0) {
-        res = MB_REG_AI;
+        res = MB_REG_DISCRETE_INPUT;
+    } else if(str_cmp_i(reg_type, "hr") == 0) {
+        res = MB_REG_HOLDING_REGISTER;
+    } else if(str_cmp_i(reg_type, "ir") == 0) {
+        res = MB_REG_INPUT_REGISTER;
     } else {
         pdebug(DEBUG_WARN, "Unsupported register type %s.", reg_type);
         res = MB_REG_UNKNOWN;
