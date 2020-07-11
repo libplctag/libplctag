@@ -439,6 +439,11 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     pdebug(DEBUG_INFO,"Starting");
 
+    if(timeout < 0) {
+        pdebug(DEBUG_WARN, "Timeout must not be negative!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     if((rc = initialize_modules()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to initialize the internal library state!");
         return rc;
@@ -967,6 +972,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    if(timeout < 0) {
+        pdebug(DEBUG_WARN, "Timeout must not be negative!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
         return PLCTAG_ERR_NOT_FOUND;
@@ -1128,6 +1139,12 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
+
+    if(timeout < 0) {
+        pdebug(DEBUG_WARN, "Timeout must not be negative!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
 
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
