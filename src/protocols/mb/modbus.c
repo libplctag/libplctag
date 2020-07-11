@@ -701,6 +701,9 @@ THREAD_FUNC(modbus_plc_handler)
                  * This is a little contorted here.   Because the tag could have been destroyed while
                  * we were processing it, that could end up calling rc_dec() on the PLC itself.   So
                  * we take another reference here and then release it after the loop.
+                 * 
+                 * If we do not do that, then the PLC destructor could be called while we hold the
+                 * PLC's mutex here.   That results in deadlock.
                  */
 
                 if(rc_inc(plc)) {
