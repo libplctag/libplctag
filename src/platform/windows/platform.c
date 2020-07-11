@@ -222,6 +222,26 @@ extern int str_cmp_i(const char *first, const char *second)
 }
 
 
+/*
+ * str_cmp_i_n
+ *
+ * Returns -1, 0, or 1 depending on whether the first string is "less" than the
+ * second, the same as the second, or "greater" than the second.  The comparison
+ * is done case insensitive.   Compares only the first count characters.
+ *
+ * It just passes this through to Windows stricmp.
+ */
+extern int str_cmp_i(const char *first, const char *second, int count)
+{
+    if(count < 0) {
+        pdebug(DEBUG_WARN, "Illegal negative count!");
+        return -1;
+    }
+
+    return _strnicmp(first, second, (size_t)(unsigned int)count);
+}
+
+
 
 /*
  * str_copy
