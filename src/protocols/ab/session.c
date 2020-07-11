@@ -552,6 +552,7 @@ int session_init(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    /* create the session mutex. */
     if((rc = mutex_create(&(session->mutex))) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create session mutex!");
         session->failed = 1;
