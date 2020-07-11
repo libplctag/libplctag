@@ -140,7 +140,7 @@ volatile int library_terminating = 0;
 /* helper functions */
 static int create_tag_object(attr attribs, modbus_tag_p *tag);
 static int find_or_create_plc(attr attribs, modbus_plc_p *plc);
-static int get_tag_type(attr attribs);
+static int parse_register_name(attr attribs, modbus_reg_type_t *reg_type, int *reg_base);
 static void modbus_tag_destructor(void *tag_arg);
 static void modbus_plc_destructor(void *plc_arg);
 static THREAD_FUNC(modbus_plc_handler);
@@ -272,19 +272,22 @@ plc_tag_p mb_tag_create(attr attribs)
 
 int create_tag_object(attr attribs, modbus_tag_p *tag)
 {
+    int rc = PLCTAG_STATUS_OK;
     int data_size = 0;
     int reg_size = 0;
     int elem_count = attr_get_int(attribs, "elem_count", 1);
-    int reg_type = get_tag_type(attribs);
-    int reg_base = attr_get_int(attribs, "reg_base", -1);
+    modbus_reg_type_t reg_type = MB_REG_UNKNOWN;
+    int reg_base = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     *tag = NULL;
 
-    if(reg_base < 0) {
-        pdebug(DEBUG_WARN, "Register base is missing or negative!");
-        return PLCTAG_ERR_BAD_PARAM;
+    /* get register type. */
+    rc = parse_register_name(attribs, &reg_type, &reg_base);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error parsing base register name!");
+        return rc;
     }
 
     /* determine register type. */
@@ -302,7 +305,10 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
             break;
 
         default:
+            pdebug(DEBUG_WARN, "Unsupported register type!");
             reg_size = 0;
+            return PLCTAG_ERR_BAD_PARAM;
+            break;
     }
 
     /* calculate the data size in bytes. */
@@ -385,15 +391,15 @@ void modbus_tag_destructor(void *tag_arg)
 
 int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 {
-    const char *server = attr_get_str(attribs, "server", NULL);
-    int server_id = attr_get_int(attribs, "server_id", -1);
+    const char *server = attr_get_str(attribs, "gateway", NULL);
+    int server_id = attr_get_int(attribs, "path", -1);
     int is_new = 0;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     if(server_id < 0 || server_id > 255) {
-        pdebug(DEBUG_WARN, "Server ID out of bounds or missing!");
+        pdebug(DEBUG_WARN, "Server ID, %d, out of bounds or missing!", server_id);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -1357,33 +1363,52 @@ int translate_modbus_error(uint8_t err_code)
 
 
 
-int get_tag_type(attr attribs)
+
+int parse_register_name(attr attribs, modbus_reg_type_t *reg_type, int *reg_base)
 {
-    int res = MB_REG_UNKNOWN;
-    const char *reg_type = attr_get_str(attribs, "reg_type", "NONE");
+    int rc = PLCTAG_STATUS_OK;
+    const char *reg_name = attr_get_str(attribs, "name", NULL);
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
-    /* determine register type. */
-    if(str_cmp_i(reg_type, "co") == 0) {
-        res = MB_REG_COIL;
-    } else if(str_cmp_i(reg_type, "di") == 0) {
-        res = MB_REG_DISCRETE_INPUT;
-    } else if(str_cmp_i(reg_type, "hr") == 0) {
-        res = MB_REG_HOLDING_REGISTER;
-    } else if(str_cmp_i(reg_type, "ir") == 0) {
-        res = MB_REG_INPUT_REGISTER;
-    } else {
-        pdebug(DEBUG_WARN, "Unsupported register type %s.", reg_type);
-        res = MB_REG_UNKNOWN;
+    if(!reg_name || str_length(reg_name)<3) {
+        pdebug(DEBUG_WARN, "Incorrect or unsupported register name!");
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    /* see if we can parse the register number. */
+    rc = str_to_int(&reg_name[2], reg_base);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to parse register number!");
+        *reg_base = 0;
+        *reg_type = MB_REG_UNKNOWN;
+        return rc;
+    }
 
-    return res;
+    /* get the register type. */
+    if(str_cmp_i_n(reg_name, "co", 2) == 0) {
+        pdebug(DEBUG_DETAIL, "Found coil type.");
+        *reg_type = MB_REG_COIL;
+    } else if(str_cmp_i_n(reg_name, "di", 2) == 0) {
+        pdebug(DEBUG_DETAIL, "Found discrete input type.");
+        *reg_type = MB_REG_DISCRETE_INPUT;
+    } else if(str_cmp_i_n(reg_name, "hr", 2) == 0) {
+        pdebug(DEBUG_DETAIL, "Found holding register type.");
+        *reg_type = MB_REG_HOLDING_REGISTER;
+    } else if(str_cmp_i_n(reg_name, "ir", 2) == 0) {
+        pdebug(DEBUG_DETAIL, "Found input register type.");
+        *reg_type = MB_REG_INPUT_REGISTER;
+    } else {
+        pdebug(DEBUG_WARN, "Unknown register type, %s!", reg_name);
+        *reg_base = 0;
+        *reg_type = MB_REG_UNKNOWN;
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_STATUS_OK;
 }
-
-
 
 
 int tag_get_abort_flag(modbus_tag_p tag)
