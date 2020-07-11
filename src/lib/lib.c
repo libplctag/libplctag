@@ -1242,7 +1242,10 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             res = (int)version_minor;
         } else if(str_cmp_i(attrib_name, "version_patch") == 0) {
             res = (int)version_patch;
+        } else if(str_cmp_i(attrib_name, "debug") == 0) {
+            res = (int)get_debug_level();
         } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
+            pdebug(DEBUG_WARN, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
             res = (int)get_debug_level();
         }
     } else {
@@ -1287,7 +1290,15 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
 
     /* get library attributes */
     if(id == 0) {
-        if(str_cmp_i(attrib_name, "debug_level") == 0) {
+        if(str_cmp_i(attrib_name, "debug") == 0) {
+            if(new_value >= DEBUG_ERROR && new_value < DEBUG_SPEW) {
+                set_debug_level(new_value);
+                res = PLCTAG_STATUS_OK;
+            } else {
+                res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+        } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
+            pdebug(DEBUG_WARN, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
             if(new_value >= DEBUG_ERROR && new_value < DEBUG_SPEW) {
                 set_debug_level(new_value);
                 res = PLCTAG_STATUS_OK;
