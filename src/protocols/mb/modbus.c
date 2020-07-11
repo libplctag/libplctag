@@ -470,6 +470,8 @@ void modbus_tag_destructor(void *tag_arg)
     }
 
     if(tag->plc) {
+        pdebug(DEBUG_DETAIL, "Unlinking from the PLC.");
+
         /* unlink the tag from the PLC. */
         critical_block(tag->plc->mutex) {
             modbus_tag_p *tag_walker = &(tag->plc->tags);
@@ -485,6 +487,7 @@ void modbus_tag_destructor(void *tag_arg)
             }
         }
 
+        pdebug(DEBUG_DETAIL, "Releasing the reference to the PLC.");
         tag->plc = rc_dec(tag->plc);
     }
 
@@ -617,12 +620,18 @@ void modbus_plc_destructor(void *plc_arg)
     if(plc->handler_thread) {
         plc->flags.terminate = 1;
         thread_join(plc->handler_thread);
+        thread_destroy(&plc->handler_thread);
         plc->handler_thread = NULL;
     }
 
     if(plc->mutex) {
         mutex_destroy(&plc->mutex);
         plc->mutex = NULL;
+    }
+
+    if(plc->sock) {
+        socket_destroy(&plc->sock);
+        plc->sock = NULL;
     }
 
     if(plc->server) {
@@ -687,34 +696,46 @@ THREAD_FUNC(modbus_plc_handler)
                 }
 
                 /* run all the tags. */
-                critical_block(plc->mutex) {
-                    /* don't do anything if there are no tags. */
-                    if(plc->tags) {
-                        modbus_tag_p *tag_walker = &(plc->tags);
 
-                        while(*tag_walker) {
-                            modbus_tag_p tag = rc_inc(*tag_walker);
+                /* 
+                 * This is a little contorted here.   Because the tag could have been destroyed while
+                 * we were processing it, that could end up calling rc_dec() on the PLC itself.   So
+                 * we take another reference here and then release it after the loop.
+                 */
 
-                            /* the tag might be in the destructor. */
-                            if(tag) {
-                                debug_set_tag_id(tag->tag_id);
+                if(rc_inc(plc)) {
+                    critical_block(plc->mutex) {
+                        /* don't do anything if there are no tags. */
+                        if(plc->tags) {
+                            modbus_tag_p *tag_walker = &(plc->tags);
 
-                                pdebug(DEBUG_DETAIL, "Processing tag %d.", tag->tag_id);
+                            while(*tag_walker) {
+                                modbus_tag_p tag = rc_inc(*tag_walker);
 
-                                rc = process_tag(tag, plc);
-                                if(rc != PLCTAG_STATUS_OK) {
-                                    pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
+                                /* the tag might be in the destructor. */
+                                if(tag) {
+                                    debug_set_tag_id(tag->tag_id);
+
+                                    pdebug(DEBUG_DETAIL, "Processing tag %d.", tag->tag_id);
+
+                                    rc = process_tag(tag, plc);
+                                    if(rc != PLCTAG_STATUS_OK) {
+                                        pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
+                                    }
+
+                                    debug_set_tag_id(0);
+
+                                    /* release reference. */
+                                    tag = rc_dec(tag);
                                 }
 
-                                debug_set_tag_id(0);
-
-                                /* release reference. */
-                                tag = rc_dec(tag);
+                                tag_walker = &((*tag_walker)->next);
                             }
-
-                            tag_walker = &((*tag_walker)->next);
                         }
                     }
+
+                    /* now drop the reference, which could cause the destructor to trigger. */
+                    rc_dec(plc);
                 }
             } while(0);
 
@@ -761,6 +782,7 @@ int connect_plc(modbus_plc_p plc)
 
     if(server_port[0] == NULL) {
         pdebug(DEBUG_WARN, "Server string is malformed or empty!");
+        mem_free(server_port);
         return PLCTAG_ERR_BAD_CONFIG;
     } else {
         server = server_port[0];
@@ -770,6 +792,8 @@ int connect_plc(modbus_plc_p plc)
         rc = str_to_int(server_port[1], &port);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to extract port number from server string \"%s\"!", plc->server);
+            mem_free(server_port);
+            server_port = NULL;
             return PLCTAG_ERR_BAD_CONFIG;
         }
     } else {
@@ -780,6 +804,10 @@ int connect_plc(modbus_plc_p plc)
 
     rc = socket_create(&(plc->sock));
     if(rc != PLCTAG_STATUS_OK) {
+        /* done with the split string. */
+        mem_free(server_port);
+        server_port = NULL;
+
         pdebug(DEBUG_WARN, "Unable to create socket object, error %s!", plc_tag_decode_error(rc));
         return rc;
     }
@@ -788,9 +816,18 @@ int connect_plc(modbus_plc_p plc)
     pdebug(DEBUG_DETAIL, "Connecting to %s on port %d...", server, port);
     rc = socket_connect_tcp(plc->sock, server, port);
     if(rc != PLCTAG_STATUS_OK) {
+        /* done with the split string. */
+        mem_free(server_port);
+
         pdebug(DEBUG_WARN, "Unable to connect to the server \"%s\", got error %s!", plc->server, plc_tag_decode_error(rc));
         socket_destroy(&(plc->sock));
         return rc;
+    }
+
+    /* done with the split string. */
+    if(server_port) {
+        mem_free(server_port);
+        server_port = NULL;
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
