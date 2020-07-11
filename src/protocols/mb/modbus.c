@@ -658,7 +658,7 @@ THREAD_FUNC(modbus_plc_handler)
 
     if(!plc) {
         pdebug(DEBUG_WARN, "Null PLC pointer passed!");
-        return THREAD_RETURN(0);
+        THREAD_RETURN(0);
     }
 
     while(! plc->flags.terminate) {
@@ -763,7 +763,7 @@ THREAD_FUNC(modbus_plc_handler)
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return THREAD_RETURN(0);
+    THREAD_RETURN(0);
 }
 
 
