@@ -482,16 +482,16 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     tag = tag_constructor(attribs);
 
-    /*
-     * FIXME - this really should be here???  Maybe not?  But, this is
-     * the only place it can be without making every protocol type do this automatically.
-     */
     if(!tag) {
         pdebug(DEBUG_WARN, "Tag creation failed, skipping mutex creation and other generic setup.");
         attr_destroy(attribs);
         return PLCTAG_ERR_CREATE;
     }
 
+    /*
+     * FIXME - this really should be here???  Maybe not?  But, this is
+     * the only place it can be without making every protocol type do this automatically.
+     */
     rc = mutex_create(&(tag->ext_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
@@ -515,6 +515,10 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     tag->read_cache_expire = (int64_t)0;
     tag->read_cache_ms = (int64_t)read_cache_ms;
+
+    /* set up any automatic read/write */
+    tag->auto_sync_read_ms = attr_get_int(attribs, "auto_sync_read_ms", 0);
+    tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
 
     /*
      * Release memory for attributes

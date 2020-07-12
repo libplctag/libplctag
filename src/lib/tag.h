@@ -113,21 +113,26 @@ typedef struct tag_byte_order_s tag_byte_order_t;
  * The base type only has a vtable for operations.
  */
 
-#define TAG_BASE_STRUCT tag_vtable_p vtable; \
-                        int status; \
-                        int size; \
-                        uint8_t is_bit:1; \
+#define TAG_BASE_STRUCT uint8_t is_bit:1; \
+                        uint8_t tag_is_dirty:1; \
+                        uint8_t read_complete:1; \
+                        uint8_t write_complete:1; \
                         uint8_t bit; \
-                        int read_complete; \
-                        int write_complete; \
+                        int8_t status; \
+                        int32_t size; \
                         int32_t tag_id; \
+                        int32_t auto_sync_read_ms; \
+                        int32_t auto_sync_write_ms; \
                         mutex_p ext_mutex; \
                         mutex_p api_mutex; \
-                        tag_byte_order_t byte_order; \
+                        tag_vtable_p vtable; \
                         void (*callback)(int32_t tag_id, int event, int status); \
                         uint8_t *data; \
                         int64_t read_cache_expire; \
-                        int64_t read_cache_ms
+                        int64_t read_cache_ms; \
+                        int64_t auto_sync_next_read; \
+                        int64_t auto_sync_next_write; \
+                        tag_byte_order_t byte_order
 
 
 
