@@ -330,6 +330,7 @@ if (UNIX)
                            stress_api_lock
                            stress_test
                            string
+                           test_auto_sync
                            test_callback
                            test_reconnect
                            test_shutdown
@@ -351,6 +352,7 @@ elseif(WIN32)
                            simple_dual
                            slc500
                            string
+                           test_auto_sync
                            test_callback
                            test_shutdown
                            test_special
