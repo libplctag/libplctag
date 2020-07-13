@@ -115,7 +115,9 @@ typedef struct tag_byte_order_s tag_byte_order_t;
 
 #define TAG_BASE_STRUCT uint8_t is_bit:1; \
                         uint8_t tag_is_dirty:1; \
+                        uint8_t read_in_flight:1; \
                         uint8_t read_complete:1; \
+                        uint8_t write_in_flight:1; \
                         uint8_t write_complete:1; \
                         uint8_t bit; \
                         int8_t status; \
@@ -130,7 +132,7 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         uint8_t *data; \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \
-                        int64_t auto_sync_next_read; \
+                        int64_t auto_sync_last_read; \
                         int64_t auto_sync_next_write; \
                         tag_byte_order_t byte_order
 
