@@ -185,7 +185,7 @@ THREAD_FUNC(tag_tickler_func)
 
     debug_set_tag_id(0);
 
-    pdebug(DEBUG_INFO,"Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     while(!library_terminating) {
         int max_index = 0;
@@ -214,26 +214,135 @@ THREAD_FUNC(tag_tickler_func)
                 }
             }
 
-            if(tag && tag->vtable->tickler) {
-                if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
-                    tag->vtable->tickler(tag);
+            if(tag) {
+                int events[PLCTAG_EVENT_DESTROYED+1] =  {0};
 
+                debug_set_tag_id(tag->tag_id);
+
+                /* try to hold the tag API mutex while all this goes on. */
+                if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+                    /* if this tag has automatic writes, then there are many things we should check */
+                    if(tag->auto_sync_write_ms > 0) {
+                        /* has the tag been written to? */
+                        if(tag->tag_is_dirty) {
+                            /* abort any in flight read if the tag is dirty. */
+                            if(tag->read_in_flight) {
+                                if(tag->vtable->abort) {
+                                    tag->vtable->abort(tag);
+                                }
+
+                                pdebug(DEBUG_DETAIL, "Aborting in-flight automatic read!");
+
+                                tag->read_complete = 0;
+                                tag->read_in_flight = 0;
+
+                                /* FIXME - should we report an ABORT event here? */
+                                events[PLCTAG_EVENT_ABORTED] = 1;
+                            }
+
+                            /* have we already done something about it? */
+                            if(!tag->auto_sync_next_write) {
+                                /* we need to queue up a new write. */
+                                tag->auto_sync_next_write = time_ms() + tag->auto_sync_write_ms;
+
+                                pdebug(DEBUG_DETAIL, "Queueing up automatic write in %dms.", tag->auto_sync_write_ms);
+                            } else if(!tag->write_in_flight && tag->auto_sync_next_write <= time_ms()) {
+                                pdebug(DEBUG_DETAIL, "Triggering automatic write start.");
+
+                                /* clear out any outstanding reads. */
+                                if(tag->read_in_flight && tag->vtable->abort) {
+                                    tag->vtable->abort(tag);
+                                    tag->read_in_flight = 0;
+                                }
+
+                                tag->tag_is_dirty = 0;
+                                tag->write_in_flight = 1;
+                                tag->auto_sync_next_write = 0;
+
+                                if(tag->vtable->write) {
+                                    tag->status = (int8_t)tag->vtable->write(tag);
+                                }
+
+                                events[PLCTAG_EVENT_WRITE_STARTED] = 1;
+                            }
+                        }
+                    }
+
+                    /* if this tag has automatic reads, we need to check that state too. */
+                    if(tag->auto_sync_read_ms > 0) {
+                        /* do we need to read? */
+                        if(tag->auto_sync_last_read + tag->auto_sync_read_ms <= time_ms()) {
+                            /* make sure that we do not have an outstanding read or write. */
+                            if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
+                                pdebug(DEBUG_DETAIL, "Triggering automatic read start.");
+
+                                tag->read_in_flight = 1;
+
+                                if(tag->vtable->read) {
+                                    tag->status = (int8_t)tag->vtable->read(tag);
+                                }
+
+                                events[PLCTAG_EVENT_READ_STARTED] = 1;
+                            }
+                        }
+                    }
+
+                    /* call the tickler function if we can. */
+                    if(tag->vtable->tickler) {
+                        /* call the tickler on the tag. */
+                        tag->vtable->tickler(tag);
+
+                        if(tag->read_complete) {
+                            tag->read_complete = 0;
+                            tag->read_in_flight = 0;
+                            tag->auto_sync_last_read = time_ms(); /* FIXME - this should be exactly auto_sync_read_ms later */
+
+                            events[PLCTAG_EVENT_READ_COMPLETED] = 1;
+                        }
+
+                        if(tag->write_complete) {
+                            tag->write_complete = 0;
+                            tag->write_in_flight = 0;
+                            tag->auto_sync_next_write = 0;
+
+                            events[PLCTAG_EVENT_WRITE_COMPLETED] = 1;
+                        }
+                    }
+
+                    /* we are done with the tag API mutex now. */
                     mutex_unlock(tag->api_mutex);
 
-                    if(tag->read_complete) {
-                        if(tag->callback) {
+                    /* call the callback outside the API mutex. */
+                    if(tag->callback) {
+                        /* was there a read start? */
+                        if(events[PLCTAG_EVENT_READ_STARTED]) {
+                            pdebug(DEBUG_DETAIL, "Tag read started.");
+                            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, plc_tag_status(tag->tag_id));
+                        }
+
+                        /* was there a write start? */
+                        if(events[PLCTAG_EVENT_WRITE_STARTED]) {
+                            pdebug(DEBUG_DETAIL, "Tag write started.");
+                            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, plc_tag_status(tag->tag_id));
+                        }
+
+                        /* was there an abort? */
+                        if(events[PLCTAG_EVENT_ABORTED]) {
+                            pdebug(DEBUG_DETAIL, "Tag operation aborted.");
+                            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, plc_tag_status(tag->tag_id));
+                        }
+
+                        /* was there a read completion? */
+                        if(events[PLCTAG_EVENT_READ_COMPLETED]) {
+                            pdebug(DEBUG_DETAIL, "Tag read completed.");
                             tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, plc_tag_status(tag->tag_id));
                         }
 
-                        tag->read_complete = 0;
-                    }
-
-                    if(tag->write_complete) {
-                        if(tag->callback) {
+                        /* was there a write completion? */
+                        if(events[PLCTAG_EVENT_WRITE_COMPLETED]) {
+                            pdebug(DEBUG_DETAIL, "Tag write completed.");
                             tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, plc_tag_status(tag->tag_id));
                         }
-
-                        tag->write_complete = 0;
                     }
                 }
             }
@@ -518,7 +627,20 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     /* set up any automatic read/write */
     tag->auto_sync_read_ms = attr_get_int(attribs, "auto_sync_read_ms", 0);
+    if(tag->auto_sync_read_ms < 0) {
+        pdebug(DEBUG_WARN, "auto_sync_read_ms value must be positive!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
+    if(tag->auto_sync_write_ms < 0) {
+        pdebug(DEBUG_WARN, "auto_sync_write_ms value must be positive!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    } else {
+        tag->auto_sync_next_write = 0;
+    }
 
     /*
      * Release memory for attributes
@@ -880,13 +1002,18 @@ int plc_tag_abort(int32_t id)
         if(!tag->vtable || !tag->vtable->abort) {
             pdebug(DEBUG_WARN,"Tag does not have a abort function!");
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+            break;
         }
 
         /* this may be synchronous. */
         rc = tag->vtable->abort(tag);
+
+        tag->write_in_flight = 0;
+        tag->read_in_flight = 0;
     }
 
     if(tag->callback) {
+        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_ABORTED.");
         tag->callback(id, PLCTAG_EVENT_ABORTED, PLCTAG_STATUS_OK);
     }
 
@@ -941,6 +1068,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
     }
 
     if(tag->callback) {
+        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_DESTROYED.");
         tag->callback(tag_id, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
     }
 
@@ -973,6 +1101,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
+    int is_done = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -988,6 +1117,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
     }
 
     if(tag->callback) {
+        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_STARTED.");
         tag->callback(id, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
     }
 
@@ -996,8 +1126,25 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         if(tag->read_cache_expire > time_ms()) {
             pdebug(DEBUG_INFO, "Returning cached data.");
             rc = PLCTAG_STATUS_OK;
+            is_done = 1;
             break;
         }
+
+        if(tag->read_in_flight || tag->write_in_flight) {
+            pdebug(DEBUG_WARN, "An operation is already in flight!");
+            rc = PLCTAG_ERR_BUSY;
+            is_done = 1;
+            break;
+        }
+
+        if(tag->tag_is_dirty) {
+            pdebug(DEBUG_WARN, "Tag has locally updated data that will be overwritten!");
+            rc = PLCTAG_ERR_BUSY;
+            is_done = 1;
+            break;
+        }
+
+        tag->read_in_flight = 1;
 
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->read(tag);
@@ -1005,6 +1152,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         /* if error, return now */
         if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_DETAIL, "Tag status reporting error %s!", plc_tag_decode_error(rc));
+            is_done = 1;
             break;
         }
 
@@ -1018,6 +1166,9 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         if(timeout) {
             int64_t timeout_time = timeout + time_ms();
             int64_t start_time = time_ms();
+
+            /* when we leave the loop below, we are done. */
+            is_done = 1;
 
             while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
                 /* give some time to the tickler function. */
@@ -1067,7 +1218,8 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
     } /* end of api mutex block */
 
     if(tag->callback) {
-        if(timeout) {
+        if(is_done) {
+            pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
             tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
         }
     }
@@ -1141,6 +1293,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
+    int is_done = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1156,10 +1309,17 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
     }
 
     if(tag->callback) {
+        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_STARTED.");
         tag->callback(id, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK);
     }
 
     critical_block(tag->api_mutex) {
+        if(tag->read_in_flight || tag->write_in_flight) {
+            pdebug(DEBUG_WARN, "Tag already has an operation in flight!");
+            is_done = 1;
+            rc = PLCTAG_ERR_BUSY;
+        }
+
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->write(tag);
 
@@ -1196,6 +1356,9 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 sleep_ms(1); /* MAGIC */
             }
 
+            /* either way, we are done. */
+            is_done = 1;
+
             /*
              * if we dropped out of the while loop but the status is
              * still pending, then we timed out.
@@ -1225,7 +1388,8 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
     } /* end of api mutex block */
 
     if(tag->callback) {
-        if(timeout) {
+        if(is_done) {
+            pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
             tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
         }
     }
@@ -1268,6 +1432,9 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
         } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
             pdebug(DEBUG_WARN, "Deprecated attribute \"debug_level\" used, use \"debug\" instead.");
             res = (int)get_debug_level();
+        } else {
+            pdebug(DEBUG_WARN, "Attribute \"%s\" is not supported at the library level!");
+            res = default_value;
         }
     } else {
         tag = lookup_tag(id);
@@ -1284,6 +1451,10 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             } else if(str_cmp_i(attrib_name, "read_cache_ms") == 0) {
                 /* FIXME - what happens if this overflows? */
                 res = (int)tag->read_cache_ms;
+            }  else if(str_cmp_i(attrib_name, "auto_sync_read_ms") == 0) {
+                res = (int)tag->auto_sync_read_ms;
+            }  else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
+                res = (int)tag->auto_sync_write_ms;
             } else  {
                 if(tag->vtable->get_int_attrib) {
                     res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
@@ -1326,6 +1497,9 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
             } else {
                 res = PLCTAG_ERR_OUT_OF_BOUNDS;
             }
+        } else {
+            pdebug(DEBUG_WARN, "Attribute \"%s\" is not support at the library level!", attrib_name);
+            return PLCTAG_ERR_UNSUPPORTED;
         }
     } else {
         tag = lookup_tag(id);
@@ -1344,6 +1518,22 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
                     tag->read_cache_ms = (int64_t)new_value;
                     res = PLCTAG_STATUS_OK;
                 } else {
+                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+            } else if(str_cmp_i(attrib_name, "auto_sync_read_ms") == 0) {
+                if(new_value >= 0) {
+                    tag->auto_sync_read_ms = new_value;
+                    res = PLCTAG_STATUS_OK;
+                } else {
+                    pdebug(DEBUG_WARN, "auto_sync_read_ms must be greater than or equal to zero!");
+                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+            } else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
+                if(new_value >= 0) {
+                    tag->auto_sync_write_ms = new_value;
+                    res = PLCTAG_STATUS_OK;
+                } else {
+                    pdebug(DEBUG_WARN, "auto_sync_write_ms must be greater than or equal to zero!");
                     res = PLCTAG_ERR_OUT_OF_BOUNDS;
                 }
             } else {
@@ -1463,6 +1653,10 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val)
 
     critical_block(tag->api_mutex) {
         if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
+            if(tag->auto_sync_write_ms > 0) {
+                tag->tag_is_dirty = 1;
+            }
+
             if(val) {
                 tag->data[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
             } else {
@@ -1551,6 +1745,10 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset + tag->byte_order.int64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int64_order_2] = (uint8_t)((val >> 16) & 0xFF);
@@ -1651,6 +1849,10 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset + tag->byte_order.int64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int64_order_2] = (uint8_t)((val >> 16) & 0xFF);
@@ -1751,6 +1953,10 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset + tag->byte_order.int32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int32_order_2] = (uint8_t)((val >> 16) & 0xFF);
@@ -1843,6 +2049,10 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset + tag->byte_order.int32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int32_order_2] = (uint8_t)((val >> 16) & 0xFF);
@@ -1936,6 +2146,10 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset + tag->byte_order.int16_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int16_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
             } else {
@@ -2030,6 +2244,10 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset + tag->byte_order.int16_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
                 tag->data[offset + tag->byte_order.int16_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
             } else {
@@ -2121,6 +2339,10 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset] = val;
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
@@ -2209,6 +2431,10 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int8_t)) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
                 tag->data[offset] = val;
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
@@ -2322,6 +2548,10 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
+            if(tag->auto_sync_write_ms > 0) {
+                tag->tag_is_dirty = 1;
+            }
+
             tag->data[offset + tag->byte_order.float64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
             tag->data[offset + tag->byte_order.float64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
             tag->data[offset + tag->byte_order.float64_order_2] = (uint8_t)((val >> 16) & 0xFF);
@@ -2428,6 +2658,10 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
+            if(tag->auto_sync_write_ms > 0) {
+                tag->tag_is_dirty = 1;
+            }
+
             tag->data[offset + tag->byte_order.float32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
             tag->data[offset + tag->byte_order.float32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
             tag->data[offset + tag->byte_order.float32_order_2] = (uint8_t)((val >> 16) & 0xFF);
