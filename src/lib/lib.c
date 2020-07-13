@@ -300,6 +300,25 @@ THREAD_FUNC(tag_tickler_func)
 
                             events[PLCTAG_EVENT_READ_COMPLETED] = 1;
                         }
+                    }
+
+                    /* call the tickler function if we can. */
+                    if(tag->vtable->tickler) {
+                        /* call the tickler on the tag. */
+                        tag->vtable->tickler(tag);
+
+                        if(tag->read_complete) {
+                            tag->read_complete = 0;
+                            tag->read_in_flight = 0;
+                            tag->auto_sync_last_read = time_ms(); /* FIXME - this should be exactly auto_sync_read_ms later */
+
+                            events[PLCTAG_EVENT_READ_COMPLETED] = 1;
+                        }
+
+                        if(tag->write_complete) {
+                            tag->write_complete = 0;
+                            tag->write_in_flight = 0;
+                            tag->auto_sync_next_write = 0;
 
                         if(tag->write_complete) {
                             tag->write_complete = 0;
@@ -1177,6 +1196,9 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             int64_t timeout_time = timeout + time_ms();
             int64_t start_time = time_ms();
 
+            /* when we leave the loop below, we are done. */
+            is_done = 1;
+
             while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
                 /* give some time to the tickler function. */
                 if(tag->vtable->tickler) {
@@ -1389,6 +1411,9 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
                 sleep_ms(1); /* MAGIC */
             }
+
+            /* either way, we are done. */
+            is_done = 1;
 
             /*
              * if we dropped out of the while loop but the status is
