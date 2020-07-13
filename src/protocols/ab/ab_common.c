@@ -439,6 +439,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     /* kick off a read to get the tag type and size. */
     if(tag->vtable->read) {
+        tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
     }
 
