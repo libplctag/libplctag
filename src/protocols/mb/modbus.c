@@ -222,6 +222,7 @@ plc_tag_p mb_tag_create(attr attribs)
         }
 
         /* trigger a read to get the initial value of the tag. */
+        tag->read_in_flight = 1;
         tag->flags._read = 1;
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
@@ -1307,7 +1308,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->seq_id = 0;
                 tag->request_num = 0;
                 tag->write_complete = 1;
-                tag->status = rc;
+                tag->status = (int8_t)rc;
             }
         } else {
             /* 
@@ -1317,7 +1318,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
             spin_block(&tag->tag_lock) {
                 tag->flags._write = 1;
                 tag->flags._busy = 0;
-                tag->status = rc;
+                tag->status = (int8_t)rc;
             }
         }
     } else {
