@@ -701,6 +701,10 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
             return rc;
         }
 
+        /* clear up any remaining flags.  This should be refactored. */
+        tag->read_in_flight = 0;
+        tag->write_in_flight = 0;
+
         pdebug(DEBUG_INFO,"tag set up elapsed time %ldms",(time_ms()-start_time));
     }
 
