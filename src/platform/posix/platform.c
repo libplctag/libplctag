@@ -499,7 +499,7 @@ int mutex_lock(mutex_p m)
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
-    /*pdebug(DEBU_DETAIL,"Done.");*/
+    //pdebug(DEBUG_SPEW,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -548,7 +548,7 @@ int mutex_unlock(mutex_p m)
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    /* pdebug(DEBUG_DETAIL,"Done."); */
+    //pdebug(DEBUG_SPEW,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
