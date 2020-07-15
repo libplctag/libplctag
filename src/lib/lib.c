@@ -33,6 +33,7 @@
 
 #define LIBPLCTAGDLL_EXPORTS 1
 
+#include <inttypes.h>
 #include <limits.h>
 #include <float.h>
 #include <lib/libplctag.h>
@@ -644,11 +645,6 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     /*
      * Release memory for attributes
-     *
-     * some code is commented out that would have kept a pointer
-     * to the attributes in the tag and released the memory upon
-     * tag destruction. To prevent a memory leak without maintaining
-     * that pointer, the memory needs to be released here.
      */
     attr_destroy(attribs);
 
@@ -705,7 +701,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         tag->read_in_flight = 0;
         tag->write_in_flight = 0;
 
-        pdebug(DEBUG_INFO,"tag set up elapsed time %ldms",(time_ms()-start_time));
+        pdebug(DEBUG_INFO,"tag set up elapsed time %" PRId64 "ms",(time_ms()-start_time));
     }
 
     /* map the tag to a tag ID */
@@ -1012,8 +1008,10 @@ int plc_tag_abort(int32_t id)
         /* this may be synchronous. */
         rc = tag->vtable->abort(tag);
 
-        tag->write_in_flight = 0;
         tag->read_in_flight = 0;
+        tag->read_complete = 0;
+        tag->write_in_flight = 0;
+        tag->write_complete = 0;
     }
 
     if(tag->callback) {
@@ -1149,19 +1147,27 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         }
 
         tag->read_in_flight = 1;
+        tag->status = PLCTAG_STATUS_PENDING;
 
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->read(tag);
 
-        /* if error, return now */
-        if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Tag status reporting error %s!", plc_tag_decode_error(rc));
+        /* if not pending then check for success or error. */
+        if(rc != PLCTAG_STATUS_PENDING) {
+            if(rc != PLCTAG_STATUS_OK) {
+                /* not pending and not OK, so error. Abort and clean up. */
+
+                pdebug(DEBUG_WARN,"Response from read command returned error %s!", plc_tag_decode_error(rc));
+
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
+            }
+
+            tag->read_in_flight = 0;
             is_done = 1;
             break;
         }
-
-        /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
-        tag->read_cache_expire = time_ms() + tag->read_cache_ms;
 
         /*
          * if there is a timeout, then loop until we get
@@ -1170,9 +1176,6 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         if(timeout) {
             int64_t timeout_time = timeout + time_ms();
             int64_t start_time = time_ms();
-
-            /* when we leave the loop below, we are done. */
-            is_done = 1;
 
             while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
                 /* give some time to the tickler function. */
@@ -1210,16 +1213,21 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
                     pdebug(DEBUG_WARN, "Read operation timed out.");
                     rc = PLCTAG_ERR_TIMEOUT;
                 }
-            }
+            } 
 
-            /* don't trigger the callback twice. */
-            if(tag->read_complete) {
-                tag->read_complete = 0;
-            }
+            /* we are done. */
+            tag->read_complete = 0;
+            tag->read_in_flight = 0;
+            is_done = 1;
 
-            pdebug(DEBUG_INFO,"elapsed time %ldms",(time_ms()-start_time));
+            pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms",(time_ms()-start_time));
         }
     } /* end of api mutex block */
+
+    if(rc == PLCTAG_STATUS_OK) {
+        /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
+        tag->read_cache_expire = time_ms() + tag->read_cache_ms;
+    }
 
     if(tag->callback) {
         if(is_done) {
@@ -1269,6 +1277,12 @@ int plc_tag_status(int32_t id)
         }
 
         rc = tag->vtable->status(tag);
+
+        if(rc == PLCTAG_STATUS_OK) {
+            if(tag->read_in_flight || tag->write_in_flight) {
+                rc = PLCTAG_STATUS_PENDING;
+            }
+        }
     }
 
     rc_dec(tag);
@@ -1322,14 +1336,30 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
             pdebug(DEBUG_WARN, "Tag already has an operation in flight!");
             is_done = 1;
             rc = PLCTAG_ERR_BUSY;
+            break;
         }
+
+        /* a write is now in flight. */
+        tag->write_in_flight = 1;
+        tag->status = PLCTAG_STATUS_OK;
 
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->write(tag);
 
-        /* if error, return now */
-        if(rc != PLCTAG_STATUS_PENDING && rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Response from write command is not OK!");
+        /* if not pending then check for success or error. */
+        if(rc != PLCTAG_STATUS_PENDING) {
+            if(rc != PLCTAG_STATUS_OK) {
+                /* not pending and not OK, so error. Abort and clean up. */
+
+                pdebug(DEBUG_WARN,"Response from write command returned error %s!", plc_tag_decode_error(rc));
+
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
+            }
+
+            tag->write_in_flight = 0;
+            is_done = 1;
             break;
         }
 
@@ -1360,9 +1390,6 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 sleep_ms(1); /* MAGIC */
             }
 
-            /* either way, we are done. */
-            is_done = 1;
-
             /*
              * if we dropped out of the while loop but the status is
              * still pending, then we timed out.
@@ -1382,12 +1409,12 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 }
             }
 
-            /* don't trigger the callback twice. */
-            if(tag->write_complete) {
-                tag->write_complete = 0;
-            }
+            /* the write is not in flight anymore. */
+            tag->write_in_flight = 0;
+            tag->write_complete = 0;
+            is_done = 1;
 
-            pdebug(DEBUG_INFO,"elapsed time %lldms",(time_ms()-start_time));
+            pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms",(time_ms()-start_time));
         }
     } /* end of api mutex block */
 
