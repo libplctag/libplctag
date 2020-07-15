@@ -1099,7 +1099,7 @@ THREAD_FUNC(session_handler)
             auto_disconnect = 0;
 
             /* if there is work to do, reconnect.. */
-            pdebug(DEBUG_DETAIL,"Critical block.");
+            pdebug(DEBUG_SPEW,"Critical block.");
             critical_block(session->mutex) {
                 if(vector_length(session->requests) > 0) {
                     pdebug(DEBUG_DETAIL, "There are requests waiting, reopening connection to PLC.");
