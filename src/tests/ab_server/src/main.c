@@ -265,9 +265,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[9] = (uint8_t)0x2e;  /* '.' */
                 plc->path[10] = (uint8_t)0x31; /* '1' */
                 plc->path[11] = (uint8_t)0x00; /* padding */
-                plc->path[12] = (uint8_t)0x20;  
+                plc->path[12] = (uint8_t)0x20;
                 plc->path[13] = (uint8_t)0x02;
-                plc->path[14] = (uint8_t)0x24; 
+                plc->path[14] = (uint8_t)0x24;
                 plc->path[15] = (uint8_t)0x01;
                 plc->path_len = 16;
                 plc->client_to_server_max_packet = 508;
@@ -277,9 +277,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "PLC/5") == 0) {
                 fprintf(stderr, "Selecting PLC/5 simulator.\n");
                 plc->plc_type = PLC_PLC5;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -289,9 +289,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
                 fprintf(stderr, "Selecting SLC 500 simulator.\n");
                 plc->plc_type = PLC_SLC;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -301,9 +301,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
                 fprintf(stderr, "Selecting Micrologix simulator.\n");
                 plc->plc_type = PLC_MICROLOGIX;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -385,7 +385,7 @@ void parse_path(const char *path_str, plc_s *plc)
  *     N7 - 2 byte signed integer.  Requires size.
  *     F8 - 4-byte floating point number.   Requires size.
  *     L19 - 4 byte signed integer.   Requires size.
- * 
+ *
  * The size field is a single positive integer.
  */
 
@@ -491,7 +491,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
         tag->elem_count = tag->dimensions[0];
         tag->num_dimensions = 1;
     }
- 
+
     /* copy the tag name */
     tag->name = strdup(data_file_name);
     if (!tag->name) {
@@ -668,7 +668,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
     } else {
         tag->dimensions[2] = 1;
     }
- 
+
     /* copy the tag name */
     tag->name = strdup(tag_name);
     if (!tag->name) {
