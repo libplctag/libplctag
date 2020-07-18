@@ -228,6 +228,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     case AB_PLC_MLGX800:
         /* we must use connected messaging here. */
+        pdebug(DEBUG_DETAIL, "Micro800 needs connected messaging.");
         tag->use_connected_msg = 1;
 
         /* Micro800 cannot pack requests. */
