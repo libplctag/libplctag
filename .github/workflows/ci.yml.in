@@ -33,7 +33,7 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
 
-    - name: Test
+    - name: Test ControlLogix
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -43,6 +43,15 @@ jobs:
         ${{ env.DIST }}/simple
         echo "test callback use."
         ${{ env.DIST }}/test_callback
+
+    - name: Test MicroLogix
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]'
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
