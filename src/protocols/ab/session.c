@@ -452,17 +452,17 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
         return NULL;
     }
 
+    rc = cip_encode_path(path, use_connected_msg, plc_type, &session->conn_path, &session->conn_path_size, &session->dhp_dest);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Unable to convert path links strings to binary path!");
+        rc_dec(session);
+        return NULL;
+    }
+    
     if(path && str_length(path)) {
         session->path = str_dup(path);
         if(path && str_length(path) && !session->path) {
             pdebug(DEBUG_WARN, "Unable to duplicate path string!");
-            rc_dec(session);
-            return NULL;
-        }
-
-        rc = cip_encode_path(path, use_connected_msg, plc_type, &session->conn_path, &session->conn_path_size, &session->dhp_dest);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_INFO, "Unable to convert path links strings to binary path!");
             rc_dec(session);
             return NULL;
         }
