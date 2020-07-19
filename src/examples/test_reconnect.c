@@ -37,12 +37,13 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,1,10
 
-#define TAG_PATH "protocol=ab-eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray&debug=4"
+//#define TAG_PATH "protocol=ab-eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray&debug=4"
+#define TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:5020&path=0&elem_count=1&name=hr0"
 //#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_size=2&elem_count=1&name=N7:0&debug=4"
 #define ELEM_COUNT 1
-#define ELEM_SIZE 4
+#define ELEM_SIZE 2
 //#define ELEM_SIZE 2
 #define DATA_TIMEOUT 5000
 
@@ -83,21 +84,21 @@ void update_tag(int32_t tag)
 
     /* print out the data */
     for(int i=0; i < ELEM_COUNT; i++) {
-        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
-//        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int16(tag,(i*ELEM_SIZE)));
+        // fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+       fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int16(tag,(i*ELEM_SIZE)));
     }
 
     /* now test a write */
     for(int i=0; i < ELEM_COUNT; i++) {
-        int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-//        int16_t val = plc_tag_get_int16(tag, (i*ELEM_SIZE));
+        // int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+        int16_t val = plc_tag_get_int16(tag, (i*ELEM_SIZE));
 
-        val = val+1;
+        val = (int16_t)((int16_t)val+(int16_t)1);
 
         fprintf(stderr,"Setting element %d to %d\n",i,val);
 
-        plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
-//        plc_tag_set_int16(tag,(i*ELEM_SIZE),val);
+        // plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
+       plc_tag_set_int16(tag,(i*ELEM_SIZE),val);
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
@@ -130,6 +131,8 @@ int main(int argc, char **argv)
         fprintf(stderr,"Usage: test_reconnect <number of seconds to pause>\n");
         return 1;
     }
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* create the tag */
     tag = create_tag();
