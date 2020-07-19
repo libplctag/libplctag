@@ -930,6 +930,11 @@ int read_packet(modbus_plc_p plc)
         plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
     }
 
+    /* if we have some data in the buffer, keep the connection open. */
+    if(plc->read_data_len > 0) {
+        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+    }
+
     pdebug(DEBUG_SPEW, "Done.");
 
     return rc;

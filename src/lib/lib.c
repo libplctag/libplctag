@@ -2775,6 +2775,9 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
         res = FLT_MIN;
     }
 
+    /* copy the data */
+    mem_copy(&res,&ures,sizeof(res));
+
     rc_dec(tag);
 
     return res;
