@@ -2655,8 +2655,8 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
         res = DBL_MIN;
     }
 
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
+    // /* copy the data */
+    // mem_copy(&res,&ures,sizeof(res));
 
     rc_dec(tag);
 
@@ -2774,9 +2774,6 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
     } else {
         res = FLT_MIN;
     }
-
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
 
     rc_dec(tag);
 
