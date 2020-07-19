@@ -167,7 +167,7 @@ static int tag_get_write_flag(modbus_tag_p tag);
 static int tag_set_write_flag(modbus_tag_p tag, int new_val);
 
 static int tag_get_busy_flag(modbus_tag_p tag);
-static int tag_set_busy_flag(modbus_tag_p tag, int new_val);
+// static int tag_set_busy_flag(modbus_tag_p tag, int new_val);
 
 /* tag vtable functions. */
 
@@ -1651,17 +1651,17 @@ int tag_get_busy_flag(modbus_tag_p tag)
     return res;
 }
 
-int tag_set_busy_flag(modbus_tag_p tag, int new_val)
-{
-    int old_val = 0;
+// int tag_set_busy_flag(modbus_tag_p tag, int new_val)
+// {
+//     int old_val = 0;
 
-    spin_block(&tag->tag_lock) {
-        old_val = tag->flags._busy;
-        tag->flags._busy = ((new_val) ? 1 : 0);
-    }
+//     spin_block(&tag->tag_lock) {
+//         old_val = tag->flags._busy;
+//         tag->flags._busy = ((new_val) ? 1 : 0);
+//     }
 
-    return old_val;
-}
+//     return old_val;
+// }
 
 
 
