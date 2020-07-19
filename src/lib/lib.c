@@ -439,6 +439,11 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     pdebug(DEBUG_INFO,"Starting");
 
+    if(timeout < 0) {
+        pdebug(DEBUG_WARN, "Timeout must not be negative!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     if((rc = initialize_modules()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to initialize the internal library state!");
         return rc;
@@ -967,6 +972,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    if(timeout < 0) {
+        pdebug(DEBUG_WARN, "Timeout must not be negative!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
         return PLCTAG_ERR_NOT_FOUND;
@@ -1128,6 +1139,12 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
+
+    if(timeout < 0) {
+        pdebug(DEBUG_WARN, "Timeout must not be negative!");
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
 
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
@@ -2214,7 +2231,8 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
 
 LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 {
-    double res = DBL_MAX;
+    double res = DBL_MIN;
+    int rc = PLCTAG_STATUS_OK;
     uint64_t ures = 0;
     plc_tag_p tag = lookup_tag(id);
 
@@ -2246,9 +2264,18 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
                     ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_5]) << 40) +
                     ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_6]) << 48) +
                     ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_7]) << 56);
+            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
         }
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        /* copy the data */
+        mem_copy(&res,&ures,sizeof(res));
+    } else {
+        res = DBL_MIN;
     }
 
     /* copy the data */
@@ -2314,7 +2341,8 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
 LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 {
-    float res = FLT_MAX;
+    float res = FLT_MIN;
+    int rc = PLCTAG_STATUS_OK;
     uint32_t ures = 0;
     plc_tag_p tag = lookup_tag(id);
 
@@ -2342,9 +2370,18 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
                                ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_1]) << 8 ) +
                                ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_2]) << 16) +
                                ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_3]) << 24));
+            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
         }
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        /* copy the data */
+        mem_copy(&res,&ures,sizeof(res));
+    } else {
+        res = FLT_MIN;
     }
 
     /* copy the data */
