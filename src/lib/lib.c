@@ -2231,7 +2231,8 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
 
 LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 {
-    double res = DBL_MAX;
+    double res = DBL_MIN;
+    int rc = PLCTAG_STATUS_OK;
     uint64_t ures = 0;
     plc_tag_p tag = lookup_tag(id);
 
@@ -2263,13 +2264,19 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
                     ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_5]) << 40) +
                     ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_6]) << 48) +
                     ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_7]) << 56);
+            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
         }
     }
 
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
+    if(rc == PLCTAG_STATUS_OK) {
+        /* copy the data */
+        mem_copy(&res,&ures,sizeof(res));
+    } else {
+        res = DBL_MIN;
+    }
 
     rc_dec(tag);
 
@@ -2331,7 +2338,8 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
 LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 {
-    float res = FLT_MAX;
+    float res = FLT_MIN;
+    int rc = PLCTAG_STATUS_OK;
     uint32_t ures = 0;
     plc_tag_p tag = lookup_tag(id);
 
@@ -2359,13 +2367,19 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
                                ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_1]) << 8 ) +
                                ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_2]) << 16) +
                                ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_3]) << 24));
+            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
         }
     }
 
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
+    if(rc == PLCTAG_STATUS_OK) {
+        /* copy the data */
+        mem_copy(&res,&ures,sizeof(res));
+    } else {
+        res = FLT_MIN;
+    }
 
     rc_dec(tag);
 
