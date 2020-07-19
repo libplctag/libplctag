@@ -51,6 +51,7 @@
 #define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
 #define MAX_MODBUS_PDU_PAYLOAD (253)  /* everything after the server address */
+#define MODBUS_INACTIVITY_TIMEOUT (5000)
 
 struct modbus_plc_t {
     struct modbus_plc_t *next;
@@ -74,6 +75,9 @@ struct modbus_plc_t {
     /* thread related state */
     thread_p handler_thread;
     mutex_p mutex;
+
+    /* comms timeout/disconnect. */
+    int64_t inactivity_timeout_ms;
 
     /* data */
     int read_data_len;
@@ -562,6 +566,9 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
         if(is_new) {
             pdebug(DEBUG_INFO, "Creating new PLC.");
 
+            /* we want to stay connected initially */
+            (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+
             rc = thread_create(&((*plc)->handler_thread), modbus_plc_handler, 32768, (void *)(*plc));
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Unable to create new handler thread, error %s!", plc_tag_decode_error(rc));
@@ -666,7 +673,8 @@ THREAD_FUNC(modbus_plc_handler)
 
         if(err_delay < time_ms()) {
             do {
-                if(! plc->sock) {
+                /* connect if we are still active and the socket is not there. */
+                if(!plc->sock && plc->inactivity_timeout_ms > time_ms()) {
                     /* socket must not be open! */
                     rc = connect_plc(plc);
                     if(rc != PLCTAG_STATUS_OK) {
@@ -695,6 +703,15 @@ THREAD_FUNC(modbus_plc_handler)
                     break;
                 }
 
+                /* check the inactivity timeout. */
+                if(plc->inactivity_timeout_ms <= time_ms() && plc->sock) {
+                    pdebug(DEBUG_DETAIL, "Shutting down socket due to inactivity.");
+                    /* shut down the socket. */
+                    socket_close(plc->sock);
+                    socket_destroy(&plc->sock);
+                    plc->sock = NULL;
+                }
+
                 /* run all the tags. */
 
                 /* 
@@ -719,7 +736,7 @@ THREAD_FUNC(modbus_plc_handler)
                                 if(tag) {
                                     debug_set_tag_id(tag->tag_id);
 
-                                    pdebug(DEBUG_DETAIL, "Processing tag %d.", tag->tag_id);
+                                    pdebug(DEBUG_SPEW, "Processing tag %d.", tag->tag_id);
 
                                     rc = process_tag(tag, plc);
                                     if(rc != PLCTAG_STATUS_OK) {
@@ -833,6 +850,9 @@ int connect_plc(modbus_plc_p plc)
         server_port = NULL;
     }
 
+    /* we just connected, keep the connection open for a few seconds. */
+    plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+
     pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
@@ -846,6 +866,12 @@ int read_packet(modbus_plc_p plc)
     int data_needed = 1;
 
     pdebug(DEBUG_SPEW, "Starting.");
+
+    /* socket could be closed due to inactivity. */
+    if(!plc->sock) {
+        pdebug(DEBUG_SPEW, "Socket is closed or missing.");
+        return PLCTAG_STATUS_OK;
+    }
 
     /* Loop until we stop getting data or we have all the data. */
     while(rc > 0 && data_needed > 0) {
@@ -886,6 +912,11 @@ int read_packet(modbus_plc_p plc)
         rc = PLCTAG_STATUS_OK;
     } 
 
+    /* if we have some data in the buffer, keep the connection open. */
+    if(plc->read_data_len > 0) {
+        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+    }
+            
     pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
@@ -900,11 +931,24 @@ int write_packet(modbus_plc_p plc)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    /* if we have some data in the buffer, keep the connection open. */
+    if(plc->write_data_len > 0) {
+        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+    }
+
+    /* check socket, could be closed due to inactivity. */
+    if(!plc->sock) {
+        pdebug(DEBUG_SPEW, "No socket or socket is closed.");
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* is there anything to do? */
     if(! plc->flags.request_ready) {
         pdebug(DEBUG_SPEW, "Done. Nothing to do.");
         return PLCTAG_STATUS_OK;
     }
 
+    /* try to get some data. */
     while(rc > 0 && data_left > 0) {
         rc = socket_write(plc->sock, plc->write_data + plc->write_data_offset, data_left);
         if(rc >= 0) {
@@ -959,7 +1003,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     /* try to get the mutex on the tag. */
     // if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
@@ -1041,7 +1085,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
 
     /* does this tag need to do anything? */
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
