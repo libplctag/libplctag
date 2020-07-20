@@ -384,8 +384,10 @@ plc_tag_p ab_tag_create(attr attribs)
     case AB_PLC_OMRON_NJNX:
         pdebug(DEBUG_DETAIL, "Setting up OMRON NJ/NX Series tag.");
 
-        if(path || str_length(path)) {
-            pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
+        if(str_length(path) == 0) {
+            pdebug(DEBUG_WARN,"A path is required for this PLC type.");
+            tag->status = PLCTAG_ERR_BAD_PARAM;
+            return (plc_tag_p)tag;
         }
 
         tag->use_connected_msg = 1;
