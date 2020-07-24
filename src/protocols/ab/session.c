@@ -69,7 +69,7 @@
 
 
 
-static ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int *use_connected_msg);
+static ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg);
 static int session_init(ab_session_p session);
 //static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
@@ -214,7 +214,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     const char *session_gw = attr_get_str(attribs, "gateway", "");
     const char *session_path = attr_get_str(attribs, "path", "");
     int use_connected_msg = attr_get_int(attribs, "use_connected_msg", 0);
-    int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
+    //int session_gw_port = attr_get_int(attribs, "gateway_port", AB_EIP_DEFAULT_PORT);
     plc_type_t plc_type = get_plc_type(attribs);
     ab_session_p session = AB_SESSION_NULL;
     int new_session = 0;
@@ -248,7 +248,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
 
         if (session == AB_SESSION_NULL) {
             pdebug(DEBUG_DETAIL, "Creating new session.");
-            session = session_create_unsafe(session_gw, session_gw_port, session_path, plc_type, &use_connected_msg);
+            session = session_create_unsafe(session_gw, session_path, plc_type, &use_connected_msg);
 
             if (session == AB_SESSION_NULL) {
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
@@ -422,7 +422,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
 
 
 
-ab_session_p session_create_unsafe(const char *host, int gw_port, const char *path, plc_type_t plc_type, int *use_connected_msg)
+ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg)
 {
     static volatile uint32_t connection_id = 0;
 
@@ -430,8 +430,6 @@ ab_session_p session_create_unsafe(const char *host, int gw_port, const char *pa
     ab_session_p session = AB_SESSION_NULL;
 
     pdebug(DEBUG_INFO, "Starting");
-
-    pdebug(DEBUG_DETAIL, "Warning: not using passed port %d", gw_port);
 
     if(*use_connected_msg) {
         pdebug(DEBUG_DETAIL, "Session should use connected messaging.");
@@ -580,22 +578,56 @@ int session_init(ab_session_p session)
 int session_open_socket(ab_session_p session)
 {
     int rc = PLCTAG_STATUS_OK;
+    char **server_port = NULL;
+    int port = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     /* Open a socket for communication with the gateway. */
     rc = socket_create(&(session->sock));
 
-    if (rc) {
+    if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create socket for session!");
-        return 0;
+        return rc;
     }
 
-    rc = socket_connect_tcp(session->sock, session->host, AB_EIP_DEFAULT_PORT);
+    server_port = str_split(session->host, ":");
+    if(!server_port) {
+        pdebug(DEBUG_WARN, "Unable to split server and port string!");
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    if(server_port[0] == NULL) {
+        pdebug(DEBUG_WARN, "Server string is malformed or empty!");
+        mem_free(server_port);
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    if(server_port[1] != NULL) {
+        rc = str_to_int(server_port[1], &port);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to extract port number from server string \"%s\"!", session->host);
+            mem_free(server_port);
+            return PLCTAG_ERR_BAD_CONFIG;
+        }
+
+        pdebug(DEBUG_DETAIL, "Using special port %d.", port);
+    } else {
+        port = AB_EIP_DEFAULT_PORT;
+
+        pdebug(DEBUG_DETAIL, "Using default port %d.", port);
+    }
+
+    rc = socket_connect_tcp(session->sock, server_port[0], port);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to connect socket for session!");
+        mem_free(server_port);
         return rc;
+    }
+
+    if(server_port) {
+        mem_free(server_port);
     }
 
     pdebug(DEBUG_INFO, "Done.");
