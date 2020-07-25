@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.1.9"
-      ARTIFACT: "libplctag_2.1.9_ubuntu_x64"
+      VERSION: "2.1.10"
+      ARTIFACT: "libplctag_2.1.10_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -33,7 +33,7 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
 
-    - name: Test
+    - name: Test ControlLogix
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -43,6 +43,19 @@ jobs:
         ${{ env.DIST }}/simple
         echo "test callback use."
         ${{ env.DIST }}/test_callback
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test MicroLogix
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]'
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
@@ -55,8 +68,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.1.9"
-      ARTIFACT: "libplctag_2.1.9_ubuntu_x86"
+      VERSION: "2.1.10"
+      ARTIFACT: "libplctag_2.1.10_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -76,7 +89,7 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
 
-    - name: Test
+    - name: Test ControlLogix
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -86,6 +99,19 @@ jobs:
         ${{ env.DIST }}/simple
         echo "test callback use."
         ${{ env.DIST }}/test_callback
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test MicroLogix
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]'
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
@@ -98,8 +124,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.1.9"
-      ARTIFACT: "libplctag_2.1.9_macos_x64"
+      VERSION: "2.1.10"
+      ARTIFACT: "libplctag_2.1.10_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -129,8 +155,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.1.9"
-      ARTIFACT: "libplctag_2.1.9_windows_x64"
+      VERSION: "2.1.10"
+      ARTIFACT: "libplctag_2.1.10_windows_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -160,8 +186,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.1.9"
-      ARTIFACT: "libplctag_2.1.9_windows_x86"
+      VERSION: "2.1.10"
+      ARTIFACT: "libplctag_2.1.10_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 

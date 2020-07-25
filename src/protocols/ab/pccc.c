@@ -64,85 +64,6 @@ static int encode_file_type(pccc_file_t file_type);
 
 
 
-float pccc_get_float32(plc_tag_p raw_tag, int offset)
-{
-    uint32_t ures = (uint32_t)0;
-    float res = FLT_MAX;
-    ab_tag_p tag = (ab_tag_p)raw_tag;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting float32 value is unsupported on a bit tag!");
-        return res;
-    }
-
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN,"Tag has no data!");
-        return res;
-    }
-
-    /* is there enough data */
-    if((offset < 0) || (offset + ((int)sizeof(ures)) > tag->size)) {
-        pdebug(DEBUG_WARN,"Data offset out of bounds.");
-        return res;
-    }
-
-    ures = ((uint32_t)(tag->data[offset+2])) +
-           ((uint32_t)(tag->data[offset+3]) << 8) +
-           ((uint32_t)(tag->data[offset+0]) << 16) +
-           ((uint32_t)(tag->data[offset+1]) << 24);
-
-    pdebug(DEBUG_DETAIL, "ures=%lu", ures);
-
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
-
-    return res;
-}
-
-
-
-
-int pccc_set_float32(plc_tag_p raw_tag, int offset, float fval)
-{
-    int rc = PLCTAG_STATUS_OK;
-    uint32_t val = 0;
-    ab_tag_p tag = (ab_tag_p)raw_tag;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting float32 value is unsupported on a bit tag!");
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    mem_copy(&val, &fval, sizeof(val));
-
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN,"Tag has no data!");
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    /* is there enough data */
-    if((offset < 0) || (offset + ((int)sizeof(val)) > tag->size)) {
-        pdebug(DEBUG_WARN,"Data offset out of bounds.");
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
-
-    tag->data[offset+2]   = (uint8_t)(val & 0xFF);
-    tag->data[offset+3] = (uint8_t)((val >> 8) & 0xFF);
-    tag->data[offset+0] = (uint8_t)((val >> 16) & 0xFF);
-    tag->data[offset+1] = (uint8_t)((val >> 24) & 0xFF);
-
-    return rc;
-}
-
-
-
-
 
 /*
  * The PLC/5, SLC, and MicroLogix have their own unique way of determining what you are
@@ -160,6 +81,7 @@ int pccc_set_float32(plc_tag_p raw_tag, int offset, float fval)
  * Float       F       32-bit float
  * Input       I       word
  * Output      O       word
+ * Long Int    L       32-bit integer, two words
  * Message     MG      structure/56 words
  * Integer     N       word
  * PID         PD      structure/41 floats
@@ -827,6 +749,12 @@ int parse_pccc_file_type(const char **str, pccc_file_t *file_type)
         (*str)++;
         break;
 
+    case 'L':
+    case 'l':
+        *file_type = PCCC_FILE_LONG_INT;
+        (*str)++;
+        break;
+
     case 'M':
     case 'm': /* Message */
         if((*str)[1] == 'G' || (*str)[1] == 'g') {
@@ -841,7 +769,7 @@ int parse_pccc_file_type(const char **str, pccc_file_t *file_type)
         break;
 
     case 'N':
-    case 'n': /* Input */
+    case 'n': /* INT */
         *file_type = PCCC_FILE_INT;
         (*str)++;
         break;
@@ -1168,10 +1096,11 @@ int encode_file_type(pccc_file_t file_type)
         case PCCC_FILE_BCD: return 0x8f; break;
         case PCCC_FILE_FLOAT: return 0x8a; break;
         case PCCC_FILE_INPUT: return 0x8c; break;
-        case PCCC_FILE_MESSAGE: break;
+        case PCCC_FILE_LONG_INT: return 0x91; break;
+        case PCCC_FILE_MESSAGE: return 0x92; break;
         case PCCC_FILE_INT: return 0x89; break;
         case PCCC_FILE_OUTPUT: return 0x8b; break;
-        case PCCC_FILE_PID: break;
+        case PCCC_FILE_PID: return 0x93; break;
         case PCCC_FILE_CONTROL: return 0x88; break;
         case PCCC_FILE_STATUS: return 0x84; break;
         case PCCC_FILE_SFC: break;

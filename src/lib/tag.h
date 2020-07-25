@@ -32,31 +32,21 @@
  ***************************************************************************/
 
 
-#ifndef __LIBPLCTAG_TAG_H__
-#define __LIBPLCTAG_TAG_H__
-
-
+#pragma once
 
 
 #include <lib/libplctag.h>
 #include <platform.h>
 #include <util/attr.h>
+#include <util/debug.h>
 
-#define PLCTAG_CANARY (0xACA7CAFE)
-#define PLCTAG_DATA_LITTLE_ENDIAN   (0)
-#define PLCTAG_DATA_BIG_ENDIAN      (1)
+// #define PLCTAG_CANARY (0xACA7CAFE)
+// #define PLCTAG_DATA_LITTLE_ENDIAN   (0)
+// #define PLCTAG_DATA_BIG_ENDIAN      (1)
 
-//extern mutex_p global_library_mutex;
 
 typedef struct plc_tag_t *plc_tag_p;
 
-
-/* define tag operation functions */
-//typedef int (*tag_abort_func)(plc_tag_p tag);
-//typedef int (*tag_destroy_func)(plc_tag_p tag);
-//typedef int (*tag_read_func)(plc_tag_p tag);
-//typedef int (*tag_status_func)(plc_tag_p tag);
-//typedef int (*tag_write_func)(plc_tag_p tag);
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
@@ -68,50 +58,52 @@ struct tag_vtable_t {
     tag_vtable_func tickler;
     tag_vtable_func write;
 
-    /* data accessors. */
-//    int (*get_size)(plc_tag_p tag);
+    /* attribute accessors. */
     int (*get_int_attrib)(plc_tag_p tag, const char *attrib_name, int default_value);
     int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
-
-    int (*get_bit)(plc_tag_p tag, int offset_bit);
-    int (*set_bit)(plc_tag_p tag, int offset_bit, int val);
-
-    uint64_t (*get_uint64)(plc_tag_p tag, int offset);
-    int (*set_uint64)(plc_tag_p tag, int offset, uint64_t val);
-
-    int64_t (*get_int64)(plc_tag_p tag, int offset);
-    int (*set_int64)(plc_tag_p tag, int offset, int64_t val);
-
-
-    uint32_t (*get_uint32)(plc_tag_p tag, int offset);
-    int (*set_uint32)(plc_tag_p tag, int offset, uint32_t val);
-
-    int32_t (*get_int32)(plc_tag_p tag, int offset);
-    int (*set_int32)(plc_tag_p tag, int offset, int32_t val);
-
-
-    uint16_t (*get_uint16)(plc_tag_p tag, int offset);
-    int (*set_uint16)(plc_tag_p tag, int offset, uint16_t val);
-
-    int16_t (*get_int16)(plc_tag_p tag, int offset);
-    int (*set_int16)(plc_tag_p tag, int offset, int16_t val);
-
-
-    uint8_t (*get_uint8)(plc_tag_p tag, int offset);
-    int (*set_uint8)(plc_tag_p tag, int offset, uint8_t val);
-
-    int8_t (*get_int8)(plc_tag_p tag, int offset);
-    int (*set_int8)(plc_tag_p tag, int offset, int8_t val);
-
-
-    double (*get_float64)(plc_tag_p tag, int offset);
-    int (*set_float64)(plc_tag_p tag, int offset, double val);
-
-    float (*get_float32)(plc_tag_p tag, int offset);
-    int (*set_float32)(plc_tag_p tag, int offset, float val);
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;
+
+
+/* byte ordering */
+
+struct tag_byte_order_s {
+    unsigned int int16_order_0:1;
+    unsigned int int16_order_1:1;
+
+    unsigned int int32_order_0:2;
+    unsigned int int32_order_1:2;
+    unsigned int int32_order_2:2;
+    unsigned int int32_order_3:2;
+
+    unsigned int float32_order_0:2;
+    unsigned int float32_order_1:2;
+    unsigned int float32_order_2:2;
+    unsigned int float32_order_3:2;
+
+    unsigned int int64_order_0:3;
+    unsigned int int64_order_1:3;
+    unsigned int int64_order_2:3;
+    unsigned int int64_order_3:3;
+    unsigned int int64_order_4:3;
+    unsigned int int64_order_5:3;
+    unsigned int int64_order_6:3;
+    unsigned int int64_order_7:3;
+
+    unsigned int float64_order_0:3;
+    unsigned int float64_order_1:3;
+    unsigned int float64_order_2:3;
+    unsigned int float64_order_3:3;
+    unsigned int float64_order_4:3;
+    unsigned int float64_order_5:3;
+    unsigned int float64_order_6:3;
+    unsigned int float64_order_7:3;
+};
+
+typedef struct tag_byte_order_s tag_byte_order_t;
+
+
 
 
 /*
@@ -122,22 +114,22 @@ typedef struct tag_vtable_t *tag_vtable_p;
  */
 
 #define TAG_BASE_STRUCT tag_vtable_p vtable; \
-                        mutex_p ext_mutex; \
-                        mutex_p api_mutex; \
                         int status; \
-                        int endian; \
-                        int tag_id; \
-                        int64_t read_cache_expire; \
-                        int64_t read_cache_ms; \
+                        int size; \
+                        uint8_t is_bit:1; \
+                        uint8_t bit; \
                         int read_complete; \
                         int write_complete; \
+                        int32_t tag_id; \
+                        mutex_p ext_mutex; \
+                        mutex_p api_mutex; \
+                        tag_byte_order_t byte_order; \
                         void (*callback)(int32_t tag_id, int event, int status); \
-                        int size; \
-                        uint8_t *data
+                        uint8_t *data; \
+                        int64_t read_cache_expire; \
+                        int64_t read_cache_ms
 
-struct plc_tag_dummy {
-    int tag_id;
-};
+
 
 struct plc_tag_t {
     TAG_BASE_STRUCT;
@@ -153,6 +145,3 @@ extern int plc_tag_abort_mapped(plc_tag_p tag);
 extern int plc_tag_destroy_mapped(plc_tag_p tag);
 extern int plc_tag_status_mapped(plc_tag_p tag);
 
-
-
-#endif
