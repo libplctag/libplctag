@@ -31,91 +31,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PLCTAG_AB_TAG_H__
-#define __PLCTAG_AB_TAG_H__ 1
+#pragma once
 
-/* do these first */
-#define MAX_TAG_NAME        (260)
-#define MAX_TAG_TYPE_INFO   (64)
-#define MAX_CONN_PATH       (260)   /* 256 plus padding. */
-
-/* they are used in some of these includes */
 #include <lib/libplctag.h>
 #include <lib/tag.h>
-#include <ab/ab_common.h>
-#include <ab/session.h>
-#include <ab/pccc.h>
+#include <util/attr.h>
 
-typedef enum {
-    AB_TYPE_BOOL,
-    AB_TYPE_BOOL_ARRAY,
-    AB_TYPE_CONTROL,
-    AB_TYPE_COUNTER,
-    AB_TYPE_FLOAT32,
-    AB_TYPE_FLOAT64,
-    AB_TYPE_INT8,
-    AB_TYPE_INT16,
-    AB_TYPE_INT32,
-    AB_TYPE_INT64,
-    AB_TYPE_STRING,
-    AB_TYPE_SHORT_STRING,
-    AB_TYPE_TIMER,
-    AB_TYPE_TAG_ENTRY /* not a real AB type, but a pseudo UDT. */
-} elem_type_t;
+/* these are definitions used outside of the Modbus module. */
 
-
-struct ab_tag_t {
-    /*struct plc_tag_t p_tag;*/
-    TAG_BASE_STRUCT;
-
-    /* how do we talk to this device? */
-    plc_type_t plc_type;
-
-    /* pointers back to session */
-    ab_session_p session;
-    int use_connected_msg;
-
-    /* this contains the encoded name */
-    uint8_t encoded_name[MAX_TAG_NAME];
-    int encoded_name_size;
-
-//    const char *read_group;
-
-    /* storage for the encoded type. */
-    uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
-    int encoded_type_info_size;
-
-    /* how much data can we send per packet? */
-    int write_data_per_packet;
-
-    /* number of elements and size of each in the tag. */
-    pccc_file_t file_type;
-    elem_type_t elem_type;
-
-    int elem_count;
-    int elem_size;
-
-    int tag_list;
-    uint32_t next_id;
-
-    //int is_bit;
-    //uint8_t bit;
-
-    /* requests */
-    int pre_write_read;
-    int first_read;
-    ab_request_p req;
-    int offset;
-
-    int allow_packing;
-
-    /* flags for operations */
-    int read_in_progress;
-    int write_in_progress;
-    /*int connect_in_progress;*/
-};
-
-
-
-
-#endif
+extern void mb_teardown(void);
+extern int mb_init();
+extern plc_tag_p mb_tag_create(attr attribs);

@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <signal.h>
 #include <stdbool.h>
 #include "slice.h"
 
@@ -47,6 +48,6 @@ typedef enum {
 typedef struct tcp_server *tcp_server_p;
 
 extern tcp_server_p tcp_server_create(const char *host, const char *port, slice_s buffer, slice_s (*handler)(slice_s input, slice_s output, void *context), void *context);
-extern void tcp_server_start(tcp_server_p server);
+extern void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate);
 extern void tcp_server_destroy(tcp_server_p server);
 

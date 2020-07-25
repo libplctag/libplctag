@@ -228,7 +228,7 @@ In Windows Start menu, click on MinGW-W64\Run Terminal;
 This will add the MinGW directory to the system PATH and open the Windows command terminal.
 Enter command lines:
 
-```
+```text
 C: <Enter>
 cd libplctag-master\Build <Enter>
 cmake -G "MinGW Makefiles" .. <Enter>
@@ -240,7 +240,6 @@ Binairies are in folder: `C:\libplctag-master\Build\bin_dist`
 Executable needs following files `libgcc_s_dw2-1.dll` and `libwinpthread-1.dll` which are found in `C:\Program Files\mingw-w64\i686-8.1.0-posix-dwarf-rt_v6-rev0\mingw32\bin`.
 
 Hope this could help someone else.
-
 
 # Instructions for macOS
 

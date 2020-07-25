@@ -33,7 +33,7 @@
 # the project is version 2.1
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 9)
+set (libplctag_VERSION_PATCH 10)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -75,6 +75,7 @@ set ( base_SRC_PATH "${PROJECT_SOURCE_DIR}/src" )
 set ( lib_SRC_PATH "${base_SRC_PATH}/lib" )
 set ( protocol_SRC_PATH "${base_SRC_PATH}/protocols" )
 set ( ab_SRC_PATH "${protocol_SRC_PATH}/ab" )
+set ( mb_SRC_PATH "${protocol_SRC_PATH}/mb" )
 set ( util_SRC_PATH "${base_SRC_PATH}/util" )
 set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
@@ -244,6 +245,8 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${ab_SRC_PATH}/session.c"
                      "${ab_SRC_PATH}/session.h"
                      "${ab_SRC_PATH}/tag.h"
+                     "${mb_SRC_PATH}/modbus.c"
+                     "${mb_SRC_PATH}/modbus.h"
                      "${protocol_SRC_PATH}/system/system.c"
                      "${protocol_SRC_PATH}/system/system.h"
                      "${protocol_SRC_PATH}/system/tag.h"

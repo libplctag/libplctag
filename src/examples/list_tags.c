@@ -275,7 +275,7 @@ int main(int argc, char **argv)
     }
 
     /* loop over the tags and output their connection strings. */
-    for(struct tag_entry_s *old_tag, *tag = tags; tag; old_tag = tag, tag = tag->next, free(old_tag->name), free(old_tag)) {
+    for(struct tag_entry_s *old_tag = NULL, *tag = tags; tag; old_tag = tag, tag = tag->next, free(old_tag->name), free(old_tag)) {
         printf("Tag \"%s", tag->name);
         switch(tag->num_dimensions) {
             case 1:

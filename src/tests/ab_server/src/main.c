@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -51,12 +52,36 @@ static void parse_path(const char *path, plc_s *plc);
 static void parse_tag(const char *tag, plc_s *plc);
 static slice_s request_handler(slice_s input, slice_s output, void *plc);
 
+
+volatile sig_atomic_t done = 0;
+
+void SIGINT_handler(int not_used)
+{
+    (void)not_used;
+
+    done = 1;
+}
+
+void setup_break_handler(void)
+{
+    struct sigaction act;
+
+    /* set up signal handler. */
+    memset(&act, 0, sizeof(act));
+    act.sa_handler = SIGINT_handler;
+    sigaction(SIGINT, &act, NULL);
+}
+
+
 int main(int argc, const char **argv)
 {
     tcp_server_p server = NULL;
     uint8_t buf[4200];  /* CIP only allows 4002 for the CIP request, but there is overhead. */
     slice_s server_buf = slice_make(buf, sizeof(buf));
     plc_s plc;
+
+    /* set up handler for ^C etc. */
+    setup_break_handler();
 
     debug_off();
 
@@ -71,7 +96,7 @@ int main(int argc, const char **argv)
     /* open a server connection and listen on the right port. */
     server = tcp_server_create("0.0.0.0", "44818", server_buf, request_handler, &plc);
 
-    tcp_server_start(server);
+    tcp_server_start(server, &done);
 
     tcp_server_destroy(server);
 

@@ -65,7 +65,7 @@ tcp_server_p tcp_server_create(const char *host, const char *port, slice_s buffe
     return server;
 }
 
-void tcp_server_start(tcp_server_p server)
+void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate)
 {
     int client_fd;
     bool done = false;
@@ -141,7 +141,7 @@ void tcp_server_start(tcp_server_p server)
 
         socket_close(client_fd);
 
-    } while(!done);
+    } while(!done && !*terminate);
 }
 
 

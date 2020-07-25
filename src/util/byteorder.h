@@ -152,3 +152,27 @@ inline static uint64_t le2h64(uint64_le src)
     return result;
 }
 
+
+
+/* as seen on comp.arch by David Brown
+
+uint32_t read32be(const uint8_t * buf) {
+    uint32_t res = 0;
+    res = (res << 8) | *buf++;
+    res = (res << 8) | *buf++;
+    res = (res << 8) | *buf++;
+    res = (res << 8) | *buf++;
+    return res;
+}
+
+
+uint32_t read32le(const uint8_t * p) {
+    uint32_t x = 0;
+    x = (x >> 8) | ((uint32_t) *p++ << 24);
+    x = (x >> 8) | ((uint32_t) *p++ << 24);
+    x = (x >> 8) | ((uint32_t) *p++ << 24);
+    x = (x >> 8) | ((uint32_t) *p++ << 24);
+    return x;
+}
+
+*/

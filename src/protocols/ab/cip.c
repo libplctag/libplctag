@@ -345,10 +345,10 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
 
     pdebug(DEBUG_DETAIL, "Starting");
 
-    if(!path || str_length(path) == (size_t)0) {
-        pdebug(DEBUG_DETAIL, "Path is NULL or empty.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
+    // if(!path || str_length(path) == (size_t)0) {
+    //     pdebug(DEBUG_DETAIL, "Path is NULL or empty.");
+    //     return PLCTAG_ERR_NULL_PTR;
+    // }
 
     path_len = (size_t)(ssize_t)str_length(path);
 
@@ -400,6 +400,8 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
         *dhp_dest = (uint16_t)dhp_dest_node;
     } else if(!is_dhp) {
         if(*needs_connection) {
+            pdebug(DEBUG_DETAIL, "PLC needs connection, adding path to the router object.");
+
             /*
              * we do a generic path to the router
              * object in the PLC.  But only if the PLC is
