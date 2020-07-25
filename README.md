@@ -54,8 +54,12 @@ Be careful!
 
 - Open source licensing under the MPL 2.0 or LGPL 2+.
 - Pure C library for portability across Linux, Windows and macOS as well as 32-bit and 64-bit.
+- Support for x86, ARM and MIPS, and probably others.
 - Very stable API with almost no changes other than feature additions since 2012.
-- Read and write tags of various types across AB/Rockwell PLCs such as ControlLogix, CompactLogix, Micro800, PLC/5, SLC 500, MicroLogix etc.
+- Read and write tags of various types in the following PLCs:
+  - AB/Rockwell ControlLogix, CompactLogix, Micro800, PLC/5, SLC 500, MicroLogix etc.
+  - Omron NX/NJ PLCs.
+  - PLCs support Modbus TCP (must support commands 1, 2, 3, 4, 15 and 16).
 - Low memory use and very high performance and capacity.  Uses protocol-specific features to increase performance.
 - Simple API with minimal use of language-specific data to enable easy wrapping in other languages.
 - Extensive example programs showing use of all library features.
@@ -93,6 +97,8 @@ Be careful!
   - logging data from multiple tags.
   - reading and writing tags from the command line.
   - getting and setting individual bits as tags.
+- Support for Omron NX/NJ series PLCs as for Allen-Bradley Micro800.
+- Support for Modbus TCP.
 
 #### Platform Support
 
@@ -112,31 +118,29 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
 - Python (included)
 - Go (included)
 - Pascal (included)
-- .Net/C#
-  - Coming soon, our own C# wrapper, [libplctag.NET](https://github.com/libplctag/libplctag.NET) based on timyhac's version below!
-  - [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet) supports .Net Core and is on Nuget!
-  - [Mesta Automation](https://github.com/mesta1/libplctag-csharp).   Very popular with a nice introductory video.
-  - [possibly experimental by timyhac, libplctag.Net](https://github.com/timyhac/libplctag.NET).   A relatively thin wrapper but loads the correct binary DLL at runtime.
-- Labview (see [here](https://github.com/dirtyb15/libplctag-labview))
-- Julia wrappers via the [PLCTag.jl](https://github.com/libplctag/PLCTag.jl) project!
+- Part of the libplctag GitHub organization:
+  - C#, [libplctag.NET](https://github.com/libplctag/libplctag.NET).
+  - Julia, [PLCTag.jl](https://github.com/libplctag/PLCTag.jl).
+- Other wrappers on GitHub:
+  - C#, [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet).
+  - C#, [Mesta Automation](https://github.com/mesta1/libplctag-csharp).
+  - Labview, (see [libplctag-labview](https://github.com/dirtyb15/libplctag-labview))
 
 ## Code
 
 ### How to Get The Code
 
-The code for the core library is at [libplctag](https://github.com/libplctag/libplctag).   Stable code is on the default _release_ branch.   If you check out
-code from GitHub, it will default to the _release_ branch.
+The code for the core library is at [libplctag](https://github.com/libplctag/libplctag).   Stable code is on the default _release_ branch.   If you check out code from GitHub, it will default to the _release_ branch.
 
 If you want pre-built binaries, we have them available on the [releases](https://github.com/libplctag/libplctag/releases) page.   Just pick the one you want and download the ZIP file for your system.   We have 32 and 64-bit builds for x86 Linux and Windows and 64-bit builds for x86-64 macOS.
 
-Go to the main project at the [libplctag organization](https://github.com/libplctag) to see the other wrappers.   We are in a state of transition right now
-as we move more alternate language wrappers into the GitHub organization.
+Go to the main project at the [libplctag organization](https://github.com/libplctag) to see the other wrappers.   We are in a state of transition right now as we move more alternate language wrappers into the GitHub organization.
 
 ### Example Code
 
-Oh, wait, you want code!   There are many examples in the [examples](https://github.com/libplctag/libplctag/tree/master/src/examples) directory.
+Oh, wait, you want code!   There are many examples in the [examples](https://github.com/libplctag/libplctag/tree/release/src/examples) directory.
 
-A good place to start is [simple.c](https://github.com/libplctag/libplctag/blob/master/src/examples/simple.c).
+A good place to start is [simple.c](https://github.com/libplctag/libplctag/blob/release/src/examples/simple.c).
 
 This code reads several 32-bit signed integers (DINT), updates them,
 then writes them back out and rereads them from a tag named TestBigArray
@@ -159,13 +163,14 @@ We need and welcome help with the following:
 - bug fixes.
 - other protocols like Modbus, SBus etc.
 - other platforms like Android, iOS etc.
+- changes and additions for other PLCs.
 - additional compilers.
 - more language wrappers!
 - Testing and more testing!
 
 ### How to Contribute
 
-We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   We ask that your code contributions to the core library are under the same dual MPL/LGPL license.
+We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   **We ask that your code contributions to the core library are under the same dual MPL/LGPL license.**
 
 Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch and can also be downloaded from the [releases](https://githubm.com/libplctag/libplctag/releases) page!  We appreciate all the help we get from our users this way.
 
@@ -196,7 +201,7 @@ If needed, we will initiate private communication from there.
 
 See the license files (LICENSE.MPL or LICENSE.LGPL) for our legal disclaimers of responsibility, fitness or
 merchantability of this library as well as your rights with regards
-to use of this library.  This code is dual licensed under the Mozilla Public License 2.0 (MPL 2.0) or the GNU
+to use of this library.  This code is **dual licensed** under the Mozilla Public License 2.0 (MPL 2.0) or the GNU
 Lesser/Library General Public License 2 or later (LGPL 2+).
 
 This dual license applies to the core C library.  Additional wrappers for other languages may be under different licenses.   Please see those projects for more information.
