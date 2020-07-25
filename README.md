@@ -39,9 +39,7 @@ Old Stable Version: 1.5
 
 ## WARNING - DISCLAIMER
 
-Note: *PLCs control many kinds of equipment and loss of property, production
-or even life can happen if mistakes in programming or access are
-made.  Always use caution when accessing or programming PLCs!*
+Note: **PLCs control many kinds of equipment and loss of property, production or even life can happen if mistakes in programming or access are made.  Always use caution when accessing or programming PLCs!**
 
 We make no claims or warrants about the suitability of this code for
 any purpose.
