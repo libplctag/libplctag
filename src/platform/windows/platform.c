@@ -957,7 +957,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         if ((rc = getaddrinfo(host, NULL, &hints, &res_head)) != 0) {
             pdebug(DEBUG_WARN, "Error looking up PLC IP address %s, error = %d\n", host, rc);
 
-            if (res) {
+            if (res_head) {
                 freeaddrinfo(res_head);
             }
 
