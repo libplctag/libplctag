@@ -333,7 +333,7 @@ plc_tag_p ab_tag_create(attr attribs)
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
-        tag->vtable = &eip_cip_vtable;
+        tag->vtable = &eip_cip_frag_vtable;
 
         break;
 
@@ -342,6 +342,20 @@ plc_tag_p ab_tag_create(attr attribs)
 
         if(path || str_length(path)) {
             pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
+        }
+
+        tag->use_connected_msg = 1;
+        tag->allow_packing = 0;
+        tag->vtable = &eip_cip_frag_vtable;
+        break;
+
+    case AB_PLC_OMRON_NJNX:
+        pdebug(DEBUG_DETAIL, "Setting up OMRON NJ/NX Series tag.");
+
+        if(str_length(path) == 0) {
+            pdebug(DEBUG_WARN,"A path is required for this PLC type.");
+            tag->status = PLCTAG_ERR_BAD_PARAM;
+            return (plc_tag_p)tag;
         }
 
         tag->use_connected_msg = 1;

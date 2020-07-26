@@ -128,11 +128,11 @@ START_PACK typedef struct {
 
 
 
-static int build_read_request_connected(ab_tag_p tag, int byte_offset);
+static int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset);
 static int build_tag_list_request_connected(ab_tag_p tag);
-static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
-static int build_write_request_connected(ab_tag_p tag, int byte_offset);
-static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
+static int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset);
+static int build_write_request_connected(ab_tag_p tag, int frag, int byte_offset);
+static int build_write_request_unconnected(ab_tag_p tag, int frag, int byte_offset);
 static int build_write_bit_request_connected(ab_tag_p tag);
 static int build_write_bit_request_unconnected(ab_tag_p tag);
 static int check_read_status_connected(ab_tag_p tag);
@@ -142,9 +142,13 @@ static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
 
+static int tag_read_common_start(ab_tag_p tag, int frag);
 static int tag_read_start(ab_tag_p tag);
+static int tag_read_frag_start(ab_tag_p tag);
 static int tag_tickler(ab_tag_p tag);
+static int tag_write_common_start(ab_tag_p tag, int frag);
 static int tag_write_start(ab_tag_p tag);
+static int tag_write_frag_start(ab_tag_p tag);
 
 /* define the exported vtable for this tag type. */
 struct tag_vtable_t eip_cip_vtable = {
@@ -155,6 +159,18 @@ struct tag_vtable_t eip_cip_vtable = {
     (tag_vtable_func)tag_write_start,
 
     /* attribute accessors */
+    ab_get_int_attrib,
+    ab_set_int_attrib
+};
+
+struct tag_vtable_t eip_cip_frag_vtable = {
+    (tag_vtable_func)ab_tag_abort, /* shared */
+    (tag_vtable_func)tag_read_frag_start,
+    (tag_vtable_func)ab_tag_status, /* shared */
+    (tag_vtable_func)tag_tickler,
+    (tag_vtable_func)tag_write_frag_start,
+
+    /* data accessors */
     ab_get_int_attrib,
     ab_set_int_attrib
 };
@@ -232,7 +248,7 @@ int tag_tickler(ab_tag_p tag)
  * The function starts the process of getting tag data from the PLC.
  */
 
-int tag_read_start(ab_tag_p tag)
+int tag_read_common_start(ab_tag_p tag, int frag)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -251,10 +267,10 @@ int tag_read_start(ab_tag_p tag)
         if(tag->tag_list) {
             rc = build_tag_list_request_connected(tag);
         } else {
-            rc = build_read_request_connected(tag, tag->offset);
+            rc = build_read_request_connected(tag, frag, tag->offset);
         }
     } else {
-        rc = build_read_request_unconnected(tag, tag->offset);
+        rc = build_read_request_unconnected(tag, frag, tag->offset);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -270,6 +286,15 @@ int tag_read_start(ab_tag_p tag)
     return PLCTAG_STATUS_PENDING;
 }
 
+int tag_read_start(ab_tag_p tag)
+{
+    return tag_read_common_start(tag, 0);
+}
+
+int tag_read_frag_start(ab_tag_p tag)
+{
+    return tag_read_common_start(tag, 1);
+}
 
 
 
@@ -282,7 +307,7 @@ int tag_read_start(ab_tag_p tag)
  * The routine starts the process of writing to a tag.
  */
 
-int tag_write_start(ab_tag_p tag)
+int tag_write_common_start(ab_tag_p tag, int frag)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -327,9 +352,9 @@ int tag_write_start(ab_tag_p tag)
     }
 
     if(tag->use_connected_msg) {
-        rc = build_write_request_connected(tag, tag->offset);
+        rc = build_write_request_connected(tag, frag, tag->offset);
     } else {
-        rc = build_write_request_unconnected(tag, tag->offset);
+        rc = build_write_request_unconnected(tag, frag, tag->offset);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -344,6 +369,15 @@ int tag_write_start(ab_tag_p tag)
     return PLCTAG_STATUS_PENDING;
 }
 
+static int tag_write_start(ab_tag_p tag)
+{
+    return tag_write_common_start(tag, 0);
+}
+
+static int tag_write_frag_start(ab_tag_p tag)
+{
+    return tag_write_common_start(tag, 1);
+}
 
 
 int build_read_request_connected(ab_tag_p tag, int byte_offset)
@@ -581,7 +615,7 @@ int build_tag_list_request_connected(ab_tag_p tag)
 
 
 
-int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
+int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
 {
     eip_cip_uc_req* cip;
     uint8_t* data;
@@ -1059,7 +1093,7 @@ int build_write_bit_request_unconnected(ab_tag_p tag)
 
 
 
-int build_write_request_connected(ab_tag_p tag, int byte_offset)
+int build_write_request_connected(ab_tag_p tag, int frag, int byte_offset)
 {
     int rc = PLCTAG_STATUS_OK;
     eip_cip_co_req* cip = NULL;
@@ -1087,7 +1121,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
         return rc;
     }
 
-    if(tag->write_data_per_packet < tag->size) {
+    if(!frag && tag->write_data_per_packet < tag->size) {
         multiple_requests = 1;
     }
 
@@ -1204,7 +1238,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset)
 
 
 
-int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
+int build_write_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
 {
     int rc = PLCTAG_STATUS_OK;
     eip_cip_uc_req* cip = NULL;
@@ -1234,7 +1268,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
         return rc;
     }
 
-    if(tag->write_data_per_packet < tag->size) {
+    if(!frag && tag->write_data_per_packet < tag->size) {
         multiple_requests = 1;
     }
 
