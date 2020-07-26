@@ -28,14 +28,11 @@
 
 ![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=release)
 
-This open source (dual MPL 2.0 and LGPL 2+ licensing) C library for Linux, Windows and macOS provides a means of accessing PLCs to read and write
-simple data.  The library has been in production use since early 2012 and is in use by multiple organizations for many tasks
-including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling
-and many, many more.
+This open source C library for Linux, Windows and macOS uses **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
 
 Current Stable Version: 2.1
 
-Old Stable Version: 1.5
+Old Stable Version: 2.0
 
 ## WARNING - DISCLAIMER
 
@@ -50,27 +47,24 @@ Be careful!
 
 ### High Level Features
 
+- EtherNet/IP and Modbus TCP support.
 - Open source licensing under the MPL 2.0 or LGPL 2+.
 - Pure C library for portability across Linux, Windows and macOS as well as 32-bit and 64-bit.
 - Support for x86, ARM and MIPS, and probably others.
 - Very stable API with almost no changes other than feature additions since 2012.
-- Read and write tags of various types in the following PLCs:
-  - AB/Rockwell ControlLogix, CompactLogix, Micro800, PLC/5, SLC 500, MicroLogix etc.
-  - Omron NX/NJ PLCs.
-  - PLCs support Modbus TCP (must support commands 1, 2, 3, 4, 15 and 16).
 - Low memory use and very high performance and capacity.  Uses protocol-specific features to increase performance.
 - Simple API with minimal use of language-specific data to enable easy wrapping in other languages.
 - Extensive example programs showing use of all library features.
-- Included wrappers for many other languages.
+- Wrappers for higher level languages like C#/.Net, Julia etc.
 - Free!
 
 ### Detailed Features
 
 #### PLC Support
 
-- support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP).   Firmware versions 16, 20 and 31.
+- support for Rockwell/Allen-Bradley ControlLogix(tm) PLCs via CIP-EtherNet/IP (CIP/EIP or EIP).
   - read/write 8, 16, 32, and 64-bit signed and unsigned integers.
-  - read/write single bits/booleans under some circumstances (BOOL arrays are still tricky).
+  - read/write single bits/booleans.
   - read/write 32-bit and 64-bit IEEE format (little endian) floating point.
   - raw support for user-defined structures (you need to pull out the data piece by piece)
   - read/write arrays of the above.
@@ -83,8 +77,6 @@ Be careful!
   - read/write of 16-bit INT.
   - read/write of 32-bit floating point.
   - read/write of arrays of the above (arrays not tested on SLC 500).
-- support for Rockwell/Allen-Bradley MicroLogix 1100 and 1400 series (not CIP-based)
-  - use as per PLC5/SLC above.
 - support for older Rockwell/Allen-Bradley PLCs accessed over a DH+ bridge (i.e. a LGX chassis with a DHRIO module) such as PLC/5, SLC 500 and MicroLogix.
   - read/write of 16-bit INT.
   - read/write of 32-bit floating point.
