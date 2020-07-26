@@ -961,6 +961,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
                 freeaddrinfo(res_head);
             }
 
+            closesocket(fd);
             return PLCTAG_ERR_BAD_GATEWAY;
         }
 
