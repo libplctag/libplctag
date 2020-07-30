@@ -378,10 +378,26 @@ plc_tag_p ab_tag_create(attr attribs)
     /* get the element count, default to 1 if missing. */
     tag->elem_count = attr_get_int(attribs,"elem_count", 1);
 
-    /* we still need size on non Logix-class PLCs */
-    if(tag->plc_type != AB_PLC_LGX
-            && tag->plc_type != AB_PLC_MLGX800
-            && tag->plc_type != AB_PLC_OMRON_NJNX) {
+
+    switch(tag->plc_type) {
+    case AB_PLC_OMRON_NJNX:
+        if (tag->elem_count != 1) {
+            tag->elem_count = 1;
+            pdebug(DEBUG_WARN,"Attribute elem_count should be 1!");
+        }
+
+        /* from here is the same as a AB_PLC_MLGX800. */
+
+    case AB_PLC_LGX:
+    case AB_PLC_MLGX800:
+        /* fill this in when we read the tag. */
+        tag->elem_size = 0;
+        tag->size = 0;
+        tag->data = NULL;
+        break;
+
+    default:
+        /* we still need size on non Logix-class PLCs */
         /* get the element size if it is not already set. */
         if(!tag->elem_size) {
             tag->elem_size = attr_get_int(attribs, "elem_size", 0);
