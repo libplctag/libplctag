@@ -65,13 +65,14 @@ typedef struct tag_def_s tag_def_s;
 
 typedef enum {
     PLC_CONTROL_LOGIX,
-    PLC_MICRO800
+    PLC_MICRO800,
+    PLC_OMRON
 } plc_type_t;
 
 /* Define the context that is passed around. */
 typedef struct {
     plc_type_t plc_type;
-    uint8_t path[16];
+    uint8_t path[20];
     uint8_t path_len;
 
     /* connection info. */
