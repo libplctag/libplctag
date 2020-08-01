@@ -340,7 +340,6 @@ void parse_tag(const char *tag_str, plc_s *plc)
     int num_dims = 0;
     size_t start = 0;
     size_t len = 0;
-    int rc = 0;
 
     if(!tag) {
         error("Unable to allocate memory for new tag!");
@@ -356,7 +355,7 @@ void parse_tag(const char *tag_str, plc_s *plc)
         usage();
     } else {
         /* copy the string. */
-        for (int i = 0; i < len && i < 200; i++) {
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
             tag_name[i] = tag_str[start + i];
         }
 
@@ -377,7 +376,7 @@ void parse_tag(const char *tag_str, plc_s *plc)
         usage();
     } else {
         /* copy the string. */
-        for (int i = 0; i < len && i < 200; i++) {
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
             type_str[i] = tag_str[start + i];
         }
 
@@ -398,7 +397,7 @@ void parse_tag(const char *tag_str, plc_s *plc)
         usage();
     } else {
         /* copy the string. */
-        for (int i = 0; i < len && i < 200; i++) {
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
             dim_str[i] = tag_str[start + i];
         }
 
