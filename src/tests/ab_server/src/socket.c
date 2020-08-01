@@ -256,7 +256,11 @@ int socket_accept(int sock)
 
 slice_s socket_read(int sock, slice_s in_buf)
 {
-    int rc = (int)recv(sock, (char *)in_buf.data, (sock_io_len_t)(unsigned int)(int)in_buf.len, 0);
+#ifdef IS_WINDOWS
+    int rc = (int)recv(sock, (char *)in_buf.data, (int)in_buf.len, 0);
+#else
+    int rc = (int)recv(sock, (char *)in_buf.data, (size_t)in_buf.len, 0);
+#endif 
 
     if(rc < 0) {
 #ifdef IS_WINDOWS
@@ -288,7 +292,11 @@ int socket_write(int sock, slice_s out_buf)
     slice_dump(out_buf);
 
     do {
-        rc = (int)send(sock, (char *)tmp_out_buf.data, (sock_io_len_t)(unsigned int)(int)tmp_out_buf.len, 0);
+#ifdef IS_WINDOWS
+        rc = (int)send(sock, (char *)tmp_out_buf.data, (int)tmp_out_buf.len, 0);
+#else
+        rc = (int)send(sock, (char *)tmp_out_buf.data, (size_t)tmp_out_buf.len, 0);
+#endif
 
         /* was there an error? */
         if(rc < 0) {
