@@ -139,7 +139,7 @@ int socket_open(const char *host, const char *port)
     if(strcmp(host,"0.0.0.0") == 0) {
         info("socket_open() setting up server socket.   Binding to address 0.0.0.0.");
 
-        rc = bind(sock, addr_info->ai_addr, (sock_io_len_t)addr_info->ai_addrlen);
+        rc = bind(sock, addr_info->ai_addr, (socklen_t)(unsigned int)addr_info->ai_addrlen);
         if (rc < 0)	{
             printf("ERROR: Unable to bind() socket: %s\n", gai_strerror(rc));
             return SOCKET_ERR_BIND;
@@ -227,7 +227,6 @@ int socket_accept(int sock)
     fd_set accept_fd_set;
     TIMEVAL timeout; 
     int num_accept_ready = 0;
-    int res = 0;
 
     /* set the timeout to zero */
     timeout.tv_sec = 0;
@@ -257,7 +256,7 @@ int socket_accept(int sock)
 
 slice_s socket_read(int sock, slice_s in_buf)
 {
-    int rc = (int)recv(sock, (char *)in_buf.data, (sock_io_len_t)in_buf.len, 0);
+    int rc = (int)recv(sock, (char *)in_buf.data, (sock_io_len_t)(unsigned int)(int)in_buf.len, 0);
 
     if(rc < 0) {
 #ifdef IS_WINDOWS
@@ -289,7 +288,7 @@ int socket_write(int sock, slice_s out_buf)
     slice_dump(out_buf);
 
     do {
-        rc = (int)send(sock, (char *)tmp_out_buf.data, (sock_io_len_t)tmp_out_buf.len, 0);
+        rc = (int)send(sock, (char *)tmp_out_buf.data, (sock_io_len_t)(unsigned int)(int)tmp_out_buf.len, 0);
 
         /* was there an error? */
         if(rc < 0) {
