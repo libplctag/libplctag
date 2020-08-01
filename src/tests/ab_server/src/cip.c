@@ -394,7 +394,7 @@ slice_s handle_read_request(slice_s input, slice_s output, plc_s *plc)
             return make_cip_error(output, read_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
         } else {
             /* all good, now fake it with an element count that is the full tag. */
-            element_count = tag->elem_count;
+            element_count = (uint16_t)tag->elem_count;
         }
     }
 

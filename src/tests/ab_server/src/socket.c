@@ -31,7 +31,9 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
+#include "compat.h"
+
+#if IS_WINDOWS
     #include <winsock2.h>
     #include <ws2tcpip.h>
 #else
@@ -52,6 +54,15 @@
 #include "utils.h"
 
 
+/* lengths for socket read and write. */
+#ifdef IS_MSVC
+    typedef int sock_io_len_t;
+#else
+    typedef size_t sock_io_len_t;
+    typedef struct timeval TIMEVAL;
+#endif
+
+
 #define LISTEN_QUEUE (10)
 
 int socket_open(const char *host, const char *port)
@@ -63,9 +74,9 @@ int socket_open(const char *host, const char *port)
     int sock_opt = 0;
     int rc;
 
-#ifdef _WIN32
+#ifdef IS_WINDOWS
 	/* Windows needs special initialization. */
-	WSADATA winsock_data;
+	static WSADATA winsock_data;
 	rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
 
 	if (rc != NO_ERROR) {
@@ -117,7 +128,7 @@ int socket_open(const char *host, const char *port)
     }
 
     /* finally, finally, finally, we get to open a socket! */
-    sock = socket(addr_info->ai_family, addr_info->ai_socktype, addr_info->ai_protocol);
+    sock = (int)socket(addr_info->ai_family, addr_info->ai_socktype, addr_info->ai_protocol);
 
     if (sock < 0) {
         info("ERROR: socket() failed: %s\n", gai_strerror(sock));
@@ -128,7 +139,7 @@ int socket_open(const char *host, const char *port)
     if(strcmp(host,"0.0.0.0") == 0) {
         info("socket_open() setting up server socket.   Binding to address 0.0.0.0.");
 
-        rc = bind(sock, addr_info->ai_addr, addr_info->ai_addrlen);
+        rc = bind(sock, addr_info->ai_addr, (socklen_t)(unsigned int)addr_info->ai_addrlen);
         if (rc < 0)	{
             printf("ERROR: Unable to bind() socket: %s\n", gai_strerror(rc));
             return SOCKET_ERR_BIND;
@@ -202,7 +213,7 @@ int socket_open(const char *host, const char *port)
 void socket_close(int sock)
 {
     if(sock >= 0) {
-#ifdef WIN32
+#ifdef IS_WINDOWS
         closesocket(sock);
 #else
         close(sock);
@@ -213,16 +224,46 @@ void socket_close(int sock)
 
 int socket_accept(int sock)
 {
-    return accept(sock, NULL, NULL);
+    fd_set accept_fd_set;
+    TIMEVAL timeout; 
+    int num_accept_ready = 0;
+
+    /* set the timeout to zero */
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 0;
+
+    /* zero out the file descriptor set. */
+    FD_ZERO(&accept_fd_set);
+
+    /* set our socket's bit in the set. */
+    FD_SET(sock, &accept_fd_set);
+
+    /* do a select to see if anything is ready to accept. */
+    num_accept_ready = select(sock+1, &accept_fd_set, NULL, NULL, &timeout);
+    if (num_accept_ready > 0) {
+        info("Ready to accept on %d sockets.", num_accept_ready);
+        if (FD_ISSET(sock, &accept_fd_set)) {
+            return (int)accept(sock, NULL, NULL);
+        }
+    } else if (num_accept_ready < 0) {
+        info("Error selecting the listen socket!");
+        return SOCKET_ERR_SELECT;
+    } 
+
+    return SOCKET_STATUS_OK;
 }
 
 
 slice_s socket_read(int sock, slice_s in_buf)
 {
+#ifdef IS_WINDOWS
+    int rc = (int)recv(sock, (char *)in_buf.data, (int)in_buf.len, 0);
+#else
     int rc = (int)recv(sock, (char *)in_buf.data, (size_t)in_buf.len, 0);
+#endif 
 
     if(rc < 0) {
-#ifdef WIN32
+#ifdef IS_WINDOWS
         rc = WSAGetLastError();
         if(rc == WSAEWOULDBLOCK) {
 #else
@@ -251,7 +292,11 @@ int socket_write(int sock, slice_s out_buf)
     slice_dump(out_buf);
 
     do {
+#ifdef IS_WINDOWS
+        rc = (int)send(sock, (char *)tmp_out_buf.data, (int)tmp_out_buf.len, 0);
+#else
         rc = (int)send(sock, (char *)tmp_out_buf.data, (size_t)tmp_out_buf.len, 0);
+#endif
 
         /* was there an error? */
         if(rc < 0) {
@@ -259,7 +304,7 @@ int socket_write(int sock, slice_s out_buf)
              * check the return value.  If it is an interrupted system call
              * or would block, just keep looping.
              */
-#ifdef WIN32
+#ifdef IS_WINDOWS
             rc = WSAGetLastError();
             if(rc != WSAEWOULDBLOCK) {
 #else
