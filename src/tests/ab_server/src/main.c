@@ -107,7 +107,7 @@ int main(int argc, const char **argv)
 void usage(void)
 {
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] --tag=<tag>\n"
-                    "   <plc type> = one of \"ControlLogix\" or \"Micro800\".\n"
+                    "   <plc type> = one of \"ControlLogix\", \"Micro800\" or \"Omron\".\n"
                     "   <path> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
                     "\n"
                     "    Tags are in the format: <name>:<type>[<sizes>] where:\n"
@@ -163,6 +163,30 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
+                plc->client_to_server_max_packet = 508;
+                plc->server_to_client_max_packet = 508;
+                needs_path = false;
+                has_plc = true;
+            }  else if(strcasecmp(&(argv[i][6]), "Omron") == 0) {
+                fprintf(stderr, "Selecting Omron NJ/NX simulator.\n");
+                plc->plc_type = PLC_OMRON;
+                plc->path[0] = (uint8_t)0x12;  /* Extended segment, port A */
+                plc->path[1] = (uint8_t)0x09;  /* 9 bytes length. */
+                plc->path[2] = (uint8_t)0x31;  /* '1' */
+                plc->path[3] = (uint8_t)0x32;  /* '2' */
+                plc->path[4] = (uint8_t)0x37;  /* '7' */
+                plc->path[5] = (uint8_t)0x2e;  /* '.' */
+                plc->path[6] = (uint8_t)0x30;  /* '0' */
+                plc->path[7] = (uint8_t)0x2e;  /* '.' */
+                plc->path[8] = (uint8_t)0x30;  /* '0' */
+                plc->path[9] = (uint8_t)0x2e;  /* '.' */
+                plc->path[10] = (uint8_t)0x31; /* '1' */
+                plc->path[11] = (uint8_t)0x00; /* padding */
+                plc->path[12] = (uint8_t)0x20;  
+                plc->path[13] = (uint8_t)0x02;
+                plc->path[14] = (uint8_t)0x24; 
+                plc->path[15] = (uint8_t)0x01;
+                plc->path_len = 16;
                 plc->client_to_server_max_packet = 508;
                 plc->server_to_client_max_packet = 508;
                 needs_path = false;
