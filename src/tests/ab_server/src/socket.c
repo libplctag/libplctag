@@ -56,9 +56,10 @@
 
 /* lengths for socket read and write. */
 #ifdef IS_MSVC
-typedef int sock_io_len_t;
+    typedef int sock_io_len_t;
 #else
-typedef ssize_t sock_io_len_t;
+    typedef ssize_t sock_io_len_t;
+    typedef struct timeval TIMEVAL;
 #endif
 
 

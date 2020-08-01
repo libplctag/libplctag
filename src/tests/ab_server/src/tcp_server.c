@@ -32,6 +32,8 @@
  ***************************************************************************/
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <limits.h>
 #include <stdlib.h>
 #include "slice.h"
 #include "socket.h"
