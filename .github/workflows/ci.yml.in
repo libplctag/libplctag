@@ -124,6 +124,17 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Omron NJ/NX
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}//tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
       with:
