@@ -509,6 +509,10 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         session->max_payload_size = MAX_CIP_MSG_SIZE;
         break;
 
+    case AB_PLC_OMRON_NJNX:
+        session->max_payload_size = MAX_CIP_MSG_SIZE;
+        break;
+
     default:
         pdebug(DEBUG_WARN, "Unknown protocol/cpu type!");
         rc_dec(session);

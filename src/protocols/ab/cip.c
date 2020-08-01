@@ -540,6 +540,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* point into the encoded path for the symbolic segment length. */
     addr_seg_len = &conn_path[c_index];
+    *addr_seg_len = 0;
     c_index++;
 
     /* get the first IP address digit. */

@@ -359,6 +359,12 @@ slice_s handle_read_request(slice_s input, slice_s output, plc_s *plc)
     bool need_frag = false;
     size_t amount_to_copy = 0;
 
+    /* Omron does not support fragmented read. */
+    if(plc->plc_type == PLC_OMRON && read_cmd == CIP_READ_FRAG[0]) {
+        info("Omron PLCs do not support fragmented read!");
+        return make_cip_error(output, read_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
+    }
+
     if(slice_len(input) < (read_cmd == CIP_READ[0] ? CIP_READ_MIN_SIZE : CIP_READ_FRAG_MIN_SIZE)) {
         info("Insufficient data in the CIP read request!");
         return make_cip_error(output, read_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
@@ -381,6 +387,16 @@ slice_s handle_read_request(slice_s input, slice_s output, plc_s *plc)
     offset += (size_t)(tag_segment_size * 2);
 
     element_count = slice_get_uint16_le(input, offset); offset += 2;
+
+    if(plc->plc_type == PLC_OMRON) {
+        if(element_count != 1) {
+            info("Omron PLC requires element count to be 1, found %d!", element_count);
+            return make_cip_error(output, read_cmd | CIP_DONE, CIP_ERR_UNSUPPORTED, false, 0);
+        } else {
+            /* all good, now fake it with an element count that is the full tag. */
+            element_count = tag->elem_count;
+        }
+    }
 
     if(read_cmd == CIP_READ_FRAG[0]) {
         byte_offset = slice_get_uint32_le(input, offset); offset += 4;
