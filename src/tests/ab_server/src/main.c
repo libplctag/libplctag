@@ -668,7 +668,6 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
     } else {
         tag->dimensions[2] = 1;
     }
-
     /* copy the tag name */
     tag->name = strdup(tag_name);
     if (!tag->name) {
