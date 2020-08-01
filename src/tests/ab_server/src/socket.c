@@ -58,7 +58,7 @@
 #ifdef IS_MSVC
     typedef int sock_io_len_t;
 #else
-    typedef ssize_t sock_io_len_t;
+    typedef size_t sock_io_len_t;
     typedef struct timeval TIMEVAL;
 #endif
 
