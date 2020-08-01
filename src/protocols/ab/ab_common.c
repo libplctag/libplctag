@@ -388,6 +388,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         /* from here is the same as a AB_PLC_MLGX800. */
 
+        /* fall through */
     case AB_PLC_LGX:
     case AB_PLC_MLGX800:
         /* fill this in when we read the tag. */
