@@ -70,14 +70,17 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate)
     int client_fd;
     bool done = false;
 
+    info("Waiting for new client connection.");
+
     do {
-        info("Waiting for new client connection.");
         client_fd = socket_accept(server->sock_fd);
 
         if(client_fd >= 0) {
             slice_s tmp_input = server->buffer;
             slice_s tmp_output;
             int rc;
+
+            info("Got new client connection, going into processing loop.");
 
             do {
                 rc = TCP_SERVER_PROCESSED;
@@ -134,13 +137,16 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate)
                     }
                 }
             } while(rc == TCP_SERVER_INCOMPLETE || rc == TCP_SERVER_PROCESSED);
-        } else {
-            /* could not open the client socket! */
-            info("WARN: error while trying to open the client socket.");
+
+            /* done with the socket */
+            socket_close(client_fd);
+        } else if (client_fd != SOCKET_STATUS_OK) {
+            /* There was an error either opening or accepting! */
+            info("WARN: error while trying to open/accept the client socket.");
         }
 
-        socket_close(client_fd);
-
+        /* wait a bit to give back the CPU. */
+        util_sleep_ms(1);
     } while(!done && !*terminate);
 }
 
@@ -151,7 +157,7 @@ void tcp_server_destroy(tcp_server_p server)
     if(server) {
         if(server->sock_fd >= 0) {
             socket_close(server->sock_fd);
-            server->sock_fd = -1;
+            server->sock_fd = INT_MIN;
         }
         free(server);
     }
