@@ -408,6 +408,8 @@ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAK
                         ${test_SRC_PATH}/ab_server/src/eip.c
                         ${test_SRC_PATH}/ab_server/src/eip.h
                         ${test_SRC_PATH}/ab_server/src/main.c
+                        ${test_SRC_PATH}/ab_server/src/pccc.c
+                        ${test_SRC_PATH}/ab_server/src/pccc.h
                         ${test_SRC_PATH}/ab_server/src/plc.h
                         ${test_SRC_PATH}/ab_server/src/slice.h
                         ${test_SRC_PATH}/ab_server/src/socket.c
