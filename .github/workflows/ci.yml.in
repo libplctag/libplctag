@@ -46,7 +46,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test MicroLogix
+    - name: Test Micro800
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -64,7 +64,29 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] &
         sleep 2
         echo "test simple get/set tag."
-        ${{ env.DIST }}//tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
+        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test PLC/5
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test SLC 500
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -113,7 +135,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test MicroLogix
+    - name: Test Micro800
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -131,7 +153,29 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] &
         sleep 2
         echo "test simple get/set tag."
-        ${{ env.DIST }}//tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
+        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test PLC/5
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test SLC 500
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
