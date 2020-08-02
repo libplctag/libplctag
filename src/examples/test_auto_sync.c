@@ -43,7 +43,7 @@
 
 
 #define REQUIRED_VERSION 2,1,11
-#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
+#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
