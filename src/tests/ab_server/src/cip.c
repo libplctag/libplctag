@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include "cip.h"
 #include "eip.h"
+#include "pccc.h"
 #include "plc.h"
 #include "slice.h"
 #include "utils.h"
@@ -51,7 +52,8 @@ const uint8_t CIP_WRITE_FRAG[] = { 0x53 };
 
 
 /* non-tag commands */
-const uint8_t CIP_PCCC_EXECUTE[] = { 0x4B, 0x02, 0x20, 0x02, 0x24, 0x01 };
+//4b 02 20 67 24 01 07 3d f3 45 43 50 21
+const uint8_t CIP_PCCC_EXECUTE[] = { 0x4B, 0x02, 0x20, 0x67, 0x24, 0x01, 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21 };
 const uint8_t CIP_FORWARD_CLOSE[] = { 0x4E, 0x02, 0x20, 0x06, 0x24, 0x01 };
 const uint8_t CIP_FORWARD_OPEN[] = { 0x54, 0x02, 0x20, 0x06, 0x24, 0x01 };
 const uint8_t CIP_LIST_TAGS[] = { 0x55, 0x02, 0x20, 0x02, 0x24, 0x01 };
@@ -109,6 +111,8 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc)
         return handle_forward_open(input, output, plc);
     } else if(slice_match_bytes(input, CIP_FORWARD_CLOSE, sizeof(CIP_FORWARD_CLOSE))) {
         return handle_forward_close(input, output, plc);
+    } else if(slice_match_bytes(input, CIP_PCCC_EXECUTE, sizeof(CIP_PCCC_EXECUTE))) {
+        return dispatch_pccc_request(input, output, plc);
     } else {
             return make_cip_error(output, (uint8_t)(slice_get_uint8(input, 0) | (uint8_t)CIP_DONE), (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
     }
