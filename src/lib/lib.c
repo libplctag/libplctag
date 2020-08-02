@@ -220,6 +220,11 @@ THREAD_FUNC(tag_tickler_func)
 
                 debug_set_tag_id(tag->tag_id);
 
+            if(tag) {
+                int events[PLCTAG_EVENT_DESTROYED+1] =  {0};
+
+                debug_set_tag_id(tag->tag_id);
+
                 /* try to hold the tag API mutex while all this goes on. */
                 if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
                     /* if this tag has automatic writes, then there are many things we should check */
@@ -310,6 +315,27 @@ THREAD_FUNC(tag_tickler_func)
 
                             events[PLCTAG_EVENT_READ_COMPLETED] = 1;
                         }
+                    }
+
+                    /* call the tickler function if we can. */
+                    if(tag->vtable->tickler) {
+                        /* call the tickler on the tag. */
+                        tag->vtable->tickler(tag);
+
+                        if(tag->read_complete) {
+                            tag->read_complete = 0;
+                            tag->read_in_flight = 0;
+
+                            /* if we have automatic read enabled, make sure we set up correct times. */
+                            if(tag->auto_sync_read_ms > 0) {
+                                /* when do we read again? */
+                                tag->auto_sync_last_read += tag->auto_sync_read_ms;
+
+                                /* if we are behind, catch up by pushing the next read out. */
+                                if(tag->auto_sync_last_read <= time_ms()) {
+                                    tag->auto_sync_last_read = time_ms() + tag->auto_sync_read_ms;
+                                }
+                            }
 
                         if(tag->write_complete) {
                             tag->write_complete = 0;
@@ -1614,6 +1640,22 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
                 } else {
                     pdebug(DEBUG_WARN, "auto_sync_write_ms must be greater than or equal to zero!");
                     tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+            } else if(str_cmp_i(attrib_name, "auto_sync_read_ms") == 0) {
+                if(new_value >= 0) {
+                    tag->auto_sync_read_ms = new_value;
+                    res = PLCTAG_STATUS_OK;
+                } else {
+                    pdebug(DEBUG_WARN, "auto_sync_read_ms must be greater than or equal to zero!");
+                    res = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+            } else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
+                if(new_value >= 0) {
+                    tag->auto_sync_write_ms = new_value;
+                    res = PLCTAG_STATUS_OK;
+                } else {
+                    pdebug(DEBUG_WARN, "auto_sync_write_ms must be greater than or equal to zero!");
                     res = PLCTAG_ERR_OUT_OF_BOUNDS;
                 }
             } else {
