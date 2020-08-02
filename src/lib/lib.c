@@ -214,7 +214,7 @@ THREAD_FUNC(tag_tickler_func)
                     tag = NULL;
                 }
             }
-
+        
             if(tag) {
                 int events[PLCTAG_EVENT_DESTROYED+1] =  {0};
 
@@ -296,29 +296,20 @@ THREAD_FUNC(tag_tickler_func)
                         if(tag->read_complete) {
                             tag->read_complete = 0;
                             tag->read_in_flight = 0;
-                            tag->auto_sync_last_read = time_ms(); /* FIXME - this should be exactly auto_sync_read_ms later */
+
+                            /* if we have automatic read enabled, make sure we set up correct times. */
+                            if(tag->auto_sync_read_ms > 0) {
+                                /* when do we read again? */
+                                tag->auto_sync_last_read += tag->auto_sync_read_ms;
+
+                                /* if we are behind, catch up by pushing the next read out. */
+                                if(tag->auto_sync_last_read <= time_ms()) {
+                                    tag->auto_sync_last_read = time_ms() + tag->auto_sync_read_ms;
+                                }
+                            }
 
                             events[PLCTAG_EVENT_READ_COMPLETED] = 1;
                         }
-                    }
-
-                    /* call the tickler function if we can. */
-                    if(tag->vtable->tickler) {
-                        /* call the tickler on the tag. */
-                        tag->vtable->tickler(tag);
-
-                        if(tag->read_complete) {
-                            tag->read_complete = 0;
-                            tag->read_in_flight = 0;
-                            tag->auto_sync_last_read = time_ms(); /* FIXME - this should be exactly auto_sync_read_ms later */
-
-                            events[PLCTAG_EVENT_READ_COMPLETED] = 1;
-                        }
-
-                        if(tag->write_complete) {
-                            tag->write_complete = 0;
-                            tag->write_in_flight = 0;
-                            tag->auto_sync_next_write = 0;
 
                         if(tag->write_complete) {
                             tag->write_complete = 0;
@@ -377,7 +368,7 @@ THREAD_FUNC(tag_tickler_func)
             sleep_ms(1);
         }
     }
-
+    
     debug_set_tag_id(0);
 
     pdebug(DEBUG_INFO,"Terminating.");
@@ -893,8 +884,15 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id)
 
 LIB_EXPORT int plc_tag_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message))
 {
-    pdebug(DEBUG_DETAIL, "Starting");
-    return debug_register_logger(log_callback_func);
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    rc = debug_register_logger(log_callback_func);
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
 }
 
 
@@ -912,8 +910,15 @@ LIB_EXPORT int plc_tag_register_logger(void (*log_callback_func)(int32_t tag_id,
 
 LIB_EXPORT int plc_tag_unregister_logger(void)
 {
+    int rc = PLCTAG_STATUS_OK;
+
     pdebug(DEBUG_DETAIL, "Starting");
-    return debug_unregister_logger();
+    
+    rc = debug_unregister_logger();
+
+    pdebug(DEBUG_DETAIL, "Done.");
+    
+    return rc;
 }
 
 
