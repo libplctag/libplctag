@@ -352,7 +352,6 @@ elseif(WIN32)
                            simple_dual
                            slc500
                            string
-                           test_auto_sync
                            test_callback
                            test_shutdown
                            test_special
