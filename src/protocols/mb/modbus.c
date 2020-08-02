@@ -226,17 +226,18 @@ plc_tag_p mb_tag_create(attr attribs)
         }
 
         /* trigger a read to get the initial value of the tag. */
+        tag->read_in_flight = 1;
         tag->flags._read = 1;
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
-        tag->status = rc;
+        tag->status = (int8_t)rc;
     }
 
     /* Set up the tag byte order. */
     rc = set_tag_byte_order(attribs, tag);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to set the tag byte order!");
-        tag->status = rc;
+        tag->status = (int8_t)rc;
     }
         
     pdebug(DEBUG_INFO, "Done.");
@@ -1005,83 +1006,75 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    /* try to get the mutex on the tag. */
-    // if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
-        /* got the mutex, so we can look at and modify the tag. */
-        if(tag_get_abort_flag(tag)) {
-            pdebug(DEBUG_DETAIL, "Aborting any in flight operations!");
+    if(tag_get_abort_flag(tag)) {
+        pdebug(DEBUG_DETAIL, "Aborting any in flight operations!");
 
-            /* do this as one block to prevent half-changed state. */
-            spin_block(&tag->tag_lock) {
-                tag->flags._read = 0;
-                tag->flags._write = 0;
-                tag->flags._busy = 0;
-                tag->flags._abort = 0;
+        /* do this as one block to prevent half-changed state. */
+        spin_block(&tag->tag_lock) {
+            tag->flags._read = 0;
+            tag->flags._write = 0;
+            tag->flags._busy = 0;
+            tag->flags._abort = 0;
+        }
+
+        tag->seq_id = 0;
+    }
+
+    if(tag_get_write_flag(tag)) {
+        if(tag_get_busy_flag(tag)) {
+            if(plc->flags.response_ready) {
+                /* we have an outstanding write request. */
+                rc = check_write_response(plc, tag);
+                if(rc == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_SPEW, "Either not our response or we got a response!");
+                } else {
+                    pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
+                }
+
+                tag->status = (int8_t)rc;
+            } else {
+                pdebug(DEBUG_SPEW, "No response yet.");
+            }
+        } else {
+            /* we have a write request but it is not in flight. */
+            if(! plc->flags.request_ready) {
+                rc = create_write_request(plc, tag);
+            } else {
+                pdebug(DEBUG_SPEW, "No buffer space for a response.");
             }
 
-            tag->seq_id = 0;
+            tag->status = (int8_t)rc;
         }
+    }
 
-        if(tag_get_write_flag(tag)) {
-            if(tag_get_busy_flag(tag)) {
-                if(plc->flags.response_ready) {
-                    /* we have an outstanding write request. */
-                    rc = check_write_response(plc, tag);
-                    if(rc == PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_SPEW, "Either not our response or we got a response!");
-                    } else {
-                        pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
-                    }
-
-                    tag->status = rc;
+    if(tag_get_read_flag(tag)) {
+        if(tag_get_busy_flag(tag)) {
+            if(plc->flags.response_ready) {
+                /* there is a request in flight, is there a response? */
+                rc = check_read_response(plc, tag);
+                if(rc == PLCTAG_STATUS_OK) {
+                    /* this is our response. */
+                    pdebug(DEBUG_SPEW, "Either not our response or we got a good response.");
                 } else {
-                    pdebug(DEBUG_SPEW, "No response yet.");
+                    pdebug(DEBUG_SPEW, "We got an error on our read response check, %s!", plc_tag_decode_error(rc));
                 }
+
+                tag->status = (int8_t)rc;
             } else {
-                /* we have a write request but it is not in flight. */
-                if(! plc->flags.request_ready) {
-                    rc = create_write_request(plc, tag);
-                } else {
-                    pdebug(DEBUG_SPEW, "No buffer space for a response.");
-                }
-
-                tag->status = rc;
+                pdebug(DEBUG_SPEW, "No response yet.");
             }
-        }
-
-        if(tag_get_read_flag(tag)) {
-            if(tag_get_busy_flag(tag)) {
-                if(plc->flags.response_ready) {
-                    /* there is a request in flight, is there a response? */
-                    rc = check_read_response(plc, tag);
-                    if(rc == PLCTAG_STATUS_OK) {
-                        /* this is our response. */
-                        pdebug(DEBUG_SPEW, "Either not our response or we got a good response.");
-                    } else {
-                        pdebug(DEBUG_SPEW, "We got an error on our read response check, %s!", plc_tag_decode_error(rc));
-                    }
-
-                    tag->status = rc;
-                } else {
-                    pdebug(DEBUG_SPEW, "No response yet.");
-                }
+        } else {
+            /* we have a write request but it is not in flight. */
+            if(! plc->flags.request_ready) {
+                rc = create_read_request(plc, tag);
             } else {
-                /* we have a write request but it is not in flight. */
-                if(! plc->flags.request_ready) {
-                    rc = create_read_request(plc, tag);
-                } else {
-                    pdebug(DEBUG_SPEW, "No buffer space for a response.");
-                }
-    
-                tag->status = rc;
-        }
-        }
+                pdebug(DEBUG_SPEW, "No buffer space for a response.");
+            }
 
-        // mutex_unlock(tag->api_mutex);
-    // }
+            tag->status = (int8_t)rc;
+        }
+    }
 
-    /* set the tag status. */
-    // tag->status = rc;
 
     /* does this tag need to do anything? */
 
@@ -1162,7 +1155,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->flags._busy = 0;
                 tag->seq_id = 0;
                 tag->read_complete = 1;
-                tag->status = rc;
+                tag->status = (int8_t)rc;
                 tag->request_num = 0;
             }
         } else {
@@ -1174,7 +1167,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->flags._read = 1;
                 tag->flags._busy = 0;
                 tag->request_num++;
-                tag->status = rc;
+                tag->status = (int8_t)rc;
             }
         }
     } else {
@@ -1359,7 +1352,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->seq_id = 0;
                 tag->request_num = 0;
                 tag->write_complete = 1;
-                tag->status = rc;
+                tag->status = (int8_t)rc;
             }
         } else {
             /* 
@@ -1369,7 +1362,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
             spin_block(&tag->tag_lock) {
                 tag->flags._write = 1;
                 tag->flags._busy = 0;
-                tag->status = rc;
+                tag->status = (int8_t)rc;
             }
         }
     } else {

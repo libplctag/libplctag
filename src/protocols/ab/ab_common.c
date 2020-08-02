@@ -170,7 +170,6 @@ plc_tag_p ab_tag_create(attr attribs)
      */
 
     tag = (ab_tag_p)rc_alloc(sizeof(struct ab_tag_t), (rc_cleanup_func)ab_tag_destroy);
-
     if(!tag) {
         pdebug(DEBUG_ERROR,"Unable to allocate memory for AB EIP tag!");
         return (plc_tag_p)NULL;
@@ -327,7 +326,7 @@ plc_tag_p ab_tag_create(attr attribs)
         rc = get_tag_data_type(tag, attribs);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error getting tag element data type %s!", plc_tag_decode_error(rc));
-            tag->status = rc;
+            tag->status = (int8_t)rc;
             return (plc_tag_p)tag;
         }
 
@@ -440,6 +439,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     /* kick off a read to get the tag type and size. */
     if(tag->vtable->read) {
+        tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
     }
 

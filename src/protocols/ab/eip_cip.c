@@ -200,7 +200,7 @@ int tag_tickler(ab_tag_p tag)
             rc = check_read_status_unconnected(tag);
         }
 
-        tag->status = rc;
+        tag->status = (int8_t)rc;
 
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->read_in_progress) {
@@ -219,7 +219,7 @@ int tag_tickler(ab_tag_p tag)
             rc = check_write_status_unconnected(tag);
         }
 
-        tag->status = rc;
+        tag->status = (int8_t)rc;
 
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->write_in_progress) {
