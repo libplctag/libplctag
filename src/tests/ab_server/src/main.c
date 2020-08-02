@@ -177,11 +177,13 @@ int main(int argc, const char **argv)
 void usage(void)
 {
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] --tag=<tag>\n"
-                    "   <plc type> = one of \"ControlLogix\", \"Micro800\", \"Omron\" or \"PLC/5\".\n"
+                    "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
+                    "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\" or \"Micrologix\".\n"
+                    "\n"
                     "   <path> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
                     "\n"
                     "    PCCC-based PLC tags are in the format: <file>[<size>] where:\n"
-                    "        <file> is the data file, e.g. N7, F8 etc.\n"
+                    "        <file> is the data file, only the following are supported:\n"
                     "            N7 - 2-byte signed integer.\n"
                     "            F8 - 4-byte floating point number.\n"
                     "            L19 - 4-byte signed integer.\n"
@@ -281,6 +283,30 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->server_to_client_max_packet = 244;
                 needs_path = false;
                 has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
+                fprintf(stderr, "Selecting SLC 500 simulator.\n");
+                plc->plc_type = PLC_SLC;
+                plc->path[0] = (uint8_t)0x20;  
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24; 
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
+                fprintf(stderr, "Selecting Micrologix simulator.\n");
+                plc->plc_type = PLC_MICROLOGIX;
+                plc->path[0] = (uint8_t)0x20;  
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24; 
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
             } else {
                 fprintf(stderr, "Unsupported PLC type %s!\n", &(argv[i][6]));
                 usage();
@@ -293,7 +319,7 @@ void process_args(int argc, const char **argv, plc_s *plc)
         }
 
         if(strncmp(argv[i],"--tag=",6) == 0) {
-            if(plc && plc->plc_type == PLC_PLC5) {
+            if(plc && (plc->plc_type == PLC_PLC5 || plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX)) {
                 parse_pccc_tag(&(argv[i][6]), plc);
             } else {
                 parse_cip_tag(&(argv[i][6]), plc);
