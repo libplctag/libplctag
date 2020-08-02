@@ -310,6 +310,30 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->server_to_client_max_packet = 244;
                 needs_path = false;
                 has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
+                fprintf(stderr, "Selecting SLC 500 simulator.\n");
+                plc->plc_type = PLC_SLC;
+                plc->path[0] = (uint8_t)0x20;  
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24; 
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
+                fprintf(stderr, "Selecting Micrologix simulator.\n");
+                plc->plc_type = PLC_MICROLOGIX;
+                plc->path[0] = (uint8_t)0x20;  
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24; 
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
             } else {
                 fprintf(stderr, "Unsupported PLC type %s!\n", &(argv[i][6]));
                 usage();
