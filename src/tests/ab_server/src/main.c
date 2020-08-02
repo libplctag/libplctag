@@ -491,7 +491,6 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
         tag->elem_count = tag->dimensions[0];
         tag->num_dimensions = 1;
     }
-
     /* copy the tag name */
     tag->name = strdup(data_file_name);
     if (!tag->name) {
