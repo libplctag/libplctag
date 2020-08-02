@@ -109,7 +109,7 @@ The C library is designed for easy wrapping.  Wrappers for many other languages 
 - Go (included)
 - Pascal (included)
 - Part of the libplctag GitHub organization:
-  - C#, [libplctag.NET](https://github.com/libplctag/libplctag.NET).
+  - .Net Core, .Net Framework, [libplctag.NET](https://github.com/libplctag/libplctag.NET).
   - Julia, [PLCTag.jl](https://github.com/libplctag/PLCTag.jl).
 - Other wrappers on GitHub:
   - C#, [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet).
