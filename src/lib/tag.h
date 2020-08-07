@@ -99,6 +99,11 @@ struct tag_byte_order_s {
     unsigned int float64_order_5:3;
     unsigned int float64_order_6:3;
     unsigned int float64_order_7:3;
+
+    /* string type and ordering. */
+    unsigned int string_char_order:1;
+    unsigned int string_count_size:4;
+    unsigned int string_capacity:8;
 };
 
 typedef struct tag_byte_order_s tag_byte_order_t;
