@@ -477,6 +477,20 @@ LIB_EXPORT int plc_tag_set_float64(int32_t tag, int offset, double val);
 LIB_EXPORT float plc_tag_get_float32(int32_t tag, int offset);
 LIB_EXPORT int plc_tag_set_float32(int32_t tag, int offset, float val);
 
+/* string accessors */
+
+/* string size */
+LIB_EXPORT int plc_tag_get_string_length(int32_t tag_id, int string_start_offset);
+LIB_EXPORT int plc_tag_set_string_length(int32_t tag_id, int string_start_offset, int string_len);
+
+/* string capacity */
+LIB_EXPORT int plc_tag_get_string_capacity(int32_t tag_id, int string_start_offset);
+LIB_EXPORT int plc_tag_get_string_total_length(int32_t tag_id, int string_start_offset);
+
+/* string character handling. */
+LIB_EXPORT int plc_tag_get_string_char(int32_t tag_id, int string_start_offset, int char_index);
+LIB_EXPORT int plc_tag_set_string_char(int32_t tag_id, int string_start_offset, int char_index, int char_val);
+
 
 #ifdef __cplusplus
 }
