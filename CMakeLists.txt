@@ -30,10 +30,10 @@
 #   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
-# the project is version 2.1
+# the project is version 2.2
 set (libplctag_VERSION_MAJOR 2)
-set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 12)
+set (libplctag_VERSION_MINOR 2)
+set (libplctag_VERSION_PATCH 0)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
