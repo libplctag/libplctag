@@ -473,16 +473,16 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         return NULL;
     }
 
-    session->plc_type = plc_type;
-    session->data_capacity = MAX_PACKET_SIZE_EX;
-    session->use_connected_msg = *use_connected_msg;
-    session->failed = 0;
-    session->conn_serial_number = (uint16_t)(intptr_t)(session);
-
     /* check for ID set up. This does not need to be thread safe since we just need a random value. */
     if(connection_id == 0) {
         connection_id = (uint32_t)rand();
     }
+
+    session->plc_type = plc_type;
+    session->data_capacity = MAX_PACKET_SIZE_EX;
+    session->use_connected_msg = *use_connected_msg;
+    session->failed = 0;
+    session->conn_serial_number = (uint16_t)(uintptr_t)(intptr_t)rand();
 
     session->session_seq_id = (uint64_t)rand();
 
@@ -2094,7 +2094,7 @@ int send_forward_open_req(ab_session_p session)
     fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection SEQUENCE number. */
+    fo->conn_serial_number = h2le16(++(session->conn_serial_number)); /* our connection SEQUENCE number. */
     fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
@@ -2181,7 +2181,7 @@ int send_forward_open_req_ex(ab_session_p session)
     fo->orig_to_targ_conn_id = h2le32(0);             /* is this right?  Our connection id on the other machines? */
     fo->targ_to_orig_conn_id = h2le32(session->orig_connection_id); /* Our connection id in the other direction. */
     /* this might need to be globally unique */
-    fo->conn_serial_number = h2le16(session->conn_serial_number); /* our connection ID/serial number. */
+    fo->conn_serial_number = h2le16(++(session->conn_serial_number)); /* our connection ID/serial number. */
     fo->orig_vendor_id = h2le16(AB_EIP_VENDOR_ID);               /* our unique :-) vendor ID */
     fo->orig_serial_number = h2le32(AB_EIP_VENDOR_SN);           /* our serial number. */
     fo->conn_timeout_multiplier = AB_EIP_TIMEOUT_MULTIPLIER;     /* timeout = mult * RPI */
