@@ -214,6 +214,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
     bool has_plc = false;
     bool has_tag = false;
 
+    /* make sure that the reject FO count is zero. */
+    plc->reject_fo_count = 0;
+
     for(int i=0; i < argc; i++) {
         if(strncmp(argv[i],"--plc=",6) == 0) {
             if(has_plc) {
@@ -329,7 +332,13 @@ void process_args(int argc, const char **argv, plc_s *plc)
 
         if(strcmp(argv[i],"--debug") == 0) {
             debug_on();
-            has_tag = true;
+        }
+
+        if(strncmp(argv[i],"--reject_fo=", 12) == 0) {
+            if(plc) {
+                info("Setting reject ForwardOpen count to %d.", atoi(&argv[i][12]));
+                plc->reject_fo_count = atoi(&argv[i][12]);
+            }
         }
     }
 
