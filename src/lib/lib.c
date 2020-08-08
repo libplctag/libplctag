@@ -75,7 +75,12 @@ static plc_tag_p lookup_tag(int32_t id);
 static int add_tag_lookup(plc_tag_p tag);
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
-//static int to_tag_index(int id);
+static int get_string_count_size_unsafe(plc_tag_p tag, int offset);
+static int get_string_length_unsafe(plc_tag_p tag, int offset);
+static int get_string_capacity_unsafe(plc_tag_p tag, int offset);
+static int get_string_padding_unsafe(plc_tag_p tag, int offset);
+static int get_string_total_length_unsafe(plc_tag_p tag, int offset);
+static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
 
 #if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
@@ -1745,6 +1750,8 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return res;
 }
 
@@ -1800,6 +1807,8 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return res;
 }
 
@@ -1852,6 +1861,8 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -1907,6 +1918,8 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -1958,6 +1971,8 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2017,6 +2032,8 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -2069,6 +2086,8 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2123,6 +2142,8 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -2172,6 +2193,8 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2227,6 +2250,8 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -2277,6 +2302,8 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2330,6 +2357,8 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -2381,6 +2410,8 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2435,6 +2466,8 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -2484,6 +2517,8 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2536,6 +2571,8 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -2582,6 +2619,8 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2634,6 +2673,8 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
     }
 
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -2702,6 +2743,8 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return res;
 }
 
@@ -2762,6 +2805,8 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
 
@@ -2817,10 +2862,9 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
         res = FLT_MIN;
     }
 
-    /* copy the data */
-    mem_copy(&res,&ures,sizeof(res));
-
     rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2878,8 +2922,416 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 
     rc_dec(tag);
 
+    pdebug(DEBUG_SPEW, "Done.");
+
     return rc;
 }
+
+
+
+int plc_tag_get_string_length(int32_t id, int offset)
+{
+    int string_length = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting a string length from a bit tag is not supported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) {
+        string_length = get_string_length_unsafe(tag, offset);
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return (int)string_length;
+}
+
+
+
+int plc_tag_set_string_length(int32_t id, int offset, int string_len)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Setting a string length from a bit tag is not supported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(string_len < 0) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "String length must be greater than or equal to zero!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    critical_block(tag->api_mutex) {
+        int count_size = get_string_count_size_unsafe(tag, offset);
+
+        if(count_size < 0) {
+            pdebug(DEBUG_WARN, "Unable to get string count word size!");
+            rc = count_size;
+            break;
+        }
+
+        /* FIXME - this is a lot of duplicate code! */
+        switch(count_size) {
+            case 1: /* single byte count */
+                if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
+                    uint8_t val = (uint8_t)(unsigned int)string_len;
+
+                    if(tag->auto_sync_write_ms > 0) {
+                        tag->tag_is_dirty = 1;
+                    }
+
+                    tag->data[offset] = val;
+                } else {
+                    pdebug(DEBUG_WARN, "String offset out of bounds!");
+                    rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+
+                break;
+
+            case 2: /* two-byte count */
+                if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
+                    uint16_t val = (uint16_t)(unsigned int)string_len;
+
+                    if(tag->auto_sync_write_ms > 0) {
+                        tag->tag_is_dirty = 1;
+                    }
+
+                    tag->data[offset + tag->byte_order.int16_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                    tag->data[offset + tag->byte_order.int16_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                } else {
+                    pdebug(DEBUG_WARN, "Data offset out of bounds!");
+                    rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+
+                break;
+
+            case 4: /* four-byte count */
+                if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
+                    uint32_t val = (uint32_t)(unsigned int)string_len;
+
+                    if(tag->auto_sync_write_ms > 0) {
+                        tag->tag_is_dirty = 1;
+                    }
+
+                    tag->data[offset + tag->byte_order.int32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
+                    tag->data[offset + tag->byte_order.int32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                    tag->data[offset + tag->byte_order.int32_order_2] = (uint8_t)((val >> 16) & 0xFF);
+                    tag->data[offset + tag->byte_order.int32_order_3] = (uint8_t)((val >> 24) & 0xFF);
+                }  else {
+                    pdebug(DEBUG_WARN, "Data offset out of bounds!");
+                    rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unsupported string type, %u!", tag->byte_order.string_type);
+                rc = PLCTAG_ERR_UNSUPPORTED;
+        }
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+
+/* string capacity */
+int plc_tag_get_string_capacity(int32_t id, int offset)
+{
+    int string_capacity = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting a string capacity from a bit tag is not supported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) {
+        string_capacity = get_string_capacity_unsafe(tag, offset);
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return string_capacity;
+}
+
+
+
+int plc_tag_get_string_total_length(int32_t id, int offset)
+{
+    int total_length = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting a string capacity from a bit tag is not supported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) {
+        total_length = get_string_total_length_unsafe(tag, offset);
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return total_length;
+}
+
+
+
+/* string character handling. */
+int plc_tag_get_string_char(int32_t id, int offset, int char_index)
+{
+    int res = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting a string capacity from a bit tag is not supported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(offset < 0) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "String offset may not be negative!");
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(char_index < 0) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Character index may not be negative!");
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    critical_block(tag->api_mutex) {
+        size_t char_offset = 0;
+        int count_size = get_string_count_size_unsafe(tag, offset);
+        int string_length = get_string_length_unsafe(tag, offset);
+        int new_index = get_string_byte_swapped_index_unsafe(tag, offset, char_index);
+
+        if(count_size < 0) {
+            pdebug(DEBUG_WARN, "Unable to calculate starting character offset!");
+            res = count_size;
+            break;
+        }
+
+        if(string_length < 0) {
+            pdebug(DEBUG_WARN, "Unable to get string length!");
+            res = string_length;
+            break;
+        }
+
+        if(new_index < 0) {
+            pdebug(DEBUG_WARN, "Unable to use character index!");
+            res = new_index;
+            break;
+        }
+
+        if(new_index >= string_length) {
+            pdebug(DEBUG_WARN, "Character index past end of string!");
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        /* check the offset. Past the end of the data? */
+        char_offset = (size_t)(unsigned int)offset
+                    + (size_t)(unsigned int)count_size
+                    + (size_t)(unsigned int)new_index;
+
+        if(char_offset >= (size_t)(uint32_t)tag->size) {
+            pdebug(DEBUG_WARN, "Tag does not have sufficient data for the requested character index!");
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        /* finally! */
+        res = tag->data[char_offset];
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return res;
+}
+
+
+
+int plc_tag_set_string_char(int32_t id, int offset, int char_index, int char_val)
+{
+    int res = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting a string capacity from a bit tag is not supported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(offset < 0) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "String offset may not be negative!");
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(char_index < 0) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Character index may not be negative!");
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    if(char_val < 0 || char_val > 255) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Character value must be from 0 to 255, inclusive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    critical_block(tag->api_mutex) {
+        size_t char_offset = 0;
+        int count_size = get_string_count_size_unsafe(tag, offset);
+        int string_length = get_string_length_unsafe(tag, offset);
+        int new_index = get_string_byte_swapped_index_unsafe(tag, offset, char_index);
+
+        if(count_size < 0) {
+            pdebug(DEBUG_WARN, "Unable to calculate starting character offset!");
+            res = count_size;
+            break;
+        }
+
+        if(string_length < 0) {
+            pdebug(DEBUG_WARN, "Unable to get string length!");
+            res = string_length;
+            break;
+        }
+
+        if(new_index < 0) {
+            pdebug(DEBUG_WARN, "Unable to use character index!");
+            res = new_index;
+            break;
+        }
+
+        if(new_index >= string_length) {
+            pdebug(DEBUG_WARN, "Character index past end of string!");
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        /* check the offset. Past the end of the data? */
+        char_offset = (size_t)(unsigned int)offset
+                    + (size_t)(unsigned int)count_size
+                    + (size_t)(unsigned int)new_index;
+
+        if(char_offset >= (size_t)(uint32_t)tag->size) {
+            pdebug(DEBUG_WARN, "Tag does not have sufficient data for the requested character index!");
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        /* finally! */
+        tag->data[char_offset] = (uint8_t)(unsigned int)char_val;
+        res = PLCTAG_STATUS_OK;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return res;
+}
+
+
 
 
 
@@ -2984,3 +3436,311 @@ int add_tag_lookup(plc_tag_p tag)
 
     return new_id;
 }
+
+
+
+/*
+ * get the string count length depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+int get_string_count_size_unsafe(plc_tag_p tag, int offset)
+{
+    int string_count_length = 0;
+    string_type_t string_type = tag->byte_order.string_type;
+
+    /* FIXME - do something with the offset! */
+    (void)offset;
+
+    switch(string_type) {
+        case STRING_AB_MICRO800:
+            string_count_length = 1; /* FIXME - is this correct? */
+            break;
+
+        case STRING_AB_PLC5:
+            string_count_length = 2;
+            break;
+
+        case STRING_AB_LGX:
+            string_count_length = 4;
+            break;
+
+        case STRING_AB_TAG_NAME:
+            string_count_length = 2;
+            break;
+
+        case STRING_ZERO_TERM:
+            string_count_length = 0;
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported string type!");
+            string_count_length = PLCTAG_ERR_UNSUPPORTED;
+            break;
+    }
+
+    return string_count_length;
+}
+
+
+
+/*
+ * get the string length depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+int get_string_length_unsafe(plc_tag_p tag, int offset)
+{
+    int32_t string_length = 0;
+    int string_count_len = get_string_count_size_unsafe(tag, offset);
+    string_type_t str_type = tag->byte_order.string_type;
+
+    if(string_count_len <= 0) {
+        pdebug(DEBUG_WARN, "Unable to get string count word size!");
+        return string_count_len;
+    }
+
+    /* FIXME - this is a lot of duplicate code! */
+    switch(string_count_len) {
+        case 0: /* no count word. */
+            if(str_type == STRING_ZERO_TERM) {
+                /* C-style zero terminated string. */
+                if(offset >=0 && offset < tag->size) {
+                    string_length = str_length((char *)&tag->data[offset]);
+                } else {
+                    pdebug(DEBUG_WARN, "String offset out of bounds!");
+                    string_length = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+            } else {
+                pdebug(DEBUG_WARN, "Unsupported string type!");
+                string_length = PLCTAG_ERR_UNSUPPORTED;
+            }
+
+            break;
+
+        case 1: /* single byte count */
+            if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
+                string_length = (int)(unsigned int)tag->data[offset];
+            } else {
+                pdebug(DEBUG_WARN, "String offset out of bounds!");
+                string_length = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+
+            break;
+
+        case 2: /* two-byte count */
+            if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
+                string_length = (int)(unsigned int)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order.int16_order_0]) << 0 ) +
+                                                              ((uint16_t)(tag->data[offset + tag->byte_order.int16_order_1]) << 8 ));
+            } else {
+                pdebug(DEBUG_WARN, "Data offset out of bounds!");
+                string_length = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+
+            break;
+
+        case 4: /* four-byte count */
+            if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
+                string_length = (int)(unsigned int)(((uint32_t)(tag->data[offset + tag->byte_order.int32_order_0]) << 0 ) +
+                                                    ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_1]) << 8 ) +
+                                                    ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_2]) << 16) +
+                                                    ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_3]) << 24));
+            }  else {
+                pdebug(DEBUG_WARN, "Data offset out of bounds!");
+                string_length = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported string count length, %d!", string_count_len);
+            string_length = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    return (int)string_length;
+}
+
+
+/*
+ * get the string capacity depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+int get_string_capacity_unsafe(plc_tag_p tag, int offset)
+{
+    int string_capacity = 0;
+    string_type_t string_type = tag->byte_order.string_type;
+
+    /* FIXME - do something with the offset! */
+    (void)offset;
+
+    switch(string_type) {
+        case STRING_AB_MICRO800:
+            string_capacity = 255; /* FIXME - is this correct? */
+            break;
+
+        case STRING_AB_PLC5:
+            string_capacity = 82;
+            break;
+
+        case STRING_AB_LGX:
+            string_capacity = 82;
+            break;
+
+        case STRING_AB_TAG_NAME:
+            string_capacity = get_string_length_unsafe(tag, offset);
+            break;
+
+        case STRING_ZERO_TERM:
+            string_capacity = get_string_length_unsafe(tag, offset);
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported string type!");
+            string_capacity = PLCTAG_ERR_UNSUPPORTED;
+            break;
+    }
+
+    return string_capacity;
+}
+
+
+/*
+ * get the string padding depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+int get_string_padding_unsafe(plc_tag_p tag, int offset)
+{
+    int string_padding = 0;
+    string_type_t string_type = tag->byte_order.string_type;
+
+    /* FIXME - do something with the offset! */
+    (void)offset;
+
+    switch(string_type) {
+        case STRING_AB_MICRO800:
+            string_padding = 0; /* FIXME - is this correct? */
+            break;
+
+        case STRING_AB_PLC5:
+            string_padding = 0;
+            break;
+
+        case STRING_AB_LGX:
+            string_padding = 2;
+            break;
+
+        case STRING_AB_TAG_NAME:
+            string_padding = 0;
+            break;
+
+        case STRING_ZERO_TERM:
+            string_padding = 1; /* for the zero char termination. */
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported string type!");
+            string_padding = PLCTAG_ERR_UNSUPPORTED;
+            break;
+    }
+
+    return string_padding;
+}
+
+
+/*
+ * get the string total length depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+
+int get_string_total_length_unsafe(plc_tag_p tag, int offset)
+{
+    int string_count_word_size = get_string_count_size_unsafe(tag, offset);
+    int string_capacity = get_string_capacity_unsafe(tag, offset);
+    int string_padding = get_string_padding_unsafe(tag, offset);
+
+    if(string_count_word_size < 0) {
+        return string_count_word_size;
+    }
+
+    if(string_capacity < 0) {
+        return string_capacity;
+    }
+
+    if(string_padding < 0) {
+        return string_padding;
+    }
+
+    return string_count_word_size + string_capacity + string_padding;
+}
+
+
+int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index)
+{
+    int new_index = 0;
+    string_type_t string_type = tag->byte_order.string_type;
+
+    /* FIXME - do something with the offset! */
+    (void)offset;
+
+    switch(string_type) {
+        case STRING_AB_MICRO800:
+            new_index = char_index;
+
+            break;
+
+        case STRING_AB_PLC5:
+            /* thank you, AB */
+
+            /* byte swap the index, odd -> even and even -> odd */
+            if(char_index & 0x01) {
+                /* odd */
+                new_index = char_index - 1;
+            } else {
+                /* even */
+                new_index = char_index + 1;
+            }
+
+            break;
+
+        case STRING_AB_LGX:
+            new_index = char_index;
+            break;
+
+        case STRING_AB_TAG_NAME:
+            new_index = char_index;
+            break;
+
+        case STRING_ZERO_TERM:
+            new_index = char_index;
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported string type!");
+            new_index = PLCTAG_ERR_UNSUPPORTED;
+
+            break;
+    }
+
+    return new_index;
+}
+
+
+
