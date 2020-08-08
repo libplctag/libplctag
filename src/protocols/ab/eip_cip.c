@@ -128,11 +128,11 @@ START_PACK typedef struct {
 
 
 
-static int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset);
+static int build_read_request_connected(ab_tag_p tag, int byte_offset);
 static int build_tag_list_request_connected(ab_tag_p tag);
-static int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset);
-static int build_write_request_connected(ab_tag_p tag, int frag, int byte_offset);
-static int build_write_request_unconnected(ab_tag_p tag, int frag, int byte_offset);
+static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
+static int build_write_request_connected(ab_tag_p tag, int byte_offset);
+static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_bit_request_connected(ab_tag_p tag);
 static int build_write_bit_request_unconnected(ab_tag_p tag);
 static int check_read_status_connected(ab_tag_p tag);
@@ -142,13 +142,9 @@ static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
 
-static int tag_read_common_start(ab_tag_p tag, int frag);
 static int tag_read_start(ab_tag_p tag);
-static int tag_read_frag_start(ab_tag_p tag);
 static int tag_tickler(ab_tag_p tag);
-static int tag_write_common_start(ab_tag_p tag, int frag);
 static int tag_write_start(ab_tag_p tag);
-static int tag_write_frag_start(ab_tag_p tag);
 
 /* define the exported vtable for this tag type. */
 struct tag_vtable_t eip_cip_vtable = {
@@ -162,19 +158,6 @@ struct tag_vtable_t eip_cip_vtable = {
     ab_get_int_attrib,
     ab_set_int_attrib
 };
-
-struct tag_vtable_t eip_cip_frag_vtable = {
-    (tag_vtable_func)ab_tag_abort, /* shared */
-    (tag_vtable_func)tag_read_frag_start,
-    (tag_vtable_func)ab_tag_status, /* shared */
-    (tag_vtable_func)tag_tickler,
-    (tag_vtable_func)tag_write_frag_start,
-
-    /* data accessors */
-    ab_get_int_attrib,
-    ab_set_int_attrib
-};
-
 
 
 
@@ -249,7 +232,7 @@ int tag_tickler(ab_tag_p tag)
  * The function starts the process of getting tag data from the PLC.
  */
 
-int tag_read_common_start(ab_tag_p tag, int frag)
+int tag_read_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -268,10 +251,10 @@ int tag_read_common_start(ab_tag_p tag, int frag)
         if(tag->tag_list) {
             rc = build_tag_list_request_connected(tag);
         } else {
-            rc = build_read_request_connected(tag, frag, tag->offset);
+            rc = build_read_request_connected(tag, tag->offset);
         }
     } else {
-        rc = build_read_request_unconnected(tag, frag, tag->offset);
+        rc = build_read_request_unconnected(tag, tag->offset);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -282,22 +265,11 @@ int tag_read_common_start(ab_tag_p tag, int frag)
         return rc;
     }
 
-//    tag->status = PLCTAG_STATUS_PENDING;
-
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
 
-int tag_read_start(ab_tag_p tag)
-{
-    return tag_read_common_start(tag, 0);
-}
-
-int tag_read_frag_start(ab_tag_p tag)
-{
-    return tag_read_common_start(tag, 1);
-}
 
 
 
@@ -310,7 +282,7 @@ int tag_read_frag_start(ab_tag_p tag)
  * The routine starts the process of writing to a tag.
  */
 
-int tag_write_common_start(ab_tag_p tag, int frag)
+int tag_write_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -355,9 +327,9 @@ int tag_write_common_start(ab_tag_p tag, int frag)
     }
 
     if(tag->use_connected_msg) {
-        rc = build_write_request_connected(tag, frag, tag->offset);
+        rc = build_write_request_connected(tag, tag->offset);
     } else {
-        rc = build_write_request_unconnected(tag, frag, tag->offset);
+        rc = build_write_request_unconnected(tag, tag->offset);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -367,29 +339,20 @@ int tag_write_common_start(ab_tag_p tag, int frag)
         return rc;
     }
 
-//    tag->status = PLCTAG_STATUS_PENDING;
-
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
 }
 
-static int tag_write_start(ab_tag_p tag)
-{
-    return tag_write_common_start(tag, 0);
-}
 
-static int tag_write_frag_start(ab_tag_p tag)
-{
-    return tag_write_common_start(tag, 1);
-}
 
-int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset)
+int build_read_request_connected(ab_tag_p tag, int byte_offset)
 {
     eip_cip_co_req* cip = NULL;
     uint8_t* data = NULL;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
+    uint8_t read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -418,7 +381,13 @@ int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset)
     //embed_start = data;
 
     /* set up the CIP Read request */
-    *data = frag ? AB_EIP_CMD_CIP_READ_FRAG : AB_EIP_CMD_CIP_READ;
+    if(tag->plc_type == AB_PLC_OMRON_NJNX) {
+        read_cmd = AB_EIP_CMD_CIP_READ;
+    } else {
+        read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
+    }
+
+    *data = read_cmd;
     data++;
 
     /* copy the tag name into the request */
@@ -429,7 +398,7 @@ int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset)
     *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count));
     data += sizeof(uint16_le);
 
-    if (frag) {
+    if (read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
         /* add the byte offset for this request */
         *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
         data += sizeof(uint32_le);
@@ -475,6 +444,7 @@ int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset)
     return PLCTAG_STATUS_OK;
 }
 
+
 int build_tag_list_request_connected(ab_tag_p tag)
 {
     eip_cip_co_req* cip = NULL;
@@ -498,7 +468,6 @@ int build_tag_list_request_connected(ab_tag_p tag)
     cip = (eip_cip_co_req*)(req->data);
 
     /* point to the end of the struct */
-//    list_req = (tag_list_req *)(cip + 1);
     data_start = data = (uint8_t*)(cip + 1);
 
     /*
@@ -612,13 +581,14 @@ int build_tag_list_request_connected(ab_tag_p tag)
 
 
 
-int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
+int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
 {
     eip_cip_uc_req* cip;
     uint8_t* data;
     uint8_t* embed_start, *embed_end;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
+    uint8_t read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -648,7 +618,13 @@ int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
     embed_start = data;
 
     /* set up the CIP Read request */
-    *data = frag ? AB_EIP_CMD_CIP_READ_FRAG : AB_EIP_CMD_CIP_READ;
+    if(tag->plc_type == AB_PLC_OMRON_NJNX) {
+        read_cmd = AB_EIP_CMD_CIP_READ;
+    } else {
+        read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
+    }
+
+    *data = read_cmd;
     data++;
 
     /* copy the tag name into the request */
@@ -661,9 +637,10 @@ int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
     data += sizeof(uint16_le);
 
     /* add the byte offset for this request */
-    /* FIXME BUG - this may not work on some processors! */
-    *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
-    data += sizeof(uint32_le);
+    if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
+        *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
+        data += sizeof(uint32_le);
+    }
 
     /* mark the end of the embedded packet */
     embed_end = data;
@@ -739,7 +716,6 @@ int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
 }
 
 
-
 int build_write_bit_request_connected(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
@@ -798,154 +774,58 @@ int build_write_bit_request_connected(ab_tag_p tag)
     *data = (uint8_t)(tag->elem_size & 0xFF); data++;
     *data = (uint8_t)((tag->elem_size >> 8) & 0xFF); data++;
 
-//    /* do different things depending on the type of the PLC */
-//    if(tag->protocol_type == AB_PROTOCOL_LGX) {
-        /* write the OR mask */
-        for(i=0; i < tag->elem_size; i++) {
-            if((tag->bit/8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+    /* write the OR mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit/8) == i) {
+            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
 
-                /* if the bit is set, then we want to mask it on. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = mask;
-                } else {
-                    *data = (uint8_t)0;
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
+            /* if the bit is set, then we want to mask it on. */
+            if(tag->data[tag->bit / 8] & mask) {
+                *data = mask;
             } else {
-                /* this is not the data we care about. */
                 *data = (uint8_t)0;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
             }
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0;
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
         }
+    }
 
-        /* write the AND mask */
-        for(i=0; i < tag->elem_size; i++) {
-            if((tag->bit / 8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+    /* write the AND mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit / 8) == i) {
+            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
 
-                /* if the bit is set, then we want to _not_ mask it off. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = (uint8_t)0xFF;
-                } else {
-                    *data = (uint8_t)(~mask);
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            } else {
-                /* this is not the data we care about. */
+            /* if the bit is set, then we want to _not_ mask it off. */
+            if(tag->data[tag->bit / 8] & mask) {
                 *data = (uint8_t)0xFF;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
+            } else {
+                *data = (uint8_t)(~mask);
             }
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0xFF;
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
         }
-//    } else if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
-//        /* it looks like the masks are processed in big endian order???!?!? */
-//
-//        /* write the OR mask */
-//        for(i = (tag->elem_size - 1); i >= 0; i--) {
-//            if((tag->bit/8) == i) {
-//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-//
-//                /* if the bit is set, then we want to mask it on. */
-//                if(tag->data[tag->bit / 8] & mask) {
-//                    *data = mask;
-//                } else {
-//                    *data = (uint8_t)0;
-//                }
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            } else {
-//                /* this is not the data we care about. */
-//                *data = (uint8_t)0;
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            }
-//        }
-//
-//        /* write the AND mask */
-//        for(i = (tag->elem_size - 1); i >= 0; i--) {
-//            if((tag->bit / 8) == i) {
-//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-//
-//                /* if the bit is set, then we want to _not_ mask it off. */
-//                if(tag->data[tag->bit / 8] & mask) {
-//                    *data = (uint8_t)0xFF;
-//                } else {
-//                    *data = ~mask;
-//                }
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            } else {
-//                /* this is not the data we care about. */
-//                *data = (uint8_t)0xFF;
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            }
-//        }
-//    } else {
-//        pdebug(DEBUG_WARN, "Write for bit tag called for a PLC type that does not support it!");
-//        return PLCTAG_ERR_UNSUPPORTED;
-//    }
+    }
 
     /* let the rest of the system know that the write is complete after this. */
     tag->offset = tag->size;
-
-
-//    /* copy encoded type info */
-//    if (tag->encoded_type_info_size) {
-//        mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
-//        data += tag->encoded_type_info_size;
-//    } else {
-//        pdebug(DEBUG_WARN,"Data type unsupported!");
-//        return PLCTAG_ERR_UNSUPPORTED;
-//    }
-//
-//    /* copy the item count, little endian */
-//    *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count));
-//    data += sizeof(uint16_le);
-//
-//    if (multiple_requests) {
-//        /* put in the byte offset */
-//        *((uint32_le*)data) = h2le32((uint32_t)(byte_offset));
-//        data += sizeof(uint32_le);
-//    }
-//
-//    /* how much data to write? */
-//    write_size = tag->size - tag->offset;
-//
-//    if(write_size > tag->write_data_per_packet) {
-//        write_size = tag->write_data_per_packet;
-//    }
-//
-//    /* now copy the data to write */
-//    mem_copy(data, tag->data + tag->offset, write_size);
-//    data += write_size;
-//    tag->offset += write_size;
-//
-//    /* need to pad data to multiple of 16-bits */
-//    if (write_size & 0x01) {
-//        *data = 0;
-//        data++;
-//    }
 
     /* now we go back and fill in the fields of the static part */
 
@@ -1050,153 +930,58 @@ int build_write_bit_request_unconnected(ab_tag_p tag)
     *data = (uint8_t)(tag->elem_size & 0xFF); data++;
     *data = (uint8_t)((tag->elem_size >> 8) & 0xFF); data++;
 
-//    /* do different things depending on the type of the PLC */
-//    if(tag->protocol_type == AB_PROTOCOL_LGX) {
-        /* write the OR mask */
-        for(i=0; i < tag->elem_size; i++) {
-            if((tag->bit/8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+    /* write the OR mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit/8) == i) {
+            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
 
-                /* if the bit is set, then we want to mask it on. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = mask;
-                } else {
-                    *data = (uint8_t)0;
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
+            /* if the bit is set, then we want to mask it on. */
+            if(tag->data[tag->bit / 8] & mask) {
+                *data = mask;
             } else {
-                /* this is not the data we care about. */
                 *data = (uint8_t)0;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
             }
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0;
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
         }
+    }
 
-        /* write the AND mask */
-        for(i=0; i < tag->elem_size; i++) {
-            if((tag->bit / 8) == i) {
-                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
+    /* write the AND mask */
+    for(i=0; i < tag->elem_size; i++) {
+        if((tag->bit / 8) == i) {
+            uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
 
-                /* if the bit is set, then we want to _not_ mask it off. */
-                if(tag->data[tag->bit / 8] & mask) {
-                    *data = (uint8_t)0xFF;
-                } else {
-                    *data = (uint8_t)(~mask);
-                }
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
-            } else {
-                /* this is not the data we care about. */
+            /* if the bit is set, then we want to _not_ mask it off. */
+            if(tag->data[tag->bit / 8] & mask) {
                 *data = (uint8_t)0xFF;
-
-                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-
-                data++;
+            } else {
+                *data = (uint8_t)(~mask);
             }
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
+        } else {
+            /* this is not the data we care about. */
+            *data = (uint8_t)0xFF;
+
+            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+
+            data++;
         }
-//    } else if(tag->protocol_type == AB_PROTOCOL_MLGX800) {
-//        /* it looks like the masks are processed in big endian order???!?!? */
-//
-//        /* write the OR mask */
-//        for(i = (tag->elem_size - 1); i >= 0; i--) {
-//            if((tag->bit/8) == i) {
-//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-//
-//                /* if the bit is set, then we want to mask it on. */
-//                if(tag->data[tag->bit / 8] & mask) {
-//                    *data = mask;
-//                } else {
-//                    *data = (uint8_t)0;
-//                }
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            } else {
-//                /* this is not the data we care about. */
-//                *data = (uint8_t)0;
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            }
-//        }
-//
-//        /* write the AND mask */
-//        for(i = (tag->elem_size - 1); i >= 0; i--) {
-//            if((tag->bit / 8) == i) {
-//                uint8_t mask = (uint8_t)(1 << (tag->bit % 8));
-//
-//                /* if the bit is set, then we want to _not_ mask it off. */
-//                if(tag->data[tag->bit / 8] & mask) {
-//                    *data = (uint8_t)0xFF;
-//                } else {
-//                    *data = ~mask;
-//                }
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            } else {
-//                /* this is not the data we care about. */
-//                *data = (uint8_t)0xFF;
-//
-//                pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
-//
-//                data++;
-//            }
-//        }
-//    } else {
-//        pdebug(DEBUG_WARN, "Write for bit tag called for a PLC type that does not support it!");
-//        return PLCTAG_ERR_UNSUPPORTED;
-//    }
+    }
 
     /* let the rest of the system know that the write is complete after this. */
     tag->offset = tag->size;
-
-//    /* copy encoded type info */
-//    if (tag->encoded_type_info_size) {
-//        mem_copy(data, tag->encoded_type_info, tag->encoded_type_info_size);
-//        data += tag->encoded_type_info_size;
-//    } else {
-//        pdebug(DEBUG_WARN,"Data type unsupported!");
-//        return PLCTAG_ERR_UNSUPPORTED;
-//    }
-//
-//    /* copy the item count, little endian */
-//    *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count));
-//    data += sizeof(uint16_le);
-//
-//    if (multiple_requests) {
-//        /* put in the byte offset */
-//        *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
-//        data += sizeof(uint32_le);
-//    }
-//
-//    /* how much data to write? */
-//    write_size = tag->size - tag->offset;
-//
-//    if(write_size > tag->write_data_per_packet) {
-//        write_size = tag->write_data_per_packet;
-//    }
-//
-//    /* now copy the data to write */
-//    mem_copy(data, tag->data + tag->offset, write_size);
-//    data += write_size;
-//    tag->offset += write_size;
-//
-//    /* need to pad data to multiple of 16-bits */
-//    if (write_size & 0x01) {
-//        *data = 0;
-//        data++;
-//    }
 
     /* now we go back and fill in the fields of the static part */
     /* mark the end of the embedded packet */
@@ -1274,7 +1059,7 @@ int build_write_bit_request_unconnected(ab_tag_p tag)
 
 
 
-int build_write_request_connected(ab_tag_p tag, int frag, int byte_offset)
+int build_write_request_connected(ab_tag_p tag, int byte_offset)
 {
     int rc = PLCTAG_STATUS_OK;
     eip_cip_co_req* cip = NULL;
@@ -1302,8 +1087,13 @@ int build_write_request_connected(ab_tag_p tag, int frag, int byte_offset)
         return rc;
     }
 
-    if(!frag && tag->write_data_per_packet < tag->size) {
+    if(tag->write_data_per_packet < tag->size) {
         multiple_requests = 1;
+    }
+
+    if(multiple_requests && tag->plc_type == AB_PLC_OMRON_NJNX) {
+        pdebug(DEBUG_WARN, "Tag too large for unfragmented request on Omron PLC!");
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     cip = (eip_cip_co_req*)(req->data);
@@ -1414,7 +1204,7 @@ int build_write_request_connected(ab_tag_p tag, int frag, int byte_offset)
 
 
 
-int build_write_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
+int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
 {
     int rc = PLCTAG_STATUS_OK;
     eip_cip_uc_req* cip = NULL;
@@ -1444,8 +1234,13 @@ int build_write_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
         return rc;
     }
 
-    if(!frag && tag->write_data_per_packet < tag->size) {
+    if(tag->write_data_per_packet < tag->size) {
         multiple_requests = 1;
+    }
+
+    if(multiple_requests && tag->plc_type == AB_PLC_OMRON_NJNX) {
+        pdebug(DEBUG_WARN, "Tag too large for unfragmented request on Omron PLC!");
+        return PLCTAG_ERR_TOO_LARGE;
     }
 
     cip = (eip_cip_uc_req*)(req->data);
