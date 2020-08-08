@@ -62,6 +62,8 @@ struct ab_session_t {
 
     /* connection variables. */
     int use_connected_msg;
+    int only_use_old_forward_open;
+    uint16_t max_payload_guess;
     uint32_t orig_connection_id;
     uint32_t targ_connection_id;
     uint16_t conn_seq_num;
