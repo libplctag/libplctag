@@ -31,7 +31,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build
+      run: cd ${{ env.BUILD }}; cmake --build .
 
     - name: Test Basic Functions
       run: |
@@ -363,7 +363,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        start /b ${{ env.DIST }}/ab_server.exe "--plc=ControlLogix" "--path=1,0" "--tag=TestBigArray:DINT[2000]"
+        start /b ${{ env.DIST }}/ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
         timeout /T 5
         echo "test getting a large tag."
         ${{ env.DIST }}/tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray"
