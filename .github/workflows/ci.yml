@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.1.13"
-      ARTIFACT: "libplctag_2.1.13_ubuntu_x64"
+      VERSION: "2.1.14"
+      ARTIFACT: "libplctag_2.1.14_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -112,7 +112,6 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
       with:
@@ -124,8 +123,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.1.13"
-      ARTIFACT: "libplctag_2.1.13_ubuntu_x86"
+      VERSION: "2.1.14"
+      ARTIFACT: "libplctag_2.1.14_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -235,8 +234,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.1.13"
-      ARTIFACT: "libplctag_2.1.13_macos_x64"
+      VERSION: "2.1.14"
+      ARTIFACT: "libplctag_2.1.14_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -457,8 +456,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.1.13"
-      ARTIFACT: "libplctag_2.1.13_windows_x86"
+      VERSION: "2.1.14"
+      ARTIFACT: "libplctag_2.1.14_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
