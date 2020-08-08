@@ -104,6 +104,9 @@ typedef struct {
     /* PCCC info */
     uint16_t pccc_seq_id;
 
+    /* debugging. */
+    int reject_fo_count;
+
     /* list of tags served by this "PLC" */
     struct tag_def_s *tags;
 } plc_s;

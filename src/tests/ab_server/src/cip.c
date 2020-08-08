@@ -70,6 +70,7 @@ const uint8_t CIP_FORWARD_OPEN_EX[] = { 0x5B, 0x02, 0x20, 0x06, 0x24, 0x01 };
 /* CIP Errors */
 
 #define CIP_OK                  ((uint8_t)0x00)
+#define CIP_ERR_0x01            ((uint8_t)0x01)
 #define CIP_ERR_FRAG            ((uint8_t)0x06)
 #define CIP_ERR_UNSUPPORTED     ((uint8_t)0x08)
 #define CIP_ERR_EXTENDED        ((uint8_t)0xff)
@@ -203,6 +204,17 @@ slice_s handle_forward_open(slice_s input, slice_s output, plc_s *plc)
         /* FIXME - send back the right error. */
         info("Forward open request path did not match the path for this PLC!");
         return make_cip_error(output, (uint8_t)(slice_get_uint8(input, 0) | CIP_DONE), (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
+    }
+
+    /* check to see how many refusals we should do. */
+    if(plc->reject_fo_count > 0) {
+        plc->reject_fo_count--;
+        info("Forward open request being bounced for debugging. %d to go.", plc->reject_fo_count);
+        return make_cip_error(output, 
+                             (uint8_t)(slice_get_uint8(input, 0) | CIP_DONE),
+                             (uint8_t)CIP_ERR_0x01,
+                             true,
+                             (uint16_t)0x100);
     }
 
     /* all good if we got here. */
