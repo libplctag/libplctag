@@ -2738,9 +2738,6 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
         res = DBL_MIN;
     }
 
-    // /* copy the data */
-    // mem_copy(&res,&ures,sizeof(res));
-
     rc_dec(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -3708,7 +3705,6 @@ int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_ind
 
         case STRING_AB_PLC5:
             /* thank you, AB */
-
             /* byte swap the index, odd -> even and even -> odd */
             if(char_index & 0x01) {
                 /* odd */

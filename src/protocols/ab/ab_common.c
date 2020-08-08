@@ -374,7 +374,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
-        tag->vtable = &eip_cip_vtable;
+        tag->vtable = &eip_cip_non_frag_vtable;
         break;
 
     default:
