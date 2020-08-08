@@ -36,13 +36,7 @@
 
 #include <ab/ab_common.h>
 
-//extern int eip_cip_tag_status(ab_tag_p tag);
-//extern int eip_cip_tag_read_start(ab_tag_p tag);
-//extern int eip_cip_tag_write_start(ab_tag_p tag);
-//extern int eip_cip_tag_tickler(ab_tag_p tag);
-
-extern struct tag_vtable_t eip_cip_non_frag_vtable;
-extern struct tag_vtable_t eip_cip_frag_vtable;
+extern struct tag_vtable_t eip_cip_vtable;
 
 /* tag listing helpers */
 extern int setup_tag_listing(ab_tag_p tag, const char *name);

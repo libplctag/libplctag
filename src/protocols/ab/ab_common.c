@@ -333,7 +333,7 @@ plc_tag_p ab_tag_create(attr attribs)
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
-        tag->vtable = &eip_cip_frag_vtable;
+        tag->vtable = &eip_cip_vtable;
 
         break;
 
@@ -346,8 +346,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
-        tag->vtable = &eip_cip_frag_vtable;
-
+        tag->vtable = &eip_cip_vtable;
         break;
 
     case AB_PLC_OMRON_NJNX:
@@ -361,7 +360,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
-        tag->vtable = &eip_cip_non_frag_vtable;
+        tag->vtable = &eip_cip_vtable;
         break;
 
     default:
