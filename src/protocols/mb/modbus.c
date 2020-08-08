@@ -411,6 +411,9 @@ int set_tag_byte_order(attr attribs, modbus_tag_p tag)
     tag->byte_order.float64_order_6 = (unsigned int)(((unsigned int)byte_order[6] - (unsigned int)('0')) & 0x07);
     tag->byte_order.float64_order_7 = (unsigned int)(((unsigned int)byte_order[7] - (unsigned int)('0')) & 0x07);
 
+    /* FIXME - string defs. */
+    tag->byte_order.string_type = STRING_UNDEFINED;
+
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;

@@ -43,9 +43,9 @@
  * STRING types are a DINT (4 bytes) followed by 82 bytes of characters.  Then two bytes of padding.
  */
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,2,0
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=88&elem_count=48&debug=1&name=Loc_Txt"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt&debug=4"
 #define ELEM_COUNT 48
 #define ELEM_SIZE 88
 #define DATA_TIMEOUT 5000
@@ -55,24 +55,26 @@ int main()
 {
     int32_t tag = 0;
     int rc;
-    int i;
+    int str_num = 1;
+    int offset = 0;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        return 1;
     }
+
+    fprintf(stderr, "Using library version %d.%d.%d.\n", 
+                                            plc_tag_get_int_attribute(0, "version_major", -1),
+                                            plc_tag_get_int_attribute(0, "version_minor", -1),
+                                            plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* create the tag */
     tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(tag < 0) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-        return 0;
-    }
-
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr,"Error creating tag! Error %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 0;
     }
@@ -86,17 +88,29 @@ int main()
     }
 
     /* print out the data */
-    for(i=0; i < ELEM_COUNT; i++) {
-        int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
+    offset = 0;
+    while(offset < plc_tag_get_size(tag)) {
+        int str_size = plc_tag_get_string_length(tag, offset);
         char str[ELEM_SIZE] = {0};
-        int j;
+        int i;
 
-        for(j=0; j<str_size; j++) {
-            str[j] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+j+4);
+        /* clamp to the buffer size. */
+        if(str_size >= ELEM_SIZE) {
+            str_size = ELEM_SIZE-1;
         }
-        str[j] = (char)0;
 
-        printf("string %d (%d chars) = '%s'\n",i, str_size, str);
+        /* copy the chars. */
+        for(i=0; i < str_size; i++) {
+            str[i] = (char)plc_tag_get_string_char(tag, offset, i);
+        }
+
+        str[i] = (char)0;
+
+        fprintf(stderr, "string %d (%d chars) = '%s'\n", str_num, str_size, str);
+
+        str_num++;
+
+        offset += plc_tag_get_string_total_length(tag, offset);
     }
 
     /* we are done */

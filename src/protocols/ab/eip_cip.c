@@ -143,7 +143,7 @@ static int check_write_status_unconnected(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
 
 static int tag_read_common_start(ab_tag_p tag, int frag);
-static int tag_read_start(ab_tag_p tag);
+static int tag_read_non_frag_start(ab_tag_p tag);
 static int tag_read_frag_start(ab_tag_p tag);
 static int tag_tickler(ab_tag_p tag);
 static int tag_write_common_start(ab_tag_p tag, int frag);
@@ -151,9 +151,9 @@ static int tag_write_start(ab_tag_p tag);
 static int tag_write_frag_start(ab_tag_p tag);
 
 /* define the exported vtable for this tag type. */
-struct tag_vtable_t eip_cip_vtable = {
+struct tag_vtable_t eip_cip_non_frag_vtable = {
     (tag_vtable_func)ab_tag_abort, /* shared */
-    (tag_vtable_func)tag_read_start,
+    (tag_vtable_func)tag_read_non_frag_start,
     (tag_vtable_func)ab_tag_status, /* shared */
     (tag_vtable_func)tag_tickler,
     (tag_vtable_func)tag_write_start,
@@ -289,13 +289,15 @@ int tag_read_common_start(ab_tag_p tag, int frag)
     return PLCTAG_STATUS_PENDING;
 }
 
-int tag_read_start(ab_tag_p tag)
+int tag_read_non_frag_start(ab_tag_p tag)
 {
+    pdebug(DEBUG_DETAIL, "Calling non-fragmenting read set up function.");
     return tag_read_common_start(tag, 0);
 }
 
 int tag_read_frag_start(ab_tag_p tag)
 {
+    pdebug(DEBUG_DETAIL, "Calling fragmenting read set up function.");
     return tag_read_common_start(tag, 1);
 }
 
@@ -344,7 +346,7 @@ int tag_write_common_start(ab_tag_p tag, int frag)
         tag->pre_write_read = 1;
         tag->write_in_progress = 0; /* temporarily mask this off */
 
-        return tag_read_start(tag);
+        return tag_read_common_start(tag, frag);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -390,6 +392,7 @@ int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset)
     uint8_t* data = NULL;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
+    uint8_t read_cmd = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -418,7 +421,17 @@ int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset)
     //embed_start = data;
 
     /* set up the CIP Read request */
-    *data = frag ? AB_EIP_CMD_CIP_READ_FRAG : AB_EIP_CMD_CIP_READ;
+    switch(tag->plc_type) {
+        case AB_PLC_OMRON_NJNX:
+            read_cmd = AB_EIP_CMD_CIP_READ;
+            break;
+
+        default:
+            read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
+            break;
+    }
+
+    *data = read_cmd;
     data++;
 
     /* copy the tag name into the request */
@@ -429,7 +442,7 @@ int build_read_request_connected(ab_tag_p tag, int frag, int byte_offset)
     *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count));
     data += sizeof(uint16_le);
 
-    if (frag) {
+    if (read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
         /* add the byte offset for this request */
         *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
         data += sizeof(uint32_le);
@@ -619,6 +632,7 @@ int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
     uint8_t* embed_start, *embed_end;
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
+    uint8_t read_cmd = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -648,7 +662,16 @@ int build_read_request_unconnected(ab_tag_p tag, int frag, int byte_offset)
     embed_start = data;
 
     /* set up the CIP Read request */
-    *data = frag ? AB_EIP_CMD_CIP_READ_FRAG : AB_EIP_CMD_CIP_READ;
+    switch(tag->plc_type) {
+        case AB_PLC_OMRON_NJNX:
+            read_cmd = AB_EIP_CMD_CIP_READ;
+            break;
+
+        default:
+            read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
+    }
+
+    *data = read_cmd;
     data++;
 
     /* copy the tag name into the request */
@@ -2623,6 +2646,8 @@ int setup_tag_listing(ab_tag_p tag, const char *name)
                 return PLCTAG_ERR_NOT_FOUND;
             }
 
+            /* FIXME - use str_cmp_i_n() */
+
             /* make sure the first part is "PROGRAM:" */
             if((tag_parts[0][0]) != 'P' && (tag_parts[0][0]) != 'p') {
                 mem_free(tag_parts);
@@ -2697,6 +2722,9 @@ int setup_tag_listing(ab_tag_p tag, const char *name)
     tag->elem_type = AB_TYPE_TAG_ENTRY;
     tag->elem_count = 1;  /* place holder */
     tag->elem_size = 1;
+
+    /* change the string type to the type used in tags. */
+    tag->byte_order.string_type = STRING_AB_TAG_NAME;
 
     pdebug(DEBUG_DETAIL, "Done.");
 

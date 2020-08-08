@@ -347,6 +347,7 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
         tag->vtable = &eip_cip_frag_vtable;
+
         break;
 
     case AB_PLC_OMRON_NJNX:
@@ -360,7 +361,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
-        tag->vtable = &eip_cip_vtable;
+        tag->vtable = &eip_cip_non_frag_vtable;
         break;
 
     default:
@@ -662,6 +663,35 @@ void set_tag_byte_order(ab_tag_p tag)
     tag->byte_order.float64_order_5 = 5;
     tag->byte_order.float64_order_6 = 6;
     tag->byte_order.float64_order_7 = 7;
+
+    switch(tag->plc_type) {
+        case AB_PLC_PLC5:
+        case AB_PLC_SLC:
+        case AB_PLC_MLGX:
+        case AB_PLC_LGX_PCCC:
+            tag->byte_order.string_type = STRING_AB_PLC5;
+            break;
+
+        case AB_PLC_OMRON_NJNX:
+        case AB_PLC_MLGX800:
+            tag->byte_order.string_type = STRING_AB_MICRO800;
+            break;
+
+        case AB_PLC_LGX:
+            if(!tag->tag_list) {
+                tag->byte_order.string_type = STRING_AB_LGX;
+            } else {
+                tag->byte_order.string_type = STRING_AB_TAG_NAME;
+            }
+
+            break;
+
+        default:
+            pdebug(DEBUG_WARN, "Unsupported PLC type!");
+            tag->byte_order.string_type = STRING_UNDEFINED;
+            break;
+
+    }
 }
 
 

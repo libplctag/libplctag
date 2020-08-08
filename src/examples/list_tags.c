@@ -96,7 +96,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
 {
     int rc = PLCTAG_STATUS_OK;
     int offset = 0;
-    int index = 0;
+    //int index = 0;
 
     rc = plc_tag_read(tag, TIMEOUT_MS);
     if(rc != PLCTAG_STATUS_OK) {
@@ -110,12 +110,10 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         uint16_t tag_type = 0;
         uint16_t element_length = 0;
         uint16_t array_dims[3] = {0,};
-        uint16_t tag_name_len = 0;
+        int tag_name_len = 0;
         char tag_name[TAG_STRING_SIZE * 2] = {0,};
-        size_t prefix_size = 0;
-        size_t i;
-
-        //offset = index * 104; /* MAGIC - size of a symbol entry. */
+        int prefix_size = 0;
+        int i;
 
         /* each entry looks like this:
         uint32_t instance_id    monotonically increasing but not contiguous
@@ -144,26 +142,30 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         array_dims[2] = (uint16_t)plc_tag_get_uint32(tag, offset);
         offset += 4;
 
-        tag_name_len = plc_tag_get_uint16(tag, offset);
-        offset += 2;
+        /* use library support for strings. Offset points to the start of the string. */
+        tag_name_len = plc_tag_get_string_length(tag, offset);
+        //offset += 2;
 
         /* copy the prefix string. */
         if(prefix && strlen(prefix) > 0) {
-            snprintf(tag_name, sizeof(tag_name), "%s.",prefix);
-            prefix_size = strlen(prefix) + 1;
-            //printf("Tag name before: %s\n", tag_name);
+            snprintf(tag_name, sizeof(tag_name), "%s.", prefix);
+            prefix_size = (int)(unsigned int)strlen(prefix) + 1;
         } else {
             prefix_size = 0;
         }
 
         /* copy the name string bytes. */
-        for(i=0; i < (size_t)tag_name_len && (size_t)(i + prefix_size) < (size_t)((TAG_STRING_SIZE*2)-1); i++) {
-            tag_name[i + prefix_size] = plc_tag_get_int8(tag,offset);
-            offset++;
-            tag_name[i + prefix_size +1] = 0;
+        for(i=0; i < tag_name_len && (i + prefix_size) < ((TAG_STRING_SIZE*2)-1); i++) {
+            tag_name[i + prefix_size] = (char)plc_tag_get_string_char(tag, offset, i);
         }
 
-        index++;
+        /* zero terminate the string. */
+        tag_name[i + prefix_size + 1] = 0;
+
+        /* fprintf(stderr, "Tag %s, string length: %d.\n", tag_name, plc_tag_get_string_total_length(tag, offset)); */
+
+        /* skip past the string. */
+        offset += plc_tag_get_string_total_length(tag, offset);
 
         /* if the tag is actually a program, put it on the program list for later. */
         if(prog_list && strncmp(tag_name, "Program:", strlen("Program:")) == 0) {

@@ -68,6 +68,8 @@ typedef struct tag_vtable_t *tag_vtable_p;
 
 /* byte ordering */
 
+typedef enum { STRING_UNDEFINED = 0, STRING_AB_MICRO800, STRING_AB_PLC5, STRING_AB_LGX, STRING_AB_TAG_NAME, STRING_ZERO_TERM } string_type_t;
+
 struct tag_byte_order_s {
     unsigned int int16_order_0:1;
     unsigned int int16_order_1:1;
@@ -101,9 +103,7 @@ struct tag_byte_order_s {
     unsigned int float64_order_7:3;
 
     /* string type and ordering. */
-    unsigned int string_char_order:1;
-    unsigned int string_count_size:4;
-    unsigned int string_capacity:8;
+    unsigned int string_type:3;
 };
 
 typedef struct tag_byte_order_s tag_byte_order_t;
