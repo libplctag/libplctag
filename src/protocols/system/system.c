@@ -137,6 +137,9 @@ plc_tag_p system_tag_create(attr attribs)
     tag->byte_order.float64_order_6 = 6;
     tag->byte_order.float64_order_7 = 7;
 
+    /* strings. */
+    tag->byte_order.string_type = STRING_ZERO_TERM;
+
     /* get the name and copy it */
     str_copy(tag->name, MAX_SYSTEM_TAG_NAME, name);
 

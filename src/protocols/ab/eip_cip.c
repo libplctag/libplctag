@@ -147,9 +147,9 @@ static int tag_tickler(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
 
 /* define the exported vtable for this tag type. */
-struct tag_vtable_t eip_cip_vtable = {
+struct tag_vtable_t eip_cip_non_frag_vtable = {
     (tag_vtable_func)ab_tag_abort, /* shared */
-    (tag_vtable_func)tag_read_start,
+    (tag_vtable_func)tag_read_non_frag_start,
     (tag_vtable_func)ab_tag_status, /* shared */
     (tag_vtable_func)tag_tickler,
     (tag_vtable_func)tag_write_start,
@@ -316,7 +316,7 @@ int tag_write_start(ab_tag_p tag)
         tag->pre_write_read = 1;
         tag->write_in_progress = 0; /* temporarily mask this off */
 
-        return tag_read_start(tag);
+        return tag_read_common_start(tag, frag);
     }
 
     if (rc != PLCTAG_STATUS_OK) {
@@ -2418,6 +2418,8 @@ int setup_tag_listing(ab_tag_p tag, const char *name)
                 return PLCTAG_ERR_NOT_FOUND;
             }
 
+            /* FIXME - use str_cmp_i_n() */
+
             /* make sure the first part is "PROGRAM:" */
             if((tag_parts[0][0]) != 'P' && (tag_parts[0][0]) != 'p') {
                 mem_free(tag_parts);
@@ -2492,6 +2494,9 @@ int setup_tag_listing(ab_tag_p tag, const char *name)
     tag->elem_type = AB_TYPE_TAG_ENTRY;
     tag->elem_count = 1;  /* place holder */
     tag->elem_size = 1;
+
+    /* change the string type to the type used in tags. */
+    tag->byte_order.string_type = STRING_AB_TAG_NAME;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
