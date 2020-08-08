@@ -37,7 +37,6 @@
 #include <ab/ab_common.h>
 
 extern struct tag_vtable_t eip_cip_vtable;
-extern struct tag_vtable_t eip_cip_frag_vtable;
 
 /* tag listing helpers */
 extern int setup_tag_listing(ab_tag_p tag, const char *name);
