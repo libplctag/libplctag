@@ -31,9 +31,9 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build
 
-    - name: Test ControlLogix
+    - name: Test Basic Functions
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -52,7 +52,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a Micro800."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -63,7 +63,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on an Omron NJ/NX."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -74,7 +74,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a PLC/5."
         ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -85,7 +85,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a SLC 500."
         ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -96,7 +96,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag with connection failures."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -107,10 +107,11 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a large tag."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
@@ -148,7 +149,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -163,7 +164,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a Micro800."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -174,7 +175,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on an Omron NJ/NX."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -185,7 +186,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a PLC/5."
         ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -196,11 +197,10 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a SLC 500."
         ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
-
 
     - name: Test Duplicate Connection ID 
       run: |
@@ -208,7 +208,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag with connection failures."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -219,7 +219,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a large tag."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -256,7 +256,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -271,7 +271,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a Micro800."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -282,7 +282,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on an Omron NJ/NX."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -293,7 +293,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a PLC/5."
         ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -304,11 +304,10 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag on a SLC 500."
         ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
-
 
     - name: Test Duplicate Connection ID 
       run: |
@@ -316,7 +315,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a tag with connection failures."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -327,7 +326,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
-        echo "test simple get/set tag."
+        echo "test getting a large tag."
         ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -360,8 +359,16 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
 
-    - name: Test
-      run: echo "no-op for now"
+    - name: Test Large Tags 
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b ${{ env.DIST }}/ab_server.exe "--plc=ControlLogix" "--path=1,0" "--tag=TestBigArray:DINT[2000]"
+        timeout /T 5
+        echo "test getting a large tag."
+        ${{ env.DIST }}/tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray"
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v1
