@@ -49,6 +49,7 @@ typedef enum {
 
 struct run_args {
     char *tag_string;
+    int32_t tag;
     int timeout;
     int debug;
     int element_type;
@@ -77,16 +78,18 @@ static void usage(void);
 static void parse_args(int argc, char **argv, struct run_args *args);
 static void parse_type(char *type_str, struct run_args *args);
 static void parse_write_vals(char *write_vals, struct run_args *args);
-static void dump_values(int32_t tag, struct run_args *args);
-static void free_args(struct run_args *args);
-static void update_values(int32_t tag, struct run_args *args);
+static void dump_values(struct run_args *args);
+static void cleanup(struct run_args *args);
+static void update_values(struct run_args *args);
 
 
 int main(int argc, char **argv)
 {
     int rc = PLCTAG_STATUS_OK;
     struct run_args args;
-    int32_t tag = 0;
+
+    /* zero out all the bytes of args. */
+    memset(&args, 0, sizeof(args));
 
     /* make sure we have the required library version */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -110,28 +113,28 @@ int main(int argc, char **argv)
 
     /* set up a scope to fake local exceptions. */
     do {
-        tag = plc_tag_create(args.tag_string, args.timeout);
-        if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-            printf("ERROR: Error creating tag %s!\n", plc_tag_decode_error(tag));
-            rc = tag;
+        args.tag = plc_tag_create(args.tag_string, args.timeout);
+        if(plc_tag_status(args.tag) != PLCTAG_STATUS_OK) {
+            printf("ERROR: Error creating tag %s!\n", plc_tag_decode_error(args.tag));
+            rc = args.tag;
             break;
         }
 
         /* start with a read. */
-        rc = plc_tag_read(tag, args.timeout);
+        rc = plc_tag_read(args.tag, args.timeout);
         if(rc != PLCTAG_STATUS_OK) {
             printf("ERROR: Error returned while trying to read tag %s!\n", plc_tag_decode_error(rc));
             break;
         }
 
         /* dump out the tag values. */
-        dump_values(tag, &args);
+        dump_values(&args);
 
         /* is there something to write? */
         if(args.write_val_count > 0) {
-            update_values(tag, &args);
+            update_values(&args);
 
-            rc = plc_tag_write(tag, args.timeout);
+            rc = plc_tag_write(args.tag, args.timeout);
             if(rc != PLCTAG_STATUS_OK) {
                 printf("ERROR: Error returned while trying to write tag %s!\n", plc_tag_decode_error(rc));
                 break;
@@ -140,21 +143,18 @@ int main(int argc, char **argv)
             printf("New values written to tag.\n");
 
             /* read it back in and dump the values. */
-            rc = plc_tag_read(tag, args.timeout);
+            rc = plc_tag_read(args.tag, args.timeout);
             if(rc != PLCTAG_STATUS_OK) {
                 printf("ERROR: Error returned while trying to read tag %s!\n", plc_tag_decode_error(rc));
                 break;
             }
 
             /* dump out the tag values. */
-            dump_values(tag, &args);
+            dump_values(&args);
         }
     } while(0);
 
-
-    plc_tag_destroy(tag);
- 
-    free_args(&args);
+    cleanup(&args);
 
     return rc;
 }
@@ -206,11 +206,16 @@ void parse_args(int argc, char **argv, struct run_args *args)
     char *write_vals;
 
     for(i = 0; i < argc; i++) {
+
+        /* DEBUG */
+        printf("Processing argument %d \"%s\".\n", i, argv[i]);
+
         if(strncmp(argv[i],"--type=", 7) == 0) {
             /* type argument. */
 
             if(has_type) {
                 printf("ERROR: The type argument can only appear once!\n");
+                cleanup(args);
                 usage();
             }
 
@@ -220,6 +225,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
         } else if(strncmp(argv[i],"--tag=", 6) == 0) {
             if(has_tag) {
                 printf("ERROR: Only one tag argument may be present!\n");
+                cleanup(args);
                 usage();
             }
 
@@ -229,6 +235,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
         } else if(strncmp(argv[i],"--debug=", 8) == 0) {
             if(has_debug) {
                 printf("ERROR: Only one debug argument may be present!\n");
+                cleanup(args);
                 usage();
             }
 
@@ -238,6 +245,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
         } else if(strncmp(argv[i],"--timeout=", 10) == 0) {
             if(has_timeout) {
                 printf("ERROR: Only one timeout argument may be present!\n");
+                cleanup(args);
                 usage();
             }
 
@@ -245,6 +253,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
 
             if(args->timeout <= 0) {
                 printf("ERROR: timeout value must be greater than zero and is in milliseconds!\n");
+                cleanup(args);
                 usage();
             }
 
@@ -252,31 +261,28 @@ void parse_args(int argc, char **argv, struct run_args *args)
         } else if(strncmp(argv[i],"--write=", 8) == 0) {
             if(has_write_vals) {
                 printf("ERROR: Only one write value(s) argument may be present!\n");
+                cleanup(args);
                 usage();
             }
 
             write_vals = &(argv[i][8]);
 
-            if(args->timeout <= 0) {
-                printf("ERROR: timeout value must be greater than zero and is in milliseconds!\n");
-                usage();
-            }
-
             has_write_vals = true;
         } else {
-            printf("ERROR: Unknown argument \"%s\"!\n", argv[i]);
-            usage();
+            printf("Warning: Unknown argument \"%s\"!\n", argv[i]);
         }
     }
 
     /* check the args we got. */
     if(!has_tag) {
         printf("ERROR: you must have a tag argument!\n");
+        cleanup(args);
         usage();
     }
 
     if(!has_type) {
         printf("ERROR: you must have a type argument!\n");
+        cleanup(args);
         usage();
     }
 
@@ -298,6 +304,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
     /* double check the types.  Bits can _not_ be arrays. */
     if(args->element_type == TYPE_BIT && args->write_val_count > 1) {
         printf("ERROR: You may not treat a bit tag as an array!\n");
+        cleanup(args);
         usage();
     }
 }
@@ -308,19 +315,19 @@ void parse_type(char *type_str, struct run_args *args)
 {
     if(strcasecmp(type_str, "bit") == 0) {
         args->element_type = TYPE_BIT;
-    } else if(strcasecmp(type_str, "int8") == 0) {
+    } else if(strcasecmp(type_str, "sint8") == 0) {
         args->element_type = TYPE_I8;
     } else if(strcasecmp(type_str, "uint8") == 0) {
         args->element_type = TYPE_U8;
-    } else if(strcasecmp(type_str, "int16") == 0) {
+    } else if(strcasecmp(type_str, "sint16") == 0) {
         args->element_type = TYPE_I16;
     } else if(strcasecmp(type_str, "uint16") == 0) {
         args->element_type = TYPE_U16;
-    } else if(strcasecmp(type_str, "int32") == 0) {
+    } else if(strcasecmp(type_str, "sint32") == 0) {
         args->element_type = TYPE_I32;
     } else if(strcasecmp(type_str, "uint32") == 0) {
         args->element_type = TYPE_U32;
-    } else if(strcasecmp(type_str, "int64") == 0) {
+    } else if(strcasecmp(type_str, "sint64") == 0) {
         args->element_type = TYPE_I64;
     } else if(strcasecmp(type_str, "uint64") == 0) {
         args->element_type = TYPE_U64;
@@ -329,9 +336,14 @@ void parse_type(char *type_str, struct run_args *args)
     } else if(strcasecmp(type_str, "real64") == 0) {
         args->element_type = TYPE_F64;
     } else if(strcasecmp(type_str, "string") == 0) {
+
+        /* DEBUG */
+        printf("Setting type to TYPE_STRING.\n");
+
         args->element_type = TYPE_STRING;
     } else {
         printf("ERROR: Unknown type %s!\n", type_str);
+        cleanup(args);
         usage();
     }
 }
@@ -348,12 +360,14 @@ void parse_write_vals(char *write_vals, struct run_args *args)
     /* check the value string */
     if(!write_vals || strlen(write_vals) == 0) {
         printf("ERROR: String of values to write must not be zero-length!\n");
+        cleanup(args);
         usage();
     }
 
     tmp_vals = strdup(write_vals);
     if(!tmp_vals) {
         printf("ERROR: Unable to copy write value(s) string!\n");
+        cleanup(args);
         exit(1);
     }
 
@@ -388,6 +402,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.u8 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(uint8_t));
             if(!args->write_vals.u8) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -399,6 +414,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&(tmp_vals[val_start]), "%" SCNu8 "", &(args->write_vals.u8[elem_index])) != 1) {
                         printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -416,6 +432,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.i8 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(int8_t));
             if(!args->write_vals.i8) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -427,6 +444,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&tmp_vals[val_start], "%" SCNd8 "", &(args->write_vals.i8[elem_index])) != 1) {
                         printf("ERROR: bad format for signed 8-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -444,6 +462,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.u16 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(uint16_t));
             if(!args->write_vals.u16) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -455,6 +474,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&(tmp_vals[val_start]), "%" SCNu16 "", &(args->write_vals.u16[elem_index])) != 1) {
                         printf("ERROR: bad format for unsigned 16-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -472,6 +492,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.i16 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(int16_t));
             if(!args->write_vals.i16) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -483,6 +504,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&tmp_vals[val_start], "%" SCNd16 "", &(args->write_vals.i16[elem_index])) != 1) {
                         printf("ERROR: bad format for signed 16-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -500,6 +522,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.u32 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(uint32_t));
             if(!args->write_vals.u32) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -511,6 +534,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&(tmp_vals[val_start]), "%" SCNu32 "", &(args->write_vals.u32[elem_index])) != 1) {
                         printf("ERROR: bad format for unsigned 32-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -528,6 +552,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.i32 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(int32_t));
             if(!args->write_vals.i32) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -539,6 +564,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&tmp_vals[val_start], "%" SCNd32 "", &(args->write_vals.i32[elem_index])) != 1) {
                         printf("ERROR: bad format for signed 32-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -556,6 +582,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.u64 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(uint64_t));
             if(!args->write_vals.u64) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -567,6 +594,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&(tmp_vals[val_start]), "%" SCNu64 "", &(args->write_vals.u64[elem_index])) != 1) {
                         printf("ERROR: bad format for unsigned 64-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -584,6 +612,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.i64 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(int64_t));
             if(!args->write_vals.i64) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -595,6 +624,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&tmp_vals[val_start], "%" SCNd64 "", &(args->write_vals.i64[elem_index])) != 1) {
                         printf("ERROR: bad format for signed 64-bit integer for write value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -612,6 +642,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.f32 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(float));
             if(!args->write_vals.f32) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -623,6 +654,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&(tmp_vals[val_start]), "%f", &(args->write_vals.f32[elem_index])) != 1) {
                         printf("ERROR: bad format for 32-bit floating point value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -640,6 +672,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.f64 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(double));
             if(!args->write_vals.f64) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -651,6 +684,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if(sscanf_platform(&tmp_vals[val_start], "%lf", &(args->write_vals.f64[elem_index])) != 1) {
                         printf("ERROR: bad format for 64-bit floating point value.\n");
+                        cleanup(args);
                         usage();
                     }
 
@@ -668,6 +702,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             args->write_vals.string = calloc((size_t)(unsigned int)args->write_val_count, sizeof(char *));
             if(!args->write_vals.string) {
                 printf("ERROR: Unable to allocate value array for write values!");
+                cleanup(args);
                 exit(1);
             }
 
@@ -680,6 +715,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
                     if((args->write_vals.string[elem_index] = strdup(&tmp_vals[val_start])) == NULL) {
                         printf("ERROR: Unable to allocate string copy for write argument %d!\n", elem_index);
+                        cleanup(args);
                         usage();
                     }
 
@@ -695,6 +731,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
         default:
             printf("ERROR: Unknown data type (%d)!\n", args->element_type);
+            cleanup(args);
             usage();
             break;
     }
@@ -706,10 +743,11 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
 
 
-void dump_values(int32_t tag, struct run_args *args)
+void dump_values(struct run_args *args)
 {
     int item_index = 0;
     int offset = 0;
+    int32_t tag = args->tag;
 
     /* display the data */
     if(args->element_type == TYPE_BIT) {
@@ -717,6 +755,7 @@ void dump_values(int32_t tag, struct run_args *args)
 
         if(rc < 0) {
             printf("Error received trying to read bit tag: %s!\n", plc_tag_decode_error(rc));
+            cleanup(args);
             exit(1);
         } else {
             printf("data=%d\n", rc);
@@ -787,6 +826,7 @@ void dump_values(int32_t tag, struct run_args *args)
                             str = calloc((size_t)(unsigned int)(str_len+1), sizeof(char));
                             if(!str) {
                                 printf("ERROR: Unable to allocate temporary buffer to output string!\n");
+                                cleanup(args);
                                 exit(1);
                             }
 
@@ -798,6 +838,10 @@ void dump_values(int32_t tag, struct run_args *args)
                             printf("data[%d]=\"%s\"\n", item_index, str);
 
                             free(str);
+                        } else if(str_len == 0) {
+                            printf("data[%d]=\"\"\n", item_index);
+                        } else {
+                            printf("Error getting string length for item %d!  Got error value %s!", item_index, plc_tag_decode_error(str_len));
                         }
                     }
 
@@ -807,6 +851,7 @@ void dump_values(int32_t tag, struct run_args *args)
 
                 default:
                     printf("ERROR: Unsupported tag type %d!\n", args->element_type);
+                    cleanup(args);
                     exit(1);
                     break;
             }
@@ -817,8 +862,11 @@ void dump_values(int32_t tag, struct run_args *args)
 }
 
 
-void free_args(struct run_args *args)
+void cleanup(struct run_args *args)
 {
+    plc_tag_destroy(args->tag);
+    args->tag = 0;
+
     if(args->write_val_count > 0) {
         if(args->element_type == TYPE_STRING && args->write_vals.string) {
             for(int i=0; i < args->write_val_count; i++) {
@@ -841,11 +889,12 @@ void free_args(struct run_args *args)
 
 
 
-void update_values(int32_t tag, struct run_args *args)
+void update_values(struct run_args *args)
 {
     int item_index = 0;
     int offset = 0;
     int rc = PLCTAG_STATUS_OK;
+    int32_t tag = args->tag;
 
     /* display the data */
     if(args->element_type == TYPE_BIT) {
@@ -853,6 +902,7 @@ void update_values(int32_t tag, struct run_args *args)
 
         if(rc < 0) {
             printf("Error received trying to write bit tag: %s!\n", plc_tag_decode_error(rc));
+            cleanup(args);
             exit(1);
         }
     } else {
@@ -866,6 +916,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_uint8(tag, offset, args->write_vals.u8[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write unsigned 8-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 1;
@@ -875,6 +926,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_uint16(tag, offset, args->write_vals.u16[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write unsigned 16-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 2;
@@ -884,6 +936,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_uint32(tag, offset, args->write_vals.u32[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write unsigned 32-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 4;
@@ -893,6 +946,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_uint64(tag, offset, args->write_vals.u64[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write unsigned 64-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 8;
@@ -902,6 +956,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_int8(tag, offset, args->write_vals.i8[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write signed 8-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 1;
@@ -911,6 +966,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_int16(tag, offset, args->write_vals.i16[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write signed 16-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 2;
@@ -920,6 +976,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_int32(tag, offset, args->write_vals.i32[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write signed 32-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 4;
@@ -929,6 +986,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_int64(tag, offset, args->write_vals.i64[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write signed 64-bit value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 8;
@@ -938,6 +996,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_float32(tag, offset, args->write_vals.f32[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write 32-bit floating point value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 4;
@@ -947,6 +1006,7 @@ void update_values(int32_t tag, struct run_args *args)
                     rc = plc_tag_set_float64(tag, offset, args->write_vals.f64[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
                         printf("Error returned while trying to write 64-bit floating point value of entry %d!\n", item_index);
+                        cleanup(args);
                         exit(1);
                     }
                     offset += 8;
@@ -967,6 +1027,7 @@ void update_values(int32_t tag, struct run_args *args)
                         rc = plc_tag_set_string_length(tag, offset, str_capacity);
                         if(rc != PLCTAG_STATUS_OK) {
                             printf("Error while setting the string length of string %d to the string capacity for clearing it!\n", item_index);
+                            cleanup(args);
                             exit(1);
                         }
 
@@ -975,6 +1036,7 @@ void update_values(int32_t tag, struct run_args *args)
                             rc = plc_tag_set_string_char(tag, offset, i, 0);
                             if(rc != PLCTAG_STATUS_OK) {
                                 printf("Error while clearing string %s!\n", plc_tag_decode_error(rc));
+                                cleanup(args);
                                 exit(1);
                             }
                         }
@@ -983,6 +1045,7 @@ void update_values(int32_t tag, struct run_args *args)
                         rc = plc_tag_set_string_length(tag, offset, str_len);
                         if(rc != PLCTAG_STATUS_OK) {
                             printf("Error while setting the string length of string %d to the string of the new value!\n", item_index);
+                            cleanup(args);
                             exit(1);
                         }
                         
@@ -991,6 +1054,7 @@ void update_values(int32_t tag, struct run_args *args)
                             rc = plc_tag_set_string_char(tag, offset, i, args->write_vals.string[item_index][i]);
                             if(rc != PLCTAG_STATUS_OK) {
                                 printf("Error, %s, while setting string %d at position %d!\n", plc_tag_decode_error(rc), item_index, i);
+                                cleanup(args);
                                 exit(1);
                             }
                         }
@@ -1002,6 +1066,7 @@ void update_values(int32_t tag, struct run_args *args)
 
                 default:
                     printf("ERROR: Unsupported tag type %d!\n", args->element_type);
+                    cleanup(args);
                     exit(1);
                     break;
             }
