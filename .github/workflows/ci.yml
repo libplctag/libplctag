@@ -363,10 +363,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        start /b ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
+        start /b ${{ env.DIST }}/ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
         timeout /T 5
         echo "test getting a large tag."
-        tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray"
+        ${{ env.DIST }}/tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray"
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
