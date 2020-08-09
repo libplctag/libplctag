@@ -344,8 +344,8 @@ jobs:
     env:
       VERSION: "2.1.14"
       ARTIFACT: "libplctag_2.1.14_windows_x64"
-      BUILD: "${{ github.workspace }}\build"
-      DIST: "${{ github.workspace }}\build\bin_dist"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
 
     steps:
     - uses: actions/checkout@v2
