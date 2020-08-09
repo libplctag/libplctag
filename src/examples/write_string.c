@@ -42,9 +42,9 @@
  * This example shows how to read and write an array of strings.
  */
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,2,0
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=88&elem_count=6&debug=1&name=Loc_Txt"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=6&name=Loc_Txt"
 #define ARRAY_1_DIM_SIZE (48)
 #define ARRAY_2_DIM_SIZE (6)
 #define STRING_DATA_SIZE (82)
@@ -61,13 +61,8 @@ int32_t create_tag(const char *path)
 
     tag = plc_tag_create(path, DATA_TIMEOUT);
 
-    if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        return tag;
-    }
-
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stdout,"Error setting up tag internal state.\n");
+        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return rc;
     }
 
@@ -81,25 +76,36 @@ int dump_strings(int32_t tag)
     char str_data[STRING_DATA_SIZE];
     int str_index;
     int str_len;
-    int num_strings = plc_tag_get_size(tag) / ELEM_SIZE;
-    int i;
+    int str_number = 0;
+    int offset = 0;
+    int tag_size = plc_tag_get_size(tag);
 
     /* loop over the whole thing. */
-    for(i=0; i< num_strings; i++) {
+    offset = 0;
+    while(offset < tag_size) {
+        str_number++;
+
         /* get the string length */
-        str_len = plc_tag_get_int32(tag,i * ELEM_SIZE);
+        str_len = plc_tag_get_string_length(tag, offset);
+        if(str_len < 0) {
+            fprintf(stderr, "Got error getting string length of string %d, error %s.\n", str_number, plc_tag_decode_error(str_len));
+            break;
+        }
+
+        /* clamp */
+        if(str_len >= STRING_DATA_SIZE) {
+            str_len = STRING_DATA_SIZE - 1;
+        }
 
         /* copy the data */
         for(str_index=0; str_index<str_len; str_index++) {
-            str_data[str_index] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+4+str_index);
+            str_data[str_index] = (char)plc_tag_get_string_char(tag, offset, str_index);
         }
+        str_data[str_index] = (char)0;
 
-        /* pad with zeros */
-        for(;str_index<STRING_DATA_SIZE; str_index++) {
-            str_data[str_index] = 0;
-        }
+        printf("String [%d] = \"%s\"\n", str_number, str_data);
 
-        printf("String [%d] = \"%s\"\n",i,str_data);
+        offset += plc_tag_get_string_total_length(tag, offset);
     }
 
     return 0;
@@ -108,26 +114,58 @@ int dump_strings(int32_t tag)
 
 
 
-void update_string(int32_t tag, int i, char *str)
+void update_string(int32_t tag, int str_number, char *str)
 {
-    int str_len;
-    int base_offset = i * ELEM_SIZE;
+    int rc = 0;
+    int str_len = (int)strlen(str);
     int str_index;
+    int str_total_length = plc_tag_get_string_total_length(tag, 0); /* assume all are the same size */
+    int str_capacity = plc_tag_get_string_capacity(tag, 0);
 
-    /* now write the data */
-    str_len = (int)strlen(str);
+    /* 
+     * first zero out the whole string. 
+     * 
+     * In order to access a character in a string, it needs to be
+     * within the string length.   So set the string length to
+     * the largest possible amount.
+     */
 
-    /* set the length */
-    plc_tag_set_int32(tag, base_offset, str_len);
-
-    /* copy the data */
-    for(str_index=0; str_index < str_len && str_index < STRING_DATA_SIZE; str_index++) {
-        plc_tag_set_uint8(tag,base_offset + 4 + str_index, (uint8_t)str[str_index]);
+    /* set the string length to the maximum. */
+    rc = plc_tag_set_string_length(tag, str_number * str_total_length, str_capacity);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Error setting string length of string %d, error %s!\n", str_number, plc_tag_decode_error(rc));
+        return;
     }
 
-    /* pad with zeros */
-    for(;str_index<STRING_DATA_SIZE; str_index++) {
-        plc_tag_set_uint8(tag,base_offset + 4 + str_index, 0);
+    for(str_index = 0;str_index < str_capacity; str_index++) {
+        rc = plc_tag_set_string_char(tag, str_number * str_total_length, str_index, 0);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Error zeroing character %d of string %d, error %s!\n", str_index, str_number, plc_tag_decode_error(rc));
+            return;
+        }
+    }
+
+    /* copy in the new string. */
+
+    /* clamp before we do anything else. */
+    if(str_len > str_capacity) {
+        str_len = str_capacity;
+    }
+
+    /* set the length to the length of the string we are inserting. */
+    rc = plc_tag_set_string_length(tag, str_number * str_total_length, str_len);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Error setting string length of string %d, error %s!\n", str_number, plc_tag_decode_error(rc));
+        return;
+    }
+
+    /* copy the data */
+    for(str_index=0; str_index < str_len; str_index++) {
+        rc = plc_tag_set_string_char(tag, str_number * str_total_length, str_index, (int)str[str_index]);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Error setting character %d of string %d, error %s!\n", str_index, str_number, plc_tag_decode_error(rc));
+            return;
+        }
     }
 }
 
@@ -137,7 +175,7 @@ int main()
 {
     int i;
     char str[STRING_DATA_SIZE] = {0};
-    int32_t tag = create_tag(TAG_PATH);
+    int32_t tag = 0; 
     int rc;
 
     /* check library API version */
@@ -146,33 +184,54 @@ int main()
         exit(1);
     }
 
-    if(tag < 0) {
+    fprintf(stderr, "Using library version %d.%d.%d.\n", 
+                                            plc_tag_get_int_attribute(0, "version_major", -1),
+                                            plc_tag_get_int_attribute(0, "version_minor", -1),
+                                            plc_tag_get_int_attribute(0, "version_patch", -1));
+
+
+    /* set up the RNG */
+    srand((unsigned int)(uint64_t)util_time_ms());
+
+    /* create the tag. */
+    if((tag = create_tag(TAG_PATH)) < 0) {
         fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        return 0;
-    }
-
-    /* test pre-read by writing first */
-    for(i=0; i<ARRAY_2_DIM_SIZE; i++) {
-        snprintf_platform(str,sizeof(str), "string value for element %d", i);
-        update_string(tag, i, str);
-    }
-
-    /* write the data */
-    rc = plc_tag_write(tag, DATA_TIMEOUT);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stdout,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         return 0;
     }
 
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stdout,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         return 0;
     }
 
+    /* dump the "before" state. */
+    printf("Strings before update:\n");
+    dump_strings(tag);
+
+    /* test pre-read by writing first */
+    for(i=0; i<ARRAY_2_DIM_SIZE; i++) {
+        snprintf_platform(str,sizeof(str), "string value for element %d is %d.", i, (int)(rand() % 1000));
+        update_string(tag, i, str);
+    }
+
+    /* write the data */
+    rc = plc_tag_write(tag, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stdout,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        return 0;
+    }
+
+    /* get the data again */
+    rc = plc_tag_read(tag, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stdout,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        return 0;
+    }
+
+    /* dump the "after" state */
+    printf("\nStrings after update:\n");
     dump_strings(tag);
 
     plc_tag_destroy(tag);
