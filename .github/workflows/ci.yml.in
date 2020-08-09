@@ -360,6 +360,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
 
     - name: Test Large Tags 
+      shell: cmd
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
