@@ -411,7 +411,7 @@ jobs:
 
     - name: Test SLC 500
       run: |
-        cd ${{ env.DIST }}
+        cd ${{ env.DIST }}\Release
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] 
         timeout /T 5
