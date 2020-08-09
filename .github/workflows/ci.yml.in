@@ -362,7 +362,7 @@ jobs:
     - name: Test Large Tags 
       run: |
         cd ${{ env.DIST }}
-        dir
+        dir Release
         echo "start up simulator..."
         start /b .\Release\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
         timeout /T 5
