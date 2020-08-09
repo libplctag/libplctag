@@ -339,7 +339,8 @@ if (UNIX)
                            toggle_bit
                            toggle_bool
                            write_string
-                           tag_rw )
+                           tag_rw
+                           tag_rw2 )
 
     set ( example_PROG_UTIL utils_posix.c )
     set ( example_LIBRARIES ${tool_lib} pthread )
@@ -359,7 +360,8 @@ elseif(WIN32)
                            toggle_bit
                            toggle_bool
                            write_string
-                           tag_rw )
+                           tag_rw
+                           tag_rw2 )
 
     set ( example_PROG_UTIL utils_windows.c)
     set ( example_LIBRARIES ${tool_lib} ws2_32 )
