@@ -342,8 +342,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.1.12"
-      ARTIFACT: "libplctag_2.1.12_windows_x64"
+      VERSION: "2.2.0"
+      ARTIFACT: "libplctag_2.2.0_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
 
