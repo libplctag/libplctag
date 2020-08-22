@@ -1598,18 +1598,18 @@ int sleep_ms(int ms)
 
 int64_t time_ms(void)
 {
+    /* Found on StackOverflow in an answer by Ian Boyd. */
+    int64_t res = 0;
+    const int64_t UNIX_TIME_START = 0x019DB1DED53E8000;   /* January 1, 1970 (start of Unix epoch) in "ticks" */
+    const int64_t TICKS_PER_MILLISECOND = 10000;          /* a tick is 100ns */
+
     FILETIME ft;
-    int64_t res;
+    GetSystemTimeAsFileTime(out ft); //returns ticks in UTC
 
-    GetSystemTimeAsFileTime(&ft);
-
-    /* calculate time as 100ns increments since Jan 1, 1601. */
     res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
 
-    /* get time in ms.   Magic offset to move baseline date. */
-    res = (res - 116444736000000000L) / 10000;
-
-    return  res;
+    /* Convert ticks since 1/1/1970 into milliseconds */
+    return (res - UNIX_TIME_START) / TICKS_PER_SECOND;    
 }
 
 
