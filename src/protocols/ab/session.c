@@ -393,6 +393,16 @@ int session_match_valid(const char *host, const char *path, ab_session_p session
         return 0;
     }
 
+    if(!str_length(host)) {
+        pdebug(DEBUG_WARN, "New session host is NULL or zero length!");
+        return 0;
+    }
+
+    if(!str_length(session->host)) {
+        pdebug(DEBUG_WARN, "Session host is NULL or zero length!");
+        return 0;
+    }
+
     if(str_cmp_i(host, session->host)) {
         return 0;
     }
