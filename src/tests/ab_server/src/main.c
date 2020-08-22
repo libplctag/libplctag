@@ -31,29 +31,97 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <signal.h>
+#include "compat.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <time.h>
+
+#if defined(IS_WINDOWS)
+#include <Windows.h>
+#else
+ /* assume it is POSIX of some sort... */
+#include <signal.h>
+#include <strings.h>
+#endif
+
 #include "eip.h"
 #include "plc.h"
 #include "slice.h"
 #include "tcp_server.h"
 #include "utils.h"
 
-
 static void usage(void);
 static void process_args(int argc, const char **argv, plc_s *plc);
 static void parse_path(const char *path, plc_s *plc);
-static void parse_tag(const char *tag, plc_s *plc);
+static void parse_pccc_tag(const char *tag, plc_s *plc);
+static void parse_cip_tag(const char *tag, plc_s *plc);
 static slice_s request_handler(slice_s input, slice_s output, void *plc);
 
 
-volatile sig_atomic_t done = 0;
+#ifdef IS_WINDOWS
+
+typedef volatile int sig_flag_t;
+
+sig_flag_t done = 0;
+
+/* straight from MS' web site :-) */
+int WINAPI CtrlHandler(DWORD fdwCtrlType)
+{
+    switch (fdwCtrlType)
+    {
+        // Handle the CTRL-C signal.
+    case CTRL_C_EVENT:
+        info("^C event");
+        done = 1;
+        return TRUE;
+
+        // CTRL-CLOSE: confirm that the user wants to exit.
+    case CTRL_CLOSE_EVENT:
+        info("Close event");
+        done = 1;
+        return TRUE;
+
+        // Pass other signals to the next handler.
+    case CTRL_BREAK_EVENT:
+        info("^Break event");
+        done = 1;
+        return TRUE;
+
+    case CTRL_LOGOFF_EVENT:
+        info("Logoff event");
+        done = 1;
+        return TRUE;
+
+    case CTRL_SHUTDOWN_EVENT:
+        info("Shutdown event");
+        done = 1;
+        return TRUE;
+
+    default:
+        info("Default Event: %d", fdwCtrlType);
+        return FALSE;
+    }
+}
+
+
+void setup_break_handler(void)
+{
+    if (!SetConsoleCtrlHandler(CtrlHandler, TRUE))
+    {
+        printf("\nERROR: Could not set control handler!\n");
+        usage();
+    }
+}
+
+#else
+
+typedef volatile sig_atomic_t sig_flag_t;
+
+sig_flag_t done = 0;
 
 void SIGINT_handler(int not_used)
 {
@@ -71,6 +139,8 @@ void setup_break_handler(void)
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
 }
+
+#endif
 
 
 int main(int argc, const char **argv)
@@ -107,10 +177,20 @@ int main(int argc, const char **argv)
 void usage(void)
 {
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] --tag=<tag>\n"
-                    "   <plc type> = one of \"ControlLogix\", \"Micro800\" or \"Omron\".\n"
+                    "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
+                    "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\" or \"Micrologix\".\n"
+                    "\n"
                     "   <path> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
                     "\n"
-                    "    Tags are in the format: <name>:<type>[<sizes>] where:\n"
+                    "    PCCC-based PLC tags are in the format: <file>[<size>] where:\n"
+                    "        <file> is the data file, only the following are supported:\n"
+                    "            N7 - 2-byte signed integer.\n"
+                    "            F8 - 4-byte floating point number.\n"
+                    "            L19 - 4-byte signed integer.\n"
+                    "\n"
+                    "        <size> field is the length of the data file.\n"
+                    "\n"
+                    "    CIP-based PLC tags are in the format: <name>:<type>[<sizes>] where:\n"
                     "        <name> is alphanumeric, starting with an alpha character.\n"
                     "        <type> is one of:\n"
                     "            INT - 2-byte signed integer.  Requires array size(s).\n"
@@ -134,6 +214,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
     bool has_plc = false;
     bool has_tag = false;
 
+    /* make sure that the reject FO count is zero. */
+    plc->reject_fo_count = 0;
+
     for(int i=0; i < argc; i++) {
         if(strncmp(argv[i],"--plc=",6) == 0) {
             if(has_plc) {
@@ -141,7 +224,7 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 usage();
             }
 
-            if(strcasecmp(&(argv[i][6]), "ControlLogix") == 0) {
+            if(str_cmp_i(&(argv[i][6]), "ControlLogix") == 0) {
                 fprintf(stderr, "Selecting ControlLogix simulator.\n");
                 plc->plc_type = PLC_CONTROL_LOGIX;
                 plc->path[0] = (uint8_t)0x00; /* filled in later. */
@@ -155,7 +238,7 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->server_to_client_max_packet = 508;
                 needs_path = true;
                 has_plc = true;
-            } else if(strcasecmp(&(argv[i][6]), "Micro800") == 0) {
+            } else if(str_cmp_i(&(argv[i][6]), "Micro800") == 0) {
                 fprintf(stderr, "Selecting Micro8xx simulator.\n");
                 plc->plc_type = PLC_MICRO800;
                 plc->path[0] = (uint8_t)0x20;
@@ -167,7 +250,7 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->server_to_client_max_packet = 508;
                 needs_path = false;
                 has_plc = true;
-            }  else if(strcasecmp(&(argv[i][6]), "Omron") == 0) {
+            } else if(str_cmp_i(&(argv[i][6]), "Omron") == 0) {
                 fprintf(stderr, "Selecting Omron NJ/NX simulator.\n");
                 plc->plc_type = PLC_OMRON;
                 plc->path[0] = (uint8_t)0x12;  /* Extended segment, port A */
@@ -191,6 +274,42 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->server_to_client_max_packet = 508;
                 needs_path = false;
                 has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "PLC/5") == 0) {
+                fprintf(stderr, "Selecting PLC/5 simulator.\n");
+                plc->plc_type = PLC_PLC5;
+                plc->path[0] = (uint8_t)0x20;  
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24; 
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
+                fprintf(stderr, "Selecting SLC 500 simulator.\n");
+                plc->plc_type = PLC_SLC;
+                plc->path[0] = (uint8_t)0x20;  
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24; 
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
+                fprintf(stderr, "Selecting Micrologix simulator.\n");
+                plc->plc_type = PLC_MICROLOGIX;
+                plc->path[0] = (uint8_t)0x20;  
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24; 
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
             } else {
                 fprintf(stderr, "Unsupported PLC type %s!\n", &(argv[i][6]));
                 usage();
@@ -203,13 +322,23 @@ void process_args(int argc, const char **argv, plc_s *plc)
         }
 
         if(strncmp(argv[i],"--tag=",6) == 0) {
-            parse_tag(&(argv[i][6]), plc);
+            if(plc && (plc->plc_type == PLC_PLC5 || plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX)) {
+                parse_pccc_tag(&(argv[i][6]), plc);
+            } else {
+                parse_cip_tag(&(argv[i][6]), plc);
+            }
             has_tag = true;
         }
 
         if(strcmp(argv[i],"--debug") == 0) {
             debug_on();
-            has_tag = true;
+        }
+
+        if(strncmp(argv[i],"--reject_fo=", 12) == 0) {
+            if(plc) {
+                info("Setting reject ForwardOpen count to %d.", atoi(&argv[i][12]));
+                plc->reject_fo_count = atoi(&argv[i][12]);
+            }
         }
     }
 
@@ -233,7 +362,8 @@ void process_args(int argc, const char **argv, plc_s *plc)
 void parse_path(const char *path_str, plc_s *plc)
 {
     int tmp_path[2];
-    if(sscanf(path_str, "%d,%d",&tmp_path[0], &tmp_path[1]) == 2) {
+
+    if (str_scanf(path_str, "%d,%d", &tmp_path[0], &tmp_path[1]) == 2) {
         plc->path[0] = (uint8_t)tmp_path[0];
         plc->path[1] = (uint8_t)tmp_path[1];
 
@@ -245,8 +375,150 @@ void parse_path(const char *path_str, plc_s *plc)
 }
 
 
+
+
 /*
- * Tags are in the format:
+ * PCCC tags are in the format:
+ *    <data file>[<size>]
+ *
+ * Where data file is one of the following:
+ *     N7 - 2 byte signed integer.  Requires size.
+ *     F8 - 4-byte floating point number.   Requires size.
+ *     L19 - 4 byte signed integer.   Requires size.
+ * 
+ * The size field is a single positive integer.
+ */
+
+void parse_pccc_tag(const char *tag_str, plc_s *plc)
+{
+    tag_def_s *tag = calloc(1, sizeof(*tag));
+    char data_file_name[200] = { 0 };
+    char size_str[200] = { 0 };
+    int num_dims = 0;
+    size_t start = 0;
+    size_t len = 0;
+
+    info("Starting.");
+
+    if(!tag) {
+        error("Unable to allocate memory for new tag!");
+    }
+
+    /* try to match the two parts of a tag definition string. */
+
+    info("Match data file.");
+
+    /* first match the data file. */
+    start = 0;
+    len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+    if (!len) {
+        fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        /* copy the string. */
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
+            data_file_name[i] = tag_str[start + i];
+        }
+
+        /* check data file for a match. */
+        if(str_cmp_i(data_file_name, "N7") == 0) {
+            info("Found N7 data file.");
+            tag->tag_type = TAG_PCCC_TYPE_INT;
+            tag->elem_size = 2;
+            tag->data_file_num = 7;
+        } else if(str_cmp_i(data_file_name, "F8") == 0) {
+            info("Found N7 data file.");
+            tag->tag_type = TAG_PCCC_TYPE_REAL;
+            tag->elem_size = 4;
+            tag->data_file_num = 8;
+        } else if(str_cmp_i(data_file_name, "L19") == 0) {
+            info("Found N7 data file.");
+            tag->tag_type = TAG_PCCC_TYPE_DINT;
+            tag->elem_size = 4;
+            tag->data_file_num = 19;
+        } else {
+            fprintf(stderr, "Unknown data file %s, unable to create tag!", data_file_name);
+            usage();
+        }
+
+        start += len;
+    }
+
+    /* get the array size delimiter. */
+    if (tag_str[start] != '[') {
+        fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after data file in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        start++;
+    }
+
+    /* get the size field */
+    len = strspn(tag_str + start, "0123456789");
+    if (!len) {
+        fprintf(stderr, "Unable to parse tag definition string, cannot match array size in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        /* copy the string. */
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
+            size_str[i] = tag_str[start + i];
+        }
+
+        start += len;
+    }
+
+    if (tag_str[start] != ']') {
+        fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after size in \"%s\"!\n", tag_str);
+        usage();
+    }
+
+    /* make sure all the dimensions are defaulted to something sane. */
+    tag->dimensions[0] = 1;
+    tag->dimensions[1] = 1;
+    tag->dimensions[2] = 1;
+
+    /* match the size. */
+    num_dims = str_scanf(size_str, "%zu", &tag->dimensions[0]);
+    if(num_dims != 1) {
+        fprintf(stderr, "Unable to parse tag size in \"%s\"!\n", tag_str);
+        usage();
+    }
+
+    /* check the size. */
+    if(tag->dimensions[0] <= 0) {
+        fprintf(stderr, "The array size must least 1 and may not be negative!\n");
+        usage();
+    } else {
+        tag->elem_count = tag->dimensions[0];
+        tag->num_dimensions = 1;
+    }
+ 
+    /* copy the tag name */
+    tag->name = strdup(data_file_name);
+    if (!tag->name) {
+        fprintf(stderr, "Unable to allocate a copy of the data file \"%s\"!\n", data_file_name);
+        usage();
+    }
+
+    /* allocate the tag data array. */
+    info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
+    tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
+    if(!tag->data) {
+        fprintf(stderr, "Unable to allocate tag data buffer!\n");
+        free(tag->name);
+    }
+
+    info("Processed \"%s\" into tag %s of type %x with dimensions (%d, %d, %d).", tag_str, tag->name, tag->tag_type, tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
+
+    /* add the tag to the list. */
+    tag->next_tag = plc->tags;
+    plc->tags = tag;
+}
+
+
+
+
+/*
+ * CIP tags are in the format:
  *    <name>:<type>[<sizes>]
  *
  * Where name is alphanumeric, starting with an alpha character.
@@ -261,72 +533,114 @@ void parse_path(const char *path_str, plc_s *plc)
  * Array size field is one or more (up to 3) numbers separated by commas.
  */
 
-void parse_tag(const char *tag_str, plc_s *plc)
+void parse_cip_tag(const char *tag_str, plc_s *plc)
 {
     tag_def_s *tag = calloc(1, sizeof(*tag));
-    char *type_str = NULL;
-    char *dim_str = NULL;
+    char tag_name[200] = { 0 };
+    char type_str[200] = { 0 };
+    char dim_str[200] = { 0 };
     int num_dims = 0;
-    int rc = 0;
+    size_t start = 0;
+    size_t len = 0;
 
     if(!tag) {
         error("Unable to allocate memory for new tag!");
     }
 
-    rc = sscanf(tag_str,"%m[a-zA-Z0-9_]:%m[A-Z][%m[0-9,]]", &(tag->name), &type_str, &dim_str);
-    if(rc != 3) {
-        fprintf(stderr, "Tag format is incorrect in \"%s\", matched %d parts and expected to match 3 parts!\n", tag_str, rc);
-        if(tag->name) {
-            info("Tag name: %s\n", tag->name);
+    /* try to match the three parts of a tag definition string. */
+
+    /* first match the name. */
+    start = 0;
+    len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+    if (!len) {
+        fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        /* copy the string. */
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
+            tag_name[i] = tag_str[start + i];
         }
 
-        if(type_str) {
-            info("type_str: %s\n", type_str);
+        start += len;
+    }
+
+    if(tag_str[start] != ':') {
+        fprintf(stderr, "Unable to parse tag definition string, cannot find colon after tag name in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        start++;
+    }
+
+    /* get the type field */
+    len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    if (!len) {
+        fprintf(stderr, "Unable to parse tag definition string, cannot match tag type in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        /* copy the string. */
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
+            type_str[i] = tag_str[start + i];
         }
 
-        if(dim_str) {
-            info("dim_str: %s\n", dim_str);
+        start += len;
+    }
+
+    if (tag_str[start] != '[') {
+        fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after tag type in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        start++;
+    }
+
+    /* get the dimension field */
+    len = strspn(tag_str + start, "0123456789,");
+    if (!len) {
+        fprintf(stderr, "Unable to parse tag definition string, cannot match dimension in \"%s\"!\n", tag_str);
+        usage();
+    } else {
+        /* copy the string. */
+        for (size_t i = 0; i < len && i < (size_t)200; i++) {
+            dim_str[i] = tag_str[start + i];
         }
 
+        start += len;
+    }
+
+    if (tag_str[start] != ']') {
+        fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after tag type in \"%s\"!\n", tag_str);
         usage();
     }
 
     /* match the type. */
-    if(strcasecmp(type_str, "SINT") == 0) {
-        tag->tag_type = TAG_TYPE_SINT;
+    if(str_cmp_i(type_str, "SINT") == 0) {
+        tag->tag_type = TAG_CIP_TYPE_SINT;
         tag->elem_size = 1;
-    } else if(strcasecmp(type_str, "INT") == 0) {
-        tag->tag_type = TAG_TYPE_INT;
+    } else if(str_cmp_i(type_str, "INT") == 0) {
+        tag->tag_type = TAG_CIP_TYPE_INT;
         tag->elem_size = 2;
-    } else if(strcasecmp(type_str, "DINT") == 0) {
-        tag->tag_type = TAG_TYPE_DINT;
+    } else if(str_cmp_i(type_str, "DINT") == 0) {
+        tag->tag_type = TAG_CIP_TYPE_DINT;
         tag->elem_size = 4;
-    } else if(strcasecmp(type_str, "LINT") == 0) {
-        tag->tag_type = TAG_TYPE_LINT;
+    } else if(str_cmp_i(type_str, "LINT") == 0) {
+        tag->tag_type = TAG_CIP_TYPE_LINT;
         tag->elem_size = 8;
-    } else if(strcasecmp(type_str, "REAL") == 0) {
-        tag->tag_type = TAG_TYPE_REAL;
+    } else if(str_cmp_i(type_str, "REAL") == 0) {
+        tag->tag_type = TAG_CIP_TYPE_REAL;
         tag->elem_size = 4;
-    } else if(strcasecmp(type_str, "LREAL") == 0) {
-        tag->tag_type = TAG_TYPE_LREAL;
+    } else if(str_cmp_i(type_str, "LREAL") == 0) {
+        tag->tag_type = TAG_CIP_TYPE_LREAL;
         tag->elem_size = 8;
     } else {
         fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
-        free(type_str);
-        free(dim_str);
         usage();
     }
-
-    free(type_str);
 
     /* match the dimensions. */
     tag->dimensions[0] = 0;
     tag->dimensions[1] = 0;
     tag->dimensions[2] = 0;
-    num_dims = sscanf(dim_str, "%zu,%zu,%zu,%*u", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
 
-    free(dim_str);
-
+    num_dims = str_scanf(dim_str, "%zu,%zu,%zu,%*u", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
     if(num_dims < 1 || num_dims > 3) {
         fprintf(stderr, "Tag dimensions must have at least one dimension non-zero and no more than three dimensions.");
         usage();
@@ -355,11 +669,18 @@ void parse_tag(const char *tag_str, plc_s *plc)
         tag->dimensions[2] = 1;
     }
  
+    /* copy the tag name */
+    tag->name = strdup(tag_name);
+    if (!tag->name) {
+        fprintf(stderr, "Unable to allocate a copy of the tag name \"%s\"!\n", tag_name);
+        usage();
+    }
+
     /* allocate the tag data array. */
     info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
-
     if(!tag->data) {
+        fprintf(stderr, "Unable to allocate tag data buffer!\n");
         free(tag->name);
     }
 
@@ -369,6 +690,7 @@ void parse_tag(const char *tag_str, plc_s *plc)
     tag->next_tag = plc->tags;
     plc->tags = tag;
 }
+
 
 /*
  * Process each request.  Dispatch to the correct
