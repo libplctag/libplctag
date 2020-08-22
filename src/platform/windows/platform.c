@@ -1606,9 +1606,8 @@ int64_t time_ms(void)
     /* calculate time as 100ns increments since Jan 1, 1601. */
     res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
 
-    /* get time in ms */
-
-    res = res / 10000;
+    /* get time in ms.   Magic offset is for Jan 1, 1970 Unix epoch baseline. */
+    res = (res - 116444736000000000) / 10000;
 
     return  res;
 }
