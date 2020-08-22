@@ -36,14 +36,27 @@
 #include <time.h>
 #include <stdarg.h>
 #include <string.h>
-#include <sys/time.h>
 #include <errno.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <netdb.h>
+
+#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
+    #define _WINSOCKAPI_
+    #include <windows.h>
+    #include <tchar.h>
+    #include <strsafe.h>
+    #include <io.h>
+    #include <Winsock2.h>
+    #include <Ws2tcpip.h>
+#else
+    /* assume it is POSIX of some sort... */
+    #include <sys/time.h>
+    #include <sys/types.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <unistd.h>
+    #include <netdb.h>
+#endif
+
 #include "utils.h"
 
 
@@ -52,6 +65,15 @@
  */
 
 
+#ifdef IS_WINDOWS
+
+int util_sleep_ms(int ms)
+{
+    Sleep(ms);
+    return 1;
+}
+
+#else
 
 int util_sleep_ms(int ms)
 {
@@ -63,12 +85,36 @@ int util_sleep_ms(int ms)
     return select(0,NULL,NULL,NULL, &tv);
 }
 
+#endif
+
 
 /*
  * time_ms
  *
  * Return the current epoch time in milliseconds.
  */
+
+#ifdef IS_WINDOWS
+int64_t util_time_ms(void)
+{
+    FILETIME ft;
+    int64_t res;
+
+    GetSystemTimeAsFileTime(&ft);
+
+    /* calculate time as 100ns increments since Jan 1, 1601. */
+    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
+
+    /* get time in ms */
+
+    res = res / 10000;
+
+    return  res;
+}
+
+#else
+
+
 int64_t util_time_ms(void)
 {
     struct timeval tv;
@@ -78,6 +124,17 @@ int64_t util_time_ms(void)
     return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
 }
 
+#endif 
+
+
+/*
+ * string helpers
+ */
+
+int match_chars(const char* source, int start_index, const char* chars)
+{
+    return (int)(unsigned int)strspn(source + start_index, chars);
+}
 
 
 /*

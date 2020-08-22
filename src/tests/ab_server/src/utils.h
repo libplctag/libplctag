@@ -34,10 +34,14 @@
 #pragma once
 
 #include <stdint.h>
+#include "compat.h"
 #include "slice.h"
 
 extern int util_sleep_ms(int ms);
 extern int64_t util_time_ms(void);
+
+/* string helpers */
+extern int match_chars(const char* source, int start_index, const char *chars);
 
 /* debug helpers */
 void debug_on(void);

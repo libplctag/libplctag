@@ -81,9 +81,12 @@
  */
 extern void *mem_alloc(int size)
 {
-    void *res = calloc((size_t)size, 1);
+    if(size <= 0) {
+        pdebug(DEBUG_WARN, "Allocation size must be greater than zero bytes!");
+        return NULL;
+    }
 
-    return res;
+    return calloc((size_t)(unsigned int)size, 1);
 }
 
 
@@ -97,7 +100,12 @@ extern void *mem_alloc(int size)
  */
 extern void *mem_realloc(void *orig, int size)
 {
-    return realloc(orig, (size_t)size);
+    if(size <= 0) {
+        pdebug(DEBUG_WARN, "New allocation size must be greater than zero bytes!");
+        return NULL;
+    }
+
+    return realloc(orig, (size_t)(ssize_t)size);
 }
 
 
@@ -123,9 +131,19 @@ extern void mem_free(const void *mem)
  *
  * set memory to the passed argument.
  */
-extern void mem_set(void *d1, int c, int size)
+extern void mem_set(void *dest, int c, int size)
 {
-    memset(d1, c, (size_t)size);
+    if(!dest) {
+        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        return;
+    }
+    
+    if(size <= 0) {
+        pdebug(DEBUG_WARN, "Size to set must be a positive number!");
+        return;
+    }
+
+    memset(dest, c, (size_t)(ssize_t)size);
 }
 
 
@@ -137,9 +155,29 @@ extern void mem_set(void *d1, int c, int size)
  *
  * copy memory from one pointer to another for the passed number of bytes.
  */
-extern void mem_copy(void *d1, void *d2, int size)
-{
-    memcpy(d1, d2, (size_t)size);
+extern void mem_copy(void *dest, void *src, int size)
+{    
+    if(!dest) {
+        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        return;
+    }
+    
+    if(!src) {
+        pdebug(DEBUG_WARN, "Source pointer is NULL!");
+        return;
+    }
+    
+    if(size < 0) {
+        pdebug(DEBUG_WARN, "Size to copy must be a positive number!");
+        return;
+    }
+
+    if(size == 0) {
+        /* nothing to do. */
+        return;
+    }
+
+    memcpy(dest, src, (size_t)(unsigned int)size);
 }
 
 
@@ -151,7 +189,27 @@ extern void mem_copy(void *d1, void *d2, int size)
  */
 extern void mem_move(void *dest, void *src, int size)
 {
-    memmove(dest, src, (size_t)size);
+    if(!dest) {
+        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        return;
+    }
+    
+    if(!src) {
+        pdebug(DEBUG_WARN, "Source pointer is NULL!");
+        return;
+    }
+    
+    if(size < 0) {
+        pdebug(DEBUG_WARN, "Size to move must be a positive number!");
+        return;
+    }
+
+    if(size == 0) {
+        /* nothing to do. */
+        return;
+    }
+
+    memmove(dest, src, (size_t)(unsigned int)size);
 }
 
 
@@ -160,12 +218,29 @@ extern void mem_move(void *dest, void *src, int size)
 
 int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
 {
-    /* short circuit the comparison if the blocks are different lengths */
-    if(src1_size != src2_size) {
-        return (src1_size - src2_size);
-    }
+    if(!src1 || src1_size <= 0) {
+        if(!src2 || src2_size <= 0) {
+            /* both are NULL or zero length, but that is "equal" for our purposes. */
+            return 0;
+        } else {
+            /* first one is "less" than second. */
+            return -1;
+        }
+    } else {
+        if(!src2 || src2_size <= 0) {
+            /* first is "greater" than second */
+            return 1; 
+        } else {
+            /* both pointers are non-NULL and the lengths are positive. */
 
-    return memcmp(src1, src2, (size_t)src1_size);
+            /* short circuit the comparison if the blocks are different lengths */
+            if(src1_size != src2_size) {
+                return (src1_size - src2_size);
+            }
+
+            return memcmp(src1, src2, (size_t)(unsigned int)src1_size);
+        }
+    }    
 }
 
 
@@ -184,10 +259,31 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
  * Return -1, 0, or 1 depending on whether the first string is "less" than the
  * second, the same as the second, or "greater" than the second.  This routine
  * just passes through to POSIX strcmp.
+ * 
+ * Handle edge cases when NULL or zero length strings are passed.
  */
 extern int str_cmp(const char *first, const char *second)
 {
-    return strcmp(first, second);
+    int first_zero = !str_length(first);
+    int second_zero = !str_length(second);
+
+    if(first_zero) {
+        if(second_zero) {
+            pdebug(DEBUG_DETAIL, "NULL or zero length strings passed.");
+            return 0;
+        } else {
+            /* first is "less" than second. */
+            return -1;
+        }
+    } else {
+        if(second_zero) {
+            /* first is "more" than second. */
+            return 1;
+        } else {
+            /* both are non-zero length. */
+            return strcmp(first, second);
+        }
+    }
 }
 
 
@@ -200,11 +296,30 @@ extern int str_cmp(const char *first, const char *second)
  * second, the same as the second, or "greater" than the second.  The comparison
  * is done case insensitive.
  *
- * It just passes this through to POSIX strcasecmp.
+ * Handle the usual edge cases.
  */
 extern int str_cmp_i(const char *first, const char *second)
 {
-    return strcasecmp(first,second);
+    int first_zero = !str_length(first);
+    int second_zero = !str_length(second);
+
+    if(first_zero) {
+        if(second_zero) {
+            pdebug(DEBUG_DETAIL, "NULL or zero length strings passed.");
+            return 0;
+        } else {
+            /* first is "less" than second. */
+            return -1;
+        }
+    } else {
+        if(second_zero) {
+            /* first is "more" than second. */
+            return 1;
+        } else {
+            /* both are non-zero length. */
+            return strcasecmp(first,second);
+        }
+    }
 }
 
 
@@ -220,11 +335,36 @@ extern int str_cmp_i(const char *first, const char *second)
  */
 extern int str_cmp_i_n(const char *first, const char *second, int count)
 {
+    int first_zero = !str_length(first);
+    int second_zero = !str_length(second);
+
     if(count < 0) {
         pdebug(DEBUG_WARN, "Illegal negative count!");
         return -1;
     }
 
+    if(count == 0) {
+        pdebug(DEBUG_DETAIL, "Called with comparison count of zero!");
+        return 0;
+    }
+
+    if(first_zero) {
+        if(second_zero) {
+            pdebug(DEBUG_DETAIL, "NULL or zero length strings passed.");
+            return 0;
+        } else {
+            /* first is "less" than second. */
+            return -1;
+        }
+    } else {
+        if(second_zero) {
+            /* first is "more" than second. */
+            return 1;
+        } else {
+            /* both are non-zero length. */
+            return strncasecmp(first, second, (size_t)(unsigned int)count);
+        }
+    }
     return strncasecmp(first, second, (size_t)(unsigned int)count);
 }
 
@@ -237,8 +377,23 @@ extern int str_cmp_i_n(const char *first, const char *second, int count)
  */
 extern int str_copy(char *dst, int dst_size, const char *src)
 {
-    strncpy(dst, src, (size_t)dst_size);
-    return 0;
+    if (!dst) {
+        pdebug(DEBUG_WARN, "Destination string pointer is NULL!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if (!src) {
+        pdebug(DEBUG_WARN, "Source string pointer is NULL!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(dst_size <= 0) {
+        pdebug(DEBUG_WARN, "Destination size is negative or zero!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    strncpy(dst, src, (size_t)(unsigned int)dst_size);
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -499,7 +654,7 @@ int mutex_lock(mutex_p m)
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
-    /*pdebug(DEBU_DETAIL,"Done.");*/
+    //pdebug(DEBUG_SPEW,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -548,7 +703,7 @@ int mutex_unlock(mutex_p m)
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    /* pdebug(DEBUG_DETAIL,"Done."); */
+    //pdebug(DEBUG_SPEW,"Done.");
 
     return PLCTAG_STATUS_OK;
 }

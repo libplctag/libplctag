@@ -33,25 +33,34 @@
 
 #pragma once
 
-#include "slice.h"
+/*
+ * This file contains various compatibility includes and definitions
+ * to allow compilation across POSIX and Windows systems.
+ */
 
-typedef enum {
-    SOCKET_STATUS_OK    = -1,
-    SOCKET_ERR_STARTUP  = -2,
-    SOCKET_ERR_OPEN     = -3,
-    SOCKET_ERR_CREATE   = -4,
-    SOCKET_ERR_BIND     = -5,
-    SOCKET_ERR_LISTEN   = -6,
-    SOCKET_ERR_SETOPT   = -7,
-    SOCKET_ERR_READ     = -8,
-    SOCKET_ERR_WRITE    = -9,
-    SOCKET_ERR_SELECT   = -10,
-    SOCKET_ERR_ACCEPT   = -11
-} socket_err_t;
+#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
+    #define IS_WINDOWS (1)
+#endif
 
-extern int socket_open(const char *host, const char *port);
-extern void socket_close(int sock);
-extern int socket_accept(int sock);
-extern slice_s socket_read(int sock, slice_s in_buf);
-extern int socket_write(int sock, slice_s out_buf);
+#if defined(_MSC_VER)
+    #define IS_MSVC (1)
+#endif
+
+
+#ifdef IS_MSVC
+    #define str_cmp_i(first, second) _stricmp(first, second)
+    #define strdup _strdup
+    #define str_scanf sscanf_s
+#else
+    #define str_cmp_i(first, second) strcasecmp(first, second)
+    #define str_scanf sscanf
+#endif
+
+/* Define ssize_t */
+#ifdef IS_MSVC
+    #include <BaseTsd.h>
+    typedef SSIZE_T ssize_t;
+#else
+    #include <sys/types.h>
+#endif
 

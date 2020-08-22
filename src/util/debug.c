@@ -183,7 +183,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     /* build the output string template */
     prefix_size += snprintf(prefix, sizeof(prefix),"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%d) %s %s:%d %s\n",
                                                     t.tm_year+1900,
-                                                    t.tm_mon,
+                                                    t.tm_mon + 1, /* month is 0-11? */
                                                     t.tm_mday,
                                                     t.tm_hour,
                                                     t.tm_min,

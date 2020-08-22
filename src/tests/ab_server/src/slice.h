@@ -37,9 +37,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/types.h> /* for ssize_t */
-
 #include <stdio.h>
+
+#include "compat.h"
 
 typedef struct {
     ssize_t len;

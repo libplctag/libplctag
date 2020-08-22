@@ -144,7 +144,7 @@ int tag_tickler(ab_tag_p tag)
     if(tag->read_in_progress) {
         pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
-        tag->status = rc;
+        tag->status = (int8_t)rc;
 
         /* check to see if the read finished. */
         if(!tag->read_in_progress) {
@@ -157,7 +157,7 @@ int tag_tickler(ab_tag_p tag)
     if(tag->write_in_progress) {
         pdebug(DEBUG_SPEW, "Write in progress.");
         rc = check_write_status(tag);
-        tag->status = rc;
+        tag->status = (int8_t)rc;
 
         /* check to see if the write finished. */
         if(!tag->write_in_progress) {

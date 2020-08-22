@@ -438,14 +438,18 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
         conn_path_index++;
     }
 
-    /* allocate space for the connection path */
-    *conn_path = mem_alloc((int)(unsigned int)conn_path_index);
-    if(! *conn_path) {
-        pdebug(DEBUG_WARN, "Unable to allocate connection path!");
-        return PLCTAG_ERR_NO_MEM;
-    }
+    if(conn_path_index > 0) {
+        /* allocate space for the connection path */
+        *conn_path = mem_alloc((int)(unsigned int)conn_path_index);
+        if(! *conn_path) {
+            pdebug(DEBUG_WARN, "Unable to allocate connection path!");
+            return PLCTAG_ERR_NO_MEM;
+        }
 
-    mem_copy(*conn_path, &tmp_conn_path[0], (int)(unsigned int)conn_path_index);
+        mem_copy(*conn_path, &tmp_conn_path[0], (int)(unsigned int)conn_path_index);
+    } else {
+        *conn_path = NULL;
+    }
 
     *conn_path_size = (uint8_t)conn_path_index;
 

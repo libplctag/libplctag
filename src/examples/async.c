@@ -47,7 +47,7 @@
 
 
 #define REQUIRED_VERSION 2,1,0
-#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[%d]&debug=4"
+#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[%d]"
 #define NUM_TAGS  (30)
 #define NUM_ELEMS (1000)
 #define DATA_TIMEOUT (5000)
