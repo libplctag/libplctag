@@ -69,6 +69,7 @@ struct modbus_plc_t {
         unsigned int terminate:1;
         unsigned int response_ready:1;
         unsigned int request_ready:1;
+        unsigned int request_in_flight:1;
     } flags;
     uint16_t seq_id;
 
@@ -726,33 +727,42 @@ THREAD_FUNC(modbus_plc_handler)
 
                 if(rc_inc(plc)) {
                     critical_block(plc->mutex) {
-                        /* don't do anything if there are no tags. */
-                        if(plc->tags) {
-                            modbus_tag_p *tag_walker = &(plc->tags);
+                        modbus_tag_p *tag_walker = &(plc->tags);
 
-                            while(*tag_walker) {
-                                modbus_tag_p tag = rc_inc(*tag_walker);
+                        while(*tag_walker) {
+                            modbus_tag_p tag = rc_inc(*tag_walker);
 
-                                /* the tag might be in the destructor. */
-                                if(tag) {
-                                    debug_set_tag_id(tag->tag_id);
+                            /* the tag might be in the destructor. */
+                            if(tag) {
+                                debug_set_tag_id(tag->tag_id);
 
-                                    pdebug(DEBUG_SPEW, "Processing tag %d.", tag->tag_id);
+                                pdebug(DEBUG_SPEW, "Processing tag %d.", tag->tag_id);
 
-                                    rc = process_tag(tag, plc);
-                                    if(rc != PLCTAG_STATUS_OK) {
-                                        pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
-                                    }
-
-                                    debug_set_tag_id(0);
-
-                                    /* release reference. */
-                                    tag = rc_dec(tag);
+                                rc = process_tag(tag, plc);
+                                if(rc != PLCTAG_STATUS_OK) {
+                                    pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
                                 }
 
-                                tag_walker = &((*tag_walker)->next);
+                                debug_set_tag_id(0);
+
+                                /* release reference. */
+                                tag = rc_dec(tag);
                             }
+
+                            tag_walker = &((*tag_walker)->next);
                         }
+
+                        /* 
+                         * age out any response in case the tag that created it
+                         * no longer exists. If it is still set here then there
+                         * was no tag that was waiting for the response.
+                         */
+
+                        if(plc->flags.response_ready) {
+                            pdebug(DEBUG_DETAIL, "Tag apparently aborted or destroyed before the response was returned.");
+                        }
+
+                        plc->flags.response_ready = 0;
                     }
 
                     /* now drop the reference, which could cause the destructor to trigger. */
@@ -908,6 +918,9 @@ int read_packet(modbus_plc_p plc)
             pdebug(DEBUG_DETAIL, "Received full packet.");
             pdebug_dump_bytes(DEBUG_DETAIL, plc->read_data, plc->read_data_len);
             plc->flags.response_ready = 1;
+
+            /* regardless of what request this is, there is nothing in flight. */
+            plc->flags.request_in_flight = 0;
         }
 
         rc = PLCTAG_STATUS_OK;
@@ -1036,8 +1049,8 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                 pdebug(DEBUG_SPEW, "No response yet.");
             }
         } else {
-            /* we have a write request but it is not in flight. */
-            if(! plc->flags.request_ready) {
+            /* we have a write request to do and nothing is in flight. */
+            if(! plc->flags.request_ready && !plc->flags.request_in_flight) {
                 rc = create_write_request(plc, tag);
             } else {
                 pdebug(DEBUG_SPEW, "No buffer space for a response.");
@@ -1064,8 +1077,8 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                 pdebug(DEBUG_SPEW, "No response yet.");
             }
         } else {
-            /* we have a write request but it is not in flight. */
-            if(! plc->flags.request_ready) {
+            /* we have a write request to do an nothing is in flight. */
+            if(!plc->flags.request_ready && !plc->flags.request_in_flight) {
                 rc = create_read_request(plc, tag);
             } else {
                 pdebug(DEBUG_SPEW, "No buffer space for a response.");
@@ -1275,8 +1288,9 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
         tag->seq_id = seq_id;
     }
 
-    /* FIXME - could this every be hoisted above the barrier above? */
+    /* FIXME - could this ever be hoisted above the barrier above? */
     plc->flags.request_ready = 1;
+    plc->flags.request_in_flight = 1;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1344,6 +1358,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         /* either way, clean up the PLC buffer. */
         plc->read_data_len = 0;
         plc->flags.response_ready = 0;
+
         /* clean up tag*/
         if(!partial_write) {
             spin_block(&tag->tag_lock) {
@@ -1490,7 +1505,9 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
         tag->seq_id = (uint16_t)(unsigned int)seq_id;
         tag->request_num++;
     }
+
     plc->flags.request_ready = 1;
+    plc->flags.request_in_flight = 1;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
