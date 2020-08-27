@@ -537,7 +537,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 
         /* did we find one. */
         if(*walker) {
-            *plc = *walker;
+            *plc = rc_inc(*walker);
             is_new = 0;
         } else {
             /* nope, make a new one.  Do as little as possible in the mutex. */
@@ -712,6 +712,19 @@ THREAD_FUNC(modbus_plc_handler)
                     socket_close(plc->sock);
                     socket_destroy(&plc->sock);
                     plc->sock = NULL;
+
+                    /* 
+                     * if we had a request that was sent, but there was no response yet,
+                     * then we need to clean up the state.   We are never going to get that
+                     * response.
+                     * 
+                     * If there is a request ready to send, then keep it in the buffer until
+                     * we reconnect.
+                     */
+
+                    if(plc->flags.request_in_flight && !plc->flags.request_ready) {
+                        plc->flags.request_in_flight = 0;
+                    }
                 }
 
                 /* run all the tags. */
