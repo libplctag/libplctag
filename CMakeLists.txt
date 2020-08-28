@@ -33,7 +33,7 @@
 # the project is version 2.1
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 15)
+set (libplctag_VERSION_PATCH 16)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
