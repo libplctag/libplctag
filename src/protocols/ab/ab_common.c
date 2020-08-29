@@ -673,7 +673,7 @@ int default_abort(plc_tag_p tag)
 
     pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
-    return PLCTAG_STATUS_OK;
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -683,16 +683,18 @@ int default_read(plc_tag_p tag)
 
     pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
-    return PLCTAG_STATUS_OK;
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
 
 int default_status(plc_tag_p tag)
 {
-    (void)tag;
-
     pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
-    return PLCTAG_STATUS_OK;
+    if(tag) {
+        return tag->status;
+    } else {
+        return PLCTAG_ERR_NOT_FOUND;
+    }
 }
 
 
@@ -713,7 +715,7 @@ int default_write(plc_tag_p tag)
 
     pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
-    return PLCTAG_STATUS_OK;
+    return PLCTAG_ERR_NOT_IMPLEMENTED;
 }
 
 
