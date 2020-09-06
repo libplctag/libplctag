@@ -1006,7 +1006,7 @@ LIB_EXPORT int plc_tag_unlock(int32_t id)
  * The status of the operation is returned.
  */
 
-int plc_tag_abort(int32_t id)
+LIB_EXPORT int plc_tag_abort(int32_t id)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);

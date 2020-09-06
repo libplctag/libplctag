@@ -15,7 +15,9 @@
   - [Help Wanted](#help-wanted)
     - [How to Contribute](#how-to-contribute)
   - [History](#history)
-  - [Contact](#contact)
+  - [Contact and Support](#contact-and-support)
+    - [libplctag Forum](#libplctag-forum)
+    - [GitHub](#github)
   - [License](#license)
   - [Attributions and Trademarks](#attributions-and-trademarks)
   - [End Note](#end-note)
@@ -172,15 +174,21 @@ Wrappers in other languages are generally split off into separate projects.  Tho
 
 See the [wiki history page](https://github.com/libplctag/libplctag/wiki/History) for more details on how libplctag was created and why we built it.
 
-## Contact
+## Contact and Support
 
-There are two ways to contact us.
+There are two ways to ask for help or contact us.
+
+### libplctag Forum
 
 If you have general questions or comments about the
-library or its use, please join and post on the Google group [libplctag](https://groups.google.com/forum/#!forum/libplctag).
+library, its use, or about one of the wrapper libraries, please join the Google group
+[libplctag](https://groups.google.com/forum/#!forum/libplctag)!
+
 The forum is open to all, but is by request only to keep the spammers down.  The traffic is fairly
 light with usually a small number of emails per month.  It is our primary means for users to
 ask questions and for discussions to happen.   Announcements about released happen on the forum.
+
+### GitHub
 
 If you find bugs or need specific features, please file them on GitHub's issue tracker for
 the project.

@@ -725,6 +725,8 @@ THREAD_FUNC(modbus_plc_handler)
                     if(plc->flags.request_in_flight && !plc->flags.request_ready) {
                         plc->flags.request_in_flight = 0;
                     }
+
+                    /* we do not want to break here as the tags might have aborts to process. */
                 }
 
                 /* run all the tags. */
@@ -764,18 +766,6 @@ THREAD_FUNC(modbus_plc_handler)
 
                             tag_walker = &((*tag_walker)->next);
                         }
-
-                        /* 
-                         * age out any response in case the tag that created it
-                         * no longer exists. If it is still set here then there
-                         * was no tag that was waiting for the response.
-                         */
-
-                        if(plc->flags.response_ready) {
-                            pdebug(DEBUG_DETAIL, "Tag apparently aborted or destroyed before the response was returned.");
-                        }
-
-                        plc->flags.response_ready = 0;
                     }
 
                     /* now drop the reference, which could cause the destructor to trigger. */
@@ -788,10 +778,6 @@ THREAD_FUNC(modbus_plc_handler)
 
                 plc->flags.response_ready = 0;
                 plc->read_data_len = 0;
-            }
-
-            if(rc != PLCTAG_STATUS_OK) {
-
             }
         } else {
             keep_going = 0;
