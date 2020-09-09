@@ -46,9 +46,6 @@ if(${CMAKE_VERSION} VERSION_GREATER 3.1)
 endif()
 
 # set a variable based on Android use
-MESSAGE("ANDROID=${ANDROID}")
-MESSAGE("ANDROID_ABI=${ANDROID_ABI}")
-
 if(ANDROID_ABI)
     message("Building on Android.")
     set(ANDROID_BUILD 1)
@@ -475,4 +472,4 @@ macro(print_all_variables)
 endmacro()
 
 # Debugging
-print_all_variables()
+# print_all_variables()
