@@ -46,7 +46,10 @@ if(${CMAKE_VERSION} VERSION_GREATER 3.1)
 endif()
 
 # set a variable based on Android use
-set(ANDROID_BUILD "0")
+MESSAGE("ANDROID=${ANDROID}")
+MESSAGE("ANDROID_ABI=${ANDROID_ABI}")
+
+set(ANDROID_BUILD 0)
 if(ANDROID)
     message("Building on Android.")
     set(ANDROID_BUILD 1)
