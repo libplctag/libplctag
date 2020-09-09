@@ -359,7 +359,7 @@ else()
                             async_stress
                             list_tags
                             plc5
-                            simpThreadsle
+                            simple
                             simple_dual
                             slc500
                             string
