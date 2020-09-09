@@ -48,7 +48,10 @@ endif()
 # set a variable based on Android use
 set(ANDROID_BUILD "0")
 if(ANDROID)
+    message("Building on Android.")
     set(ANDROID_BUILD 1)
+else()
+    message("Not building on Android.")
 endif()
 
 # set compiler and flags for 32-bit MinGW builds
@@ -356,7 +359,7 @@ else()
                             async_stress
                             list_tags
                             plc5
-                            simple
+                            simpThreadsle
                             simple_dual
                             slc500
                             string
@@ -469,4 +472,4 @@ macro(print_all_variables)
 endmacro()
 
 # Debugging
-# print_all_variables()
+print_all_variables()
