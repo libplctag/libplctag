@@ -49,12 +49,12 @@ endif()
 MESSAGE("ANDROID=${ANDROID}")
 MESSAGE("ANDROID_ABI=${ANDROID_ABI}")
 
-set(ANDROID_BUILD 0)
-if(ANDROID)
+if(ANDROID_ABI)
     message("Building on Android.")
     set(ANDROID_BUILD 1)
 else()
     message("Not building on Android.")
+    set(ANDROID_BUILD 0)
 endif()
 
 # set compiler and flags for 32-bit MinGW builds
