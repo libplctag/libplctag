@@ -33,17 +33,22 @@
 # the project is version 2.1
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 17)
+set (libplctag_VERSION_PATCH 18)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
-
 
 cmake_minimum_required (VERSION 2.8)
 
 # prevent expansion of quoted things that could be variables in if()
 if(${CMAKE_VERSION} VERSION_GREATER 3.1)
     cmake_policy(SET CMP0054 NEW)
+endif()
+
+# set a variable based on Android use
+set(ANDROID_BUILD "0")
+if(ANDROID)
+    set(ANDROID_BUILD 1)
 endif()
 
 # set compiler and flags for 32-bit MinGW builds
@@ -311,130 +316,133 @@ if (WIN32)
 endif()
 
 # add the examples and tests
-if (UNIX)
-	# example programs
-    set ( example_PROGRAMS async
-                           async_stress
-                           barcode_test
-                           busy_test
-                           data_dumper
-                           list_tags
-                           multithread
-                           multithread_cached_read
-                           multithread_plc5
-                           multithread_plc5_dhp
-                           plc5
-                           simple
-                           simple_dual
-                           slc500
-                           stress_api_lock
-                           stress_test
-                           string
-                           test_auto_sync
-                           test_callback
-                           test_reconnect
-                           test_shutdown
-                           test_special
-                           test_tag_attributes
-                           toggle_bit
-                           toggle_bool
-                           write_string
-                           tag_rw )
+if(ANDROID_BUILD)
+    MESSAGE("Building for Android.")
+else()
+    if (UNIX)
+        # example programs
+        set ( example_PROGRAMS async
+                            async_stress
+                            barcode_test
+                            busy_test
+                            data_dumper
+                            list_tags
+                            multithread
+                            multithread_cached_read
+                            multithread_plc5
+                            multithread_plc5_dhp
+                            plc5
+                            simple
+                            simple_dual
+                            slc500
+                            stress_api_lock
+                            stress_test
+                            string
+                            test_auto_sync
+                            test_callback
+                            test_reconnect
+                            test_shutdown
+                            test_special
+                            test_tag_attributes
+                            toggle_bit
+                            toggle_bool
+                            write_string
+                            tag_rw )
 
-    set ( example_PROG_UTIL utils_posix.c )
-    set ( example_LIBRARIES ${tool_lib} pthread )
-elseif(WIN32)
-    set ( example_PROGRAMS async
-                           async_stress
-                           list_tags
-                           plc5
-                           simple
-                           simple_dual
-                           slc500
-                           string
-                           test_callback
-                           test_shutdown
-                           test_special
-                           test_tag_attributes
-                           toggle_bit
-                           toggle_bool
-                           write_string
-                           tag_rw )
+        set ( example_PROG_UTIL utils_posix.c )
+        set ( example_LIBRARIES ${tool_lib} pthread )
+    elseif(WIN32)
+        set ( example_PROGRAMS async
+                            async_stress
+                            list_tags
+                            plc5
+                            simple
+                            simple_dual
+                            slc500
+                            string
+                            test_callback
+                            test_shutdown
+                            test_special
+                            test_tag_attributes
+                            toggle_bit
+                            toggle_bool
+                            write_string
+                            tag_rw )
 
-    set ( example_PROG_UTIL utils_windows.c)
-    set ( example_LIBRARIES ${tool_lib} ws2_32 )
-endif()
+        set ( example_PROG_UTIL utils_windows.c)
+        set ( example_LIBRARIES ${tool_lib} ws2_32 )
+    endif()
 
-# set the compile flags for the utilities file.
-set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+    # set the compile flags for the utilities file.
+    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
 
-# set the compile and link properties for all examples.
-foreach ( example ${example_PROGRAMS} )
-    set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
-    add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-    target_link_libraries(${example} ${example_LIBRARIES} )
+    # set the compile and link properties for all examples.
+    foreach ( example ${example_PROGRAMS} )
+        set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+        add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
+        target_link_libraries(${example} ${example_LIBRARIES} )
+
+        if(BASE_LINK_FLAGS)
+            set_target_properties(${example} PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+        endif()
+    endforeach(example)
+
+    # simple.cpp is different because it is C++
+    message("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
+    set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS "${BASE_CXX_FLAGS}")
+    add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
+
+    target_link_libraries (simple_cpp ${example_LIBRARIES} )
 
     if(BASE_LINK_FLAGS)
-        set_target_properties(${example} PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+        message("BASE_LINK_FLAGS=${BASE_LINK_FLAGS}")
+        set_target_properties(simple_cpp PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
     endif()
-endforeach(example)
 
-# simple.cpp is different because it is C++
-message("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
-set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS "${BASE_CXX_FLAGS}")
-add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
+    # Generate files from templates
+    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
-target_link_libraries (simple_cpp ${example_LIBRARIES} )
+    # build the GitHub Actions config file
+    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
 
-if(BASE_LINK_FLAGS)
-    message("BASE_LINK_FLAGS=${BASE_LINK_FLAGS}")
-    set_target_properties(simple_cpp PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-endif()
+    # build the simulator for testing.
+    # if(UNIX)
+        set(AB_SERVER_FILES ${test_SRC_PATH}/ab_server/src/cip.c
+                            ${test_SRC_PATH}/ab_server/src/cip.h
+                            ${test_SRC_PATH}/ab_server/src/compat.h
+                            ${test_SRC_PATH}/ab_server/src/cpf.c
+                            ${test_SRC_PATH}/ab_server/src/cpf.h
+                            ${test_SRC_PATH}/ab_server/src/eip.c
+                            ${test_SRC_PATH}/ab_server/src/eip.h
+                            ${test_SRC_PATH}/ab_server/src/main.c
+                            ${test_SRC_PATH}/ab_server/src/pccc.c
+                            ${test_SRC_PATH}/ab_server/src/pccc.h
+                            ${test_SRC_PATH}/ab_server/src/plc.h
+                            ${test_SRC_PATH}/ab_server/src/slice.h
+                            ${test_SRC_PATH}/ab_server/src/socket.c
+                            ${test_SRC_PATH}/ab_server/src/socket.h
+                            ${test_SRC_PATH}/ab_server/src/tcp_server.c
+                            ${test_SRC_PATH}/ab_server/src/tcp_server.h
+                            ${test_SRC_PATH}/ab_server/src/utils.c
+                            ${test_SRC_PATH}/ab_server/src/utils.h
+        )
 
+        foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
+            set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+        endforeach()
 
-# Generate files from templates
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
+        add_executable(ab_server ${AB_SERVER_FILES})
 
-# build the GitHub Actions config file
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
+        target_link_libraries(ab_server ${example_LIBRARIES} )
 
-# build the simulator for testing.
-# if(UNIX)
-    set(AB_SERVER_FILES ${test_SRC_PATH}/ab_server/src/cip.c
-                        ${test_SRC_PATH}/ab_server/src/cip.h
-                        ${test_SRC_PATH}/ab_server/src/compat.h
-                        ${test_SRC_PATH}/ab_server/src/cpf.c
-                        ${test_SRC_PATH}/ab_server/src/cpf.h
-                        ${test_SRC_PATH}/ab_server/src/eip.c
-                        ${test_SRC_PATH}/ab_server/src/eip.h
-                        ${test_SRC_PATH}/ab_server/src/main.c
-                        ${test_SRC_PATH}/ab_server/src/pccc.c
-                        ${test_SRC_PATH}/ab_server/src/pccc.h
-                        ${test_SRC_PATH}/ab_server/src/plc.h
-                        ${test_SRC_PATH}/ab_server/src/slice.h
-                        ${test_SRC_PATH}/ab_server/src/socket.c
-                        ${test_SRC_PATH}/ab_server/src/socket.h
-                        ${test_SRC_PATH}/ab_server/src/tcp_server.c
-                        ${test_SRC_PATH}/ab_server/src/tcp_server.h
-                        ${test_SRC_PATH}/ab_server/src/utils.c
-                        ${test_SRC_PATH}/ab_server/src/utils.h
-    )
+        if(BASE_LINK_FLAGS)
+            set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+        endif()
+    # endif()
 
-    foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-        set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
-    endforeach()
-
-    add_executable(ab_server ${AB_SERVER_FILES})
-
-    target_link_libraries(ab_server ${example_LIBRARIES} )
-
-    if(BASE_LINK_FLAGS)
-        set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-    endif()
-# endif()
-
-# make sure the .h file is in the output directory
-CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+    # make sure the .h file is in the output directory
+    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+endif(ANDROID_BUILD)
 
 # for installation
 if(UNIX)
@@ -444,9 +452,12 @@ elseif(WIN32)
 	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
 endif()
 
-install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
-install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
-
+if(ANDROID_BUILD)
+    message("Skipping package config and header file copy for Android build.")
+else()
+    install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
+    install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+endif(ANDROID_BUILD)
 
 macro(print_all_variables)
     message(STATUS "print_all_variables------------------------------------------{")
