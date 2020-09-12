@@ -110,9 +110,9 @@ SET(C99_FLAGS "")
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -fsanitize=undefined,address -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
     set(BASE_RELEASE_LINK_FLAGS "")
-    set(BASE_DEBUG_LINK_FLAGS "-fsanitize=undefined,address")
+    set(BASE_DEBUG_LINK_FLAGS "")
 
     if(APPLE)
         set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D_DARWIN_C_SOURCE")
