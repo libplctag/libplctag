@@ -33,7 +33,7 @@
 # the project is version 2.1
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 18)
+set (libplctag_VERSION_PATCH 19)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -52,6 +52,19 @@ if(ANDROID_ABI)
 else()
     message("Not building on Android.")
     set(ANDROID_BUILD 0)
+endif()
+
+# Check more Android flags
+if(ANDROID_BUILD)
+    message("No need to check more variables for Android, already building Android.")
+else()
+    if(ANDROID)
+        message("Building on Android.")
+        set(ANDROID_BUILD 1)
+    else()
+        message("Not building on Android.")
+        set(ANDROID_BUILD 0)
+    endif()
 endif()
 
 # set compiler and flags for 32-bit MinGW builds
@@ -110,9 +123,9 @@ SET(C99_FLAGS "")
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -fsanitize=undefined,address -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
     set(BASE_RELEASE_LINK_FLAGS "")
-    set(BASE_DEBUG_LINK_FLAGS "-fsanitize=undefined,address")
+    set(BASE_DEBUG_LINK_FLAGS "")
 
     if(APPLE)
         set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D_DARWIN_C_SOURCE")
