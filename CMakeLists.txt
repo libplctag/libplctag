@@ -54,6 +54,19 @@ else()
     set(ANDROID_BUILD 0)
 endif()
 
+# Check more Android flags
+if(ANDROID_BUILD)
+    message("No need to check more variables for Android, already building Android.")
+else()
+    if(ANDROID)
+        message("Building on Android.")
+        set(ANDROID_BUILD 1)
+    else()
+        message("Not building on Android.")
+        set(ANDROID_BUILD 0)
+    endif()
+endif()
+
 # set compiler and flags for 32-bit MinGW builds
 if (${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     SET(CMAKE_C_COMPILER gcc.exe)
