@@ -68,7 +68,7 @@ struct {
 
 static lock_t library_initialization_lock = LOCK_INIT;
 static volatile int library_initialized = 0;
-static mutex_p lib_mutex = NULL;
+static volatile mutex_p lib_mutex = NULL;
 
 
 /*
@@ -150,7 +150,8 @@ void destroy_modules(void)
 
     spin_block(&library_initialization_lock) {
         if(lib_mutex != NULL) {
-            mutex_destroy(&lib_mutex);
+            /* FIXME casting to get rid of volatile is WRONG */
+            mutex_destroy((mutex_p *)&lib_mutex);
             lib_mutex = NULL;
         }
     }
@@ -175,25 +176,27 @@ int initialize_modules(void)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    /* 
+    /*
      * Try to keep busy waiting to a minimum.
-     * If there is no mutex set up, then create one. 
+     * If there is no mutex set up, then create one.
      * Only one thread allowed at a time through this gate.
      */
     spin_block(&library_initialization_lock) {
         if(lib_mutex == NULL) {
-            rc = mutex_create(&lib_mutex);
+            pdebug(DEBUG_INFO, "Creating library mutex.");
+            /* FIXME - casting to get rid of volatile is WRONG */
+            rc = mutex_create((mutex_p *)&lib_mutex);
         }
     }
 
     /* check the status outside the lock. */
-    if(!lib_mutex || rc != PLCTAG_STATUS_OK) {
+    if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to initialize library mutex!  Error %s!", plc_tag_decode_error(rc));
         return rc;
     } else {
-        /* 
+        /*
         * guard library initialization with a mutex.
-        * 
+        *
         * This prevents busy waiting as would happen with just a spin lock.
         */
         critical_block(lib_mutex) {
