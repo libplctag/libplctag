@@ -43,11 +43,16 @@
  * unconnected packet format.
  */
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,1,19
 
-#define TAG_PATH1 "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=TestDINTArray&debug=1"
-#define TAG_PATH2 "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=4&elem_size=4&name=F8:0&debug=1"
-#define DATA_TIMEOUT 5000
+// #define TAG_PATH1 "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=TestDINTArray&debug=1"
+// #define TAG_PATH2 "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=4&elem_size=4&name=F8:0&debug=1"
+
+#define TAG_PATH2 "protocol=ab_eip&gateway=10.206.1.38&path=0&plc=plc5&elem_size=4&elem_count=1&name=F8:0"
+#define TAG_PATH1 "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=2&elem_count=1&name=N7:0"
+
+
+#define DATA_TIMEOUT 1000
 
 
 int main()
@@ -56,7 +61,8 @@ int main()
     int32_t tag2 = 0;
     int rc1,rc2;
     int i;
-    int done = 0;
+    int elem_size = 0;
+    int elem_count = 0;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -64,50 +70,46 @@ int main()
         exit(1);
     }
 
+    /* set debug level if we need it. */
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+
     /* create the tag, async */
     tag1 = plc_tag_create(TAG_PATH1, 0);
     tag2 = plc_tag_create(TAG_PATH2, 0);
 
     /* everything OK? */
-    if(tag1 < 0) {
-        fprintf(stderr,"ERROR: Could not create tag1!\n");
-        return 0;
+    if(plc_tag_status(tag1) != PLCTAG_STATUS_OK && plc_tag_status(tag1) != PLCTAG_STATUS_PENDING) {
+        fprintf(stderr,"ERROR, %s: Could not create tag 1!\n", plc_tag_decode_error(plc_tag_status(tag1)));
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return plc_tag_status(tag1);
     }
 
-    if(tag2 < 0) {
-        fprintf(stderr,"ERROR: Could not create tag2!\n");
-        return 0;
+    if(plc_tag_status(tag2) != PLCTAG_STATUS_OK && plc_tag_status(tag2) != PLCTAG_STATUS_PENDING) {
+        fprintf(stderr,"ERROR, %s: Could not create tag 2!\n", plc_tag_decode_error(plc_tag_status(tag2)));
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return plc_tag_status(tag2);
     }
 
-    /* wait for tags to finish setting up */
-    util_sleep_ms(1000);
+    /* brute force wait for tags to finish setting up */
+    util_sleep_ms(DATA_TIMEOUT);
 
-    do {
-        done = 1;
-        rc1 = plc_tag_status(tag1);
-        rc2 = plc_tag_status(tag2);
-
-        if(rc1 == PLCTAG_STATUS_PENDING) {
-            done = 0;
-        }
-
-        if(rc2 == PLCTAG_STATUS_PENDING) {
-            done = 0;
-        }
-
-        if(!done) {
-            util_sleep_ms(5);
-        }
-    } while(!done);
+    rc1 = plc_tag_status(tag1);
+    rc2 = plc_tag_status(tag2);
 
     if(rc1 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc1));
-        return 0;
+        fprintf(stderr,"Error setting up tag 1 internal state. %s\n", plc_tag_decode_error(rc1));
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return rc1;
     }
 
     if(rc2 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc2));
-        return 0;
+        fprintf(stderr,"Error setting up tag 2 internal state. %s\n", plc_tag_decode_error(rc2));
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return rc2;
     }
 
     /* get the data */
@@ -115,44 +117,109 @@ int main()
     rc1 = plc_tag_read(tag1, 0);
 
     if(rc1 != PLCTAG_STATUS_OK && rc1 != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc1, plc_tag_decode_error(rc1));
-        return 0;
+        fprintf(stderr,"ERROR: Unable to start reading the tag 1 data! Got error code %d: %s\n",rc1, plc_tag_decode_error(rc1));
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return rc1;
     }
 
     if(rc2 != PLCTAG_STATUS_OK && rc2 != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc2, plc_tag_decode_error(rc2));
-        return 0;
+        fprintf(stderr,"ERROR: Unable to start reading the tag 2 data! Got error code %d: %s\n",rc2, plc_tag_decode_error(rc2));
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return rc2;
     }
 
     /* let the reads complete */
-    util_sleep_ms(1000);
+    util_sleep_ms(DATA_TIMEOUT);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);
 
     if(rc1 != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the tag 1 data! Got error code %d: %s\n",rc1, plc_tag_decode_error(rc1));
-
-        return 0;
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return rc1;
     }
 
     if(rc2 != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the tag 2 data! Got error code %d: %s\n",rc2, plc_tag_decode_error(rc2));
-
-        return 0;
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return rc2;
     }
 
-    /* print out the data */
-    for(i=0; i < 10; i++) {
-        fprintf(stderr,"tag 1 data[%d]=%d\n",i,plc_tag_get_int32(tag1,(i*4)));
+
+    /* print out the data for tag 1 */
+    elem_count = plc_tag_get_int_attribute(tag1, "elem_count", 0);
+    if(elem_count == 0) {
+        fprintf(stderr, "Tag element count is zero!\n");
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return PLCTAG_ERR_NO_DATA;
     }
 
-    /* print out the data */
-    for(i=0; i < 4; i++) {
-        fprintf(stderr,"tag 2 data[%d]=%f\n",i,plc_tag_get_float32(tag2,(i*4)));
+    elem_size = plc_tag_get_size(tag1)/elem_count;
+
+    for(i=0; i < elem_count; i++) {
+        switch(elem_size) {
+            case 1:
+                fprintf(stderr,"tag 1 data[%d]=%d\n",i,plc_tag_get_int8(tag1,(i*1)));
+                break;
+
+            case 2:
+                fprintf(stderr,"tag 1 data[%d]=%d\n",i,plc_tag_get_int16(tag1,(i*2)));
+                break;
+
+            case 4:
+                fprintf(stderr,"tag 1 data[%d]=%f\n",i,plc_tag_get_float32(tag1,(i*4)));
+                break;
+
+            default:
+                fprintf(stderr, "Unsupported size %d!", elem_size);
+                plc_tag_destroy(tag1);
+                plc_tag_destroy(tag2);
+                return PLCTAG_ERR_NO_DATA;
+                break;
+        }
     }
 
-    /* we are done, clean up tag 2 first */
+    /* print out the data for tag 2 */
+    elem_count = plc_tag_get_int_attribute(tag2, "elem_count", 0);
+    if(elem_count == 0) {
+        fprintf(stderr, "Tag element count is zero!\n");
+        plc_tag_destroy(tag1);
+        plc_tag_destroy(tag2);
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    elem_size = plc_tag_get_size(tag2)/elem_count;
+
+    for(i=0; i < elem_count; i++) {
+        switch(elem_size) {
+            case 1:
+                fprintf(stderr,"tag 2 data[%d]=%d\n",i,plc_tag_get_int8(tag2,(i*1)));
+                break;
+
+            case 2:
+                fprintf(stderr,"tag 2 data[%d]=%d\n",i,plc_tag_get_int16(tag2,(i*2)));
+                break;
+
+            case 4:
+                fprintf(stderr,"tag 2 data[%d]=%f\n",i,plc_tag_get_float32(tag2,(i*4)));
+                break;
+
+            default:
+                fprintf(stderr, "Unsupported size %d!", elem_size);
+                plc_tag_destroy(tag1);
+                plc_tag_destroy(tag2);
+                return PLCTAG_ERR_NO_DATA;
+                break;
+        }
+    }
+
+    /* we are done, clean up tag 2 first as order does not matter */
     plc_tag_destroy(tag2);
     plc_tag_destroy(tag1);
 
