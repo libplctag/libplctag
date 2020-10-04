@@ -612,7 +612,7 @@ struct mutex_t {
 
 int mutex_create(mutex_p *m)
 {
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(*m) {
         pdebug(DEBUG_WARN, "Called with non-NULL pointer!");
@@ -634,7 +634,7 @@ int mutex_create(mutex_p *m)
 
     (*m)->initialized = 1;
 
-    pdebug(DEBUG_SPEW, "Done creating mutex %p.", *m);
+    pdebug(DEBUG_DETAIL, "Done creating mutex %p.", *m);
 
     return PLCTAG_STATUS_OK;
 }
@@ -715,7 +715,7 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m)
 
 int mutex_destroy(mutex_p *m)
 {
-    pdebug(DEBUG_SPEW, "Starting to destroy mutex %p.", m);
+    pdebug(DEBUG_DETAIL, "Starting to destroy mutex %p.", m);
 
     if(!m || !*m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
@@ -731,7 +731,7 @@ int mutex_destroy(mutex_p *m)
 
     *m = NULL;
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
