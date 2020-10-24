@@ -270,7 +270,7 @@ plc_tag_p ab_tag_create(attr attribs)
     case AB_PLC_PLC5:
         if(!tag->session->dhp_dest) {
             pdebug(DEBUG_DETAIL, "Setting up PLC/5 tag.");
-            
+
             if(str_length(path)) {
                 pdebug(DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
             }
@@ -289,7 +289,7 @@ plc_tag_p ab_tag_create(attr attribs)
     case AB_PLC_SLC:
     case AB_PLC_MLGX:
         if(!tag->session->dhp_dest) {
-            
+
             if(str_length(path)) {
                 pdebug(DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
             }
@@ -339,7 +339,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     case AB_PLC_MLGX800:
         pdebug(DEBUG_DETAIL, "Setting up Micro8X0 tag.");
-            
+
         if(path || str_length(path)) {
             pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
         }
@@ -847,11 +847,17 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    /* assume we have a match. */
+    tag->status = PLCTAG_STATUS_OK;
+
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "elem_size") == 0) {
         res = tag->elem_size;
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
+    } else {
+        pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
     }
 
     return res;
@@ -860,9 +866,12 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
 int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 {
-    (void)raw_tag;
     (void)attrib_name;
     (void)new_value;
+
+    pdebug(DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+
+    raw_tag->status  = PLCTAG_ERR_UNSUPPORTED;
 
     return PLCTAG_ERR_UNSUPPORTED;
 }
