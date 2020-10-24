@@ -92,11 +92,11 @@ typedef struct modbus_plc_t *modbus_plc_p;
 
 typedef enum { MB_REG_UNKNOWN, MB_REG_COIL, MB_REG_DISCRETE_INPUT, MB_REG_HOLDING_REGISTER, MB_REG_INPUT_REGISTER } modbus_reg_type_t;
 
-typedef enum { MB_CMD_READ_COIL_MULTI = 0x01,  
-               MB_CMD_READ_DISCRETE_INPUT_MULTI = 0x02,  
-               MB_CMD_READ_HOLDING_REGISTER_MULTI = 0x03, 
+typedef enum { MB_CMD_READ_COIL_MULTI = 0x01,
+               MB_CMD_READ_DISCRETE_INPUT_MULTI = 0x02,
+               MB_CMD_READ_HOLDING_REGISTER_MULTI = 0x03,
                MB_CMD_READ_INPUT_REGISTER_MULTI = 0x04,
-               MB_CMD_WRITE_COIL_SINGLE = 0x05, 
+               MB_CMD_WRITE_COIL_SINGLE = 0x05,
                MB_CMD_WRITE_HOLDING_REGISTER_SINGLE = 0x06,
                MB_CMD_WRITE_COIL_MULTI = 0x0F,
                MB_CMD_WRITE_HOLDING_REGISTER_MULTI = 0x10
@@ -189,7 +189,7 @@ static int mb_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default
 static int mb_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
 
 struct tag_vtable_t modbus_vtable = {
-    (tag_vtable_func)mb_abort, 
+    (tag_vtable_func)mb_abort,
     (tag_vtable_func)mb_read_start,
     (tag_vtable_func)mb_tag_status, /* shared */
     (tag_vtable_func)mb_tickler,
@@ -240,7 +240,7 @@ plc_tag_p mb_tag_create(attr attribs)
         pdebug(DEBUG_WARN, "Unable to set the tag byte order!");
         tag->status = (int8_t)rc;
     }
-        
+
     pdebug(DEBUG_INFO, "Done.");
 
     return (plc_tag_p)tag;
@@ -331,7 +331,7 @@ int set_tag_byte_order(attr attribs, modbus_tag_p tag)
     /* the default values below are "pure" big-endian. */
 
     /* 16-bit ints. */
-    byte_order = attr_get_str(attribs, "int16_byte_order", "10"); 
+    byte_order = attr_get_str(attribs, "int16_byte_order", "10");
     pdebug(DEBUG_DETAIL, "int16_byte_order=%s", byte_order);
 
     rc = check_byte_order_str(byte_order, 2);
@@ -345,7 +345,7 @@ int set_tag_byte_order(attr attribs, modbus_tag_p tag)
     tag->byte_order.int16_order_1 = (unsigned int)(((unsigned int)byte_order[1] - (unsigned int)('0')) & 0x01);
 
     /* 32-bit ints */
-    byte_order = attr_get_str(attribs, "int32_byte_order", "3210"); 
+    byte_order = attr_get_str(attribs, "int32_byte_order", "3210");
     pdebug(DEBUG_DETAIL, "int32_byte_order=%s", byte_order);
 
     rc = check_byte_order_str(byte_order, 4);
@@ -360,7 +360,7 @@ int set_tag_byte_order(attr attribs, modbus_tag_p tag)
     tag->byte_order.int32_order_3 = (unsigned int)(((unsigned int)byte_order[3] - (unsigned int)('0')) & 0x03);
 
     /* 64-bit ints */
-    byte_order = attr_get_str(attribs, "int64_byte_order", "76543210"); 
+    byte_order = attr_get_str(attribs, "int64_byte_order", "76543210");
     pdebug(DEBUG_DETAIL, "int64_byte_order=%s", byte_order);
 
     rc = check_byte_order_str(byte_order, 8);
@@ -379,7 +379,7 @@ int set_tag_byte_order(attr attribs, modbus_tag_p tag)
     tag->byte_order.int64_order_7 = (unsigned int)(((unsigned int)byte_order[7] - (unsigned int)('0')) & 0x07);
 
     /* 32-bit floats. */
-    byte_order = attr_get_str(attribs, "float32_byte_order", "3210"); 
+    byte_order = attr_get_str(attribs, "float32_byte_order", "3210");
     pdebug(DEBUG_DETAIL, "float32_byte_order=%s", byte_order);
 
     rc = check_byte_order_str(byte_order, 4);
@@ -394,7 +394,7 @@ int set_tag_byte_order(attr attribs, modbus_tag_p tag)
     tag->byte_order.float32_order_3 = (unsigned int)(((unsigned int)byte_order[3] - (unsigned int)('0')) & 0x03);
 
     /* 64-bit floats */
-    byte_order = attr_get_str(attribs, "float64_byte_order", "76543210"); 
+    byte_order = attr_get_str(attribs, "float64_byte_order", "76543210");
     pdebug(DEBUG_DETAIL, "float64_byte_order=%s", byte_order);
 
     rc = check_byte_order_str(byte_order, 8);
@@ -464,7 +464,7 @@ int check_byte_order_str(const char *byte_order, int length)
 
 
 
-void modbus_tag_destructor(void *tag_arg) 
+void modbus_tag_destructor(void *tag_arg)
 {
     modbus_tag_p tag = (modbus_tag_p)tag_arg;
 
@@ -597,7 +597,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 
 
 
-void modbus_plc_destructor(void *plc_arg) 
+void modbus_plc_destructor(void *plc_arg)
 {
     modbus_plc_p plc = (modbus_plc_p)plc_arg;
 
@@ -713,11 +713,11 @@ THREAD_FUNC(modbus_plc_handler)
                     socket_destroy(&plc->sock);
                     plc->sock = NULL;
 
-                    /* 
+                    /*
                      * if we had a request that was sent, but there was no response yet,
                      * then we need to clean up the state.   We are never going to get that
                      * response.
-                     * 
+                     *
                      * If there is a request ready to send, then keep it in the buffer until
                      * we reconnect.
                      */
@@ -731,11 +731,11 @@ THREAD_FUNC(modbus_plc_handler)
 
                 /* run all the tags. */
 
-                /* 
+                /*
                  * This is a little contorted here.   Because the tag could have been destroyed while
                  * we were processing it, that could end up calling rc_dec() on the PLC itself.   So
                  * we take another reference here and then release it after the loop.
-                 * 
+                 *
                  * If we do not do that, then the PLC destructor could be called while we hold the
                  * PLC's mutex here.   That results in deadlock.
                  */
@@ -896,7 +896,7 @@ int read_packet(modbus_plc_p plc)
                 rc = PLCTAG_ERR_TOO_LARGE;
             }
         } else {
-            data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;            
+            data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;
         }
 
         rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, data_needed);
@@ -923,13 +923,13 @@ int read_packet(modbus_plc_p plc)
         }
 
         rc = PLCTAG_STATUS_OK;
-    } 
+    }
 
     /* if we have some data in the buffer, keep the connection open. */
     if(plc->read_data_len > 0) {
         plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
     }
-            
+
     pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
@@ -993,22 +993,22 @@ int write_packet(modbus_plc_p plc)
 
 /*
  * This is called in the context of the PLC thread.
- * 
+ *
  * The process cannot lock the tag's API mutex.   If the tag user side is
  * blocked in plc_tag_read, plc_tag_write or any other possibly blocking
  * API call, then the API mutex will be held.
- * 
+ *
  * However, we can ensure that the tag will not be deleted out from underneath
  * us because this function is called under the PLC's mutex.   plc_tag_delete()
  * will first call the destructor and try to remove the tag from the PLC's list
  * and that requires the PLC's mutex to be held.   So as long as we are
  * under the PLC's mutex, we cannot have the tag disappear out from underneath
  * us or out of the list.
- * 
+ *
  * To help ensure that, we take a reference to the tag as well.  If the tag was
  * in the process of being destroyed, the reference returned will be null.
- * 
- * So if we are here, we are not going to have the tag disappear nor are we going to 
+ *
+ * So if we are here, we are not going to have the tag disappear nor are we going to
  * have the PLC's tag list mutated.
  */
 
@@ -1171,8 +1171,8 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->request_num = 0;
             }
         } else {
-            /* 
-             * keep doing a read, but clear the busy flag so that we 
+            /*
+             * keep doing a read, but clear the busy flag so that we
              * keep creating new requests.
              */
             spin_block(&tag->tag_lock) {
@@ -1369,8 +1369,8 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->status = (int8_t)rc;
             }
         } else {
-            /* 
-             * keep doing a write, but clear the busy flag so that we 
+            /*
+             * keep doing a write, but clear the busy flag so that we
              * keep creating new requests.
              */
             spin_block(&tag->tag_lock) {
@@ -1862,6 +1862,8 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    tag->status = PLCTAG_STATUS_OK;
+
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "elem_size") == 0) {
         res = (tag->elem_size + 7)/8; /* return size in bytes! */
@@ -1869,6 +1871,7 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = tag->elem_count;
     } else {
         pdebug(DEBUG_WARN,"Attribute \"%s\" is not supported.", attrib_name);
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
     }
 
     return res;
@@ -1877,9 +1880,12 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
 int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 {
-    (void)raw_tag;
     (void)attrib_name;
     (void)new_value;
+
+    pdebug(DEBUG_WARN, "Attribute \"%s\" is unsupported!", attrib_name);
+
+    raw_tag->status = PLCTAG_ERR_UNSUPPORTED;
 
     return PLCTAG_ERR_UNSUPPORTED;
 }

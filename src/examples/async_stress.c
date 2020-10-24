@@ -273,7 +273,7 @@ int main(int argc, char **argv)
 }
 
 
-int read_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) 
+int read_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms)
 {
     if(timeout_ms <= 0) {
         fprintf(stderr, "Timeout to read_tags() must be greater than zero!\n");
@@ -287,12 +287,12 @@ int read_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms)
 
         /* if any failed, we need to abort the request. */
         if(statuses[i] != PLCTAG_STATUS_OK && statuses[i] != PLCTAG_STATUS_PENDING) {
-            fprintf(stderr, "1 Calling plc_tag_abort() on tag %d!\n", i);                
+            fprintf(stderr, "1 Calling plc_tag_abort() on tag %d!\n", i);
             plc_tag_abort(tags[i]);
         }
     }
 
-    return wait_for_tags(tags, statuses, num_tags, (int64_t)timeout_ms);
+    return wait_for_tags(tags, statuses, num_tags, timeout_ms);
 }
 
 
@@ -318,7 +318,7 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms)
 
                     fprintf(stderr, "Tag %d failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
 
-                    fprintf(stderr, "2 Calling plc_tag_abort() on tag %d!\n", i);                
+                    fprintf(stderr, "2 Calling plc_tag_abort() on tag %d!\n", i);
                     plc_tag_abort(tags[i]);
                 }
             }
@@ -338,7 +338,7 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms)
         for(int i=0; i<num_tags; i++) {
             if(statuses[i] == PLCTAG_STATUS_PENDING) {
                 /* we timed out, so abort and mark the status. */
-                fprintf(stderr, "3 Calling plc_tag_abort() on tag %d!\n", i);                
+                fprintf(stderr, "3 Calling plc_tag_abort() on tag %d!\n", i);
                 plc_tag_abort(tags[i]);
 
                 statuses[i] = PLCTAG_ERR_TIMEOUT;

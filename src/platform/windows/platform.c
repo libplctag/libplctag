@@ -150,7 +150,7 @@ extern void mem_set(void *dest, int c, int size)
         pdebug(DEBUG_WARN, "Destination pointer is NULL!");
         return;
     }
-    
+
     if(size <= 0) {
         pdebug(DEBUG_WARN, "Size to set must be a positive number!");
         return;
@@ -174,12 +174,12 @@ extern void mem_copy(void *dest, void *src, int size)
         pdebug(DEBUG_WARN, "Destination pointer is NULL!");
         return;
     }
-    
+
     if(!src) {
         pdebug(DEBUG_WARN, "Source pointer is NULL!");
         return;
     }
-    
+
     if(size < 0) {
         pdebug(DEBUG_WARN, "Size to copy must be a positive number!");
         return;
@@ -208,12 +208,12 @@ extern void mem_move(void *dest, void *src, int size)
         pdebug(DEBUG_WARN, "Destination pointer is NULL!");
         return;
     }
-    
+
     if(!src) {
         pdebug(DEBUG_WARN, "Source pointer is NULL!");
         return;
     }
-    
+
     if(size < 0) {
         pdebug(DEBUG_WARN, "Size to move must be a positive number!");
         return;
@@ -244,7 +244,7 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
     } else {
         if(!src2 || src2_size <= 0) {
             /* first is "greater" than second */
-            return 1; 
+            return 1;
         } else {
             /* both pointers are non-NULL and the lengths are positive. */
 
@@ -255,7 +255,7 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
 
             return memcmp(src1, src2, src1_size);
         }
-    }    
+    }
 }
 
 
@@ -273,8 +273,8 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
  * Return -1, 0, or 1 depending on whether the first string is "less" than the
  * second, the same as the second, or "greater" than the second.  This routine
  * just passes through to POSIX strcmp.
- * 
- * We must handle some edge cases here due to wrappers.   We could get a NULL 
+ *
+ * We must handle some edge cases here due to wrappers.   We could get a NULL
  * pointer or a zero-length string for either argument.
  */
 extern int str_cmp(const char *first, const char *second)
@@ -629,9 +629,15 @@ struct mutex_t {
 
 int mutex_create(mutex_p *m)
 {
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(*m) {
+        pdebug(DEBUG_WARN, "Called with non-NULL pointer!");
+    }
+
     *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
     if(! *m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_WARN, "null mutex pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -644,27 +650,27 @@ int mutex_create(mutex_p *m)
     if(!(*m)->h_mutex) {
         mem_free(*m);
         *m = NULL;
-        /*pdebug("Error initializing mutex.");*/
+        pdebug(DEBUG_WARN, "Error initializing mutex!");
         return PLCTAG_ERR_MUTEX_INIT;
     }
 
     (*m)->initialized = 1;
 
-    /*pdebug("Done.");*/
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
 
-int mutex_lock(mutex_p m)
+int mutex_lock_impl(const char *func, int line, mutex_p m)
 {
-    DWORD dwWaitResult;
+    DWORD dwWaitResult = 0;
 
-    pdebug(DEBUG_SPEW,"locking mutex %p", m);
+    pdebug(DEBUG_SPEW,"locking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -684,14 +690,14 @@ int mutex_lock(mutex_p m)
 
 
 
-int mutex_try_lock(mutex_p m)
+int mutex_try_lock_impl(const char *func, int line, mutex_p m)
 {
-    DWORD dwWaitResult;
+    DWORD dwWaitResult = 0;
 
-    pdebug(DEBUG_SPEW,"trying to lock mutex %p", m);
+    pdebug(DEBUG_SPEW,"trying to lock mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -710,12 +716,12 @@ int mutex_try_lock(mutex_p m)
 
 
 
-int mutex_unlock(mutex_p m)
+int mutex_unlock_impl(const char *func, int line, mutex_p m)
 {
-    pdebug(DEBUG_SPEW,"unlocking mutex %p", m);
+    pdebug(DEBUG_SPEW,"unlocking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        /*pdebug("null mutex pointer.");*/
+        pdebug(DEBUG_WARN,"null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -738,7 +744,7 @@ int mutex_unlock(mutex_p m)
 
 int mutex_destroy(mutex_p *m)
 {
-    pdebug(DEBUG_SPEW,"destroying mutex %p", m);
+    pdebug(DEBUG_DETAIL,"destroying mutex %p", m);
 
     if(!m || !*m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
@@ -751,7 +757,7 @@ int mutex_destroy(mutex_p *m)
 
     *m = NULL;
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
