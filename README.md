@@ -169,7 +169,7 @@ We need and welcome help with the following:
 
 We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   **We ask that your code contributions to the core library are under the same dual MPL/LGPL license.**
 
-Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch!  We appreciate all the help we get from our users this way.
+Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch and can also be downloaded from the [releases](https://github.com/libplctag/libplctag/releases) page!  We appreciate all the help we get from our users this way.
 
 The easiest way to contribute to the core library is to raise a PR on GitHub.
 
