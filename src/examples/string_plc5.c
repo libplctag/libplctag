@@ -40,7 +40,7 @@
 /*
  * Read a STRING from a PCCC-based PLC.  Note that the actual data size of a string is 84 bytes.
  *
- * STRING types are an IINT (2 bytes) followed by 82 bytes of characters.  The character data is
+ * STRING types are an INT (2 bytes) followed by 82 bytes of characters.  The character data is
  * byteswapped! Character 0 is at offset 1, character 1 is at offset 0, character 2 is at offset 3,
  * character 4 is at offset 2...
  */
