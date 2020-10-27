@@ -354,6 +354,7 @@ else()
                             stress_api_lock
                             stress_test
                             string
+                            string_plc5
                             test_auto_sync
                             test_callback
                             test_reconnect
@@ -376,6 +377,7 @@ else()
                             simple_dual
                             slc500
                             string
+                            string_plc5
                             test_callback
                             test_shutdown
                             test_special
