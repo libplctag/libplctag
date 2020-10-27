@@ -48,7 +48,8 @@
 #define REQUIRED_VERSION 2,1,16
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=84&elem_count=2&name=ST18:0"
-#define DATA_TIMEOUT 5000
+#define DATA_TIMEOUT (5000)
+#define STR_BUF_MAX (82)
 
 int main()
 {
@@ -100,10 +101,10 @@ int main()
     for(i=0; i < elem_count; i++) {
         /* get the string character count, as a INT */
         int str_size = plc_tag_get_int16(tag,(i*elem_size));
-        char str[elem_size];
+        char str[STR_BUF_MAX+1];
         int j = 0;
 
-        for(j=0; j<str_size; j++) {
+        for(j=0; (j < str_size) && (j < STR_BUF_MAX); j++) {
             int char_index = (i*elem_size) /* each string has a full buffer. */
                            + 2             /* skip the string length INT */
                            + (j ^ 0x01);   /* byteswap the index. */
