@@ -455,6 +455,7 @@ elseif (BUILD_EXAMPLES)
                             stress_api_lock
                             stress_test
                             string
+                            string_plc5
                             test_auto_sync
                             test_callback
                             test_raw_cip
@@ -481,6 +482,7 @@ elseif (BUILD_EXAMPLES)
                             simple_dual
                             slc500
                             string
+                            string_plc5
                             test_callback
                             test_raw_cip
                             test_shutdown
