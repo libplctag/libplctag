@@ -1,69 +1,70 @@
+# How to Build libplctag
+
 The build system uses CMake to bootstrap a local build.  On Linux.  On Windows, this makes a Visual Studio project.
 CMake is also used to create a build on macOS.
 
 Note that as of version 2.0.22, pre-built binaries are included in the GitHub releases.
 
-
 # Instructions for Linux
 
 ## Install the compilers
 
-For Ubuntu/Debian and derivatives, use
+### Debian/Ubuntu
 
-```
-$ sudo apt-get install build-essential
-```
+#### Install Build Essentials, CMake and Git
 
-That will get gcc.   Use your distro-specific instructions to install Clang if you want to use that compiler.
-
-## Install cmake and git
-
-For Ubuntu/Debian and derivatives, use
-
-```
-$ sudo apt-get install cmake git
+```text
+$> sudo apt-get install build-essential cmake git
 ```
 
-Instructions for other Linux distributions happily accepted.
+Use your distro-specific instructions to install Clang if you want to use that compiler.
 
+### RHEL/CentOS
+
+These instructions probably work with few modifications for Red Hat and Oracle Linux.  Please file a GitHub ticket if they need changes for SUSE and other RPM-based distributions.
+
+#### Install Compilers, CMake and Git
+
+You need to become root or, if your Linux distribution supports it, run these commands with `sudo`.
+
+```text
+$> yum install gcc gcc-c++ cmake git
+```
 
 ## Check out the code
 
 Make a work directory in which you want to check out the code.
 
-```
-$ git clone https://github.com/libplctag/libplctag.git
+```text
+$> git clone https://github.com/libplctag/libplctag.git
 ```
 
 Or you can download one of the releases directly from GitHub.
 
-
 ## Build the Make build files
-
 
 Go into the project build directory (the build directory may not already exist)/
 
-```
-$ cd libplctag
-$ mkdir -p build
-$ cd build
+```text
+$> cd libplctag
+$> mkdir -p build
+$> cd build
 ```
 
 Run cmake (use "Release" for a release build and "Debug" for a debug build).
 
-```
-$ cmake .. -DCMAKE_BUILD_TYPE=Release
+```text
+$> cmake .. -DCMAKE_BUILD_TYPE=Release
 ```
 
 The ".." above is important.
-
 
 ## Compile the code
 
 Run make
 
-```
-$ make
+```text
+$> make
 ```
 
 The binaries will be in the `build/bin_dist` directory.   This includes the libraries (static and dynamic) and the
@@ -75,11 +76,11 @@ If you want to use Clang instead, install Clang first.
 
 Then set the default compilers to Clang
 
-```
-$ export CC=clang
-$ export CXX=clang++
-$ cmake ..
-$ make
+```text
+$> export CC=clang
+$> export CXX=clang++
+$> cmake ..
+$> make
 ```
 
 # Instructions for Windows using Microsoft Visual Studio

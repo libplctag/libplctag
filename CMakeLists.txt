@@ -33,7 +33,7 @@
 # the project is version 2.1
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 20)
+set (libplctag_VERSION_PATCH 21)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -354,6 +354,7 @@ else()
                             stress_api_lock
                             stress_test
                             string
+                            string_plc5
                             test_auto_sync
                             test_callback
                             test_reconnect
@@ -376,6 +377,7 @@ else()
                             simple_dual
                             slc500
                             string
+                            string_plc5
                             test_callback
                             test_shutdown
                             test_special

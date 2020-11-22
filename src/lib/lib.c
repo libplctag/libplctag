@@ -1282,16 +1282,22 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
  */
 
 
-int plc_tag_status(int32_t id)
+LIB_EXPORT int plc_tag_status(int32_t id)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    /* check the ID.  It might be an error status from creating the tag. */
     if(!tag) {
-        pdebug(DEBUG_WARN,"Tag not found.");
-        return PLCTAG_ERR_NOT_FOUND;
+        if(id < 0) {
+            pdebug(DEBUG_WARN, "Called with an error status %s!", plc_tag_decode_error(id));
+            return id;
+        } else {
+            pdebug(DEBUG_WARN,"Tag not found.");
+            return PLCTAG_ERR_NOT_FOUND;
+        }
     }
 
     critical_block(tag->api_mutex) {
