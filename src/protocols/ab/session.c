@@ -470,7 +470,7 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         rc_dec(session);
         return NULL;
     }
-
+    
     if(path && str_length(path)) {
         session->path = str_dup(path);
         if(path && str_length(path) && !session->path) {
@@ -960,8 +960,8 @@ int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
 
 
 typedef enum { SESSION_OPEN_SOCKET, SESSION_REGISTER, SESSION_SEND_FORWARD_OPEN,
-               SESSION_RECEIVE_FORWARD_OPEN, SESSION_IDLE, SESSION_DISCONNECT,
-               SESSION_UNREGISTER, SESSION_CLOSE_SOCKET, SESSION_START_RETRY,
+               SESSION_RECEIVE_FORWARD_OPEN, SESSION_IDLE, SESSION_DISCONNECT, 
+               SESSION_UNREGISTER, SESSION_CLOSE_SOCKET, SESSION_START_RETRY, 
                SESSION_WAIT_RETRY, SESSION_WAIT_RECONNECT
              } session_state_t;
 
@@ -1061,57 +1061,7 @@ THREAD_FUNC(session_handler)
                 pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                 state = SESSION_IDLE;
             }
-            break;
-
-        case SESSION_RECEIVE_FORWARD_OPEN:
-            pdebug(DEBUG_DETAIL, "in SESSION_RECEIVE_FORWARD_OPEN state.");
-
-            if((rc = receive_forward_open_response(session)) != PLCTAG_STATUS_OK) {
-                if(rc == PLCTAG_ERR_DUPLICATE) {
-                    pdebug(DEBUG_DETAIL, "Duplicate connection error received, trying again with different connection ID.");
-                    state = SESSION_SEND_FORWARD_OPEN;
-                } else if(rc == PLCTAG_ERR_TOO_LARGE) {
-                    pdebug(DEBUG_DETAIL, "Requested packet size too large, retrying with smaller size.");
-                    state = SESSION_SEND_FORWARD_OPEN;
-                } else if(rc == PLCTAG_ERR_UNSUPPORTED && !session->only_use_old_forward_open) {
-                    /* if we got an unsupported error and we are trying with ForwardOpenEx, then try the old command. */
-                    pdebug(DEBUG_DETAIL, "PLC does not support ForwardOpenEx, trying old ForwardOpen.");
-                    session->only_use_old_forward_open = 1;
-                    state = SESSION_SEND_FORWARD_OPEN;
-                } else {
-                    pdebug(DEBUG_WARN, "Receive Forward Open failed %s!", plc_tag_decode_error(rc));
-                    state = SESSION_UNREGISTER;
-                }
-            } else {
-                pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
-                state = SESSION_IDLE;
-            }
-            break;
-
-        case SESSION_RECEIVE_FORWARD_OPEN:
-            pdebug(DEBUG_DETAIL, "in SESSION_RECEIVE_FORWARD_OPEN state.");
-
-            if((rc = receive_forward_open_response(session)) != PLCTAG_STATUS_OK) {
-                if(rc == PLCTAG_ERR_DUPLICATE) {
-                    pdebug(DEBUG_DETAIL, "Duplicate connection error received, trying again with different connection ID.");
-                    state = SESSION_SEND_FORWARD_OPEN;
-                } else if(rc == PLCTAG_ERR_TOO_LARGE) {
-                    pdebug(DEBUG_DETAIL, "Requested packet size too large, retrying with smaller size.");
-                    state = SESSION_SEND_FORWARD_OPEN;
-                } else if(rc == PLCTAG_ERR_UNSUPPORTED && !session->only_use_old_forward_open) {
-                    /* if we got an unsupported error and we are trying with ForwardOpenEx, then try the old command. */
-                    pdebug(DEBUG_DETAIL, "PLC does not support ForwardOpenEx, trying old ForwardOpen.");
-                    session->only_use_old_forward_open = 1;
-                    state = SESSION_SEND_FORWARD_OPEN;
-                } else {
-                    pdebug(DEBUG_WARN, "Receive Forward Open failed %s!", plc_tag_decode_error(rc));
-                    state = SESSION_UNREGISTER;
-                }
-            } else {
-                pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
-                state = SESSION_IDLE;
-            }
-            break;
+            break;        
 
         case SESSION_IDLE:
             pdebug(DEBUG_SPEW, "in SESSION_IDLE state.");
@@ -2002,7 +1952,7 @@ int send_forward_open_request(ab_session_p session)
         pdebug(DEBUG_DETAIL, "Setting initial payload size guess to %u.", (unsigned int)session->max_payload_guess);
     }
 
-    /*
+    /* 
      * double check the message size.   If we just transitioned to using the old ForwardOpen command
      * then the maximum payload guess might be too large.
      */
