@@ -57,6 +57,7 @@ const
   const PLCTAG_ERR_WINSOCK          = (-36);
   const PLCTAG_ERR_WRITE            = (-37);
   const PLCTAG_ERR_PARTIAL          = (-38);
+  const PLCTAG_ERR_BUSY             = (-39);
 
 
 
