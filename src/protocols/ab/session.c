@@ -1088,6 +1088,31 @@ THREAD_FUNC(session_handler)
             }
             break;
 
+        case SESSION_RECEIVE_FORWARD_OPEN:
+            pdebug(DEBUG_DETAIL, "in SESSION_RECEIVE_FORWARD_OPEN state.");
+
+            if((rc = receive_forward_open_response(session)) != PLCTAG_STATUS_OK) {
+                if(rc == PLCTAG_ERR_DUPLICATE) {
+                    pdebug(DEBUG_DETAIL, "Duplicate connection error received, trying again with different connection ID.");
+                    state = SESSION_SEND_FORWARD_OPEN;
+                } else if(rc == PLCTAG_ERR_TOO_LARGE) {
+                    pdebug(DEBUG_DETAIL, "Requested packet size too large, retrying with smaller size.");
+                    state = SESSION_SEND_FORWARD_OPEN;
+                } else if(rc == PLCTAG_ERR_UNSUPPORTED && !session->only_use_old_forward_open) {
+                    /* if we got an unsupported error and we are trying with ForwardOpenEx, then try the old command. */
+                    pdebug(DEBUG_DETAIL, "PLC does not support ForwardOpenEx, trying old ForwardOpen.");
+                    session->only_use_old_forward_open = 1;
+                    state = SESSION_SEND_FORWARD_OPEN;
+                } else {
+                    pdebug(DEBUG_WARN, "Receive Forward Open failed %s!", plc_tag_decode_error(rc));
+                    state = SESSION_UNREGISTER;
+                }
+            } else {
+                pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
+                state = SESSION_IDLE;
+            }
+            break;
+
         case SESSION_IDLE:
             pdebug(DEBUG_SPEW, "in SESSION_IDLE state.");
 

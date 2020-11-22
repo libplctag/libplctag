@@ -315,9 +315,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
                 fprintf(stderr, "Selecting SLC 500 simulator.\n");
                 plc->plc_type = PLC_SLC;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -327,9 +327,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
                 fprintf(stderr, "Selecting Micrologix simulator.\n");
                 plc->plc_type = PLC_MICROLOGIX;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -523,6 +523,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
         tag->elem_count = tag->dimensions[0];
         tag->num_dimensions = 1;
     }
+
     /* copy the tag name */
     tag->name = strdup(data_file_name);
     if (!tag->name) {
@@ -560,7 +561,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
  *     LINT - 8-byte signed integer.  Requires array size(s).
  *     REAL - 4-byte floating point number.  Requires array size(s).
  *     LREAL - 8-byte floating point number.  Requires array size(s).
- *     STRING - 82-byte string with 4-byte count word and 2 bytes of padding. 
+ *     STRING - 82-byte string with 4-byte count word and 2 bytes of padding.
  *
  * Array size field is one or more (up to 3) numbers separated by commas.
  */
@@ -703,6 +704,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
     } else {
         tag->dimensions[2] = 1;
     }
+
     /* copy the tag name */
     tag->name = strdup(tag_name);
     if (!tag->name) {
