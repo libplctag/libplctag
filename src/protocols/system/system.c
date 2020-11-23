@@ -65,6 +65,28 @@ struct tag_vtable_t system_tag_vtable = {
 
 };
 
+tag_byte_order_t system_tag_byte_order = {
+    .is_allocated = 0,
+
+    .int16_order = {0,1},
+    .int32_order = {0,1,2,3},
+    .int64_order = {0,1,2,3,4,5,6,7},
+    .float32_order = {0,1,2,3},
+    .float64_order = {0,1,2,3,4,5,6,7},
+
+    .str_is_defined = 1,
+    .str_is_counted = 0,
+    .str_is_fixed_length = 0,
+    .str_is_zero_terminated = 1, /* C-style string. */
+    .str_is_byte_swapped = 0,
+
+    .str_count_word_bytes = 0,
+    .str_max_capacity = 0,
+    .str_total_length = 0,
+    .str_pad_bytes = 0
+};
+
+
 
 plc_tag_p system_tag_create(attr attribs)
 {
@@ -99,46 +121,8 @@ plc_tag_p system_tag_create(attr attribs)
      */
     tag->vtable = &system_tag_vtable;
 
-    /* set up the byte order. */
-
-    /* 16-bit ints. */
-    tag->byte_order.int16_order_0 = 0;
-    tag->byte_order.int16_order_1 = 1;
-
-    /* 32-bit ints */
-    tag->byte_order.int32_order_0 = 0;
-    tag->byte_order.int32_order_1 = 1;
-    tag->byte_order.int32_order_2 = 2;
-    tag->byte_order.int32_order_3 = 3;
-
-    /* 64-bit ints */
-    tag->byte_order.int64_order_0 = 0;
-    tag->byte_order.int64_order_1 = 1;
-    tag->byte_order.int64_order_2 = 2;
-    tag->byte_order.int64_order_3 = 3;
-    tag->byte_order.int64_order_4 = 4;
-    tag->byte_order.int64_order_5 = 5;
-    tag->byte_order.int64_order_6 = 6;
-    tag->byte_order.int64_order_7 = 7;
-
-    /* 32-bit floats. */
-    tag->byte_order.float32_order_0 = 0;
-    tag->byte_order.float32_order_1 = 1;
-    tag->byte_order.float32_order_2 = 2;
-    tag->byte_order.float32_order_3 = 3;
-
-    /* 64-bit floats */
-    tag->byte_order.float64_order_0 = 0;
-    tag->byte_order.float64_order_1 = 1;
-    tag->byte_order.float64_order_2 = 2;
-    tag->byte_order.float64_order_3 = 3;
-    tag->byte_order.float64_order_4 = 4;
-    tag->byte_order.float64_order_5 = 5;
-    tag->byte_order.float64_order_6 = 6;
-    tag->byte_order.float64_order_7 = 7;
-
-    /* strings. */
-    tag->byte_order.string_type = STRING_ZERO_TERM;
+    /* set the byte order. */
+    tag->byte_order = &system_tag_byte_order;
 
     /* get the name and copy it */
     str_copy(tag->name, MAX_SYSTEM_TAG_NAME, name);
@@ -178,7 +162,10 @@ static void system_tag_destroy(plc_tag_p ptag)
         mutex_destroy(&ptag->api_mutex);
     }
 
-    //mem_free(tag);
+    if(tag->byte_order && tag->byte_order->is_allocated) {
+        mem_free(tag->byte_order);
+        tag->byte_order = NULL;
+    }
 
     return;
 }

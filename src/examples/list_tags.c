@@ -40,7 +40,7 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,2,0
 
 #define TAG_STRING_SIZE (200)
 #define TIMEOUT_MS (5000)
@@ -96,12 +96,18 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
 {
     int rc = PLCTAG_STATUS_OK;
     int offset = 0;
-    //int index = 0;
+    int prefix_size = 0;
 
     rc = plc_tag_read(tag, TIMEOUT_MS);
     if(rc != PLCTAG_STATUS_OK) {
         printf("Unable to read tag!  Return code %s\n",plc_tag_decode_error(tag));
         usage();
+    }
+
+    if(prefix && strlen(prefix) > 0) {
+        prefix_size = (int)(unsigned int)strlen(prefix) + 1; /* +1 for an additional '.' at the end. */
+    } else {
+        prefix_size = 0;
     }
 
     /* process each tag entry. */
@@ -111,9 +117,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         uint16_t element_length = 0;
         uint16_t array_dims[3] = {0,};
         int tag_name_len = 0;
-        char tag_name[TAG_STRING_SIZE * 2] = {0,};
-        int prefix_size = 0;
-        int i;
+        char *tag_name = NULL;
 
         /* each entry looks like this:
         uint32_t instance_id    monotonically increasing but not contiguous
@@ -143,24 +147,25 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         offset += 4;
 
         /* use library support for strings. Offset points to the start of the string. */
-        tag_name_len = plc_tag_get_string_length(tag, offset);
-        //offset += 2;
+        tag_name_len = plc_tag_get_string_capacity(tag, offset)+1; /* add +1 for the zero byte. */
+
+        /* allocate space for the prefix plus the tag name. */
+        tag_name = malloc((size_t)(unsigned int)(prefix_size + tag_name_len));
+        if(!tag_name) {
+            fprintf(stderr, "Unable to allocate memory for the tag name!\n");
+            usage();
+        }
 
         /* copy the prefix string. */
         if(prefix && strlen(prefix) > 0) {
-            snprintf(tag_name, sizeof(tag_name), "%s.", prefix);
-            prefix_size = (int)(unsigned int)strlen(prefix) + 1;
-        } else {
-            prefix_size = 0;
+            snprintf(tag_name, (size_t)(unsigned int)tag_name_len, "%s.", prefix);
         }
 
-        /* copy the name string bytes. */
-        for(i=0; i < tag_name_len && (i + prefix_size) < ((TAG_STRING_SIZE*2)-1); i++) {
-            tag_name[i + prefix_size] = (char)plc_tag_get_string_char(tag, offset, i);
+        rc = plc_tag_get_string(tag, offset, tag_name + prefix_size, tag_name_len - prefix_size);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Unable to get the tag name string, got error %s!\n", plc_tag_decode_error(rc));
+            usage();
         }
-
-        /* zero terminate the string. */
-        tag_name[i + prefix_size + 1] = 0;
 
         /* fprintf(stderr, "Tag %s, string length: %d.\n", tag_name, plc_tag_get_string_total_length(tag, offset)); */
 
@@ -179,7 +184,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
             //printf("index %d: Found program: %s\n", index, tag_name);
 
             entry->next = *prog_list;
-            entry->program_name = strdup(tag_name);
+            entry->program_name = tag_name;
 
             *prog_list = entry;
         } else if(!(tag_type & TAG_IS_SYSTEM)) {
@@ -195,7 +200,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
             //printf("index %d: Found tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
 
             /* fill in the fields. */
-            tag_entry->name = strdup(tag_name);
+            tag_entry->name = tag_name;
             tag_entry->type = tag_type;
             tag_entry->elem_size = element_length;
             tag_entry->num_dimensions = (uint16_t)((tag_type & TAG_DIM_MASK) >> 13);

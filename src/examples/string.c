@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
@@ -46,8 +47,8 @@
 #define REQUIRED_VERSION 2,2,0
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt&debug=4"
-#define ELEM_COUNT 48
-#define ELEM_SIZE 88
+//#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=84&elem_count=2&name=ST18:0"
+
 #define DATA_TIMEOUT 5000
 
 
@@ -64,7 +65,7 @@ int main()
         return 1;
     }
 
-    fprintf(stderr, "Using library version %d.%d.%d.\n", 
+    fprintf(stderr, "Using library version %d.%d.%d.\n",
                                             plc_tag_get_int_attribute(0, "version_major", -1),
                                             plc_tag_get_int_attribute(0, "version_minor", -1),
                                             plc_tag_get_int_attribute(0, "version_patch", -1));
@@ -84,29 +85,36 @@ int main()
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return 0;
+        return rc;
     }
 
     /* print out the data */
     offset = 0;
     while(offset < plc_tag_get_size(tag)) {
-        int str_size = plc_tag_get_string_length(tag, offset);
-        char str[ELEM_SIZE] = {0};
-        int i;
+        // int str_size = plc_tag_get_string_length(tag, offset);
+        // char str[ELEM_SIZE] = {0};
+        // int i;
+        char *str = NULL;
+        int str_cap = plc_tag_get_string_capacity(tag, offset) + 1; /* +1 for the zero termination. */
 
-        /* clamp to the buffer size. */
-        if(str_size >= ELEM_SIZE) {
-            str_size = ELEM_SIZE-1;
+        str = malloc((size_t)(unsigned int)str_cap);
+        if(!str) {
+            fprintf(stderr, "Unable to allocate memory for the string!\n");
+            plc_tag_destroy(tag);
+            return PLCTAG_ERR_NO_MEM;
         }
 
-        /* copy the chars. */
-        for(i=0; i < str_size; i++) {
-            str[i] = (char)plc_tag_get_string_char(tag, offset, i);
+        rc = plc_tag_get_string(tag, offset, str, str_cap);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Unable to get string, got error %s!\n", plc_tag_decode_error(rc));
+            free(str);
+            plc_tag_destroy(tag);
+            return rc;
         }
 
-        str[i] = (char)0;
+        fprintf(stderr, "string %d (%u chars) = '%s'\n", str_num, (unsigned int)strlen(str), str);
 
-        fprintf(stderr, "string %d (%d chars) = '%s'\n", str_num, str_size, str);
+        free(str);
 
         str_num++;
 
