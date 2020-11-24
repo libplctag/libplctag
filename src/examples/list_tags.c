@@ -104,8 +104,9 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         usage();
     }
 
+    /* get the prefix length */
     if(prefix && strlen(prefix) > 0) {
-        prefix_size = (int)(unsigned int)strlen(prefix) + 1; /* +1 for an additional '.' at the end. */
+        prefix_size = (int)(unsigned int)strlen(prefix) + 1; /* +1 for the dot */
     } else {
         prefix_size = 0;
     }
@@ -120,12 +121,12 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         char *tag_name = NULL;
 
         /* each entry looks like this:
-        uint32_t instance_id    monotonically increasing but not contiguous
-        uint16_t symbol_type    type of the symbol.
-        uint16_t element_length length of one array element in bytes.
-        uint32_t array_dims[3]  array dimensions.
-        uint16_t string_len     string length count.
-        uint8_t string_data[]   string bytes (string_len of them)
+            uint32_t instance_id    monotonically increasing but not contiguous
+            uint16_t symbol_type    type of the symbol.
+            uint16_t element_length length of one array element in bytes.
+            uint32_t array_dims[3]  array dimensions.
+            uint16_t string_len     string length count.
+            uint8_t string_data[]   string bytes (string_len of them)
         */
 
         /* we do not actually need this.
@@ -147,27 +148,27 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         offset += 4;
 
         /* use library support for strings. Offset points to the start of the string. */
-        tag_name_len = plc_tag_get_string_capacity(tag, offset)+1; /* add +1 for the zero byte. */
+        tag_name_len = plc_tag_get_string_capacity(tag, offset) + 1; /* add +1 for the zero byte. */
 
         /* allocate space for the prefix plus the tag name. */
-        tag_name = malloc((size_t)(unsigned int)(prefix_size + tag_name_len));
+        tag_name = malloc((size_t)(unsigned int)(tag_name_len + prefix_size));
         if(!tag_name) {
             fprintf(stderr, "Unable to allocate memory for the tag name!\n");
             usage();
         }
 
         /* copy the prefix string. */
-        if(prefix && strlen(prefix) > 0) {
-            snprintf(tag_name, (size_t)(unsigned int)tag_name_len, "%s.", prefix);
+        if(prefix_size > 0) {
+            snprintf(tag_name, (size_t)(unsigned int)(tag_name_len + prefix_size), "%s.", prefix);
         }
 
-        rc = plc_tag_get_string(tag, offset, tag_name + prefix_size, tag_name_len - prefix_size);
+        rc = plc_tag_get_string(tag, offset, tag_name + prefix_size, tag_name_len);
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr, "Unable to get the tag name string, got error %s!\n", plc_tag_decode_error(rc));
             usage();
         }
 
-        /* fprintf(stderr, "Tag %s, string length: %d.\n", tag_name, plc_tag_get_string_total_length(tag, offset)); */
+        /* fprintf(stderr, "Tag %s, string length: %d.\n", tag_name, (int)(unsigned int)strlen(tag_name)); */
 
         /* skip past the string. */
         offset += plc_tag_get_string_total_length(tag, offset);
