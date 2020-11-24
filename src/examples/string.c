@@ -46,8 +46,8 @@
 
 #define REQUIRED_VERSION 2,2,0
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt&debug=4"
-//#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=84&elem_count=2&name=ST18:0"
+//#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt&debug=4"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=84&elem_count=2&name=ST18:0"
 
 #define DATA_TIMEOUT 5000
 
@@ -91,9 +91,6 @@ int main()
     /* print out the data */
     offset = 0;
     while(offset < plc_tag_get_size(tag)) {
-        // int str_size = plc_tag_get_string_length(tag, offset);
-        // char str[ELEM_SIZE] = {0};
-        // int i;
         char *str = NULL;
         int str_cap = plc_tag_get_string_capacity(tag, offset) + 1; /* +1 for the zero termination. */
 

@@ -75,7 +75,7 @@ tag_byte_order_t pccc_tag_byte_order = {
     .str_is_counted = 1,
     .str_is_fixed_length = 1,
     .str_is_zero_terminated = 0,
-    .str_is_byte_swapped = 0,
+    .str_is_byte_swapped = 1,
 
     .str_count_word_bytes = 2,
     .str_max_capacity = 82,
