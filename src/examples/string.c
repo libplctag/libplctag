@@ -76,7 +76,7 @@ int main()
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
     /* loop over the tag strings. */
-    for(int i=0; i < sizeof(tag_strings)/sizeof(tag_strings[0]); i++) {
+    for(int i=0; i < (int)(unsigned int)(sizeof(tag_strings)/sizeof(tag_strings[0])); i++) {
         tag = plc_tag_create(tag_strings[i], DATA_TIMEOUT);
 
         /* everything OK? */
