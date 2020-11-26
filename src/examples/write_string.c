@@ -156,6 +156,7 @@ int main()
     /* how many strings do we have? */
     string_count = plc_tag_get_int_attribute(tag, "elem_count", 1);
 
+    /* update the string. */
     for(int i=0; i < string_count; i++) {
         snprintf_platform(str, sizeof(str), "string value for element %d is %d.", i, (int)(rand() % 1000));
         update_string(tag, i, str);
