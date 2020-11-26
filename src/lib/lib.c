@@ -3067,7 +3067,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
 
 
-int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
+LIB_EXPORT int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
 {
     int string_capacity = 0;
     plc_tag_p tag = lookup_tag(id);
@@ -3115,7 +3115,7 @@ int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
 
 
 
-int plc_tag_get_string_total_length(int32_t id, int string_start_offset)
+LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offset)
 {
     int total_length = 0;
     plc_tag_p tag = lookup_tag(id);
