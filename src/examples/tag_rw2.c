@@ -819,19 +819,19 @@ void dump_values(struct run_args *args)
 
                 case TYPE_STRING:
                     {
-                        int str_cap = plc_tag_get_string_capacity(tag, offset);
+                        int str_len = plc_tag_get_string_length(tag, offset);
                         char *str = NULL;
                         int rc = PLCTAG_STATUS_OK;
 
-                        if(str_cap > 0) {
-                            str = calloc((size_t)(unsigned int)(str_cap+1), sizeof(char));
+                        if(str_len > 0) {
+                            str = calloc((size_t)(unsigned int)(str_len+1), sizeof(char));
                             if(!str) {
                                 printf("ERROR: Unable to allocate temporary buffer to output string!\n");
                                 cleanup(args);
                                 exit(1);
                             }
 
-                            rc = plc_tag_get_string(tag, offset, str, str_cap);
+                            rc = plc_tag_get_string(tag, offset, str, str_len);
                             if(rc != PLCTAG_STATUS_OK) {
                                 printf("ERROR: Unable to get string %d, error: %s!\n", item_index, plc_tag_decode_error(rc));
                                 cleanup(args);
@@ -841,10 +841,10 @@ void dump_values(struct run_args *args)
                             printf("data[%d]=\"%s\"\n", item_index, str);
 
                             free(str);
-                        } else if(str_cap == 0) {
+                        } else if(str_len == 0) {
                             printf("data[%d]=\"\"\n", item_index);
                         } else {
-                            printf("Error getting string length for item %d!  Got error value %s!", item_index, plc_tag_decode_error(str_cap));
+                            printf("Error getting string length for item %d!  Got error value %s!", item_index, plc_tag_decode_error(str_len));
                         }
                     }
 

@@ -148,7 +148,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         offset += 4;
 
         /* use library support for strings. Offset points to the start of the string. */
-        tag_name_len = plc_tag_get_string_capacity(tag, offset) + 1; /* add +1 for the zero byte. */
+        tag_name_len = plc_tag_get_string_length(tag, offset) + 1; /* add +1 for the zero byte. */
 
         /* allocate space for the prefix plus the tag name. */
         tag_name = malloc((size_t)(unsigned int)(tag_name_len + prefix_size));

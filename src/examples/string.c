@@ -99,7 +99,7 @@ int main()
         str_num = 1;
         while(offset < plc_tag_get_size(tag)) {
             char *str = NULL;
-            int str_cap = plc_tag_get_string_capacity(tag, offset) + 1; /* +1 for the zero termination. */
+            int str_cap = plc_tag_get_string_length(tag, offset) + 1; /* +1 for the zero termination. */
 
             str = malloc((size_t)(unsigned int)str_cap);
             if(!str) {
