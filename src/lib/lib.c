@@ -2879,6 +2879,14 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
         return PLCTAG_ERR_NOT_FOUND;
     }
 
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
     /* is there data? */
     if(!tag->data) {
         rc_dec(tag);
@@ -2889,7 +2897,7 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
 
     if(tag->is_bit) {
         rc_dec(tag);
-        pdebug(DEBUG_WARN, "Getting a string length from a bit tag is not supported!");
+        pdebug(DEBUG_WARN, "Getting a string value from a bit tag is not supported!");
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -2954,6 +2962,14 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         return PLCTAG_ERR_NO_DATA;
     }
 
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
     if(!string_val) {
         rc_dec(tag);
         pdebug(DEBUG_WARN, "New string value pointer is null!");
@@ -2965,7 +2981,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
     if(tag->is_bit) {
         rc_dec(tag);
-        pdebug(DEBUG_WARN, "Getting a string length from a bit tag is not supported!");
+        pdebug(DEBUG_WARN, "Setting a string value on a bit tag is not supported!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
         return PLCTAG_ERR_UNSUPPORTED;
     }
@@ -3063,6 +3079,14 @@ int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
         return PLCTAG_ERR_NOT_FOUND;
     }
 
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
     /* is there data? */
     if(!tag->data) {
         rc_dec(tag);
@@ -3073,7 +3097,7 @@ int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
 
     if(tag->is_bit) {
         rc_dec(tag);
-        pdebug(DEBUG_WARN, "Getting a string capacity from a bit tag is not supported!");
+        pdebug(DEBUG_WARN, "Getting string capacity from a bit tag is not supported!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
         return PLCTAG_ERR_UNSUPPORTED;
     }
@@ -3103,6 +3127,14 @@ int plc_tag_get_string_total_length(int32_t id, int string_start_offset)
         return PLCTAG_ERR_NOT_FOUND;
     }
 
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
     /* is there data? */
     if(!tag->data) {
         rc_dec(tag);
@@ -3113,7 +3145,7 @@ int plc_tag_get_string_total_length(int32_t id, int string_start_offset)
 
     if(tag->is_bit) {
         rc_dec(tag);
-        pdebug(DEBUG_WARN, "Getting a string capacity from a bit tag is not supported!");
+        pdebug(DEBUG_WARN, "Getting a string total length from a bit tag is not supported!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
         return PLCTAG_ERR_UNSUPPORTED;
     }
