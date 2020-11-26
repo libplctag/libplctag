@@ -3115,6 +3115,55 @@ LIB_EXPORT int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
 
 
 
+LIB_EXPORT int plc_tag_get_string_length(int32_t id, int string_start_offset)
+{
+    int string_length = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting string length from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) {
+        string_length = get_string_length_unsafe(tag, string_start_offset);
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return string_length;
+}
+
+
+
+
 LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offset)
 {
     int total_length = 0;

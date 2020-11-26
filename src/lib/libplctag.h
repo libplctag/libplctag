@@ -481,6 +481,7 @@ LIB_EXPORT int plc_tag_set_float32(int32_t tag, int offset, float val);
 
 LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char *buffer, int buffer_length);
 LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const char *string_val);
+LIB_EXPORT int plc_tag_get_string_length(int32_t tag_id, int string_start_offset);
 LIB_EXPORT int plc_tag_get_string_capacity(int32_t tag_id, int string_start_offset);
 LIB_EXPORT int plc_tag_get_string_total_length(int32_t tag_id, int string_start_offset);
 
