@@ -1265,12 +1265,36 @@ extern int socket_destroy(sock_p *s)
  */
 int sleep_ms(int ms)
 {
-    struct timeval tv;
+    struct timespec wait_time;
+    struct timespec remainder;
+    int done = 1;
+    int rc = PLCTAG_STATUS_OK;
 
-    tv.tv_sec = ms/1000;
-    tv.tv_usec = (ms % 1000)*1000;
+    if(ms < 0) {
+        pdebug(DEBUG_WARN, "called with negative time %d!", ms);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
 
-    return select(0,NULL,NULL,NULL, &tv);
+    wait_time.tv_sec = ms/1000;
+    wait_time.tv_nsec = ((int64_t)ms % 1000)*1000000; /* convert to nanoseconds */
+
+    do {
+        int rc = nanosleep(&wait_time, &remainder);
+        if(rc < 0 && errno == EINTR) {
+            /* we were interrupted, keep going. */
+            wait_time = remainder;
+            done = 0;
+        } else {
+            done = 1;
+
+            if(rc < 0) {
+                /* error condition. */
+                rc = PLCTAG_ERR_BAD_REPLY;
+            }
+        }
+    } while(!done);
+
+    return rc;
 }
 
 
