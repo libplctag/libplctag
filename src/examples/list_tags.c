@@ -218,6 +218,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
             *tag_list = tag_entry;
         } else {
             //printf("index %d: Found system tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
+            free(tag_name);
         }
     } while(rc == PLCTAG_STATUS_OK && offset < plc_tag_get_size(tag));
 
@@ -283,7 +284,9 @@ int main(int argc, char **argv)
     }
 
     /* loop over the tags and output their connection strings. */
-    for(struct tag_entry_s *old_tag = NULL, *tag = tags; tag; old_tag = tag, tag = tag->next, free(old_tag->name), free(old_tag)) {
+    while(tags) {
+        struct tag_entry_s *tag = tags;
+
         printf("Tag \"%s", tag->name);
         switch(tag->num_dimensions) {
             case 1:
@@ -303,6 +306,11 @@ int main(int argc, char **argv)
         }
 
         printf("\" (%04x): protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\n", tag->type, host, path, tag->elem_size, tag->elem_count, tag->name);
+
+        tags = tag->next;
+
+        free(tag->name);
+        free(tag);
     }
 
     return 0;
