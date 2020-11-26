@@ -98,7 +98,7 @@ int main(int argc, char **argv)
     }
 
     /* output the version we are using. */
-    printf("Library version %d.%d.%d.\n", 
+    printf("Library version %d.%d.%d.\n",
                             plc_tag_get_int_attribute(0, "version_major", 0),
                             plc_tag_get_int_attribute(0, "version_minor", 0),
                             plc_tag_get_int_attribute(0, "version_patch", 0));
@@ -196,14 +196,14 @@ void usage(void)
 
 
 void parse_args(int argc, char **argv, struct run_args *args)
-{   
+{
     int i = 0;
     bool has_type = false;
     bool has_tag = false;
     bool has_debug = false;
     bool has_timeout = false;
     bool has_write_vals = false;
-    char *write_vals;
+    char *write_vals = NULL;
 
     for(i = 0; i < argc; i++) {
 
@@ -371,7 +371,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
         exit(1);
     }
 
-    /* 
+    /*
      * count the number of elements. At the same time, zero terminate
      * each value string.
      */
@@ -819,29 +819,37 @@ void dump_values(struct run_args *args)
 
                 case TYPE_STRING:
                     {
-                        int str_len = plc_tag_get_string_length(tag, offset);
+                        int str_cap = plc_tag_get_string_capacity(tag, offset);
                         char *str = NULL;
+                        int rc = PLCTAG_STATUS_OK;
 
-                        if(str_len > 0) {
-                            str = calloc((size_t)(unsigned int)(str_len+1), sizeof(char));
+                        if(str_cap > 0) {
+                            str = calloc((size_t)(unsigned int)(str_cap+1), sizeof(char));
                             if(!str) {
                                 printf("ERROR: Unable to allocate temporary buffer to output string!\n");
                                 cleanup(args);
                                 exit(1);
                             }
 
-                            /* copy the string data. Note calloc fills the space with zeros. */
-                            for(int i = 0; i < str_len; i++) {
-                                str[i] = (char)plc_tag_get_string_char(tag, offset, i);
+                            rc = plc_tag_get_string(tag, offset, str, str_cap);
+                            if(rc != PLCTAG_STATUS_OK) {
+                                printf("ERROR: Unable to get string %d, error: %s!\n", item_index, plc_tag_decode_error(rc));
+                                cleanup(args);
+                                exit(1);
                             }
+
+                            // /* copy the string data. Note calloc fills the space with zeros. */
+                            // for(int i = 0; i < str_len; i++) {
+                            //     str[i] = (char)plc_tag_get_string_char(tag, offset, i);
+                            // }
 
                             printf("data[%d]=\"%s\"\n", item_index, str);
 
                             free(str);
-                        } else if(str_len == 0) {
+                        } else if(str_cap == 0) {
                             printf("data[%d]=\"\"\n", item_index);
                         } else {
-                            printf("Error getting string length for item %d!  Got error value %s!", item_index, plc_tag_decode_error(str_len));
+                            printf("Error getting string length for item %d!  Got error value %s!", item_index, plc_tag_decode_error(str_cap));
                         }
                     }
 
@@ -1021,43 +1029,54 @@ void update_values(struct run_args *args)
                         if(str_len > str_capacity) {
                             printf("Warning: truncating string %d, \"%s\", to fit fixed string capacity!\n", item_index, args->write_vals.string[item_index]);
                             str_len = str_capacity;
+
+                            /* zero terminate it at the new shorter length */
+                            args->write_vals.string[item_index][str_len] = 0;
                         }
 
-                        /* set the string length to the capacity to zero out the other characters. */
-                        rc = plc_tag_set_string_length(tag, offset, str_capacity);
+                        /* set the string. */
+                        rc = plc_tag_set_string(tag, offset, args->write_vals.string[item_index]);
                         if(rc != PLCTAG_STATUS_OK) {
-                            printf("Error while setting the string length of string %d to the string capacity for clearing it!\n", item_index);
+                            printf("Error while setting the string %d, error: %s!\n", item_index, plc_tag_decode_error(rc));
                             cleanup(args);
                             exit(1);
                         }
 
-                        /* now clear the string. */
-                        for(int i = 0; i < str_capacity; i++) {
-                            rc = plc_tag_set_string_char(tag, offset, i, 0);
-                            if(rc != PLCTAG_STATUS_OK) {
-                                printf("Error while clearing string %s!\n", plc_tag_decode_error(rc));
-                                cleanup(args);
-                                exit(1);
-                            }
-                        }
+                    //     /* set the string length to the capacity to zero out the other characters. */
+                    //     rc = plc_tag_set_string_length(tag, offset, str_capacity);
+                    //     if(rc != PLCTAG_STATUS_OK) {
+                    //         printf("Error while setting the string length of string %d to the string capacity for clearing it!\n", item_index);
+                    //         cleanup(args);
+                    //         exit(1);
+                    //     }
 
-                        /* now set the string length to the value of the new string. */
-                        rc = plc_tag_set_string_length(tag, offset, str_len);
-                        if(rc != PLCTAG_STATUS_OK) {
-                            printf("Error while setting the string length of string %d to the string of the new value!\n", item_index);
-                            cleanup(args);
-                            exit(1);
-                        }
-                        
-                        /* now set the string characters. */
-                        for(int i = 0; i < str_len; i++) {
-                            rc = plc_tag_set_string_char(tag, offset, i, args->write_vals.string[item_index][i]);
-                            if(rc != PLCTAG_STATUS_OK) {
-                                printf("Error, %s, while setting string %d at position %d!\n", plc_tag_decode_error(rc), item_index, i);
-                                cleanup(args);
-                                exit(1);
-                            }
-                        }
+                    //     /* now clear the string. */
+                    //     for(int i = 0; i < str_capacity; i++) {
+                    //         rc = plc_tag_set_string_char(tag, offset, i, 0);
+                    //         if(rc != PLCTAG_STATUS_OK) {
+                    //             printf("Error while clearing string %s!\n", plc_tag_decode_error(rc));
+                    //             cleanup(args);
+                    //             exit(1);
+                    //         }
+                    //     }
+
+                    //     /* now set the string length to the value of the new string. */
+                    //     rc = plc_tag_set_string_length(tag, offset, str_len);
+                    //     if(rc != PLCTAG_STATUS_OK) {
+                    //         printf("Error while setting the string length of string %d to the string of the new value!\n", item_index);
+                    //         cleanup(args);
+                    //         exit(1);
+                    //     }
+
+                    //     /* now set the string characters. */
+                    //     for(int i = 0; i < str_len; i++) {
+                    //         rc = plc_tag_set_string_char(tag, offset, i, args->write_vals.string[item_index][i]);
+                    //         if(rc != PLCTAG_STATUS_OK) {
+                    //             printf("Error, %s, while setting string %d at position %d!\n", plc_tag_decode_error(rc), item_index, i);
+                    //             cleanup(args);
+                    //             exit(1);
+                    //         }
+                    //     }
                     }
 
                     offset += plc_tag_get_string_total_length(tag, offset);
