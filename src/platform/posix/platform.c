@@ -1295,6 +1295,20 @@ int sleep_ms(int ms)
     } while(!done);
 
     return rc;
+
+
+    // rc = nanosleep(&wait_time, &remainder);
+    // if(rc < 0 && errno != EINTR) {
+    //     rc = PLCTAG_ERR_BAD_REPLY;
+    // }
+
+    // return rc;
+    // struct timeval tv;
+
+    // tv.tv_sec = ms/1000;
+    // tv.tv_usec = (ms % 1000)*1000;
+
+    // return select(0,NULL,NULL,NULL, &tv);
 }
 
 
