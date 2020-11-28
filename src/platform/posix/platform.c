@@ -1259,9 +1259,10 @@ extern int socket_destroy(sock_p *s)
 /*
  * sleep_ms
  *
- * Sleep the passed number of milliseconds.  Note that signals
- * will cause this to terminate early!  Check the time before
- * you assume that the total time has passed.
+ * Sleep the passed number of milliseconds.  This handles the case of being
+ * interrupted by a signal.
+ *
+ * FIXME - should the signal interrupt handling be done here or in app code?
  */
 int sleep_ms(int ms)
 {
