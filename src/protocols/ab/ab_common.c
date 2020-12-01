@@ -357,6 +357,12 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->vtable = &eip_cip_vtable;
         }
 
+        if(!tag->tag_list) {
+            tag->byte_order = &logix_tag_byte_order;
+        } else {
+            tag->byte_order = &logix_tag_listing_byte_order;
+        }
+
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
