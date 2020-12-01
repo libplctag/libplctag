@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
@@ -43,11 +44,13 @@
  * STRING types are a DINT (4 bytes) followed by 82 bytes of characters.  Then two bytes of padding.
  */
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,2,0
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.27&path=1,0&cpu=LGX&elem_size=88&elem_count=48&debug=1&name=Loc_Txt"
-#define ELEM_COUNT 48
-#define ELEM_SIZE 88
+static const char *tag_strings[] = {
+    "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt",
+    "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=84&elem_count=2&name=ST18:0"
+};
+
 #define DATA_TIMEOUT 5000
 
 
@@ -55,52 +58,76 @@ int main()
 {
     int32_t tag = 0;
     int rc;
-    int i;
+    int str_num = 1;
+    int offset = 0;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
+        return 1;
     }
 
-    /* create the tag */
-    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
+    fprintf(stderr, "Using library version %d.%d.%d.\n",
+                                            plc_tag_get_int_attribute(0, "version_major", -1),
+                                            plc_tag_get_int_attribute(0, "version_minor", -1),
+                                            plc_tag_get_int_attribute(0, "version_patch", -1));
 
-    /* everything OK? */
-    if(tag < 0) {
-        fprintf(stderr,"ERROR: Could not create tag!\n");
-        return 0;
-    }
+    /* turn off debugging output. */
+    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
-    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
-        return 0;
-    }
+    /* loop over the tag strings. */
+    for(int i=0; i < (int)(unsigned int)(sizeof(tag_strings)/sizeof(tag_strings[0])); i++) {
+        tag = plc_tag_create(tag_strings[i], DATA_TIMEOUT);
 
-    /* get the data */
-    rc = plc_tag_read(tag, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
-        return 0;
-    }
-
-    /* print out the data */
-    for(i=0; i < ELEM_COUNT; i++) {
-        int str_size = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-        char str[ELEM_SIZE] = {0};
-        int j;
-
-        for(j=0; j<str_size; j++) {
-            str[j] = (char)plc_tag_get_uint8(tag,(i*ELEM_SIZE)+j+4);
+        /* everything OK? */
+        if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"Error creating tag %d! Error %s\n", i, plc_tag_decode_error(rc));
+            plc_tag_destroy(tag);
+            return rc;
         }
-        str[j] = (char)0;
 
-        printf("string %d (%d chars) = '%s'\n",i, str_size, str);
+        /* get the data */
+        rc = plc_tag_read(tag, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"ERROR: Unable to read the data for tag %d! Got error code %d: %s\n", i, rc, plc_tag_decode_error(rc));
+            plc_tag_destroy(tag);
+            return rc;
+        }
+
+        /* print out the data */
+        offset = 0;
+        str_num = 1;
+        while(offset < plc_tag_get_size(tag)) {
+            char *str = NULL;
+            int str_cap = plc_tag_get_string_length(tag, offset) + 1; /* +1 for the zero termination. */
+
+            str = malloc((size_t)(unsigned int)str_cap);
+            if(!str) {
+                fprintf(stderr, "Unable to allocate memory for the string %d of tag %d!\n", str_num, i);
+                plc_tag_destroy(tag);
+                return PLCTAG_ERR_NO_MEM;
+            }
+
+            rc = plc_tag_get_string(tag, offset, str, str_cap);
+            if(rc != PLCTAG_STATUS_OK) {
+                fprintf(stderr, "Unable to get string %d of tag %d, got error %s!\n", str_num, i, plc_tag_decode_error(rc));
+                free(str);
+                plc_tag_destroy(tag);
+                return rc;
+            }
+
+            fprintf(stderr, "tag %d string %d (%u chars) = '%s'\n", i, str_num, (unsigned int)strlen(str), str);
+
+            free(str);
+
+            str_num++;
+
+            offset += plc_tag_get_string_total_length(tag, offset);
+        }
+
+        /* we are done */
+        plc_tag_destroy(tag);
     }
-
-    /* we are done */
-    plc_tag_destroy(tag);
 
     return 0;
 }

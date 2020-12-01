@@ -30,10 +30,10 @@
 #   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
-# the project is version 2.1
+# the project is version 2.2
 set (libplctag_VERSION_MAJOR 2)
-set (libplctag_VERSION_MINOR 1)
-set (libplctag_VERSION_PATCH 21)
+set (libplctag_VERSION_MINOR 2)
+set (libplctag_VERSION_PATCH 0)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -354,7 +354,6 @@ else()
                             stress_api_lock
                             stress_test
                             string
-                            string_plc5
                             test_auto_sync
                             test_callback
                             test_reconnect
@@ -364,7 +363,9 @@ else()
                             toggle_bit
                             toggle_bool
                             write_string
-                            tag_rw )
+                            tag_rw
+                            tag_rw2
+                            )
 
         set ( example_PROG_UTIL utils_posix.c )
         set ( example_LIBRARIES ${tool_lib} pthread )
@@ -377,7 +378,6 @@ else()
                             simple_dual
                             slc500
                             string
-                            string_plc5
                             test_callback
                             test_shutdown
                             test_special
@@ -385,7 +385,9 @@ else()
                             toggle_bit
                             toggle_bool
                             write_string
-                            tag_rw )
+                            tag_rw
+                            tag_rw2
+                            )
 
         set ( example_PROG_UTIL utils_windows.c)
         set ( example_LIBRARIES ${tool_lib} ws2_32 )

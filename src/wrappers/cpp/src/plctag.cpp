@@ -264,28 +264,24 @@ std::vector<std::string> plctag::read_tag_str(int tag_num, int timeout, int elem
 		for (int i = 0; i < element_count; i++)
 		{
 			/// method 1
-			int str_size = plc_tag_get_int32(tag.at(tag_num), (i * element_size));
+			int str_size = plc_tag_get_string_length(tag.at(tag_num), (i * element_size));
 			status = plc_tag_status(tag.at(tag_num));
 			if (status != PLCTAG_STATUS_OK)
 			{
-				ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_int32 >> error = " << plc_tag_decode_error(status);
+				ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_string_length >> error = " << plc_tag_decode_error(status);
 				throw - 3;
 			}
 
+			// maximum AB string size is 82, so leave room for the zero terminator.
 			char char_str[83] = {0};
-			int j = 0;
 
-			for (j = 0; j < str_size; j++)
+		    status = plc_tag_get_string(tag.at(tag_num), (i * element_size), char_str, (int)(unsigned int)sizeof(char_str));
+			if (status != PLCTAG_STATUS_OK)
 			{
-				char_str[j] = (char)plc_tag_get_uint8(tag.at(tag_num), ((i * element_size) + j + 4));
-				status = plc_tag_status(tag.at(tag_num));
-				if (status != PLCTAG_STATUS_OK)
-				{
-					ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_uint8 >> error = " << plc_tag_decode_error(status);
-					throw - 4;
-				}
+				ERROR << "tag.at(" << tag_num << ") >> plc_tag_get_string >> error = " << plc_tag_decode_error(status);
+				throw - 4;
 			}
-			char_str[j] = (char)0;	   // null terminate char array
+
 			std::string str(char_str); // convert char array to string
 			svec.push_back(str);
 

@@ -137,7 +137,6 @@ int read_barcode(void)
     static int32_t barcode_tag = 0;
     int rc = PLCTAG_STATUS_OK;
     char barcode_buf[85] = {0,};
-    int32_t barcode_len = 0;
 
     if(barcode_tag <= 0) {
         barcode_tag = plc_tag_create(BARCODE, TIMEOUT_MS);
@@ -155,15 +154,10 @@ int read_barcode(void)
         return rc;
     }
 
-    /* zero this out so that there is a terminating zero character. */
-    memset(barcode_buf, 0, sizeof(barcode_buf));
-
-    /* get the length of the string. */
-    barcode_len = plc_tag_get_int32(barcode_tag, 0);
-
-    /* copy the barcode characters. */
-    for(int i=0; i < barcode_len && i < (int)sizeof(barcode_buf); i++) {
-        barcode_buf[i] = (char)plc_tag_get_uint8(barcode_tag, 4 + i); /* offset for the string length */
+    rc = plc_tag_get_string(barcode_tag, 0, barcode_buf, (int)(unsigned int)sizeof(barcode_buf));
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("ERROR: error getting barcode string!\n");
+        return rc;
     }
 
     /* print out the barcode */
