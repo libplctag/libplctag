@@ -760,23 +760,9 @@ void dump_values(struct run_args *args)
             cleanup(args);
             exit(1);
         } else {
+<<<<<<< HEAD
             printf("bit %d = %d\n", bit_num, rc);
-        }
-    } else {
-        int len = plc_tag_get_size(tag);
-
-        item_index = 0;
-        offset = 0;
-        while(offset < len) {
-            switch(args->element_type) {
-                case TYPE_U8:
-                    printf("data[%d]=%" PRIu8 " (%" PRIx8 ")\n", item_index, plc_tag_get_uint8(tag, offset), plc_tag_get_uint8(tag, offset));
-                    offset += 1;
-                    break;
-
-                case TYPE_U16:
-                    printf("data[%d]=%" PRIu16 " (%" PRIx16 ")\n", item_index, plc_tag_get_uint16(tag, offset),plc_tag_get_uint16(tag, offset));
-                    offset += 2;
+=======
                     break;
 
                 case TYPE_U32:
