@@ -48,7 +48,7 @@
 
 static const char *tag_strings[] = {
     "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt",
-    "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=84&elem_count=2&name=ST18:0"
+    "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_count=2&name=ST18:0"
 };
 
 #define DATA_TIMEOUT 5000
@@ -73,7 +73,7 @@ int main()
                                             plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* turn off debugging output. */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* loop over the tag strings. */
     for(int i=0; i < (int)(unsigned int)(sizeof(tag_strings)/sizeof(tag_strings[0])); i++) {
