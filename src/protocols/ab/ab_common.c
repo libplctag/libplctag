@@ -86,8 +86,6 @@ volatile int ab_protocol_terminating = 0;
 
 /* forward declarations*/
 static int get_tag_data_type(ab_tag_p tag, attr attribs);
-static int set_tag_byte_order(ab_tag_p tag, attr attribs);
-static int check_byte_order_str(const char *byte_order, int length);
 
 static void ab_tag_destroy(ab_tag_p tag);
 static int default_abort(plc_tag_p tag);
@@ -267,6 +265,14 @@ plc_tag_p ab_tag_create(attr attribs)
 
     pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
 
+    /* get the tag data type, or try. */
+    rc = get_tag_data_type(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error getting tag element data type %s!", plc_tag_decode_error(rc));
+        tag->status = (int8_t)rc;
+        return (plc_tag_p)tag;
+    }
+
     /* set up PLC-specific information. */
     switch(tag->plc_type) {
     case AB_PLC_PLC5:
@@ -332,13 +338,6 @@ plc_tag_p ab_tag_create(attr attribs)
             return (plc_tag_p)tag;
         }
 
-        rc = get_tag_data_type(tag, attribs);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error getting tag element data type %s!", plc_tag_decode_error(rc));
-            tag->status = (int8_t)rc;
-            return (plc_tag_p)tag;
-        }
-
         if(!tag->tag_list) {
             tag->byte_order = &logix_tag_byte_order;
         } else {
@@ -391,12 +390,8 @@ plc_tag_p ab_tag_create(attr attribs)
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
-    /* set the byte order for the tag. */
-    rc = set_tag_byte_order(tag, attribs);
-
     /* get the element count, default to 1 if missing. */
     tag->elem_count = attr_get_int(attribs,"elem_count", 1);
-
 
     switch(tag->plc_type) {
     case AB_PLC_OMRON_NJNX:
@@ -411,7 +406,7 @@ plc_tag_p ab_tag_create(attr attribs)
     case AB_PLC_LGX:
     case AB_PLC_MLGX800:
         /* fill this in when we read the tag. */
-        tag->elem_size = 0;
+        //tag->elem_size = 0;
         tag->size = 0;
         tag->data = NULL;
         break;
@@ -423,7 +418,7 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->elem_size = attr_get_int(attribs, "elem_size", 0);
         }
 
-        /* allocate memory for the data */
+        /* Determine the tag size */
         tag->size = (tag->elem_count) * (tag->elem_size);
         if(tag->size == 0) {
             /* failure! Need data_size! */
@@ -477,6 +472,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
     const char *elem_type = NULL;
     const char *tag_name = NULL;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     switch(tag->plc_type) {
     case AB_PLC_PLC5:
     case AB_PLC_SLC:
@@ -509,6 +506,14 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 pdebug(DEBUG_DETAIL,"Found tag element type of float.");
                 tag->elem_size=4;
                 tag->elem_type = AB_TYPE_FLOAT32;
+                break;
+
+            case 'l':
+            case 'L':
+                /* 32-bit integer */
+                pdebug(DEBUG_DETAIL,"Found tag element type of long int.");
+                tag->elem_size=4;
+                tag->elem_type = AB_TYPE_INT32;
                 break;
 
             case 'n':
@@ -553,9 +558,9 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
             default:
                 pdebug(DEBUG_DETAIL,"Unknown tag type for tag %s", tag_name);
+                return PLCTAG_ERR_UNSUPPORTED;
                 break;
             }
-
         }
 
         break;
@@ -608,25 +613,52 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 tag->elem_type = AB_TYPE_SHORT_STRING;
             } else {
                 pdebug(DEBUG_DETAIL, "Unknown tag type %s", elem_type);
+                return PLCTAG_ERR_UNSUPPORTED;
             }
         } else {
-            /* just for Logix, check for tag listing */
-            if(tag->plc_type == AB_PLC_LGX) {
-                const char *tag_name = attr_get_str(attribs, "name", NULL);
-                int tag_listing_rc = setup_tag_listing(tag, tag_name);
+            /* 
+             * We have two cases
+             *      * tag listing, but only for LGX.
+             *      * no type, just elem_size.
+             * Otherwise this is an error.
+             */
+            {
+                int elem_size = attr_get_int(attribs, "elem_size", 0);
 
-                if(tag_listing_rc == PLCTAG_ERR_BAD_PARAM) {
-                    pdebug(DEBUG_WARN, "Tag listing request is malformed!");
-                    return PLCTAG_ERR_BAD_PARAM;
+                if(tag->plc_type == AB_PLC_LGX) {
+                    const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
+                    int tag_listing_rc = setup_tag_listing(tag, tmp_tag_name);
+
+                    if(tag_listing_rc == PLCTAG_ERR_BAD_PARAM) {
+                        pdebug(DEBUG_WARN, "Error parsing tag listing name!");
+                        return PLCTAG_ERR_BAD_PARAM;
+                    }
                 }
-            }
+
+                /* if we did not set an element size yet, set one. */
+                if(tag->elem_size == 0) {
+                    if(elem_size > 0) {
+                        pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
+                        tag->elem_size = elem_size;
+                    } 
+                    
+                    // else {
+                    //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
+                    //     return PLCTAG_ERR_BAD_PARAM;
+                    // }
+                } else {
+                    if(elem_size > 0) {
+                        pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
+                    }
+                }
+            }            
         }
 
         break;
 
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
-        return PLCTAG_ERR_BAD_CONFIG;
+        return PLCTAG_ERR_BAD_DEVICE;
         break;
     }
 
@@ -634,208 +666,6 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
     return PLCTAG_STATUS_OK;
 }
-
-
-/*
- * FIXME TODO
- * Refactor this into a central library function.  It has almost nothing to do with
- * the type of tag.
- */
-
-/* Check for overrides and set tag byte order if found. */
-int set_tag_byte_order(ab_tag_p tag, attr attribs)
-{
-    int rc = PLCTAG_STATUS_OK;
-    int use_default = 1;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    /* the default values are already set in the tag. */
-
-    /* check for overrides. */
-    if(attr_get_str(attribs,  "int16_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "int32_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "int64_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "float32_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "float64_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    /* FIXME TODO - handle strings. */
-    if(!use_default) {
-        const char *byte_order_str = NULL;
-        tag_byte_order_t *new_byte_order = mem_alloc((int)(unsigned int)sizeof(*(tag->byte_order)));
-
-        if(!new_byte_order) {
-            pdebug(DEBUG_WARN, "Unable to allocate byte order struct for tag!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-
-        /* copy the defaults. */
-        *new_byte_order = *(tag->byte_order);
-
-        /* replace the old byte order. */
-        tag->byte_order = new_byte_order;
-
-        /* mark it as allocated so that we free it later. */
-        tag->byte_order->is_allocated = 1;
-
-        /* 16-bit ints. */
-        byte_order_str = attr_get_str(attribs, "int16_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order int16_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 2);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string int16_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            /* strange gyrations to make the compiler happy.   MSVC will probably complain. */
-            tag->byte_order->int16_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x01);
-            tag->byte_order->int16_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x01);
-        }
-
-        /* 32-bit ints. */
-        byte_order_str = attr_get_str(attribs, "int32_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order int32_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 4);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string int32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->int32_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->int32_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->int32_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->int32_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
-        }
-
-        /* 64-bit ints. */
-        byte_order_str = attr_get_str(attribs, "int64_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order int64_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 8);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string int64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->int64_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[4] = (size_t)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[5] = (size_t)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[6] = (size_t)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[7] = (size_t)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
-        }
-
-        /* 32-bit floats. */
-        byte_order_str = attr_get_str(attribs, "float32_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order float32_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 4);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string float32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->float32_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->float32_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->float32_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->float32_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
-        }
-
-        /* 64-bit floats */
-        byte_order_str = attr_get_str(attribs, "float64_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order float64_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 8);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string float64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->float64_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[4] = (size_t)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[5] = (size_t)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[6] = (size_t)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[7] = (size_t)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
-        }
-
-        /* FIXME TODO - handle strings! */
-    }
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-int check_byte_order_str(const char *byte_order, int length)
-{
-    int taken[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    int byte_order_len = str_length(byte_order);
-
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    /* check the size. */
-    if(byte_order_len != length) {
-        pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be %d characters long!", byte_order, length);
-        return (byte_order_len < length ? PLCTAG_ERR_TOO_SMALL : PLCTAG_ERR_TOO_LARGE);
-    }
-
-    /* check each character. */
-    for(int i=0; i < byte_order_len; i++) {
-        int val = 0;
-
-        if(!isdigit(byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
-            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be only characters from '0' to '7'!", byte_order);
-            return PLCTAG_ERR_BAD_DATA;
-        }
-
-        /* get the numeric value. */
-        val = byte_order[i] - '0';
-
-        if(val < 0 || val > (length-1)) {
-            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must only values from 0 to %d!", byte_order, (length - 1));
-            return PLCTAG_ERR_BAD_DATA;
-        }
-
-        if(taken[val]) {
-            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must use each digit exactly once!", byte_order);
-            return PLCTAG_ERR_BAD_DATA;
-        }
-
-        taken[val] = 1;
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
 
 
 int default_abort(plc_tag_p tag)

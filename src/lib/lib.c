@@ -33,9 +33,10 @@
 
 #define LIBPLCTAGDLL_EXPORTS 1
 
+#include <ctype.h>
+#include <float.h>
 #include <inttypes.h>
 #include <limits.h>
-#include <float.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <lib/init.h>
@@ -75,6 +76,8 @@ static plc_tag_p lookup_tag(int32_t id);
 static int add_tag_lookup(plc_tag_p tag);
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
+static int set_tag_byte_order(plc_tag_p tag, attr attribs);
+static int check_byte_order_str(const char *byte_order, int length);
 // static int get_string_count_size_unsafe(plc_tag_p tag, int offset);
 static int get_string_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_capacity_unsafe(plc_tag_p tag, int offset);
@@ -655,6 +658,14 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         return PLCTAG_ERR_BAD_PARAM;
     } else {
         tag->auto_sync_next_write = 0;
+    }
+
+    /* set up the tag byte order if there are any overrides. */
+    rc = set_tag_byte_order(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to correctly set tag data byte order: %s!", plc_tag_decode_error(rc));
+        rc_dec(tag);
+        return rc;
     }
 
     /*
@@ -3218,6 +3229,362 @@ LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offs
 /*****************************************************************************************************
  *****************************  Support routines for extra indirection *******************************
  ****************************************************************************************************/
+
+int set_tag_byte_order(plc_tag_p tag, attr attribs)
+
+{
+    int use_default = 1;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* the default values are already set in the tag. */
+
+    /* check for overrides. */
+    if(attr_get_str(attribs,  "int16_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "int32_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "int64_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "float32_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "float64_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_is_counted", NULL) != NULL) {
+        use_default = 0;
+    }
+    
+    if(attr_get_str(attribs, "str_is_fixed_length", NULL) != NULL) {
+        use_default = 0;
+    }
+    
+    if(attr_get_str(attribs, "str_is_zero_terminated", NULL) != NULL) {
+        use_default = 0;
+    }
+    
+    if(attr_get_str(attribs, "str_is_byte_swapped", NULL) != NULL) {
+        use_default = 0;
+    }
+    
+    if(attr_get_str(attribs, "str_count_word_bytes", NULL) != NULL) {
+        use_default = 0;
+    }
+    
+    if(attr_get_str(attribs, "str_max_capacity", NULL) != NULL) {
+        use_default = 0;
+    }
+    
+    if(attr_get_str(attribs, "str_total_length", NULL) != NULL) {
+        use_default = 0;
+    }
+    
+    if(attr_get_str(attribs, "str_pad_bytes", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    /* FIXME TODO - handle strings. */
+    if(!use_default) {
+        const char *byte_order_str = NULL;
+        int str_param = 0;
+        int rc = PLCTAG_STATUS_OK;
+        tag_byte_order_t *new_byte_order = mem_alloc((int)(unsigned int)sizeof(*(tag->byte_order)));
+
+        if(!new_byte_order) {
+            pdebug(DEBUG_WARN, "Unable to allocate byte order struct for tag!");
+            return PLCTAG_ERR_NO_MEM;
+        }
+
+        /* copy the defaults. */
+        *new_byte_order = *(tag->byte_order);
+
+        /* replace the old byte order. */
+        tag->byte_order = new_byte_order;
+
+        /* mark it as allocated so that we free it later. */
+        tag->byte_order->is_allocated = 1;
+
+        /* 16-bit ints. */
+        byte_order_str = attr_get_str(attribs, "int16_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order int16_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 2);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string int16_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            /* strange gyrations to make the compiler happy.   MSVC will probably complain. */
+            tag->byte_order->int16_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x01);
+            tag->byte_order->int16_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x01);
+        }
+
+        /* 32-bit ints. */
+        byte_order_str = attr_get_str(attribs, "int32_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order int32_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 4);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string int32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->int32_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->int32_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->int32_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->int32_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
+        }
+
+        /* 64-bit ints. */
+        byte_order_str = attr_get_str(attribs, "int64_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order int64_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 8);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string int64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->int64_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[4] = (int)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[5] = (int)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[6] = (int)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[7] = (int)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
+        }
+
+        /* 32-bit floats. */
+        byte_order_str = attr_get_str(attribs, "float32_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order float32_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 4);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string float32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->float32_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->float32_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->float32_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->float32_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
+        }
+
+        /* 64-bit floats */
+        byte_order_str = attr_get_str(attribs, "float64_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order float64_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 8);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string float64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->float64_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[4] = (int)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[5] = (int)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[6] = (int)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[7] = (int)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
+        }
+
+        /* string information. */
+
+        /* is the string counted? */
+        if(attr_get_str(attribs, "str_is_counted", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_counted", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_counted = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_counted must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* is the string a fixed length? */
+        if(attr_get_str(attribs, "str_is_fixed_length", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_fixed_length", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_fixed_length = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_fixed_length must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* is the string zero terminated? */
+        if(attr_get_str(attribs, "str_is_zero_terminated", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_zero_terminated", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_zero_terminated = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_zero_terminated must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* is the string byteswapped like PLC/5? */
+        if(attr_get_str(attribs, "str_is_byte_swapped", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_byte_swapped", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_byte_swapped = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_byte_swapped must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* main string parameters. */
+
+        /* how many bytes is the string count word? */
+        if(attr_get_str(attribs, "str_count_word_bytes", NULL)) {
+            str_param = attr_get_int(attribs, "str_count_word_bytes", 0);
+            if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4 || str_param == 8) {
+                tag->byte_order->str_count_word_bytes = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, 4, or 8!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* What is the string maximum capacity */
+        if(attr_get_str(attribs, "str_max_capacity", NULL)) {
+            str_param = attr_get_int(attribs, "str_max_capacity", 0);
+            if(str_param >= 0) {
+                tag->byte_order->str_max_capacity = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_max_capacity must be missing, 0, or positive!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* What is the string total length */
+        if(attr_get_str(attribs, "str_total_length", NULL)) {
+            str_param = attr_get_int(attribs, "str_total_length", 0);
+            if(str_param >= 0) {
+                tag->byte_order->str_total_length = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_total_length must be missing, 0, or positive!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* What is the string padding length */
+        if(attr_get_str(attribs, "str_pad_bytes", NULL)) {
+            str_param = attr_get_int(attribs, "str_pad_bytes", 0);
+            if(str_param >= 0) {
+                tag->byte_order->str_pad_bytes = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_pad_bytes must be missing, 0, or positive!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* now make sure that the combination of settings works. */
+
+        /* if we have a counted string, we need the count! */
+        if(tag->byte_order->str_is_counted) {
+            if(tag->byte_order->str_count_word_bytes == 0) {
+                pdebug(DEBUG_WARN, "If a string definition is counted, you must use both \"str_is_counted\" and \"str_count_word_bytes\" parameters!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* if we have a fixed length string, we need to know what the length is! */
+        if(tag->byte_order->str_is_fixed_length) {
+            if(tag->byte_order->str_total_length == 0) {
+                pdebug(DEBUG_WARN, "If a string definition is fixed length, you must use both \"str_is_fixed_length\" and \"str_total_length\" parameters!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* check the total length. */
+        if(tag->byte_order->str_total_length > 0 
+          && (tag->byte_order->str_is_zero_terminated 
+            + tag->byte_order->str_max_capacity 
+            + tag->byte_order->str_count_word_bytes
+            + tag->byte_order->str_pad_bytes)
+          > tag->byte_order->str_total_length)
+        {
+            pdebug(DEBUG_WARN, "Tag string total length must be at least the sum of the other string components!");
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        /* Do we have enough of a definition for a string? */
+        /* FIXME - This is probably not enough checking! */
+        if(tag->byte_order->str_is_counted || tag->byte_order->str_is_zero_terminated) {
+            tag->byte_order->str_is_defined = 1;
+        } else {
+            pdebug(DEBUG_WARN, "Insufficient definitions found to support strings!");
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+int check_byte_order_str(const char *byte_order, int length)
+{
+    int taken[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int byte_order_len = str_length(byte_order);
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* check the size. */
+    if(byte_order_len != length) {
+        pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be %d characters long!", byte_order, length);
+        return (byte_order_len < length ? PLCTAG_ERR_TOO_SMALL : PLCTAG_ERR_TOO_LARGE);
+    }
+
+    /* check each character. */
+    for(int i=0; i < byte_order_len; i++) {
+        int val = 0;
+
+        if(!isdigit(byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
+            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be only characters from '0' to '7'!", byte_order);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /* get the numeric value. */
+        val = byte_order[i] - '0';
+
+        if(val < 0 || val > (length-1)) {
+            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must only values from 0 to %d!", byte_order, (length - 1));
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        if(taken[val]) {
+            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must use each digit exactly once!", byte_order);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        taken[val] = 1;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 
 
 plc_tag_p lookup_tag(int32_t tag_id)
