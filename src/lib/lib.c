@@ -3292,7 +3292,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         use_default = 0;
     }
 
-    /* FIXME TODO - handle strings. */
+    /* if we need to override something, build a new byte order structure. */
     if(!use_default) {
         const char *byte_order_str = NULL;
         int str_param = 0;
