@@ -299,13 +299,7 @@ THREAD_FUNC(tag_tickler_func)
 
                             /* if we have automatic read enabled, make sure we set up correct times. */
                             if(tag->auto_sync_read_ms > 0) {
-                                /* when do we read again? */
-                                tag->auto_sync_last_read += tag->auto_sync_read_ms;
-
-                                /* if we are behind, catch up by pushing the next read out. */
-                                if(tag->auto_sync_last_read <= time_ms()) {
-                                    tag->auto_sync_last_read = time_ms() + tag->auto_sync_read_ms;
-                                }
+                                tag->auto_sync_last_read = time_ms();
                             }
 
                             events[PLCTAG_EVENT_READ_COMPLETED] = 1;
