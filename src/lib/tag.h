@@ -125,7 +125,7 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         void (*callback)(int32_t tag_id, int event, int status); \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \
-                        int64_t auto_sync_last_read; \
+                        int64_t auto_sync_next_read; \
                         int64_t auto_sync_next_write
 
 
