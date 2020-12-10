@@ -48,7 +48,7 @@
 
 static const char *tag_strings[] = {
     "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt",
-    "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_size=84&elem_count=2&name=ST18:0"
+    "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_count=2&name=ST18:0"
 };
 
 #define DATA_TIMEOUT 5000

@@ -168,8 +168,8 @@ volatile int library_terminating = 0;
 
 /* helper functions */
 static int create_tag_object(attr attribs, modbus_tag_p *tag);
-static int set_tag_byte_order(attr attribs, modbus_tag_p tag);
-static int check_byte_order_str(const char *byte_order, int length);
+// static int set_tag_byte_order(attr attribs, modbus_tag_p tag);
+// static int check_byte_order_str(const char *byte_order, int length);
 static int find_or_create_plc(attr attribs, modbus_plc_p *plc);
 static int parse_register_name(attr attribs, modbus_reg_type_t *reg_type, int *reg_base);
 static void modbus_tag_destructor(void *tag_arg);
@@ -258,11 +258,11 @@ plc_tag_p mb_tag_create(attr attribs)
     }
 
     /* Set up the tag byte order. */
-    rc = set_tag_byte_order(attribs, tag);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to set the tag byte order!");
-        tag->status = (int8_t)rc;
-    }
+    // rc = set_tag_byte_order(attribs, tag);
+    // if(rc != PLCTAG_STATUS_OK) {
+    //     pdebug(DEBUG_WARN, "Unable to set the tag byte order!");
+    //     tag->status = (int8_t)rc;
+    // }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -338,206 +338,6 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
     (*tag)->vtable = &modbus_vtable;
 
     pdebug(DEBUG_INFO, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-/*
- * FIXME TODO
- * Refactor this into a central library function.  It has almost nothing to do with
- * the type of tag.
- */
-
-int set_tag_byte_order(attr attribs, modbus_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
-    int use_default = 1;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    /* the default values are "pure" big-endian. */
-
-    /* check for overrides. */
-    if(attr_get_str(attribs,  "int16_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "int32_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "int64_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "float32_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-    if(attr_get_str(attribs,  "float64_byte_order", NULL) != NULL) {
-        use_default = 0;
-    }
-
-
-    /* FIXME TODO - handle strings. */
-    if(use_default) {
-        tag->byte_order = &modbus_tag_byte_order;
-    } else {
-        const char *byte_order_str = NULL;
-
-        tag->byte_order = mem_alloc((int)(unsigned int)sizeof(*(tag->byte_order)));
-        if(!tag->byte_order) {
-            pdebug(DEBUG_WARN, "Unable to allocate byte order struct for tag!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-
-        /* copy the defaults. */
-        *(tag->byte_order) = modbus_tag_byte_order;
-
-        /* mark it as allocated so that we free it later. */
-        tag->byte_order->is_allocated = 1;
-
-        /* 16-bit ints. */
-        byte_order_str = attr_get_str(attribs, "int16_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order int16_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 2);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string int16_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            /* strange gyrations to make the compiler happy.   MSVC will probably complain. */
-            tag->byte_order->int16_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x01);
-            tag->byte_order->int16_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x01);
-        }
-
-        /* 32-bit ints. */
-        byte_order_str = attr_get_str(attribs, "int32_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order int32_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 4);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string int32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->int32_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->int32_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->int32_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->int32_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
-        }
-
-        /* 64-bit ints. */
-        byte_order_str = attr_get_str(attribs, "int64_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order int64_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 8);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string int64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->int64_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[4] = (size_t)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[5] = (size_t)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[6] = (size_t)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->int64_order[7] = (size_t)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
-        }
-
-        /* 32-bit floats. */
-        byte_order_str = attr_get_str(attribs, "float32_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order float32_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 4);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string float32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->float32_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->float32_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->float32_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
-            tag->byte_order->float32_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
-        }
-
-        /* 64-bit floats */
-        byte_order_str = attr_get_str(attribs, "float64_byte_order", NULL);
-        if(byte_order_str) {
-            pdebug(DEBUG_DETAIL, "Override byte order float64_byte_order=%s", byte_order_str);
-
-            rc = check_byte_order_str(byte_order_str, 8);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Byte order string float64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
-                return rc;
-            }
-
-            tag->byte_order->float64_order[0] = (size_t)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[1] = (size_t)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[2] = (size_t)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[3] = (size_t)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[4] = (size_t)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[5] = (size_t)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[6] = (size_t)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
-            tag->byte_order->float64_order[7] = (size_t)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
-        }
-
-        /* FIXME TODO - handle strings! */
-    }
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int check_byte_order_str(const char *byte_order, int length)
-{
-    int taken[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    int byte_order_len = str_length(byte_order);
-
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    /* check the size. */
-    if(byte_order_len != length) {
-        pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be %d characters long!", byte_order, length);
-        return (byte_order_len < length ? PLCTAG_ERR_TOO_SMALL : PLCTAG_ERR_TOO_LARGE);
-    }
-
-    /* check each character. */
-    for(int i=0; i < byte_order_len; i++) {
-        int val = 0;
-
-        if(!isdigit(byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
-            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be only characters from '0' to '7'!", byte_order);
-            return PLCTAG_ERR_BAD_DATA;
-        }
-
-        /* get the numeric value. */
-        val = byte_order[i] - '0';
-
-        if(val < 0 || val > (length-1)) {
-            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must only values from 0 to %d!", byte_order, (length - 1));
-            return PLCTAG_ERR_BAD_DATA;
-        }
-
-        if(taken[val]) {
-            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must use each digit exactly once!", byte_order);
-            return PLCTAG_ERR_BAD_DATA;
-        }
-
-        taken[val] = 1;
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
