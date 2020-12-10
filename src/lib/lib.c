@@ -299,6 +299,7 @@ THREAD_FUNC(tag_tickler_func)
 
                             /* if we have automatic read enabled, make sure we set up correct times. */
                             if(tag->auto_sync_read_ms > 0) {
+                                /* calculate elapsed_sync_peroids instead using current time to avoid read times drift*/
                                 int64_t elapsed_sync_peroids = (time_ms() - tag->auto_sync_last_read) / tag->auto_sync_read_ms;
                                 tag->auto_sync_last_read += elapsed_sync_peroids * tag->auto_sync_read_ms;
                             }
