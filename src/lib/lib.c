@@ -660,7 +660,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         pdebug(DEBUG_WARN, "auto_sync_read_ms value must be positive!");
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
-    } else {
+    } else if(tag->auto_sync_read_ms > 0) {
         /* how many periods did we already pass? */
         int64_t periods = (time_ms() / tag->auto_sync_read_ms);
         tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
@@ -3278,31 +3278,31 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
     if(attr_get_str(attribs, "str_is_counted", NULL) != NULL) {
         use_default = 0;
     }
-    
+
     if(attr_get_str(attribs, "str_is_fixed_length", NULL) != NULL) {
         use_default = 0;
     }
-    
+
     if(attr_get_str(attribs, "str_is_zero_terminated", NULL) != NULL) {
         use_default = 0;
     }
-    
+
     if(attr_get_str(attribs, "str_is_byte_swapped", NULL) != NULL) {
         use_default = 0;
     }
-    
+
     if(attr_get_str(attribs, "str_count_word_bytes", NULL) != NULL) {
         use_default = 0;
     }
-    
+
     if(attr_get_str(attribs, "str_max_capacity", NULL) != NULL) {
         use_default = 0;
     }
-    
+
     if(attr_get_str(attribs, "str_total_length", NULL) != NULL) {
         use_default = 0;
     }
-    
+
     if(attr_get_str(attribs, "str_pad_bytes", NULL) != NULL) {
         use_default = 0;
     }
@@ -3531,9 +3531,9 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         }
 
         /* check the total length. */
-        if(tag->byte_order->str_total_length > 0 
-          && (tag->byte_order->str_is_zero_terminated 
-            + tag->byte_order->str_max_capacity 
+        if(tag->byte_order->str_total_length > 0
+          && (tag->byte_order->str_is_zero_terminated
+            + tag->byte_order->str_max_capacity
             + tag->byte_order->str_count_word_bytes
             + tag->byte_order->str_pad_bytes)
           > tag->byte_order->str_total_length)
