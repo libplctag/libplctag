@@ -35,11 +35,11 @@
 #include <util/debug.h>
 
 
-void atomic_init(atomic_int *a, int new_val)
-{
-    a->lock = LOCK_INIT;
-    a->val = new_val;
-}
+// void atomic_init(atomic_int *a, int new_val)
+// {
+//     a->lock = LOCK_INIT;
+//     a->val = new_val;
+// }
 
 
 
