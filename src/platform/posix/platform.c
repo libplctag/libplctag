@@ -774,7 +774,7 @@ int condition_var_create(condition_var_p *var)
     }
 
     if(pthread_cond_init(&((*var)->p_cond), NULL)) {
-        pthread_mutex_destroy(&((*var)->p_cond));
+        pthread_mutex_destroy(&((*var)->p_mutex));
         mem_free(*var);
         *var = NULL;
         pdebug(DEBUG_ERROR,"Error initializing pthread condition variable.");
@@ -850,10 +850,10 @@ int condition_var_wait_impl(const char *func, int line, condition_var_p var, int
     }
 
     /* now wait on the condition variable. */
-    rc = pthread_cond_timedwait(&(var->p_mutex), &(var->p_cond), &abstime);
+    rc = pthread_cond_timedwait(&(var->p_cond), &(var->p_mutex), &abstime);
     if(rc) {
         /* either timeout or another error. */
-        if(rc = ETIMEDOUT) {
+        if(rc == ETIMEDOUT) {
             /* timeout, translate the error. */
             rc = PLCTAG_ERR_TIMEOUT;
         } else {
