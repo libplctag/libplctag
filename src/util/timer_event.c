@@ -34,17 +34,19 @@
 
 #include <lib/libplctag.h>
 #include <platform.h>
+#include <util/atomic_int.h>
 #include <util/debug.h>
 #include <util/timer_event.h>
 
+
+#define TIMER_LONG_TIME (30000) /* 30 seconds in milliseconds */
 
 static timer_event_callback_p callbacks = NULL;
 static mutex_p callback_mutex = NULL;
 static condition_var_p timer_signal = NULL;
 static thread_p timer_thread = NULL;
 static volatile int64_t next_wake_time = 0;
-static volatile int library_terminating = 0;
-
+static atomic_int library_terminating = ATOMIC_INT_STATIC_INIT(0);
 
 
 static THREAD_FUNC(timer_thread_handler);
@@ -69,7 +71,7 @@ int timer_event_register_callback(timer_event_callback_p callback)
         *callback_walker = callback;
 
         /* make sure that we capture the earliest wake time. */
-        if(next_wake_time == 0 || next_wake_time > callback->wake_time) {
+        if(callback->wake_time < next_wake_time) {
             next_wake_time = callback->wake_time;
             need_wakeup = 1;
         }
@@ -133,25 +135,25 @@ int timer_event_tickler(int64_t current_time)
         timer_event_callback_p callback = NULL;
 
         critical_block(callback_mutex) {
-            if(callbacks && next_wake_time <= current_time) {
-                callback = callbacks;
+            callback = callbacks;
+
+            /* anything to do yet? */
+            if(callback && callback->wake_time  <= current_time) {
                 callbacks = callback->next;
                 callback->next = NULL;
 
-                /* set the next wake time if we have more callbacks. */
+                /* peek to see if there is still work to do. */
                 if(callbacks) {
                     next_wake_time = callbacks->wake_time;
-
-                    if(next_wake_time <= current_time) {
-                        done = 0;
-                    } else {
-                        done = 1;
-                    }
+                } else {
+                    next_wake_time = time_ms() + TIMER_LONG_TIME;
                 }
             }
+
+            done = (next_wake_time > current_time);
         }
 
-        /* was there an even to fire? */
+        /* was there an event to fire? */
         if(callback) {
             pdebug(DEBUG_SPEW, "Calling timer callback.");
             callback->timer_event_handler(TIMER_FIRED, current_time, callback->context);
@@ -172,6 +174,8 @@ int timer_event_init(void)
     pdebug(DEBUG_INFO, "Starting");
 
     callbacks = NULL;
+
+    next_wake_time = time_ms() + TIMER_LONG_TIME;
 
     /* create the mutex. */
     rc = mutex_create(&callback_mutex);
@@ -207,7 +211,7 @@ void timer_event_teardown(void)
     pdebug(DEBUG_INFO, "Starting");
 
     /* first shut down the thread. */
-    library_terminating = 1;
+    atomic_int_set(&library_terminating,1);
 
     /* make sure the thread is not waiting */
     if(timer_signal) {
@@ -223,7 +227,7 @@ void timer_event_teardown(void)
     }
 
     /* reset to valid state. */
-    library_terminating = 0;
+    atomic_int_set(&library_terminating, 0);
 
     /* destroy the condition var */
     if(timer_signal) {
@@ -232,22 +236,27 @@ void timer_event_teardown(void)
 
     /* check the callbacks */
     if(callback_mutex) {
-        critical_block(callback_mutex) {
-            if(callbacks) {
-                pdebug(DEBUG_WARN, "There are callbacks still registered!");
+        int done = 1;
 
-                timer_event_callback_p callback = callbacks;
-                int64_t current_time = time_ms();
+        do {
+            timer_event_callback_p callback = NULL;
 
-                while(callback) {
-                    callback->timer_event_handler(TIMER_SHUTDOWN, current_time, callback->context);
-
-                    callback = callback->next;
+            critical_block(callback_mutex) {
+                if(callbacks) {
+                    /* unlink the head callback */
+                    callback = callbacks;
+                    callbacks = callback->next;
                 }
 
-                callbacks = NULL;
+                /* any left? if so, keep going. */
+                done = !callbacks;
             }
-        }
+
+            if(callback) {
+                callback->timer_event_handler(TIMER_SHUTDOWN, 0, callback->context);
+                callback = NULL;
+            }
+        } while(!done);
 
         /* destroy the mutex. */
         rc = mutex_destroy(&callback_mutex);
@@ -271,7 +280,7 @@ THREAD_FUNC(timer_thread_handler)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    while(!library_terminating) {
+    while(!atomic_int_get(&library_terminating)) {
         int64_t current_time = time_ms();
 
         /*
@@ -283,6 +292,7 @@ THREAD_FUNC(timer_thread_handler)
         rc = condition_var_wait(timer_signal, next_wake_time);
         if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_ERR_TIMEOUT) {
                 rc = timer_event_tickler(current_time);
+                /* FIXME - check return status. */
         } else {
             pdebug(DEBUG_WARN, "Got unexpected error %s from condition_var_wait()!", plc_tag_decode_error(rc));
         }
