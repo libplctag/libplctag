@@ -43,7 +43,7 @@
 
 
 
-int atomic_get(atomic_int *a)
+int atomic_int_get(atomic_int *a)
 {
     int val = 0;
 
@@ -60,7 +60,7 @@ int atomic_get(atomic_int *a)
 
 
 
-int atomic_set(atomic_int *a, int new_val)
+int atomic_int_set(atomic_int *a, int new_val)
 {
     int old_val = 0;
 
@@ -78,7 +78,7 @@ int atomic_set(atomic_int *a, int new_val)
 
 
 
-int atomic_add(atomic_int *a, int other)
+int atomic_int_add(atomic_int *a, int other)
 {
     int old_val = 0;
 
