@@ -70,19 +70,19 @@ typedef struct tag_vtable_t *tag_vtable_p;
 
 struct tag_byte_order_s {
     /* set if we allocated this specifically for the tag. */
-    unsigned int is_allocated:1;
+    int is_allocated;
 
     /* string type and ordering. */
-    unsigned int str_is_defined:1;
-    unsigned int str_is_counted:1;
-    unsigned int str_is_fixed_length:1;
-    unsigned int str_is_zero_terminated:1;
-    unsigned int str_is_byte_swapped:1;
+    int str_is_defined;
+    int str_is_counted;
+    int str_is_fixed_length;
+    int str_is_zero_terminated;
+    int str_is_byte_swapped;
 
-    unsigned int str_count_word_bytes;
-    unsigned int str_max_capacity;
-    unsigned int str_total_length;
-    unsigned int str_pad_bytes;
+    int str_count_word_bytes;
+    int str_pad_bytes;
+    int str_max_capacity;
+    int str_total_length;
 
     int int16_order[2];
     int int32_order[4];

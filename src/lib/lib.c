@@ -2944,7 +2944,7 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
         /* check the amount of space. */
         if(string_start_offset + (int)tag->byte_order->str_count_word_bytes + max_len <= tag->size) {
             for(int i = 0; i < max_len; i++) {
-                size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                size_t char_index = ((size_t)(unsigned int)i ^ (tag->byte_order->str_is_byte_swapped ? (size_t)1 : (size_t)0)) /* byte swap if necessary */
                                   + (size_t)(unsigned int)string_start_offset
                                   + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
                 buffer[i] = (char)tag->data[char_index];
@@ -3027,7 +3027,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
                 /* copy the string data into the tag. */
                 for(int i = 0; i < string_length; i++) {
-                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped ? (size_t)1 : (size_t)0)) /* byte swap if necessary */
                                     + (size_t)(unsigned int)string_start_offset
                                     + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
                     tag->data[char_index] = (uint8_t)string_val[i];
@@ -3035,7 +3035,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
                 /* zero pad the rest. */
                 for(int i = string_length; i < string_capacity; i++) {
-                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped ? (size_t)1 : (size_t)0)) /* byte swap if necessary */
                                     + (size_t)(unsigned int)string_start_offset
                                     + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
                     tag->data[char_index] = (uint8_t)0;
@@ -3426,7 +3426,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_counted", NULL)) {
             str_param = attr_get_int(attribs, "str_is_counted", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_counted = (unsigned int)str_param;
+                tag->byte_order->str_is_counted = str_param;
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_counted must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3437,7 +3437,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_fixed_length", NULL)) {
             str_param = attr_get_int(attribs, "str_is_fixed_length", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_fixed_length = (unsigned int)str_param;
+                tag->byte_order->str_is_fixed_length = str_param;
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_fixed_length must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3448,7 +3448,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_zero_terminated", NULL)) {
             str_param = attr_get_int(attribs, "str_is_zero_terminated", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_zero_terminated = (unsigned int)str_param;
+                tag->byte_order->str_is_zero_terminated = str_param;
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_zero_terminated must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3459,7 +3459,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_byte_swapped", NULL)) {
             str_param = attr_get_int(attribs, "str_is_byte_swapped", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_byte_swapped = (unsigned int)str_param;
+                tag->byte_order->str_is_byte_swapped = str_param;
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_byte_swapped must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3471,10 +3471,10 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         /* how many bytes is the string count word? */
         if(attr_get_str(attribs, "str_count_word_bytes", NULL)) {
             str_param = attr_get_int(attribs, "str_count_word_bytes", 0);
-            if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4 || str_param == 8) {
-                tag->byte_order->str_count_word_bytes = (unsigned int)str_param;
+            if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4) {
+                tag->byte_order->str_count_word_bytes = str_param;
             } else {
-                pdebug(DEBUG_WARN, "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, 4, or 8!");
+                pdebug(DEBUG_WARN, "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, or 4!");
                 return PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -3483,7 +3483,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_max_capacity", NULL)) {
             str_param = attr_get_int(attribs, "str_max_capacity", 0);
             if(str_param >= 0) {
-                tag->byte_order->str_max_capacity = (unsigned int)str_param;
+                tag->byte_order->str_max_capacity = str_param;
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_max_capacity must be missing, 0, or positive!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3494,7 +3494,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_total_length", NULL)) {
             str_param = attr_get_int(attribs, "str_total_length", 0);
             if(str_param >= 0) {
-                tag->byte_order->str_total_length = (unsigned int)str_param;
+                tag->byte_order->str_total_length = str_param;
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_total_length must be missing, 0, or positive!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3505,7 +3505,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_pad_bytes", NULL)) {
             str_param = attr_get_int(attribs, "str_pad_bytes", 0);
             if(str_param >= 0) {
-                tag->byte_order->str_pad_bytes = (unsigned int)str_param;
+                tag->byte_order->str_pad_bytes = str_param;
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_pad_bytes must be missing, 0, or positive!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3789,7 +3789,7 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
         if(tag->byte_order->str_is_zero_terminated) {
             /* slow, but hopefully correct. */
             for(int i = offset + (int)(tag->byte_order->str_count_word_bytes); i < tag->size; i++) {
-                size_t char_index = (((size_t)(unsigned int)string_length) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                size_t char_index = (((size_t)(unsigned int)string_length) ^ (tag->byte_order->str_is_byte_swapped ? (size_t)1 : (size_t)0)) /* byte swap if necessary */
                                 + (size_t)(unsigned int)offset
                                 + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
 

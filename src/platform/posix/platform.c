@@ -739,6 +739,163 @@ int mutex_destroy(mutex_p *m)
 
 
 
+/***************************************************************************
+ *************************** Condition Variables ***************************
+ **************************************************************************/
+
+struct condition_var_s {
+    pthread_mutex_t p_mutex;
+    pthread_cond_t p_cond;
+    int initialized;
+};
+
+
+
+int condition_var_create(condition_var_p *var)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(*var) {
+        pdebug(DEBUG_WARN, "Called with non-NULL pointer!");
+    }
+
+    *var = (struct condition_var_s *)mem_alloc(sizeof(struct condition_var_s));
+
+    if(! *var) {
+        pdebug(DEBUG_ERROR,"null mutex pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(pthread_mutex_init(&((*var)->p_mutex),NULL)) {
+        mem_free(*var);
+        *var = NULL;
+        pdebug(DEBUG_ERROR,"Error initializing pthread mutex.");
+        return PLCTAG_ERR_CREATE;
+    }
+
+    if(pthread_cond_init(&((*var)->p_cond), NULL)) {
+        pthread_mutex_destroy(&((*var)->p_cond));
+        mem_free(*var);
+        *var = NULL;
+        pdebug(DEBUG_ERROR,"Error initializing pthread condition variable.");
+        return PLCTAG_ERR_CREATE;
+    }
+
+    (*var)->initialized = 1;
+
+    pdebug(DEBUG_DETAIL, "Done creating condition variable %p.", *var);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+int condition_var_destroy(condition_var_p *var)
+{
+    pdebug(DEBUG_DETAIL, "Starting to destroy condition variable %p.", var);
+
+    if(!var || !*var) {
+        pdebug(DEBUG_WARN, "null condition variable pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(pthread_mutex_destroy(&((*var)->p_mutex))) {
+        pdebug(DEBUG_WARN, "error while attempting to destroy pthread mutex.");
+        return PLCTAG_ERR_MUTEX_DESTROY;
+    }
+
+    if(pthread_cond_destroy(&((*var)->p_cond))) {
+        pdebug(DEBUG_WARN, "error while attempting to destroy pthread condition variable.");
+        return PLCTAG_ERR_MUTEX_DESTROY;
+    }
+
+    mem_free(*var);
+
+    *var = NULL;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int condition_var_wait_impl(const char *func, int line, condition_var_p var, int64_t timeout_wake_time)
+{
+    int rc = PLCTAG_STATUS_OK;
+    struct timespec abstime;
+
+    pdebug(DEBUG_SPEW,"Waiting on condition var %p, called from %s:%d.", var, func, line);
+
+    if(!var) {
+        pdebug(DEBUG_WARN, "Null condition var pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!var->initialized) {
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(timeout_wake_time <= 0) {
+        pdebug(DEBUG_WARN, "Illegal wake up time.  Time must be positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    abstime.tv_sec = timeout_wake_time / 1000;
+    abstime.tv_nsec = (timeout_wake_time % 1000) * (int64_t)1000000;
+
+    /* first lock the mutex */
+    if(pthread_mutex_lock(&(var->p_mutex))) {
+        pdebug(DEBUG_WARN, "error locking mutex.");
+        return PLCTAG_ERR_MUTEX_LOCK;
+    }
+
+    /* now wait on the condition variable. */
+    rc = pthread_cond_timedwait(&(var->p_mutex), &(var->p_cond), &abstime);
+    if(rc) {
+        /* either timeout or another error. */
+        if(rc = ETIMEDOUT) {
+            /* timeout, translate the error. */
+            rc = PLCTAG_ERR_TIMEOUT;
+        } else {
+            pdebug(DEBUG_WARN, "Unable to wait on condition variable!");
+            rc = PLCTAG_ERR_MUTEX_LOCK; /* should have a better error. */
+        }
+    } else {
+        /* no error, the condition was signaled.  Perhaps. */
+        rc = PLCTAG_STATUS_OK;
+    }
+
+    /* try to unlock the mutex. */
+    pthread_mutex_unlock(&(var->p_mutex));
+
+    pdebug(DEBUG_SPEW,"Done.");
+
+    return rc;
+}
+
+
+int condition_var_signal_impl(const char *func, int line, condition_var_p var)
+{
+    pdebug(DEBUG_SPEW,"trying to signal condition variable %p, called from %s:%d.", var, func, line);
+
+    if(!var) {
+        pdebug(DEBUG_WARN, "null condition var pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!var->initialized) {
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(pthread_cond_signal(&(var->p_cond))) {
+        pdebug(DEBUG_SPEW, "error signaling condition var!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    pdebug(DEBUG_SPEW,"Done.");
+
+    return PLCTAG_STATUS_OK;
+}
 
 
 
