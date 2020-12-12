@@ -34,6 +34,7 @@
 
 #include <platform.h>
 #include <lib/libplctag.h>
+#include <util/debug.h>
 #include <util/protocol_stream.h>
 
 int protocol_stream_init(protocol_stream_p stream)
@@ -42,15 +43,128 @@ int protocol_stream_init(protocol_stream_p stream)
 
     pdebug (DEBUG_DETAIL, "Starting");
 
-    rc = mutex_create()
+    rc = mutex_create(&(stream->mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Unable to initialize mutex!");
+        return rc;
+    }
+
+    stream->callbacks = NULL;
 
     pdebug(DEBUG_DETAIL, "Done");
 
     return rc;
 }
 
-int protocol_stread_destroy(protocol_stream_p stream);
+int protocol_stream_destroy(protocol_stream_p stream)
+{
+    int rc = PLCTAG_STATUS_OK;
+    protocol_stream_callback_p callback = NULL;
 
-int protocol_stream_register_callback(protocol_stream_p stream, protocol_stream_callback_p callback);
-int protocol_stream_remove_callback(protocol_stream_p stream, protocol_stream_callback_p callback);
+    pdebug(DEBUG_DETAIL, "Starting");
+
+    /* loop through the callbacks and call them. */
+    do {
+        critical_block(stream->mutex) {
+            if(stream->callbacks) {
+                callback = stream->callbacks;
+                stream->callbacks = callback->next;
+            }
+        }
+
+        if(callback) {
+            callback->callback_handler(PROTOCOL_STREAM_CLOSING, callback->context, slice_make(NULL, 0));
+        }
+
+    } while(callback);
+
+    stream->callbacks = NULL;
+
+    /* notify the stream event handler that the stream is being destroyed. */
+    stream->event_handler(PROTOCOL_STREAM_CLOSING, stream->context);
+
+    rc = mutex_destroy(&(stream->mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Unable to destroy mutex!");
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done");
+
+    return rc;
+}
+
+int protocol_stream_register_callback(protocol_stream_p stream, protocol_stream_callback_p callback)
+{
+    pdebug(DEBUG_SPEW, "Starting");
+
+    if(!stream) {
+        pdebug(DEBUG_WARN, "Called with null stream!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!callback) {
+        pdebug(DEBUG_WARN, "Called with null callback!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* put the new callback at the end of the list. */
+    critical_block(stream->mutex) {
+        protocol_stream_callback_p *callback_walker = &(stream->callbacks);
+
+        while(*callback_walker) {
+            callback_walker = &((*callback_walker)->next);
+        }
+
+        *callback_walker = callback;
+        callback->next = NULL;
+    }
+
+    stream->event_handler(PROTOCOL_STREAM_CALLBACK_ADDED, stream->context);
+
+    pdebug(DEBUG_SPEW, "Done");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int protocol_stream_remove_callback(protocol_stream_p stream, protocol_stream_callback_p callback)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_SPEW, "Starting");
+
+    if(!stream) {
+        pdebug(DEBUG_WARN, "Called with null stream!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!callback) {
+        pdebug(DEBUG_WARN, "Called with null callback!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* Find the callback in the list. */
+    critical_block(stream->mutex) {
+        protocol_stream_callback_p *callback_walker = &(stream->callbacks);
+
+        while(*callback_walker && *callback_walker != callback) {
+            callback_walker = &((*callback_walker)->next);
+        }
+
+        if(*callback_walker == callback) {
+            *callback_walker = callback->next;
+            callback->next = NULL;
+        } else {
+            /* not found. */
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
+    }
+
+    stream->event_handler(PROTOCOL_STREAM_CALLBACK_REMOVED, stream->context);
+
+    pdebug(DEBUG_SPEW, "Done");
+
+    return rc;
+}
 

@@ -38,7 +38,12 @@
 #include <platform.h>
 #include <util/slice.h>
 
-typedef enum {PROTOCOL_STREAM_OPEN, PROTOCOL_STREAM_PACKET_READY, PROTOCOL_STREAM_WRITE_READY, PROTOCOL_STREAM_CLOSING} protocol_stream_event_t;
+typedef enum {PROTOCOL_STREAM_OPEN,
+              PROTOCOL_STREAM_PACKET_READY,
+              PROTOCOL_STREAM_WRITE_READY,
+              PROTOCOL_STREAM_CLOSING,
+              PROTOCOL_STREAM_CALLBACK_ADDED,
+              PROTOCOL_STREAM_CALLBACK_REMOVED} protocol_stream_event_t;
 
 struct protocol_stream_callback_s {
     mutex_p mutex;
@@ -51,11 +56,13 @@ typedef struct protocol_stream_callback_s *protocol_stream_callback_p;
 struct protocol_stream_s {
     mutex_p mutex;
     protocol_stream_callback_p callbacks;
+    void *context;
+    void (*event_handler)(protocol_stream_event_t event, void *context);
 };
 typedef struct protocol_stream_s *protocol_stream_p;
 
 extern int protocol_stream_init(protocol_stream_p stream);
-extern int protocol_stread_destroy(protocol_stream_p stream);
+extern int protocol_stream_destroy(protocol_stream_p stream);
 
 extern int protocol_stream_register_callback(protocol_stream_p stream, protocol_stream_callback_p callback);
 extern int protocol_stream_remove_callback(protocol_stream_p stream, protocol_stream_callback_p callback);
