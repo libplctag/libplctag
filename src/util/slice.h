@@ -86,13 +86,35 @@ inline static int slice_get_err(slice_t s)
     return s.len;
 }
 
+/* check whether in bounds or not before calling! */
+inline static uint8_t slice_get_uint8(slice_t s, int index)
+{
+    if(slice_in_bounds(s, index)) {
+        return s.data[index];
+    } else {
+        return 0;
+    }
+}
+
+
+inline static int slice_set_uint8(slice_t s, int index, uint8_t val) {
+    if(slice_in_bounds(s, index)) {
+        s.data[index] = val;
+        return PLCTAG_STATUS_OK;
+    } else {
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+}
+
+
+
 inline static int slice_match_bytes(slice_t s, const uint8_t *data, int data_len)
 {
     if(data_len != slice_len(s)) {
         return 0;
     }
 
-    for(size_t i=0; i < data_len; i++) {
+    for(int i=0; i < data_len; i++) {
         if(slice_get_uint8(s, i) != data[i]) {
             return 0;
         }
@@ -103,7 +125,7 @@ inline static int slice_match_bytes(slice_t s, const uint8_t *data, int data_len
 
 inline static int slice_match_string(slice_t s, const char *data)
 {
-    return slice_match_bytes(s, (const uint8_t*)data, strlen(data));
+    return slice_match_bytes(s, (const uint8_t*)data, str_length(data));
 }
 
 inline static slice_t slice_from_slice(slice_t src, int start, int len) {
@@ -125,7 +147,7 @@ inline static slice_t slice_from_slice(slice_t src, int start, int len) {
         return slice_make_err(PLCTAG_ERR_OUT_OF_BOUNDS);
     }
 
-    if(start > (size_t)src.len) {
+    if(start > src.len) {
         actual_start = src.len;
     } else {
         actual_start = (int)start;
@@ -146,127 +168,105 @@ inline static slice_t slice_from_slice(slice_t src, int start, int len) {
 
 
 /* helper functions to get and set data in a slice. */
-inline static uint8_t slice_get_uint8(slice_t s, int index, int *rc)
-{
-    *rc = PLCTAG_STATUS_OK;
 
-    if(slice_in_bounds(s, index)) {
-        return s.data[index];
-    } else {
-        *rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        return 0;
-    }
-}
+// inline static uint16_t slice_get_uint16_le(slice_t input_buf, int offset, int *rc)
+// {
+//     uint16_t res = 0;
 
+//     *rc = PLCTAG_STATUS_OK;
+//     if(slice_in_bounds(input_buf, offset + 1)) {
+//         res = (uint16_t)(slice_get_uint8(input_buf, offset, rc) + (slice_get_uint8(input_buf, offset + 1, rc) << 8));
+//         return res;
+//     } else {
+//         *rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+//         return 0;
+//     }
+// }
 
-inline static int slice_set_uint8(slice_t s, int index, uint8_t val) {
-    if(slice_in_bounds(s, index)) {
-        s.data[index] = val;
-        return PLCTAG_STATUS_OK;
-    } else {
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
-}
+// inline static int slice_set_uint16_le(slice_t input_buf, int offset, uint16_t val)
+// {
+//     if(slice_in_bounds(input_buf, offset + 1)) {
+//         slice_set_uint8(input_buf, offset, (uint8_t)(val & 0xFF));
+//         slice_set_uint8(input_buf, offset + 1, (uint8_t)((val >> 8) & 0xFF));
 
-
-inline static uint16_t slice_get_uint16_le(slice_t input_buf, int offset, int *rc)
-{
-    uint16_t res = 0;
-
-    *rc = PLCTAG_STATUS_OK;
-    if(slice_in_bounds(input_buf, offset + 1)) {
-        res = (uint16_t)(slice_get_uint8(input_buf, offset) + (slice_get_uint8(input_buf, offset + 1) << 8));
-        return res;
-    } else {
-        *rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        return 0;
-    }
-}
-
-inline static int slice_set_uint16_le(slice_t input_buf, int offset, uint16_t val)
-{
-    if(slice_in_bounds(input_buf, offset + 1)) {
-        slice_set_uint8(input_buf, offset, (uint8_t)(val & 0xFF));
-        slice_set_uint8(input_buf, offset + 1, (uint8_t)((val >> 8) & 0xFF));
-
-        return PLCTAG_STATUS_OK;
-    } else {
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
-}
+//         return PLCTAG_STATUS_OK;
+//     } else {
+//         return PLCTAG_ERR_OUT_OF_BOUNDS;
+//     }
+// }
 
 
-inline static uint32_t slice_get_uint32_le(slice_t input_buf, int offset, int *rc)
-{
-    uint32_t res = 0;
+// inline static uint32_t slice_get_uint32_le(slice_t input_buf, int offset, int *rc)
+// {
+//     uint32_t res = 0;
 
-    *rc = PLCTAG_STATUS_OK;
+//     *rc = PLCTAG_STATUS_OK;
 
-    if(slice_in_bounds(input_buf, offset + 3)) {
-        res =  (uint32_t)(slice_get_uint8(input_buf, offset))
-             + (uint32_t)(slice_get_uint8(input_buf, offset + 1) << 8)
-             + (uint32_t)(slice_get_uint8(input_buf, offset + 2) << 16)
-             + (uint32_t)(slice_get_uint8(input_buf, offset + 3) << 24);
-    } else {
-        *rc = PLCTAG_ERR_OUT_OF_BOUNDS
-        res = 0;
-    }
+//     if(slice_in_bounds(input_buf, offset + 3)) {
+//         res =  (uint32_t)(slice_get_uint8(input_buf, offset))
+//              + (uint32_t)(slice_get_uint8(input_buf, offset + 1) << 8)
+//              + (uint32_t)(slice_get_uint8(input_buf, offset + 2) << 16)
+//              + (uint32_t)(slice_get_uint8(input_buf, offset + 3) << 24);
+//     } else {
+//         *rc = PLCTAG_ERR_OUT_OF_BOUNDS
+//         res = 0;
+//     }
 
-    return res;
-}
+//     return res;
+// }
 
-inline static int slice_set_uint32_t_le(slice_t output_buf, int offset, uint32_t val)
-{
-    if(slice_in_bounds(input_buf, offset + 3)) {
-        slice_set_uint8(input_buf, offset,     (uint8_t)(val & 0xFF));
-        slice_set_uint8(input_buf, offset + 1, (uint8_t)((val >> 8)  & 0xFF));
-        slice_set_uint8(input_buf, offset + 2, (uint8_t)((val >> 16) & 0xFF));
-        slice_set_uint8(input_buf, offset + 3, (uint8_t)((val >> 24) & 0xFF));
+// inline static int slice_set_uint32_t_le(slice_t output_buf, int offset, uint32_t val)
+// {
+//     if(slice_in_bounds(input_buf, offset + 3)) {
+//         slice_set_uint8(input_buf, offset,     (uint8_t)(val & 0xFF));
+//         slice_set_uint8(input_buf, offset + 1, (uint8_t)((val >> 8)  & 0xFF));
+//         slice_set_uint8(input_buf, offset + 2, (uint8_t)((val >> 16) & 0xFF));
+//         slice_set_uint8(input_buf, offset + 3, (uint8_t)((val >> 24) & 0xFF));
 
-        return PLCTAG_STATUS_OK;
-    } else {
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
-}
+//         return PLCTAG_STATUS_OK;
+//     } else {
+//         return PLCTAG_ERR_OUT_OF_BOUNDS;
+//     }
+// }
 
 
-inline static uint64_t slice_get_uint64_le(slice_t input_buf, size_t offset, int *rc) {
-    uint64_t res = 0;
+// inline static uint64_t slice_get_uint64_le(slice_t input_buf, size_t offset, int *rc) {
+//     uint64_t res = 0;
 
-    *rc = PLCTAG_STATUS_OK;
+//     *rc = PLCTAG_STATUS_OK;
 
-    if(slice_in_bounds(input_buf, offset + 7)) {
-        res =  ((uint64_t)slice_get_uint8(input_buf, offset,     rc))
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 1, rc) << 8)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 2, rc) << 16)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 3, rc) << 24)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 4, rc) << 32)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 5, rc) << 40)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 6, rc) << 48)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 7, rc) << 56);
-    } else {
-        *rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-        res = 0;
-    }
+//     if(slice_in_bounds(input_buf, offset + 7)) {
+//         res =  ((uint64_t)slice_get_uint8(input_buf, offset,     rc))
+//              + ((uint64_t)slice_get_uint8(input_buf, offset + 1, rc) << 8)
+//              + ((uint64_t)slice_get_uint8(input_buf, offset + 2, rc) << 16)
+//              + ((uint64_t)slice_get_uint8(input_buf, offset + 3, rc) << 24)
+//              + ((uint64_t)slice_get_uint8(input_buf, offset + 4, rc) << 32)
+//              + ((uint64_t)slice_get_uint8(input_buf, offset + 5, rc) << 40)
+//              + ((uint64_t)slice_get_uint8(input_buf, offset + 6, rc) << 48)
+//              + ((uint64_t)slice_get_uint8(input_buf, offset + 7, rc) << 56);
+//     } else {
+//         *rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+//         res = 0;
+//     }
 
-    return res;
-}
+//     return res;
+// }
 
-inline static int slice_set_uint64_t_le(slice_t output_buf, int offset, uint64_t val)
-{
-    if(slice_in_bounds(input_buf, offset + 7)) {
-        slice_set_uint8(input_buf, offset,     (uint8_t)(val & 0xFF));
-        slice_set_uint8(input_buf, offset + 1, (uint8_t)((val >> 8)  & 0xFF));
-        slice_set_uint8(input_buf, offset + 2, (uint8_t)((val >> 16) & 0xFF));
-        slice_set_uint8(input_buf, offset + 3, (uint8_t)((val >> 24) & 0xFF));
-        slice_set_uint8(input_buf, offset + 4, (uint8_t)((val >> 32) & 0xFF));
-        slice_set_uint8(input_buf, offset + 5, (uint8_t)((val >> 40) & 0xFF));
-        slice_set_uint8(input_buf, offset + 6, (uint8_t)((val >> 48) & 0xFF));
-        slice_set_uint8(input_buf, offset + 7, (uint8_t)((val >> 56) & 0xFF));
+// inline static int slice_set_uint64_t_le(slice_t output_buf, int offset, uint64_t val)
+// {
+//     if(slice_in_bounds(input_buf, offset + 7)) {
+//         slice_set_uint8(input_buf, offset,     (uint8_t)(val & 0xFF));
+//         slice_set_uint8(input_buf, offset + 1, (uint8_t)((val >> 8)  & 0xFF));
+//         slice_set_uint8(input_buf, offset + 2, (uint8_t)((val >> 16) & 0xFF));
+//         slice_set_uint8(input_buf, offset + 3, (uint8_t)((val >> 24) & 0xFF));
+//         slice_set_uint8(input_buf, offset + 4, (uint8_t)((val >> 32) & 0xFF));
+//         slice_set_uint8(input_buf, offset + 5, (uint8_t)((val >> 40) & 0xFF));
+//         slice_set_uint8(input_buf, offset + 6, (uint8_t)((val >> 48) & 0xFF));
+//         slice_set_uint8(input_buf, offset + 7, (uint8_t)((val >> 56) & 0xFF));
 
-        return PLCTAG_STATUS_OK;
-    } else {
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
-}
+//         return PLCTAG_STATUS_OK;
+//     } else {
+//         return PLCTAG_ERR_OUT_OF_BOUNDS;
+//     }
+// }
 
