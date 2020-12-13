@@ -46,6 +46,10 @@ extern "C"
 #endif
 */
 
+#ifndef WINDOWS_PLATFORM
+    #define WINDOWS_PLATFORM 1
+#endif
+
 #define _WINSOCKAPI_
 
 /* Windows defaults to FD set size of 64 */

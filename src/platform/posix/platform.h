@@ -39,6 +39,11 @@
 #include <math.h>
 #include <stdarg.h>
 
+
+#ifndef POSIX_PLATFORM
+    #define POSIX_PLATFORM 1
+#endif
+
 /* common definitions */
 #define START_PACK
 #define END_PACK __attribute__((__packed__))
