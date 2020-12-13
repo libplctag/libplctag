@@ -93,3 +93,57 @@ int atomic_int_add(atomic_int *a, int other)
 
     return old_val;
 }
+
+
+int atomic_int_and(atomic_int *a, int other)
+{
+    int old_val = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    spin_block(&a->lock) {
+        old_val = a->val;
+        a->val &= other;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return old_val;
+}
+
+
+
+int atomic_int_or(atomic_int *a, int other)
+{
+    int old_val = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    spin_block(&a->lock) {
+        old_val = a->val;
+        a->val |= other;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return old_val;
+}
+
+
+
+int atomic_int_xor(atomic_int *a, int other)
+{
+    int old_val = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    spin_block(&a->lock) {
+        old_val = a->val;
+        a->val ^= other;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return old_val;
+}
+

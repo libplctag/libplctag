@@ -43,3 +43,6 @@ typedef struct { lock_t lock; volatile int val; } atomic_int;
 extern int atomic_int_get(atomic_int *a);
 extern int atomic_int_set(atomic_int *a, int new_val);
 extern int atomic_int_add(atomic_int *a, int other);
+extern int atomic_int_and(atomic_int *a, int other);
+extern int atomic_int_or(atomic_int *a, int other);
+extern int atomic_int_xor(atomic_int *a, int other);
