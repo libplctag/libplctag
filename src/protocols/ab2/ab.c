@@ -34,6 +34,7 @@
 #include <platform.h>
 #include <ab2/ab.h>
 #include <ab2/common_defs.h>
+#include <ab2/plc5.h>
 #include <lib/tag.h>
 #include <util/attr.h>
 #include <util/debug.h>

@@ -51,11 +51,15 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    tag = rc_alloc(sizeof(*tag), (void (*)(void*))plc5_tag_destroy);
+    tag = (ab2_plc5_tag_p)base_tag_create(sizeof(*tag), (void (*)(void*))plc5_tag_destroy);
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Unable to allocate new PLC/5 tag!");
+        return NULL;
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return NULL;
+    return (plc_tag_p)tag;
 }
 
 
@@ -65,6 +69,14 @@ void plc5_tag_destroy(void *tag_arg)
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
 
     pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Null tag pointer passed to destructor!");
+        return;
+    }
+
+    /* delete the base tag parts. */
+    base_tag_destroy((plc_tag_p)tag);
 
     pdebug(DEBUG_INFO, "Done.");
 }
