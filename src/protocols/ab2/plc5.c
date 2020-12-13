@@ -43,7 +43,7 @@ typedef struct {
 typedef ab2_plc5_tag_t *ab2_plc5_tag_p;
 
 
-static void plc5_tag_destroy(ab2_plc5_tag_p tag);
+static void plc5_tag_destroy(void *tag_arg);
 
 plc_tag_p ab2_plc5_tag_create(attr attribs)
 {
@@ -51,7 +51,7 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    tag = rc_alloc(sizeof(*tag), plc5_tag_destroy);
+    tag = rc_alloc(sizeof(*tag), (void (*)(void*))plc5_tag_destroy);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -60,8 +60,10 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
 
 
 /* helper functions. */
-void plc5_tag_destroy(ab2_plc5_tag_p tag)
+void plc5_tag_destroy(void *tag_arg)
 {
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     pdebug(DEBUG_INFO, "Done.");
