@@ -38,12 +38,36 @@
 typedef struct {
     struct plc_tag_t base_tag;
 
-
+    uint16_t elem_size;
+    uint16_t elem_count;
 } ab2_plc5_tag_t;
 typedef ab2_plc5_tag_t *ab2_plc5_tag_p;
 
 
 static void plc5_tag_destroy(void *tag_arg);
+
+static int plc5_tag_abort(plc_tag_p tag);
+static int plc5_tag_read(plc_tag_p tag);
+static int plc5_tag_status(plc_tag_p tag);
+static int plc5_tag_tickler(plc_tag_p tag);
+static int plc5_tag_write(plc_tag_p tag);
+static int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
+static int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
+
+
+/* vtables for different kinds of tags */
+static struct tag_vtable_t plc5_vtable = {
+    plc5_tag_abort,
+    plc5_tag_read,
+    plc5_tag_status,
+    plc5_tag_tickler,
+    plc5_tag_write,
+
+    /* attribute accessors */
+    plc5_get_int_attrib,
+    plc5_set_int_attrib
+};
+
 
 plc_tag_p ab2_plc5_tag_create(attr attribs)
 {
@@ -56,6 +80,9 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
         pdebug(DEBUG_WARN, "Unable to allocate new PLC/5 tag!");
         return NULL;
     }
+
+    /* set the vtable for base functions. */
+    tag->base_tag.vtable = &plc5_vtable;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -80,3 +107,95 @@ void plc5_tag_destroy(void *tag_arg)
 
     pdebug(DEBUG_INFO, "Done.");
 }
+
+
+int plc5_tag_abort(plc_tag_p tag)
+{
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+
+int plc5_tag_read(plc_tag_p tag)
+{
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+
+int plc5_tag_status(plc_tag_p tag)
+{
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+
+int plc5_tag_tickler(plc_tag_p tag)
+{
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+
+int plc5_tag_write(plc_tag_p tag)
+{
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+
+int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value)
+{
+    int res = default_value;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)raw_tag;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* assume we have a match. */
+    tag->base_tag.status = PLCTAG_STATUS_OK;
+
+    /* match the attribute. */
+    if(str_cmp_i(attrib_name, "elem_size") == 0) {
+        res = tag->elem_size;
+    } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
+        res = tag->elem_count;
+    } else {
+        pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
+        tag->base_tag.status = PLCTAG_ERR_UNSUPPORTED;
+        return default_value;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return res;
+}
+
+
+int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
+{
+    (void)attrib_name;
+    (void)new_value;
+
+    pdebug(DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+
+    raw_tag->status  = PLCTAG_ERR_UNSUPPORTED;
+
+    return PLCTAG_ERR_UNSUPPORTED;
+}
+
+
