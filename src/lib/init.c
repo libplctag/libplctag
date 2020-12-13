@@ -43,7 +43,7 @@
 #include <system/system.h>
 #include <util/attr.h>
 #include <util/debug.h>
-#include <util/timer_event.h>
+#include <util/event_socket.h>
 
 
 
@@ -153,7 +153,7 @@ void destroy_modules(void)
 
     mb_teardown();
 
-    timer_event_teardown();
+    event_socket_teardown();
 
     lib_teardown();
 
@@ -216,9 +216,9 @@ int initialize_modules(void)
                 pdebug(DEBUG_INFO,"Initialized library modules.");
                 rc = lib_init();
 
-                pdebug(DEBUG_INFO,"Initializing timer event module.");
+                pdebug(DEBUG_INFO,"Initializing protocol socket module.");
                 if(rc == PLCTAG_STATUS_OK) {
-                    rc = timer_event_init();
+                    rc = event_socket_init();
                 }
 
                 pdebug(DEBUG_INFO,"Initializing AB2 module.");
