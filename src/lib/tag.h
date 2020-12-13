@@ -143,3 +143,6 @@ extern void lib_teardown(void);
 extern int plc_tag_abort_mapped(plc_tag_p tag);
 extern int plc_tag_destroy_mapped(plc_tag_p tag);
 extern int plc_tag_status_mapped(plc_tag_p tag);
+
+extern plc_tag_p base_tag_create(int tag_size, void (*tag_destructor)(void *arg));
+extern void base_tag_destroy(void *tag_arg);

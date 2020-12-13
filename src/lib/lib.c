@@ -630,18 +630,26 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
      * FIXME - this really should be here???  Maybe not?  But, this is
      * the only place it can be without making every protocol type do this automatically.
      */
-    rc = mutex_create(&(tag->ext_mutex));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
-        rc_dec(tag);
-        return PLCTAG_ERR_CREATE;
+    if(!tag->ext_mutex) {
+        rc = mutex_create(&(tag->ext_mutex));
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
+            rc_dec(tag);
+            return PLCTAG_ERR_CREATE;
+        }
+    } else {
+        pdebug(DEBUG_DETAIL, "Specific tag type created external mutex.");
     }
 
-    rc = mutex_create(&(tag->api_mutex));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to create tag API mutex!");
-        rc_dec(tag);
-        return PLCTAG_ERR_CREATE;
+    if(!tag->api_mutex) {
+        rc = mutex_create(&(tag->api_mutex));
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN,"Unable to create tag API mutex!");
+            rc_dec(tag);
+            return PLCTAG_ERR_CREATE;
+        }
+    } else {
+        pdebug(DEBUG_DETAIL, "Specific tag type created API mutex.");
     }
 
     /* set up the read cache config. */
@@ -3986,4 +3994,76 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
 // }
 
 
+/*
+ * base_tag_create
+ *
+ * This function allocates the tag with rc_alloc and then sets up the
+ * base tag parts.
+ */
 
+plc_tag_p base_tag_create(int tag_size, void (*tag_destructor)(void *arg))
+{
+    plc_tag_p tag = NULL;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    tag = rc_alloc(tag_size, tag_destructor);
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Unable to allocate tag memory!");
+        return NULL;
+    }
+
+    rc = mutex_create(&(tag->ext_mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    rc = mutex_create(&(tag->api_mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Unable to create tag API mutex!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return tag;
+}
+
+
+void base_tag_destroy(void *tag_arg)
+{
+    plc_tag_p tag = (plc_tag_p)tag_arg;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Destructor called with null pointer!");
+        return;
+    }
+
+    if(tag->ext_mutex) {
+        mutex_destroy(&(tag->ext_mutex));
+        tag->ext_mutex = NULL;
+    }
+
+    if(tag->api_mutex) {
+        mutex_destroy(&(tag->api_mutex));
+        tag->api_mutex = NULL;
+    }
+
+    if(tag->byte_order && tag->byte_order->is_allocated) {
+        mem_free(tag->byte_order);
+        tag->byte_order = NULL;
+    }
+
+    if(tag->data) {
+        mem_free(tag->data);
+        tag->data = NULL;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+}
