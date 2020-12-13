@@ -1095,7 +1095,7 @@ extern void lock_release(lock_t *lock)
  **************************************************************************/
 
 struct sock_t {
-    int fd;
+    socket_t fd;
     int port;
     int is_open;
 };
@@ -1122,6 +1122,22 @@ extern int socket_create(sock_p *s)
     pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
+}
+
+
+
+int socket_get_fd(sock_p s)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(s) {
+        pdebug(DEBUG_DETAIL, "Done.");
+
+        return s->fd;
+    } else {
+        pdebug(DEBUG_WARN, "Passed socket is null!");
+        return INVALID_SOCKET;
+    }
 }
 
 

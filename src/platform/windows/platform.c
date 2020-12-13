@@ -1035,6 +1035,19 @@ extern int socket_create(sock_p *s)
     return PLCTAG_STATUS_OK;
 }
 
+int socket_get_fd(sock_p s)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(s) {
+        pdebug(DEBUG_DETAIL, "Done.");
+
+        return s->fd;
+    } else {
+        pdebug(DEBUG_WARN, "Passed socket is null!");
+        return INVALID_SOCKET;
+    }
+}
 
 
 extern int socket_connect_tcp(sock_p s, const char *host, int port)
