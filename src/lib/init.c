@@ -32,16 +32,18 @@
  ***************************************************************************/
 
 #include <stdlib.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
-#include <platform.h>
-#include <util/attr.h>
-#include <util/debug.h>
+
 #include <ab/ab.h>
 #include <ab2/ab.h>
-#include <mb/modbus.h>
-#include <system/system.h>
 #include <lib/init.h>
+#include <lib/libplctag.h>
+#include <lib/tag.h>
+#include <mb/modbus.h>
+#include <platform.h>
+#include <system/system.h>
+#include <util/attr.h>
+#include <util/debug.h>
+#include <util/timer_event.h>
 
 
 
@@ -151,6 +153,8 @@ void destroy_modules(void)
 
     mb_teardown();
 
+    timer_event_teardown();
+
     lib_teardown();
 
     spin_block(&library_initialization_lock) {
@@ -211,6 +215,11 @@ int initialize_modules(void)
 
                 pdebug(DEBUG_INFO,"Initialized library modules.");
                 rc = lib_init();
+
+                pdebug(DEBUG_INFO,"Initializing timer event module.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = timer_event_init();
+                }
 
                 pdebug(DEBUG_INFO,"Initializing AB2 module.");
                 if(rc == PLCTAG_STATUS_OK) {
