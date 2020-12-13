@@ -38,6 +38,7 @@
 #include <util/attr.h>
 #include <util/debug.h>
 #include <ab/ab.h>
+#include <ab2/ab.h>
 #include <mb/modbus.h>
 #include <system/system.h>
 #include <lib/init.h>
@@ -62,6 +63,8 @@ struct {
     /* Allen-Bradley PLCs */
     {"ab-eip", NULL, NULL, NULL, ab_tag_create},
     {"ab_eip", NULL, NULL, NULL, ab_tag_create},
+    {"ab-eip2", NULL, NULL, NULL, ab2_tag_create},
+    {"ab_eip2", NULL, NULL, NULL, ab2_tag_create},
     {"modbus-tcp", NULL, NULL, NULL, mb_tag_create},
     {"modbus_tcp", NULL, NULL, NULL, mb_tag_create}
 };
@@ -144,6 +147,8 @@ void destroy_modules(void)
 {
     ab_teardown();
 
+    ab2_protocol_teardown();
+
     mb_teardown();
 
     lib_teardown();
@@ -206,6 +211,11 @@ int initialize_modules(void)
 
                 pdebug(DEBUG_INFO,"Initialized library modules.");
                 rc = lib_init();
+
+                pdebug(DEBUG_INFO,"Initializing AB2 module.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = ab2_protocol_init();
+                }
 
                 pdebug(DEBUG_INFO,"Initializing AB module.");
                 if(rc == PLCTAG_STATUS_OK) {
