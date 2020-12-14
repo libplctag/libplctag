@@ -217,15 +217,15 @@ for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); LINE_ID(
 
 
 /* condition variables */
-typedef struct condition_var_s *condition_var_p;
-extern int condition_var_create(condition_var_p *var);
-extern int condition_var_destroy(condition_var_p *var);
-/* timeout_wake_time is the absolute time to wake up if the condition was not triggered. */
-extern int condition_var_wait_impl(const char *func, int line_num, condition_var_p var, int64_t timeout_wake_time);
-extern int condition_var_signal_impl(const char *func, int line_num, condition_var_p var);
+// typedef struct condition_var_s *condition_var_p;
+// extern int condition_var_create(condition_var_p *var);
+// extern int condition_var_destroy(condition_var_p *var);
+// /* timeout_wake_time is the absolute time to wake up if the condition was not triggered. */
+// extern int condition_var_wait_impl(const char *func, int line_num, condition_var_p var, int64_t timeout_wake_time);
+// extern int condition_var_signal_impl(const char *func, int line_num, condition_var_p var);
 
-#define condition_var_wait(var, timeout) condition_var_wait_impl(__func__, __LINE__, var, timeout)
-#define condition_var_signal(var) condition_var_signal_impl(__func__, __LINE__, var)
+// #define condition_var_wait(var, timeout) condition_var_wait_impl(__func__, __LINE__, var, timeout)
+// #define condition_var_signal(var) condition_var_signal_impl(__func__, __LINE__, var)
 
 
 /* thread functions/defs */
