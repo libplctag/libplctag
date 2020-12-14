@@ -33,37 +33,30 @@
 
 #pragma once
 
+#include <util/slice.h>
+
+typedef struct protocol_s *protocol_p;
+typedef struct protocol_request_s *protocol_request_p;
+
 struct protocol_s {
     /* request API */
-    int (*protocol_request_create)(struct protocol_request_s **request, struct protocol_s *protocol, void *requestor);
-    int (*protocol_request_start)(struct protocol_request_s *request,
-                                  int (*request_callback)(struct protocol_s *protocol,
-                                                          struct protocol_request_s *request,
-                                                          void *requestor,
-                                                          int64_t current_time,
-                                                          slice_t packet));
-    int (*protocol_request_abort)(struct protocol_request_s *request);
-    int (*protocol_request_destroy)(struct protocol_request_s **request);
+    int (*create_request)(protocol_p protocol, protocol_request_p *request);
+    int (*signal_request)(protocol_p protocol,
+                          protocol_request_p request,
+                          void *context,
+                          slice_t (*build_request)(protocol_ protocol,
+                                                   protocol_request_p request,
+                                                   void *context,
+                                                   int64_t current_time,
+                                                   slice_t output_buffer),
+                          int (*process_request)(protocol_p protocol,
+                                                 protocol_request_p request,
+                                                 void *context,
+                                                 int64_t current_time,
+                                                 slice_t input_payload));
+    int (*abort_request)(protocol_p protocol, protocol_request_p request);
+    int (*destroy_request)(protocol_p protocol, protocol_request_p *request);
 
-    /* protocol layer API up the stack*/
-    int (*protocol_can_read)(struct protocol_s *protocol);
-    int (*protocol_can_write)(struct protocol_s *protocol);
-    int (*protocol_closing)(struct protocol_s *protocol);
-
-    /* protocol layer API down the stack */
-    int (*protocol_)
-
-    /* protocol clean up */
-    int (*protocol_destroy)(struct protocol_s *protocol);
+    int (*destroy_protocol)(protocol_p *protocol);
 };
-typedef struct protocol_s *protocol_p;
-
-struct protocol_request_s {
-    int (*request_callback)(struct protocol_s *protocol,
-                            struct protocol_request_s *request,
-                            void *requestor,
-                            int64_t current_time,
-                            int event, slice_t output_buffer);
-};
-typedef struct protocol_request_s *protocol_request_p;
 
