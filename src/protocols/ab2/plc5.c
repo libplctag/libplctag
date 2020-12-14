@@ -105,27 +105,40 @@ void plc5_tag_destroy(void *tag_arg)
     /* delete the base tag parts. */
     base_tag_destroy((plc_tag_p)tag);
 
+    /* get rid of any outstanding timers and events. */
+
+
     pdebug(DEBUG_INFO, "Done.");
 }
 
 
-int plc5_tag_abort(plc_tag_p tag)
+int plc5_tag_abort(plc_tag_p tag_arg)
 {
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+
     pdebug(DEBUG_INFO, "Starting.");
+
+    if(tag->base_tag.read_in_flight || tag->base_tag.write_in_flight) {
+        /* abort outstanding request. */
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    return PLCTAG_STATUS_OK;
 }
 
 
-int plc5_tag_read(plc_tag_p tag)
+int plc5_tag_read(plc_tag_p tag_arg)
 {
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+
     pdebug(DEBUG_INFO, "Starting.");
+
+    //protocol_queue_request(tag->request, tag, )
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    return PLCTAG_STATUS_PENDING;
 }
 
 
