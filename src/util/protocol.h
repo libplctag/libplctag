@@ -44,7 +44,7 @@ struct protocol_s {
     int (*signal_request)(protocol_p protocol,
                           protocol_request_p request,
                           void *context,
-                          slice_t (*build_request)(protocol_ protocol,
+                          slice_t (*build_request)(protocol_p protocol,
                                                    protocol_request_p request,
                                                    void *context,
                                                    int64_t current_time,
