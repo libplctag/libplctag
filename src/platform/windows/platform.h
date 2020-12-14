@@ -261,7 +261,7 @@ extern void lock_release(lock_t *lock);
 typedef struct sock_t *sock_p;
 typedef SOCKET socket_t;
 extern int socket_create(sock_p *s);
-extern socket_t socket_get_fd(sock_p *s);
+extern socket_t socket_get_fd(sock_p s);
 extern int socket_connect_tcp(sock_p s, const char *host, int port);
 extern int socket_read(sock_p s, uint8_t *buf, int size);
 extern int socket_write(sock_p s, uint8_t *buf, int size);
