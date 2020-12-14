@@ -48,8 +48,8 @@ extern int event_socket_create(event_socket_p *ps,
                                 void *context,
                                 event_socket_event_t event_mask,
                                 void (*connect_callback)(event_socket_p esock, int64_t current_time, void *context),
-                                int (*can_read_callback)(event_socket_p esock, int64_t current_time, void *context),
-                                int (*can_write_callback)(event_socket_p esock, int64_t current_time, void *context),
+                                int (*can_read_callback)(event_socket_p esock, int64_t current_time, void *context, sock_p sock),
+                                int (*can_write_callback)(event_socket_p esock, int64_t current_time, void *context, sock_p sock),
                                 void (*close_callback)(event_socket_p esock, int64_t current_time, void *context));
 extern int event_socket_connect(event_socket_p event_sock, const char *host, int port);
 extern int event_socket_close(event_socket_p event_sock);

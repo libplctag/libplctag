@@ -52,8 +52,8 @@ struct event_socket_s {
     struct event_socket_s *next;
     void *context;
     void (*connect_callback)(struct event_socket_s *psock, int64_t current_time, void *context);
-    int (*can_read_callback)(struct event_socket_s *psock, int64_t current_time, void *context);
-    int (*can_write_callback)(struct event_socket_s *psock, int64_t current_time, void *context);
+    int (*can_read_callback)(struct event_socket_s *psock, int64_t current_time, void *context, sock_p sock);
+    int (*can_write_callback)(struct event_socket_s *psock, int64_t current_time, void *context, sock_p sock);
     void (*close_callback)(struct event_socket_s *psock, int64_t current_time, void *context);
 };
 
@@ -76,8 +76,8 @@ int event_socket_create(event_socket_p *event_sock,
                         void *context,
                         event_socket_event_t event_mask,
                         void (*connect_callback)(event_socket_p esock, int64_t current_time, void *context),
-                        int (*can_read_callback)(event_socket_p esock, int64_t current_time, void *context),
-                        int (*can_write_callback)(event_socket_p esock, int64_t current_time, void *context),
+                        int (*can_read_callback)(event_socket_p esock, int64_t current_time, void *context, sock_p sock),
+                        int (*can_write_callback)(event_socket_p esock, int64_t current_time, void *context), sock_p sock,
                         void (*close_callback)(event_socket_p esock, int64_t current_time, void *context))
 {
     int rc = PLCTAG_STATUS_OK;
@@ -489,7 +489,7 @@ void event_socket_tickler(void)
 
                 if(rc > 0) {
                     if((atomic_int_get(&(event_sock->event_mask)) & EVENT_SOCKET_CAN_READ) && FD_ISSET(socket_get_fd(event_sock->sock), &event_socket_read_fds)) {
-                        rc = event_sock->can_read_callback(event_sock, current_time, event_sock->context);
+                        rc = event_sock->can_read_callback(event_sock, current_time, event_sock->context, event_sock->sock);
 
                         /* if we get an OK, then the event should not be rescheduled. */
                         if(rc == PLCTAG_STATUS_OK) {
@@ -497,7 +497,7 @@ void event_socket_tickler(void)
                             *sock_walker = event_sock->next;
                         } /* else leave it in place. */
                     } else if((atomic_int_get(&(event_sock->event_mask)) & EVENT_SOCKET_CAN_WRITE) && FD_ISSET(socket_get_fd(event_sock->sock), &event_socket_write_fds)) {
-                        rc = event_sock->can_write_callback(event_sock, current_time, event_sock->context);
+                        rc = event_sock->can_write_callback(event_sock, current_time, event_sock->context, event_sock->sock);
 
                         /* if we get an OK, then the event should not be rescheduled. */
                         if(rc == PLCTAG_STATUS_OK) {
