@@ -56,7 +56,5 @@ struct protocol_s {
                                                  slice_t input_payload));
     int (*abort_request)(protocol_p protocol, protocol_request_p request);
     int (*destroy_request)(protocol_p protocol, protocol_request_p *request);
-
-    int (*destroy_protocol)(protocol_p *protocol);
 };
 
