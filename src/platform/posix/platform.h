@@ -198,14 +198,46 @@ typedef int socket_t;
 #ifndef SOCKET_ERROR
     #define SOCKET_ERROR (-1)
 #endif
+
 typedef struct sock_t *sock_p;
 extern int socket_create(sock_p *s);
-extern socket_t socket_get_fd(sock_p s);
 extern int socket_connect_tcp(sock_p s, const char *host, int port);
 extern int socket_read(sock_p s, uint8_t *buf, int size);
 extern int socket_write(sock_p s, uint8_t *buf, int size);
 extern int socket_close(sock_p s);
 extern int socket_destroy(sock_p *s);
+
+typedef enum {
+    SOCKET_EVENT_ACCEPT,
+    SOCKET_EVENT_CONNECT,
+    SOCKET_EVENT_READ,
+    SOCKET_EVENT_WRITE,
+    SOCKET_EVENT_CLOSE,
+    SOCKET_EVENT_ERROR,
+    SOCKET_EVENT_LAST
+} socket_event_t;
+
+extern int socket_set_callback(sock_p sock, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context);
+extern int socket_enable_event(sock_p s, socket_event_t event);
+extern int socket_disable_event(sock_p s, socket_event_t event);
+
+
+/***************************************************************
+ **************************** Timers ***************************
+ ***************************************************************/
+
+typedef struct timer_s *timer_p;
+
+extern int timer_create(timer_p *timer);
+extern int timer_set_callback(timer_p timer,
+                              void (*callback)(timer_p timer,
+                                              int64_t wake_time,
+                                              int64_t current_time,
+                                              void *context),
+                              void *context);
+extern int timer_set_wake_time(timer_p timer, int64_t wake_time);
+extern int timer_destroy(timer_p *timer);
+
 
 /* serial handling */
 typedef struct serial_port_t *serial_port_p;
@@ -222,5 +254,11 @@ extern int sleep_ms(int ms);
 extern int64_t time_ms(void);
 
 #define snprintf_platform snprintf
+
+/* start up/global platform */
+extern void platform_tickler(void);
+extern int platform_init(void);
+extern void platform_teardown(void);
+
 
 #endif /* _PLATFORM_H_ */

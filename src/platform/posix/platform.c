@@ -53,6 +53,7 @@
 #include <time.h>
 
 #include <lib/libplctag.h>
+#include <util/atomic_int.h>
 #include <util/debug.h>
 
 
@@ -63,6 +64,36 @@
         #define _DARWIN_C_SOURCE _POSIX_C_SOURCE
     #endif
 #endif
+
+
+
+/***************************************************************************
+ ******************************* Globals ***********************************
+ **************************************************************************/
+
+
+#define TICKLER_MAX_WAIT_TIME_MS (50)
+
+static thread_p platform_thread = NULL;
+static atomic_int_t library_shutdown = ATOMIC_INT_STATIC_INIT(0);
+
+static mutex_p timer_mutex = NULL;
+static timer_p timer_list = NULL;
+static int64_t next_wake_time = 0;
+
+static mutex_p socket_mutex = NULL;
+static sock_p socket_list = NULL;
+static atomic_int_t need_recalculate_fd_sets = ATOMIC_INT_STATIC_INIT(0);
+
+static THREAD_FUNC(platform_thread_func);
+
+int pipe_fds[2];
+static fd_set socket_read_fds;
+static fd_set socket_write_fds;
+static int max_fd;
+
+/* used to wake the timer/socket thread. */
+static void wake_up_event_loop(void);
 
 
 /***************************************************************************
@@ -1097,7 +1128,15 @@ extern void lock_release(lock_t *lock)
 struct sock_t {
     socket_t fd;
     int port;
-    int is_open;
+
+    atomic_int event_mask;
+
+    /* next in the list of sockets. */
+    struct sock_t *next;
+
+    /* callback info */
+    void *context;
+    int (*callback)(sock_p sock, socket_event_t event, void *context);
 };
 
 
@@ -1125,22 +1164,6 @@ extern int socket_create(sock_p *s)
 }
 
 
-
-int socket_get_fd(sock_p s)
-{
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(s) {
-        pdebug(DEBUG_DETAIL, "Done.");
-
-        return s->fd;
-    } else {
-        pdebug(DEBUG_WARN, "Passed socket is null!");
-        return INVALID_SOCKET;
-    }
-}
-
-
 extern int socket_connect_tcp(sock_p s, const char *host, int port)
 {
     struct in_addr ips[MAX_IPS];
@@ -1151,7 +1174,7 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     int done = 0;
     int fd;
     int flags;
-    struct timeval timeout; /* used for timing out connections etc. */
+    struct timeval timeout;  /* used for timing out connections etc. */
     struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
 
     pdebug(DEBUG_DETAIL,"Starting.");
@@ -1305,7 +1328,6 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     /* save the values */
     s->fd = fd;
     s->port = port;
-    s->is_open = 1;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1386,16 +1408,11 @@ extern int socket_close(sock_p s)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
-        return PLCTAG_STATUS_OK;
-    }
-
     if(!close(s->fd)) {
         return PLCTAG_ERR_CLOSE;
     }
 
-    s->fd = 0;
-    s->is_open = 0;
+    s->fd = INVALID_SOCKET;
 
     return PLCTAG_STATUS_OK;
 }
@@ -1417,9 +1434,217 @@ extern int socket_destroy(sock_p *s)
 
 
 
+/* socket event handling */
+
+int socket_set_callback(sock_p sock, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    sock->callback = callback;
+    sock->context = context;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int socket_enable_event(sock_p sock, socket_event_t event)
+{
+    int rc = PLCTAG_STATUS_OK;
+    uint16_t event_val = 0;
+    uint16_t repeat_val = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(event < 0 || event >= SOCKET_EVENT_LAST) {
+        pdebug(DEBUG_WARN, "Illegal event value!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    event_val = (1 << event);
+
+    atomic_int_or(&(sock->event_mask), event_val);
+
+    /* cause the socket fd sets to be recalculated. */
+    atomic_int_add(&need_recalculate_fd_sets, 1);
+
+    /* this may result in a socket that is ready. */
+    wake_up_event_loop();
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int socket_disable_event(sock_p sock, socket_event_t event)
+{
+    int rc = PLCTAG_STATUS_OK;
+    uint16_t event_val = 0;
+    uint16_t repeat_val = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(event < 0 || event >= SOCKET_EVENT_LAST) {
+        pdebug(DEBUG_WARN, "Illegal event value!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    event_val = ~(1 << event);
+
+    atomic_int_and(&(sock->event_mask), event_val);
+
+    /* cause the socket fd sets to be recalculated. */
+    atomic_int_add(&need_recalculate_fd_sets, 1);
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+
+}
 
 
 
+
+
+/***************************************************************************
+ ********************************* Timers **********************************
+ **************************************************************************/
+
+
+struct timer_s {
+    struct timer_s *next;
+    void *context;
+    int (*callback)(timer_p timer,
+                    int64_t wake_time,
+                    int64_t current_time,
+                    void *context);
+    int64_t wake_time;
+};
+
+int timer_create(timer_p *timer)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!timer) {
+        pdebug(DEBUG_WARN, "null timer pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    *timer = (timer_p)mem_alloc(sizeof(struct timer_s));
+    if(! *timer) {
+        pdebug(DEBUG_ERROR, "Failed to allocate memory for timer.");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    (*timer)->wake_time = INT64_MAX;
+
+    /* add the new timer to the list. */
+    critical_block(timer_mutex) {
+        (*timer)->next = timer_list;
+        timer_list = timer;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int timer_set_callback(timer_p timer,
+                       void (*callback)(timer_p timer,
+                                        int64_t wake_time,
+                                        int64_t current_time,
+                                        void *context),
+                       void *context)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!timer) {
+        pdebug(DEBUG_WARN, "null timer pointer.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    timer->context = context;
+    timer->callback = callback;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int timer_set_wake_time(timer_p timer, int64_t wake_time)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!timer) {
+        pdebug(DEBUG_WARN, "null timer pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* FIXME - this could be a race condition */
+    timer->wake_time = wake_time;
+
+    /* should we wake the select? */
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int timer_destroy(timer_p *timer)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!timer) {
+        pdebug(DEBUG_WARN, "null timer pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!*timer) {
+        pdebug(DEBUG_WARN, "null timer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* find and remove the timer. */
+    critical_block(timer_mutex) {
+        timer_p *timer_walker = &timer_list;
+
+        while(*timer_walker && *timer_walker != *timer) {
+            timer_walker = &((*timer_walker)->next);
+        }
+
+        /* unlink from the list. */
+        if(*timer_walker && *timer_walker == *timer) {
+            *timer_walker = (*timer)->next;
+        }
+    }
+
+    mem_free(*timer);
+    *timer = NULL;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
 
 
 /***************************************************************************
@@ -1498,4 +1723,273 @@ int64_t time_ms(void)
     gettimeofday(&tv,NULL);
 
     return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
+}
+
+
+
+
+/***************************************************************************
+ ******************************* Platform **********************************
+ ***************************************************************************/
+
+
+
+/*
+ * platform_tickler()
+ *
+ * This function normally gets called by the platform thread
+ * but this can be turned off and this tickler called directly
+ * from the client application.   The latter would be used
+ * primarily from embedded systems.
+ */
+
+void platform_tickler(void)
+{
+    int recalc_count = 0;
+    int64_t wait_time_ms = 0;
+    struct timeval timeval_wait;
+    int num_signaled_fds = 0;
+    int64_t current_time = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* do we need to recalculate the fd set for the sockets? */
+    recalc_count = atomic_int_get(&need_recalculate_fd_sets);
+    if(recalc_count > 0) {
+        pdebug(DEBUG_DETAIL, "Recalculating the fd set for sockets.");
+        recalculate_fd_sets();
+
+        /*
+         * subtract the number we had before.   Other threads may have
+         * incremented the counter since we started this if statement.
+         * If so, then we will trigger again.
+         *
+         * We cannot just set this to zero as a new socket could have
+         * been added or the state of the sockets changed between the
+         * time we recalculated the fd sets and the time we cleared
+         * the need_recalculate_fd_sets flag.
+         */
+        atomic_int_add(&need_recalculate_fd_sets, -recalc_count);
+    }
+
+    /* determine the amount of time to wait. */
+    wait_time_ms = next_wake_time - time_ms();
+    if(wait_time_ms < 0) {
+        wait_time_ms = 0;
+    }
+
+    if(wait_time_ms > TICKLER_MAX_WAIT_TIME_MS) {
+        wait_time_ms = TICKLER_MAX_WAIT_TIME_MS;
+    }
+
+    timeval_wait.tv_sec = 0;
+    timeval_wait.tv_usec = wait_time_ms * 1000;
+
+    /* select on the open fds. */
+    num_signaled_fds = select(max_fd + 1, &socket_read_fds, &socket_write_fds, NULL, &timeval_wait);
+    if(num_signaled_fds > 0) {
+        pdebug(DEBUG_DETAIL, "Starting to run socket callbacks.");
+
+        /* catch the case that the wake up pipe has data. */
+        if (FD_ISSET(pipe_fds[0], &socket_read_fds)) {
+            uint8_t dummy;
+
+            while(read(pipe_fds[0], &dummy, 1) > 0) { }
+        }
+
+        /* process the sockets. */
+        critical_block(socket_mutex) {
+            sock_p *socket_walker = &socket_list;
+
+            while(*socket_walker) {
+                sock_p sock = *socket_walker;
+
+                /* check and clear the mask for reads */
+                if(atomic_int_xor(&(sock->event_mask), (1 << SOCKET_EVENT_READ)) && sock->callback && FD_ISSET(sock->fd, &socket_read_fds)) {
+                    sock->callback(sock, SOCKET_EVENT_READ, sock->context);
+                }
+
+                /* check and clear the mask for writes */
+                if(atomic_int_xor(&(sock->event_mask), (1 << SOCKET_EVENT_WRITE)) && sock->callback && FD_ISSET(sock->fd, &socket_read_fds)) {
+                    sock->callback(sock, SOCKET_EVENT_WRITE, sock->context);
+                }
+
+                socket_walker = &((*socket_walker)->next);
+            }
+        }
+
+        pdebug(DEBUG_DETAIL, "Done running socket callbacks.");
+    }
+
+    /* call any timer callbacks. */
+    current_time = time_ms();
+
+    critical_block(timer_mutex) {
+        timer_p timer = timer_list;
+
+        earliest_wake_time = INT64_MAX;
+
+        while(timer && timer->wake_time <= current_time) {
+            if(timer->wake_time <= current_time) {
+                int64_t old_wake_time = timer->wake_time;
+
+                /* prevent the timer from firing again unless reset. */
+                timer->wake_time = INT64_MAX;
+
+                /* call the callback.  This may set a new wake time. */
+                timer->callback(timer, old_wake_time, current_time, timer->context);
+            }
+
+            /* calculate the earliest wake time. */
+            if(earliest_wake_time > timer->wake_time) {
+                earliest_wake_time = timer->wake_time;
+            }
+
+            timer = timer->next;
+        }
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+}
+
+
+
+
+
+int platform_init(void)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int flags = 0;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* open the pipe for waking the select wait. */
+    if(pipe(pipe_fds)) {
+        pdebug(DEBUG_WARN, "Unable to open waker pipe!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    /* make the read pipe fd non-blocking. */
+    if(fcntl(pipe_fds[0], F_GETFL) < 0) {
+        pdebug(DEBUG_WARN, "Unable to get flags of read pipe fd!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    /* set read fd non-blocking */
+    flags |= O_NONBLOCK;
+
+    if(fcntl(pipe_fds[0], F_SETFL, flags) < 0) {
+        pdebug(DEBUG_WARN, "Unable to set flags of read pipe fd!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    /* make the write pipe fd non-blocking. */
+    if(fcntl(pipe_fds[1], F_GETFL) < 0) {
+        pdebug(DEBUG_WARN, "Unable to get flags of write pipe fd!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    /* set write fd non-blocking */
+    flags |= O_NONBLOCK;
+
+    if(fcntl(pipe_fds[1], F_SETFL, flags) < 0) {
+        pdebug(DEBUG_WARN, "Unable to set flags of write pipe fd!");
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+
+    /* create the socket mutex. */
+    rc = mutex_create(&socket_mutex);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create socket mutex!");
+        return rc;
+    }
+
+    /* create the timer mutex. */
+    rc = mutex_create(&timer_mutex);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create timer mutex!");
+        return rc;
+    }
+
+    /* create the platform thread. */
+    rc = thread_create(&platform_thread, platform_thread_func, 32768, NULL);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create platform thread!");
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+void platform_teardown(void)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* destroy the platform thread. */
+    atomic_int_set(&library_shutdown, 1);
+
+    rc = thread_join(platform_thread);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to join platform thread, got error %s!", plc_tag_decode_error(rc));
+        return;
+    }
+
+    rc = thread_destroy(&platform_thread);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to destroy platform thread!");
+        return;
+    }
+
+    platform_thread = NULL;
+
+    /* reset the shutdown flag to make sure that the library can restart. */
+    atomic_int_set(&library_shutdown, 0);
+
+    /* destroy the timer mutex. */
+    rc = mutex_mutex(&timer_mutex);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create timer mutex!");
+        return rc;
+    }
+
+    timer_mutex = NULL;
+
+    /* destroy the socket mutex. */
+    rc = mutex_mutex(&socket_mutex);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create socket mutex!");
+        return rc;
+    }
+
+    socket_mutex = NULL;
+
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+
+    pipe_fds[0] = -1;
+    pipe_fds[1] = -1;
+
+    /* if there were sockets or timers left, oh well, leak away! */
+    timer_list = NULL;
+    socket_list = NULL;
+
+    atomic_int_set(&need_recalculate_fd_sets, 0);
+
+    pdebug(DEBUG_INFO, "Done.");
+}
+
+/*
+ * writing to the pipe causes the select to immediately
+ * succeed.
+ */
+void wake_up_event_loop(void)
+{
+    uint8_t dummy = 0;
+    write(pipe_fds[1], &dummy, 1);
 }
