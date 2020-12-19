@@ -205,21 +205,18 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port);
 extern int socket_read(sock_p s, uint8_t *buf, int size);
 extern int socket_write(sock_p s, uint8_t *buf, int size);
 extern int socket_close(sock_p s);
-extern int socket_destroy(sock_p *s);
 
 typedef enum {
-    SOCKET_EVENT_ACCEPT,
-    SOCKET_EVENT_CONNECT,
-    SOCKET_EVENT_READ,
-    SOCKET_EVENT_WRITE,
-    SOCKET_EVENT_CLOSE,
-    SOCKET_EVENT_ERROR,
+    SOCKET_EVENT_NONE = 0,
+    SOCKET_EVENT_ACCEPT = 1,
+    SOCKET_EVENT_READ = 1,
+    SOCKET_EVENT_CONNECT = 2,
+    SOCKET_EVENT_WRITE = 2,
     SOCKET_EVENT_LAST
 } socket_event_t;
 
-extern int socket_set_callback(sock_p sock, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context);
-extern int socket_enable_event(sock_p s, socket_event_t event);
-extern int socket_disable_event(sock_p s, socket_event_t event);
+extern int socket_event_enable(sock_p s, socket_event_t event, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context);
+extern int socket_event_disable(sock_p s);
 
 
 /***************************************************************
@@ -228,15 +225,15 @@ extern int socket_disable_event(sock_p s, socket_event_t event);
 
 typedef struct timer_s *timer_p;
 
-extern int timer_create(timer_p *timer);
-extern int timer_set_callback(timer_p timer,
-                              void (*callback)(timer_p timer,
-                                              int64_t wake_time,
-                                              int64_t current_time,
-                                              void *context),
-                              void *context);
-extern int timer_set_wake_time(timer_p timer, int64_t wake_time);
-extern int timer_destroy(timer_p *timer);
+extern int event_timer_create(timer_p *timer);
+extern int event_timer_wake_at(timer_p timer,
+                         int64_t wake_time,
+                         void (*callback)(timer_p timer,
+                                          int64_t wake_time,
+                                          int64_t current_time,
+                                          void *context),
+                         void *context);
+extern int event_timer_snooze(timer_p);
 
 
 /* serial handling */

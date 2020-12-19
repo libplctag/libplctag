@@ -55,6 +55,7 @@
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
 #include <util/debug.h>
+#include <util/rc.h>
 
 
 
@@ -75,22 +76,22 @@
 #define TICKLER_MAX_WAIT_TIME_MS (50)
 
 static thread_p platform_thread = NULL;
-static atomic_int_t library_shutdown = ATOMIC_INT_STATIC_INIT(0);
+static atomic_int library_shutdown = ATOMIC_INT_STATIC_INIT(0);
 
 static mutex_p timer_mutex = NULL;
 static timer_p timer_list = NULL;
-static int64_t next_wake_time = 0;
 
 static mutex_p socket_mutex = NULL;
 static sock_p socket_list = NULL;
-static atomic_int_t need_recalculate_fd_sets = ATOMIC_INT_STATIC_INIT(0);
+static sock_p *socket_list_iter = NULL;
+static fd_set global_read_fds;
+static fd_set global_write_fds;
+static int max_socket_fd = -1;
+static atomic_int need_recalculate_fd_sets = ATOMIC_INT_STATIC_INIT(1);
 
 static THREAD_FUNC(platform_thread_func);
 
 int pipe_fds[2];
-static fd_set socket_read_fds;
-static fd_set socket_write_fds;
-static int max_fd;
 
 /* used to wake the timer/socket thread. */
 static void wake_up_event_loop(void);
@@ -1129,34 +1130,39 @@ struct sock_t {
     socket_t fd;
     int port;
 
-    atomic_int event_mask;
-
     /* next in the list of sockets. */
     struct sock_t *next;
 
-    /* callback info */
+    /* event/callback info */
+    socket_event_t event_wanted;
     void *context;
-    int (*callback)(sock_p sock, socket_event_t event, void *context);
+    void (*callback)(sock_p sock, socket_event_t event, void *context);
 };
 
 
 #define MAX_IPS (8)
 
-extern int socket_create(sock_p *s)
+static void socket_rc_destroy(void *sock_arg);
+
+extern int socket_create(sock_p *sock)
 {
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(!s) {
-        pdebug(DEBUG_WARN, "null socket pointer.");
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Null socket location pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    *s = (sock_p)mem_alloc(sizeof(struct sock_t));
-
-    if(! *s) {
+    *sock = (sock_p)rc_alloc(sizeof(**sock), socket_rc_destroy);
+    if(! *sock) {
         pdebug(DEBUG_ERROR, "Failed to allocate memory for socket.");
         return PLCTAG_ERR_NO_MEM;
     }
+
+    (*sock)->event_wanted = SOCKET_EVENT_NONE;
+    (*sock)->callback = NULL;
+    (*sock)->context = NULL;
+    (*sock)->fd = INVALID_SOCKET;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1181,6 +1187,13 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    /* check the size of the fd set. */
+    if(fd >= FD_SETSIZE) {
+        pdebug(DEBUG_WARN, "Socket fd, %d, is too large to fit in a fd set!");
+        close(fd);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* check for errors */
     if(fd < 0) {
@@ -1305,12 +1318,10 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         return PLCTAG_ERR_OPEN;
     }
 
-
     /* FIXME
      * connect() is a little easier to handle in blocking mode, for now
      * we make the socket non-blocking here, after connect(). */
     flags=fcntl(fd,F_GETFL,0);
-
     if(flags<0) {
         pdebug(DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
         close(fd);
@@ -1329,6 +1340,11 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
     s->fd = fd;
     s->port = port;
 
+    /* raise the connected event. */
+    if(s->event_wanted == SOCKET_EVENT_CONNECT && s->callback) {
+        s->callback(s, SOCKET_EVENT_CONNECT, s->context);
+    }
+
     pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
@@ -1343,11 +1359,6 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
 
     if(!s || !buf) {
         return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!s->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_READ;
     }
 
     /* The socket is non-blocking. */
@@ -1374,11 +1385,6 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_WRITE;
-    }
-
     /* The socket is non-blocking. */
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
@@ -1402,63 +1408,51 @@ extern int socket_write(sock_p s, uint8_t *buf, int size)
 
 
 
-extern int socket_close(sock_p s)
+extern int socket_close(sock_p sock)
 {
-    if(!s) {
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!sock) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!close(s->fd)) {
+    /* remove the socket from any lists and fd sets. */
+    socket_event_disable(sock);
+
+    /* close the socket fd. */
+    if(!close(sock->fd)) {
         return PLCTAG_ERR_CLOSE;
     }
 
-    s->fd = INVALID_SOCKET;
+    sock->fd = INVALID_SOCKET;
 
     return PLCTAG_STATUS_OK;
 }
 
 
-extern int socket_destroy(sock_p *s)
+void socket_rc_destroy(void *sock_arg)
 {
-    if(!s || !*s)
-        return PLCTAG_ERR_NULL_PTR;
+    sock_p sock = (sock_p)sock_arg;
 
-    socket_close(*s);
+    pdebug(DEBUG_INFO, "Starting.");
 
-    mem_free(*s);
+    if(!sock) {
+        pdebug(DEBUG_ERROR, "Called with null pointer!");
+        return;
+    }
 
-    *s = 0;
+    socket_close(sock);
 
-    return PLCTAG_STATUS_OK;
+    pdebug(DEBUG_INFO, "Done.");
 }
 
 
 
 /* socket event handling */
 
-int socket_set_callback(sock_p sock, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context)
-{
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_WARN, "Socket pointer is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    sock->callback = callback;
-    sock->context = context;
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int socket_enable_event(sock_p sock, socket_event_t event)
+int socket_event_enable(sock_p sock, socket_event_t event, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context)
 {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t event_val = 0;
-    uint16_t repeat_val = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1472,28 +1466,60 @@ int socket_enable_event(sock_p sock, socket_event_t event)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    event_val = (1 << event);
+    if(!callback) {
+        pdebug(DEBUG_WARN, "Callback must not be null.");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
-    atomic_int_or(&(sock->event_mask), event_val);
+    critical_block(socket_mutex) {
+        /* set up the socket internals. */
+        sock->event_wanted = event;
+        sock->callback = callback;
+        sock->context = context;
 
-    /* cause the socket fd sets to be recalculated. */
-    atomic_int_add(&need_recalculate_fd_sets, 1);
+        /* some events are not handled via the fd set. */
+        if(sock->fd != INVALID_SOCKET && sock->fd >= 0 && sock->fd < FD_SETSIZE) {
+            int skip_list = 0;
 
-    /* this may result in a socket that is ready. */
-    wake_up_event_loop();
+            switch(event) {
+                case SOCKET_EVENT_READ:
+                    FD_CLR(sock->fd, &global_write_fds);
+                    FD_SET(sock->fd, &global_read_fds);
+                    break;
+
+                case SOCKET_EVENT_WRITE:
+                    FD_CLR(sock->fd, &global_read_fds);
+                    FD_SET(sock->fd, &global_write_fds);
+                    break;
+
+                default:
+                    /* not one of the events we are going to wait in select() on */
+                    skip_list = 1;
+                    break;
+            }
+
+            if(!skip_list) {
+                /* add it to the list. */
+                sock->next = socket_list;
+                socket_list = sock;
+
+                /* this may result in a socket that is ready. */
+                wake_up_event_loop();
+            }
+        } else {
+            pdebug(DEBUG_WARN, "Socket fd, %d, is out of supported bounds [0..%d)!", sock->fd, FD_SETSIZE);
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+    }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
-int socket_disable_event(sock_p sock, socket_event_t event)
+int socket_event_disable(sock_p sock)
 {
-    int rc = PLCTAG_STATUS_OK;
-    uint16_t event_val = 0;
-    uint16_t repeat_val = 0;
-
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!sock) {
@@ -1501,17 +1527,42 @@ int socket_disable_event(sock_p sock, socket_event_t event)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(event < 0 || event >= SOCKET_EVENT_LAST) {
-        pdebug(DEBUG_WARN, "Illegal event value!");
-        return PLCTAG_ERR_BAD_PARAM;
+    critical_block(socket_mutex) {
+        if(sock->event_wanted != SOCKET_EVENT_NONE) {
+            /*
+            * Find the socket.  Remove it from the list.
+            * Remove it from both fd sets.   Fix up the iterator.
+            */
+            sock_p *socket_walker = &socket_list;
+
+            while(*socket_walker && *socket_walker != sock) {
+                socket_walker = &((*socket_walker)->next);
+            }
+
+            if(*socket_walker && *socket_walker == sock) {
+                *socket_walker = sock->next;
+
+                /* fix up the iterator if it is pointing at the element we are removing. */
+                if(socket_list_iter && socket_list_iter == &(sock->next)) {
+                    socket_list_iter = (sock->next ? &(sock->next->next) : NULL);
+                }
+
+                sock->next = NULL;
+
+                /* clear the fd set entry since we are not waiting. */
+                FD_CLR(sock->fd, &global_read_fds);
+                FD_CLR(sock->fd, &global_write_fds);
+
+                if(sock->fd >= max_socket_fd) {
+                    /* we need to recalculate the fd set. */
+                    atomic_int_add(&need_recalculate_fd_sets, 1);
+                }
+            }
+
+            sock->event_wanted = SOCKET_EVENT_NONE;
+            sock->callback = NULL;
+        }
     }
-
-    event_val = ~(1 << event);
-
-    atomic_int_and(&(sock->event_mask), event_val);
-
-    /* cause the socket fd sets to be recalculated. */
-    atomic_int_add(&need_recalculate_fd_sets, 1);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1531,14 +1582,17 @@ int socket_disable_event(sock_p sock, socket_event_t event)
 struct timer_s {
     struct timer_s *next;
     void *context;
-    int (*callback)(timer_p timer,
-                    int64_t wake_time,
-                    int64_t current_time,
-                    void *context);
+    void (*callback)(timer_p timer,
+                     int64_t wake_time,
+                     int64_t current_time,
+                     void *context);
     int64_t wake_time;
 };
 
-int timer_create(timer_p *timer)
+
+static void timer_rc_destroy(void *timer_arg);
+
+int event_timer_create(timer_p *timer)
 {
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1547,7 +1601,7 @@ int timer_create(timer_p *timer)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    *timer = (timer_p)mem_alloc(sizeof(struct timer_s));
+    *timer = (timer_p)rc_alloc(sizeof(struct timer_s), timer_rc_destroy);
     if(! *timer) {
         pdebug(DEBUG_ERROR, "Failed to allocate memory for timer.");
         return PLCTAG_ERR_NO_MEM;
@@ -1555,43 +1609,65 @@ int timer_create(timer_p *timer)
 
     (*timer)->wake_time = INT64_MAX;
 
-    /* add the new timer to the list. */
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int event_timer_wake_at(timer_p timer,
+                  int64_t wake_time,
+                  void (*callback)(timer_p timer,
+                                   int64_t wake_time,
+                                   int64_t current_time,
+                                   void *context),
+                  void *context)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!timer) {
+        pdebug(DEBUG_WARN, "null timer pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!callback) {
+        pdebug(DEBUG_WARN, "Callback pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* add to the list of active timers. */
     critical_block(timer_mutex) {
-        (*timer)->next = timer_list;
-        timer_list = timer;
+        timer_p *timer_walker = &timer_list;
+
+        timer->wake_time = wake_time;
+        timer->context = context;
+        timer->callback = callback;
+
+        while(*timer_walker && (*timer_walker)->wake_time < wake_time) {
+            timer_walker = &((*timer_walker)->next);
+        }
+
+        timer->next = *timer_walker;
+        *timer_walker = timer;
+
+        /* do we have a new wake up time? */
+        if(timer_list == timer) {
+            wake_up_event_loop();
+        }
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
-int timer_set_callback(timer_p timer,
-                       void (*callback)(timer_p timer,
-                                        int64_t wake_time,
-                                        int64_t current_time,
-                                        void *context),
-                       void *context)
+int event_timer_snooze(timer_p timer)
 {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    int rc = PLCTAG_STATUS_OK;
 
-    if(!timer) {
-        pdebug(DEBUG_WARN, "null timer pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    timer->context = context;
-    timer->callback = callback;
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int timer_set_wake_time(timer_p timer, int64_t wake_time)
-{
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!timer) {
@@ -1599,52 +1675,53 @@ int timer_set_wake_time(timer_p timer, int64_t wake_time)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* FIXME - this could be a race condition */
-    timer->wake_time = wake_time;
+    /* remove from the list of active timers. */
+    critical_block(timer_mutex) {
+        timer_p *timer_walker = &timer_list;
 
-    /* should we wake the select? */
+        while(*timer_walker && *timer_walker != timer) {
+            timer_walker = &((*timer_walker)->next);
+        }
+
+        if(*timer_walker && *timer_walker == timer) {
+            *timer_walker = timer->next;
+            timer->next = NULL;
+        } else {
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
+    }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
-int timer_destroy(timer_p *timer)
+/* timer helpers */
+
+void timer_rc_destroy(void *timer_arg)
 {
-    pdebug(DEBUG_DETAIL, "Starting.");
+    timer_p timer = (timer_p)timer_arg;
 
-    if(!timer) {
-        pdebug(DEBUG_WARN, "null timer pointer!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!*timer) {
-        pdebug(DEBUG_WARN, "null timer!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
+    pdebug(DEBUG_INFO, "Starting.");
 
     /* find and remove the timer. */
     critical_block(timer_mutex) {
         timer_p *timer_walker = &timer_list;
 
-        while(*timer_walker && *timer_walker != *timer) {
+        while(*timer_walker && *timer_walker != timer) {
             timer_walker = &((*timer_walker)->next);
         }
 
         /* unlink from the list. */
-        if(*timer_walker && *timer_walker == *timer) {
-            *timer_walker = (*timer)->next;
-        }
+        if(*timer_walker && *timer_walker == timer) {
+            *timer_walker = timer->next;
+        } /* else not found */
     }
 
-    mem_free(*timer);
-    *timer = NULL;
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    pdebug(DEBUG_INFO, "Done.");
 }
+
 
 
 /***************************************************************************
@@ -1733,6 +1810,12 @@ int64_t time_ms(void)
  ***************************************************************************/
 
 
+static int64_t run_timers(int64_t current_time);
+static int recalculate_fd_sets(void);
+static sock_p socket_list_iter_start(void);
+static sock_p socket_list_iter_next(void);
+static void socket_list_iter_done(void);
+static void socket_list_iter_unlink(void);
 
 /*
  * platform_tickler()
@@ -1748,26 +1831,30 @@ void platform_tickler(void)
     int recalc_count = 0;
     int64_t wait_time_ms = 0;
     struct timeval timeval_wait;
+    int max_fd = 0;
     int num_signaled_fds = 0;
-    int64_t current_time = 0;
+    int64_t current_time = time_ms();
+    int64_t next_wake_time = 0;
+    fd_set tmp_read_fds;
+    fd_set tmp_write_fds;
 
     pdebug(DEBUG_SPEW, "Starting.");
+
+    /* call the timers, this gets the next wake up time. */
+    next_wake_time = run_timers(current_time);
 
     /* do we need to recalculate the fd set for the sockets? */
     recalc_count = atomic_int_get(&need_recalculate_fd_sets);
     if(recalc_count > 0) {
-        pdebug(DEBUG_DETAIL, "Recalculating the fd set for sockets.");
-        recalculate_fd_sets();
+        max_fd = recalculate_fd_sets();
 
         /*
          * subtract the number we had before.   Other threads may have
          * incremented the counter since we started this if statement.
          * If so, then we will trigger again.
          *
-         * We cannot just set this to zero as a new socket could have
-         * been added or the state of the sockets changed between the
-         * time we recalculated the fd sets and the time we cleared
-         * the need_recalculate_fd_sets flag.
+         * This handles the race condition that the counter changes
+         * after we recalculate and before we reset the counter.
          */
         atomic_int_add(&need_recalculate_fd_sets, -recalc_count);
     }
@@ -1785,75 +1872,194 @@ void platform_tickler(void)
     timeval_wait.tv_sec = 0;
     timeval_wait.tv_usec = wait_time_ms * 1000;
 
+    /* copy the fd sets as select is destructive. */
+    critical_block(socket_mutex) {
+        tmp_read_fds = global_read_fds;
+        tmp_write_fds = global_write_fds;
+    }
+
+    FD_SET(pipe_fds[0], &tmp_read_fds);
+
+    /* make sure that the maximum fd is at least the pipe fd */
+    max_fd = (max_fd < pipe_fds[0] ? pipe_fds[0] : max_fd);
+
     /* select on the open fds. */
-    num_signaled_fds = select(max_fd + 1, &socket_read_fds, &socket_write_fds, NULL, &timeval_wait);
+    num_signaled_fds = select(max_fd + 1, &tmp_read_fds, &tmp_write_fds, NULL, &timeval_wait);
     if(num_signaled_fds > 0) {
         pdebug(DEBUG_DETAIL, "Starting to run socket callbacks.");
 
         /* catch the case that the wake up pipe has data. */
-        if (FD_ISSET(pipe_fds[0], &socket_read_fds)) {
+        if(FD_ISSET(pipe_fds[0], &tmp_read_fds)) {
             uint8_t dummy;
 
             while(read(pipe_fds[0], &dummy, 1) > 0) { }
+
+            num_signaled_fds--;
         }
 
-        /* process the sockets. */
-        critical_block(socket_mutex) {
-            sock_p *socket_walker = &socket_list;
-
-            while(*socket_walker) {
-                sock_p sock = *socket_walker;
-
-                /* check and clear the mask for reads */
-                if(atomic_int_xor(&(sock->event_mask), (1 << SOCKET_EVENT_READ)) && sock->callback && FD_ISSET(sock->fd, &socket_read_fds)) {
-                    sock->callback(sock, SOCKET_EVENT_READ, sock->context);
+        if(num_signaled_fds > 0) {
+            for(sock_p sock = socket_list_iter_start(); sock; rc_dec(sock), sock = socket_list_iter_next()) {
+                if(sock->event_wanted == SOCKET_EVENT_READ && FD_ISSET(sock->fd, &tmp_read_fds) && sock->callback) {
+                    sock->callback(sock, sock->event_wanted, sock->context);
+                    socket_list_iter_unlink();
+                } else if(sock->event_wanted == SOCKET_EVENT_WRITE && FD_ISSET(sock->fd, &tmp_write_fds) && sock->callback) {
+                    sock->callback(sock, sock->event_wanted, sock->context);
+                    socket_list_iter_unlink();
                 }
-
-                /* check and clear the mask for writes */
-                if(atomic_int_xor(&(sock->event_mask), (1 << SOCKET_EVENT_WRITE)) && sock->callback && FD_ISSET(sock->fd, &socket_read_fds)) {
-                    sock->callback(sock, SOCKET_EVENT_WRITE, sock->context);
-                }
-
-                socket_walker = &((*socket_walker)->next);
-            }
-        }
-
-        pdebug(DEBUG_DETAIL, "Done running socket callbacks.");
-    }
-
-    /* call any timer callbacks. */
-    current_time = time_ms();
-
-    critical_block(timer_mutex) {
-        timer_p timer = timer_list;
-
-        earliest_wake_time = INT64_MAX;
-
-        while(timer && timer->wake_time <= current_time) {
-            if(timer->wake_time <= current_time) {
-                int64_t old_wake_time = timer->wake_time;
-
-                /* prevent the timer from firing again unless reset. */
-                timer->wake_time = INT64_MAX;
-
-                /* call the callback.  This may set a new wake time. */
-                timer->callback(timer, old_wake_time, current_time, timer->context);
             }
 
-            /* calculate the earliest wake time. */
-            if(earliest_wake_time > timer->wake_time) {
-                earliest_wake_time = timer->wake_time;
-            }
-
-            timer = timer->next;
+            socket_list_iter_done();
         }
     }
-
-    pdebug(DEBUG_SPEW, "Done.");
 }
 
 
 
+THREAD_FUNC(platform_thread_func)
+{
+    (void)arg;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    while(! atomic_int_get(&library_shutdown)) {
+        platform_tickler();
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    THREAD_RETURN(0);
+}
+
+
+int64_t run_timers(int64_t current_time)
+{
+    int64_t next_wake_time = INT64_MAX;
+    int done = 1;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        timer_p timer = NULL;
+
+        critical_block(timer_mutex) {
+            if(timer_list && timer_list->wake_time <= current_time) {
+                timer = rc_inc(timer_list);
+
+                /* pop off the list head. */
+                timer_list = timer_list->next;
+
+                next_wake_time = (timer_list ? timer_list->wake_time : INT64_MAX);
+
+                /* keep trying */
+                done = 0;
+            } else {
+                timer = NULL;
+                done = 1;
+            }
+        }
+
+        if(timer) {
+            /* call the callback.  This may re-enable the timer. */
+            timer->callback(timer, timer->wake_time, current_time, timer->context);
+
+            /* release our reference */
+            timer = rc_dec(timer);
+        }
+    } while(!done);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return next_wake_time;
+}
+
+
+int recalculate_fd_sets(void)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    critical_block(socket_mutex) {
+        max_socket_fd = -1;
+
+        /* clear out the old fd sets */
+        FD_ZERO(&global_read_fds);
+        FD_ZERO(&global_write_fds);
+
+        for(sock_p sock = socket_list; sock; sock = sock->next) {
+            if(sock->event_wanted == SOCKET_EVENT_READ) {
+                FD_SET(sock->fd, &global_read_fds);
+                max_socket_fd = (max_socket_fd < sock->fd ? sock->fd : max_socket_fd);
+            } else if(sock->event_wanted == SOCKET_EVENT_WRITE) {
+                FD_SET(sock->fd, &global_write_fds);
+                max_socket_fd = (max_socket_fd < sock->fd ? sock->fd : max_socket_fd);
+            }
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return max_socket_fd;
+}
+
+
+sock_p socket_list_iter_start(void)
+{
+    sock_p result = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    critical_block(socket_mutex) {
+        socket_list_iter = &socket_list;
+        result = rc_inc(*socket_list_iter);
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return result;
+}
+
+sock_p socket_list_iter_next(void)
+{
+    sock_p result = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    critical_block(socket_mutex) {
+        if(socket_list_iter && *socket_list_iter) {
+            socket_list_iter = &((*socket_list_iter)->next);
+            result = rc_inc(*socket_list_iter);
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return result;
+}
+
+
+void socket_list_iter_done(void)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    critical_block(socket_mutex) {
+        socket_list_iter = NULL;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+}
+
+
+void socket_list_iter_unlink(void)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    critical_block(socket_mutex) {
+        if(socket_list_iter && *socket_list_iter) {
+            *socket_list_iter = (*socket_list_iter)->next;
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+}
 
 
 int platform_init(void)
@@ -1952,19 +2158,19 @@ void platform_teardown(void)
     atomic_int_set(&library_shutdown, 0);
 
     /* destroy the timer mutex. */
-    rc = mutex_mutex(&timer_mutex);
+    rc = mutex_destroy(&timer_mutex);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to create timer mutex!");
-        return rc;
+        pdebug(DEBUG_ERROR, "Unable to destroy timer mutex!");
+        return;
     }
 
     timer_mutex = NULL;
 
     /* destroy the socket mutex. */
-    rc = mutex_mutex(&socket_mutex);
+    rc = mutex_destroy(&socket_mutex);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to create socket mutex!");
-        return rc;
+        pdebug(DEBUG_ERROR, "Unable to destroy socket mutex!");
+        return;
     }
 
     socket_mutex = NULL;
@@ -1974,6 +2180,9 @@ void platform_teardown(void)
 
     pipe_fds[0] = -1;
     pipe_fds[1] = -1;
+
+    FD_ZERO(&global_read_fds);
+    FD_ZERO(&global_write_fds);
 
     /* if there were sockets or timers left, oh well, leak away! */
     timer_list = NULL;

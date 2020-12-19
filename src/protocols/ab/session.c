@@ -755,7 +755,7 @@ int session_close_socket(ab_session_p session)
 
     if (session->sock) {
         socket_close(session->sock);
-        socket_destroy(&(session->sock));
+        session->sock = rc_dec(session->sock);
         session->sock = NULL;
     }
 
