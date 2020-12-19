@@ -1931,47 +1931,6 @@ THREAD_FUNC(platform_thread_func)
 }
 
 
-int64_t run_timers(int64_t current_time)
-{
-    int64_t next_wake_time = INT64_MAX;
-    int done = 1;
-
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    do {
-        timer_p timer = NULL;
-
-        critical_block(timer_mutex) {
-            if(timer_list && timer_list->wake_time <= current_time) {
-                timer = rc_inc(timer_list);
-
-                /* pop off the list head. */
-                timer_list = timer_list->next;
-
-                next_wake_time = (timer_list ? timer_list->wake_time : INT64_MAX);
-
-                /* keep trying */
-                done = 0;
-            } else {
-                timer = NULL;
-                done = 1;
-            }
-        }
-
-        if(timer) {
-            /* call the callback.  This may re-enable the timer. */
-            timer->callback(timer, timer->wake_time, current_time, timer->context);
-
-            /* release our reference */
-            timer = rc_dec(timer);
-        }
-    } while(!done);
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return next_wake_time;
-}
-
 
 int recalculate_fd_sets(void)
 {
@@ -2133,64 +2092,6 @@ int platform_init(void)
 
 void platform_teardown(void)
 {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_INFO, "Starting.");
-
-    /* destroy the platform thread. */
-    atomic_int_set(&library_shutdown, 1);
-
-    rc = thread_join(platform_thread);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to join platform thread, got error %s!", plc_tag_decode_error(rc));
-        return;
-    }
-
-    rc = thread_destroy(&platform_thread);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to destroy platform thread!");
-        return;
-    }
-
-    platform_thread = NULL;
-
-    /* reset the shutdown flag to make sure that the library can restart. */
-    atomic_int_set(&library_shutdown, 0);
-
-    /* destroy the timer mutex. */
-    rc = mutex_destroy(&timer_mutex);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to destroy timer mutex!");
-        return;
-    }
-
-    timer_mutex = NULL;
-
-    /* destroy the socket mutex. */
-    rc = mutex_destroy(&socket_mutex);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to destroy socket mutex!");
-        return;
-    }
-
-    socket_mutex = NULL;
-
-    close(pipe_fds[0]);
-    close(pipe_fds[1]);
-
-    pipe_fds[0] = -1;
-    pipe_fds[1] = -1;
-
-    FD_ZERO(&global_read_fds);
-    FD_ZERO(&global_write_fds);
-
-    /* if there were sockets or timers left, oh well, leak away! */
-    timer_list = NULL;
-    socket_list = NULL;
-
-    atomic_int_set(&need_recalculate_fd_sets, 0);
-
-    pdebug(DEBUG_INFO, "Done.");
 }
 
 /*

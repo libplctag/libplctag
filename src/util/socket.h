@@ -33,42 +33,37 @@
 
 #pragma once
 
-#include <platform.h>
+#include <stdint.h>
 
+typedef int socket_t;
+#ifndef INVALID_SOCKET
+    #define INVALID_SOCKET (-1)
+#endif
+#ifndef SOCKET_ERROR
+    #define SOCKET_ERROR (-1)
+#endif
 
-typedef enum { EVENT_SOCKET_CONNECT            = (1 << 0),
-               EVENT_SOCKET_CLOSE              = (1 << 1),
-               EVENT_SOCKET_CAN_READ           = (1 << 2),
-               EVENT_SOCKET_CAN_WRITE          = (1 << 3)
-             } event_socket_event_t;
+typedef struct sock_t *sock_p;
+extern int socket_create(sock_p *s);
+extern int socket_connect_tcp(sock_p s, const char *host, int port);
+extern int socket_read(sock_p s, uint8_t *buf, int size);
+extern int socket_write(sock_p s, uint8_t *buf, int size);
+extern int socket_close(sock_p s);
 
-typedef struct event_socket_s *event_socket_p;
+typedef enum {
+    SOCKET_EVENT_NONE = 0,
+    SOCKET_EVENT_ACCEPT = 1,
+    SOCKET_EVENT_READ = 1,
+    SOCKET_EVENT_CONNECT = 2,
+    SOCKET_EVENT_WRITE = 2,
+    SOCKET_EVENT_LAST
+} socket_event_t;
 
-extern int event_socket_create(event_socket_p *ps,
-                                void *context,
-                                event_socket_event_t event_mask,
-                                void (*connect_callback)(event_socket_p esock, int64_t current_time, void *context),
-                                int (*can_read_callback)(event_socket_p esock, int64_t current_time, void *context, sock_p sock),
-                                int (*can_write_callback)(event_socket_p esock, int64_t current_time, void *context, sock_p sock),
-                                void (*close_callback)(event_socket_p esock, int64_t current_time, void *context));
-extern int event_socket_connect(event_socket_p event_sock, const char *host, int port);
-extern int event_socket_close(event_socket_p event_sock);
-extern int event_socket_destroy(event_socket_p *event_sock);
-extern int event_socket_enable_events(event_socket_p event_sock, event_socket_event_t event);
-extern int event_socket_disable_events(event_socket_p event_sock, event_socket_event_t event);
+extern int socket_event_enable(sock_p s, socket_event_t event, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context);
+extern int socket_event_disable(sock_p s);
 
-
-typedef struct timer_s *timer_p;
-
-extern int timer_create(timer_p *timer,
-                        void *context,
-                        int(*timer_callback)(timer_p timer, int64_t current_time, void *context));
-extern int timer_destroy(timer_p *timer);
-extern int timer_set(timer_p timer, int64_t wake_time);
-extern int timer_abort(timer_p timer);
-
-
-extern void event_socket_tickler(void);
-
-extern int event_socket_init(void);
-extern void event_socket_teardown(void);
+/* socket event functions for the event loop. */
+extern void socket_event_wake(void);
+extern void socket_event_tickler(int64_t next_wake_time, int64_t current_time);
+extern int socket_event_init(void);
+extern void socket_event_teardown(void);

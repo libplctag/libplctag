@@ -190,50 +190,10 @@ extern int lock_acquire_try(lock_t *lock);
 extern int lock_acquire(lock_t *lock);
 extern void lock_release(lock_t *lock);
 
-/* socket functions */
-typedef int socket_t;
-#ifndef INVALID_SOCKET
-    #define INVALID_SOCKET (-1)
-#endif
-#ifndef SOCKET_ERROR
-    #define SOCKET_ERROR (-1)
-#endif
-
-typedef struct sock_t *sock_p;
-extern int socket_create(sock_p *s);
-extern int socket_connect_tcp(sock_p s, const char *host, int port);
-extern int socket_read(sock_p s, uint8_t *buf, int size);
-extern int socket_write(sock_p s, uint8_t *buf, int size);
-extern int socket_close(sock_p s);
-
-typedef enum {
-    SOCKET_EVENT_NONE = 0,
-    SOCKET_EVENT_ACCEPT = 1,
-    SOCKET_EVENT_READ = 1,
-    SOCKET_EVENT_CONNECT = 2,
-    SOCKET_EVENT_WRITE = 2,
-    SOCKET_EVENT_LAST
-} socket_event_t;
-
-extern int socket_event_enable(sock_p s, socket_event_t event, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context);
-extern int socket_event_disable(sock_p s);
-
 
 /***************************************************************
  **************************** Timers ***************************
  ***************************************************************/
-
-typedef struct timer_s *timer_p;
-
-extern int event_timer_create(timer_p *timer);
-extern int event_timer_wake_at(timer_p timer,
-                         int64_t wake_time,
-                         void (*callback)(timer_p timer,
-                                          int64_t wake_time,
-                                          int64_t current_time,
-                                          void *context),
-                         void *context);
-extern int event_timer_snooze(timer_p);
 
 
 /* serial handling */
