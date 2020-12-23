@@ -50,5 +50,5 @@ extern int timer_event_snooze(timer_p);
 /* event loop functions */
 extern int64_t timer_event_tickler(int64_t current_time);
 extern int timer_event_init(void);
-extern int timer_event_teardown(void);
+extern void timer_event_teardown(void);
 

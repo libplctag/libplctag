@@ -31,13 +31,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <platform.h>
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
 #include <util/event_loop.h>
 #include <util/debug.h>
-#include <util/event_timer.h>
+#include <util/timer_event.h>
 #include <util/socket.h>
+#include <util/thread.h>
+#include <util/time.h>
 
 
 static thread_p event_loop_thread = NULL;
@@ -50,7 +51,7 @@ void event_loop_wake(void)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* wake up the blocking socket event calls. */
-    socket_event_wake();
+    socket_event_loop_wake();
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -60,6 +61,8 @@ void event_loop_wake(void)
 
 int event_loop_init(void)
 {
+    int rc = PLCTAG_STATUS_OK;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     atomic_int_set(&library_shutdown, 0);
@@ -70,7 +73,7 @@ int event_loop_init(void)
         return rc;
     }
 
-    rc = socket_event_init();
+    rc = socket_event_loop_init();
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to initialize socket event module, error %s!", plc_tag_decode_error(rc));
         return rc;
@@ -115,17 +118,9 @@ void event_loop_teardown(void)
     /* reset the shutdown flag to make sure that the library can restart. */
     atomic_int_set(&library_shutdown, 0);
 
-    rc = socket_event_teardown();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to tear down socket event module, got error %s!", plc_tag_decode_error(rc));
-        return;
-    }
+    socket_event_loop_teardown();
 
-    rc = timer_event_teardown();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to tear down socket event module, got error %s!", plc_tag_decode_error(rc));
-        return;
-    }
+    timer_event_teardown();
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -143,7 +138,7 @@ void event_loop_tickler(void)
     next_wake_time = timer_event_tickler(current_time);
 
     /* end with a blocking tickler */
-    socket_event_tickler(next_wake_time, current_time);
+    socket_event_loop_tickler(next_wake_time, current_time);
 
     pdebug(DEBUG_DETAIL, "Done.");
 }

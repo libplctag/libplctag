@@ -31,18 +31,22 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+#include <util/platform.h>
+#include <util/time.h>
 
-#include <platform.h>
+/*
+ * time_ms
+ *
+ * Return the current epoch time in milliseconds.
+ */
+int64_t time_ms(void)
+{
+    struct timeval tv;
 
-typedef void (*rc_cleanup_func)(void *);
+    gettimeofday(&tv,NULL);
 
-#define rc_alloc(size, cleaner) rc_alloc_impl(__func__, __LINE__, size, cleaner)
-extern void *rc_alloc_impl(const char *func, int line_num, int size, rc_cleanup_func cleaner);
+    return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
+}
 
-#define rc_inc(ref) rc_inc_impl(__func__, __LINE__, ref)
-extern void *rc_inc_impl(const char *func, int line_num, void *ref);
 
-#define rc_dec(ref) rc_dec_impl(__func__, __LINE__, ref)
-extern void *rc_dec_impl(const char *func, int line_num, void *ref);
 

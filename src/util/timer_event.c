@@ -31,16 +31,18 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stddef.h>
 #include <lib/libplctag.h>
-#include <util/event_timer.h>
 #include <util/debug.h>
-#include <util/rc.h>
+#include <util/mem.h>
+#include <util/mutex.h>
+#include <util/timer_event.h>
 
 
-struct timer_event_s {
-    struct timer_event_s *next;
+struct timer_s {
+    struct timer_s *next;
     void *context;
-    void (*callback)(timer_event_p timer,
+    void (*callback)(timer_p timer,
                      int64_t wake_time,
                      int64_t current_time,
                      void *context);
@@ -48,13 +50,13 @@ struct timer_event_s {
 };
 
 
-static timer_event_p timer_list = NULL;
+static timer_p timer_list = NULL;
 static mutex_p timer_mutex = NULL;
 
 
 static void timer_rc_destroy(void *timer_arg);
 
-int timer_event_create(timer_event_p *timer)
+int timer_event_create(timer_p *timer)
 {
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -63,7 +65,7 @@ int timer_event_create(timer_event_p *timer)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    *timer = (timer_event_p)rc_alloc(sizeof(**timer), timer_rc_destroy);
+    *timer = (timer_p)rc_alloc(sizeof(**timer), timer_rc_destroy);
     if(! *timer) {
         pdebug(DEBUG_ERROR, "Failed to allocate memory for timer.");
         return PLCTAG_ERR_NO_MEM;
@@ -77,9 +79,9 @@ int timer_event_create(timer_event_p *timer)
 }
 
 
-int timer_event_wake_at(timer_event_p timer,
+int timer_event_wake_at(timer_p timer,
                   int64_t wake_time,
-                  void (*callback)(timer_event_p timer,
+                  void (*callback)(timer_p timer,
                                    int64_t wake_time,
                                    int64_t current_time,
                                    void *context),
@@ -101,7 +103,7 @@ int timer_event_wake_at(timer_event_p timer,
 
     /* add to the list of active timers. */
     critical_block(timer_mutex) {
-        timer_event_p *timer_walker = &timer_list;
+        timer_p *timer_walker = &timer_list;
 
         timer->wake_time = wake_time;
         timer->context = context;
@@ -126,7 +128,7 @@ int timer_event_wake_at(timer_event_p timer,
 }
 
 
-int timer_event_snooze(timer_event_p timer)
+int timer_event_snooze(timer_p timer)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -139,7 +141,7 @@ int timer_event_snooze(timer_event_p timer)
 
     /* remove from the list of active timers. */
     critical_block(timer_mutex) {
-        timer_event_p *timer_walker = &timer_list;
+        timer_p *timer_walker = &timer_list;
 
         while(*timer_walker && *timer_walker != timer) {
             timer_walker = &((*timer_walker)->next);
@@ -163,13 +165,13 @@ int timer_event_snooze(timer_event_p timer)
 
 void timer_rc_destroy(void *timer_arg)
 {
-    timer_event_p timer = (timer_event_p)timer_arg;
+    timer_p timer = (timer_p)timer_arg;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     /* find and remove the timer. */
     critical_block(timer_mutex) {
-        timer_event_p *timer_walker = &timer_list;
+        timer_p *timer_walker = &timer_list;
 
         while(*timer_walker && *timer_walker != timer) {
             timer_walker = &((*timer_walker)->next);
@@ -196,7 +198,7 @@ int64_t timer_event_tickler(int64_t current_time)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     do {
-        timer_event_p timer = NULL;
+        timer_p timer = NULL;
 
         critical_block(timer_mutex) {
             if(timer_list && timer_list->wake_time <= current_time) {
@@ -242,7 +244,7 @@ int timer_event_init(void)
 
     rc = mutex_create(&timer_mutex);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create timer mutex, got error %s!", plc_tag_decode_error(rc);
+        pdebug(DEBUG_WARN, "Unable to create timer mutex, got error %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -252,7 +254,7 @@ int timer_event_init(void)
 }
 
 
-int timer_event_teardown(void)
+void timer_event_teardown(void)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -263,7 +265,7 @@ int timer_event_teardown(void)
 
     rc = mutex_destroy(&timer_mutex);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to destroy timer mutex, got error %s!", plc_tag_decode_error(rc);
+        pdebug(DEBUG_WARN, "Unable to destroy timer mutex, got error %s!", plc_tag_decode_error(rc));
     }
 
     pdebug(DEBUG_DETAIL, "Done.");

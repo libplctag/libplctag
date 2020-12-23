@@ -31,28 +31,32 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_PCCC_H__
-#define __LIBPLCTAG_AB_PCCC_H__
+#pragma once
 
+#include <util/platform.h>
 
-#include <stdint.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#define mem_alloc(size) mem_alloc_impl(__func__, __LINE__, size)
+extern void *mem_alloc_impl(const char *func, int line_num, int size);
 
+#define mem_realloc(orig, size) mem_realloc_impl(__func__, __LINE__, orig, size)
+extern void *mem_realloc_impl(const char *func, int line_num, void *orig, int size);
 
-typedef enum { PCCC_FILE_UNKNOWN, PCCC_FILE_ASCII, PCCC_FILE_BIT, PCCC_FILE_BLOCK_TRANSFER, PCCC_FILE_COUNTER,
-               PCCC_FILE_BCD, PCCC_FILE_FLOAT, PCCC_FILE_INPUT, PCCC_FILE_LONG_INT, PCCC_FILE_MESSAGE, PCCC_FILE_INT, PCCC_FILE_OUTPUT,
-               PCCC_FILE_PID, PCCC_FILE_CONTROL, PCCC_FILE_STATUS, PCCC_FILE_SFC, PCCC_FILE_STRING, PCCC_FILE_TIMER
-             } pccc_file_t;
+#define mem_free(mem) mem_free_impl(__func__, __LINE__, mem)
+extern void mem_free_impl(const char *func, int line_num, const void *mem);
 
-extern int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern uint8_t pccc_calculate_bcc(uint8_t *data,int size);
-extern uint16_t pccc_calculate_crc16(uint8_t *data, int size);
-extern const char *pccc_decode_error(uint8_t *error_ptr);
-extern uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
-extern int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
+extern void mem_set(void *dest, int c, int size);
+extern void mem_copy(void *dest, void *src, int size);
+extern void mem_move(void *dest, void *src, int size);
+extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
 
+typedef void (*rc_cleanup_func)(void *);
 
+#define rc_alloc(size, cleaner) rc_alloc_impl(__func__, __LINE__, size, cleaner)
+extern void *rc_alloc_impl(const char *func, int line_num, int size, rc_cleanup_func cleaner);
 
-#endif
+#define rc_inc(ref) rc_inc_impl(__func__, __LINE__, ref)
+extern void *rc_inc_impl(const char *func, int line_num, void *ref);
+
+#define rc_dec(ref) rc_dec_impl(__func__, __LINE__, ref)
+extern void *rc_dec_impl(const char *func, int line_num, void *ref);
+

@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include <ctype.h>
-#include <platform.h>
+#include <stddef.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <ab/defs.h>
@@ -44,6 +44,8 @@
 #include <ab/error_codes.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/mem.h>
+#include <util/string.h>
 #include <util/vector.h>
 
 

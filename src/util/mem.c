@@ -31,34 +31,210 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+
+#include <stdlib.h>
+#include <string.h>
 #include <lib/libplctag.h>
-#include <platform.h>
-#include <util/rc.h>
 #include <util/debug.h>
+#include <util/lock.h>
+#include <util/mem.h>
+#include <util/platform.h>
 
 
-//~ #ifndef container_of
-//~ #define container_of(ptr, type, member) ((type *)((char *)(1 ? (ptr) : &((type *)0)->member) - offsetof(type, member)))
-//~ #endif
+
+/*
+ * mem_alloc_impl
+ *
+ * This is a wrapper around the platform's memory allocation routine.
+ * It will zero out memory before returning it.
+ *
+ * It will return NULL on failure.
+ */
+void *mem_alloc_impl(const char *func, int line_num, int size)
+{
+    pdebug(DEBUG_DETAIL, "Starting, called from %s:%d.", func, line_num);
+
+    if(size <= 0) {
+        pdebug(DEBUG_WARN, "Allocation size must be greater than zero bytes!");
+        return NULL;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return calloc(INT_TO_SIZE_T(size), 1);
+}
+
+
+
+/*
+ * mem_realloc_impl
+ *
+ * This is a wrapper around the platform's memory re-allocation routine.
+ *
+ * It will return NULL on failure.
+ */
+void *mem_realloc_impl(const char *func, int line_num, void *orig, int size)
+{
+    pdebug(DEBUG_DETAIL, "Starting, called from %s:%d.", func, line_num);
+
+    if(size <= 0) {
+        pdebug(DEBUG_WARN, "New allocation size must be greater than zero bytes!");
+        return NULL;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return realloc(orig, INT_TO_SIZE_T(size));
+}
+
+
+
+/*
+ * mem_free_impl
+ *
+ * Free the allocated memory passed in.  If the passed pointer is
+ * null, do nothing.
+ */
+void mem_free_impl(const char *func, int line_num, const void *mem)
+{
+    pdebug(DEBUG_DETAIL, "Starting, called from %s:%d.", func, line_num);
+
+    if(mem) {
+        /* casting is required because free() does not take a const pointer. */
+        free((void *)mem);
+
+        pdebug(DEBUG_DETAIL, "Done.");
+    } else {
+        pdebug(DEBUG_WARN, "Null pointer passed at %s:%d!", func, line_num);
+    }
+}
 
 
 
 
 /*
- * Handle clean up functions.
+ * mem_set
+ *
+ * set memory to the passed argument.
  */
+void mem_set(void *dest, int c, int size)
+{
+    if(!dest) {
+        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        return;
+    }
 
-//typedef struct cleanup_t *cleanup_p;
-//
-//struct cleanup_t {
-//    cleanup_p next;
-//    const char *function_name;
-//    int line_num;
-//    int extra_arg_count;
-//    void **extra_args;
-//    rc_cleanup_func cleanup_func;
-//    void *dummy[]; /* force alignment */
-//};
+    if(size <= 0) {
+        pdebug(DEBUG_WARN, "Size to set must be a positive number!");
+        return;
+    }
+
+    memset(dest, c, INT_TO_SIZE_T(size));
+}
+
+
+
+
+
+/*
+ * mem_copy
+ *
+ * copy memory from one pointer to another for the passed number of bytes.
+ *
+ * Memory cannot overlap!
+ */
+void mem_copy(void *dest, void *src, int size)
+{
+    if(!dest) {
+        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        return;
+    }
+
+    if(!src) {
+        pdebug(DEBUG_WARN, "Source pointer is NULL!");
+        return;
+    }
+
+    if(size < 0) {
+        pdebug(DEBUG_WARN, "Size to copy must be a positive number!");
+        return;
+    }
+
+    if(size == 0) {
+        /* nothing to do. */
+        return;
+    }
+
+    memcpy(dest, src, INT_TO_SIZE_T(size));
+}
+
+
+
+/*
+ * mem_move
+ *
+ * move memory from one pointer to another for the passed number of bytes.
+ *
+ * Memory can overlap.
+ */
+void mem_move(void *dest, void *src, int size)
+{
+    if(!dest) {
+        pdebug(DEBUG_WARN, "Destination pointer is NULL!");
+        return;
+    }
+
+    if(!src) {
+        pdebug(DEBUG_WARN, "Source pointer is NULL!");
+        return;
+    }
+
+    if(size < 0) {
+        pdebug(DEBUG_WARN, "Size to move must be a positive number!");
+        return;
+    }
+
+    if(size == 0) {
+        /* nothing to do. */
+        return;
+    }
+
+    memmove(dest, src, INT_TO_SIZE_T(size));
+}
+
+
+
+int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
+{
+    if(!src1 || src1_size <= 0) {
+        if(!src2 || src2_size <= 0) {
+            /* both are NULL or zero length, but that is "equal" for our purposes. */
+            return 0;
+        } else {
+            /* first one is "less" than second. */
+            return -1;
+        }
+    } else {
+        if(!src2 || src2_size <= 0) {
+            /* first is "greater" than second */
+            return 1;
+        } else {
+            /* both pointers are non-NULL and the lengths are positive. */
+
+            /* short circuit the comparison if the blocks are different lengths */
+            if(src1_size != src2_size) {
+                return (src1_size - src2_size);
+            }
+
+            return memcmp(src1, src2, INT_TO_SIZE_T(src1_size));
+        }
+    }
+}
+
+
+
+
+
 
 
 /*

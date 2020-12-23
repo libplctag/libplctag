@@ -31,15 +31,16 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <platform.h>
-#include <util/debug.h>
-#include <util/attr.h>
+#include <stddef.h>
 #include <lib/tag.h>
 #include <lib/libplctag.h>
 #include <lib/version.h>
-#include <system/tag.h>
 #include <lib/init.h>
-#include <util/rc.h>
+#include <util/attr.h>
+#include <util/debug.h>
+#include <util/mem.h>
+#include <util/string.h>
+#include <system/tag.h>
 
 
 

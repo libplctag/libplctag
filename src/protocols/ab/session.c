@@ -31,17 +31,18 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <platform.h>
 #include <ab/ab_common.h>
 #include <ab/cip.h>
 #include <ab/defs.h>
 #include <ab/error_codes.h>
 #include <ab/session.h>
-#include <util/debug.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <time.h>
+#include <util/debug.h>
+#include <util/sleep.h>
+#include <util/time.h>
 
 #define MAX_REQUESTS (200)
 
@@ -636,7 +637,7 @@ int session_open_socket(ab_session_p session)
         pdebug(DEBUG_DETAIL, "Using default port %d.", port);
     }
 
-    rc = socket_connect_tcp(session->sock, server_port[0], port);
+    rc = socket_tcp_connect(session->sock, server_port[0], port);
 
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to connect socket for session!");
@@ -1781,7 +1782,7 @@ int send_eip_request(ab_session_p session, int timeout)
 
     /* send the packet */
     do {
-        rc = socket_write(session->sock, session->data + session->data_offset, (int)session->data_size - (int)session->data_offset);
+        rc = socket_tcp_write(session->sock, session->data + session->data_offset, (int)session->data_size - (int)session->data_offset);
 
         if(rc >= 0) {
             session->data_offset += (uint32_t)rc;
@@ -1847,7 +1848,7 @@ int recv_eip_response(ab_session_p session, int timeout)
     data_needed = sizeof(eip_encap);
 
     do {
-        rc = socket_read(session->sock, session->data + session->data_offset,
+        rc = socket_tcp_read(session->sock, session->data + session->data_offset,
                          (int)(data_needed - session->data_offset));
 
         if (rc < 0) {

@@ -34,12 +34,16 @@
 #include <ctype.h>
 #include <limits.h>
 #include <float.h>
-#include <platform.h>
 #include <lib/libplctag.h>
 #include <mb/modbus.h>
 #include <util/attr.h>
 #include <util/debug.h>
-#include <util/rc.h>
+#include <util/lock.h>
+#include <util/mem.h>
+#include <util/sleep.h>
+#include <util/socket.h>
+#include <util/thread.h>
+#include <util/time.h>
 
 /* data definitions */
 
@@ -728,7 +732,7 @@ int connect_plc(modbus_plc_p plc)
 
     /* connect to the socket */
     pdebug(DEBUG_DETAIL, "Connecting to %s on port %d...", server, port);
-    rc = socket_connect_tcp(plc->sock, server, port);
+    rc = socket_tcp_connect(plc->sock, server, port);
     if(rc != PLCTAG_STATUS_OK) {
         /* done with the split string. */
         mem_free(server_port);
@@ -783,7 +787,7 @@ int read_packet(modbus_plc_p plc)
             data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;
         }
 
-        rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, data_needed);
+        rc = socket_tcp_read(plc->sock, plc->read_data + plc->read_data_len, data_needed);
         if(rc >= 0) {
             /* got data! Or got nothing, but no error. */
             plc->read_data_len += rc;
@@ -852,7 +856,7 @@ int write_packet(modbus_plc_p plc)
 
     /* try to get some data. */
     while(rc > 0 && data_left > 0) {
-        rc = socket_write(plc->sock, plc->write_data + plc->write_data_offset, data_left);
+        rc = socket_tcp_write(plc->sock, plc->write_data + plc->write_data_offset, data_left);
         if(rc >= 0) {
             plc->write_data_offset += rc;
             data_left = plc->write_data_len - plc->write_data_offset;

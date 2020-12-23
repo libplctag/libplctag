@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <platform.h>
+#include <util/platform.h>
 
 
 START_PACK typedef struct {

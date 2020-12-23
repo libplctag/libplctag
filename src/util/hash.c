@@ -41,8 +41,8 @@
 
 
 #include <lib/libplctag.h>
-#include <platform.h>
 #include <util/debug.h>
+#include <util/hash.h>
 
 /*
 --------------------------------------------------------------------

@@ -32,17 +32,18 @@
  ***************************************************************************/
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <lib/libplctag.h>
-#include <platform.h>
 #include <ab/ab_common.h>
 #include <ab/cip.h>
 #include <ab/tag.h>
 #include <ab/defs.h>
 #include <util/debug.h>
+#include <util/string.h>
 
 
 static int skip_whitespace(const char *name, int *name_index);
@@ -417,7 +418,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
 
         *dhp_dest = 0;
     } else {
-        /* 
+        /*
          *we had the special DH+ format and it was
          * either not last or not a PLC5/SLC.  That
          * is an error.
@@ -497,7 +498,7 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     return PLCTAG_STATUS_OK;
 }
 
-/* 
+/*
  * match symbolic IP address segments.
  *  18,10.206.10.14 - port 2/A -> 10.206.10.14
  *  19,10.206.10.14 - port 3/B -> 10.206.10.14
@@ -667,11 +668,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 }
 
 
-/* 
+/*
  * match DH+ address segments.
  *  A:1:2 - port 2/A -> DH+ node 2
  *  B:1:2 - port 3/B -> DH+ node 2
- * 
+ *
  * A and B can be lowercase or numeric.
  */
 

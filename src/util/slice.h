@@ -40,6 +40,7 @@
 #include <stdio.h>
 
 #include <util/debug.h>
+#include <util/string.h>
 
 typedef struct {
     int len;

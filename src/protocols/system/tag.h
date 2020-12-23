@@ -33,10 +33,10 @@
 
 #pragma once
 
+#include <stdint.h>
+#include <lib/tag.h>
 #include <util/attr.h>
 #include <util/debug.h>
-#include <platform.h>
-#include <lib/tag.h>
 
 #define MAX_SYSTEM_TAG_NAME (20)
 #define MAX_SYSTEM_TAG_SIZE (30)

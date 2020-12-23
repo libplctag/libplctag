@@ -31,28 +31,41 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_PCCC_H__
-#define __LIBPLCTAG_AB_PCCC_H__
+#pragma once
+
+typedef struct mutex_t *mutex_p;
+extern int mutex_create(mutex_p *m);
+extern int mutex_destroy(mutex_p *m);
+
+#define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
+extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
+
+#define mutex_try_lock(m) mutex_lock_impl(__func__, __LINE__, m)
+extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
+
+#define mutex_unlock(m) mutex_unlock_impl(__func__, __LINE__, m)
+extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 
 
-#include <stdint.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+/* macros are evil */
 
+/*
+ * Use this one like this:
+ *
+ *     critical_block(my_mutex) {
+ *         locked_data++;
+ *         foo(locked_data);
+ *     }
+ *
+ * The macro locks and unlocks for you.  Derived from ideas/code on StackOverflow.com.
+ *
+ * Do not use break, return, goto or continue inside the synchronized block if
+ * you intend to have them apply to a loop outside the synchronized block.
+ *
+ * You can use break, but it will drop out of the inner for loop and correctly
+ * unlock the mutex.  It will NOT break out of any surrounding loop outside the
+ * synchronized block.
+ */
+#define critical_block(lock) \
+for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))  for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock); __sync_rc_nargle_##__LINE__ == PLCTAG_STATUS_OK && __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0)
 
-typedef enum { PCCC_FILE_UNKNOWN, PCCC_FILE_ASCII, PCCC_FILE_BIT, PCCC_FILE_BLOCK_TRANSFER, PCCC_FILE_COUNTER,
-               PCCC_FILE_BCD, PCCC_FILE_FLOAT, PCCC_FILE_INPUT, PCCC_FILE_LONG_INT, PCCC_FILE_MESSAGE, PCCC_FILE_INT, PCCC_FILE_OUTPUT,
-               PCCC_FILE_PID, PCCC_FILE_CONTROL, PCCC_FILE_STATUS, PCCC_FILE_SFC, PCCC_FILE_STRING, PCCC_FILE_TIMER
-             } pccc_file_t;
-
-extern int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern uint8_t pccc_calculate_bcc(uint8_t *data,int size);
-extern uint16_t pccc_calculate_crc16(uint8_t *data, int size);
-extern const char *pccc_decode_error(uint8_t *error_ptr);
-extern uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
-extern int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
-
-
-
-#endif

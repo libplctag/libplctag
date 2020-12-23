@@ -38,10 +38,11 @@
  *      Author: Kyle Hayes
  */
 
-#include <util/attr.h>
-#include <platform.h>
 #include <stdio.h>
+#include <util/attr.h>
 #include <util/debug.h>
+#include <util/mem.h>
+#include <util/string.h>
 
 
 
@@ -156,10 +157,10 @@ extern attr attr_create_from_str(const char *attr_str)
         while(*cur && *cur != '=')
             cur++;
 
-        /* 
+        /*
          * did we run off the end of the string?
          * That is an error because we need to have a value.
-         * 
+         *
          * FIXME - this is actually a bug.   We need to fail
          * on all malformed attribute.  Not just at the end of a line.
          *    "foo=&bar=blah"

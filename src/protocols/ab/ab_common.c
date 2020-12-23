@@ -34,7 +34,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <float.h>
-#include <platform.h>
+#include <stddef.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <ab/ab.h>
@@ -52,6 +52,11 @@
 #include <ab/tag.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/lock.h>
+#include <util/mem.h>
+#include <util/mutex.h>
+#include <util/string.h>
+#include <util/thread.h>
 #include <util/vector.h>
 
 
@@ -616,7 +621,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 return PLCTAG_ERR_UNSUPPORTED;
             }
         } else {
-            /* 
+            /*
              * We have two cases
              *      * tag listing, but only for LGX.
              *      * no type, just elem_size.
@@ -640,8 +645,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                     if(elem_size > 0) {
                         pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
                         tag->elem_size = elem_size;
-                    } 
-                    
+                    }
+
                     // else {
                     //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
                     //     return PLCTAG_ERR_BAD_PARAM;
@@ -651,7 +656,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                         pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
                     }
                 }
-            }            
+            }
         }
 
         break;

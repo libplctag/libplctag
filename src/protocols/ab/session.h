@@ -36,7 +36,10 @@
 
 #include <ab/ab_common.h>
 #include <ab/defs.h>
-#include <util/rc.h>
+#include <util/lock.h>
+#include <util/mem.h>
+#include <util/socket.h>
+#include <util/thread.h>
 #include <util/vector.h>
 
 /* #define MAX_SESSION_HOST    (128) */

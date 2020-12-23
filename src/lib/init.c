@@ -39,10 +39,14 @@
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <mb/modbus.h>
-#include <platform.h>
 #include <system/system.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/event_loop.h>
+#include <util/lock.h>
+#include <util/mutex.h>
+#include <util/string.h>
+#include <util/time.h>
 
 
 
@@ -154,7 +158,7 @@ void destroy_modules(void)
 
     lib_teardown();
 
-    platform_teardown();
+    event_loop_teardown();
 
     spin_block(&library_initialization_lock) {
         if(lib_mutex != NULL) {
@@ -214,7 +218,7 @@ int initialize_modules(void)
 
                 pdebug(DEBUG_INFO,"Initializing platform module.");
                 if(rc == PLCTAG_STATUS_OK) {
-                    rc = platform_init();
+                    rc = event_loop_init();
                 }
 
                 pdebug(DEBUG_INFO,"Initialized library modules.");

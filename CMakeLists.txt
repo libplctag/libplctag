@@ -103,16 +103,16 @@ set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
 
 # OS-specific files for the platform code.
 # FIXME - does this work for macOS?
-if (UNIX)
-    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/posix" )
-elseif (WIN32)
-    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
-endif()
+# if (UNIX)
+#    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/posix" )
+# elseif (WIN32)
+#    set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
+# endif()
 
 
 # where to find include files.
 include_directories("${base_SRC_PATH}")
-include_directories("${platform_SRC_PATH}")
+# include_directories("${platform_SRC_PATH}")
 include_directories("${protocol_SRC_PATH}")
 
 
@@ -276,7 +276,6 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${protocol_SRC_PATH}/system/system.c"
                      "${protocol_SRC_PATH}/system/system.h"
                      "${protocol_SRC_PATH}/system/tag.h"
-                     "${util_SRC_PATH}/atomic_int.c"
                      "${util_SRC_PATH}/atomic_int.h"
                      "${util_SRC_PATH}/attr.c"
                      "${util_SRC_PATH}/attr.h"
@@ -289,19 +288,31 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${util_SRC_PATH}/hash.h"
                      "${util_SRC_PATH}/hashtable.c"
                      "${util_SRC_PATH}/hashtable.h"
+                     "${util_SRC_PATH}/lock.c"
+                     "${util_SRC_PATH}/lock.h"
                      "${util_SRC_PATH}/macros.h"
+                     "${util_SRC_PATH}/mem.c"
+                     "${util_SRC_PATH}/mem.h"
+                     "${util_SRC_PATH}/mutex.c"
+                     "${util_SRC_PATH}/mutex.h"
+                     "${util_SRC_PATH}/platform.h"
                      "${util_SRC_PATH}/protocol.h"
-                     "${util_SRC_PATH}/rc.c"
-                     "${util_SRC_PATH}/rc.h"
+                     "${util_SRC_PATH}/sleep.c"
+                     "${util_SRC_PATH}/sleep.h"
+                     "${util_SRC_PATH}/slice.h"
                      "${util_SRC_PATH}/socket.c"
                      "${util_SRC_PATH}/socket.h"
-                     "${util_SRC_PATH}/slice.h"
+                     "${util_SRC_PATH}/string.c"
+                     "${util_SRC_PATH}/string.h"
+                     "${util_SRC_PATH}/thread.c"
+                     "${util_SRC_PATH}/thread.h"
+                     "${util_SRC_PATH}/time.c"
+                     "${util_SRC_PATH}/time.h"
                      "${util_SRC_PATH}/timer_event.c"
                      "${util_SRC_PATH}/timer_event.h"
                      "${util_SRC_PATH}/vector.c"
                      "${util_SRC_PATH}/vector.h"
-                     "${platform_SRC_PATH}/platform.c"
-                     "${platform_SRC_PATH}/platform.h" )
+)
 
 # set the compiler flags
 FOREACH( lib_src ${libplctag_SRCS} )

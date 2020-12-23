@@ -31,9 +31,13 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stddef.h>
 #include <ab2/plc5.h>
 #include <ab2/common_defs.h>
-#include <util/rc.h>
+#include <util/attr.h>
+#include <util/debug.h>
+#include <util/mem.h>
+#include <util/string.h>
 
 typedef struct {
     struct plc_tag_t base_tag;

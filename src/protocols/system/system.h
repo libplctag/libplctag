@@ -35,8 +35,6 @@
 #define __PROTOCOL_SYSTEM_H__ 1
 
 #include <util/attr.h>
-#include <util/debug.h>
-#include <platform.h>
 #include <lib/tag.h>
 
 extern plc_tag_p system_tag_create(attr attribs);

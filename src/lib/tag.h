@@ -34,11 +34,11 @@
 
 #pragma once
 
-
+#include <stdint.h>
 #include <lib/libplctag.h>
-#include <platform.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/mutex.h>
 
 // #define PLCTAG_CANARY (0xACA7CAFE)
 // #define PLCTAG_DATA_LITTLE_ENDIAN   (0)

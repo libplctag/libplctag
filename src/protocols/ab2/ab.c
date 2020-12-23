@@ -31,13 +31,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <platform.h>
+#include <stddef.h>
 #include <ab2/ab.h>
 #include <ab2/common_defs.h>
 #include <ab2/plc5.h>
 #include <lib/tag.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/string.h>
 
 
 static plc_type_t get_plc_type(attr attribs);

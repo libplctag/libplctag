@@ -31,28 +31,62 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_PCCC_H__
-#define __LIBPLCTAG_AB_PCCC_H__
 
+#include <util/debug.h>
+#include <util/lock.h>
+#include <util/platform.h>
 
-#include <stdint.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#ifdef PLATFORM_IS_WINDOWS
+    #include <winnt.h>
 
-
-typedef enum { PCCC_FILE_UNKNOWN, PCCC_FILE_ASCII, PCCC_FILE_BIT, PCCC_FILE_BLOCK_TRANSFER, PCCC_FILE_COUNTER,
-               PCCC_FILE_BCD, PCCC_FILE_FLOAT, PCCC_FILE_INPUT, PCCC_FILE_LONG_INT, PCCC_FILE_MESSAGE, PCCC_FILE_INT, PCCC_FILE_OUTPUT,
-               PCCC_FILE_PID, PCCC_FILE_CONTROL, PCCC_FILE_STATUS, PCCC_FILE_SFC, PCCC_FILE_STRING, PCCC_FILE_TIMER
-             } pccc_file_t;
-
-extern int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern uint8_t pccc_calculate_bcc(uint8_t *data,int size);
-extern uint16_t pccc_calculate_crc16(uint8_t *data, int size);
-extern const char *pccc_decode_error(uint8_t *error_ptr);
-extern uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
-extern int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
-
-
-
+    #define ATOMIC_UNLOCK_VAL ((LONG)(0))
+    #define ATOMIC_LOCK_VAL ((LONG)(1))
+#else
+    #define ATOMIC_UNLOCK_VAL ((unsigned int)0)
+    #define ATOMIC_LOCK_VAL ((unsigned int)1)
 #endif
+
+/*
+ * lock_acquire
+ *
+ * Tries to write a non-zero value into the lock atomically.
+ *
+ * Returns non-zero on success.
+ *
+ * Warning: do not pass null pointers!
+ */
+
+int lock_acquire_try(lock_t *lock)
+{
+#ifdef PLATFORM_IS_WINDOWS
+    LONG rc = InterlockedExchange(lock, ATOMIC_LOCK_VAL);
+#else
+    int rc = __sync_lock_test_and_set((int*)lock, ATOMIC_LOCK_VAL);
+#endif
+
+    if(rc != ATOMIC_LOCK_VAL) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+
+int lock_acquire(lock_t *lock)
+{
+    while(!lock_acquire_try(lock)) ;
+
+    return 1;
+}
+
+
+void lock_release(lock_t *lock)
+{
+#ifdef PLATFORM_IS_WINDOWS
+    InterlockedExchange(lock, ATOMIC_UNLOCK_VAL);
+#else
+    __sync_lock_release((int*)lock);
+#endif
+}
+
+

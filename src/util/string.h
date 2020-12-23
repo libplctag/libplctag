@@ -31,28 +31,25 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_PCCC_H__
-#define __LIBPLCTAG_AB_PCCC_H__
+#pragma once
 
+#include <util/platform.h>
 
-#include <stdint.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
-
-
-typedef enum { PCCC_FILE_UNKNOWN, PCCC_FILE_ASCII, PCCC_FILE_BIT, PCCC_FILE_BLOCK_TRANSFER, PCCC_FILE_COUNTER,
-               PCCC_FILE_BCD, PCCC_FILE_FLOAT, PCCC_FILE_INPUT, PCCC_FILE_LONG_INT, PCCC_FILE_MESSAGE, PCCC_FILE_INT, PCCC_FILE_OUTPUT,
-               PCCC_FILE_PID, PCCC_FILE_CONTROL, PCCC_FILE_STATUS, PCCC_FILE_SFC, PCCC_FILE_STRING, PCCC_FILE_TIMER
-             } pccc_file_t;
-
-extern int plc5_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern int slc_encode_tag_name(uint8_t *data, int *size, pccc_file_t *file_type, const char *name, int max_tag_name_size);
-extern uint8_t pccc_calculate_bcc(uint8_t *data,int size);
-extern uint16_t pccc_calculate_crc16(uint8_t *data, int size);
-extern const char *pccc_decode_error(uint8_t *error_ptr);
-extern uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
-extern int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
-
-
-
+#ifdef PLATFORM_IS_WINDOWS
+    #define snprintf_platform sprintf_s
+#else
+    #define snprintf_platform snprintf
 #endif
+
+extern int str_cmp(const char *first, const char *second);
+extern int str_cmp_i(const char *first, const char *second);
+extern int str_cmp_i_n(const char *first, const char *second, int num_chars);
+extern int str_copy(char *dst, int dst_size, const char *src);
+extern int str_length(const char *str);
+extern char *str_dup(const char *str);
+extern int str_to_int(const char *str, int *val);
+extern int str_to_float(const char *str, float *val);
+extern char **str_split(const char *str, const char *sep);
+#define str_concat(s1, ...) str_concat_impl(COUNT_NARG(__VA_ARGS__)+1, s1, __VA_ARGS__)
+extern char *str_concat_impl(int num_args, ...);
+

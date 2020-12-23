@@ -31,26 +31,80 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PLATFORM_H__
-#define __PLATFORM_H__
+#pragma once
 
-#include <stddef.h>
-#include <stdint.h>
-#include <math.h>
-#include <stdarg.h>
+/*
+ * This file contains all the main ifdefs to figure out the underlying platform
+ * and to set up any required macros.
+ */
 
+#if defined(_WIN32) || defined(WIN32) || defined (_WIN64) || defined (WIN64)
+    #define PLATFORM_IS_WINDOWS 1
+#else
+    #define PLATFORM_IS_POSIX 1
 
-#ifndef POSIX_PLATFORM
-    #define POSIX_PLATFORM 1
+    /* check for Apple and *BSD platforms */
+    #if defined(__APPLE__) || defined(__FreeBSD__) ||  defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
+        #define PLATFORM_IS_BSD 1
+
+        #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+            #define PLATFORM_IS_APPLE
+            #define _DARWIN_C_SOURCE _POSIX_C_SOURCE
+        #endif
+    #endif
+
+    #if __ANDROID__
+        #define PLATFORM_IS_ANDROID 1
+    #endif
+
 #endif
 
 /* common definitions */
-#define START_PACK
-#define END_PACK __attribute__((__packed__))
+#ifdef PLATFORM_IS_WINDOWS
+    #define MSG_NOSIGNAL 0
 
-#define ZLA_SIZE 0
+    #ifdef _MSC_VER
+        /* MS Visual Studio C compiler. */
+        #define START_PACK __pragma( pack(push, 1) )
+        #define END_PACK   __pragma( pack(pop) )
+        #define __PRETTY_FUNCTION__ __FUNCTION__
+        #define __func__ __FUNCTION__
+    #else
+        /* MinGW on Windows. */
+        #define START_PACK
+        #define END_PACK  __attribute__((packed))
+        #define __PRETTY_FUNCTION__  __func__
+    #endif
 
-#define USE_GNU_VARARG_MACROS 1
+    /* VS C++ uses foo[] to denote a zero length array. */
+    #define ZLA_SIZE
+
+    /* export definitions. */
+
+    #define USE_STD_VARARG_MACROS 1
+
+    /* Apparently ssize_t is not on Windows. */
+    #if defined(_MSC_VER)
+        #include <BaseTsd.h>
+        typedef SSIZE_T ssize_t;
+    #endif
+
+    #define INT_TO_SIZE_T(i) (i)
+#elif defined(PLATFORM_IS_POSIX)
+    #define START_PACK
+    #define END_PACK __attribute__((__packed__))
+
+    #define ZLA_SIZE 0
+
+    #define USE_GNU_VARARG_MACROS 1
+
+    /* get definition of ssize_t */
+    #include <sys/types.h>
+
+    #define INT_TO_SIZE_T(i) ((size_t)(ssize_t)(i))
+#else
+    #error "Unsupported platform!"
+#endif
 
 #ifndef COUNT_NARG
 #define COUNT_NARG(...)                                                \
@@ -84,71 +138,20 @@
          9,8,7,6,5,4,3,2,1,0
 #endif
 
+/* from Wikipedia. */
 #ifndef container_of
 #define container_of(ptr, type, member) ((type *)((char *)(1 ? (ptr) : &((type *)0)->member) - offsetof(type, member)))
 #endif
 
-#if defined(_WIN32) && defined(_MSC_VER)
-    /* MinGW on Windows does not need this. */
-    #define __func__ __FUNCTION__
+/* handle bools */
+#ifndef bool
+    typedef int bool;
 #endif
 
+#ifndef TRUE
+    #define TRUE (1)
+#endif
 
-/* memory functions/defs */
-
-/* string functions/defs */
-/* mutex functions/defs */
-
-
-/* condition variables */
-// typedef struct condition_var_s *condition_var_p;
-// extern int condition_var_create(condition_var_p *var);
-// extern int condition_var_destroy(condition_var_p *var);
-// /* timeout_wake_time is the absolute time to wake up if the condition was not triggered. */
-// extern int condition_var_wait_impl(const char *func, int line_num, condition_var_p var, int64_t timeout_wake_time);
-// extern int condition_var_signal_impl(const char *func, int line_num, condition_var_p var);
-
-// #define condition_var_wait(var, timeout) condition_var_wait_impl(__func__, __LINE__, var, timeout)
-// #define condition_var_signal(var) condition_var_signal_impl(__func__, __LINE__, var)
-
-
-/* thread functions/defs */
-/* atomic operations */
-#define spin_block(lock) \
-for(int __sync_flag_nargle_lock_##__LINE__ = 1; __sync_flag_nargle_lock_##__LINE__ ; __sync_flag_nargle_lock_##__LINE__ = 0, lock_release(lock))  for(int __sync_rc_nargle_lock_##__LINE__ = lock_acquire(lock); __sync_rc_nargle_lock_##__LINE__ && __sync_flag_nargle_lock_##__LINE__ ; __sync_flag_nargle_lock_##__LINE__ = 0)
-
-typedef int lock_t;
-
-#define LOCK_INIT (0)
-
-/* returns non-zero when lock acquired, zero when lock operation failed */
-extern int lock_acquire_try(lock_t *lock);
-extern int lock_acquire(lock_t *lock);
-extern void lock_release(lock_t *lock);
-
-
-
-
-/* serial handling */
-typedef struct serial_port_t *serial_port_p;
-#define PLC_SERIAL_PORT_NULL ((plc_serial_port)NULL)
-extern serial_port_p plc_lib_open_serial_port(const char *path, int baud_rate, int data_bits, int stop_bits, int parity_type);
-extern int plc_lib_close_serial_port(serial_port_p serial_port);
-extern int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size);
-extern int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size);
-
-
-
-/* misc functions */
-extern int sleep_ms(int ms);
-extern int64_t time_ms(void);
-
-#define snprintf_platform snprintf
-
-/* start up/global platform */
-extern void platform_tickler(void);
-extern int platform_init(void);
-extern void platform_teardown(void);
-
-
-#endif /* _PLATFORM_H_ */
+#ifndef FALSE
+    #define FALSE (0)
+#endif
