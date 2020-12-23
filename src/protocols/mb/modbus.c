@@ -529,7 +529,7 @@ void modbus_plc_destructor(void *plc_arg)
     }
 
     if(plc->sock) {
-        plc->sock = rc_dec(plc->sock);
+        socket_destroy(&(plc->sock));
     }
 
     if(plc->server) {
@@ -599,7 +599,7 @@ THREAD_FUNC(modbus_plc_handler)
                     pdebug(DEBUG_DETAIL, "Shutting down socket due to inactivity.");
                     /* shut down the socket. */
                     socket_close(plc->sock);
-                    plc->sock = rc_dec(plc->sock);
+                    socket_destroy(&(plc->sock));
 
                     /*
                      * if we had a request that was sent, but there was no response yet,
@@ -738,7 +738,7 @@ int connect_plc(modbus_plc_p plc)
         mem_free(server_port);
 
         pdebug(DEBUG_WARN, "Unable to connect to the server \"%s\", got error %s!", plc->server, plc_tag_decode_error(rc));
-        plc->sock = rc_dec(plc->sock);
+        socket_destroy(&(plc->sock));
         return rc;
     }
 
