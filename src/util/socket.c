@@ -108,6 +108,7 @@ static atomic_bool need_recalculate_socket_fd_sets = ATOMIC_BOOL_STATIC_INIT(1);
 #define MAX_IPS (8)
 
 static int create_event_wakeup_channel(void);
+static void destroy_event_wakeup_channel(void);
 static void signal_max_fd_recalculate_needed(void);
 static int check_events(void);
 
@@ -707,6 +708,8 @@ int create_event_wakeup_channel(void)
     return rc;
 }
 
+
+
 #else
 
 /* standard POSIX */
@@ -780,6 +783,25 @@ int create_event_wakeup_channel(void)
 
 
 #endif
+
+
+void destroy_event_wakeup_channel(void)
+{
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(wake_fds[0] != INVALID_SOCKET) {
+        closesocket(wake_fds[0]);
+        wake_fds[0] = INVALID_SOCKET;
+    }
+
+    if(wake_fds[1] != INVALID_SOCKET) {
+        closesocket(wake_fds[1]);
+        wake_fds[1] = INVALID_SOCKET;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+}
+
 
 /* socket event handling */
 
@@ -998,207 +1020,6 @@ void socket_event_tickler(int64_t next_wake_time, int64_t current_time)
 
 
 
-// void wait_for_events(int64_t next_wake_time)
-// {
-//     int num_ready_socks = 0;
-//     TIMEVAL timeval_wait;
-//     int64_t wait_time_ms = next_wake_time - time_ms();
-
-//     pdebug(DEBUG_DETAIL, "Starting.");
-
-//     if(wait_time_ms < 0) {
-//         wait_time_ms = 0;
-//     }
-
-//     if(wait_time_ms > TICKLER_MAX_WAIT_TIME_MS) {
-//         wait_time_ms = TICKLER_MAX_WAIT_TIME_MS;
-//     }
-
-//     timeval_wait.tv_sec = 0;
-//     timeval_wait.tv_usec = wait_time_ms * 1000;
-
-//     num_ready_socks = select(max_fd + 1, &read_fds, &write_fds, NULL, &timeval_wait);
-//     if(num_ready_socks > 0) {
-//         critical_block(socket_mutex) {
-//             for(int i=0; i < MAX_SOCKET_EVENTS; i++) {
-//                 uint8_t state = socket_event_state[i];
-
-//                 if(state & SOCKET_EVENT_USED) {
-//                     /* the socket pointer is valid */
-//                     sock_p sock = socket_event_sockets[i];
-
-//                     if(FD_ISSET(sock->fd, &read_fds)) {
-//                         socket_event_state[i] |= SOCKET_EVENT_READ | SOCKET_EVENT_ACCEPT;
-//                     }
-
-//                     if(FD_ISSET(sock->fd, &write_fds)) {
-//                         socket_event_state[i] |= SOCKET_EVENT_WRITE  | SOCKET_EVENT_CONNECT;
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
-
-// void dispatch_events(void)
-// {
-//     for(int i = 0; i < MAX_SOCKET_EVENTS; i++) {
-//         uint8_t state = 0;
-//         sock_p sock = NULL;
-
-//         critical_block(socket_mutex) {
-//             state = socket_event_state[i];
-
-//             /* is the event in use? */
-//             if(state & SOCKET_EVENT_USED) {
-//                 if(state & sock->event_mask) {
-//                     sock = socket_event_sockets[i];
-//                 }
-//             }
-//         }
-
-//         if(state && sock) {
-//             sock->callback(sock, i, state, sock->context);
-//         }
-//     }
-// }
-
-
-// void cleanup_events(void)
-// {
-//     critical_block(socket_mutex) {
-//         for(int event_id=0; event_id < MAX_SOCKET_EVENTS; event_id++) {
-// ??????
-
-// Call callback one more time when disposing of the entry?
-//         }
-//     }
-// }
-
-
-// #ifdef PLATFORM_IS_WINDOWS
-
-// mutex_p socket_mutex;
-// int max_socket_index;
-// sock_p socket_array[WSA_MAXIMUM_WAIT_EVENTS];
-// WSAEVENT event_array[WSA_MAXIMUM_WAIT_EVENTS], NewEvent;
-
-
-
-// void check_events(int64_t next_wake_time)
-// {
-//     int rc = 0;
-//     int64_t wait_time_ms = next_wake_time - time_ms();
-//     int index = 0;
-//     int local_max_index;
-
-//     pdebug(DEBUG_DETAIL, "Starting.");
-
-//     critical_block(socket_mutex) {
-//         local_max_index = max_socket_index;
-//     }
-
-//     rc = WSAWaitForMultipleEvents(local_max_index,
-//                                   event_array,
-//                                   FALSE, /* return when any are ready. */
-//                                   wait_time_ms, /* time to wait for timeout */
-//                                   FALSE); /* not alertable */
-
-//     if ((ret != WSA_WAIT_FAILED) && (ret != WSA_WAIT_TIMEOUT)) {
-//         /* we got a valid event. */
-//         index = ret - WSA_WAIT_OBJECT_0;
-
-//                         // Service event signaled on HandleArray[index]WSAResetEvent(HandleArray[index]);
-
-//             }
-
-//     pdebug(DEBUG_DETAIL, "Done.");
-// }
-
-// #else
-
-// void update_events(int64_t next_wake_time)
-// {
-//     /* determine the amount of time to wait. */
-//     TIMEVAL timeval_wait;
-//     int64_t wait_time_ms = next_wake_time - time_ms();
-//     fd_set tmp_read_fds;
-//     fd_set tmp_write_fds;
-//     int max_fd = 0;
-//     int num_signaled_fds = 0;
-
-//     pdebug(DEBUG_DETAIL, "Starting.");
-
-//     if(wait_time_ms < 0) {
-//         wait_time_ms = 0;
-//     }
-
-//     if(wait_time_ms > TICKLER_MAX_WAIT_TIME_MS) {
-//         wait_time_ms = TICKLER_MAX_WAIT_TIME_MS;
-//     }
-
-//     timeval_wait.tv_sec = 0;
-//     timeval_wait.tv_usec = wait_time_ms * 1000;
-
-//     /* copy the fd sets as select is destructive. */
-//     critical_block(socket_mutex) {
-//         tmp_read_fds = global_read_fds;
-//         tmp_write_fds = global_write_fds;
-//         max_fd = max_socket_fd;
-//     }
-
-//     /* select on the open fds. */
-//     num_signaled_fds = select(max_fd + 1, &tmp_read_fds, &tmp_write_fds, NULL, &timeval_wait);
-//     if(num_signaled_fds > 0) {
-//         pdebug(DEBUG_DETAIL, "Starting to run socket callbacks.");
-
-//         /* catch the case that the wake up pipe has data. */
-//         if(check_socket_wake_signal(&tmp_read_fds)) {
-//             num_signaled_fds--;
-//         }
-
-//         if(num_signaled_fds > 0) {
-//             /*
-//              * loop through the sockets looking for wanted and set events.  If there is
-//              * an event and the socket wanted it, then we turn off the even in the socket
-//              * and call the callback.
-//              */
-//             for(sock_p sock = socket_list_iter_start(); num_signaled_fds > 0 && sock; rc_dec(sock), sock = socket_list_iter_next()) {
-//                 socket_event_t wanted_event = sock->event;
-//                 if((wanted_event == SOCKET_EVENT_ACCEPT || wanted_event == SOCKET_EVENT_READ) && FD_ISSET(sock->fd, &tmp_read_fds) && sock->callback) {
-//                     sock->event = SOCKET_EVENT_NONE;
-//                     sock->callback(sock, wanted_event, sock->context);
-//                     num_signaled_fds--;
-//                 } else if((wanted_event == SOCKET_EVENT_CONNECT || wanted_event == SOCKET_EVENT_WRITE) && FD_ISSET(sock->fd, &tmp_write_fds) && sock->callback) {
-//                     sock->event = SOCKET_EVENT_NONE;
-//                     sock->callback(sock, wanted_event, sock->context);
-//                     num_signaled_fds--;
-//                 }
-//             }
-
-//             socket_list_iter_done();
-//         }
-//     }
-
-//     pdebug(DEBUG_DETAIL, "Done.");
-// }
-
-// #endif
-
-
-// void signal_max_fd_recalculate_needed(void)
-// {
-//     pdebug(DEBUG_DETAIL, "Starting.");
-
-//     atomic_int_add(&need_recalculate_socket_fd_sets, 1);
-
-//     pdebug(DEBUG_DETAIL, "Done.");
-// }
-
-
-
-
 int socket_event_init(void)
 {
     int rc = PLCTAG_STATUS_OK;
@@ -1276,11 +1097,7 @@ void socket_event_teardown(void)
 
     atomic_bool_set(&need_recalculate_socket_fd_sets, 0);
 
-    rc = destroy_socket_wakeup_signal();
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to destroy socket wake up signal!");
-        return;
-    }
+    destroy_event_wakeup_channel();
 
 #ifdef PLATFORM_IS_WINDOWS
 	/* Windows needs special teardown. */
