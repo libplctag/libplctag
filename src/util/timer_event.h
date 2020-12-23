@@ -46,6 +46,7 @@ extern int timer_event_wake_at(timer_p timer,
                                           void *context),
                          void *context);
 extern int timer_event_snooze(timer_p);
+extern int timer_destroy(timer_p *timer);
 
 /* event loop functions */
 extern int64_t timer_event_tickler(int64_t current_time);

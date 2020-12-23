@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <lib/libplctag.h>
 #include <util/debug.h>
+#include <util/event_loop.h>
 #include <util/mem.h>
 #include <util/mutex.h>
 #include <util/timer_event.h>
@@ -54,7 +55,7 @@ static timer_p timer_list = NULL;
 static mutex_p timer_mutex = NULL;
 
 
-static void timer_rc_destroy(void *timer_arg);
+// static void timer_rc_destroy(void *timer_arg);
 
 int timer_event_create(timer_p *timer)
 {
@@ -65,7 +66,7 @@ int timer_event_create(timer_p *timer)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    *timer = (timer_p)rc_alloc(sizeof(**timer), timer_rc_destroy);
+    *timer = (timer_p)mem_alloc(sizeof(**timer));
     if(! *timer) {
         pdebug(DEBUG_ERROR, "Failed to allocate memory for timer.");
         return PLCTAG_ERR_NO_MEM;
@@ -163,27 +164,42 @@ int timer_event_snooze(timer_p timer)
 
 /* timer helpers */
 
-void timer_rc_destroy(void *timer_arg)
+int timer_destroy(timer_p *timer)
 {
-    timer_p timer = (timer_p)timer_arg;
+    int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
+
+    if(!timer) {
+        pdebug(DEBUG_WARN, "Pointer to timer location is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(! *timer) {
+        pdebug(DEBUG_WARN, "Pointer to timer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     /* find and remove the timer. */
     critical_block(timer_mutex) {
         timer_p *timer_walker = &timer_list;
 
-        while(*timer_walker && *timer_walker != timer) {
+        while(*timer_walker && *timer_walker != *timer) {
             timer_walker = &((*timer_walker)->next);
         }
 
         /* unlink from the list. */
-        if(*timer_walker && *timer_walker == timer) {
-            *timer_walker = timer->next;
-        } /* else not found */
+        if(*timer_walker && *timer_walker == *timer) {
+            *timer_walker = (*timer)->next;
+            *timer = NULL;
+        } else {
+            rc = PLCTAG_ERR_NOT_FOUND;
+        }
     }
 
     pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
 }
 
 
