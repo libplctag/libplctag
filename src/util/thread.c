@@ -139,7 +139,7 @@ void thread_stop(void)
  * Kill another thread.
  */
 
-void thread_kill(thread_p t)
+int thread_kill(thread_p t)
 {
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -154,15 +154,17 @@ void thread_kill(thread_p t)
     }
 
 #ifdef PLATFORM_IS_WINDOWS
-        TerminateThread(t->h_thread, (DWORD)0);
+    TerminateThread(t->h_thread, (DWORD)0);
 #elif defined(PLATFORM_IS_ANDROID)
-        pthread_kill(t->p_thread, 0);
+    pthread_kill(t->p_thread, 0);
 #else
     /* generic POSIX */
-        pthread_cancel(t->p_thread);
+    pthread_cancel(t->p_thread);
 #endif
 
     pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
 }
 
 /*
