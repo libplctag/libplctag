@@ -98,7 +98,7 @@ static mutex_p socket_event_mutex = NULL;
 static sock_p socket_list = NULL;
 static sock_p global_socket_iterator = NULL;
 
-static THREAD_LOCAL atomic_bool socket_event_mutex_held_in_this_thread = ATOMIC_BOOL_STATIC_INIT(FALSE);
+// static THREAD_LOCAL atomic_bool socket_event_mutex_held_in_this_thread = ATOMIC_BOOL_STATIC_INIT(FALSE);
 
 static int wake_fds[2] = { INVALID_SOCKET, INVALID_SOCKET};
 static fd_set global_read_fds;
@@ -331,9 +331,7 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
 
         /* call the connection event callback if needed. */
         if((atomic_int_get(&(s->event_mask)) & SOCKET_EVENT_CONNECTION_READY) && s->callback) {
-            atomic_bool_set(&socket_event_mutex_held_in_this_thread, TRUE);
             s->callback(s, SOCKET_EVENT_CONNECTION_READY, s->context);
-            atomic_bool_set(&socket_event_mutex_held_in_this_thread, FALSE);
         }
     }
 
@@ -466,9 +464,7 @@ extern int socket_close(sock_p sock)
     }
 
     /* If the socket is closed, it does not need to be on the list. */
-
-    /* skip the mutex if we are called within it. */
-    if(atomic_bool_get(&socket_event_mutex_held_in_this_thread)) {
+    critical_block(socket_event_mutex) {
         sock_p *walker = &socket_list;
 
         while(*walker && *walker != sock) {
@@ -485,36 +481,12 @@ extern int socket_close(sock_p sock)
 
         sock->next = NULL;
 
-        /* call the close event callback if needed. */
+        /* call the connection event callback if needed. */
         if((atomic_int_get(&(sock->event_mask)) & SOCKET_EVENT_CLOSING) && sock->callback) {
             sock->callback(sock, SOCKET_EVENT_CLOSING, sock->context);
         }
-    } else {
-        critical_block(socket_event_mutex) {
-            sock_p *walker = &socket_list;
-
-            while(*walker && *walker != sock) {
-                walker = &((*walker)->next);
-            }
-
-            if(*walker && *walker == sock) {
-                *walker = sock->next;
-
-                if(global_socket_iterator == sock) {
-                    global_socket_iterator = sock->next;
-                }
-            } /* else not on the list. */
-
-            sock->next = NULL;
-
-            /* call the connection event callback if needed. */
-            if((atomic_int_get(&(sock->event_mask)) & SOCKET_EVENT_CLOSING) && sock->callback) {
-                atomic_bool_set(&socket_event_mutex_held_in_this_thread, TRUE);
-                sock->callback(sock, SOCKET_EVENT_CLOSING, sock->context);
-                atomic_bool_set(&socket_event_mutex_held_in_this_thread, FALSE);
-            }
-        }
     }
+
 
     /* close the socket fd. */
     if(sock->fd != INVALID_SOCKET) {
@@ -978,8 +950,6 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 
         if(num_signaled_fds > 0) {
             critical_block(socket_event_mutex) {
-                atomic_bool_set(&socket_event_mutex_held_in_this_thread, TRUE);
-
                 for(global_socket_iterator = socket_list; global_socket_iterator; global_socket_iterator = global_socket_iterator->next) {
                     sock_p sock = global_socket_iterator;
                     int event_mask = atomic_int_get(&(sock->event_mask));
@@ -1009,8 +979,6 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                         }
                     }
                 }
-
-                atomic_bool_set(&socket_event_mutex_held_in_this_thread, FALSE);
             }
         }
     }
