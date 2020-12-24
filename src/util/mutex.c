@@ -52,6 +52,7 @@
 
     struct mutex_t {
         pthread_mutex_t p_mutex;
+        pthread_mutexattr_t mutex_attr;
         int initialized;
     };
 
@@ -87,7 +88,17 @@ int mutex_create(mutex_p *m)
         return PLCTAG_ERR_MUTEX_INIT;
     }
 #else
-    if(pthread_mutex_init(&((*m)->p_mutex),NULL)) {
+    if(pthread_mutexattr_init(&((*m)->mutex_attr))) {
+        pdebug(DEBUG_WARN, "Unable to initialize pthread attributes!");
+        return PLCTAG_ERR_MUTEX_INIT;
+    }
+
+    if(pthread_mutexattr_settype(&((*m)->mutex_attr), PTHREAD_MUTEX_RECURSIVE)) {
+        pdebug(DEBUG_WARN, "Unable to set pthread attributes!");
+        return PLCTAG_ERR_MUTEX_INIT;
+    }
+
+    if(pthread_mutex_init(&((*m)->p_mutex), &((*m)->mutex_attr))) {
         mem_free(*m);
         *m = NULL;
         pdebug(DEBUG_WARN,"Error initializing mutex.");
@@ -230,6 +241,11 @@ int mutex_destroy(mutex_p *m)
 #else
     if(pthread_mutex_destroy(&((*m)->p_mutex))) {
         pdebug(DEBUG_WARN, "error while attempting to destroy mutex.");
+        return PLCTAG_ERR_MUTEX_DESTROY;
+    }
+
+    if(pthread_mutexattr_destroy(&((*m)->mutex_attr))) {
+        pdebug(DEBUG_WARN, "error while attempting to destroy mutex attributes.");
         return PLCTAG_ERR_MUTEX_DESTROY;
     }
 #endif
