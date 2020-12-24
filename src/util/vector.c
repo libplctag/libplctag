@@ -31,10 +31,10 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stddef.h>
 #include <lib/libplctag.h>
-#include <platform.h>
-#include <util/rc.h>
 #include <util/debug.h>
+#include <util/mem.h>
 #include <util/vector.h>
 
 struct vector_t {

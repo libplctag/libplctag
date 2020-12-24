@@ -60,6 +60,7 @@
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
 #include <util/debug.h>
+#include <util/mem.h>
 #include <util/mutex.h>
 #include <util/platform.h>
 #include <util/socket.h>
@@ -109,10 +110,6 @@ static atomic_bool need_recalculate_socket_fd_sets = ATOMIC_BOOL_STATIC_INIT(1);
 
 static int create_event_wakeup_channel(void);
 static void destroy_event_wakeup_channel(void);
-static void signal_max_fd_recalculate_needed(void);
-static int check_events(void);
-
-
 
 
 
@@ -340,6 +337,9 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
         }
     }
 
+    /* we might need an event. */
+    socket_event_loop_wake();
+
     pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
@@ -531,7 +531,7 @@ extern int socket_close(sock_p sock)
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
@@ -546,7 +546,7 @@ int socket_destroy(sock_p *sock)
     }
 
     /* make sure the socket is closed. */
-    socket_close(sock);
+    socket_close(*sock);
 
     /* Free any memory. */
     mem_free(*sock);
@@ -790,12 +790,12 @@ void destroy_event_wakeup_channel(void)
     pdebug(DEBUG_INFO, "Starting.");
 
     if(wake_fds[0] != INVALID_SOCKET) {
-        closesocket(wake_fds[0]);
+        socketclose(wake_fds[0]);
         wake_fds[0] = INVALID_SOCKET;
     }
 
     if(wake_fds[1] != INVALID_SOCKET) {
-        closesocket(wake_fds[1]);
+        socketclose(wake_fds[1]);
         wake_fds[1] = INVALID_SOCKET;
     }
 
@@ -874,7 +874,7 @@ int socket_event_get_mask(sock_p sock, int *event_mask)
 
 
 
-void socket_event_wake(void)
+void socket_event_loop_wake(void)
 {
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -886,15 +886,13 @@ void socket_event_wake(void)
 
 
 
-void socket_event_tickler(int64_t next_wake_time, int64_t current_time)
+void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 {
     int recalc_count = 0;
     TIMEVAL timeval_wait;
-    int64_t current_time = time_ms();
-    int64_t wait_time_ms = next_wake_time - time_ms();
+    int64_t wait_time_ms = next_wake_time - current_time;
     fd_set local_read_fds;
     fd_set local_write_fds;
-    int max_fd = 0;
     int num_signaled_fds = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -1020,10 +1018,9 @@ void socket_event_tickler(int64_t next_wake_time, int64_t current_time)
 
 
 
-int socket_event_init(void)
+int socket_event_loop_init(void)
 {
     int rc = PLCTAG_STATUS_OK;
-    int flags = 0;
 
 #ifdef PLATFORM_IS_WINDOWS
 	static WSADATA winsock_data;
@@ -1073,7 +1070,7 @@ int socket_event_init(void)
 
 
 
-void socket_event_teardown(void)
+void socket_event_loop_teardown(void)
 {
     int rc = PLCTAG_STATUS_OK;
 

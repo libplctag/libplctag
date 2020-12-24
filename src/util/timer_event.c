@@ -89,6 +89,7 @@ int timer_event_wake_at(timer_p timer,
                   void *context)
 {
     int rc = PLCTAG_STATUS_OK;
+    bool need_wake_up = FALSE;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -119,8 +120,12 @@ int timer_event_wake_at(timer_p timer,
 
         /* do we have a new wake up time? */
         if(timer_list == timer) {
-            wake_up_event_loop();
+            need_wake_up = TRUE;
         }
+    }
+
+    if(need_wake_up) {
+        event_loop_wake();
     }
 
     pdebug(DEBUG_DETAIL, "Done.");

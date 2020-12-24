@@ -31,6 +31,9 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <errno.h>
+#include <time.h>
+#include <lib/libplctag.h>
 #include <util/debug.h>
 #include <util/platform.h>
 #include <util/sleep.h>
@@ -44,6 +47,17 @@
  *
  * FIXME - should the signal interrupt handling be done here or in app code?
  */
+
+#ifdef PLATFORM_IS_WINDOWS
+
+int sleep_ms(int ms)
+{
+    Sleep(ms);
+    return PLCTAG_STATUS_OK;
+}
+
+#else
+
 int sleep_ms(int ms)
 {
     struct timespec wait_time;
@@ -82,3 +96,4 @@ int sleep_ms(int ms)
     return rc;
 }
 
+#endif
