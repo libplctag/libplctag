@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include <ab2/plc5.h>
 #include <ab2/common_defs.h>
+#include <ab2/pccc.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/mem.h>
@@ -44,6 +45,9 @@ typedef struct {
 
     uint16_t elem_size;
     uint16_t elem_count;
+
+    pccc_plc_p plc;
+    struct pccc_plc_request_s request;
 } ab2_plc5_tag_t;
 typedef ab2_plc5_tag_t *ab2_plc5_tag_p;
 
@@ -73,9 +77,13 @@ static struct tag_vtable_t plc5_vtable = {
 };
 
 
+static int build_read_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag);
+static int handle_read_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag);
+
 plc_tag_p ab2_plc5_tag_create(attr attribs)
 {
     ab2_plc5_tag_p tag = NULL;
+    pccc_plc_p plc = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -84,6 +92,14 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
         pdebug(DEBUG_WARN, "Unable to allocate new PLC/5 tag!");
         return NULL;
     }
+
+    plc = pccc_plc_get(attribs);
+    if(!plc) {
+        pdebug(DEBUG_WARN, "Unable to get PLC!");
+        rc_dec(tag);
+    }
+
+    pccc_plc_request_init(plc, &(tag->request));
 
     /* set the vtable for base functions. */
     tag->base_tag.vtable = &plc5_vtable;
@@ -123,7 +139,7 @@ int plc5_tag_abort(plc_tag_p tag_arg)
     pdebug(DEBUG_INFO, "Starting.");
 
     if(tag->base_tag.read_in_flight || tag->base_tag.write_in_flight) {
-        /* abort outstanding request. */
+        pccc_plc_request_abort(tag->plc, &(tag->request));
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -134,11 +150,21 @@ int plc5_tag_abort(plc_tag_p tag_arg)
 
 int plc5_tag_read(plc_tag_p tag_arg)
 {
+    int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    //protocol_queue_request(tag->request, tag, )
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Tag pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    rc = pccc_eip_start_request(&(tag->request), (void *)tag, build_read_request_callback, handle_read_response_callback);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to start read request!");
+        return rc;
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -146,13 +172,18 @@ int plc5_tag_read(plc_tag_p tag_arg)
 }
 
 
-int plc5_tag_status(plc_tag_p tag)
+int plc5_tag_status(plc_tag_p tag_arg)
 {
+    int rc = PLCTAG_STATUS_OK;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+
     pdebug(DEBUG_INFO, "Starting.");
+
+    rc = tag->base_tag.status;
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    return rc;
 }
 
 
@@ -166,13 +197,27 @@ int plc5_tag_tickler(plc_tag_p tag)
 }
 
 
-int plc5_tag_write(plc_tag_p tag)
+int plc5_tag_write(plc_tag_p tag_arg)
 {
+    int rc = PLCTAG_STATUS_OK;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+
     pdebug(DEBUG_INFO, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Tag pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    rc = pccc_eip_start_request(&(tag->request), (void *)tag, build_read_request_callback, handle_read_response_callback);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to start read request!");
+        return rc;
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    return PLCTAG_STATUS_PENDING;
 }
 
 
@@ -215,4 +260,20 @@ int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_valu
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
+
+
+int build_read_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    pdebug(DEBUG_DETAIL, "Done.");
+}
+
+
+int handle_read_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    pdebug(DEBUG_DETAIL, "Done.");
+}
 
