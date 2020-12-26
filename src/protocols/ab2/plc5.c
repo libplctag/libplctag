@@ -79,6 +79,8 @@ static struct tag_vtable_t plc5_vtable = {
 
 static int build_read_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag);
 static int handle_read_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag);
+static int build_write_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag);
+static int handle_write_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag);
 
 plc_tag_p ab2_plc5_tag_create(attr attribs)
 {
@@ -160,7 +162,7 @@ int plc5_tag_read(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = pccc_eip_start_request(&(tag->request), (void *)tag, build_read_request_callback, handle_read_response_callback);
+    rc = pccc_plc_request_start(tag->plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
         return rc;
@@ -209,7 +211,7 @@ int plc5_tag_write(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = pccc_eip_start_request(&(tag->request), (void *)tag, build_read_request_callback, handle_read_response_callback);
+    rc = pccc_plc_request_start(tag->plc, &(tag->request), (void *)tag, build_write_request_callback, handle_write_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
         return rc;
