@@ -33,6 +33,8 @@
 
  #pragma once
 
+#include <stdint.h>
+#include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/slice.h>
 
@@ -44,16 +46,44 @@ struct pccc_plc_request_s {
     struct pccc_plc_request_s *next;
     void *tag;
     pccc_plc_p plc;
-    int (*build_request_callback)(slice_t output_buffer, pccc_plc_p plc, void *tag);
+    slice_t (*build_request_callback)(slice_t output_buffer, pccc_plc_p plc, void *tag);
     int (*handle_response_callback)(slice_t input_buffer, pccc_plc_p plc, void *tag);
 };
+
+#define PCCC_CMD_OK ((uint8_t)(0x40))
+#define PCCC_TYPED_CMD ((uint8_t)(0x0F))
 
 extern pccc_plc_p pccc_plc_get(attr attribs);
 extern int pccc_plc_request_init(pccc_plc_p pccc_plc, pccc_plc_request_p req);
 extern int pccc_plc_request_start(pccc_plc_p plc, pccc_plc_request_p req, void *tag,
-                                  int (*build_request_callback)(slice_t output_buffer, pccc_plc_p plc, void *tag),
+                                  slice_t (*build_request_callback)(slice_t output_buffer, pccc_plc_p plc, void *tag),
                                   int (*handle_response_callback)(slice_t input_buffer, pccc_plc_p plc, void *tag));
 extern int pccc_plc_request_abort(pccc_plc_p plc, pccc_plc_request_p req);
+extern uint16_t pccc_plc_get_tsn(pccc_plc_p plc);
+
+
+typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
+               PCCC_FILE_ASCII          = 0x8e,
+               PCCC_FILE_BCD            = 0x8f,
+               PCCC_FILE_BIT            = 0x85,
+               PCCC_FILE_BLOCK_TRANSFER = 0x00, /* UNKNOWN! */
+               PCCC_FILE_CONTROL        = 0x88,
+               PCCC_FILE_COUNTER        = 0x87,
+               PCCC_FILE_FLOAT          = 0x8a,
+               PCCC_FILE_INPUT          = 0x8c,
+               PCCC_FILE_INT            = 0x89,
+               PCCC_FILE_LONG_INT       = 0x91,
+               PCCC_FILE_MESSAGE        = 0x92,
+               PCCC_FILE_OUTPUT         = 0x8b,
+               PCCC_FILE_PID            = 0x93,
+               PCCC_FILE_SFC            = 0x00, /* UNKNOWN! */
+               PCCC_FILE_STATUS         = 0x84,
+               PCCC_FILE_STRING         = 0x8d,
+               PCCC_FILE_TIMER          = 0x86
+             } pccc_file_t;
+
+extern int pccc_plc_parse_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
+extern const char *pccc_plc_decode_error(slice_t err);
 
 extern int pccc_plc_init(void);
-extern int pccc_plc_teardown(void);
+extern void pccc_plc_teardown(void);
