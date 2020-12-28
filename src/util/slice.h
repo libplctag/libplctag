@@ -88,7 +88,7 @@ inline static int slice_get_err(slice_t s)
 }
 
 /* check whether in bounds or not before calling! */
-inline static uint8_t slice_get_uint8(slice_t s, int index)
+inline static uint8_t slice_get_byte(slice_t s, int index)
 {
     if(slice_in_bounds(s, index)) {
         return s.data[index];
@@ -98,7 +98,7 @@ inline static uint8_t slice_get_uint8(slice_t s, int index)
 }
 
 
-inline static int slice_set_uint8(slice_t s, int index, uint8_t val) {
+inline static int slice_set_byte(slice_t s, int index, uint8_t val) {
     if(slice_in_bounds(s, index)) {
         s.data[index] = val;
         return PLCTAG_STATUS_OK;
@@ -116,7 +116,7 @@ inline static int slice_match_bytes(slice_t s, const uint8_t *data, int data_len
     }
 
     for(int i=0; i < data_len; i++) {
-        if(slice_get_uint8(s, i) != data[i]) {
+        if(slice_get_byte(s, i) != data[i]) {
             return 0;
         }
     }
