@@ -31,41 +31,22 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+ #pragma once
 
+#include <stdint.h>
 #include <util/attr.h>
-#include <util/mutex.h>
 #include <util/slice.h>
 
-typedef struct protocol_s *protocol_p;
-struct protocol_s {
-    struct protocol_s *next;
+typedef struct cip_s *cip_p;
 
-    mutex_p mutex;
-    protocol_request_p request_list;
 
-    const char *stack_type;
-    const char *host;
-    const char *path;
-};
+#define CIP_CMD_OK ((uint8_t)(0x80))
 
-typedef struct protocol_request_s *protocol_request_p;
-struct protocol_request_s {
-    struct protocol_request *next;
-    void *client;
-    slice_t (*build_request_callback)(slice_t output_buffer, void *client);
-    int (*handle_response_callback)(slice_t input_buffer, void *client);
-    int (*abort_callback)(void *client);
-};
+extern cip_p cip_get(attr attribs);
 
-extern int protocol_get(const char *stack_type, attr attribs, protocol_p *protocol, int (*constructor)(attr attribs, protocol_p *protocol));
-extern int protocol_cleanup(protocol_p protocol);
+extern int cip_encode_path(const char *path, bool needs_connection, bool *has_dhp, uint8_t *dhp_dest, slice_t buffer);
+extern int cip_encode_tag_name(const char *name, slice_t buffer);
 
-extern int protocol_request_init(protocol_p protocol, protocol_request_p req);
-extern int protocol_request_start(protocol_p protocol, protocol_request_p req, void *client,
-                                  slice_t (*build_request_callback)(slice_t output_buffer, void *client),
-                                  int (*handle_response_callback)(slice_t input_buffer, void *client));
-extern int protocol_request_abort(protocol_p plc, protocol_request_p req);
-
-extern int protocol_module_init(void);
-extern void protocol_module_teardown(void);
+extern const char *cip_decode_error_short(uint8_t *data);
+extern const char *cip_decode_error_long(uint8_t *data);
+extern int cip_decode_error_code(uint8_t *data);
