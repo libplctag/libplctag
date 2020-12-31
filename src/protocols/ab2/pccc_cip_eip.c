@@ -64,7 +64,7 @@ struct pccc_cip_eip_s {
 #define PCCC_CIP_EIP_STACK "PCCC/CIP/EIP"
 
 
-static int pccc_constructor(attr attribs, protocol_p *protocol);
+static int pccc_constructor(const char *protocol_key, attr attribs, protocol_p *protocol);
 static void pccc_rc_destroy(void *plc_arg);
 
 /* calls to handle requests to this protocol layer. */

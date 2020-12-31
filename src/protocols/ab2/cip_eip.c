@@ -51,6 +51,7 @@ struct cip_eip_s {
     uint16_t tsn;
 
     protocol_p eip;
+    struct eip_request_s eip_request;
 
     char *host;
     char *path;
@@ -59,11 +60,22 @@ struct cip_eip_s {
 #define CIP_EIP_STACK "CIP/EIP"
 
 
-static int cip_constructor(attr attribs, protocol_p *protocol);
+static int cip_constructor(const char *protocol_key, attr attribs, protocol_p *protocol);
 static void cip_rc_destroy(void *plc_arg);
 
+/* calls to handle requests to this protocol layer. */
+static int new_cip_request_callback(protocol_p protocol, protocol_request_p request);
+static int cleanup_cip_request_callback(protocol_p protocol, protocol_request_p request);
+static int build_cip_request_result_callback(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_output_slice);
+static int process_cip_response_result_callback(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_input_slice);
 
-protocol_p cip_cip_get(attr attribs)
+/* calls to handle requests queued for the next protocol layer */
+static int build_eip_request_callback(protocol_p protocol, void *client, slice_t output_buffer, slice_t *used_buffer);
+static int handle_eip_response_callback(protocol_p protocol, void *client, slice_t input_buffer, slice_t *used_buffer);
+
+
+
+protocol_p cip_eip_get(attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     const char *host = NULL;
@@ -89,9 +101,9 @@ protocol_p cip_cip_get(attr attribs)
         return PLCTAG_ERR_NO_MEM;
     }
 
-    rc = protocol_get(protocol_key, attribs, (protocol_p *)&result, pccc_constructor);
+    rc = protocol_get(protocol_key, attribs, (protocol_p *)&result, cip_constructor);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to get PCCC/CIP/EIP protocol stack, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Unable to get CIP/EIP protocol stack, error %s!", plc_tag_decode_error(rc));
         mem_free(protocol_key);
         rc_dec(result);
         return NULL;
@@ -107,18 +119,43 @@ protocol_p cip_cip_get(attr attribs)
 
 
 
-int cip_constructor(attr attribs, protocol_p *protocol)
+int cip_constructor(const char *protocol_key, attr attribs, protocol_p *protocol)
 {
-    cip_p result = NULL;
+    int rc = PLCTAG_STATUS_OK;
+    cip_eip_p result = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    result = (cip_p)rc_alloc(sizeof(*result), cip_rc_destroy);
+    result = (cip_eip_p)rc_alloc(sizeof(*result), cip_rc_destroy);
     if(result) {
-        /* pick a transmission sequence number. */
-        result->tsn = (uint16_t)((unsigned int)rand() % 0xFFFF);
+        rc = protocol_init(result, protocol_key, new_cip_request_callback, cleanup_cip_request_callback);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to initialize new protocol, error %s!", plc_tag_decode_error(rc));
+            rc_dec(result);
+            return rc;
+        }
+
+        /* set up the request for the next level down */
+        rc = protocol_request_init((protocol_p)result, (protocol_request_p)&(result->eip_request));
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to initialize protocol request, error %s!", plc_tag_decode_error(rc));
+            rc_dec(result);
+            return rc;
+        }
 
         /* TODO get the next protocol layer */
+        result->eip = eip_get(attribs);
+        if(!result->eip) {
+            pdebug(DEBUG_WARN, "Unable to create next protocol layer for EIP!");
+            rc_dec(result);
+            return PLCTAG_ERR_BAD_CONNECTION;
+        }
+
+        *protocol = (protocol_p)result;
+    } else {
+        pdebug(DEBUG_WARN, "Unable to allocate PCCC/CIP/EIP stack!");
+        *protocol = NULL;
+        return PLCTAG_ERR_NO_MEM;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -126,18 +163,26 @@ int cip_constructor(attr attribs, protocol_p *protocol)
     return PLCTAG_STATUS_OK;
 }
 
+
+
 void cip_rc_destroy(void *plc_arg)
 {
-    cip_p plc = (cip_p)plc_arg;
-
-    pdebug(DEBUG_INFO, "Starting.");
+    cip_eip_p plc = (cip_eip_p)plc_arg;
 
     if(!plc) {
         pdebug(DEBUG_WARN, "Destructor function called with null pointer!");
         return;
     }
 
+    pdebug(DEBUG_INFO, "Starting for protocol layer %s.", plc->protocol.protocol_key);
+
     /* destroy PCCC specific features first, then destroy the generic protocol. */
+
+    /* abort anything we have in flight to the layer below */
+    protocol_stop_request(plc->eip, (protocol_request_p)&(plc->eip_request));
+
+    /* release our reference on the EIP layer */
+    plc->eip = rc_dec(plc->eip);
 
     /* destroy the generic protocol */
     protocol_cleanup((protocol_p)plc);
@@ -146,12 +191,12 @@ void cip_rc_destroy(void *plc_arg)
 }
 
 
-static int skip_whitespace(const char *name, int *name_index);
-static int parse_bit_segment(ab_tag_p tag, const char *name, int *name_index);
-static int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, int *name_index);
-static int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, int *name_index);
+// static int skip_whitespace(const char *name, int *name_index);
+// static int parse_bit_segment(ab_tag_p tag, const char *name, int *name_index);
+// static int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, int *name_index);
+// static int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, int *name_index);
 
-static slice_t int cip_encode_path(const char *path, bool needs_connection, bool *has_dhp, uint8_t *dhp_dest, slice_t buffer);
+static slice_t cip_encode_path(const char *path, bool is_connected, int *dhp_dest, slice_t buffer);
 static int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *buffer_index);
 static int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *buffer_index);
 static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, uint8_t *src_node, uint8_t *dest_node);
@@ -159,109 +204,6 @@ static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t 
 #define MAX_IP_ADDR_SEG_LEN (16)
 
 
-
-// static int match_channel(const char **p, int *dhp_channel)
-// {
-//     switch(**p) {
-//     case 'A':
-//     case 'a':
-//     case '2':
-//         *dhp_channel = 1;
-//         *p = *p + 1;
-//         return 1;
-//         break;
-//     case 'B':
-//     case 'b':
-//     case '3':
-//         *dhp_channel = 2;
-//         *p = *p + 1;
-//         return 1;
-//         break;
-
-//     default:
-//         return 0;
-//         break;
-//     }
-
-//     return 0;
-// }
-
-
-// static int match_colon(const char **p)
-// {
-//     if(**p == ':') {
-//         *p = *p + 1;
-//         return 1;
-//     }
-
-//     return 0;
-// }
-
-
-// static int match_int(const char **p, int *val)
-// {
-//     int result = 0;
-//     int digits = 3;
-
-//     if(! (**p >= '0' && **p <= '9')) {
-//         return 0;
-//     }
-
-//     while(**p >= '0' && **p <= '9' && digits > 0) {
-//         result = (result * 10) + (**p - '0');
-//         *p = *p + 1;
-//         digits--;
-//     }
-
-//     /* FIXME - what is the maximum DH+ ID we can have? 255? */
-
-//     *val = result;
-
-//     return 1;
-// }
-
-
-
-// /* match_dhp_node()
-//  *
-//  * Match a string with the format c:d:d where c is a single character and d is a number.
-//  */
-
-// int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *dest_node)
-// {
-//     const char *p = dhp_str;
-
-//     if(!match_channel(&p, dhp_channel)) {
-//         pdebug(DEBUG_INFO, "Not DH+ route.  Expected DH+ channel identifier (A/2 or B/3)");
-//         return 0;
-//     }
-
-//     if(!match_colon(&p)) {
-//         pdebug(DEBUG_INFO, "Not DH+ route.  Expected : in route.");
-//         return 0;
-//     }
-
-//     /* we have seen enough to commit to this being a DHP node. */
-
-//     if(!match_int(&p, src_node)) {
-//         pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected source address!");
-//         return 0;
-//     }
-
-//     if(!match_colon(&p)) {
-//         pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected colon!");
-//         return PLCTAG_ERR_BAD_PARAM;
-//     }
-
-//     if(!match_int(&p, dest_node)) {
-//         pdebug(DEBUG_WARN, "Bad syntax in DH+ route.  Expected destination address!");
-//         return PLCTAG_ERR_BAD_PARAM;
-//     }
-
-//     pdebug(DEBUG_DETAIL, "parsed DH+ connection string %s as channel %d, source node %d and destination node %d", dhp_str, *dhp_channel, *src_node, *dest_node);
-
-//     return 1;
-// }
 
 /*
  * cip_encode_path()
@@ -382,13 +324,13 @@ slice_t cip_encode_path(const char *path, bool is_connected, int *dhp_dest, slic
 }
 
 
-int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *buffer_index)
+int match_numeric_segment(const char *path, int *path_index, slice_t buffer, int *buffer_index)
 {
     int val = 0;
     size_t p_index = *path_index;
     size_t c_index = *buffer_index;
 
-    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", *path_index, path);
 
     while(isdigit(path[p_index])) {
         val = (val * 10) + (path[p_index] - '0');
@@ -397,13 +339,13 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* did we match anything? */
     if(p_index == *path_index) {
-        pdebug(DEBUG_DETAIL,"Did not find numeric path segment at position %d.", (int)(ssize_t)p_index);
+        pdebug(DEBUG_DETAIL,"Did not find numeric path segment at position %d.", p_index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
     /* was the numeric segment valid? */
     if(val < 0 || val > 0x0F) {
-        pdebug(DEBUG_WARN, "Numeric segment in path at position %d is out of bounds!", (int)(ssize_t)(*path_index));
+        pdebug(DEBUG_WARN, "Numeric segment in path at position %d is out of bounds!", *path_index);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
