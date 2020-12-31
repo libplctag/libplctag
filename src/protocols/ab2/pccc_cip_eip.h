@@ -34,19 +34,50 @@
  #pragma once
 
 #include <stdint.h>
+#include <util/atomic_int.h>
 #include <util/attr.h>
+#include <util/protocol.h>
 #include <util/slice.h>
 
-typedef struct cip_s *cip_p;
+#define PCCC_CMD_OK ((uint8_t)(0x40))
+#define PCCC_TYPED_CMD ((uint8_t)(0x0F))
 
 
-#define CIP_CMD_OK ((uint8_t)(0x80))
 
-extern cip_p cip_get(attr attribs);
+#define LIBPLCTAG_VENDOR_ID ((uint16_t)0xF33D)      /* no idea what this needs to be */
+#define LIBPLCTAG_VENDOR_SN ((uint32_t)0x21504345)  /* the string !PCE */
 
-extern int cip_encode_path(const char *path, bool needs_connection, bool *has_dhp, uint8_t *dhp_dest, slice_t buffer);
-extern int cip_encode_tag_name(const char *name, slice_t buffer);
 
-extern const char *cip_decode_error_short(uint8_t *data);
-extern const char *cip_decode_error_long(uint8_t *data);
-extern int cip_decode_error_code(uint8_t *data);
+typedef struct pccc_cip_eip_s *pccc_cip_eip_p;
+struct pccc_cip_eip_request_s {
+    struct protocol_request_s protocol_request;
+};
+
+
+extern protocol_p pccc_cip_eip_get(attr attribs);
+
+extern uint16_t pccc_cip_eip_get_tsn(protocol_p plc);
+
+typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
+               PCCC_FILE_ASCII          = 0x8e,
+               PCCC_FILE_BCD            = 0x8f,
+               PCCC_FILE_BIT            = 0x85,
+               PCCC_FILE_BLOCK_TRANSFER = 0x00, /* UNKNOWN! */
+               PCCC_FILE_CONTROL        = 0x88,
+               PCCC_FILE_COUNTER        = 0x87,
+               PCCC_FILE_FLOAT          = 0x8a,
+               PCCC_FILE_INPUT          = 0x8c,
+               PCCC_FILE_INT            = 0x89,
+               PCCC_FILE_LONG_INT       = 0x91,
+               PCCC_FILE_MESSAGE        = 0x92,
+               PCCC_FILE_OUTPUT         = 0x8b,
+               PCCC_FILE_PID            = 0x93,
+               PCCC_FILE_SFC            = 0x00, /* UNKNOWN! */
+               PCCC_FILE_STATUS         = 0x84,
+               PCCC_FILE_STRING         = 0x8d,
+               PCCC_FILE_TIMER          = 0x86
+             } pccc_file_t;
+
+extern int pccc_parse_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
+extern const char *pccc_decode_error(slice_t err);
+

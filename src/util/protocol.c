@@ -47,24 +47,20 @@ static mutex_p protocol_list_mutex = NULL;
 
 
 
-int protocol_get(const char *stack_type, attr attribs, protocol_p *protocol, int (*constructor)(attr attribs, protocol_p *protocol))
+int protocol_get(const char *protocol_key, attr attribs, protocol_p *protocol, int (*constructor)(attr attribs, protocol_p *protocol))
 {
     int rc = PLCTAG_STATUS_OK;
     const char *host = NULL;
     const char *path = NULL;
     protocol_p result = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
-
-    /* get the host and path. */
-    host = attr_get_str(attribs, "gateway", NULL);
-    path = attr_get_str(attribs, "path", "");
+    pdebug(DEBUG_INFO, "Starting for protocol layer %s.", protocol_key);
 
     /* try to find a protocol that matches. */
     critical_block(protocol_list_mutex) {
         result = protocol_list;
 
-        while(result && ((str_cmp_i(stack_type, result->stack_type) != 0) || (str_cmp_i(host, result->host) != 0) || (str_cmp_i(path, result->path) != 0))) {
+        while(result && (str_cmp_i(protocol_key, result->protocol_key) != 0)) {
             result = result->next;
         }
 
@@ -83,40 +79,6 @@ int protocol_get(const char *stack_type, attr attribs, protocol_p *protocol, int
             /* not found, so make a new one. */
             rc = constructor(attribs, &result);
             if(rc == PLCTAG_STATUS_OK) {
-                result->next = NULL;
-
-                result->stack_type = str_dup(stack_type);
-                if(!result->stack_type) {
-                    pdebug(DEBUG_WARN, "Unable to allocate stack type copy!");
-                    result = rc_dec(result);
-                    break;
-                }
-
-                result->host = str_dup(host);
-                if(!result->host) {
-                    pdebug(DEBUG_WARN, "Unable to allocate host name copy!");
-                    result = rc_dec(result);
-                    break;
-                }
-
-                result->path = str_dup(path);
-                if(!result->path) {
-                    pdebug(DEBUG_WARN, "Unable to allocate path copy!");
-                    result = rc_dec(result);
-                    break;
-                }
-
-                rc = mutex_create(&(result->mutex));
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Unable to create PLC mutex, got error %s!", plc_tag_decode_error(rc));
-                    result = rc_dec(result);
-                    break;
-                }
-
-                /* get it on the list before we leave the mutex. */
-                result->next = protocol_list;
-                protocol_list = result;
-
                 *protocol = result;
             } else {
                 pdebug(DEBUG_WARN, "Unable to allocate new protocol, error %s!", plc_tag_decode_error(rc));
@@ -125,7 +87,51 @@ int protocol_get(const char *stack_type, attr attribs, protocol_p *protocol, int
         } /* else we found an existing one. */
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol_key);
+
+    return rc;
+}
+
+
+
+int protocol_init(protocol_p protocol,
+                  const char *protocol_key,
+                  int (*handle_new_request_callback)(protocol_p protocol, protocol_request_p request),
+                  int (*handle_cleanup_request_callback)(protocol_p protocol, protocol_request_p request))
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    do {
+        protocol->next = NULL;
+
+        protocol->protocol_key = str_dup(protocol_key);
+        if(!protocol->protocol_key) {
+            pdebug(DEBUG_WARN, "Unable to allocate protocol key copy!");
+            break;
+        }
+
+        rc = mutex_create(&(protocol->mutex));
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to create PLC mutex, got error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        protocol->handle_new_request_callback = handle_new_request_callback;
+        protocol->handle_cleanup_request_callback = handle_cleanup_request_callback;
+
+        /* get it on the list before we leave the mutex. */
+        protocol->next = protocol_list;
+        protocol_list = protocol;
+    } while(0);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to initialize protocol, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done for protocol layer %s.", protocol->protocol_key);
 
     return rc;
 }
@@ -133,12 +139,12 @@ int protocol_get(const char *stack_type, attr attribs, protocol_p *protocol, int
 
 int protocol_cleanup(protocol_p protocol)
 {
-    pdebug(DEBUG_INFO, "Starting.");
-
     if(!protocol) {
         pdebug(DEBUG_WARN, "Destructor function called with null pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
+
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
 
     /* remove the PLC from the list. */
     critical_block(protocol_list_mutex) {
@@ -154,14 +160,9 @@ int protocol_cleanup(protocol_p protocol)
         } /* else not on the list.  Weird. */
     }
 
-    if(protocol->path) {
-        mem_free(protocol->path);
-        protocol->path = NULL;
-    }
-
-    if(protocol->host) {
-        mem_free(protocol->host);
-        protocol->host = NULL;
+    if(protocol->protocol_key) {
+        mem_free(protocol->protocol_key);
+        protocol->protocol_key = NULL;
     }
 
     if(protocol->mutex) {
@@ -169,7 +170,7 @@ int protocol_cleanup(protocol_p protocol)
         protocol->mutex = NULL;
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_DETAIL, "Done for protocol layer %s.", protocol->protocol_key);
 
     return PLCTAG_STATUS_OK;
 }
@@ -178,88 +179,97 @@ int protocol_cleanup(protocol_p protocol)
 
 int protocol_request_init(protocol_p protocol, protocol_request_p req)
 {
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(protocol) {
+    if(!protocol) {
         pdebug(DEBUG_WARN, "PLC pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(req) {
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    if(!req) {
         pdebug(DEBUG_WARN, "Request pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     mem_set(req, 0, sizeof(*req));
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done for protocol layer %s.", protocol->protocol_key);
 
     return PLCTAG_STATUS_OK;
 }
 
 
-int protocol_request_start(protocol_p protocol, protocol_request_p req, void *tag,
-                           slice_t (*build_request_callback)(slice_t output_buffer, void *tag),
-                           int (*handle_response_callback)(slice_t input_buffer, void *tag))
+
+int protocol_start_request(protocol_p protocol,
+                           protocol_request_p request,
+                           void *client,
+                           int (*build_request_callback)(protocol_p protocol, void *client, slice_t output_buffer, slice_t *used_buffer),
+                           int (*process_response_callback)(protocol_p protocol, void *client, slice_t input_buffer, slice_t *used_buffer))
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(protocol) {
+    if(!protocol) {
         pdebug(DEBUG_WARN, "PLC pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(req) {
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    if(!request) {
         pdebug(DEBUG_WARN, "Request pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* set up the request and put it on the list. */
     critical_block(protocol->mutex) {
-        /* find the request, or the end of the list. */
-        protocol_request_p *walker = &(protocol->request_list);
+        rc = protocol->handle_new_request_callback(protocol, request);
+        if(rc == PLCTAG_STATUS_OK) {
+            /* find the request, or the end of the list. */
+            protocol_request_p *walker = &(protocol->request_list);
 
-        while(*walker && *walker != req) {
-            walker = &((*walker)->next);
-        }
+            while(*walker && *walker != request) {
+                walker = &((*walker)->next);
+            }
 
-        if(! *walker) {
-            /* ran off the end of the list. */
-            req->next = NULL;
-            req->protocol = protocol;
-            req->tag = tag;
-            req->build_request_callback = build_request_callback;
-            req->handle_response_callback = handle_response_callback;
+            if(! *walker) {
+                /* ran off the end of the list. */
+                request->next = NULL;
+                request->client = client;
+                request->build_request_callback = build_request_callback;
+                request->process_response_callback = process_response_callback;
 
-            /* add the request to the end of the list. */
-            *walker = req;
-        } else {
-            pdebug(DEBUG_WARN, "Request is already in use!");
-            rc = PLCTAG_ERR_BUSY;
-            break;
-        }
+                /* add the request to the end of the list. */
+                *walker = request;
+            } else {
+                pdebug(DEBUG_WARN, "Request is already in use!");
+                rc = PLCTAG_ERR_BUSY;
+                break;
+            }
+        } /* else we refused the new request. */
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Refused new request with error %s!", plc_tag_decode_error(rc));
+    }
+
+    pdebug(DEBUG_DETAIL, "Done for protocol layer %s.", protocol->protocol_key);
 
     return rc;
 }
 
 
-int protocol_request_abort(protocol_p protocol, protocol_request_p req)
+int protocol_stop_request(protocol_p protocol, protocol_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(protocol) {
+    if(!protocol) {
         pdebug(DEBUG_WARN, "PLC pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(req) {
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    if(!req) {
         pdebug(DEBUG_WARN, "Request pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -275,19 +285,159 @@ int protocol_request_abort(protocol_p protocol, protocol_request_p req)
         if(*walker && *walker == req) {
             *walker = req->next;
             req->next = NULL;
+            rc = protocol->handle_cleanup_request_callback(protocol, req);
         } else {
             rc = PLCTAG_ERR_NOT_FOUND;
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Error, %s, found while trying to stop request!", plc_tag_decode_error(rc));
+    }
+
+    pdebug(DEBUG_DETAIL, "Done for protocol layer %s.", protocol->protocol_key);
 
     return rc;
 }
 
 
 
-int protocol_init(void)
+
+int protocol_build_request(protocol_p protocol,
+                           slice_t original_output_buffer,
+                           slice_t *new_output_buffer,
+                           int (*build_request_result_callback)(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_output_slice))
+{
+    int rc = PLCTAG_STATUS_OK;
+    slice_t output_buffer = original_output_buffer;
+    slice_t used_buffer = slice_make(NULL, 0);
+    int total_byte_count = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    /* iterate over the list of outstanding requests. */
+    critical_block(protocol->mutex) {
+        protocol_request_p *request_walker = &(protocol->request_list);
+
+        while(*request_walker && slice_len(output_buffer) > 0) {
+            /* build the request in the passed output buffer and return the used space. */
+            rc = (*request_walker)->build_request_callback(protocol, (*request_walker)->client, output_buffer, &used_buffer);
+
+            /* check the result and possibly change the result. Do any post-processing. */
+            if(build_request_result_callback) {
+                rc = build_request_result_callback(protocol, *request_walker, rc, used_buffer, &output_buffer);
+            } else {
+                /* no special handling, just trim off the part we used. */
+                output_buffer = slice_from_slice(output_buffer, slice_len(used_buffer), slice_len(output_buffer));
+            }
+
+            if(rc != PLCTAG_STATUS_PENDING) {
+                /* unlink the request. */
+                protocol_request_p tmp_req = *request_walker;
+                *request_walker = tmp_req->next;
+
+                protocol->handle_cleanup_request_callback(protocol, tmp_req);
+
+                break;
+            } else {
+                total_byte_count += slice_len(used_buffer);
+            }
+
+            /* go to the next one if we are not at the end of the list. */
+            if(*request_walker) {
+                request_walker = &((*request_walker)->next);
+            }
+        }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error, %s, encountered while building requests!", plc_tag_decode_error(rc));
+        *new_output_buffer = slice_make_err(rc);
+        return rc;
+    } else {
+        *new_output_buffer = slice_from_slice(original_output_buffer, 0, total_byte_count);
+
+        pdebug(DEBUG_DETAIL, "Completed request packet:");
+        pdebug_dump_bytes(DEBUG_DETAIL, slice_data(*new_output_buffer), slice_len(*new_output_buffer));
+    }
+
+    pdebug(DEBUG_DETAIL, "Done for protocol layer %s.", protocol->protocol_key);
+
+    return rc;
+}
+
+
+
+int protocol_process_response(protocol_p protocol,
+                              slice_t original_input_buffer,
+                              slice_t *remaining_input_buffer,
+                              int (*process_response_result_callback)(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_output_slice))
+{
+    int rc = PLCTAG_STATUS_OK;
+    slice_t input_buffer = original_input_buffer;
+    slice_t used_buffer = slice_make(NULL, 0);
+    int total_bytes_processed = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    /* iterate over the list of outstanding requests. */
+    critical_block(protocol->mutex) {
+        protocol_request_p *request_walker = &(protocol->request_list);
+
+        while(*request_walker && slice_len(input_buffer) > 0) {
+            /* build the request in the passed output buffer and return the used space. */
+            rc = (*request_walker)->process_response_callback(protocol, (*request_walker)->client, input_buffer, &used_buffer);
+
+            /* check the result and possibly change the result. Do any post-processing. */
+            if(process_response_result_callback) {
+                rc = process_response_result_callback(protocol, *request_walker, rc, used_buffer, &input_buffer);
+            } else {
+                /* no special handling, just trim off the part we used. */
+                input_buffer = slice_from_slice(input_buffer, slice_len(used_buffer), slice_len(input_buffer));
+            }
+
+            if(rc != PLCTAG_STATUS_PENDING) {
+                /* unlink the request. */
+                protocol_request_p tmp_req = *request_walker;
+                *request_walker = tmp_req->next;
+
+                protocol->handle_cleanup_request_callback(protocol, tmp_req);
+
+                break;
+            } else {
+                total_bytes_processed += slice_len(used_buffer);
+            }
+
+            /* go to the next one if we are not at the end of the list. */
+            if(*request_walker) {
+                request_walker = &((*request_walker)->next);
+            }
+        }
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        *remaining_input_buffer = slice_from_slice(original_input_buffer, total_bytes_processed, slice_len(original_input_buffer));
+
+        pdebug(DEBUG_DETAIL, "Data bytes remaining:");
+        pdebug_dump_bytes(DEBUG_DETAIL, slice_data(*remaining_input_buffer), slice_len(*remaining_input_buffer));
+    } else {
+        pdebug(DEBUG_WARN, "Error, %s, found while processing input packet!", plc_tag_decode_error(rc));
+        *remaining_input_buffer = slice_make_err(rc);
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done for protocol layer %s.", protocol->protocol_key);
+
+    return rc;
+}
+
+
+
+
+
+
+
+int protocol_module_init(void)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -299,13 +449,15 @@ int protocol_init(void)
         return rc;
     }
 
+    protocol_list = NULL;
+
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
-void protocol_teardown(void)
+void protocol_module_teardown(void)
 {
     int rc = PLCTAG_STATUS_OK;
 

@@ -34,53 +34,75 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <lib/libplctag.h>
-#include <ab2/cip.h>
+#include <ab2/cip_eip.h>
 #include <ab2/eip.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/lock.h>
 #include <util/mem.h>
 #include <util/mutex.h>
 #include <util/protocol.h>
 #include <util/string.h>
 
-struct cip_s {
+struct cip_eip_s {
     struct protocol_s protocol;
 
     lock_t lock;
     uint16_t tsn;
 
-    eip_p eip;
+    protocol_p eip;
 
     char *host;
     char *path;
 };
 
-#define CIP_STACK "CIP/EIP"
+#define CIP_EIP_STACK "CIP/EIP"
 
 
 static int cip_constructor(attr attribs, protocol_p *protocol);
 static void cip_rc_destroy(void *plc_arg);
 
 
-cip_p cip_get(attr attribs)
+protocol_p cip_cip_get(attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     const char *host = NULL;
     const char *path = NULL;
-    cip_p result = NULL;
+    const char *protocol_key = NULL;
+    cip_eip_p result = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    rc = protocol_get(CIP_STACK, attribs, (protocol_p *)&result, cip_constructor);
+    host = attr_get_str(attribs, "gateway", "");
+    path = attr_get_str(attribs, "path", "");
+
+    /* if the host is empty, error. */
+    if(!host || str_length(host) == 0) {
+        pdebug(DEBUG_WARN, "Gateway must not be empty or null!");
+        return NULL;
+    }
+
+    /* create the protocol key, a copy will be made, so destroy this after use. */
+    protocol_key = str_concat(CIP_EIP_STACK, "/", host, "/", path);
+    if(!protocol_key) {
+        pdebug(DEBUG_WARN, "Unable to allocate protocol key string!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    rc = protocol_get(protocol_key, attribs, (protocol_p *)&result, pccc_constructor);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to get CIP/EIP protocol stack, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Unable to get PCCC/CIP/EIP protocol stack, error %s!", plc_tag_decode_error(rc));
+        mem_free(protocol_key);
         rc_dec(result);
         return NULL;
     }
 
+    /* we are done with the protocol key */
+    mem_free(protocol_key);
+
     pdebug(DEBUG_INFO, "Done.");
 
-    return result;
+    return (protocol_p)result;
 }
 
 
@@ -129,6 +151,7 @@ static int parse_bit_segment(ab_tag_p tag, const char *name, int *name_index);
 static int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, int *name_index);
 static int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, int *name_index);
 
+static slice_t int cip_encode_path(const char *path, bool needs_connection, bool *has_dhp, uint8_t *dhp_dest, slice_t buffer);
 static int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *buffer_index);
 static int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *buffer_index);
 static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, uint8_t *src_node, uint8_t *dest_node);

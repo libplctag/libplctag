@@ -44,28 +44,52 @@ struct protocol_s {
     mutex_p mutex;
     protocol_request_p request_list;
 
-    const char *stack_type;
-    const char *host;
-    const char *path;
+    const char *protocol_key;
+
+    /* called just before adding the new request to the queue. */
+    int (*handle_new_request_callback)(protocol_p protocol, protocol_request_p request);
+
+    /* called just after a request is removed from the queue. */
+    int (*handle_cleanup_request_callback)(protocol_p protocol, protocol_request_p request);
 };
 
 typedef struct protocol_request_s *protocol_request_p;
 struct protocol_request_s {
     struct protocol_request *next;
     void *client;
-    slice_t (*build_request_callback)(slice_t output_buffer, void *client);
-    int (*handle_response_callback)(slice_t input_buffer, void *client);
-    int (*abort_callback)(void *client);
+    int (*build_request_callback)(protocol_p protocol, void *client, slice_t output_buffer, slice_t *used_buffer);
+    int (*process_response_callback)(protocol_p protocol, void *client, slice_t input_buffer, slice_t *used_buffer);
 };
 
-extern int protocol_get(const char *stack_type, attr attribs, protocol_p *protocol, int (*constructor)(attr attribs, protocol_p *protocol));
+extern int protocol_get(const char *protocol_key, attr attribs, protocol_p *protocol, int (*constructor)(const char *protocol_key, attr attribs, protocol_p *protocol));
+extern int protocol_init(protocol_p protocol,
+                         const char *protocol_key,
+                         int (*handle_new_request_callback)(protocol_p protocol, protocol_request_p request),
+                         int (*handle_cleanup_request_callback)(protocol_p protocol, protocol_request_p request));
 extern int protocol_cleanup(protocol_p protocol);
 
+/* request handling from the client. */
 extern int protocol_request_init(protocol_p protocol, protocol_request_p req);
-extern int protocol_request_start(protocol_p protocol, protocol_request_p req, void *client,
-                                  slice_t (*build_request_callback)(slice_t output_buffer, void *client),
-                                  int (*handle_response_callback)(slice_t input_buffer, void *client));
-extern int protocol_request_abort(protocol_p plc, protocol_request_p req);
+extern int protocol_start_request(protocol_p protocol,
+                                  protocol_request_p request,
+                                  void *client,
+                                  int (*build_request_callback)(protocol_p protocol, void *client, slice_t output_buffer, slice_t *used_buffer),
+                                  int (*process_response_callback)(protocol_p protocol, void *client, slice_t input_buffer, slice_t *used_buffer));
+extern int protocol_stop_request(protocol_p plc, protocol_request_p req);
 
+
+
+/* request handling from the protocol layer itself. */
+extern int protocol_build_request(protocol_p protocol,
+                                  slice_t output_buffer,
+                                  slice_t *used_slice,
+                                  int (*build_request_result_callback)(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_output_slice));
+extern int protocol_process_response(protocol_p protocol,
+                                     slice_t input_slice,
+                                     slice_t *used_slice,
+                                     int (*process_response_result_callback)(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_input_slice));
+
+
+/* global module set up and teardown. */
 extern int protocol_module_init(void);
 extern void protocol_module_teardown(void);

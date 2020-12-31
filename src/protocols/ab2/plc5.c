@@ -34,7 +34,7 @@
 #include <stddef.h>
 #include <ab2/plc5.h>
 #include <ab2/common_defs.h>
-#include <ab2/pccc.h>
+#include <ab2/pccc_cip_eip.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/mem.h>
@@ -54,9 +54,10 @@ typedef struct {
     int data_file_sub_elem;
 
     /* plc and request info */
-    pccc_plc_p plc;
-    struct pccc_plc_request_s request;
-    uint16_t tsn; /* transfer sequence number */
+    protocol_p plc;
+    struct pccc_cip_eip_request_s request;
+
+    uint16_t tsn; /* transfer sequence number of the most recent request. */
     uint16_t trans_offset;
 
 } ab2_plc5_tag_t;
@@ -94,17 +95,18 @@ static struct tag_vtable_t plc5_vtable = {
 };
 
 
-static slice_t build_read_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag);
-static int handle_read_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag);
-static slice_t build_write_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag);
-static int handle_write_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag);
+static int build_read_request_callback(protocol_p protocol, void *tag, slice_t output_buffer, slice_t *used_buffer);
+static int handle_read_response_callback(protocol_p protocol, void *tag, slice_t input_buffer, slice_t *used_buffer);
+static int build_write_request_callback(protocol_p protocol, void *tag, slice_t output_buffer, slice_t *used_buffer);
+static int handle_write_response_callback(protocol_p protocol, void *tag, slice_t input_buffer, slice_t *used_buffer);
+
 static int encode_plc5_logical_address(slice_t output, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem);
 
 plc_tag_p ab2_plc5_tag_create(attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = NULL;
-    pccc_plc_p plc = NULL;
+    protocol_p plc = NULL;
     const char *tag_name = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -130,14 +132,14 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
         return NULL;
     }
 
-    plc = pccc_plc_get(attribs);
+    plc = pccc_cip_eip_get(attribs);
     if(!plc) {
         pdebug(DEBUG_WARN, "Unable to get PLC!");
         rc_dec(tag);
         return NULL;
     }
 
-    pccc_plc_request_init(plc, &(tag->request));
+    protocol_request_init(plc, (protocol_request_p)&(tag->request));
 
     /* set the vtable for base functions. */
     tag->base_tag.vtable = &plc5_vtable;
@@ -160,11 +162,13 @@ void plc5_tag_destroy(void *tag_arg)
         return;
     }
 
-    /* delete the base tag parts. */
-    base_tag_destroy((plc_tag_p)tag);
-
     /* get rid of any outstanding timers and events. */
 
+    /* unlink the protocol layers. */
+    tag->plc = rc_dec(tag->plc);
+
+    /* delete the base tag parts. */
+    base_tag_destroy((plc_tag_p)tag);
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -176,7 +180,7 @@ int plc5_tag_abort(plc_tag_p tag_arg)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    pccc_plc_request_abort(tag->plc, &(tag->request));
+    protocol_stop_request(tag->plc, (protocol_request_p)&(tag->request));
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -196,7 +200,7 @@ int plc5_tag_read(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = pccc_plc_request_start(tag->plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
+    rc = protocol_start_request(tag->plc, (protocol_request_p)&(tag->request), tag, build_read_request_callback, handle_read_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
         return rc;
@@ -247,7 +251,7 @@ int plc5_tag_write(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = pccc_plc_request_start(tag->plc, &(tag->request), (void *)tag, build_write_request_callback, handle_write_response_callback);
+    rc = protocol_start_request(tag->plc, &(tag->request), (void *)tag, build_write_request_callback, handle_write_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
         return rc;
@@ -302,10 +306,11 @@ int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_valu
 
 
 
-slice_t build_read_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag_arg)
+int build_read_request_callback(protocol_p protocol, void *tag_arg, slice_t output_buffer, slice_t *used_buffer)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
     int req_off = 0;
     int max_trans_size = 0;
     int num_elems = 0;
@@ -369,67 +374,14 @@ slice_t build_read_request_callback(slice_t output_buffer, pccc_plc_p plc, void 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
         tag->base_tag.status = (int8_t)rc;
-        return slice_make_err(rc);
+        *used_buffer = slice_make_err(rc);
+        return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    *used_buffer = slice_from_slice(output_buffer, 0, req_off);
 
-    return slice_from_slice(output_buffer, 0, req_off);
-}
-
-
-int handle_read_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag_arg)
-{
-    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
-    int rc = PLCTAG_STATUS_OK;
-    int resp_data_size = 0;
-
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    /* check the response */
-    if(slice_len(input_buffer) < 4) {
-        pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    if(slice_get_byte(input_buffer, 0) != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
-        pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)slice_get_byte(input_buffer, 0));
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    if(slice_get_byte(input_buffer, 1) != 0) {
-        pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_plc_decode_error(slice_from_slice(input_buffer, 1, 5)), slice_get_byte(input_buffer, 1));
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    /*
-     * copy the data.
-     *
-     * Note that we start at byte 2.  Bytes 0 and 1 are the CMD and
-     * STS bytes, respectively.
-     */
-    resp_data_size = slice_len(input_buffer) - 2;
-
-    for(int i=0; i < resp_data_size; i++) {
-        tag->base_tag.data[tag->trans_offset + i] = slice_get_byte(input_buffer, i + 2);
-    }
-
-    tag->trans_offset += (uint16_t)(unsigned int)resp_data_size;
-
-    /* do we have more work to do? */
-    if(tag->trans_offset < tag->base_tag.size) {
-        pdebug(DEBUG_DETAIL, "Starting new read request for remaining data.");
-        rc = pccc_plc_request_start(plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error queuing up next request!");
-            return rc;
-        }
-    } else {
-        /* done! */
-        tag->trans_offset = 0;
-        rc = PLCTAG_STATUS_OK;
-        tag->base_tag.status = (int8_t)rc;
-    }
+    pdebug(DEBUG_DETAIL, "Read request packet:");
+    pdebug_dump_bytes(DEBUG_DETAIL, slice_data(*used_buffer), slice_len(*used_buffer));
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -437,10 +389,88 @@ int handle_read_response_callback(slice_t input_buffer, pccc_plc_p plc, void *ta
 }
 
 
-slice_t build_write_request_callback(slice_t output_buffer, pccc_plc_p plc, void *tag_arg)
+int handle_read_response_callback(protocol_p protocol, void *tag_arg, slice_t input_buffer, slice_t *used_buffer)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
+    int resp_data_size = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        /* check the response */
+        if(slice_len(input_buffer) < 4) {
+            pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        if(slice_get_byte(input_buffer, 0) != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
+            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)slice_get_byte(input_buffer, 0));
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        if(slice_get_byte(input_buffer, 1) != 0) {
+            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_plc_decode_error(slice_from_slice(input_buffer, 1, 5)), slice_get_byte(input_buffer, 1));
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL, "Read response packet:");
+        pdebug_dump_bytes(DEBUG_DETAIL, slice_data(input_buffer), slice_len(input_buffer));
+
+        /*
+        * copy the data.
+        *
+        * Note that we start at byte 2.  Bytes 0 and 1 are the CMD and
+        * STS bytes, respectively.
+        */
+        resp_data_size = slice_len(input_buffer) - 2;
+
+        for(int i=0; i < resp_data_size; i++) {
+            tag->base_tag.data[tag->trans_offset + i] = slice_get_byte(input_buffer, i + 2);
+        }
+
+        tag->trans_offset += (uint16_t)(unsigned int)resp_data_size;
+
+        /* do we have more work to do? */
+        if(tag->trans_offset < tag->base_tag.size) {
+            pdebug(DEBUG_DETAIL, "Starting new read request for remaining data.");
+            rc = protocol_start_request(plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error queuing up next request!");
+                break;
+            }
+        } else {
+            /* done! */
+            tag->trans_offset = 0;
+            rc = PLCTAG_STATUS_OK;
+            tag->base_tag.status = (int8_t)rc;
+        }
+    } while(0);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        tag->base_tag.status = rc;
+        *used_buffer = slice_make_err(rc);
+        return rc;
+    }
+
+    /* Clear out the buffer.   This marks that we processed it all. */
+    *used_buffer = input_buffer;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int build_write_request_callback(protocol_p protocol, void *tag_arg, slice_t output_buffer, slice_t *used_buffer)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
     int req_off = 0;
     int encoded_file_start = 0;
     int max_trans_size = 0;
@@ -515,53 +545,76 @@ slice_t build_write_request_callback(slice_t output_buffer, pccc_plc_p plc, void
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
         tag->base_tag.status = (int8_t)rc;
-        return slice_make_err(rc);
+        *used_buffer = slice_make_err(rc);
+        return rc;
     }
+
+    *used_buffer = slice_from_slice(output_buffer, 0, req_off);
+
+    pdebug(DEBUG_DETAIL, "Write request packet:");
+    pdebug_dump_bytes(DEBUG_DETAIL, slice_data(*used_buffer), slice_len(*used_buffer));
 
     pdebug(DEBUG_DETAIL, "Done.");
 
-    return slice_from_slice(output_buffer, 0, req_off);
+    return rc;
 }
 
 
-int handle_write_response_callback(slice_t input_buffer, pccc_plc_p plc, void *tag_arg)
+int handle_write_response_callback(protocol_p protocol, void *tag_arg, slice_t input_buffer, slice_t *used_buffer)
 {
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
+    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    /* check the response */
-    if(slice_len(input_buffer) < 4) {
-        pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    if(slice_get_byte(input_buffer, 0) != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
-        pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)slice_get_byte(input_buffer, 0));
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    if(slice_get_byte(input_buffer, 1) != 0) {
-        pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_plc_decode_error(slice_from_slice(input_buffer, 1, 5)), slice_get_byte(input_buffer, 1));
-        return PLCTAG_ERR_BAD_REPLY;
-    }
-
-    /* do we have more work to do? */
-    if(tag->trans_offset < tag->base_tag.size) {
-        pdebug(DEBUG_DETAIL, "Starting new write request for remaining data.");
-        rc = pccc_plc_request_start(plc, &(tag->request), tag, build_write_request_callback,handle_write_response_callback);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error queuing up next request!");
-            tag->base_tag.status = (int8_t)rc;
-            return rc;
+    do {
+        /* check the response */
+        if(slice_len(input_buffer) < 4) {
+            pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
         }
-    } else {
-        /* done! */
-        tag->trans_offset = 0;
-        rc = PLCTAG_STATUS_OK;
-        tag->base_tag.status = (int8_t)rc;
+
+        if(slice_get_byte(input_buffer, 0) != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
+            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)slice_get_byte(input_buffer, 0));
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        if(slice_get_byte(input_buffer, 1) != 0) {
+            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_plc_decode_error(slice_from_slice(input_buffer, 1, 5)), slice_get_byte(input_buffer, 1));
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL, "Write response packet:");
+        pdebug_dump_bytes(DEBUG_DETAIL, slice_data(input_buffer), slice_len(input_buffer));
+
+        /* do we have more work to do? */
+        if(tag->trans_offset < tag->base_tag.size) {
+            pdebug(DEBUG_DETAIL, "Starting new write request for remaining data.");
+            rc = pccc_plc_request_start(plc, &(tag->request), tag, build_write_request_callback,handle_write_response_callback);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error, %s, queuing up next request!", plc_tag_decode_error(rc));
+                break;
+            }
+        } else {
+            /* done! */
+            tag->trans_offset = 0;
+            rc = PLCTAG_STATUS_OK;
+            tag->base_tag.status = (int8_t)rc;
+        }
+    } while(0);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        tag->base_tag.status = rc;
+        *used_buffer = slice_make_err(rc);
+        return rc;
     }
+
+    /* Clear out the buffer.   This marks that we processed it all. */
+    *used_buffer = input_buffer;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
