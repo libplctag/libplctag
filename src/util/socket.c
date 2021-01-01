@@ -87,10 +87,12 @@ struct sock_t {
     /* next in the list of sockets. */
     struct sock_t *next;
 
-    /* event/callback info */
-    atomic_int event_mask;
-    void *context;
-    void (*callback)(sock_p sock, int events, void *context);
+    /* callbacks for events. */
+    void (*read_ready_callback)(sock_p sock, void *context);
+    void *read_ready_context;
+
+    void (*write_ready_callback)(sock_p sock, void *context);
+    void *write_ready_context;
 };
 
 
@@ -129,9 +131,10 @@ int socket_create(sock_p *sock)
         return PLCTAG_ERR_NO_MEM;
     }
 
-    atomic_int_set(&((*sock)->event_mask), 0);
-    (*sock)->callback = NULL;
-    (*sock)->context = NULL;
+    (*sock)->read_ready_callback = NULL;
+    (*sock)->read_ready_context = NULL;
+    (*sock)->write_ready_callback = NULL;
+    (*sock)->write_ready_context = NULL;
     (*sock)->fd = INVALID_SOCKET;
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -328,11 +331,6 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     critical_block(socket_event_mutex) {
         s->next = socket_list;
         socket_list = s;
-
-        /* call the connection event callback if needed. */
-        if((atomic_int_get(&(s->event_mask)) & SOCKET_EVENT_CONNECTION_READY) && s->callback) {
-            s->callback(s, SOCKET_EVENT_CONNECTION_READY, s->context);
-        }
     }
 
     /* we might need an event. */
@@ -463,7 +461,7 @@ extern int socket_close(sock_p sock)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* If the socket is closed, it does not need to be on the list. */
+    /* remove it from the list and clear the FD sets */
     critical_block(socket_event_mutex) {
         sock_p *walker = &socket_list;
 
@@ -474,6 +472,7 @@ extern int socket_close(sock_p sock)
         if(*walker && *walker == sock) {
             *walker = sock->next;
 
+            /* fix up the iterator. */
             if(global_socket_iterator == sock) {
                 global_socket_iterator = sock->next;
             }
@@ -481,12 +480,18 @@ extern int socket_close(sock_p sock)
 
         sock->next = NULL;
 
-        /* call the connection event callback if needed. */
-        if((atomic_int_get(&(sock->event_mask)) & SOCKET_EVENT_CLOSING) && sock->callback) {
-            sock->callback(sock, SOCKET_EVENT_CLOSING, sock->context);
+        /* clear the FD sets */
+        FD_CLR(sock->fd, &global_read_fds);
+        FD_CLR(sock->fd, &global_write_fds);
+
+        /* force a recalculation of the FD set and max socket if we are the top one. */
+        if(sock->fd >= max_socket_fd) {
+            atomic_int_add(&need_recalculate_socket_fd_sets, 10);
+        } else {
+            /* not as urgent, recalculate eventually. */
+            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
         }
     }
-
 
     /* close the socket fd. */
     if(sock->fd != INVALID_SOCKET) {
@@ -495,9 +500,6 @@ extern int socket_close(sock_p sock)
             rc = PLCTAG_ERR_CLOSE;
         }
     }
-
-    /* force recalculation. */
-    atomic_int_add(&need_recalculate_socket_fd_sets, 10);
 
     sock->fd = INVALID_SOCKET;
 
@@ -530,6 +532,72 @@ int socket_destroy(sock_p *sock)
     return PLCTAG_STATUS_OK;
 }
 
+
+
+int socket_callback_when_read_ready(sock_p sock, void (*callback)(sock_p sock, void *context), void *context)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    critical_block(socket_event_mutex) {
+        /* if we are enabling the event, set the FD and raise the recalc count. */
+        if(callback) {
+            FD_SET(sock->fd, &global_read_fds);
+            max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
+            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+        } else {
+            FD_CLR(sock->fd, &global_read_fds);
+            if(sock->fd >= max_socket_fd) {
+                /* the top FD has possibly changed, force a recalculation. */
+                atomic_int_add(&need_recalculate_socket_fd_sets, 10);
+            } else {
+                /* there was a change, so raise the need for recalculation. */
+                atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+            }
+        }
+
+        sock->read_ready_callback = callback;
+        sock->read_ready_context = context;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+
+int socket_callback_when_write_ready(sock_p sock, void (*callback)(sock_p sock, void *context), void *context)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    critical_block(socket_event_mutex) {
+        /* if we are enabling the event, set the FD and raise the recalc count. */
+        if(callback) {
+            FD_SET(sock->fd, &global_write_fds);
+            max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
+            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+        } else {
+            FD_CLR(sock->fd, &global_write_fds);
+            if(sock->fd >= max_socket_fd) {
+                /* the top FD has possibly changed, force a recalculation. */
+                atomic_int_add(&need_recalculate_socket_fd_sets, 10);
+            } else {
+                /* there was a change, so raise the need for recalculation. */
+                atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+            }
+        }
+
+        sock->write_ready_callback = callback;
+        sock->write_ready_context = context;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
 
 
 
@@ -775,75 +843,6 @@ void destroy_event_wakeup_channel(void)
 }
 
 
-/* socket event handling */
-
-int socket_event_set_callback(sock_p sock, void (*callback)(sock_p sock, int events, void *context), void *context)
-{
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_WARN, "Socket pointer is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* this is critical info, protect it with the global socket mutex. */
-    critical_block(socket_event_mutex) {
-        sock->callback = callback;
-        sock->context = context;
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-
-int socket_event_set_mask(sock_p sock, int event_mask)
-{
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_WARN, "Socket pointer is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* FIXME - Optimize by setting/clearing fd set on actual changes. */
-    atomic_int_set(&(sock->event_mask), event_mask);
-
-    /* we need a recalculation of the fd sets. */
-    atomic_int_add(&need_recalculate_socket_fd_sets, 10);
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-int socket_event_get_mask(sock_p sock, int *event_mask)
-{
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(!sock) {
-        pdebug(DEBUG_WARN, "Socket pointer is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!event_mask) {
-        pdebug(DEBUG_WARN, "Event mask pointer is null!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* Get the value. */
-    *event_mask = atomic_int_get(&(sock->event_mask));
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-
 
 
 void socket_event_loop_wake(void)
@@ -882,22 +881,19 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
             FD_ZERO(&global_write_fds);
 
             for(sock_p tmp_sock = socket_list; tmp_sock; tmp_sock = tmp_sock->next) {
-                int event_mask = atomic_int_get(&(tmp_sock->event_mask));
-
-                if((event_mask & SOCKET_EVENT_ACCEPT_READY) || (event_mask & SOCKET_EVENT_READ_READY)) {
+                if(tmp_sock->read_ready_callback) {
                     FD_SET(tmp_sock->fd, &global_read_fds);
 
                     /* only do this inside the if.   Some events are not part of the fd set. */
                     max_socket_fd = (max_socket_fd < tmp_sock->fd ? tmp_sock->fd : max_socket_fd);
                 }
 
-                if((event_mask & SOCKET_EVENT_CONNECTION_READY) || (event_mask & SOCKET_EVENT_WRITE_READY)) {
+                if(tmp_sock->write_ready_callback) {
                     FD_SET(tmp_sock->fd, &global_write_fds);
 
                     /* only do this inside the if.   Some events are not part of the fd set. */
                     max_socket_fd = (max_socket_fd < tmp_sock->fd ? tmp_sock->fd : max_socket_fd);
                 }
-
             }
 
             /* make sure the wake channel is in the read set. */
@@ -917,8 +913,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     }
 
     /* copy the fd sets safely */
-    pdebug(DEBUG_DETAIL, "Copying the select fd sets.");
-
+    pdebug(DEBUG_DETAIL, "Code the FD sets for safety.");
     critical_block(socket_event_mutex) {
         local_read_fds = global_read_fds;
         local_write_fds = global_write_fds;
@@ -932,6 +927,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     }
 
     if(wait_time_ms > TICKLER_MAX_WAIT_TIME_MS) {
+        pdebug(DEBUG_DETAIL, "Clamping wait time to %d milliseconds.", TICKLER_MAX_WAIT_TIME_MS);
         wait_time_ms = TICKLER_MAX_WAIT_TIME_MS;
     }
 
@@ -940,43 +936,32 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 
     num_signaled_fds = select(max_socket_fd + 1, &local_read_fds, &local_write_fds, NULL, &timeval_wait);
     if(num_signaled_fds > 0) {
+        /* Were we woken up by the waker channel? */
         if(FD_ISSET(wake_fds[0], &local_read_fds)) {
-            uint8_t dummy[32];
+            uint8_t dummy[48];
 
+            /* pull all the data out to clear the status. */
             while(read(wake_fds[0], &dummy[0], sizeof(dummy)) > 0) { /* nothing */ }
 
             num_signaled_fds--;
         }
 
+        /* is there still work to do? */
         if(num_signaled_fds > 0) {
+            /* the callbacks can mutate the socket list and the global FD sets. */
             critical_block(socket_event_mutex) {
+                /* loop, but use an iterator so that sockets can be closed while in the mutex. */
                 for(global_socket_iterator = socket_list; global_socket_iterator; global_socket_iterator = global_socket_iterator->next) {
                     sock_p sock = global_socket_iterator;
-                    int event_mask = atomic_int_get(&(sock->event_mask));
 
-                    if(sock->callback) {
-                        if((event_mask & (SOCKET_EVENT_ACCEPT_READY || SOCKET_EVENT_READ_READY)) && FD_ISSET(sock->fd, &local_read_fds)) {
-                            if(event_mask & SOCKET_EVENT_ACCEPT_READY) {
-                                sock->callback(sock, SOCKET_EVENT_ACCEPT_READY, sock->context);
-                            }
+                    if(sock->read_ready_callback && FD_ISSET(sock->fd, &local_read_fds)) {
+                        pdebug(DEBUG_DETAIL, "Socket %d has data to read.", sock->fd);
+                        sock->read_ready_callback(sock, sock->read_ready_context);
+                    }
 
-                            /* if socket_close() or socket_destroy() were called, then the iterator moved. */
-                            if((global_socket_iterator == sock) && (event_mask & SOCKET_EVENT_READ_READY)) {
-                                sock->callback(sock, SOCKET_EVENT_READ_READY, sock->context);
-                            }
-                        }
-
-                        /* if socket_close() or socket_destroy() were called, then the iterator moved. */
-                        if((global_socket_iterator == sock) && ((event_mask & (SOCKET_EVENT_CONNECTION_READY || SOCKET_EVENT_WRITE_READY)) && FD_ISSET(sock->fd, &local_read_fds))) {
-                            if(event_mask & SOCKET_EVENT_CONNECTION_READY) {
-                                sock->callback(sock, SOCKET_EVENT_CONNECTION_READY, sock->context);
-                            }
-
-                            /* if socket_close() or socket_destroy() were called, then the iterator moved. */
-                            if((global_socket_iterator == sock) && (event_mask & SOCKET_EVENT_WRITE_READY)) {
-                                sock->callback(sock, SOCKET_EVENT_WRITE_READY, sock->context);
-                            }
-                        }
+                    if(sock->write_ready_callback && FD_ISSET(sock->fd, &local_write_fds)) {
+                        pdebug(DEBUG_DETAIL, "Socket %d can write data.", sock->fd);
+                        sock->write_ready_callback(sock, sock->write_ready_context);
                     }
                 }
             }

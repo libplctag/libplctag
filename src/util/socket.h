@@ -62,10 +62,13 @@ typedef enum {
     SOCKET_EVENT_WRITE_READY         = (1 << 4)
 } socket_event_t;
 
+extern int socket_callback_when_read_ready(sock_p, void (*callback)(sock_p sock, void *context), void *context);
+extern int socket_callback_when_write_ready(sock_p, void (*callback)(sock_p sock, void *context), void *context);
 
-extern int socket_event_set_callback(sock_p sock, void (*callback)(sock_p sock, int events, void *context), void *context);
-extern int socket_event_set_mask(sock_p sock, int event_mask);
-extern int socket_event_get_mask(sock_p sock, int *event_mask);
+
+// extern int socket_event_set_callback(sock_p sock, void (*callback)(sock_p sock, int events, void *context), void *context);
+// extern int socket_event_set_mask(sock_p sock, int event_mask);
+// extern int socket_event_get_mask(sock_p sock, int *event_mask);
 
 // extern int socket_bind(sock_p sock, const char *interface, int port);
 // extern int socket_tcp_listen(sock_p sock, int listen_queue_size);
