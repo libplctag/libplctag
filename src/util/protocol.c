@@ -302,6 +302,30 @@ int protocol_stop_request(protocol_p protocol, protocol_request_p req)
 
 
 
+bool protocol_has_requests(protocol_p protocol)
+{
+    bool result = FALSE;
+
+    if(!protocol) {
+        pdebug(DEBUG_WARN, "Protocol pointer is NULL!");
+        return FALSE;
+    }
+
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    critical_block(protocol->mutex) {
+        if(protocol->request_list) {
+            result = TRUE;
+        } else {
+            result = FALSE;
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Starting for protocol layer %s.", protocol->protocol_key);
+
+    return result;
+}
+
 
 int protocol_build_request(protocol_p protocol,
                            slice_t original_output_buffer,

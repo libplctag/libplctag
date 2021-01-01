@@ -75,7 +75,8 @@ extern int protocol_start_request(protocol_p protocol,
                                   void *client,
                                   int (*build_request_callback)(protocol_p protocol, void *client, slice_t output_buffer, slice_t *used_buffer),
                                   int (*process_response_callback)(protocol_p protocol, void *client, slice_t input_buffer, slice_t *used_buffer));
-extern int protocol_stop_request(protocol_p plc, protocol_request_p req);
+extern int protocol_stop_request(protocol_p protocol, protocol_request_p req);
+extern bool protocol_has_requests(protocol_p protocol);
 
 
 
