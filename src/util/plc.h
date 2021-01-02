@@ -38,11 +38,16 @@
 #include <util/attr.h>
 
 
+typedef int64_t plc_request_id;
+
+#define INVALID_REQUEST_ID ((plc_request_id)-1)
+
 struct plc_request_s {
     struct plc_request_s *next;
     void *context;
-    int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *buffer_offset);
-    int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *buffer_offset);
+    plc_request_id req_id;
+    int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
+    int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
 };
 
 typedef struct plc_request_s *plc_request_p;
@@ -50,17 +55,18 @@ typedef struct plc_request_s *plc_request_p;
 
 typedef struct plc_layer_s *plc_layer_p;
 
-extern int plc_init_layer(plc_p plc,
-                                 int layer_index,
-                                 void *context,
-                                 int (*reset)(void *context),
-                                 int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *buffer_offset),
-                                 int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *buffer_offset),
-                                 int (*prepare_request)(void *context, uint8_t *buffer, int buffer_capacity, int *buffer_offset),
-                                 int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *buffer_offset),
-                                 int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *buffer_offset),
-                                 int (*destroy_layer)(void *context)
-                                );
+extern int plc_set_layer(plc_p plc,
+                          int layer_index,
+                          void *context,
+                          int (*initialize)(void *context),
+                          int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
+                          int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
+                          int (*prepare_for_request)(void *context),
+                          int (*prepare_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
+                          int (*prepare_for_response)(void *context),
+                          int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
+                          int (*destroy_layer)(void *context)
+                        );
 
 typedef struct plc_s *plc_p;
 
@@ -73,7 +79,9 @@ extern int plc_set_buffer_size(plc_p plc, int buffer_size);
 extern int plc_start_request(plc_p plc,
                              plc_request_p request,
                              void *client,
-                             int (build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *buffer_offset),
-                             int (*process_response_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *buffer_offset));
+                             int (*build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id),
+                             int (*process_response_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id));
 extern int plc_stop_request(plc_p plc, plc_request_p request);
 
+extern int plc_module_init(void);
+extern void plc_module_teardown(void);
