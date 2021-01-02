@@ -42,6 +42,11 @@ typedef int64_t plc_request_id;
 
 #define INVALID_REQUEST_ID ((plc_request_id)-1)
 
+typedef struct plc_s *plc_p;
+typedef struct plc_layer_s *plc_layer_p;
+typedef struct plc_request_s *plc_request_p;
+
+
 struct plc_request_s {
     struct plc_request_s *next;
     void *context;
@@ -50,10 +55,6 @@ struct plc_request_s {
     int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
 };
 
-typedef struct plc_request_s *plc_request_p;
-
-
-typedef struct plc_layer_s *plc_layer_p;
 
 extern int plc_set_layer(plc_p plc,
                           int layer_index,
@@ -68,19 +69,21 @@ extern int plc_set_layer(plc_p plc,
                           int (*destroy_layer)(void *context)
                         );
 
-typedef struct plc_s *plc_p;
-
 extern int plc_get(const char *plc_type, attr attribs, plc_p *plc, int (*constructor)(plc_p plc, attr attribs));
 extern int plc_init(plc_p plc, int num_layers);
+
 extern int plc_get_idle_timeout(plc_p plc);
 extern int plc_set_idle_timeout(plc_p plc, int timeout_ms);
+
 extern int plc_get_buffer_size(plc_p plc);
 extern int plc_set_buffer_size(plc_p plc, int buffer_size);
+
 extern int plc_start_request(plc_p plc,
                              plc_request_p request,
                              void *client,
-                             int (*build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id),
-                             int (*process_response_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id));
+                             int (*build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num),
+                             int (*process_response_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num));
+
 extern int plc_stop_request(plc_p plc, plc_request_p request);
 
 extern int plc_module_init(void);

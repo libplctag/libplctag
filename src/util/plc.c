@@ -363,7 +363,7 @@ int plc_set_buffer_size(plc_p plc, int buffer_size)
 int plc_start_request(plc_p plc,
                       plc_request_p request,
                       void *client,
-                      int (build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num),
+                      int (*build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num),
                       int (*process_response_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num))
 {
     int rc = PLCTAG_STATUS_OK;
@@ -422,7 +422,31 @@ int plc_start_request(plc_p plc,
 
 
 
-int plc_stop_request(plc_p plc, plc_request_p request);
+int plc_stop_request(plc_p plc, plc_request_p request)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    critical_block(plc->plc_mutex) {
+        /* is the request already on the list?  If not, add it at the end. */
+        plc_request_p *walker = &(plc->request_list);
+
+        while(*walker && *walker != request) {
+            walker = &((*walker)->next);
+        }
+
+        if(*walker) {
+            *walker = request->next;
+        } else {
+            pdebug(DEBUG_WARN, "Request not on the PLC's list.");
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return PLCTAG_STATUS_OK;
+}
 
 
 
@@ -430,6 +454,8 @@ void plc_rc_destroy(void *plc_arg)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_p plc = (plc_p)plc_arg;
+    int64_t timeout = 0;
+    bool is_connected = TRUE;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -440,37 +466,51 @@ void plc_rc_destroy(void *plc_arg)
         while(*walker && *walker != plc) {
             walker = &((*walker)->next);
         }
+
+        if(*walker == plc) {
+            *walker = plc->next;
+            plc->next = NULL;
+        } else {
+            pdebug(DEBUG_WARN, "PLC not found on the list!");
+        }
     }
 
-    if(atomic_bool_get(&(plc->is_connected)) == TRUE) {
-        pdebug(DEBUG_INFO, "PLC is still connected.");
+    /* lock the PLC mutex for some of these operations. */
+    critical_block(plc->plc_mutex) {
+        plc->is_terminating = TRUE;
 
-        /* kick off disconnect. */
-        rc = start_disconnecting_unsafe(plc);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error, %s, while starting disconnect process!");
-        } else {
-            int64_t timeout = time_ms() + DESTROY_DISCONNECT_TIMEOUT_MS;
-            while(atomic_bool_get(&(plc->is_connected)) == TRUE && timeout > time_ms()) {
-                sleep_ms(10);
-            }
+        if(plc->is_connected) {
+            is_connected = TRUE;
+            start_disconnecting_unsafe(plc);
+        }
+    }
 
-            if(atomic_bool_get(&(plc->is_connected)) == TRUE) {
-                pdebug(DEBUG_WARN, "PLC is still connected, closing socket anyway!");
-            }
+    /* loop until we timeout or we are disconnected. */
+    timeout = time_ms() + DESTROY_DISCONNECT_TIMEOUT_MS;
+
+    while(is_connected && timeout > time_ms()) {
+        critical_block(plc->plc_mutex) {
+            is_connected = plc->is_connected;
         }
 
-        socket_close(plc->socket);
-
-        socket_destroy(&(plc->socket));
-        plc->socket = NULL;
+        if(is_connected) {
+            sleep_ms(10);
+        }
     }
 
-    rc = mutex_destroy(&(plc->request_mutex));
+    critical_block(plc->plc_mutex) {
+        /* regardless of why we are past the timeout loop, we close everything up. */
+        socket_close(plc->socket);
+    }
+
+    socket_destroy(&(plc->socket));
+    plc->socket = NULL;
+
+    rc = mutex_destroy(&(plc->plc_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, destroying PLC mutex!", plc_tag_decode_error(rc));
     }
-    plc->request_mutex = NULL;
+    plc->plc_mutex = NULL;
 
     if(plc->request_list) {
         pdebug(DEBUG_WARN, "Request list is not empty!");
@@ -730,7 +770,7 @@ int build_disconnect_request_unsafe(plc_p plc)
         }
 
         /* set up the top level disconnect packet. */
-        rc = plc->layers[plc->current_layer].disconnect(plc->layers[plc->current_layer].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+        rc = plc->layers[plc->current_layer].disconnect(plc->layers[plc->current_layer].context, plc->data, plc->data_capacity, &data_start, &data_end);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error, %s, while preparing layer %d for disconnect!", plc_tag_decode_error(rc), plc->current_layer);
             break;
@@ -1064,7 +1104,7 @@ int build_connect_request_unsafe(plc_p plc)
         }
 
         /* set up the top level connect packet. */
-        rc = plc->layers[plc->current_layer].connect(plc->layers[plc->current_layer].context, plc->data, plc->data_capacity, &data_start, &data_end));
+        rc = plc->layers[plc->current_layer].connect(plc->layers[plc->current_layer].context, plc->data, plc->data_capacity, &data_start, &data_end);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error, %s, while preparing layer %d for connect!", plc_tag_decode_error(rc), plc->current_layer);
             break;
