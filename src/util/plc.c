@@ -85,6 +85,8 @@ struct plc_s {
     sock_p socket;
     bool is_connected;
 
+    int idle_timeout_ms;
+
     uint8_t *data;
     int data_capacity;
     int data_size;
@@ -215,7 +217,7 @@ int plc_set_layer(plc_p plc,
     pdebug(DEBUG_INFO, "Starting.");
 
     if(!plc) {
-        pdebug(DEBUG_WARN, "Layer pointer is null!");
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -240,10 +242,117 @@ int plc_set_layer(plc_p plc,
 
 
 
-int plc_get_idle_timeout(plc_p plc);
-int plc_set_idle_timeout(plc_p plc, int timeout_ms);
-int plc_get_buffer_size(plc_p plc);
-int plc_set_buffer_size(plc_p plc, int buffer_size);
+int plc_get_idle_timeout(plc_p plc)
+{
+    int res = 0;
+
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    critical_block(plc->plc_mutex) {
+        res = plc->idle_timeout_ms;
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return res;
+}
+
+
+
+int plc_set_idle_timeout(plc_p plc, int timeout_ms)
+{
+    int res = 0;
+
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(timeout_ms < 0 || timeout_ms > 5000) {
+        pdebug(DEBUG_WARN, "Illegal timeout value %d!", timeout_ms);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    critical_block(plc->plc_mutex) {
+        plc->idle_timeout_ms = timeout_ms;
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+int plc_get_buffer_size(plc_p plc)
+{
+    int res = 0;
+
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    critical_block(plc->plc_mutex) {
+        res = plc->data_size;
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return res;
+}
+
+
+
+int plc_set_buffer_size(plc_p plc, int buffer_size)
+{
+    int rc = 0;
+
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(buffer_size <= 0 || buffer_size > 65536) {
+        pdebug(DEBUG_WARN, "Illegal buffer size value %d!", buffer_size);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    critical_block(plc->plc_mutex) {
+        plc->data = mem_realloc(plc->data, buffer_size);
+        if(!plc->data) {
+            pdebug(DEBUG_WARN, "Unable to reallocate memory for data buffer!");
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
+
+        plc->data_capacity = buffer_size;
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error setting buffer size!");
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+
 int plc_start_request(plc_p plc,
                              plc_request_p request,
                              void *client,
