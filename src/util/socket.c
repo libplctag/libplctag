@@ -955,11 +955,15 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                     sock_p sock = global_socket_iterator;
 
                     if(sock->read_ready_callback && FD_ISSET(sock->fd, &local_read_fds)) {
+                        FD_CLR(sock->fd, &global_read_fds);
+                        atomic_int_add(&need_recalculate_socket_fd_sets, 1);
                         pdebug(DEBUG_DETAIL, "Socket %d has data to read.", sock->fd);
                         sock->read_ready_callback(sock, sock->read_ready_context);
                     }
 
                     if(sock->write_ready_callback && FD_ISSET(sock->fd, &local_write_fds)) {
+                        FD_CLR(sock->fd, &global_write_fds);
+                        atomic_int_add(&need_recalculate_socket_fd_sets, 1);
                         pdebug(DEBUG_DETAIL, "Socket %d can write data.", sock->fd);
                         sock->write_ready_callback(sock, sock->write_ready_context);
                     }
