@@ -152,6 +152,11 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc, int (*constructor)(p
 
         /* now check if we got a valid reference. */
         if(!plc) {
+            const char *host_args = NULL;
+            char **host_segments = NULL;
+            const char *host = NULL;
+            int port = 0;
+
             /* need to make one. */
             plc = rc_alloc(sizeof(*plc), plc_rc_destroy);
             if(!plc) {
@@ -163,21 +168,76 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc, int (*constructor)(p
             }
 
             plc->key = plc_key;
+            plc_key = NULL;
 
             /* build the layers */
-            rc = constructor(*plc, attribs);
+            rc = constructor(plc, attribs);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Unable to construct PLC %s layers, error %s!", plc_key, plc_tag_decode_error(rc));
+                rc_dec(plc);
                 break;
             }
+
+            /* handle the host and port. Do this after the plc-specific constructor ran as it will set a default port. */
+            host_args = attr_get_str(attribs, "gateway", NULL);
+            port = attr_get_int(attribs, "default_port", 0);
+
+            if(!host_args || str_length(host_args) == 0) {
+                pdebug(DEBUG_WARN, "Host/gateway not provided!");
+                rc_dec(plc);
+                rc = PLCTAG_ERR_BAD_GATEWAY;
+                break;
+            }
+
+            host_segments = str_split(host_args, ":");
+
+            if(!host_segments) {
+                pdebug(DEBUG_WARN, "Unable to split gateway string!");
+                rc_dec(plc);
+                rc = PLCTAG_ERR_BAD_GATEWAY;
+                break;
+            }
+
+            if(!host_segments[0] || str_length(host_segments[0]) == 0) {
+                pdebug(DEBUG_WARN, "Host/gateway not provided!");
+                mem_free(host_segments);
+                rc_dec(plc);
+                return PLCTAG_ERR_BAD_GATEWAY;
+            }
+
+            plc->host = str_dup(host_segments[0]);
+
+            if(host_segments[1] && str_length(host_segments[1])) {
+                rc = str_to_int(host_segments[1], &port);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_WARN, "Unable to parse port number, error %s!", plc_tag_decode_error(rc));
+                    mem_free(host_segments);
+                    rc_dec(plc);
+                    rc = PLCTAG_ERR_BAD_GATEWAY;
+                    break;
+                }
+
+                if(port <= 0 || port > 65535) {
+                    pdebug(DEBUG_WARN, "Port value (%d) must be between 0 and 65535!", port);
+                    mem_free(host_segments);
+                    rc_dec(plc);
+                    rc = PLCTAG_ERR_BAD_GATEWAY;
+                    break;
+                }
+            }
+
+            mem_free(host_segments);
+
+            plc->port = port;
         }
     }
+
+    mem_free(plc_key);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to get or create PLC!");
         return rc;
     }
-
 
     pdebug(DEBUG_INFO, "Done for PLC type %s.", plc_type);
 
