@@ -45,6 +45,7 @@
 #include <util/event_loop.h>
 #include <util/lock.h>
 #include <util/mutex.h>
+#include <util/plc.h>
 #include <util/string.h>
 #include <util/time.h>
 
@@ -156,9 +157,11 @@ void destroy_modules(void)
 
     mb_teardown();
 
-    lib_teardown();
+    plc_module_teardown();
 
     event_loop_teardown();
+
+    lib_teardown();
 
     spin_block(&library_initialization_lock) {
         if(lib_mutex != NULL) {
@@ -223,6 +226,16 @@ int initialize_modules(void)
 
                 pdebug(DEBUG_INFO,"Initialized library modules.");
                 rc = lib_init();
+
+                pdebug(DEBUG_INFO,"Initializing event loop.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = event_loop_init();
+                }
+
+                pdebug(DEBUG_INFO,"Initializing PLC module.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = plc_module_init();
+                }
 
                 pdebug(DEBUG_INFO,"Initializing AB2 module.");
                 if(rc == PLCTAG_STATUS_OK) {
