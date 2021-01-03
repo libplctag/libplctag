@@ -63,7 +63,7 @@ extern int plc_set_layer(plc_p plc,
                           int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
                           int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
                           int (*prepare_for_request)(void *context),
-                          int (*prepare_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
+                          int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                           int (*prepare_for_response)(void *context),
                           int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                           int (*destroy_layer)(void *context)
