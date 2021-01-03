@@ -395,7 +395,9 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
     uint8_t *data = buffer + *data_start;
     int data_size = *data_end - *data_start;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    (void)buffer_capacity;
+
+    pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_num);
 
     do {
         /* check the response */
@@ -566,9 +568,9 @@ int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_ca
     int data_size = *data_end - *data_start;
     uint8_t *data = buffer + *data_start;
 
-    (void)req_num;
+    (void)buffer_capacity;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting for request %" REQ_ID_FMT ".", req_num);
 
     do {
         /* check the response */
@@ -610,7 +612,7 @@ int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_ca
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        tag->base_tag.status = rc;
+        tag->base_tag.status = (int8_t)rc;
         return rc;
     }
 

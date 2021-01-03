@@ -55,9 +55,9 @@ struct plc_layer_s {
     int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
     int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
     int (*prepare_for_request)(void *context);
-    int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num);
+    int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*prepare_for_response)(void *context);
-    int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num);
+    int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*destroy_layer)(void *context);
 };
 
@@ -160,7 +160,6 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
         if(!plc) {
             const char *host_args = NULL;
             char **host_segments = NULL;
-            const char *host = NULL;
             int port = 0;
 
             /* need to make one. */
@@ -261,7 +260,7 @@ int plc_init(plc_p plc, int num_layers, void *context, void (*context_destructor
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
     /* allocate the layer array. */
-    plc->layers = mem_alloc(sizeof(struct plc_layer_s) * num_layers);
+    plc->layers = mem_alloc((int)(unsigned int)sizeof(struct plc_layer_s) * num_layers);
     if(!plc->layers) {
         pdebug(DEBUG_WARN, "Unable to allocate the layer array memory!");
         return PLCTAG_ERR_NO_MEM;
@@ -1677,6 +1676,8 @@ int plc_module_init(void)
 
 void plc_module_teardown(void)
 {
+    int rc = PLCTAG_STATUS_OK;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     if(plc_list != NULL) {

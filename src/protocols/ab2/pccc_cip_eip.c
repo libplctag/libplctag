@@ -104,7 +104,7 @@ plc_p pccc_cip_eip_plc_get(attr attribs)
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return (protocol_p)result;
+    return result;
 }
 
 
@@ -119,7 +119,7 @@ int pccc_cip_eip_get_tsn(plc_p plc, uint16_t *tsn)
     context = plc_get_context(plc);
 
     if(context) {
-        *tsn = atomic_int_add_mask(&(context->tsn), 1, (unsigned int)0xFFFF);
+        *tsn = (uint16_t)atomic_int_add_mask(&(context->tsn), 1, (unsigned int)0xFFFF);
     } else {
         return PLCTAG_ERR_NULL_PTR;
     }

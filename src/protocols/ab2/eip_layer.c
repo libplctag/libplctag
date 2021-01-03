@@ -327,6 +327,8 @@ int eip_layer_prepare_for_response(void *context)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    (void)context;
+
     pdebug(DEBUG_INFO, "Preparing for response.");
 
     pdebug(DEBUG_INFO, "Done.");
@@ -348,6 +350,9 @@ int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
     int offset = 0;
 
     pdebug(DEBUG_INFO, "Processing EIP response.");
+
+    /* there is only one EIP response in a packet. */
+    *req_num = 1;
 
     if(buffer_capacity < EIP_HEADER_SIZE){
         pdebug(DEBUG_DETAIL, "Need more data!");

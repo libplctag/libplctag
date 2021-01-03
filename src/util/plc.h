@@ -34,11 +34,14 @@
 #pragma once
 
 #include <stdint.h>
+#include <inttypes.h>
 #include <lib/libplctag.h>
 #include <util/attr.h>
 
 
 typedef int64_t plc_request_id;
+
+#define REQ_ID_FMT PRId64
 
 #define INVALID_REQUEST_ID ((plc_request_id)-1)
 
