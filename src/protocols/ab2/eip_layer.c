@@ -52,14 +52,18 @@
 #define SESSION_REQUEST_RESPONSE_SIZE (28)
 
 #define REGISTER_SESSION_CMD ((uint16_t)(0x65))
-#define SEND_UNCONNECTED_DATA ((uint16_t)0x6F)
-#define SEND_CONNECTED_DATA ((uint16_t)0x70)
+#define UNREGISTER_SESSION_CMD   ((uint16_t)0x0066)
+
+#define SEND_UNCONNECTED_DATA_CMD ((uint16_t)0x6F)
+#define SEND_CONNECTED_DATA_CMD ((uint16_t)0x70)
 
 
 struct eip_layer_state_s {
     /* session data */
     plc_p plc;
+
     bool is_connected;
+
     uint32_t session_handle;
     uint64_t session_context;
 };
@@ -67,11 +71,11 @@ struct eip_layer_state_s {
 
 static int eip_layer_initialize(void *context);
 static int eip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
-static int eip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
-static int eip_layer_prepare_for_request(void *context);
-static int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
-static int eip_layer_prepare_for_response(void *context);
-static int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
+// static int eip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
+static int eip_layer_prepare_for_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
+static int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
+//static int eip_layer_prepare_for_response(void *context);
+static int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
 static int eip_layer_destroy_layer(void *context);
 
 
@@ -104,7 +108,6 @@ int eip_layer_setup(plc_p plc, int layer_index, attr attribs)
                        /*eip_layer_disconnect*/ NULL,
                        eip_layer_prepare_for_request,
                        eip_layer_build_request,
-                       eip_layer_prepare_for_response,
                        eip_layer_process_response,
                        eip_layer_destroy_layer);
     if(rc != PLCTAG_STATUS_OK) {
@@ -129,6 +132,7 @@ int eip_layer_initialize(void *context)
     pdebug(DEBUG_INFO, "Initializing EIP layer.");
 
     state->is_connected = FALSE;
+
     state->session_handle = 0;
     state->session_context = (uint64_t)rand();
 
@@ -147,13 +151,17 @@ int eip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
 
     pdebug(DEBUG_INFO, "Building EIP connect packet.");
 
+    if(state->is_connected == TRUE) {
+        pdebug(DEBUG_WARN, "Connect called while EIP layer is already connected!");
+        return PLCTAG_ERR_BUSY;
+    }
+
     /* check space */
     if(buffer_capacity < SESSION_REQUEST_SIZE) {
         pdebug(DEBUG_WARN, "Insufficient space to build session request!");
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    *data_start = 0;
     offset = 0;
 
     do {
@@ -200,27 +208,94 @@ int eip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
 
 
 /* NOT USED */
-int eip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end)
+// int eip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end)
+// {
+//     int rc = PLCTAG_STATUS_OK;
+//     struct eip_layer_state_s *state = (struct eip_layer_state_s *)context;
+//     int offset = 0;
+
+//     pdebug(DEBUG_INFO, "Building EIP disconnect packet.");
+
+//     if(state->is_connected == FALSE) {
+//         pdebug(DEBUG_WARN, "Disconnect called while EIP layer is not connected!");
+//         return PLCTAG_ERR_BUSY;
+//     }
+
+//     /* check space */
+//     if(buffer_capacity < SESSION_REQUEST_SIZE) {
+//         pdebug(DEBUG_WARN, "Insufficient space to build session request!");
+//         return PLCTAG_ERR_TOO_SMALL;
+//     }
+
+//     offset = 0;
+
+//     do {
+//         /* command */
+//         TRY_SET_U16_LE(buffer, buffer_capacity, offset, UNREGISTER_SESSION_CMD);
+
+//         /* packet/payload length. */
+//         TRY_SET_U16_LE(buffer, buffer_capacity, offset, 4);
+
+//         /* session handle, session handle from session setup. */
+//         TRY_SET_U32_LE(buffer, buffer_capacity, offset, state->session_handle);
+
+//         /* session status, zero here. */
+//         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
+
+//         /* session context, zero here. */
+//         TRY_SET_U64_LE(buffer, buffer_capacity, offset, 0);
+
+//         /* options, unused, zero here. */
+//         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
+
+//         /* payload */
+
+//         /* requested EIP version. */
+//         TRY_SET_U16_LE(buffer, buffer_capacity, offset, EIP_VERSION);
+
+//         /* requested EIP options. */
+//         TRY_SET_U16_LE(buffer, buffer_capacity, offset, 0);
+
+//         *data_start = offset;
+//         *data_end = offset;
+//     } while(0);
+
+//     if(rc != PLCTAG_STATUS_OK) {
+//         pdebug(DEBUG_WARN, "Error, %s, building session registration request!", plc_tag_decode_error(rc));
+//         return rc;
+//     }
+
+//     pdebug(DEBUG_INFO, "Done.");
+
+//     return rc;
+// }
+
+
+
+
+int eip_layer_prepare_for_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Disconnect EIP layer.");
-
-    pdebug(DEBUG_INFO, "Done.");
-
-    return rc;
-}
-
-
-
-
-int eip_layer_prepare_for_request(void *context)
-{
-    int rc = PLCTAG_STATUS_OK;
+    (void)context;
+    (void)buffer;
+    (void)req_id;
 
     pdebug(DEBUG_INFO, "Preparing layer for building a request.");
 
-    /* Anything to do here? */
+    /* allocate space for the EIP header. */
+    if(buffer_capacity < EIP_HEADER_SIZE) {
+        pdebug(DEBUG_WARN, "Buffer size, (%d) is too small for EIP header (size %d)!", buffer_capacity, EIP_HEADER_SIZE);
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    if(*data_start < EIP_HEADER_SIZE) {
+        *data_start = EIP_HEADER_SIZE;
+    }
+
+    if(*data_end < EIP_HEADER_SIZE) {
+        *data_end = EIP_HEADER_SIZE;
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -230,15 +305,18 @@ int eip_layer_prepare_for_request(void *context)
 
 
 
-int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num)
+int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     struct eip_layer_state_s *state = (struct eip_layer_state_s *)context;
     int offset = 0;
     int payload_size = 0;
-    uint16_t command = SEND_UNCONNECTED_DATA;
+    uint16_t command = SEND_UNCONNECTED_DATA_CMD;
 
     pdebug(DEBUG_INFO, "Building a request.");
+
+    /* set this to something.   Not used at this layer. */
+    *req_id = 1;
 
     /* check to see if we are connected or not. */
     if(!state->is_connected) {
@@ -263,12 +341,12 @@ int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity,
 
         if(address_item_type == 0) {
             /* unconnected message. */
-            command = SEND_UNCONNECTED_DATA;
+            command = SEND_UNCONNECTED_DATA_CMD;
         } else {
-            command = SEND_CONNECTED_DATA;
+            command = SEND_CONNECTED_DATA_CMD;
         }
     } else {
-        command = SEND_UNCONNECTED_DATA;
+        command = SEND_UNCONNECTED_DATA_CMD;
     }
 
     /* fix up data end if this is the first time through. */
@@ -293,7 +371,7 @@ int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity,
         /* session status, zero here. */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
 
-        if(command == SEND_CONNECTED_DATA) {
+        if(command == SEND_CONNECTED_DATA_CMD) {
             /* session context, zero here. */
             TRY_SET_U64_LE(buffer, buffer_capacity, offset, 0);
         } else {
@@ -323,23 +401,23 @@ int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity,
 
 
 
-int eip_layer_prepare_for_response(void *context)
-{
-    int rc = PLCTAG_STATUS_OK;
+// int eip_layer_prepare_for_response(void *context)
+// {
+//     int rc = PLCTAG_STATUS_OK;
 
-    (void)context;
+//     (void)context;
 
-    pdebug(DEBUG_INFO, "Preparing for response.");
+//     pdebug(DEBUG_INFO, "Preparing for response.");
 
-    pdebug(DEBUG_INFO, "Done.");
+//     pdebug(DEBUG_INFO, "Done.");
 
-    return rc;
-}
-
-
+//     return rc;
+// }
 
 
-int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num)
+
+
+int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     struct eip_layer_state_s *state = (struct eip_layer_state_s *)context;
@@ -352,7 +430,7 @@ int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
     pdebug(DEBUG_INFO, "Processing EIP response.");
 
     /* there is only one EIP response in a packet. */
-    *req_num = 1;
+    *req_id = 1;
 
     if(buffer_capacity < EIP_HEADER_SIZE){
         pdebug(DEBUG_DETAIL, "Need more data!");
@@ -394,12 +472,12 @@ int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
             state->is_connected = TRUE;
 
             /* signal that we have consumed the whole payload. */
-            *data_end = (int)(unsigned int)(payload_size + EIP_HEADER_SIZE);
-            *data_start = *data_end;
+            *data_end = buffer_capacity;
+            *data_start = buffer_capacity;
         } else {
             /* other layers will need to process this. */
             *data_start = EIP_HEADER_SIZE;
-            *data_end = (int)(unsigned int)(payload_size + EIP_HEADER_SIZE);
+            *data_end = buffer_capacity;
         }
     } while(0);
 
