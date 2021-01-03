@@ -93,6 +93,8 @@ struct plc_s {
     int data_capacity;
     int data_size;
     int data_offset;
+
+    atomic_int sequence_id;
 };
 
 
@@ -265,11 +267,26 @@ int plc_init(plc_p plc, int num_layers)
 
     plc->num_layers = num_layers;
 
+    atomic_int_set(&(plc->sequence_id), rand());
+
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
     return rc;
 }
 
+
+uint32_t plc_get_sequence_id(plc_p plc)
+{
+    int result = 0;
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    result = atomic_int_add(&(plc->sequence_id), 1);
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return (uint32_t)(unsigned int)result;
+}
 
 int plc_set_layer(plc_p plc,
                   int layer_index,
@@ -427,8 +444,8 @@ int plc_set_buffer_size(plc_p plc, int buffer_size)
 int plc_start_request(plc_p plc,
                       plc_request_p request,
                       void *client,
-                      int (*build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num),
-                      int (*process_response_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, int *req_num))
+                      int (*build_request_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num),
+                      int (*process_response_callback)(void *client, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num))
 {
     int rc = PLCTAG_STATUS_OK;
 
