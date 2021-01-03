@@ -38,15 +38,19 @@
 #include <util/debug.h>
 #include <util/lock.h>
 
-typedef struct { lock_t lock; volatile int val; } atomic_int;
+typedef struct { lock_t lock; volatile unsigned int val; } atomic_int;
 
 #define ATOMIC_INT_STATIC_INIT(n) {0, n}
 
-static inline int atomic_int_get(atomic_int *a)
+static inline unsigned int atomic_int_get(atomic_int *a)
 {
-    int val = 0;
+    unsigned int val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!a) {
+        return UINT_MAX;
+    }
 
     spin_block(&a->lock) {
         val = a->val;
@@ -59,11 +63,15 @@ static inline int atomic_int_get(atomic_int *a)
 
 
 
-static inline int atomic_int_set(atomic_int *a, int new_val)
+static inline unsigned int atomic_int_set(atomic_int *a, unsigned int new_val)
 {
-    int old_val = 0;
+    unsigned int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!a) {
+        return UINT_MAX;
+    }
 
     spin_block(&a->lock) {
         old_val = a->val;
@@ -77,15 +85,20 @@ static inline int atomic_int_set(atomic_int *a, int new_val)
 
 
 
-static inline int atomic_int_add(atomic_int *a, int other)
+static inline unsigned int atomic_int_add(atomic_int *a, int other)
 {
-    int old_val = 0;
+    unsigned int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
     spin_block(&a->lock) {
         old_val = a->val;
-        a->val += other;
+
+        if(other > 0) {
+            a->val += (unsigned int)other;
+        } else {
+            a->val -= (unsigned int)(-other);
+        }
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -94,9 +107,34 @@ static inline int atomic_int_add(atomic_int *a, int other)
 }
 
 
-static inline int atomic_int_and(atomic_int *a, int other)
+
+static inline unsigned int atomic_int_add_mask(atomic_int *a, int addend, unsigned int mask)
 {
-    int old_val = 0;
+    unsigned int old_val = UINT_MAX;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    spin_block(&a->lock) {
+        old_val = a->val;
+
+        if(addend > 0) {
+            a->val += (unsigned int)addend;
+        } else {
+            a->val -= (unsigned int)(-addend);
+        }
+
+        a->val &= mask;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return old_val;
+}
+
+
+static inline unsigned int atomic_int_and(atomic_int *a, int other)
+{
+    unsigned int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -112,9 +150,9 @@ static inline int atomic_int_and(atomic_int *a, int other)
 
 
 
-static inline int atomic_int_or(atomic_int *a, int other)
+static inline unsigned int atomic_int_or(atomic_int *a, int other)
 {
-    int old_val = 0;
+    unsigned int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -130,9 +168,9 @@ static inline int atomic_int_or(atomic_int *a, int other)
 
 
 
-static inline int atomic_int_xor(atomic_int *a, int other)
+static inline unsigned int atomic_int_xor(atomic_int *a, int other)
 {
-    int old_val = 0;
+    unsigned int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -151,16 +189,17 @@ static inline int atomic_int_xor(atomic_int *a, int other)
 
 static inline int atomic_int_get_bit(atomic_int *a, int bit)
 {
-    int val = 0;
+    unsigned int val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    if(bit < 0 || (bit >= (((int)(unsigned int)sizeof(unsigned int)*CHAR_BIT)))) {
+        pdebug(DEBUG_WARN, "Bit must be between 0 and %d!", ((int)(unsigned int)(sizeof(unsigned int)*CHAR_BIT)) - 1);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
     spin_block(&a->lock) {
-        if(bit >= 0 && bit < (((int)(unsigned int)sizeof(int)*CHAR_BIT))) {
-            val = (a->val & (1 << bit)) ? 1 : 0;
-        } else {
-            val = 0;
-        }
+        val = (a->val & (1 << bit)) ? 1 : 0;
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -173,6 +212,11 @@ static inline int atomic_int_set_bit(atomic_int *a, int bit, int new_val)
     int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
+
+    if(bit < 0 || (bit >= (((int)(unsigned int)sizeof(unsigned int)*CHAR_BIT)))) {
+        pdebug(DEBUG_WARN, "Bit must be between 0 and %d!", ((int)(unsigned int)(sizeof(unsigned int)*CHAR_BIT)) - 1);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
 
     spin_block(&a->lock) {
         if(bit >= 0 && bit < (((int)(unsigned int)sizeof(int)*CHAR_BIT))) {
@@ -207,7 +251,7 @@ typedef atomic_int atomic_bool;
 #define ATOMIC_BOOL_STATIC_INIT(n) {0, n}
 
 
-static inline int atomic_bool_get(atomic_bool *ab)
+static inline bool atomic_bool_get(atomic_bool *ab)
 {
     int val = 0;
 
@@ -223,7 +267,7 @@ static inline int atomic_bool_get(atomic_bool *ab)
 }
 
 
-static inline int atomic_bool_set(atomic_bool *ab, bool new_val)
+static inline bool atomic_bool_set(atomic_bool *ab, bool new_val)
 {
     int old_val = 0;
 
