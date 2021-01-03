@@ -62,8 +62,8 @@ typedef enum {
     SOCKET_EVENT_WRITE_READY         = (1 << 4)
 } socket_event_t;
 
-extern int socket_callback_when_read_ready(sock_p, void (*callback)(sock_p sock, void *context), void *context);
-extern int socket_callback_when_write_ready(sock_p, void (*callback)(sock_p sock, void *context), void *context);
+extern int socket_callback_when_read_ready(sock_p, void (*callback)(void *context), void *context);
+extern int socket_callback_when_write_ready(sock_p, void (*callback)(void *context), void *context);
 
 
 // extern int socket_event_set_callback(sock_p sock, void (*callback)(sock_p sock, int events, void *context), void *context);
