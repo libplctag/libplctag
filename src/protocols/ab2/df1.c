@@ -35,13 +35,13 @@
 #include <util/debug.h>
 
 /* tag name parsing. */
-static int parse_df1_file_type(const char **str, pccc_file_t *file_type);
+static int parse_df1_file_type(const char **str, df1_file_t *file_type);
 static int parse_df1_file_num(const char **str, int *file_num);
 static int parse_df1_elem_num(const char **str, int *elem_num);
-static int parse_df1_subelem_num(const char **str, pccc_file_t file_type, int *subelem_num);
+static int parse_df1_subelem_num(const char **str, df1_file_t file_type, int *subelem_num);
 
 
-int df1_parse_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *subelem_num)
+int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file_num, int *elem_num, int *subelem_num)
 {
     int rc = PLCTAG_STATUS_OK;
     const char *p = name;
@@ -78,7 +78,7 @@ int df1_parse_logical_address(const char *name, pccc_file_t *file_type, int *fil
 
 
 
-int parse_df1_file_type(const char **str, pccc_file_t *file_type)
+int parse_df1_file_type(const char **str, df1_file_t *file_type)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -284,7 +284,7 @@ int parse_df1_elem_num(const char **str, int *elem_num)
 
 
 
-int parse_df1_subelem_num(const char **str, pccc_file_t file_type, int *subelem_num)
+int parse_df1_subelem_num(const char **str, df1_file_t file_type, int *subelem_num)
 {
     int tmp = 0;
 

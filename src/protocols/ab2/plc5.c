@@ -34,7 +34,8 @@
 #include <stddef.h>
 #include <ab2/plc5.h>
 #include <ab2/common_defs.h>
-#include <ab2/pccc_cip_eip.h>
+#include <ab2/df1.h>
+#include <ab2/pccc_eip_plc.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/mem.h>
@@ -49,7 +50,7 @@ typedef struct {
     uint16_t elem_count;
 
     /* data type info */
-    pccc_file_t data_file_type;
+    df1_file_t data_file_type;
     int data_file_num;
     int data_file_elem;
     int data_file_sub_elem;
@@ -326,7 +327,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
 
         /* TSN - 16-bit value */
-        tag->tsn = (uint16_t)plc_get_sequence_id(tag->plc);
+        tag->tsn = (uint16_t)pccc_cip_eip_plc_get_tsn(tag->plc);
         TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->tsn);
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, (tag->tsn & 0xFF));
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, ((tag->tsn >> 8) & 0xFF));

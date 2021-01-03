@@ -62,8 +62,8 @@ typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
                PCCC_FILE_STATUS         = 0x84,
                PCCC_FILE_STRING         = 0x8d,
                PCCC_FILE_TIMER          = 0x86
-             } pccc_file_t;
+             } df1_file_t;
 
-extern int df1_parse_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
+extern int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
 extern const char *df1_decode_error(uint8_t *data, int capacity);
 
