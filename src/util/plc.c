@@ -94,7 +94,9 @@ struct plc_s {
     int data_size;
     int data_offset;
 
-    atomic_int sequence_id;
+    /* model-specific data. */
+    void *context;
+    void (*context_destructor)(plc_p plc, void *context);
 };
 
 
@@ -252,7 +254,7 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 
 
 
-int plc_init(plc_p plc, int num_layers)
+int plc_init(plc_p plc, int num_layers, void *context, void (*context_destructor)(plc_p plc, void *context))
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -266,8 +268,8 @@ int plc_init(plc_p plc, int num_layers)
     }
 
     plc->num_layers = num_layers;
-
-    atomic_int_set(&(plc->sequence_id), rand());
+    plc->context = context;
+    plc->context_destructor = context_destructor;
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
@@ -275,18 +277,6 @@ int plc_init(plc_p plc, int num_layers)
 }
 
 
-uint32_t plc_get_sequence_id(plc_p plc)
-{
-    int result = 0;
-
-    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
-
-    result = atomic_int_add(&(plc->sequence_id), 1);
-
-    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
-
-    return (uint32_t)(unsigned int)result;
-}
 
 int plc_set_layer(plc_p plc,
                   int layer_index,
@@ -328,6 +318,26 @@ int plc_set_layer(plc_p plc,
     return PLCTAG_STATUS_OK;
 }
 
+
+void *plc_get_context(plc_p plc)
+{
+    void *res = NULL;
+
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return NULL;
+    }
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    critical_block(plc->plc_mutex) {
+        res = plc->context;
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return res;
+}
 
 
 int plc_get_idle_timeout(plc_p plc)
@@ -577,6 +587,17 @@ void plc_rc_destroy(void *plc_arg)
         if(is_connected) {
             sleep_ms(10);
         }
+    }
+
+    /* if there is local context, destroy it. */
+    if(plc->context) {
+        if(plc->context_destructor) {
+            plc->context_destructor(plc, plc->context);
+        } else {
+            mem_free(plc->context);
+        }
+
+        plc->context = NULL;
     }
 
     critical_block(plc->plc_mutex) {

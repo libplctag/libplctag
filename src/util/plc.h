@@ -55,6 +55,8 @@ struct plc_request_s {
     int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
 };
 
+extern int plc_get(const char *plc_type, attr attribs, plc_p *plc, int (*constructor)(plc_p plc, attr attribs));
+extern int plc_init(plc_p plc, int num_layers, void *context, void (*context_destructor)(plc_p plc, void *context));
 
 extern int plc_set_layer(plc_p plc,
                           int layer_index,
@@ -69,10 +71,7 @@ extern int plc_set_layer(plc_p plc,
                           int (*destroy_layer)(void *context)
                         );
 
-extern int plc_get(const char *plc_type, attr attribs, plc_p *plc, int (*constructor)(plc_p plc, attr attribs));
-extern int plc_init(plc_p plc, int num_layers);
-
-extern uint32_t plc_get_sequence_id(plc_p plc);
+extern void *plc_get_context(plc_p plc);
 
 extern int plc_get_idle_timeout(plc_p plc);
 extern int plc_set_idle_timeout(plc_p plc, int timeout_ms);

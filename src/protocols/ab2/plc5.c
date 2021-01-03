@@ -430,14 +430,14 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
 
         for(int i=0; i < resp_data_size; i++) {
             tag->base_tag.data[tag->trans_offset + i] = data[i + 4];
-        4
+        }
 
         tag->trans_offset += (uint16_t)(unsigned int)resp_data_size;
 
         /* do we have more work to do? */
         if(tag->trans_offset < tag->base_tag.size) {
             pdebug(DEBUG_DETAIL, "Starting new read request for remaining data.");
-            rc = plc_start_request(plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
+            rc = plc_start_request(tag->plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error queuing up next request!");
                 break;
@@ -486,7 +486,12 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
 
         /* TSN - 16-bit value */
-        tag->tsn = (uint16_t)plc_get_sequence_id(plc);
+        rc = pccc_cip_eip_plc_get_tsn(tag->plc, &(tag->tsn));
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to get TSN for request, error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
         TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->tsn);
 
         /* PLC5 read function. */
@@ -535,6 +540,9 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
         /* update the amount transfered. */
         tag->trans_offset += (uint16_t)(unsigned int)trans_size;
 
+        pdebug(DEBUG_DETAIL, "Write request packet:");
+        pdebug_dump_bytes(DEBUG_DETAIL, buffer + *data_start, req_off - *data_start);
+
         /* we are done, mark the packet space as used. */
         *data_start = *data_end = req_off;
     } while(0);
@@ -542,14 +550,8 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
         tag->base_tag.status = (int8_t)rc;
-        *used_buffer = slice_make_err(rc);
         return rc;
     }
-
-    *used_buffer = slice_from_slice(output_buffer, 0, req_off);
-
-    pdebug(DEBUG_DETAIL, "Write request packet:");
-    pdebug_dump_bytes(DEBUG_DETAIL, slice_data(*used_buffer), slice_len(*used_buffer));
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -609,7 +611,6 @@ int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_ca
 
     if(rc != PLCTAG_STATUS_OK) {
         tag->base_tag.status = rc;
-        *used_buffer = slice_make_err(rc);
         return rc;
     }
 

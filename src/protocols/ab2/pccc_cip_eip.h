@@ -54,7 +54,7 @@
 
 extern plc_p pccc_cip_eip_plc_get(attr attribs);
 
-// extern uint16_t pccc_cip_eip_get_tsn(protocol_p plc);
+extern int pccc_cip_eip_plc_get_tsn(plc_p plc, uint16_t *tsn);
 
 typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
                PCCC_FILE_ASCII          = 0x8e,
