@@ -77,5 +77,5 @@ typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
              } pccc_file_t;
 
 extern int pccc_parse_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
-extern const char *pccc_decode_error(slice_t err);
+extern const char *pccc_decode_error(uint8_t *data, int capacity);
 

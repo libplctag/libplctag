@@ -34,7 +34,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <lib/libplctag.h>
-#include <ab2/eip.h>
+#include <ab2/eip_layer.h>
 #include <ab2/pccc_cip_eip.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
@@ -748,17 +748,22 @@ int parse_pccc_subelem_num(const char **str, pccc_file_t file_type, int *subelem
 
 
 
-const char *pccc_decode_error(slice_t err)
+const char *pccc_decode_error(uint8_t *data, int capacity)
 {
     unsigned int error = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    error = slice_get_byte(err, 0);
+    error = data[0];
 
     /* extended error? */
     if(error == 0xF0) {
-        error = (unsigned int)slice_get_byte(err, 3) | (unsigned int)(slice_get_byte(err, 4) << 8);
+        if(capacity < 5) {
+            pdebug(DEBUG_WARN, "Unable to get additional error status, no capacity!");
+            return "Error translating PCCC error!";
+        }
+
+        error = (unsigned int)data[3] | (data[4] << 8);
     }
 
     switch(error) {
