@@ -34,10 +34,8 @@
  #pragma once
 
 #include <stdint.h>
-#include <util/atomic_int.h>
 #include <util/attr.h>
-#include <util/protocol.h>
-#include <util/slice.h>
+#include <util/plc.h>
 
 #define PCCC_CMD_OK ((uint8_t)(0x40))
 #define PCCC_TYPED_CMD ((uint8_t)(0x0F))
@@ -48,15 +46,15 @@
 #define LIBPLCTAG_VENDOR_SN ((uint32_t)0x21504345)  /* the string !PCE */
 
 
-typedef struct pccc_cip_eip_s *pccc_cip_eip_p;
-struct pccc_cip_eip_request_s {
-    struct protocol_request_s protocol_request;
-};
+// typedef struct pccc_cip_eip_s *pccc_cip_eip_p;
+// struct pccc_cip_eip_request_s {
+//     struct protocol_request_s protocol_request;
+// };
 
 
-extern protocol_p pccc_cip_eip_get(attr attribs);
+extern plc_p pccc_cip_eip_plc_get(attr attribs);
 
-extern uint16_t pccc_cip_eip_get_tsn(protocol_p plc);
+// extern uint16_t pccc_cip_eip_get_tsn(protocol_p plc);
 
 typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
                PCCC_FILE_ASCII          = 0x8e,

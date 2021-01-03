@@ -34,7 +34,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <lib/libplctag.h>
-#include <ab2/cip_eip.h>
+#include <ab2/eip.h>
 #include <ab2/pccc_cip_eip.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
@@ -45,37 +45,37 @@
 #include <util/string.h>
 
 
-struct pccc_cip_eip_s {
-    struct protocol_s protocol;
+// struct pccc_cip_eip_s {
+//     struct protocol_s protocol;
 
-    lock_t lock;
-    uint16_t tsn;
+//     lock_t lock;
+//     uint16_t tsn;
 
-    atomic_int requests_in_flight;
+//     atomic_int requests_in_flight;
 
-    /* a reference to the CIP protocol layer. */
-    protocol_p cip;
-    struct pccc_cip_eip_request_s cip_request;
+//     /* a reference to the CIP protocol layer. */
+//     protocol_p cip;
+//     struct pccc_cip_eip_request_s cip_request;
 
-    /* we might be pointed at a DH+ node. */
-    int dhp_dest_node;
-};
+//     /* we might be pointed at a DH+ node. */
+//     int dhp_dest_node;
+// };
 
-#define PCCC_CIP_EIP_STACK "PCCC/CIP/EIP"
+#define PCCC_CIP_EIP_STACK "PCCC+CIP+EIP"
 
 
-static int pccc_constructor(const char *protocol_key, attr attribs, protocol_p *protocol);
-static void pccc_rc_destroy(void *plc_arg);
+static int pccc_constructor(plc_p plc, attr attribs);
+// static void pccc_rc_destroy(void *plc_arg);
 
-/* calls to handle requests to this protocol layer. */
-static int new_pccc_request_callback(protocol_p protocol, protocol_request_p request);
-static int cleanup_pccc_request_callback(protocol_p protocol, protocol_request_p request);
-static int build_pccc_request_result_callback(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_output_slice);
-static int process_response_result_callback(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_input_slice);
+// /* calls to handle requests to this protocol layer. */
+// static int new_pccc_request_callback(protocol_p protocol, protocol_request_p request);
+// static int cleanup_pccc_request_callback(protocol_p protocol, protocol_request_p request);
+// static int build_pccc_request_result_callback(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_output_slice);
+// static int process_response_result_callback(protocol_p protocol, protocol_request_p request, int status, slice_t used_slice, slice_t *new_input_slice);
 
-/* calls to handle requests queued for the next protocol layer */
-static int build_cip_request_callback(protocol_p protocol, void *client, slice_t output_buffer, slice_t *used_buffer);
-static int handle_cip_response_callback(protocol_p protocol, void *client, slice_t input_buffer, slice_t *used_buffer);
+// /* calls to handle requests queued for the next protocol layer */
+// static int build_cip_request_callback(protocol_p protocol, void *client, slice_t output_buffer, slice_t *used_buffer);
+// static int handle_cip_response_callback(protocol_p protocol, void *client, slice_t input_buffer, slice_t *used_buffer);
 
 /* tag name parsing. */
 static int parse_pccc_file_type(const char **str, pccc_file_t *file_type);
@@ -84,42 +84,18 @@ static int parse_pccc_elem_num(const char **str, int *elem_num);
 static int parse_pccc_subelem_num(const char **str, pccc_file_t file_type, int *subelem_num);
 
 
-protocol_p pccc_cip_eip_get(attr attribs)
+plc_p pccc_cip_eip_plc_get(attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
-    const char *host = NULL;
-    const char *path = NULL;
-    const char *protocol_key = NULL;
-    pccc_cip_eip_p result = NULL;
+    plc_p result = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    host = attr_get_str(attribs, "gateway", "");
-    path = attr_get_str(attribs, "path", "");
-
-    /* if the host is empty, error. */
-    if(!host || str_length(host) == 0) {
-        pdebug(DEBUG_WARN, "Gateway must not be empty or null!");
-        return NULL;
-    }
-
-    /* create the protocol key, a copy will be made, so destroy this after use. */
-    protocol_key = str_concat(PCCC_CIP_EIP_STACK, "/", host, "/", path);
-    if(!protocol_key) {
-        pdebug(DEBUG_WARN, "Unable to allocate protocol key string!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    rc = protocol_get(protocol_key, attribs, (protocol_p *)&result, pccc_constructor);
+    rc = plc_get(PCCC_CIP_EIP_STACK, attribs, &result, pccc_constructor);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to get PCCC/CIP/EIP protocol stack, error %s!", plc_tag_decode_error(rc));
-        mem_free(protocol_key);
-        rc_dec(result);
         return NULL;
     }
-
-    /* we are done with the protocol key */
-    mem_free(protocol_key);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -127,72 +103,41 @@ protocol_p pccc_cip_eip_get(attr attribs)
 }
 
 
-uint16_t pccc_cip_eip_get_tsn(protocol_p plc_arg)
-{
-    pccc_cip_eip_p plc = (pccc_cip_eip_p)plc_arg;
-    uint16_t res = 0;
+// uint16_t pccc_cip_eip_get_tsn(protocol_p plc_arg)
+// {
+//     pccc_cip_eip_p plc = (pccc_cip_eip_p)plc_arg;
+//     uint16_t res = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+//     pdebug(DEBUG_DETAIL, "Starting.");
 
-    spin_block(&(plc->lock)) {
-        plc->tsn = (plc->tsn == 0xFFFF) ? 0: (plc->tsn+1);
-        res = plc->tsn;
-    }
+//     spin_block(&(plc->lock)) {
+//         plc->tsn = (plc->tsn == 0xFFFF) ? 0: (plc->tsn+1);
+//         res = plc->tsn;
+//     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+//     pdebug(DEBUG_DETAIL, "Done.");
 
-    return res;
-}
+//     return res;
+// }
 
 
 
-int pccc_constructor(const char *protocol_key, attr attribs, protocol_p *protocol)
+int pccc_constructor(plc_p plc, attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
-    pccc_cip_eip_p result = NULL;
+    void *
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    result = (pccc_cip_eip_p)rc_alloc(sizeof(*result), pccc_rc_destroy);
-    if(result) {
-        rc = protocol_init(result, protocol_key, new_pccc_request_callback, cleanup_pccc_request_callback);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to initialize new protocol, error %s!", plc_tag_decode_error(rc));
-            rc_dec(result);
-            return rc;
-        }
-
-        /* set up the request for the next level down */
-        rc = protocol_request_init((protocol_p)result, (protocol_request_p)&(result->cip_request));
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to initialize protocol request, error %s!", plc_tag_decode_error(rc));
-            rc_dec(result);
-            return rc;
-        }
-
-        /* TODO get the next protocol layer */
-        result->cip = cip_eip_get(attribs);
-        if(!result->cip) {
-            pdebug(DEBUG_WARN, "Unable to create next protocol layer for CIP!");
-            rc_dec(result);
-            return PLCTAG_ERR_BAD_CONNECTION;
-        }
-
-        /* is this DH+? */
-        result->dhp_dest_node = cip_eip_get_dhp_dest(result->cip);
-
-        /* pick a transmission sequence number. */
-        result->tsn = (uint16_t)((unsigned int)rand() % 0xFFFF);
-
-        /* set the number of requests */
-        atomic_int_set(&(result->requests_in_flight), 0);
-
-        *protocol = (protocol_p)result;
-    } else {
-        pdebug(DEBUG_WARN, "Unable to allocate PCCC/CIP/EIP stack!");
-        *protocol = NULL;
-        return PLCTAG_ERR_NO_MEM;
+    /* start building up the layers. */
+    rc = plc_init(plc, 3); /* 3 layers */
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to initialize the PLC to take the layers, error %s!", plc_tag_decode_error(rc));
+        return rc;
     }
+
+    /* first layer, EIP */
+
 
     pdebug(DEBUG_INFO, "Done.");
 
