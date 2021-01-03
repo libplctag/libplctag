@@ -38,6 +38,7 @@
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/mem.h>
+#include <util/plc.h>
 #include <util/string.h>
 
 
@@ -54,8 +55,8 @@ typedef struct {
     int data_file_sub_elem;
 
     /* plc and request info */
-    protocol_p plc;
-    struct pccc_cip_eip_request_s request;
+    plc_p plc;
+    struct plc_request_s request;
 
     uint16_t tsn; /* transfer sequence number of the most recent request. */
     uint16_t trans_offset;
@@ -95,18 +96,18 @@ static struct tag_vtable_t plc5_vtable = {
 };
 
 
-static int build_read_request_callback(protocol_p protocol, void *tag, slice_t output_buffer, slice_t *used_buffer);
-static int handle_read_response_callback(protocol_p protocol, void *tag, slice_t input_buffer, slice_t *used_buffer);
-static int build_write_request_callback(protocol_p protocol, void *tag, slice_t output_buffer, slice_t *used_buffer);
-static int handle_write_response_callback(protocol_p protocol, void *tag, slice_t input_buffer, slice_t *used_buffer);
+static int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
+static int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
+static int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
+static int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
 
-static int encode_plc5_logical_address(slice_t output, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem);
+static int encode_plc5_logical_address(uint8_t *buffer, int buffer_capacity, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem);
 
 plc_tag_p ab2_plc5_tag_create(attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = NULL;
-    protocol_p plc = NULL;
+    plc_p plc = NULL;
     const char *tag_name = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -125,21 +126,19 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
         return NULL;
     }
 
-    rc = pccc_plc_parse_logical_address(tag_name, &(tag->data_file_type),&(tag->data_file_num), &(tag->data_file_elem), &(tag->data_file_sub_elem));
+    rc = pccc_parse_logical_address(tag_name, &(tag->data_file_type),&(tag->data_file_num), &(tag->data_file_elem), &(tag->data_file_sub_elem));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Malformed data file name!");
         rc_dec(tag);
         return NULL;
     }
 
-    plc = pccc_cip_eip_get(attribs);
+    plc = pccc_cip_eip_plc_get(attribs);
     if(!plc) {
         pdebug(DEBUG_WARN, "Unable to get PLC!");
         rc_dec(tag);
         return NULL;
     }
-
-    protocol_request_init(plc, (protocol_request_p)&(tag->request));
 
     /* set the vtable for base functions. */
     tag->base_tag.vtable = &plc5_vtable;
@@ -180,7 +179,7 @@ int plc5_tag_abort(plc_tag_p tag_arg)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    protocol_stop_request(tag->plc, (protocol_request_p)&(tag->request));
+    plc_stop_request(tag->plc, &(tag->request));
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -200,7 +199,7 @@ int plc5_tag_read(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = protocol_start_request(tag->plc, (protocol_request_p)&(tag->request), tag, build_read_request_callback, handle_read_response_callback);
+    rc = plc_start_request(tag->plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
         return rc;
@@ -251,7 +250,7 @@ int plc5_tag_write(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    rc = protocol_start_request(tag->plc, &(tag->request), (void *)tag, build_write_request_callback, handle_write_response_callback);
+    rc = plc_start_request(tag->plc, &(tag->request), (void *)tag, build_write_request_callback, handle_write_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
         return rc;
@@ -302,19 +301,18 @@ int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_valu
     return PLCTAG_ERR_UNSUPPORTED;
 }
 
-#define TRY_SET_BYTE(out, off, val) rc = slice_set_byte(out, off, (uint8_t)(val)); if(rc != PLCTAG_STATUS_OK) break; else (off)++
 
 
-
-int build_read_request_callback(protocol_p protocol, void *tag_arg, slice_t output_buffer, slice_t *used_buffer)
+int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
-    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
-    int req_off = 0;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
+    int req_off = *data_start;
     int max_trans_size = 0;
     int num_elems = 0;
     int trans_size = 0;
+
+    (void)req_num;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -322,29 +320,30 @@ int build_read_request_callback(protocol_p protocol, void *tag_arg, slice_t outp
 
     do {
         /* PCCC command type byte */
-        TRY_SET_BYTE(output_buffer, req_off, PCCC_TYPED_CMD);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PCCC_TYPED_CMD);
 
         /* status, always zero */
-        TRY_SET_BYTE(output_buffer, req_off, 0);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
 
         /* TSN - 16-bit value */
-        tag->tsn = pccc_plc_get_tsn(plc);
-        TRY_SET_BYTE(output_buffer, req_off, (tag->tsn & 0xFF));
-        TRY_SET_BYTE(output_buffer, req_off, ((tag->tsn >> 8) & 0xFF));
+        tag->tsn = (uint16_t)plc_get_sequence_id(tag->plc);
+        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->tsn);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, (tag->tsn & 0xFF));
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, ((tag->tsn >> 8) & 0xFF));
 
         /* PLC5 read function. */
-        TRY_SET_BYTE(output_buffer, req_off, PLC5_RANGE_READ_FUNC);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PLC5_RANGE_READ_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_BYTE(output_buffer, req_off, ((tag->trans_offset/2) & 0xFF));
-        TRY_SET_BYTE(output_buffer, req_off, (((tag->trans_offset/2) >> 8) & 0xFF));
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, ((tag->trans_offset/2) & 0xFF));
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, (((tag->trans_offset/2) >> 8) & 0xFF));
 
         /* total transfer size in words. */
-        TRY_SET_BYTE(output_buffer, req_off, ((unsigned int)(tag->base_tag.size/2) & 0xFF));
-        TRY_SET_BYTE(output_buffer, req_off, (((unsigned int)(tag->base_tag.size/2) >> 8) & 0xFF));
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, ((unsigned int)(tag->base_tag.size/2) & 0xFF));
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, (((unsigned int)(tag->base_tag.size/2) >> 8) & 0xFF));
 
         /* set the logical PLC-5 address. */
-        rc = encode_plc5_logical_address(output_buffer, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = encode_plc5_logical_address(buffer, buffer_capacity, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size in bytes. */
@@ -368,20 +367,19 @@ int build_read_request_callback(protocol_p protocol, void *tag_arg, slice_t outp
 
         pdebug(DEBUG_DETAIL, "Actual bytes to transfer %d.", trans_size);
 
-        TRY_SET_BYTE(output_buffer, req_off, trans_size);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, trans_size);
+
+        *data_end = req_off;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
         tag->base_tag.status = (int8_t)rc;
-        *used_buffer = slice_make_err(rc);
         return rc;
     }
 
-    *used_buffer = slice_from_slice(output_buffer, 0, req_off);
-
     pdebug(DEBUG_DETAIL, "Read request packet:");
-    pdebug_dump_bytes(DEBUG_DETAIL, slice_data(*used_buffer), slice_len(*used_buffer));
+    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *data_start, *data_end - *data_start);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -389,56 +387,57 @@ int build_read_request_callback(protocol_p protocol, void *tag_arg, slice_t outp
 }
 
 
-int handle_read_response_callback(protocol_p protocol, void *tag_arg, slice_t input_buffer, slice_t *used_buffer)
+int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
-    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
     int resp_data_size = 0;
+    uint8_t *data = buffer + *data_start;
+    int data_size = *data_end - *data_start;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
     do {
         /* check the response */
-        if(slice_len(input_buffer) < 4) {
+        if(data_size < 4) {
             pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        if(slice_get_byte(input_buffer, 0) != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
-            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)slice_get_byte(input_buffer, 0));
+        if(data[0] != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
+            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)data[0]);
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
 
-        if(slice_get_byte(input_buffer, 1) != 0) {
-            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_plc_decode_error(slice_from_slice(input_buffer, 1, 5)), slice_get_byte(input_buffer, 1));
+        if(data[1] != 0) {
+            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_decode_error(&(data[1]), data_size - 1));
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
 
         pdebug(DEBUG_DETAIL, "Read response packet:");
-        pdebug_dump_bytes(DEBUG_DETAIL, slice_data(input_buffer), slice_len(input_buffer));
+        pdebug_dump_bytes(DEBUG_DETAIL, data, data_size);
 
         /*
         * copy the data.
         *
-        * Note that we start at byte 2.  Bytes 0 and 1 are the CMD and
-        * STS bytes, respectively.
+        * Note that we start at byte 4.  Bytes 0 and 1 are the CMD and
+        * STS bytes, respectively, then we have the TSN.
         */
-        resp_data_size = slice_len(input_buffer) - 2;
+        resp_data_size = data_size - 4;
 
         for(int i=0; i < resp_data_size; i++) {
-            tag->base_tag.data[tag->trans_offset + i] = slice_get_byte(input_buffer, i + 2);
-        }
+            tag->base_tag.data[tag->trans_offset + i] = data[i + 4];
+        4
 
         tag->trans_offset += (uint16_t)(unsigned int)resp_data_size;
 
         /* do we have more work to do? */
         if(tag->trans_offset < tag->base_tag.size) {
             pdebug(DEBUG_DETAIL, "Starting new read request for remaining data.");
-            rc = protocol_start_request(plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
+            rc = plc_start_request(plc, &(tag->request), tag, build_read_request_callback, handle_read_response_callback);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error queuing up next request!");
                 break;
@@ -449,16 +448,15 @@ int handle_read_response_callback(protocol_p protocol, void *tag_arg, slice_t in
             rc = PLCTAG_STATUS_OK;
             tag->base_tag.status = (int8_t)rc;
         }
+
+        *data_start = *data_end;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        tag->base_tag.status = rc;
-        *used_buffer = slice_make_err(rc);
+        pdebug(DEBUG_WARN, "Error, %s, handling read response!", plc_tag_decode_error(rc));
+        tag->base_tag.status = (int8_t)rc;
         return rc;
     }
-
-    /* Clear out the buffer.   This marks that we processed it all. */
-    *used_buffer = input_buffer;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -466,11 +464,10 @@ int handle_read_response_callback(protocol_p protocol, void *tag_arg, slice_t in
 }
 
 
-int build_write_request_callback(protocol_p protocol, void *tag_arg, slice_t output_buffer, slice_t *used_buffer)
+int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
-    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
     int req_off = 0;
     int encoded_file_start = 0;
     int max_trans_size = 0;
@@ -483,30 +480,27 @@ int build_write_request_callback(protocol_p protocol, void *tag_arg, slice_t out
 
     do {
         /* PCCC command type byte */
-        TRY_SET_BYTE(output_buffer, req_off, PCCC_TYPED_CMD);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PCCC_TYPED_CMD);
 
         /* status, always zero */
-        TRY_SET_BYTE(output_buffer, req_off, 0);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
 
         /* TSN - 16-bit value */
-        tag->tsn = pccc_plc_get_tsn(plc);
-        TRY_SET_BYTE(output_buffer, req_off, (tag->tsn & 0xFF));
-        TRY_SET_BYTE(output_buffer, req_off, ((tag->tsn >> 8) & 0xFF));
+        tag->tsn = (uint16_t)plc_get_sequence_id(plc);
+        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->tsn);
 
         /* PLC5 read function. */
-        TRY_SET_BYTE(output_buffer, req_off, PLC5_RANGE_WRITE_FUNC);
+        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PLC5_RANGE_WRITE_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_BYTE(output_buffer, req_off, ((tag->trans_offset/2) & 0xFF));
-        TRY_SET_BYTE(output_buffer, req_off, (((tag->trans_offset/2) >> 8) & 0xFF));
+        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->trans_offset/2);
 
         /* total transfer size in words. */
-        TRY_SET_BYTE(output_buffer, req_off, ((unsigned int)(tag->base_tag.size/2) & 0xFF));
-        TRY_SET_BYTE(output_buffer, req_off, (((unsigned int)(tag->base_tag.size/2) >> 8) & 0xFF));
+        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->base_tag.size/2);
 
         /* set the logical PLC-5 address. */
         encoded_file_start = req_off;
-        rc = encode_plc5_logical_address(output_buffer, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = encode_plc5_logical_address(buffer, buffer_capacity, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size. */
@@ -531,8 +525,8 @@ int build_write_request_callback(protocol_p protocol, void *tag_arg, slice_t out
         pdebug(DEBUG_DETAIL, "Actual bytes to transfer %d.", trans_size);
 
         /* copy the data. */
-        for(int i=0; i < trans_size && rc == PLCTAG_STATUS_OK; i++) {
-            rc = slice_set_byte(output_buffer, req_off, tag->base_tag.data[tag->trans_offset + i]);
+        for(int i=0; i < trans_size; i++) {
+            buffer[req_off] = tag->base_tag.data[tag->trans_offset + i];
             req_off++;
         }
 
@@ -540,6 +534,9 @@ int build_write_request_callback(protocol_p protocol, void *tag_arg, slice_t out
 
         /* update the amount transfered. */
         tag->trans_offset += (uint16_t)(unsigned int)trans_size;
+
+        /* we are done, mark the packet space as used. */
+        *data_start = *data_end = req_off;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -560,41 +557,44 @@ int build_write_request_callback(protocol_p protocol, void *tag_arg, slice_t out
 }
 
 
-int handle_write_response_callback(protocol_p protocol, void *tag_arg, slice_t input_buffer, slice_t *used_buffer)
+int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
 {
-    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
-    pccc_cip_eip_p plc = (pccc_cip_eip_p)protocol;
     int rc = PLCTAG_STATUS_OK;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
+    int data_size = *data_end - *data_start;
+    uint8_t *data = buffer + *data_start;
+
+    (void)req_num;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
     do {
         /* check the response */
-        if(slice_len(input_buffer) < 4) {
+        if(data_size < 4) {
             pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        if(slice_get_byte(input_buffer, 0) != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
-            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)slice_get_byte(input_buffer, 0));
+        if(data[0] != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
+            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)data[0]);
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
 
-        if(slice_get_byte(input_buffer, 1) != 0) {
-            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_plc_decode_error(slice_from_slice(input_buffer, 1, 5)), slice_get_byte(input_buffer, 1));
+        if(data[1] != 0) {
+            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_decode_error(&data[1], data_size - 1), (int)(unsigned int)data[1]);
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
 
         pdebug(DEBUG_DETAIL, "Write response packet:");
-        pdebug_dump_bytes(DEBUG_DETAIL, slice_data(input_buffer), slice_len(input_buffer));
+        pdebug_dump_bytes(DEBUG_DETAIL, data, data_size);
 
         /* do we have more work to do? */
         if(tag->trans_offset < tag->base_tag.size) {
             pdebug(DEBUG_DETAIL, "Starting new write request for remaining data.");
-            rc = pccc_plc_request_start(plc, &(tag->request), tag, build_write_request_callback,handle_write_response_callback);
+            rc = plc_start_request(tag->plc, &(tag->request), tag, build_write_request_callback, handle_write_response_callback);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error, %s, queuing up next request!", plc_tag_decode_error(rc));
                 break;
@@ -614,7 +614,7 @@ int handle_write_response_callback(protocol_p protocol, void *tag_arg, slice_t i
     }
 
     /* Clear out the buffer.   This marks that we processed it all. */
-    *used_buffer = input_buffer;
+    *data_start = *data_end;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -622,7 +622,7 @@ int handle_write_response_callback(protocol_p protocol, void *tag_arg, slice_t i
 }
 
 
-int encode_plc5_logical_address(slice_t output, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem)
+int encode_plc5_logical_address(uint8_t *buffer, int buffer_capacity, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -636,37 +636,34 @@ int encode_plc5_logical_address(slice_t output, int *offset, int data_file_num, 
          * 0x06 = 0b0110 = levels 1, and 2.
          */
         if(data_file_sub_elem > 0) {
-            TRY_SET_BYTE(output, *offset, 0x0E);
+            TRY_SET_BYTE(buffer, buffer_capacity, *offset, 0x0E);
         } else {
-            TRY_SET_BYTE(output, *offset, 0x06);
+            TRY_SET_BYTE(buffer, buffer_capacity, *offset, 0x06);
         }
 
         /* add in the data file number. */
-        if(data_file_num <= 254) {
-            TRY_SET_BYTE(output, *offset, (unsigned int)(data_file_num));
+        if(data_file_num <= 0xFE) {
+            TRY_SET_BYTE(buffer, buffer_capacity, *offset, data_file_num);
         } else {
-            TRY_SET_BYTE(output, *offset, 0xFF);
-            TRY_SET_BYTE(output, *offset, (unsigned int)(data_file_num & 0xFF));
-            TRY_SET_BYTE(output, *offset, (unsigned int)((data_file_num >> 8) & 0xFF));
+            TRY_SET_BYTE(buffer, buffer_capacity, *offset, 0xFF);
+            TRY_SET_U16_LE(buffer, buffer_capacity, *offset, data_file_num);
         }
 
         /* add in the element number */
-        if(data_file_elem <= 254) {
-            TRY_SET_BYTE(output, *offset, (unsigned int)(data_file_elem));
+        if(data_file_elem <= 0xFE) {
+            TRY_SET_BYTE(buffer, buffer_capacity, *offset, data_file_elem);
         } else {
-            TRY_SET_BYTE(output, *offset, 0xFF);
-            TRY_SET_BYTE(output, *offset, (unsigned int)(data_file_elem & 0xFF));
-            TRY_SET_BYTE(output, *offset, (unsigned int)((data_file_elem >> 8) & 0xFF));
+            TRY_SET_BYTE(buffer, buffer_capacity, *offset, 0xFF);
+            TRY_SET_U16_LE(buffer, buffer_capacity, *offset, data_file_elem);
         }
 
         /* check to see if we need to put in a subelement. */
         if(data_file_sub_elem >= 0) {
-            if(data_file_sub_elem <= 254) {
-                TRY_SET_BYTE(output, *offset, (unsigned int)(data_file_sub_elem));
+            if(data_file_sub_elem <= 0xFE) {
+                TRY_SET_BYTE(buffer, buffer_capacity, *offset, data_file_sub_elem);
             } else {
-                TRY_SET_BYTE(output, *offset, 0xFF);
-                TRY_SET_BYTE(output, *offset, (unsigned int)(data_file_sub_elem & 0xFF));
-                TRY_SET_BYTE(output, *offset, (unsigned int)((data_file_sub_elem >> 8) & 0xFF));
+                TRY_SET_BYTE(buffer, buffer_capacity, *offset, 0xFF);
+                TRY_SET_U16_LE(buffer, buffer_capacity, *offset, data_file_sub_elem);
             }
         }
     } while(0);
