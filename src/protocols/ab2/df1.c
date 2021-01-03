@@ -31,8 +31,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <ctype.h>
+#include <lib/libplctag.h>
 #include <ab2/df1.h>
 #include <util/debug.h>
+#include <util/string.h>
 
 /* tag name parsing. */
 static int parse_df1_file_type(const char **str, df1_file_t *file_type);
