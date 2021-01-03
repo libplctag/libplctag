@@ -132,7 +132,7 @@ static inline unsigned int atomic_int_add_mask(atomic_int *a, int addend, unsign
 }
 
 
-static inline unsigned int atomic_int_and(atomic_int *a, int other)
+static inline unsigned int atomic_int_and(atomic_int *a, unsigned int other)
 {
     unsigned int old_val = 0;
 
@@ -150,7 +150,7 @@ static inline unsigned int atomic_int_and(atomic_int *a, int other)
 
 
 
-static inline unsigned int atomic_int_or(atomic_int *a, int other)
+static inline unsigned int atomic_int_or(atomic_int *a, unsigned int other)
 {
     unsigned int old_val = 0;
 
@@ -168,7 +168,7 @@ static inline unsigned int atomic_int_or(atomic_int *a, int other)
 
 
 
-static inline unsigned int atomic_int_xor(atomic_int *a, int other)
+static inline unsigned int atomic_int_xor(atomic_int *a, unsigned int other)
 {
     unsigned int old_val = 0;
 
@@ -189,7 +189,7 @@ static inline unsigned int atomic_int_xor(atomic_int *a, int other)
 
 static inline int atomic_int_get_bit(atomic_int *a, int bit)
 {
-    unsigned int val = 0;
+    int val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -219,17 +219,13 @@ static inline int atomic_int_set_bit(atomic_int *a, int bit, int new_val)
     }
 
     spin_block(&a->lock) {
-        if(bit >= 0 && bit < (((int)(unsigned int)sizeof(int)*CHAR_BIT))) {
-            /* save old value */
-            old_val = (a->val & (1 << bit)) ? 1 : 0;
+        /* save old value */
+        old_val = (a->val & ((unsigned int)1 << bit)) ? 1 : 0;
 
-            if(new_val) {
-                a->val |= (1 << bit);
-            } else {
-                a->val &= ~(1 << bit);
-            }
+        if(new_val) {
+            a->val |= ((unsigned int)1 << bit);
         } else {
-            old_val = 0;
+            a->val &= (~((unsigned int)1 << bit));
         }
     }
 
