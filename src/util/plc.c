@@ -116,7 +116,7 @@ static plc_p plc_list = NULL;
 
 
 static void start_idle_timeout_unsafe(plc_p plc);
-static void plc_idle_timeout_callback(timer_p timer, int64_t wake_time, int64_t current_time, void *plc_arg);
+static void plc_idle_timeout_callback(int64_t wake_time, int64_t current_time, void *plc_arg);
 static void reset_plc(plc_p plc);
 static void plc_rc_destroy(void *plc_arg);
 static void dispatch_plc_request_unsafe(plc_p plc);
@@ -294,7 +294,7 @@ int plc_initialize(plc_p plc)
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
     critical_block(plc->plc_mutex) {
-        plc_reset(plc);
+        reset_plc(plc);
     }
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
@@ -412,7 +412,7 @@ int plc_set_context(plc_p plc, void *context, void (*context_destructor)(plc_p p
 
     critical_block(plc->plc_mutex) {
         plc->context = context;
-        plc->context_destructor;
+        plc->context_destructor = context_destructor;
     }
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
@@ -445,7 +445,6 @@ int plc_get_idle_timeout(plc_p plc)
 
 int plc_set_idle_timeout(plc_p plc, int timeout_ms)
 {
-    int rc = PLCTAG_STATUS_OK;
     int res = 0;
 
     if(!plc) {
@@ -453,7 +452,7 @@ int plc_set_idle_timeout(plc_p plc, int timeout_ms)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(timeout_ms < 0 || timeout_ms > 5000) {
+    if(timeout_ms < 0 || timeout_ms > 5000) { /* FIXME - MAGIC constant */
         pdebug(DEBUG_WARN, "Illegal timeout value %d!", timeout_ms);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
@@ -589,7 +588,7 @@ int plc_start_request(plc_p plc,
         }
     }
 
-    if(rc = PLCTAG_STATUS_OK) {
+    if(rc == PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
     } else {
         pdebug(DEBUG_INFO, "Done with error %s for PLC %s.", plc_tag_decode_error(rc), plc->key);
@@ -624,7 +623,7 @@ int plc_stop_request(plc_p plc, plc_request_p request)
         }
     }
 
-    if(rc = PLCTAG_STATUS_OK) {
+    if(rc == PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
     } else {
         pdebug(DEBUG_INFO, "Done with error %s for PLC %s.", plc_tag_decode_error(rc), plc->key);
@@ -649,10 +648,11 @@ void start_idle_timeout_unsafe(plc_p plc)
 
 
 
-void plc_idle_timeout_callback(timer_p timer, int64_t wake_time, int64_t current_time, void *plc_arg)
+void plc_idle_timeout_callback(int64_t wake_time, int64_t current_time, void *plc_arg)
 {
-    int rc = PLCTAG_STATUS_OK;
     plc_p plc = (plc_p)plc_arg;
+
+    (void)wake_time;
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
