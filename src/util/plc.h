@@ -75,7 +75,7 @@ extern int plc_set_layer(plc_p plc,
                         );
 
 extern void *plc_get_context(plc_p plc);
-extern void *plc_set_context(plc_p plc, void *context, void (*context_destructor)(plc_p plc, void *context));
+extern int plc_set_context(plc_p plc, void *context, void (*context_destructor)(plc_p plc, void *context));
 
 extern int plc_get_idle_timeout(plc_p plc);
 extern int plc_set_idle_timeout(plc_p plc, int timeout_ms);
@@ -98,49 +98,49 @@ extern void plc_module_teardown(void);
 
 /* handy definitions. */
 
-#define TRY_GET_BYTE(buffer, capacity, offset, val) if(offset < capacity) { (val) = buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++)
+#define TRY_GET_BYTE(buffer, capacity, offset, val) if(offset < capacity) { (val) = buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++
 
 #define TRY_GET_U16_LE(buffer, capacity, offset, val) \
-        if(offset < capacity) { (val) = (uint16_t)buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint16_t)(((unsigned int)buffer[offset]) << (unsigned int)8); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++)
+        if(offset < capacity) { (val) = (uint16_t)buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint16_t)(((unsigned int)buffer[offset]) << (unsigned int)8); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++
 
 #define TRY_GET_U32_LE(buffer, capacity, offset, val) \
-        if(offset < capacity) { (val) = (uint32_t)(uint32_t)buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint32_t)(((uint32_t)buffer[offset]) << 8); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint32_t)(((uint32_t)buffer[offset]) << 16); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint32_t)(((uint32_t)buffer[offset]) << 24); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++)
+        if(offset < capacity) { (val) = (uint32_t)(uint32_t)buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint32_t)(((uint32_t)buffer[offset]) << 8); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint32_t)(((uint32_t)buffer[offset]) << 16); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint32_t)(((uint32_t)buffer[offset]) << 24); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++
 
 #define TRY_GET_U64_LE(buffer, capacity, offset, val) \
-        if(offset < capacity) { (val) = (uint64_t)(uint64_t)buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 8); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 16); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 24); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 32); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 40); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 48); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 56); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++) \
+        if(offset < capacity) { (val) = (uint64_t)(uint64_t)buffer[offset]; } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 8); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 16); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 24); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 32); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 40); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 48); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { (val) |= (uint64_t)(((uint64_t)buffer[offset]) << 56); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++ \
 
-#define TRY_SET_BYTE(buffer, capacity, offset, val) if(offset < capacity) { buffer[offset] = (uint8_t)(unsigned int)(val); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++)
+#define TRY_SET_BYTE(buffer, capacity, offset, val) if(offset < capacity) { buffer[offset] = (uint8_t)(unsigned int)(val); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++
 
 #define TRY_SET_U16_LE(buffer, capacity, offset, val) \
-        if(offset < capacity) { buffer[offset] = (uint8_t)((uint16_t)(val) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint16_t)(val) >> 8) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++)
+        if(offset < capacity) { buffer[offset] = (uint8_t)((uint16_t)(val) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint16_t)(val) >> 8) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++
 
 #define TRY_SET_U32_LE(buffer, capacity, offset, val) \
-        if(offset < capacity) { buffer[offset] = (uint8_t)((uint32_t)(val) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint32_t)(val) >> 8) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint32_t)(val) >> 16) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint32_t)(val) >> 24) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++)
+        if(offset < capacity) { buffer[offset] = (uint8_t)((uint32_t)(val) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint32_t)(val) >> 8) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint32_t)(val) >> 16) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint32_t)(val) >> 24) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++
 
 #define TRY_SET_U64_LE(buffer, capacity, offset, val) \
-        if(offset < capacity) { buffer[offset] = (uint8_t)((uint64_t)(val) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 8) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 16) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 24) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 32) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 40) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 48) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++); \
-        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 56) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++)
+        if(offset < capacity) { buffer[offset] = (uint8_t)((uint64_t)(val) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 8) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 16) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 24) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 32) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 40) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 48) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++; \
+        if(offset < capacity) { buffer[offset] = (uint8_t)(((uint64_t)(val) >> 56) & 0xFF); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset)++
 
 
 
