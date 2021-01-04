@@ -32,6 +32,14 @@
  ***************************************************************************/
 
 
+
+
+
+//FIXME - make sure connect goes bottom up and disconnect goes top down.
+
+
+
+
 #include <inttypes.h>
 #include <stdint.h>
 #include <lib/libplctag.h>
@@ -45,9 +53,11 @@
 #include <util/string.h>
 #include <util/socket.h>
 #include <util/time.h>
+#include <util/timer_event.h>
 
 
 #define DESTROY_DISCONNECT_TIMEOUT_MS (500)
+#define DEFAULT_IDLE_TIMEOUT_MS (5000)
 
 struct plc_layer_s {
     void *context;
@@ -87,6 +97,8 @@ struct plc_s {
     bool is_connected;
 
     int idle_timeout_ms;
+    int64_t next_idle_timeout;
+    timer_p timeout_timer;
 
     uint8_t *data;
     int data_capacity;
@@ -103,7 +115,9 @@ static mutex_p plc_list_mutex = NULL;
 static plc_p plc_list = NULL;
 
 
-
+static void start_idle_timeout_unsafe(plc_p plc);
+static void plc_idle_timeout_callback(timer_p timer, int64_t wake_time, int64_t current_time, void *plc_arg);
+static void reset_plc(plc_p plc);
 static void plc_rc_destroy(void *plc_arg);
 static void dispatch_plc_request_unsafe(plc_p plc);
 static int start_connecting_unsafe(plc_p plc);
@@ -209,7 +223,8 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
                 pdebug(DEBUG_WARN, "Host/gateway not provided!");
                 mem_free(host_segments);
                 rc_dec(plc);
-                return PLCTAG_ERR_BAD_GATEWAY;
+                rc = PLCTAG_ERR_BAD_GATEWAY;
+                break;
             }
 
             plc->host = str_dup(host_segments[0]);
@@ -235,6 +250,18 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 
             mem_free(host_segments);
 
+            rc = timer_event_create(&(plc->timeout_timer));
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to create timer, error %s!", plc_tag_decode_error(rc));
+                rc_dec(plc);
+                break;
+            }
+
+            plc->idle_timeout_ms = DEFAULT_IDLE_TIMEOUT_MS;
+
+            /* start the idle timer */
+            start_idle_timeout_unsafe(plc);
+
             plc->port = port;
         }
 
@@ -255,22 +282,57 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 
 
 
-int plc_init(plc_p plc, int num_layers, void *context, void (*context_destructor)(plc_p plc, void *context))
+int plc_initialize(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
-    /* allocate the layer array. */
+    critical_block(plc->plc_mutex) {
+        plc_reset(plc);
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return rc;
+}
+
+
+
+
+int plc_set_number_of_layers(plc_p plc, int num_layers)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    /* clean up anything that already existed. */
+    if(plc->layers) {
+        for(int index = 0; index < plc->num_layers; index++) {
+            plc->layers[index].destroy_layer(plc->layers[index].context);
+        }
+
+        mem_free(plc->layers);
+    }
+
     plc->layers = mem_alloc((int)(unsigned int)sizeof(struct plc_layer_s) * num_layers);
     if(!plc->layers) {
         pdebug(DEBUG_WARN, "Unable to allocate the layer array memory!");
+        plc->num_layers = 0;
         return PLCTAG_ERR_NO_MEM;
     }
 
     plc->num_layers = num_layers;
-    plc->context = context;
-    plc->context_destructor = context_destructor;
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
@@ -339,6 +401,26 @@ void *plc_get_context(plc_p plc)
 }
 
 
+int plc_set_context(plc_p plc, void *context, void (*context_destructor)(plc_p plc, void *context))
+{
+    if(!plc) {
+        pdebug(DEBUG_WARN, "PLC pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    critical_block(plc->plc_mutex) {
+        plc->context = context;
+        plc->context_destructor;
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 int plc_get_idle_timeout(plc_p plc)
 {
     int res = 0;
@@ -363,6 +445,7 @@ int plc_get_idle_timeout(plc_p plc)
 
 int plc_set_idle_timeout(plc_p plc, int timeout_ms)
 {
+    int rc = PLCTAG_STATUS_OK;
     int res = 0;
 
     if(!plc) {
@@ -381,6 +464,8 @@ int plc_set_idle_timeout(plc_p plc, int timeout_ms)
         res = plc->idle_timeout_ms;
         plc->idle_timeout_ms = timeout_ms;
     }
+
+    /* new timeout period takes effect after the next timer wake up. */
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
@@ -504,7 +589,11 @@ int plc_start_request(plc_p plc,
         }
     }
 
-    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+    if(rc = PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+    } else {
+        pdebug(DEBUG_INFO, "Done with error %s for PLC %s.", plc_tag_decode_error(rc), plc->key);
+    }
 
     return PLCTAG_STATUS_OK;
 }
@@ -535,9 +624,77 @@ int plc_stop_request(plc_p plc, plc_request_p request)
         }
     }
 
-    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+    if(rc = PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+    } else {
+        pdebug(DEBUG_INFO, "Done with error %s for PLC %s.", plc_tag_decode_error(rc), plc->key);
+    }
 
     return rc;
+}
+
+void start_idle_timeout_unsafe(plc_p plc)
+{
+    int64_t next_timeout = time_ms() + plc->idle_timeout_ms;
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    /* remove it from the queue. */
+    timer_event_snooze(plc->timeout_timer);
+
+    timer_event_wake_at(plc->timeout_timer, next_timeout, plc_idle_timeout_callback, plc);
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+}
+
+
+
+void plc_idle_timeout_callback(timer_p timer, int64_t wake_time, int64_t current_time, void *plc_arg)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_p plc = (plc_p)plc_arg;
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    /* we want to take the mutex here.  Protect the PLC state while we see if we are going to timeout */
+    critical_block(plc->plc_mutex) {
+        if(plc->is_connected) {
+            if(plc->next_idle_timeout < current_time) {
+                pdebug(DEBUG_INFO, "Idle timeout triggered.  Starting to disconnect.");
+                start_disconnecting_unsafe(plc);
+            }
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+}
+
+
+void reset_plc(plc_p plc)
+{
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    if(plc->socket) {
+        /*
+         * this is safe because socket_close() acquires the socket mutex.
+         * And that prevents the event loop thread from calling a callback at the
+         * same time.   Once this is done, the even loop will not trigger any
+         * callbacks against this PLC.
+         */
+        socket_close(plc->socket);
+    }
+
+    plc->is_connected = FALSE;
+    plc->connect_in_flight = FALSE;
+    plc->disconnect_in_flight = FALSE;
+    plc->current_layer = 0;
+
+    /* reset the layers */
+    for(int index = 0; index < plc->num_layers; index++) {
+        plc->layers[index].initialize(plc->layers[index].context);
+    }
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 }
 
 
@@ -590,6 +747,20 @@ void plc_rc_destroy(void *plc_arg)
         }
     }
 
+    if(plc->timeout_timer) {
+        timer_event_snooze(plc->timeout_timer);
+        timer_destroy(&(plc->timeout_timer));
+        plc->timeout_timer = NULL;
+    }
+
+    /* reset the PLC to clean up more things. */
+    reset_plc(plc);
+
+    if(plc->socket) {
+        socket_destroy(&(plc->socket));
+        plc->socket = NULL;
+    }
+
     /* if there is local context, destroy it. */
     if(plc->context) {
         if(plc->context_destructor) {
@@ -600,14 +771,6 @@ void plc_rc_destroy(void *plc_arg)
 
         plc->context = NULL;
     }
-
-    critical_block(plc->plc_mutex) {
-        /* regardless of why we are past the timeout loop, we close everything up. */
-        socket_close(plc->socket);
-    }
-
-    socket_destroy(&(plc->socket));
-    plc->socket = NULL;
 
     rc = mutex_destroy(&(plc->plc_mutex));
     if(rc != PLCTAG_STATUS_OK) {
@@ -709,7 +872,7 @@ int start_disconnecting_unsafe(plc_p plc)
 
     /* set up disconnect state. */
     plc->disconnect_in_flight = TRUE;
-    plc->current_layer = 0;
+    plc->current_layer = plc->num_layers - 1;
 
     /* kill any request in flight */
     if(plc->request_in_flight) {
@@ -726,7 +889,11 @@ int start_disconnecting_unsafe(plc_p plc)
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, while setting up disconnect callback!", plc_tag_decode_error(rc));
 
-        /* TODO - force close the socket here.   Everything is broken.  Start over. */
+        /* clear up the world.  Something is really wrong. */
+        reset_plc(plc);
+
+        /* restart. */
+        dispatch_plc_request_unsafe(plc);
 
         return rc;
     }
@@ -749,13 +916,13 @@ void write_disconnect_request(void *plc_arg)
     critical_block(plc->plc_mutex) {
         do {
             /* does the current layer support disconnect? */
-            while(plc->current_layer < plc->num_layers && !plc->layers[plc->current_layer].disconnect) {
-                /* no it does not, skip to the next layer. */
-                plc->current_layer++;
+            while(plc->current_layer >= 0 && !plc->layers[plc->current_layer].disconnect) {
+                /* no it does not, skip down to the next layer. */
+                plc->current_layer--;
             }
 
             /* are we done going through the layers? */
-            if(plc->current_layer >= plc->num_layers) {
+            if(plc->current_layer < 0) {
                 /* we are done. */
                 pdebug(DEBUG_DETAIL, "Finished disconnecting layers.");
                 break;
@@ -819,19 +986,10 @@ void write_disconnect_request(void *plc_arg)
                 pdebug(DEBUG_WARN, "Error, %s, trying to build disconnect request!", plc_tag_decode_error(rc));
             }
 
-            /* final "layer" which is the socket. */
-            if(plc->socket) {
-                socket_close(plc->socket);
-            }
+            /* clean up the world. */
+            reset_plc(plc);
 
-            /* reset the layers */
-            for(int index = 0; index < plc->num_layers; index++) {
-                rc = plc->layers[index].initialize(plc->layers[index].context);
-            }
-
-            plc->disconnect_in_flight = FALSE;
-            plc->current_layer = 0;
-
+            /* restart. */
             dispatch_plc_request_unsafe(plc);
         }
     }
@@ -953,19 +1111,23 @@ void process_disconnect_response(void *plc_arg)
                 break;
             }
 
-            /* we are all good. Do the next layer. */
-            plc->current_layer++;
+            /*
+             * we are all good. Do the next layer.
+             * Note we start at higher levels of the stack
+             * and work down toward the lowest level. */
+            plc->current_layer--;
 
             plc->data_size = 0;
             plc->data_offset = 0;
 
-            if(plc->current_layer >= plc->num_layers) {
+            if(plc->current_layer < 0) {
                 pdebug(DEBUG_INFO, "Done disconnecting all layers.");
 
                 socket_close(plc->socket);
 
                 plc->is_connected = FALSE;
                 plc->disconnect_in_flight = FALSE;
+                plc->current_layer = 0;
 
                 /* reset the layers */
                 for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
@@ -991,16 +1153,10 @@ void process_disconnect_response(void *plc_arg)
 
             pdebug(DEBUG_WARN, "Error trying to process disconnect response.  Force reset the stack.");
 
-            socket_close(plc->socket);
+            /* clean up the world. */
+            reset_plc(plc);
 
-            /* reset the layers */
-            for(int index = 0; index < plc->num_layers; index++) {
-                rc = plc->layers[index].initialize(plc->layers[index].context);
-            }
-
-            plc->disconnect_in_flight = FALSE;
-            plc->current_layer = 0;
-
+            /* restart everything. */
             dispatch_plc_request_unsafe(plc);
 
             break;
@@ -1034,6 +1190,9 @@ int start_connecting_unsafe(plc_p plc)
         pdebug(DEBUG_INFO, "PLC disconnect in flight.");
         return PLCTAG_ERR_BUSY;
     }
+
+    /* force the PLC into a good state */
+    reset_plc(plc);
 
     /* set up connect state. */
     plc->connect_in_flight = TRUE;
@@ -1281,6 +1440,9 @@ void process_connect_response(void *plc_arg)
 
                 plc->is_connected = TRUE;
 
+                /* start the idle timeout timer */
+                start_idle_timeout_unsafe(plc);
+
                 /* try to dispatch new requests */
                 dispatch_plc_request_unsafe(plc);
             } else {
@@ -1437,6 +1599,7 @@ void build_plc_request_callback(void *plc_arg)
 
             /* clean up the whole stack at this point. */
             rc = start_disconnecting_unsafe(plc);
+
             break;
         }
     }
@@ -1493,6 +1656,9 @@ void write_plc_request_callback(void *plc_arg)
                 /* yes, so wait for the response. */
                 plc->data_offset = 0;
                 plc->data_size = 0;
+
+                /* set up the idle timeout */
+                start_idle_timeout_unsafe(plc);
 
                 rc = socket_callback_when_read_ready(plc->socket, process_plc_request_response, plc);
                 if(rc != PLCTAG_STATUS_OK) {
