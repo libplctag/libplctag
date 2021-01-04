@@ -40,8 +40,7 @@ typedef struct timer_s *timer_p;
 extern int timer_event_create(timer_p *timer);
 extern int timer_event_wake_at(timer_p timer,
                          int64_t wake_time,
-                         void (*callback)(timer_p timer,
-                                          int64_t wake_time,
+                         void (*callback)(int64_t wake_time,
                                           int64_t current_time,
                                           void *context),
                          void *context);
