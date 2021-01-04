@@ -480,6 +480,12 @@ extern int socket_close(sock_p sock)
 
         sock->next = NULL;
 
+        /* remove the callbacks */
+        sock->read_ready_callback = NULL;
+        sock->read_ready_context = NULL;
+        sock->write_ready_callback = NULL;
+        sock->write_ready_context = NULL;
+
         /* clear the FD sets */
         FD_CLR(sock->fd, &global_read_fds);
         FD_CLR(sock->fd, &global_write_fds);
