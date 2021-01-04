@@ -348,6 +348,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size in bytes. */
+        /* TODO - is this correct logic?  What about the TSN in the response? */
         max_trans_size = PLC5_WORD_RANGE_READ_MAX_PAYLOAD;
 
         pdebug(DEBUG_DETAIL, "Maximum transfer size %d.", max_trans_size);
@@ -512,6 +513,7 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size. */
+        /* TODO - is this correct logic?   What about the TSN? */
         max_trans_size = PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD - (req_off - encoded_file_start);
 
         pdebug(DEBUG_DETAIL, "Maximum transfer size %d.", max_trans_size);
