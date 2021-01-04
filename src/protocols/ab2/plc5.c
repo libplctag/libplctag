@@ -97,10 +97,10 @@ static struct tag_vtable_t plc5_vtable = {
 };
 
 
-static int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
-static int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
-static int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
-static int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num);
+static int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
+static int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
+static int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
+static int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
 
 static int encode_plc5_logical_address(uint8_t *buffer, int buffer_capacity, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem);
 
@@ -127,14 +127,14 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
         return NULL;
     }
 
-    rc = pccc_parse_logical_address(tag_name, &(tag->data_file_type),&(tag->data_file_num), &(tag->data_file_elem), &(tag->data_file_sub_elem));
+    rc = df1_parse_logical_address(tag_name, &(tag->data_file_type),&(tag->data_file_num), &(tag->data_file_elem), &(tag->data_file_sub_elem));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Malformed data file name!");
         rc_dec(tag);
         return NULL;
     }
 
-    plc = pccc_cip_eip_plc_get(attribs);
+    plc = pccc_eip_plc_get(attribs);
     if(!plc) {
         pdebug(DEBUG_WARN, "Unable to get PLC!");
         rc_dec(tag);
@@ -304,7 +304,7 @@ int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_valu
 
 
 
-int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
+int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
@@ -313,7 +313,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
     int num_elems = 0;
     int trans_size = 0;
 
-    (void)req_num;
+    (void)req_id;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -327,21 +327,21 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
 
         /* TSN - 16-bit value */
-        tag->tsn = (uint16_t)pccc_cip_eip_plc_get_tsn(tag->plc);
+        rc = (uint16_t)pccc_eip_plc_get_tsn(tag->plc, &(tag->tsn));
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to get TSN!");
+            break;
+        }
         TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->tsn);
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, (tag->tsn & 0xFF));
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, ((tag->tsn >> 8) & 0xFF));
 
         /* PLC5 read function. */
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, PLC5_RANGE_READ_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, ((tag->trans_offset/2) & 0xFF));
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, (((tag->trans_offset/2) >> 8) & 0xFF));
+        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->trans_offset);
 
         /* total transfer size in words. */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, ((unsigned int)(tag->base_tag.size/2) & 0xFF));
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, (((unsigned int)(tag->base_tag.size/2) >> 8) & 0xFF));
+        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->base_tag.size/2);
 
         /* set the logical PLC-5 address. */
         rc = encode_plc5_logical_address(buffer, buffer_capacity, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
@@ -388,7 +388,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
 }
 
 
-int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
+int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
@@ -398,7 +398,7 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
 
     (void)buffer_capacity;
 
-    pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_num);
+    pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_id);
 
     do {
         /* check the response */
@@ -415,7 +415,7 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
         }
 
         if(data[1] != 0) {
-            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_decode_error(&(data[1]), data_size - 1));
+            pdebug(DEBUG_WARN, "Received error response %s (%d)!", df1_decode_error(&(data[1]), data_size - 1));
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -467,7 +467,7 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
 }
 
 
-int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
+int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
@@ -477,7 +477,7 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
     int num_elems = 0;
     int trans_size = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting for request %" REQ_ID_FMT ".", req_id);
 
     /* encode the request. */
 
@@ -489,7 +489,7 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
 
         /* TSN - 16-bit value */
-        rc = pccc_cip_eip_plc_get_tsn(tag->plc, &(tag->tsn));
+        rc = pccc_eip_plc_get_tsn(tag->plc, &(tag->tsn));
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to get TSN for request, error %s!", plc_tag_decode_error(rc));
             break;
@@ -562,7 +562,7 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
 }
 
 
-int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_num)
+int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
@@ -571,7 +571,7 @@ int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_ca
 
     (void)buffer_capacity;
 
-    pdebug(DEBUG_DETAIL, "Starting for request %" REQ_ID_FMT ".", req_num);
+    pdebug(DEBUG_DETAIL, "Starting for request %" REQ_ID_FMT ".", req_id);
 
     do {
         /* check the response */
@@ -588,7 +588,7 @@ int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_ca
         }
 
         if(data[1] != 0) {
-            pdebug(DEBUG_WARN, "Received error response %s (%d)!", pccc_decode_error(&data[1], data_size - 1), (int)(unsigned int)data[1]);
+            pdebug(DEBUG_WARN, "Received error response %s (%d)!", df1_decode_error(&data[1], data_size - 1), (int)(unsigned int)data[1]);
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -641,6 +641,7 @@ int encode_plc5_logical_address(uint8_t *buffer, int buffer_capacity, int *offse
          */
         if(data_file_sub_elem > 0) {
             TRY_SET_BYTE(buffer, buffer_capacity, *offset, 0x0E);
+            //if(*offset < buffer_capacity) { buffer[*offset] = (uint8_t)(unsigned int)(0x0E); } else { rc = PLCTAG_ERR_OUT_OF_BOUNDS; break; } (offset++);
         } else {
             TRY_SET_BYTE(buffer, buffer_capacity, *offset, 0x06);
         }

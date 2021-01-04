@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <lib/libplctag.h>
 #include <ab2/eip_layer.h>
-#include <ab2/pccc_cip_eip.h>
+#include <ab2/pccc_eip_plc.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -115,11 +115,18 @@ int pccc_constructor(plc_p plc, attr attribs)
 
     atomic_int_set(&(context->tsn), rand() & 0xFFFF);
 
+    /* set the context for this type of PLC. */
+    rc = plc_set_context(plc, context, NULL);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to initialize the PLC with the context, error %s!", plc_tag_decode_error(rc));
+        mem_free(context);
+        return rc;
+    }
+
     /* start building up the layers. */
-    rc = plc_init(plc, 1, context, NULL); /* 3 layers */
+    rc = plc_set_number_of_layers(plc, 1); /* 3 layers */
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize the PLC with the layer count and context, error %s!", plc_tag_decode_error(rc));
-        mem_free(context);
         return rc;
     }
 
