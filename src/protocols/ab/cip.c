@@ -417,7 +417,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
 
         *dhp_dest = 0;
     } else {
-        /* 
+        /*
          *we had the special DH+ format and it was
          * either not last or not a PLC5/SLC.  That
          * is an error.
@@ -497,7 +497,7 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     return PLCTAG_STATUS_OK;
 }
 
-/* 
+/*
  * match symbolic IP address segments.
  *  18,10.206.10.14 - port 2/A -> 10.206.10.14
  *  19,10.206.10.14 - port 3/B -> 10.206.10.14
@@ -667,11 +667,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 }
 
 
-/* 
+/*
  * match DH+ address segments.
  *  A:1:2 - port 2/A -> DH+ node 2
  *  B:1:2 - port 3/B -> DH+ node 2
- * 
+ *
  * A and B can be lowercase or numeric.
  */
 
@@ -911,8 +911,8 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
 
     pdebug(DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", name_i, encoded_i);
 
-    /* a symbolic segment must start with an alphabetic character, then can have digits or underscores. */
-    if(!isalpha(name[name_i]) && name[name_i] != ':' && name[name_i] != '_') {
+    /* a symbolic segment must start with an alphabetic character or @, then can have digits or underscores. */
+    if(!isalpha(name[name_i]) && name[name_i] != ':' && name[name_i] != '_' && name[name_i] != '@') {
         pdebug(DEBUG_DETAIL, "tag name at position %d is not the start of a symbolic segment.", name_i);
         return PLCTAG_ERR_NO_MATCH;
     }
