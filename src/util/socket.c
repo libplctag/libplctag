@@ -80,14 +80,31 @@
 /* maximum time to wait for a socket to be ready. */
 #define TICKLER_MAX_WAIT_TIME_MS (50)
 
-struct sock_t {
-    socket_t fd;
-    int port;
 
+enum {
+    CONNECTION_THREAD_NOT_RUNNING,
+    CONNECTION_THREAD_RUNNING,
+    CONNECTION_THREAD_TERMINATE,
+    CONNECTION_THREAD_DEAD
+};
+
+struct sock_t {
     /* next in the list of sockets. */
     struct sock_t *next;
 
+    socket_t fd;
+
+    int port;
+    const char *host;
+
+    atomic_int status;
+
     /* callbacks for events. */
+    thread_p connection_thread;
+    atomic_bool connection_thread_done;
+    void (*connection_ready_callback)(void *context);
+    void *connection_ready_context;
+
     void (*read_ready_callback)(void *context);
     void *read_ready_context;
 
@@ -107,13 +124,14 @@ static fd_set global_read_fds;
 static fd_set global_write_fds;
 static int max_socket_fd = -1;
 static atomic_bool need_recalculate_socket_fd_sets = ATOMIC_BOOL_STATIC_INIT(1);
+static atomic_int global_connection_thread_done = ATOMIC_INT_STATIC_INIT(0);
 
 #define MAX_IPS (8)
 
 static int create_event_wakeup_channel(void);
 static void destroy_event_wakeup_channel(void);
 
-
+static THREAD_FUNC(socket_connection_thread_func);
 
 
 int socket_create(sock_p *sock)
@@ -131,10 +149,20 @@ int socket_create(sock_p *sock)
         return PLCTAG_ERR_NO_MEM;
     }
 
+    /* set up connection callback support */
+    (*sock)->connection_thread = NULL;
+    atomic_bool_set(&((*sock)->connection_thread_done), FALSE);
+    (*sock)->connection_ready_callback = NULL;
+    (*sock)->connection_ready_context = NULL;
+
+    /* read callback support */
     (*sock)->read_ready_callback = NULL;
     (*sock)->read_ready_context = NULL;
+
+    /* write callback support */
     (*sock)->write_ready_callback = NULL;
     (*sock)->write_ready_context = NULL;
+
     (*sock)->fd = INVALID_SOCKET;
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -454,6 +482,7 @@ extern int socket_tcp_write(sock_p s, uint8_t *buf, int size)
 extern int socket_close(sock_p sock)
 {
     int rc = PLCTAG_STATUS_OK;
+    thread_p connection_thread = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -461,7 +490,11 @@ extern int socket_close(sock_p sock)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* remove it from the list and clear the FD sets */
+    /*
+     * remove it from the list and clear the FD sets.
+     * These are changed by the event thread too, so
+     * all this has to be in the mutex.
+     */
     critical_block(socket_event_mutex) {
         sock_p *walker = &socket_list;
 
@@ -478,14 +511,6 @@ extern int socket_close(sock_p sock)
             }
         } /* else not on the list. */
 
-        sock->next = NULL;
-
-        /* remove the callbacks */
-        sock->read_ready_callback = NULL;
-        sock->read_ready_context = NULL;
-        sock->write_ready_callback = NULL;
-        sock->write_ready_context = NULL;
-
         /* clear the FD sets */
         FD_CLR(sock->fd, &global_read_fds);
         FD_CLR(sock->fd, &global_write_fds);
@@ -497,17 +522,56 @@ extern int socket_close(sock_p sock)
             /* not as urgent, recalculate eventually. */
             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
         }
-    }
 
-    /* close the socket fd. */
-    if(sock->fd != INVALID_SOCKET) {
-        if(!socketclose(sock->fd)) {
-            pdebug(DEBUG_WARN, "Error while closing socket: %d!", errno);
-            rc = PLCTAG_ERR_CLOSE;
+        /* close the socket fd */
+        if(sock->fd != INVALID_SOCKET) {
+            if(!socketclose(sock->fd)) {
+                pdebug(DEBUG_WARN, "Error while closing socket: %d!", errno);
+                rc = PLCTAG_ERR_CLOSE;
+            }
+
+            sock->fd = INVALID_SOCKET;
         }
+
+        /* make sure the event thread will not try to handle this. */
+        connection_thread = sock->connection_thread;
+        sock->connection_thread = NULL;
+
+        /* clear any link left in the socket object. */
+        sock->next = NULL;
     }
 
-    sock->fd = INVALID_SOCKET;
+    /*
+     * now that the socket is removed from the list, the event thread
+     * will not trigger it.
+     *
+     * This is racy if another call to socket_callback_when_connection_ready() is made by
+     * another thread when this is running.  Don't do that.
+     */
+
+    /*
+     * check the connection thread.  If it is still running, then we need to terminate it.
+     * But we need to do this outside the mutex because it could hang for a very long time.
+     */
+
+    if(connection_thread) {
+        pdebug(DEBUG_INFO, "Waiting for connection thread to terminate.");
+
+        thread_join(connection_thread);
+        thread_destroy(&connection_thread);
+
+        pdebug(DEBUG_INFO, "Connection thread terminated.");
+    }
+
+    /* now remove the callbacks. */
+    sock->connection_ready_callback = NULL;
+    sock->connection_ready_context = NULL;
+
+    sock->read_ready_callback = NULL;
+    sock->read_ready_context = NULL;
+
+    sock->write_ready_callback = NULL;
+    sock->write_ready_context = NULL;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -528,6 +592,12 @@ int socket_destroy(sock_p *sock)
     /* make sure the socket is closed. */
     socket_close(*sock);
 
+    /* free anything left over. */
+    if((*sock)->host) {
+        mem_free((*sock)->host);
+        (*sock)->host = NULL;
+    }
+
     /* Free any memory. */
     mem_free(*sock);
 
@@ -537,6 +607,98 @@ int socket_destroy(sock_p *sock)
 
     return PLCTAG_STATUS_OK;
 }
+
+
+int socket_status(sock_p sock)
+{
+    if(sock) {
+        return (int)(unsigned int)atomic_int_get(&(sock->status));
+    } else {
+        return PLCTAG_ERR_NULL_PTR;
+    }
+}
+
+
+THREAD_FUNC(socket_connection_thread_func)
+{
+    sock_p sock = (sock_p)arg;
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting for %s:%d.", sock->host, sock->port);
+
+    rc = socket_tcp_connect(sock, sock->host, sock->port);
+
+    /* save our status for other callers. */
+    atomic_int_set(&(sock->status), (unsigned int)rc);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Blocking TCP connect call complete.");
+    } else {
+        pdebug(DEBUG_INFO, "Blocking TCP connect call failed with error %s.", plc_tag_decode_error(rc));
+    }
+
+    /* call the callback if there is one. */
+    if(sock->connection_ready_callback) {
+        pdebug(DEBUG_INFO, "Calling connection callback for socket %s:%d.", sock->host, sock->port);
+        sock->connection_ready_callback(sock->connection_ready_context);
+    }
+
+    /* set a flag so that the system knows we are done. */
+    atomic_bool_set(&(sock->connection_thread_done), TRUE);
+    atomic_int_add(&global_connection_thread_done, 1);
+
+    /* make sure the event thread cleans up this thread soon. */
+    socket_event_loop_wake();
+
+    pdebug(DEBUG_INFO, "Done for %s:%d.", sock->host, sock->port);
+
+    THREAD_RETURN(0);
+}
+
+
+
+
+int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *context), void *context, const char *host, int port)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting for %s:%d.", host, port);
+
+    critical_block(socket_event_mutex) {
+        sock->host = str_dup(host);
+        if(!sock->host) {
+            pdebug(DEBUG_WARN, "Unable to allocate memory for host name copy!");
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
+
+        sock->port = port;
+
+        /* set up the callback info before we create the thread. */
+        sock->connection_ready_callback = callback;
+        sock->connection_ready_context = context;
+
+        /* set the flag so that we know the connection thread is running. */
+        atomic_bool_set(&(sock->connection_thread_done), FALSE);
+
+        /* set up the connection thread. */
+        rc = thread_create(&(sock->connection_thread), socket_connection_thread_func, 32768, sock);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to create background connection thread!");
+
+            sock->connection_thread = NULL;
+            atomic_int_set(&(sock->status), (unsigned int)rc);
+            atomic_bool_set(&(sock->connection_thread_done), TRUE);
+
+            break;
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done for %s:%d.", host, port);
+
+    return rc;
+}
+
 
 
 
@@ -866,6 +1028,7 @@ void socket_event_loop_wake(void)
 void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 {
     int recalc_count = 0;
+    int connection_thread_cleanup_count = 0;
     TIMEVAL timeval_wait;
     int64_t wait_time_ms = next_wake_time - current_time;
     fd_set local_read_fds;
@@ -916,6 +1079,35 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
          * after we recalculate and before we reset the counter.
          */
         atomic_int_add(&need_recalculate_socket_fd_sets, -recalc_count);
+    }
+
+    /* do we need to clean up any dead connection threads? */
+    connection_thread_cleanup_count = (int)atomic_int_get(&global_connection_thread_done);
+    if(connection_thread_cleanup_count > 0) {
+        critical_block(socket_event_mutex) {
+            sock_p sock = socket_list;
+
+            while(sock) {
+                /* does this socket have a completed connection thread? */
+                if(sock->connection_thread && (atomic_bool_get(&(sock->connection_thread_done)) == TRUE)) {
+                    pdebug(DEBUG_INFO, "Cleaning up connection thread for socket %s:%d.", sock->host, sock->port);
+                    thread_join(sock->connection_thread);
+                    thread_destroy(&(sock->connection_thread));
+                    sock->connection_thread = NULL;
+                }
+                sock = sock->next;
+            }
+        }
+
+        /*
+         * subtract the number we had before.   Other threads may have
+         * incremented the counter since we started this if statement.
+         * If so, then we will trigger again.
+         *
+         * This handles the race condition that the counter changes
+         * after we recalculate and before we reset the counter.
+         */
+        atomic_int_add(&global_connection_thread_done, -connection_thread_cleanup_count);
     }
 
     /* copy the fd sets safely */
@@ -1018,6 +1210,8 @@ int socket_event_loop_init(void)
 
     socket_list = NULL;
     global_socket_iterator = NULL;
+
+    atomic_int_set(&global_connection_thread_done, 0);
 
     /* create the socket mutex. */
     rc = mutex_create(&socket_event_mutex);

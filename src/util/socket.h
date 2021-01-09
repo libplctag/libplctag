@@ -46,59 +46,20 @@ typedef int socket_t;
 #endif
 
 typedef struct sock_t *sock_p;
+
+/* direct calls. */
 extern int socket_create(sock_p *s);
 extern int socket_tcp_connect(sock_p s, const char *host, int port);
 extern int socket_tcp_read(sock_p client, uint8_t *buf, int size);
 extern int socket_tcp_write(sock_p client, uint8_t *buf, int size);
 extern int socket_close(sock_p s);
 extern int socket_destroy(sock_p *sock);
+extern int socket_status(sock_p sock);
 
-
-typedef enum {
-    SOCKET_EVENT_ACCEPT_READY        = (1 << 0),
-    SOCKET_EVENT_CONNECTION_READY    = (1 << 1),
-    SOCKET_EVENT_CLOSING             = (1 << 2),
-    SOCKET_EVENT_READ_READY          = (1 << 3),
-    SOCKET_EVENT_WRITE_READY         = (1 << 4)
-} socket_event_t;
-
+/* callback/event calls */
+extern int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *context), void *context, const char *host, int port);
 extern int socket_callback_when_read_ready(sock_p, void (*callback)(void *context), void *context);
 extern int socket_callback_when_write_ready(sock_p, void (*callback)(void *context), void *context);
-
-
-// extern int socket_event_set_callback(sock_p sock, void (*callback)(sock_p sock, int events, void *context), void *context);
-// extern int socket_event_set_mask(sock_p sock, int event_mask);
-// extern int socket_event_get_mask(sock_p sock, int *event_mask);
-
-// extern int socket_bind(sock_p sock, const char *interface, int port);
-// extern int socket_tcp_listen(sock_p sock, int listen_queue_size);
-// extern int socket_tcp_client(sock_p *client, const char *host, int port);
-// extern int socket_tcp_server(sock_p *server, const char *interface, int port, int listen_queue_size);
-// extern int socket_tcp_accept(sock_p server, sock_p *client);
-
-// extern int socket_udp_open(sock_p *udp, const char *interface, int port)
-// extern int socket_udp_send(sock_p udp, uint8_t *data, int data_len, )
-// extern int socket_cancel(sock_p s);
-
-
-// extern int socket_on_tcp_accept_ready(sock_p s, bool (*callback)(sock_p sock, int status, void *context), void *context);
-// extern int socket_on_tcp_connection_ready(sock_p s, bool (*callback)(sock_p sock, int status, void *context), void *context);
-// extern int socket_on_tcp_read_ready(sock_p s, bool (*callback)(sock_p sock, int status, void *context), void *context);
-// extern int socket_on_tcp_write_ready(sock_p s, bool (*callback)(sock_p sock, int status, void *context), void *context);
-// extern int socket_on_cancel(sock_p s, int (*callback)(sock_p sock, int status, void *context), void *context);
-
-
-// typedef enum {
-//     SOCKET_EVENT_NONE,
-//     SOCKET_EVENT_ACCEPT,
-//     SOCKET_EVENT_READ,
-//     SOCKET_EVENT_CONNECT,
-//     SOCKET_EVENT_WRITE,
-//     SOCKET_EVENT_LAST
-// } socket_event_t;
-
-// extern int socket_event_enable(sock_p sock, socket_event_t event, void (*callback)(sock_p sock, socket_event_t event, void *context), void *context);
-// extern int socket_event_disable(sock_p sock);
 
 /* socket event functions for the event loop. */
 extern void socket_event_loop_wake(void);
