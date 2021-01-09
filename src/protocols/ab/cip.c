@@ -912,8 +912,8 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
 
     pdebug(DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", name_i, encoded_i);
 
-    /* a symbolic segment must start with an alphabetic character, then can have digits or underscores. */
-    if(!isalpha(name[name_i]) && name[name_i] != ':' && name[name_i] != '_') {
+    /* a symbolic segment must start with an alphabetic character or @, then can have digits or underscores. */
+    if(!isalpha(name[name_i]) && name[name_i] != ':' && name[name_i] != '_' && name[name_i] != '@') {
         pdebug(DEBUG_DETAIL, "tag name at position %d is not the start of a symbolic segment.", name_i);
         return PLCTAG_ERR_NO_MATCH;
     }
