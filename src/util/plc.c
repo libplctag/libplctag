@@ -908,7 +908,7 @@ void plc_heartbeat(plc_p plc)
 static int state_dispatch_requests(plc_p plc);
 static int state_prepare_protocol_layers_for_tag_request(plc_p plc);
 static int state_build_tag_request(plc_p plc);
-static int state_build_protocol_layers_for_tag_request(plc_p plc);
+static int state_fix_up_tag_request_layers(plc_p plc);
 static int state_tag_request_sent(plc_p plc);
 static int state_tag_response_ready(plc_p plc);
 static int state_process_tag_response(plc_p plc);
@@ -1036,45 +1036,43 @@ int state_prepare_protocol_layers_for_tag_request(plc_p plc)
 int state_build_tag_request(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
-    int data_start = plc->payload_end;
+    int data_start = plc->payload_start;
     int data_end = plc->payload_end;
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
     do {
-        /* STOP */
+        /* build the tag request on top of the prepared layers. */
+        rc = plc->current_request->build_request(plc->current_request->context, plc->data, plc->data_actual_capacity, &data_start, &data_end, plc->current_request->req_id);
+
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TOO_SMALL, "Error %s building tag request for PLC %s!", plc_tag_decode_error(rc), plc->key);
+
+        /* was there enough space? */
+        if(rc == PLCTAG_ERR_TOO_SMALL) {
+            pdebug(DEBUG_INFO, "Insufficient space to build tag request for PLC %s.", plc->key);
+
+            /* signal that we are done. */
+            plc->last_payload = TRUE;
+            plc->payload_end = plc->payload_start;
+        } else {
+            pdebug(DEBUG_INFO, "Build tag request, going to next state to fill in layers for PLC %s.", plc->key);
+
+            plc->payload_end = data_end;
+            plc->last_payload = FALSE;
+        }
+
+        /* fix up the layers. */
+        plc->state_func = state_fix_up_tag_request_layers;
+        rc = PLCTAG_STATUS_PENDING;
     } while(0);
 
-    rc = plc->current_request->build_request(plc->current_request->context, plc->data, plc->data_capacity, &data_start, &data_end, plc->current_request->req_id);
-
-    if(rc == PLCTAG_STATUS_OK) {
-        /* build the layers. */
-        pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
-
-        plc->payload_end = data_end;
-        plc->payload_start = 0;
-
-        plc->state_func = state_build_protocol_layers_for_tag_request;
-        rc = PLCTAG_STATUS_PENDING;
-    } else if(rc == PLCTAG_ERR_TOO_SMALL) {
-        pdebug(DEBUG_INFO, "Insufficient space to build new tag request.");
-
-        /* don't change plc->payload_end */
-
-        /* rebuild in case something needs to change */
-        plc->state_func = state_build_protocol_layers_for_tag_request;
-        rc = PLCTAG_STATUS_PENDING;
-    } else {
-        pdebug(DEBUG_WARN, "Error %s while building tag requst for PLC %s!", plc_tag_decode_error(rc), plc->key);
-    }
-
-    /* TODO - handle errors */
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
     return rc;
 }
 
 
-int state_build_protocol_layers_for_tag_request(plc_p plc)
+int state_fix_up_tag_request_layers(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
     int data_start = 0;
@@ -1084,8 +1082,6 @@ int state_build_protocol_layers_for_tag_request(plc_p plc)
     pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
 
     do {
-        plc->last_payload = TRUE;
-
         for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
             rc = plc->layers[index].build_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
             if(rc == PLCTAG_STATUS_PENDING) {
@@ -1095,7 +1091,7 @@ int state_build_protocol_layers_for_tag_request(plc_p plc)
             }
         }
 
-        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while building request layers for PLC %s!", plc_tag_decode_error(rc), plc->key)
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while building request layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* we built the layers.   Do we have an option to add more requests? */
         if(plc->last_payload == FALSE && plc->current_request->next) {
@@ -1116,7 +1112,7 @@ int state_build_protocol_layers_for_tag_request(plc_p plc)
         plc->state_func = state_tag_request_sent;
         rc = socket_callback_when_write_done(plc->socket, plc_state_runner, plc, plc->data, &(plc->data_size));
 
-        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while setting up write callback for PLC %s!", plc_tag_decode_error(rc), plc->key)
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while setting up write callback for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* we are done and need to wait for the IO layer to send the packet. */
         rc = PLCTAG_STATUS_OK;
@@ -1173,7 +1169,6 @@ int state_tag_request_sent(plc_p plc)
 
 
 
-
 int state_tag_response_ready(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
@@ -1211,7 +1206,7 @@ int state_tag_response_ready(plc_p plc)
 
         /* if we get PLCTAG_ERR_PARTIAL, then we need to keep reading. */
         if(rc == PLCTAG_ERR_PARTIAL) {
-            pdebug(DEBUG_INFO, "Did not get all the data yet, need to get more.");
+            pdebug(DEBUG_INFO, "PLC %s did not get all the data yet, need to get more.", plc->key);
 
             /* come back to this routine. */
             plc->state_func = state_tag_response_ready;
@@ -1268,6 +1263,8 @@ int state_process_tag_response(plc_p plc)
 
             data_start = plc->payload_start;
             data_end = plc->payload_end;
+
+            pdebug(DEBUG_DETAIL, "Attempting to process request %" REQ_ID_FMT " for PLC %s.", request->req_id, plc->key);
 
             rc = request->process_response(request->context, plc->data, plc->data_actual_capacity, &data_start, &data_end, request->req_id);
 
