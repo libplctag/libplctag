@@ -58,6 +58,7 @@
 
 #define DESTROY_DISCONNECT_TIMEOUT_MS (500)
 #define DEFAULT_IDLE_TIMEOUT_MS (5000)
+#define PLC_HEARTBEAT_INTERVAL_MS (200)
 
 struct plc_layer_s {
     void *context;
@@ -75,39 +76,57 @@ struct plc_layer_s {
 struct plc_s {
     struct plc_s *next;
 
+    /* the unique identifying key for this PLC instance. */
     const char *key;
 
     mutex_p plc_mutex;
 
     bool is_terminating;
 
-    struct plc_request_s *request_list;
-    bool request_in_flight;
-
-    int num_layers;
-    struct plc_layer_s *layers;
-
-    bool connect_in_flight;
-    bool disconnect_in_flight;
-    int current_layer;
-
+    /* where are we connected/connecting? */
     const char *host;
     int port;
     sock_p socket;
-    bool is_connected;
 
-    int idle_timeout_ms;
-    int64_t next_idle_timeout;
-    timer_p timeout_timer;
+    /* our requests. */
+    struct plc_request_s *request_list;
+    struct plc_request_s *current_request;
+    // bool request_in_flight;
 
+    int num_layers;
+    struct plc_layer_s *layers;
+    int current_layer;
+
+    /* state engine */
+    int (*state_func)(plc_p plc);
+
+    /* data buffer. */
     uint8_t *data;
     int data_capacity;
+    int data_actual_capacity;
     int data_size;
     int data_offset;
 
     /* model-specific data. */
     void *context;
     void (*context_destructor)(plc_p plc, void *context);
+
+    /* heartbeat heartbeat_timer */
+    timer_p heartbeat_timer;
+
+    /* error handling */
+    int64_t next_retry_time;
+
+    /* idle handling. */
+    int idle_timeout_ms;
+    int64_t next_idle_timeout;
+
+
+    // bool connect_in_flight;
+    // bool disconnect_in_flight;
+
+    bool is_connected;
+
 };
 
 
@@ -250,16 +269,16 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 
             mem_free(host_segments);
 
-            rc = timer_event_create(&(plc->timeout_timer));
+            rc = timer_event_create(&(plc->heartbeat_timer));
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to create timer, error %s!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_WARN, "Unable to create heartbeat_timer, error %s!", plc_tag_decode_error(rc));
                 rc_dec(plc);
                 break;
             }
 
             plc->idle_timeout_ms = DEFAULT_IDLE_TIMEOUT_MS;
 
-            /* start the idle timer */
+            /* start the idle heartbeat_timer */
             start_idle_timeout_unsafe(plc);
 
             plc->port = port;
@@ -464,7 +483,7 @@ int plc_set_idle_timeout(plc_p plc, int timeout_ms)
         plc->idle_timeout_ms = timeout_ms;
     }
 
-    /* new timeout period takes effect after the next timer wake up. */
+    /* new timeout period takes effect after the next heartbeat_timer wake up. */
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
@@ -495,24 +514,32 @@ int plc_get_buffer_size(plc_p plc)
 
 
 
-int plc_set_buffer_size(plc_p plc, int buffer_size)
+int plc_set_buffer_size(plc_p plc, int buffer_size, int buffer_overflow)
 {
     int rc = 0;
+    int actual_capacity = 0;
 
     if(!plc) {
         pdebug(DEBUG_WARN, "PLC pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
     if(buffer_size <= 0 || buffer_size > 65536) {
         pdebug(DEBUG_WARN, "Illegal buffer size value %d!", buffer_size);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+    if(buffer_overflow < 0 || buffer_overflow > 65536) {
+        pdebug(DEBUG_WARN, "Illegal buffer overflow size value %d!", buffer_overflow);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
+    actual_capacity = buffer_size + buffer_overflow;
 
     critical_block(plc->plc_mutex) {
-        plc->data = mem_realloc(plc->data, buffer_size);
+        plc->data = mem_realloc(plc->data, actual_capacity);
         if(!plc->data) {
             pdebug(DEBUG_WARN, "Unable to reallocate memory for data buffer!");
             rc = PLCTAG_ERR_NO_MEM;
@@ -520,6 +547,7 @@ int plc_set_buffer_size(plc_p plc, int buffer_size)
         }
 
         plc->data_capacity = buffer_size;
+        plc->data_actual_capacity = actual_capacity;
     }
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -639,9 +667,9 @@ void start_idle_timeout_unsafe(plc_p plc)
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
     /* remove it from the queue. */
-    timer_event_snooze(plc->timeout_timer);
+    timer_event_snooze(plc->heartbeat_timer);
 
-    timer_event_wake_at(plc->timeout_timer, next_timeout, plc_idle_timeout_callback, plc);
+    timer_event_wake_at(plc->heartbeat_timer, next_timeout, plc_idle_timeout_callback, plc);
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 }
@@ -747,10 +775,10 @@ void plc_rc_destroy(void *plc_arg)
         }
     }
 
-    if(plc->timeout_timer) {
-        timer_event_snooze(plc->timeout_timer);
-        timer_destroy(&(plc->timeout_timer));
-        plc->timeout_timer = NULL;
+    if(plc->heartbeat_timer) {
+        timer_event_snooze(plc->heartbeat_timer);
+        timer_destroy(&(plc->heartbeat_timer));
+        plc->heartbeat_timer = NULL;
     }
 
     /* reset the PLC to clean up more things. */
@@ -795,6 +823,374 @@ void plc_rc_destroy(void *plc_arg)
 
     pdebug(DEBUG_INFO, "Done.");
 }
+
+
+
+static int plc_state_runner(plc_p plc);
+static void plc_heartbeat(plc_p plc);
+
+
+
+
+
+
+
+
+/* new implementation */
+
+int plc_state_runner(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    critical_block(plc->plc_mutex) {
+        /* loop until we end up waiting for something. */
+        do {
+            rc = plc->state_func(plc);
+        } while(rc == PLCTAG_STATUS_PENDING);
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+void plc_heartbeat(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int64_t now = event_loop_time();
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* we do not want the PLC changing from another thread */
+    critical_block(plc->plc_mutex) {
+        /* Only dispatch if we can. */
+        if(plc->state_func == state_dispatch_requests) {
+            plc_state_runner(plc);
+        }
+    }
+
+    rc = timer_event_wake_at(plc->heartbeat_timer, now + PLC_HEARTBEAT_INTERVAL_MS, plc_heartbeat, plc);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to set up heartbeat_timer wake event.  Got error %s!", plc_tag_decode_error(rc));
+
+        /* TODO - what do we do now?   Everything is broken... */
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+}
+
+
+
+
+
+/* main dispatch states. */
+static int state_dispatch_requests(plc_p plc);
+static int state_prepare_protocol_layers_for_tag_request(plc_p plc);
+static int state_build_tag_request(plc_p plc);
+static int state_build_protocol_layers_for_tag_request(plc_p plc);
+static int state_send_tag_request(plc_p plc);
+static int state_wait_for_tag_response(plc_p plc);
+static int state_process_tag_response(plc_p plc);
+
+/* connection states. */
+static int state_start_connect(plc_p plc);
+static int state_start_open_socket(plc_p plc);
+static int state_start_connect_layer(plc_p plc);
+static int state_build_connect_request(plc_p plc);
+static int state_send_connect_request(plc_p plc);
+static int state_wait_for_connect_response(plc_p plc);
+static int state_process_connect_response(plc_p plc);
+
+/* disconnect states. */
+static int state_start_disconnect(plc_p plc);
+static int state_start_disconnect_layer(plc_p plc);
+static int state_build_disconnect_request(plc_p plc);
+static int state_send_disconnect_request(plc_p plc);
+static int state_wait_for_disconnect_response(plc_p plc);
+static int state_process_disconnect_response(plc_p plc);
+static int state_close_socket(plc_p plc);
+
+/* terminal state */
+static int state_terminate(plc_p plc);
+
+
+/* dispatch states. */
+
+
+int state_dispatch_requests(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int64_t now = event_loop_time();
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        /* if we are terminating, then close down. */
+        if(plc->is_terminating && plc->is_connected == TRUE) {
+            if(plc->is_connected == TRUE) {
+                pdebug(DEBUG_INFO, "PLC terminating, starting disconnect.");
+                plc->state_func = state_start_disconnect;
+                rc = PLCTAG_STATUS_PENDING;
+                break;
+            } else {
+                plc->state_func = state_terminate;
+                rc = PLCTAG_STATUS_OK;
+                break;
+            }
+        }
+
+        /* check idle time. */
+        if(plc->next_idle_timeout < now) {
+            pdebug(DEBUG_INFO, "Starting idle disconnect.");
+            plc->state_func = state_start_disconnect;
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* are there requests queued? */
+        if(plc->request_list) {
+            /* are we connected? */
+            if(plc->is_connected == FALSE) {
+                plc->state_func = state_start_connect;
+                rc = PLCTAG_STATUS_PENDING;
+                break;
+            }
+
+            /* we have requests and we are connected, dispatch! */
+            plc->state_func = state_prepare_protocol_layers_for_tag_request;
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+    } while(0);
+
+    if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_STATUS_PENDING) {
+        pdebug(DEBUG_DETAIL, "Done dispatching for PLC %s.", plc->key);
+        return rc;
+    } else {
+        pdebug(DEBUG_WARN, "Error %s while trying to dispatch for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        return rc;
+    }
+
+    /* TODO - handle errors. */
+}
+
+
+int state_prepare_protocol_layers_for_tag_request(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int data_start = 0;
+    int data_end = 0;
+    plc_request_id req_id = 0;
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
+        rc = plc->layers[index].prepare_for_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+        /* point to where the next part of the packet should start. */
+        plc->data_size = data_start;
+
+        /* set up the current request. */
+        plc->current_request = plc->request_list;
+        plc->current_request->req_id = req_id;
+
+        /* we are going to build the tag request now. */
+        plc->state_func = state_build_tag_request;
+
+        /* we want to continue to other states. */
+        rc = PLCTAG_STATUS_PENDING;
+    } else {
+        pdebug(DEBUG_WARN, "Error %s while preparing layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
+    }
+
+    /* TODO - handle errors */
+
+    return rc;
+}
+
+
+int state_build_tag_request(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int data_start = plc->data_size;
+    int data_end = plc->data_size;
+
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    rc = plc->current_request->build_request(plc->current_request->context, plc->data, plc->data_capacity, &data_start, &data_end, plc->current_request->req_id);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        /* build the layers. */
+        pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+        plc->data_size = data_end;
+        plc->data_offset = 0;
+
+        plc->state_func = state_build_protocol_layers_for_tag_request;
+        rc = PLCTAG_STATUS_PENDING;
+    } else if(rc == PLCTAG_ERR_TOO_SMALL) {
+        pdebug(DEBUG_INFO, "Insufficient space to build new tag request.");
+
+        /* don't change plc->data_size */
+
+        /* rebuild in case something needs to change */
+        plc->state_func = state_build_protocol_layers_for_tag_request;
+        rc = PLCTAG_STATUS_PENDING;
+    } else {
+        pdebug(DEBUG_WARN, "Error %s while building tag requst for PLC %s!", plc_tag_decode_error(rc), plc->key);
+    }
+
+    /* TODO - handle errors */
+
+    return rc;
+}
+
+
+int state_build_protocol_layers_for_tag_request(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int data_start = 0;
+    int data_end = plc->data_size;
+    plc_request_id req_id = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+
+    for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
+        rc = plc->layers[index].build_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_DETAIL, "Layers built for PLC %s.", plc->key);
+
+        /* is there room left? */
+        if(data_start == data_end) {
+            /* no room, send the data. */
+            plc->data_size = data_end;
+            plc->data_offset = 0;
+
+            plc->state_func = state_send_tag_request;
+            rc = PLCTAG_STATUS_PENDING;
+        } else {
+            /* there is room so set up another request. */
+
+            pdebug(DEBUG_DETAIL, "There are %d bytes left, attempting to pack in another request.", data_end - data_start);
+
+            plc->current_request = plc->current_request->next;
+
+            if(plc->current_request) {
+                plc->data_size = data_start;
+
+                plc->current_request->req_id = req_id;
+
+                plc->state_func = state_build_tag_request;
+                rc = PLCTAG_STATUS_PENDING;
+            } else {
+                /* no more requests. */
+                pdebug(DEBUG_DETAIL, "No more requests, going to send the request now.");
+
+                plc->data_size = data_start;
+                plc->data_offset = 0;
+
+                plc->state_func = state_send_tag_request;
+                rc = PLCTAG_STATUS_PENDING;
+            }
+        }
+    } else {
+        pdebug(DEBUG_WARN, "Error %s while preparing layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
+    }
+
+    /* TODO handle errors. */
+
+    return rc;
+}
+
+
+int state_send_tag_request(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int bytes_written = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+
+    bytes_written = socket_tcp_write(plc->socket, plc->data + plc->data_offset, plc->data_size - plc->data_offset);
+
+
+    /* STOP */
+
+    pdebug(DEBUG_DETAIL, "Done for PLC %s.", plc->key);
+
+    return rc;
+}
+
+
+int state_wait_for_tag_response(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+
+    pdebug(DEBUG_DETAIL, "Done for PLC %s.", plc->key);
+
+    return rc;
+}
+
+
+int state_process_tag_response(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+
+    pdebug(DEBUG_DETAIL, "Done for PLC %s.", plc->key);
+
+    return rc;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /* must be called within the PLC's mutex. */
@@ -1440,7 +1836,7 @@ void process_connect_response(void *plc_arg)
 
                 plc->is_connected = TRUE;
 
-                /* start the idle timeout timer */
+                /* start the idle timeout heartbeat_timer */
                 start_idle_timeout_unsafe(plc);
 
                 /* try to dispatch new requests */
@@ -1462,7 +1858,7 @@ void process_connect_response(void *plc_arg)
 
             pdebug(DEBUG_WARN, "Error trying to process connect response.  Force disconnect and try again.");
 
-            /* TODO - set up delay timer. */
+            /* TODO - set up delay heartbeat_timer. */
 
             plc->connect_in_flight = FALSE;
             plc->current_layer = 0;
