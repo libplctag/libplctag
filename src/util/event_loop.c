@@ -43,6 +43,7 @@
 
 static thread_p event_loop_thread = NULL;
 static THREAD_FUNC(even_loop_handler);
+static int64_t current_time = 0;
 static atomic_int library_shutdown = ATOMIC_INT_STATIC_INIT(0);
 
 
@@ -57,6 +58,10 @@ void event_loop_wake(void)
 }
 
 
+int64_t event_loop_time(void)
+{
+    return current_time;
+}
 
 
 int event_loop_init(void)
@@ -130,7 +135,8 @@ void event_loop_teardown(void)
 void event_loop_tickler(void)
 {
     int64_t next_wake_time = INT64_MAX;
-    int64_t current_time = time_ms();
+
+    current_time = time_ms();
 
     pdebug(DEBUG_DETAIL, "Starting.");
 

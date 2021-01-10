@@ -33,6 +33,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 /*
  * this is the core of the event module.
  *
@@ -40,6 +42,8 @@
  */
 
 extern void event_loop_wake(void);
+extern int64_t event_loop_time(void);
 extern void event_loop_tickler(void);
+
 extern int event_loop_init(void);
 extern void event_loop_teardown(void);
