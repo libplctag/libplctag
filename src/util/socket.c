@@ -664,6 +664,11 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
 
     pdebug(DEBUG_INFO, "Starting for %s:%d.", host, port);
 
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Called with null socket pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     critical_block(socket_event_mutex) {
         sock->host = str_dup(host);
         if(!sock->host) {
@@ -708,6 +713,11 @@ int socket_callback_when_read_ready(sock_p sock, void (*callback)(void *context)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Called with null socket pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
     critical_block(socket_event_mutex) {
         /* if we are enabling the event, set the FD and raise the recalc count. */
         if(callback) {
@@ -740,6 +750,11 @@ int socket_callback_when_write_ready(sock_p sock, void (*callback)(void *context
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Called with null socket pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
 
     critical_block(socket_event_mutex) {
         /* if we are enabling the event, set the FD and raise the recalc count. */
