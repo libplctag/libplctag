@@ -105,11 +105,15 @@ struct sock_t {
     void (*connection_ready_callback)(void *context);
     void *connection_ready_context;
 
-    void (*read_ready_callback)(void *context);
-    void *read_ready_context;
+    void (*read_done_callback)(void *context);
+    void *read_done_context;
+    uint8_t *read_buffer;
+    uint8_t *read_amount;
 
-    void (*write_ready_callback)(void *context);
-    void *write_ready_context;
+    void (*write_done_callback)(void *context);
+    void *write_done_context;
+    uint8_t *write_buffer;
+    uint8_t *write_amount;
 };
 
 
@@ -156,12 +160,12 @@ int socket_create(sock_p *sock)
     (*sock)->connection_ready_context = NULL;
 
     /* read callback support */
-    (*sock)->read_ready_callback = NULL;
-    (*sock)->read_ready_context = NULL;
+    (*sock)->read_done_callback = NULL;
+    (*sock)->read_done_context = NULL;
 
     /* write callback support */
-    (*sock)->write_ready_callback = NULL;
-    (*sock)->write_ready_context = NULL;
+    (*sock)->write_done_callback = NULL;
+    (*sock)->write_done_context = NULL;
 
     (*sock)->fd = INVALID_SOCKET;
 
@@ -567,11 +571,11 @@ extern int socket_close(sock_p sock)
     sock->connection_ready_callback = NULL;
     sock->connection_ready_context = NULL;
 
-    sock->read_ready_callback = NULL;
-    sock->read_ready_context = NULL;
+    sock->read_done_callback = NULL;
+    sock->read_done_context = NULL;
 
-    sock->write_ready_callback = NULL;
-    sock->write_ready_context = NULL;
+    sock->write_done_callback = NULL;
+    sock->write_done_context = NULL;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -707,7 +711,7 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
 
 
 
-int socket_callback_when_read_ready(sock_p sock, void (*callback)(void *context), void *context)
+int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context), void *context, uint8_t *buffer, int *amount)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -735,8 +739,10 @@ int socket_callback_when_read_ready(sock_p sock, void (*callback)(void *context)
             }
         }
 
-        sock->read_ready_callback = callback;
-        sock->read_ready_context = context;
+        sock->read_done_callback = callback;
+        sock->read_done_context = context;
+        sock->read_buffer = buffer;
+        sock->read_amount = amount;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -745,7 +751,7 @@ int socket_callback_when_read_ready(sock_p sock, void (*callback)(void *context)
 }
 
 
-int socket_callback_when_write_ready(sock_p sock, void (*callback)(void *context), void *context)
+int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context), void *context)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -773,8 +779,8 @@ int socket_callback_when_write_ready(sock_p sock, void (*callback)(void *context
             }
         }
 
-        sock->write_ready_callback = callback;
-        sock->write_ready_context = context;
+        sock->write_done_callback = callback;
+        sock->write_done_context = context;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -1049,6 +1055,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     fd_set local_read_fds;
     fd_set local_write_fds;
     int num_signaled_fds = 0;
+    int byte_count = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1065,14 +1072,14 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
             FD_ZERO(&global_write_fds);
 
             for(sock_p tmp_sock = socket_list; tmp_sock; tmp_sock = tmp_sock->next) {
-                if(tmp_sock->read_ready_callback) {
+                if(tmp_sock->read_done_callback) {
                     FD_SET(tmp_sock->fd, &global_read_fds);
 
                     /* only do this inside the if.   Some events are not part of the fd set. */
                     max_socket_fd = (max_socket_fd < tmp_sock->fd ? tmp_sock->fd : max_socket_fd);
                 }
 
-                if(tmp_sock->write_ready_callback) {
+                if(tmp_sock->write_done_callback) {
                     FD_SET(tmp_sock->fd, &global_write_fds);
 
                     /* only do this inside the if.   Some events are not part of the fd set. */
@@ -1167,18 +1174,66 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                 for(global_socket_iterator = socket_list; global_socket_iterator; global_socket_iterator = global_socket_iterator->next) {
                     sock_p sock = global_socket_iterator;
 
-                    if(sock->read_ready_callback && FD_ISSET(sock->fd, &local_read_fds)) {
-                        FD_CLR(sock->fd, &global_read_fds);
-                        atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+                    if(sock->read_done_callback && FD_ISSET(sock->fd, &local_read_fds)) {
                         pdebug(DEBUG_DETAIL, "Socket %d has data to read.", sock->fd);
-                        sock->read_ready_callback(sock->read_ready_context);
+
+                        byte_count = socket_tcp_read(sock, sock->read_buffer, *(sock->read_amount));
+                        if(byte_count != 0) {
+                            if(byte_count > 0) {
+                                /* we got data! */
+                                pdebug(DEBUG_DETAIL, "IO thread read data:");
+                                pdebug_dump_bytes(DEBUG_DETAIL, sock->read_buffer, byte_count);
+
+                                atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+                            } else if(byte_count < 0) {
+                                /* set the status if we had an error. */
+                                atomic_int_set(&(sock->status), byte_count);
+                            }
+
+                            /* do not keep calling this, we got data or an error. */
+                            FD_CLR(sock->fd, &global_read_fds);
+                            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+
+                            /* communicate the amount or error back to the caller. */
+                            *(sock->read_amount) = byte_count;
+
+                            /* call the callback either way. */
+                            sock->read_done_callback(sock->read_done_context);
+                        } /* else no data and not an error, just keep waiting. */
                     }
 
-                    if(sock->write_ready_callback && FD_ISSET(sock->fd, &local_write_fds)) {
-                        FD_CLR(sock->fd, &global_write_fds);
-                        atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+                    if(sock->write_done_callback && FD_ISSET(sock->fd, &local_write_fds)) {
                         pdebug(DEBUG_DETAIL, "Socket %d can write data.", sock->fd);
-                        sock->write_ready_callback(sock->write_ready_context);
+
+                        byte_count = socket_tcp_write(sock, sock->write_buffer, *(sock->write_amount));
+                        if(byte_count > 0) {
+                            /* we sent data */
+                            pdebug(DEBUG_DETAIL, "IO thread wrote data:");
+                            pdebug_dump_bytes(DEBUG_DETAIL, sock->write_buffer, byte_count);
+
+                            /* advance the buffer pointer */
+                            sock->write_buffer += byte_count;
+                            *(sock->write_amount) -= byte_count;
+
+                            atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+                        } else if(byte_count < 0) {
+                            /* error! */
+                            pdebug(DEBUG_WARN, "Got error %s trying to write data to socket %d!", plc_tag_decode_error(byte_count), sock->fd);
+
+                            *(sock->write_amount) = byte_count;
+                            atomic_int_set(&(sock->status), byte_count);
+                        }
+
+                        /* are we done writing?   Either all data sent, amount==0, or an error, amount < 0. */
+                        if(*(sock->write_amount) <= 0) {
+                            FD_CLR(sock->fd, &global_write_fds);
+                            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+
+                            /* call the callback */
+                            sock->write_done_callback(sock->write_done_context);
+                        }
+
+                        /* if the byte_count was zero then we keep trying. */
                     }
                 }
             }

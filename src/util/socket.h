@@ -58,7 +58,7 @@ extern int socket_status(sock_p sock);
 
 /* callback/event calls */
 extern int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *context), void *context, const char *host, int port);
-extern int socket_callback_when_read_ready(sock_p, void (*callback)(void *context), void *context);
+extern int socket_callback_when_read_done(sock_p, void (*callback)(void *context), void *context, uint8_t *buffer, int *amount);
 extern int socket_callback_when_write_ready(sock_p, void (*callback)(void *context), void *context);
 
 /* socket event functions for the event loop. */
