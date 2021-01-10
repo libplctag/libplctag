@@ -43,9 +43,7 @@
 struct timer_s {
     struct timer_s *next;
     void *context;
-    void (*callback)(int64_t wake_time,
-                     int64_t current_time,
-                     void *context);
+    void (*callback)(void *context);
     int64_t wake_time;
 };
 
@@ -79,12 +77,7 @@ int timer_event_create(timer_p *timer)
 }
 
 
-int timer_event_wake_at(timer_p timer,
-                  int64_t wake_time,
-                  void (*callback)(int64_t wake_time,
-                                   int64_t current_time,
-                                   void *context),
-                  void *context)
+int timer_event_wake_at(timer_p timer, int64_t wake_time, void (*callback)(void *context), void *context)
 {
     int rc = PLCTAG_STATUS_OK;
     bool need_wake_up = FALSE;
@@ -216,34 +209,16 @@ int64_t timer_event_tickler(int64_t current_time)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    do {
-        timer_p timer = NULL;
+    critical_block(timer_mutex) {
+        while(timer_list && timer_list->wake_time <= current_time) {
+            timer_p timer = timer_list;
 
-        critical_block(timer_mutex) {
-            if(timer_list && timer_list->wake_time <= current_time) {
-                timer = rc_inc(timer_list);
+            /* skip to the next one before we call the callback as it might reinsert the timer. */
+            timer_list = timer_list->next;
 
-                /* pop off the list head. */
-                timer_list = timer_list->next;
-
-                next_wake_time = (timer_list ? timer_list->wake_time : INT64_MAX);
-
-                /* keep trying */
-                done = 0;
-            } else {
-                timer = NULL;
-                done = 1;
-            }
+            timer->callback(timer->context);
         }
-
-        if(timer) {
-            /* call the callback.  This may re-enable the timer. */
-            timer->callback(timer->wake_time, current_time, timer->context);
-
-            /* release our reference */
-            timer = rc_dec(timer);
-        }
-    } while(!done);
+    }
 
     pdebug(DEBUG_SPEW, "Done.");
 
