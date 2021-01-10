@@ -35,6 +35,7 @@
 #include <util/atomic_int.h>
 #include <util/event_loop.h>
 #include <util/debug.h>
+#include <util/lock.h>
 #include <util/timer_event.h>
 #include <util/socket.h>
 #include <util/thread.h>
@@ -43,9 +44,19 @@
 
 static thread_p event_loop_thread = NULL;
 static THREAD_FUNC(even_loop_handler);
-static int64_t current_time = 0;
+
+static lock_t event_loop_current_time_lock = LOCK_INIT;
+static int64_t event_loop_current_time = 0;
+
 static atomic_int library_shutdown = ATOMIC_INT_STATIC_INIT(0);
 
+
+static void set_event_loop_time(int64_t new_time)
+{
+    spin_block(&event_loop_current_time_lock) {
+        event_loop_current_time = new_time;
+    }
+}
 
 void event_loop_wake(void)
 {
@@ -59,8 +70,13 @@ void event_loop_wake(void)
 
 
 int64_t event_loop_time(void)
-{
-    return current_time;
+{   int64_t result = 0;
+
+    spin_block(&event_loop_current_time_lock) {
+        result = event_loop_current_time;
+    }
+
+    return result;
 }
 
 
@@ -135,16 +151,17 @@ void event_loop_teardown(void)
 void event_loop_tickler(void)
 {
     int64_t next_wake_time = INT64_MAX;
+    int64_t now = time_ms();
 
-    current_time = time_ms();
+    set_event_loop_time(now);
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* call non-blocking ticklers first. */
-    next_wake_time = timer_event_tickler(current_time);
+    next_wake_time = timer_event_tickler(now);
 
     /* end with a blocking tickler */
-    socket_event_loop_tickler(next_wake_time, current_time);
+    socket_event_loop_tickler(next_wake_time, now);
 
     pdebug(DEBUG_DETAIL, "Done.");
 }
