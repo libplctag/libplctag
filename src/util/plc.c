@@ -60,12 +60,25 @@
 #define DEFAULT_IDLE_TIMEOUT_MS (5000)
 #define PLC_HEARTBEAT_INTERVAL_MS (200)
 
+
+/* very common code pattern. */
+#define RETRY_ON_ERROR(CONDITION, ...)  \
+if(CONDITION) { \
+    pdebug(DEBUG_WARN, __VA_ARGS__ ); \
+    plc->state_func = state_error_retry; \
+    rc = PLCTAG_STATUS_PENDING; \
+    break; \
+}
+
+
+
+
 struct plc_layer_s {
     void *context;
     int (*initialize)(void *context);
     int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
     int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
-    int (*prepare_for_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
+    int (*prepare)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*destroy_layer)(void *context);
@@ -91,7 +104,8 @@ struct plc_s {
     /* our requests. */
     struct plc_request_s *request_list;
     struct plc_request_s *current_request;
-    // bool request_in_flight;
+    plc_request_id current_response_id;
+    bool last_payload;
 
     int num_layers;
     struct plc_layer_s *layers;
@@ -105,7 +119,10 @@ struct plc_s {
     int data_capacity;
     int data_actual_capacity;
     int data_size;
-    int data_offset;
+    bool response_complete;
+    int payload_end;
+    int payload_start;
+
 
     /* model-specific data. */
     void *context;
@@ -366,7 +383,7 @@ int plc_set_layer(plc_p plc,
                   int (*initialize)(void *context),
                   int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
                   int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
-                  int (*prepare_for_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
+                  int (*prepare)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                   int (*build_request)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                   int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                   int (*destroy_layer)(void *context)
@@ -388,7 +405,7 @@ int plc_set_layer(plc_p plc,
     plc->layers[layer_index].initialize = initialize;
     plc->layers[layer_index].connect = connect;
     plc->layers[layer_index].disconnect = disconnect;
-    plc->layers[layer_index].prepare_for_request = prepare_for_request;
+    plc->layers[layer_index].prepare = prepare;
     plc->layers[layer_index].build_request = build_request;
     plc->layers[layer_index].process_response = process_response;
     plc->layers[layer_index].destroy_layer = destroy_layer;
@@ -504,7 +521,7 @@ int plc_get_buffer_size(plc_p plc)
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
     critical_block(plc->plc_mutex) {
-        res = plc->data_size;
+        res = plc->payload_end;
     }
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
@@ -892,8 +909,8 @@ static int state_dispatch_requests(plc_p plc);
 static int state_prepare_protocol_layers_for_tag_request(plc_p plc);
 static int state_build_tag_request(plc_p plc);
 static int state_build_protocol_layers_for_tag_request(plc_p plc);
-static int state_send_tag_request(plc_p plc);
-static int state_wait_for_tag_response(plc_p plc);
+static int state_tag_request_sent(plc_p plc);
+static int state_tag_response_ready(plc_p plc);
 static int state_process_tag_response(plc_p plc);
 
 /* connection states. */
@@ -914,7 +931,8 @@ static int state_wait_for_disconnect_response(plc_p plc);
 static int state_process_disconnect_response(plc_p plc);
 static int state_close_socket(plc_p plc);
 
-/* terminal state */
+/* terminal or error states */
+static int state_error_retry(plc_p plc);
 static int state_terminate(plc_p plc);
 
 
@@ -930,7 +948,7 @@ int state_dispatch_requests(plc_p plc)
 
     do {
         /* if we are terminating, then close down. */
-        if(plc->is_terminating && plc->is_connected == TRUE) {
+        if(plc->is_terminating) {
             if(plc->is_connected == TRUE) {
                 pdebug(DEBUG_INFO, "PLC terminating, starting disconnect.");
                 plc->state_func = state_start_disconnect;
@@ -988,30 +1006,28 @@ int state_prepare_protocol_layers_for_tag_request(plc_p plc)
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
-    for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-        rc = plc->layers[index].prepare_for_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
-    }
+    do {
+        /* prepare the layers for a request. */
+        for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+        }
 
-    if(rc == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while preparing layers for tag request for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
-        /* point to where the next part of the packet should start. */
-        plc->data_size = data_start;
+        /* payload boundaries. */
+        plc->payload_start = data_start;
+        plc->payload_end = data_end;
 
-        /* set up the current request. */
+        /* set up request */
         plc->current_request = plc->request_list;
         plc->current_request->req_id = req_id;
 
-        /* we are going to build the tag request now. */
         plc->state_func = state_build_tag_request;
-
-        /* we want to continue to other states. */
         rc = PLCTAG_STATUS_PENDING;
-    } else {
-        pdebug(DEBUG_WARN, "Error %s while preparing layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
-    }
+        break;
+    } while(0);
 
-    /* TODO - handle errors */
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
     return rc;
 }
@@ -1020,10 +1036,14 @@ int state_prepare_protocol_layers_for_tag_request(plc_p plc)
 int state_build_tag_request(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
-    int data_start = plc->data_size;
-    int data_end = plc->data_size;
+    int data_start = plc->payload_end;
+    int data_end = plc->payload_end;
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    do {
+        /* STOP */
+    } while(0);
 
     rc = plc->current_request->build_request(plc->current_request->context, plc->data, plc->data_capacity, &data_start, &data_end, plc->current_request->req_id);
 
@@ -1031,15 +1051,15 @@ int state_build_tag_request(plc_p plc)
         /* build the layers. */
         pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
-        plc->data_size = data_end;
-        plc->data_offset = 0;
+        plc->payload_end = data_end;
+        plc->payload_start = 0;
 
         plc->state_func = state_build_protocol_layers_for_tag_request;
         rc = PLCTAG_STATUS_PENDING;
     } else if(rc == PLCTAG_ERR_TOO_SMALL) {
         pdebug(DEBUG_INFO, "Insufficient space to build new tag request.");
 
-        /* don't change plc->data_size */
+        /* don't change plc->payload_end */
 
         /* rebuild in case something needs to change */
         plc->state_func = state_build_protocol_layers_for_tag_request;
@@ -1058,72 +1078,49 @@ int state_build_protocol_layers_for_tag_request(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
     int data_start = 0;
-    int data_end = plc->data_size;
+    int data_end = plc->payload_end;
     plc_request_id req_id = 0;
 
     pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
 
-    for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-        rc = plc->layers[index].build_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
-    }
+    do {
+        plc->last_payload = TRUE;
 
-    if(rc == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_DETAIL, "Layers built for PLC %s.", plc->key);
-
-        /* is there room left? */
-        if(data_start == data_end) {
-            /* no room, send the data. */
-            plc->data_size = data_end;
-            plc->data_offset = 0;
-
-            plc->state_func = state_send_tag_request;
-            rc = PLCTAG_STATUS_PENDING;
-        } else {
-            /* there is room so set up another request. */
-
-            pdebug(DEBUG_DETAIL, "There are %d bytes left, attempting to pack in another request.", data_end - data_start);
-
-            plc->current_request = plc->current_request->next;
-
-            if(plc->current_request) {
-                plc->data_size = data_start;
-
-                plc->current_request->req_id = req_id;
-
-                plc->state_func = state_build_tag_request;
-                rc = PLCTAG_STATUS_PENDING;
-            } else {
-                /* no more requests. */
-                pdebug(DEBUG_DETAIL, "No more requests, going to send the request now.");
-
-                plc->data_size = data_start;
-                plc->data_offset = 0;
-
-                plc->state_func = state_send_tag_request;
-                rc = PLCTAG_STATUS_PENDING;
+        for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
+            rc = plc->layers[index].build_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+            if(rc == PLCTAG_STATUS_PENDING) {
+                /* this layer can handle multiple requests. */
+                plc->last_payload = FALSE;
+                rc = PLCTAG_STATUS_OK;
             }
         }
-    } else {
-        pdebug(DEBUG_WARN, "Error %s while preparing layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
-    }
 
-    /* TODO handle errors. */
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while building request layers for PLC %s!", plc_tag_decode_error(rc), plc->key)
 
-    return rc;
-}
+        /* we built the layers.   Do we have an option to add more requests? */
+        if(plc->last_payload == FALSE && plc->current_request->next) {
+            plc->current_request = plc->current_request->next;
+            plc->current_request->req_id = req_id;
 
+            /* point to the possible data range in the buffer. */
+            plc->payload_start = data_start;
+            plc->payload_end = data_end;
 
-int state_send_tag_request(plc_p plc)
-{
-    int rc = PLCTAG_STATUS_OK;
-    int bytes_written = 0;
+            plc->state_func = state_build_tag_request;
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
 
-    pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+        /* we built the full packet.  Send it. */
+        plc->data_size = data_end;
+        plc->state_func = state_tag_request_sent;
+        rc = socket_callback_when_write_done(plc->socket, plc_state_runner, plc, plc->data, &(plc->data_size));
 
-    bytes_written = socket_tcp_write(plc->socket, plc->data + plc->data_offset, plc->data_size - plc->data_offset);
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while setting up write callback for PLC %s!", plc_tag_decode_error(rc), plc->key)
 
-
-    /* STOP */
+        /* we are done and need to wait for the IO layer to send the packet. */
+        rc = PLCTAG_STATUS_OK;
+    } while(0);
 
     pdebug(DEBUG_DETAIL, "Done for PLC %s.", plc->key);
 
@@ -1131,11 +1128,119 @@ int state_send_tag_request(plc_p plc)
 }
 
 
-int state_wait_for_tag_response(plc_p plc)
+int state_tag_request_sent(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
+    int data_start = 0;
+    int data_end = 0;
+    plc_request_id req_id = 0;
+    int bytes_written = 0;
 
     pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+
+    do {
+        /* find out why we got called. */
+        rc = socket_status(plc->socket);
+
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to write socket in PLC %s!", plc_tag_decode_error(rc), plc->key)
+
+        /* all good!  We send the request.  Prepare the layers for receiving the response. */
+        for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_actual_capacity, &data_start, &data_end, &req_id);
+        }
+
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to prepare layers for response in PLC %s!", plc_tag_decode_error(rc), plc->key)
+
+        /* ready to wait for the response. */
+        plc->state_func = state_tag_response_ready;
+
+        /* clear out the payload. */
+        plc->payload_end = plc->payload_start = plc->data_size = 0;
+
+        rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to set up socket response read in PLC %s!", plc_tag_decode_error(rc), plc->key)
+
+        /* wait for response. */
+        rc = PLCTAG_STATUS_OK;
+        break;
+    } while(0);
+
+    pdebug(DEBUG_DETAIL, "Done for PLC %s.", plc->key);
+
+    return rc;
+}
+
+
+
+
+int state_tag_response_ready(plc_p plc)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int bytes_read = 0;
+    int data_start = 0;
+    int data_end = 0;
+    plc_request_id req_id = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+
+    do {
+        /* check socket status.  Might be an error */
+        rc = socket_status(plc->socket);
+
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s from socket read for PLC %s!", plc_tag_decode_error(rc), plc->key);
+
+        pdebug(DEBUG_DETAIL, "Got possible response:");
+        pdebug_dump_bytes(DEBUG_DETAIL, plc->data, plc->data_size);
+
+        /*
+         * If a layer returns PLCTAG_STATUS_PENDING, then we know that there are multiple
+         * sub-packets remaining within it and we need to continue.
+         */
+        plc->last_payload = TRUE;
+
+        for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
+            rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_actual_capacity, &data_start, &data_end, &req_id);
+            if(rc == PLCTAG_STATUS_PENDING) {
+                plc->last_payload = FALSE;
+                rc = PLCTAG_STATUS_OK;
+            }
+        }
+
+        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_PARTIAL, "Got error %s processing layers, restarting stack for PLC %s!", plc_tag_decode_error(rc), plc->key)
+
+        /* if we get PLCTAG_ERR_PARTIAL, then we need to keep reading. */
+        if(rc == PLCTAG_ERR_PARTIAL) {
+            pdebug(DEBUG_INFO, "Did not get all the data yet, need to get more.");
+
+            /* come back to this routine. */
+            plc->state_func = state_tag_response_ready;
+            rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+
+            RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Unexpected error %s setting socket read callback for PLC %s!", plc_tag_decode_error(rc), plc->key);
+
+            /* We know we need to wait, so there is nothing for the state runner to do. */
+            rc = PLCTAG_STATUS_OK;
+            break;
+        }
+
+        /* if we got here, then we have a valid response.
+         * The data_start and data_end bracket the payload for the tag.
+         *
+         * req_id is the internal ID for the request we want to match.
+         */
+
+        // plc->response_complete = TRUE;
+        // plc->last_payload = (rc == PLCTAG_STATUS_PENDING);
+
+        plc->payload_start = data_start;
+        plc->payload_end = data_end;
+        plc->current_response_id = req_id;
+
+        plc->state_func = state_process_tag_response;
+        rc = PLCTAG_STATUS_PENDING;
+        break;
+    } while(0);
 
     pdebug(DEBUG_DETAIL, "Done for PLC %s.", plc->key);
 
@@ -1146,8 +1251,46 @@ int state_wait_for_tag_response(plc_p plc)
 int state_process_tag_response(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
+    int data_start = 0;
+    int data_end = 0;
 
     pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
+
+    do {
+        /* is there any data left? */
+        /* is this response for us? */
+        if(plc->request_list && plc->current_response_id == plc->request_list->req_id) {
+            plc_request_p request = plc->request_list;
+
+            /* remove the request from the queue. We have a response. */
+            plc->request_list = plc->request_list->next;
+            request->next = NULL;
+
+            data_start = plc->payload_start;
+            data_end = plc->payload_end;
+
+            rc = request->process_response(request->context, plc->data, plc->data_actual_capacity, &data_start, &data_end, request->req_id);
+
+            RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s processing request for tag for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        } else {
+            /* nope */
+            pdebug(DEBUG_INFO, "Response for a skipped or aborted request %" REQ_ID_FMT " for PLC %s.", plc->current_response_id, plc->key);
+        }
+
+        /* do we have more to process? */
+        if(plc->last_payload == FALSE) {
+            pdebug(DEBUG_INFO, "More response sub-packets to process for PLC %s.", plc->key);
+            plc->state_func = state_tag_response_ready;
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        } else {
+            /* last one, go to the dispatcher. */
+            pdebug(DEBUG_INFO, "No more response sub-packets to process for PLC %s, triggering dispatcher.", plc->key);
+            plc->state_func = state_dispatch_requests;
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+    } while(0);
 
     pdebug(DEBUG_DETAIL, "Done for PLC %s.", plc->key);
 
@@ -1278,8 +1421,8 @@ int start_disconnecting_unsafe(plc_p plc)
         plc->request_in_flight = FALSE;
     }
 
-    plc->data_size = 0;
-    plc->data_offset = 0;
+    plc->payload_end = 0;
+    plc->payload_start = 0;
 
     rc = socket_callback_when_write_ready(plc->socket, write_disconnect_request, plc);
     if(rc != PLCTAG_STATUS_OK) {
@@ -1325,7 +1468,7 @@ void write_disconnect_request(void *plc_arg)
             }
 
             /* do we have a packet to send? */
-            if(plc->data_size == 0) {
+            if(plc->payload_end == 0) {
                 /* no we do not. make one. */
                 rc = build_disconnect_request_unsafe(plc);
                 if(rc != PLCTAG_STATUS_OK) {
@@ -1335,11 +1478,11 @@ void write_disconnect_request(void *plc_arg)
             }
 
             /* do we have data to send? */
-            if(plc->data_offset < plc->data_size) {
+            if(plc->payload_start < plc->payload_end) {
                 int bytes_written = 0;
 
                 /* We have data to write. */
-                bytes_written = socket_tcp_write(plc->socket, plc->data + plc->data_offset, plc->data_size - plc->data_offset);
+                bytes_written = socket_tcp_write(plc->socket, plc->data + plc->payload_start, plc->payload_end - plc->payload_start);
                 if(bytes_written < 0) {
                     /* error sending data! */
                     rc = bytes_written;
@@ -1348,10 +1491,10 @@ void write_disconnect_request(void *plc_arg)
                     break;
                 }
 
-                plc->data_offset += bytes_written;
+                plc->payload_start += bytes_written;
 
                 /* did we write all the data? */
-                if(plc->data_offset < plc->data_size) {
+                if(plc->payload_start < plc->payload_end) {
                     /* no, so queue up another write. */
                     rc = socket_callback_when_write_ready(plc->socket, write_disconnect_request, plc);
                     if(rc != PLCTAG_STATUS_OK) {
@@ -1362,10 +1505,10 @@ void write_disconnect_request(void *plc_arg)
             }
 
             /* did we write it all? */
-            if(plc->data_offset >= plc->data_size) {
+            if(plc->payload_start >= plc->payload_end) {
                 /* yes, so wait for the response. */
-                plc->data_offset = 0;
-                plc->data_size = 0;
+                plc->payload_start = 0;
+                plc->payload_end = 0;
 
                 rc = socket_callback_when_read_ready(plc->socket, process_disconnect_response, plc);
                 if(rc != PLCTAG_STATUS_OK) {
@@ -1407,7 +1550,7 @@ int build_disconnect_request_unsafe(plc_p plc)
         /* prepare the layers from lowest to highest.  This reserves space in the buffer. */
         for(int index = 0; index < plc->current_layer && index >= 0 && rc == PLCTAG_STATUS_OK; index++) {
             pdebug(DEBUG_DETAIL, "Preparing layer %d for disconnect.", index);
-            rc = plc->layers[index].prepare_for_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
         }
 
         if(rc != PLCTAG_STATUS_OK) {
@@ -1436,16 +1579,16 @@ int build_disconnect_request_unsafe(plc_p plc)
         pdebug(DEBUG_INFO, "Layer %d disconnect packet:", plc->current_layer);
         pdebug_dump_bytes(DEBUG_INFO, plc->data, data_end);
 
-        plc->data_size = data_end;
-        plc->data_offset = 0;
+        plc->payload_end = data_end;
+        plc->payload_start = 0;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error trying to build disconnect packet!");
 
         /* punt */
-        plc->data_size = 0;
-        plc->data_offset = 0;
+        plc->payload_end = 0;
+        plc->payload_start = 0;
         plc->current_layer = 0;
 
         /* let the caller deal with it. */
@@ -1476,18 +1619,18 @@ void process_disconnect_response(void *plc_arg)
 
         do {
             /* we have data to read. */
-            bytes_read = socket_tcp_read(plc->socket, plc->data + plc->data_size, plc->data_capacity - plc->data_size);
+            bytes_read = socket_tcp_read(plc->socket, plc->data + plc->payload_end, plc->data_capacity - plc->payload_end);
             if(bytes_read < 0) {
                 rc = bytes_read;
                 pdebug(DEBUG_WARN, "Error, %s, while trying to read socket!", plc_tag_decode_error(rc));
                 break;
             }
 
-            plc->data_size += bytes_read;
+            plc->payload_end += bytes_read;
 
             /* do we have enough data? */
             for(int index = 0; index <= plc->current_layer && rc == PLCTAG_STATUS_OK; index++) {
-                rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_size, &data_start, &data_end, &req_id);
+                rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->payload_end, &data_start, &data_end, &req_id);
             }
 
             if(rc == PLCTAG_ERR_PARTIAL) {
@@ -1513,8 +1656,8 @@ void process_disconnect_response(void *plc_arg)
              * and work down toward the lowest level. */
             plc->current_layer--;
 
-            plc->data_size = 0;
-            plc->data_offset = 0;
+            plc->payload_end = 0;
+            plc->payload_start = 0;
 
             if(plc->current_layer < 0) {
                 pdebug(DEBUG_INFO, "Done disconnecting all layers.");
@@ -1593,8 +1736,8 @@ int start_connecting_unsafe(plc_p plc)
     /* set up connect state. */
     plc->connect_in_flight = TRUE;
     plc->current_layer = 0;
-    plc->data_size = 0;
-    plc->data_offset = 0;
+    plc->payload_end = 0;
+    plc->payload_start = 0;
 
     /* open socket */
 
@@ -1643,7 +1786,7 @@ void write_connect_request(void *plc_arg)
             }
 
             /* do we have a packet to send? */
-            if(plc->data_size == 0) {
+            if(plc->payload_end == 0) {
                 /* no we do not. make one. */
                 rc = build_connect_request_unsafe(plc);
                 if(rc != PLCTAG_STATUS_OK) {
@@ -1653,11 +1796,11 @@ void write_connect_request(void *plc_arg)
             }
 
             /* do we have data to send? */
-            if(plc->data_offset < plc->data_size) {
+            if(plc->payload_start < plc->payload_end) {
                 int bytes_written = 0;
 
                 /* We have data to write. */
-                bytes_written = socket_tcp_write(plc->socket, plc->data + plc->data_offset, plc->data_size - plc->data_offset);
+                bytes_written = socket_tcp_write(plc->socket, plc->data + plc->payload_start, plc->payload_end - plc->payload_start);
                 if(bytes_written < 0) {
                     /* error sending data! */
                     rc = bytes_written;
@@ -1666,10 +1809,10 @@ void write_connect_request(void *plc_arg)
                     break;
                 }
 
-                plc->data_offset += bytes_written;
+                plc->payload_start += bytes_written;
 
                 /* did we write all the data? */
-                if(plc->data_offset < plc->data_size) {
+                if(plc->payload_start < plc->payload_end) {
                     /* no, so queue up another write. */
                     rc = socket_callback_when_write_ready(plc->socket, write_connect_request, plc);
                     if(rc != PLCTAG_STATUS_OK) {
@@ -1680,10 +1823,10 @@ void write_connect_request(void *plc_arg)
             }
 
             /* did we write it all? */
-            if(plc->data_offset >= plc->data_size) {
+            if(plc->payload_start >= plc->payload_end) {
                 /* yes, so wait for the response. */
-                plc->data_offset = 0;
-                plc->data_size = 0;
+                plc->payload_start = 0;
+                plc->payload_end = 0;
 
                 rc = socket_callback_when_read_ready(plc->socket, process_connect_response, plc);
                 if(rc != PLCTAG_STATUS_OK) {
@@ -1722,7 +1865,7 @@ int build_connect_request_unsafe(plc_p plc)
         /* prepare the layers from lowest to highest.  This reserves space in the buffer. */
         for(int index = 0; index < plc->current_layer && index >= 0 && rc == PLCTAG_STATUS_OK; index++) {
             pdebug(DEBUG_DETAIL, "Preparing layer %d for connect attempt.", index);
-            rc = plc->layers[index].prepare_for_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
         }
 
         if(rc != PLCTAG_STATUS_OK) {
@@ -1751,8 +1894,8 @@ int build_connect_request_unsafe(plc_p plc)
         pdebug(DEBUG_INFO, "Layer %d disconnect packet:", plc->current_layer);
         pdebug_dump_bytes(DEBUG_INFO, plc->data, data_end);
 
-        plc->data_size = data_end;
-        plc->data_offset = 0;
+        plc->payload_end = data_end;
+        plc->payload_start = 0;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -1761,8 +1904,8 @@ int build_connect_request_unsafe(plc_p plc)
         /* TODO - figure out what to do here to clean up. */
 
         /* punt */
-        plc->data_size = 0;
-        plc->data_offset = 0;
+        plc->payload_end = 0;
+        plc->payload_start = 0;
         plc->current_layer = plc->num_layers;
     }
 
@@ -1792,18 +1935,18 @@ void process_connect_response(void *plc_arg)
 
         do {
             /* we have data to read. */
-            bytes_read = socket_tcp_read(plc->socket, plc->data + plc->data_size, plc->data_capacity - plc->data_size);
+            bytes_read = socket_tcp_read(plc->socket, plc->data + plc->payload_end, plc->data_capacity - plc->payload_end);
             if(bytes_read < 0) {
                 rc = bytes_read;
                 pdebug(DEBUG_WARN, "Error, %s, while trying to read socket!", plc_tag_decode_error(rc));
                 break;
             }
 
-            plc->data_size += bytes_read;
+            plc->payload_end += bytes_read;
 
             /* do we have enough data? */
             for(int index = 0; index <= plc->current_layer && rc == PLCTAG_STATUS_OK; index++) {
-                rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_size, &data_start, &data_end, &req_id);
+                rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->payload_end, &data_start, &data_end, &req_id);
             }
 
             if(rc == PLCTAG_ERR_PARTIAL) {
@@ -1827,8 +1970,8 @@ void process_connect_response(void *plc_arg)
             plc->current_layer++;
 
             /* get us ready for the next round. */
-            plc->data_size = 0;
-            plc->data_offset = 0;
+            plc->payload_end = 0;
+            plc->payload_start = 0;
 
             if(plc->current_layer >= plc->num_layers) {
                 /* done! */
@@ -1919,7 +2062,7 @@ void build_plc_request_callback(void *plc_arg)
         do {
             /* This allocates space in the buffer and may do some other housekeeping.*/
             for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-                rc = plc->layers[index].prepare_for_request(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_num);
+                rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_num);
             }
 
             if(rc != PLCTAG_STATUS_OK) {
@@ -1977,8 +2120,8 @@ void build_plc_request_callback(void *plc_arg)
             }
 
             /* queue the send. */
-            plc->data_size = data_end;
-            plc->data_offset = 0;
+            plc->payload_end = data_end;
+            plc->payload_start = 0;
 
             rc = socket_callback_when_write_ready(plc->socket, write_plc_request_callback, plc);
             if(rc != PLCTAG_STATUS_OK) {
@@ -2021,11 +2164,11 @@ void write_plc_request_callback(void *plc_arg)
         /* multiple things to check that can change. */
         do {
             /* do we have data to send? */
-            if(plc->data_offset < plc->data_size) {
+            if(plc->payload_start < plc->payload_end) {
                 int bytes_written = 0;
 
                 /* We have data to write. */
-                bytes_written = socket_tcp_write(plc->socket, plc->data + plc->data_offset, plc->data_size - plc->data_offset);
+                bytes_written = socket_tcp_write(plc->socket, plc->data + plc->payload_start, plc->payload_end - plc->payload_start);
                 if(bytes_written < 0) {
                     /* error sending data! */
                     rc = bytes_written;
@@ -2034,10 +2177,10 @@ void write_plc_request_callback(void *plc_arg)
                     break;
                 }
 
-                plc->data_offset += bytes_written;
+                plc->payload_start += bytes_written;
 
                 /* did we write all the data? */
-                if(plc->data_offset < plc->data_size) {
+                if(plc->payload_start < plc->payload_end) {
                     /* no, so queue up another write. */
                     rc = socket_callback_when_write_ready(plc->socket, write_plc_request_callback, plc);
                     if(rc != PLCTAG_STATUS_OK) {
@@ -2048,10 +2191,10 @@ void write_plc_request_callback(void *plc_arg)
             }
 
             /* did we write it all? */
-            if(plc->data_offset >= plc->data_size) {
+            if(plc->payload_start >= plc->payload_end) {
                 /* yes, so wait for the response. */
-                plc->data_offset = 0;
-                plc->data_size = 0;
+                plc->payload_start = 0;
+                plc->payload_end = 0;
 
                 /* set up the idle timeout */
                 start_idle_timeout_unsafe(plc);
@@ -2101,19 +2244,19 @@ void process_plc_request_response(void *plc_arg)
         plc_request_p *request_walker = &(plc->request_list);
 
         /* we have data to read. */
-        bytes_read = socket_tcp_read(plc->socket, plc->data + plc->data_size, plc->data_capacity - plc->data_size);
+        bytes_read = socket_tcp_read(plc->socket, plc->data + plc->payload_end, plc->data_capacity - plc->payload_end);
         if(bytes_read < 0) {
             rc = bytes_read;
             pdebug(DEBUG_WARN, "Error, %s, while trying to read socket!", plc_tag_decode_error(rc));
             break;
         }
 
-        plc->data_size += bytes_read;
+        plc->payload_end += bytes_read;
 
         /* possibly loop over the requests. */
         do {
             data_start = 0;
-            data_end = plc->data_size;
+            data_end = plc->payload_end;
             plc_request_p request = *request_walker;
 
             /* do we have enough data? */
