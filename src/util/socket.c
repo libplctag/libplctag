@@ -108,6 +108,7 @@ struct sock_t {
     void (*read_done_callback)(void *context);
     void *read_done_context;
     uint8_t *read_buffer;
+    int read_buffer_capacity;
     uint8_t *read_amount;
 
     void (*write_done_callback)(void *context);
@@ -711,7 +712,7 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
 
 
 
-int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context), void *context, uint8_t *buffer, int *amount)
+int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context), void *context, uint8_t *buffer, int buffer_capacity, int *amount)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -742,6 +743,7 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
         sock->read_done_callback = callback;
         sock->read_done_context = context;
         sock->read_buffer = buffer;
+        sock->read_buffer_capacity = buffer_capacity;
         sock->read_amount = amount;
     }
 
@@ -751,7 +753,7 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
 }
 
 
-int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context), void *context)
+int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context), void *context, uint8_t *buffer, int *amount)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -781,6 +783,8 @@ int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context)
 
         sock->write_done_callback = callback;
         sock->write_done_context = context;
+        sock->write_buffer = buffer;
+        sock->write_amount = amount;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -1177,7 +1181,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                     if(sock->read_done_callback && FD_ISSET(sock->fd, &local_read_fds)) {
                         pdebug(DEBUG_DETAIL, "Socket %d has data to read.", sock->fd);
 
-                        byte_count = socket_tcp_read(sock, sock->read_buffer, *(sock->read_amount));
+                        byte_count = socket_tcp_read(sock, sock->read_buffer + *(sock->read_amount), sock->read_buffer_capacity - *(sock->read_amount));
                         if(byte_count != 0) {
                             if(byte_count > 0) {
                                 /* we got data! */
