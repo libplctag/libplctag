@@ -637,9 +637,9 @@ THREAD_FUNC(socket_connection_thread_func)
     atomic_int_set(&(sock->status), (unsigned int)rc);
 
     if(rc == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO, "Blocking TCP connect call complete.");
+        pdebug(DEBUG_INFO, "Blocking TCP connect call to %s:%d complete.", sock->host, sock->port);
     } else {
-        pdebug(DEBUG_INFO, "Blocking TCP connect call failed with error %s.", plc_tag_decode_error(rc));
+        pdebug(DEBUG_INFO, "Blocking TCP connect call to %s:%d failed with error %s.", sock->host, sock->port, plc_tag_decode_error(rc));
     }
 
     /* call the callback if there is one. */
@@ -675,6 +675,12 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
     }
 
     critical_block(socket_event_mutex) {
+        /* clean up anything left over. */
+        if(sock->host) {
+            mem_free(sock->host);
+            sock->host = NULL;
+        }
+
         sock->host = str_dup(host);
         if(!sock->host) {
             pdebug(DEBUG_WARN, "Unable to allocate memory for host name copy!");
