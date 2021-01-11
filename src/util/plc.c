@@ -152,7 +152,6 @@ struct plc_s {
     /* data buffer. */
     uint8_t *data;
     int data_capacity;
-    int data_actual_capacity;
     int data_size;
     bool response_complete;
     int payload_end;
@@ -614,10 +613,9 @@ int plc_get_buffer_size(plc_p plc)
 
 
 
-int plc_set_buffer_size(plc_p plc, int buffer_size, int buffer_overflow)
+int plc_set_buffer_size(plc_p plc, int buffer_size)
 {
     int rc = 0;
-    int actual_capacity = 0;
 
     if(!plc) {
         pdebug(DEBUG_WARN, "PLC pointer is null!");
@@ -631,15 +629,8 @@ int plc_set_buffer_size(plc_p plc, int buffer_size, int buffer_overflow)
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    if(buffer_overflow < 0 || buffer_overflow > 65536) {
-        pdebug(DEBUG_WARN, "Illegal buffer overflow size value %d!", buffer_overflow);
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
-
-    actual_capacity = buffer_size + buffer_overflow;
-
     critical_block(plc->plc_mutex) {
-        plc->data = mem_realloc(plc->data, actual_capacity);
+        plc->data = mem_realloc(plc->data, buffer_size);
         if(!plc->data) {
             pdebug(DEBUG_WARN, "Unable to reallocate memory for data buffer!");
             rc = PLCTAG_ERR_NO_MEM;
@@ -647,7 +638,6 @@ int plc_set_buffer_size(plc_p plc, int buffer_size, int buffer_overflow)
         }
 
         plc->data_capacity = buffer_size;
-        plc->data_actual_capacity = actual_capacity;
     }
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -1099,7 +1089,7 @@ int state_build_tag_request(plc_p plc)
 
     do {
         /* build the tag request on top of the prepared layers. */
-        rc = plc->current_request->build_request(plc->current_request->context, plc->data, plc->data_actual_capacity, &data_start, &data_end, plc->current_request->req_id);
+        rc = plc->current_request->build_request(plc->current_request->context, plc->data, plc->data_capacity, &data_start, &data_end, plc->current_request->req_id);
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TOO_SMALL, "Error %s building tag request for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1197,7 +1187,7 @@ int state_tag_request_sent(plc_p plc)
 
         /* all good!  We send the request.  Prepare the layers for receiving the response. */
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_actual_capacity, &data_start, &data_end, &req_id);
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
         }
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to prepare layers for response in PLC %s!", plc_tag_decode_error(rc), plc->key)
@@ -1208,7 +1198,7 @@ int state_tag_request_sent(plc_p plc)
         /* clear out the payload. */
         plc->payload_end = plc->payload_start = plc->data_size = 0;
 
-        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to set up socket response read in PLC %s!", plc_tag_decode_error(rc), plc->key)
 
@@ -1249,7 +1239,7 @@ int state_tag_response_ready(plc_p plc)
         plc->last_payload = TRUE;
 
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_actual_capacity, &data_start, &data_end, &req_id);
+            rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
             if(rc == PLCTAG_STATUS_PENDING) {
                 plc->last_payload = FALSE;
                 rc = PLCTAG_STATUS_OK;
@@ -1264,7 +1254,7 @@ int state_tag_response_ready(plc_p plc)
 
             /* come back to this routine. */
             NEXT_STATE(state_tag_response_ready);
-            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
             RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Unexpected error %s setting socket read callback for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1320,7 +1310,7 @@ int state_process_tag_response(plc_p plc)
 
             pdebug(DEBUG_DETAIL, "Attempting to process request %" REQ_ID_FMT " for PLC %s.", request->req_id, plc->key);
 
-            rc = request->process_response(request->context, plc->data, plc->data_actual_capacity, &data_start, &data_end, request->req_id);
+            rc = request->process_response(request->context, plc->data, plc->data_capacity, &data_start, &data_end, request->req_id);
 
             RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s processing request for tag for PLC %s!", plc_tag_decode_error(rc), plc->key);
         } else {
@@ -1428,13 +1418,13 @@ int state_build_layer_connect_request(plc_p plc)
 
         /* prepare the layers up to the current layer. */
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for connect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* build the connect request. */
-        rc = plc->layers[plc->current_layer_index].connect(plc->layers[plc->current_layer_index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end));
+        rc = plc->layers[plc->current_layer_index].connect(plc->layers[plc->current_layer_index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing connect attempt for layer %d for PLC %s!", plc_tag_decode_error(rc), plc->current_layer_index, plc->key);
 
@@ -1444,7 +1434,7 @@ int state_build_layer_connect_request(plc_p plc)
 
         /* fix up the layers up to the current layer. */
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s fixing up layers for connect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
@@ -1483,7 +1473,7 @@ int state_layer_connect_request_sent(plc_p plc)
         plc->data_size = plc->payload_end = plc->payload_start = 0;
 
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for connect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
@@ -1492,7 +1482,7 @@ int state_layer_connect_request_sent(plc_p plc)
         plc->data_size = plc->payload_end = plc->payload_start = 0;
 
         NEXT_STATE(state_layer_connect_response_ready);
-        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read callback for connect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1522,7 +1512,7 @@ int state_layer_connect_response_ready(plc_p plc)
 
         /* check to see if we got the entire response back. */
         for(int index=0; index <= plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
             if(rc == PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_INFO, "Connection attempt rejected, trying again.");
                 retry_layer = TRUE;
@@ -1535,7 +1525,7 @@ int state_layer_connect_response_ready(plc_p plc)
         if(rc == PLCTAG_ERR_TOO_SMALL) {
             /* we got a partial packet, wait for more data. */
             NEXT_STATE(state_layer_connect_response_ready);
-            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
             RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read complete callback for connect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1582,7 +1572,7 @@ int state_start_disconnect(plc_p plc)
         plc->data_size = plc->payload_end = plc->payload_start = 0;
 
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         if(rc != PLCTAG_STATUS_OK) {
@@ -1641,13 +1631,13 @@ int state_build_layer_disconnect_request(plc_p plc)
 
         /* prepare the layers up to the current layer. */
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for disconnect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* build the disconnect request. */
-        rc = plc->layers[plc->current_layer_index].disconnect(plc->layers[plc->current_layer_index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end));
+        rc = plc->layers[plc->current_layer_index].disconnect(plc->layers[plc->current_layer_index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end));
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing disconnect attempt for layer %d for PLC %s!", plc_tag_decode_error(rc), plc->current_layer_index, plc->key);
 
@@ -1657,7 +1647,7 @@ int state_build_layer_disconnect_request(plc_p plc)
 
         /* fix up the layers up to the current layer. */
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s fixing up layers for disconnect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
@@ -1694,7 +1684,7 @@ int state_layer_disconnect_request_sent(plc_p plc)
         plc->data_size = plc->payload_end = plc->payload_start = 0;
 
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for disconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
@@ -1703,7 +1693,7 @@ int state_layer_disconnect_request_sent(plc_p plc)
         plc->data_size = plc->payload_end = plc->payload_start = 0;
 
         NEXT_STATE(state_layer_disconnect_response_ready);
-        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read callback for discconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1730,7 +1720,7 @@ int state_layer_disconnect_response_ready(plc_p plc)
 
         /* check to see if we got the entire response back. */
         for(int index=0; index <= plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_actual_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
+            rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_response_id));
         }
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TOO_SMALL, "Error %s processing layer responses for disconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
@@ -1738,7 +1728,7 @@ int state_layer_disconnect_response_ready(plc_p plc)
         if(rc == PLCTAG_ERR_TOO_SMALL) {
             /* we got a partial packet, wait for more data. */
             NEXT_STATE(state_layer_disconnect_response_ready);
-            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
             RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read complete callback for disconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 

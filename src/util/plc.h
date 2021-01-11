@@ -81,7 +81,7 @@ extern int plc_get_idle_timeout(plc_p plc);
 extern int plc_set_idle_timeout(plc_p plc, int timeout_ms);
 
 extern int plc_get_buffer_size(plc_p plc);
-extern int plc_set_buffer_size(plc_p plc, int buffer_size, int buffer_overflow);
+extern int plc_set_buffer_size(plc_p plc, int buffer_size);
 
 extern int plc_start_request(plc_p plc,
                              plc_request_p request,
