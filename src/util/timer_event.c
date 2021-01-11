@@ -205,7 +205,6 @@ int timer_destroy(timer_p *timer)
 int64_t timer_event_tickler(int64_t current_time)
 {
     int64_t next_wake_time = INT64_MAX;
-    int done = 1;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
