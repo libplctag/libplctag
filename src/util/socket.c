@@ -109,12 +109,12 @@ struct sock_t {
     void *read_done_context;
     uint8_t *read_buffer;
     int read_buffer_capacity;
-    uint8_t *read_amount;
+    int *read_amount;
 
     void (*write_done_callback)(void *context);
     void *write_done_context;
     uint8_t *write_buffer;
-    uint8_t *write_amount;
+    int *write_amount;
 };
 
 
@@ -1197,7 +1197,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                                 atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
                             } else if(byte_count < 0) {
                                 /* set the status if we had an error. */
-                                atomic_int_set(&(sock->status), byte_count);
+                                atomic_int_set(&(sock->status), (unsigned int)byte_count);
                             }
 
                             /* do not keep calling this, we got data or an error. */
@@ -1231,7 +1231,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             pdebug(DEBUG_WARN, "Got error %s trying to write data to socket %d!", plc_tag_decode_error(byte_count), sock->fd);
 
                             *(sock->write_amount) = byte_count;
-                            atomic_int_set(&(sock->status), byte_count);
+                            atomic_int_set(&(sock->status), (unsigned int)byte_count);
                         }
 
                         /* are we done writing?   Either all data sent, amount==0, or an error, amount < 0. */
