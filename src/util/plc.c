@@ -84,7 +84,7 @@ if(CONDITION) { \
     pdebug(DEBUG_WARN, __VA_ARGS__ ); \
     reset_plc(plc); \
     NEXT_STATE(state_error_retry); \
-    rc = PLCTAG_STATUS_PENDING; \
+    rc = PLCTAG_STATUS_OK; \
     break; \
 }
 
