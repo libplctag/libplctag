@@ -44,14 +44,15 @@
 #include <util/plc.h>
 #include <util/string.h>
 
+#define PCCC_PACKET_OVERHEAD (64)
+#define PCCC_PLC_MAX_PACKET (PCCC_PLC_READ_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD)
 
+#define PCCC_CIP_EIP_STACK "PCCC+CIP+EIP"
 
 
 struct local_plc_context_s {
     atomic_int tsn;
 };
-
-#define PCCC_CIP_EIP_STACK "PCCC+CIP+EIP"
 
 
 static int pccc_constructor(plc_p plc, attr attribs);
@@ -105,6 +106,13 @@ int pccc_constructor(plc_p plc, attr attribs)
     struct local_plc_context_s *context = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
+
+    /* set up the PLC buffer */
+    rc = plc_set_buffer_size(plc, PCCC_PLC_MAX_PACKET);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error %s while trying to set PCCC PLC buffer size.", plc_tag_decode_error(rc));
+        return rc;
+    }
 
     /* allocate and set up our local data. */
     context = mem_alloc(sizeof(*context));

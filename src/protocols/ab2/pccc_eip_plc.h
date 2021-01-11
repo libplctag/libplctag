@@ -37,6 +37,9 @@
 #include <util/attr.h>
 #include <util/plc.h>
 
+#define PCCC_PLC_READ_MAX_PAYLOAD (244)
+#define PCCC_PLC_WRITE_MAX_PAYLOAD (240)
+
 extern plc_p pccc_eip_plc_get(attr attribs);
 
 extern int pccc_eip_plc_get_tsn(plc_p plc, uint16_t *tsn);
