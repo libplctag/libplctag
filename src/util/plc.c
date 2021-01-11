@@ -83,7 +83,7 @@ if(CONDITION) { \
 if(CONDITION) { \
     pdebug(DEBUG_WARN, __VA_ARGS__ ); \
     reset_plc(plc); \
-    NEXT_STATE(state_dispatch_requests); \
+    NEXT_STATE(state_error_retry); \
     rc = PLCTAG_STATUS_PENDING; \
     break; \
 }
@@ -1404,7 +1404,10 @@ int state_build_layer_connect_request(plc_p plc)
         if(plc->current_layer_index >= plc->num_layers) {
             pdebug(DEBUG_INFO, "Connected to PLC %s.", plc->key);
 
+            /* set the state for the new connection. */
             plc->is_connected = TRUE;
+            plc->retry_interval_ms = MIN_RETRY_INTERVAL_MS/2;
+            plc->next_retry_time = 0;
 
             NEXT_STATE(state_dispatch_requests);
             rc = PLCTAG_STATUS_PENDING;
@@ -1657,7 +1660,7 @@ int state_build_layer_disconnect_request(plc_p plc)
 
         rc = socket_callback_when_write_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, &(plc->data_size));
 
-        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up write callback for disconnect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up write callback for disconnect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* we wait. */
         rc = PLCTAG_STATUS_OK;
@@ -1695,7 +1698,7 @@ int state_layer_disconnect_request_sent(plc_p plc)
         NEXT_STATE(state_layer_disconnect_response_ready);
         rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
-        RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read callback for discconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read callback for discconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* wait */
         rc = PLCTAG_STATUS_OK;
@@ -1730,7 +1733,7 @@ int state_layer_disconnect_response_ready(plc_p plc)
             NEXT_STATE(state_layer_disconnect_response_ready);
             rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->data_size));
 
-            RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read complete callback for disconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
+            RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read complete callback for disconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
             /* wait */
             rc = PLCTAG_STATUS_OK;
@@ -1768,6 +1771,8 @@ int state_error_retry(plc_p plc)
     if(plc->retry_interval_ms > MAX_RETRY_INTERVAL_MS) {
         plc->retry_interval_ms = MAX_RETRY_INTERVAL_MS;
     }
+
+    pdebug(DEBUG_INFO, "New retry interval is %dms.", plc->retry_interval_ms);
 
     plc->next_retry_time = time_ms() + plc->retry_interval_ms;
 
