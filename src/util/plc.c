@@ -46,6 +46,7 @@
 #include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/event_loop.h>
 #include <util/mem.h>
 #include <util/mutex.h>
 #include <util/plc.h>
@@ -215,38 +216,19 @@ static int state_build_layer_disconnect_request(plc_p plc);
 static int state_layer_disconnect_request_sent(plc_p plc);
 static int state_layer_disconnect_response_ready(plc_p plc);
 
-
-
-static int state_start_disconnect_layer(plc_p plc);
-static int state_build_disconnect_request(plc_p plc);
-static int state_send_disconnect_request(plc_p plc);
-static int state_wait_for_disconnect_response(plc_p plc);
-static int state_process_disconnect_response(plc_p plc);
-static int state_close_socket(plc_p plc);
-
 /* terminal or error states */
 static int state_error_retry(plc_p plc);
 static int state_terminate(plc_p plc);
 
-/* helpers */
 
 
-
-
-// static void start_idle_timeout_unsafe(plc_p plc);
-// static void plc_idle_timeout_callback(int64_t wake_time, int64_t current_time, void *plc_arg);
-// static void dispatch_plc_request_unsafe(plc_p plc);
-// static int start_connecting_unsafe(plc_p plc);
-// static void write_connect_request(void *plc_arg);
-// static int build_connect_request_unsafe(plc_p plc);
-// static void process_connect_response(void *plc_arg);
-// static int start_disconnecting_unsafe(plc_p plc);
-// static void write_disconnect_request(void *plc_arg);
-// static int build_disconnect_request_unsafe(plc_p plc);
-// static void process_disconnect_response(void *plc_arg);
-// static void build_plc_request_callback(void *plc_arg);
-// static void write_plc_request_callback(void *plc_arg);
-// static void process_plc_request_response(void *plc_arg);
+/*
+ * plc_get
+ *
+ * Primary entry point to get a PLC.  This is called by PLC-specific
+ * creation functions which will create the generic PLC and then
+ * set up the layers.
+ */
 
 int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constructor)(plc_p plc, attr attribs))
 {
@@ -376,7 +358,7 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
             plc->idle_timeout_ms = DEFAULT_IDLE_TIMEOUT_MS;
 
             /* start the idle heartbeat_timer */
-            rc = timer_event_wake_at(plc->heartbeat_timer, time_ms() + PLC_HEARTBEAT_INTERVAL_MS, plc_state_runner, plc);
+            rc = timer_event_wake_at(plc->heartbeat_timer, time_ms() + PLC_HEARTBEAT_INTERVAL_MS, (void (*)(void*))plc_state_runner, plc);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Unable to start heartbeat timer, error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -409,6 +391,12 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 }
 
 
+
+/*
+ * plc_initialize
+ *
+ * Force a hard reset of the PLC object state.
+ */
 
 int plc_initialize(plc_p plc)
 {
@@ -992,7 +980,7 @@ void plc_heartbeat(plc_p plc)
         }
     }
 
-    rc = timer_event_wake_at(plc->heartbeat_timer, now + PLC_HEARTBEAT_INTERVAL_MS, plc_heartbeat, plc);
+    rc = timer_event_wake_at(plc->heartbeat_timer, now + PLC_HEARTBEAT_INTERVAL_MS, (void (*)(void*))plc_heartbeat, plc);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to set up heartbeat_timer wake event.  Got error %s!", plc_tag_decode_error(rc));
 
@@ -1178,7 +1166,7 @@ int state_fix_up_tag_request_layers(plc_p plc)
         /* we built the full packet.  Send it. */
         plc->data_size = data_end;
         NEXT_STATE(state_tag_request_sent);
-        rc = socket_callback_when_write_done(plc->socket, plc_state_runner, plc, plc->data, &(plc->data_size));
+        rc = socket_callback_when_write_done(plc->socket, (void (*)(void*))plc_state_runner, plc, plc->data, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while setting up write callback for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1198,7 +1186,6 @@ int state_tag_request_sent(plc_p plc)
     int data_start = 0;
     int data_end = 0;
     plc_request_id req_id = 0;
-    int bytes_written = 0;
 
     pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
 
@@ -1221,7 +1208,7 @@ int state_tag_request_sent(plc_p plc)
         /* clear out the payload. */
         plc->payload_end = plc->payload_start = plc->data_size = 0;
 
-        rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to set up socket response read in PLC %s!", plc_tag_decode_error(rc), plc->key)
 
@@ -1240,7 +1227,6 @@ int state_tag_request_sent(plc_p plc)
 int state_tag_response_ready(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
-    int bytes_read = 0;
     int data_start = 0;
     int data_end = 0;
     plc_request_id req_id = 0;
@@ -1278,7 +1264,7 @@ int state_tag_response_ready(plc_p plc)
 
             /* come back to this routine. */
             NEXT_STATE(state_tag_response_ready);
-            rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
 
             RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Unexpected error %s setting socket read callback for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1393,7 +1379,7 @@ int state_start_connect(plc_p plc)
 
         /* kick off a connect. */
         NEXT_STATE(state_build_layer_connect_request);
-        rc = socket_callback_when_connection_ready(plc->socket, plc_state_runner, plc, plc->host, plc->port);
+        rc = socket_callback_when_connection_ready(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->host, plc->port);
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Got error %s, unable to start background socket connection for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1466,7 +1452,7 @@ int state_build_layer_connect_request(plc_p plc)
         /* send the connect request. */
         NEXT_STATE(state_layer_connect_request_sent);
 
-        rc = socket_callback_when_write_done(plc->socket, plc_state_runner, plc, plc->data, &(plc->data_size));
+        rc = socket_callback_when_write_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up write callback for connect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1506,7 +1492,7 @@ int state_layer_connect_request_sent(plc_p plc)
         plc->data_size = plc->payload_end = plc->payload_start = 0;
 
         NEXT_STATE(state_layer_connect_response_ready);
-        rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read callback for connect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1549,7 +1535,7 @@ int state_layer_connect_response_ready(plc_p plc)
         if(rc == PLCTAG_ERR_TOO_SMALL) {
             /* we got a partial packet, wait for more data. */
             NEXT_STATE(state_layer_connect_response_ready);
-            rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
 
             RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read complete callback for connect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1679,7 +1665,7 @@ int state_build_layer_disconnect_request(plc_p plc)
         /* send the connect request. */
         NEXT_STATE(state_layer_disconnect_request_sent);
 
-        rc = socket_callback_when_write_done(plc->socket, plc_state_runner, plc, plc->data, &(plc->data_size));
+        rc = socket_callback_when_write_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up write callback for disconnect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1717,7 +1703,7 @@ int state_layer_disconnect_request_sent(plc_p plc)
         plc->data_size = plc->payload_end = plc->payload_start = 0;
 
         NEXT_STATE(state_layer_disconnect_response_ready);
-        rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+        rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
 
         RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read callback for discconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1752,7 +1738,7 @@ int state_layer_disconnect_response_ready(plc_p plc)
         if(rc == PLCTAG_ERR_TOO_SMALL) {
             /* we got a partial packet, wait for more data. */
             NEXT_STATE(state_layer_disconnect_response_ready);
-            rc = socket_callback_when_read_done(plc->socket, plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
+            rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_actual_capacity, &(plc->data_size));
 
             RETRY_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s setting up read complete callback for disconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
@@ -1812,6 +1798,52 @@ int state_terminate(plc_p plc)
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
     return PLCTAG_STATUS_OK;
+}
+
+
+
+/****** Module Support ******/
+
+
+int plc_module_init(void)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    plc_list = NULL;
+
+    rc = mutex_create(&plc_list_mutex);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error, %s, creating plc list mutex!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+void plc_module_teardown(void)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(plc_list != NULL) {
+        pdebug(DEBUG_WARN, "PLC list not empty!");
+    }
+
+    plc_list = NULL;
+
+    rc = mutex_destroy(&plc_list_mutex);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error, %s, destroying plc list mutex!", plc_tag_decode_error(rc));
+        return;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
 }
 
 
