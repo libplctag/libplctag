@@ -166,6 +166,7 @@ struct plc_s {
     timer_p heartbeat_timer;
 
     /* error handling */
+    int retry_interval_ms;
     int64_t next_retry_time;
 
     /* idle handling. */
@@ -387,6 +388,9 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
             }
 
             plc->port = port;
+
+            /* start the state machine. */
+            plc->state_func = state_dispatch_requests;
         }
 
         *plc_return = plc;
@@ -700,7 +704,7 @@ int plc_start_request(plc_p plc,
         request->next = NULL;
         request->req_id = -1;
         request->context = client;
-        request->fix_up_layer = build_request_callback;
+        request->build_request = build_request_callback;
         request->process_response = process_response_callback;
 
         *walker = request;
@@ -805,6 +809,8 @@ void plc_rc_destroy(void *plc_arg)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    pdebug(DEBUG_INFO, "Remove PLC %s from the list.", plc->key);
+
     /* remove it from the list. */
     critical_block(plc_list_mutex) {
         plc_p *walker = &plc_list;
@@ -817,46 +823,67 @@ void plc_rc_destroy(void *plc_arg)
             *walker = plc->next;
             plc->next = NULL;
         } else {
-            pdebug(DEBUG_WARN, "PLC not found on the list!");
+            pdebug(DEBUG_WARN, "PLC %s not found on the list!", plc->key);
         }
     }
 
-    /* lock the PLC mutex for some of these operations. */
-    critical_block(plc->plc_mutex) {
-        plc->is_terminating = TRUE;
+    pdebug(DEBUG_INFO, "Stop PLC %s heartbeat.", plc->key);
 
-        if(plc->is_connected) {
-            is_connected = TRUE;
-            start_disconnecting_unsafe(plc);
-        }
-    }
-
-    /* loop until we timeout or we are disconnected. */
-    timeout = time_ms() + DESTROY_DISCONNECT_TIMEOUT_MS;
-
-    while(is_connected && timeout > time_ms()) {
-        critical_block(plc->plc_mutex) {
-            is_connected = plc->is_connected;
-        }
-
-        if(is_connected) {
-            sleep_ms(10);
-        }
-    }
-
+    /* stop the heartbeat. */
     if(plc->heartbeat_timer) {
         timer_event_snooze(plc->heartbeat_timer);
         timer_destroy(&(plc->heartbeat_timer));
         plc->heartbeat_timer = NULL;
     }
 
+    pdebug(DEBUG_INFO, "Start PLC %s disconnect.", plc->key);
+
+    /* lock the PLC mutex for some of these operations. */
+    critical_block(plc->plc_mutex) {
+        plc->is_terminating = TRUE;
+
+        plc->is_terminating = TRUE;
+
+        /*
+         * if the PLC is connected, run the state loop to try to get through
+         * any terminatable states.
+         */
+        if(plc->is_connected) {
+            is_connected = TRUE;
+            plc_state_runner(plc);
+        }
+    }
+
+    /* loop until we timeout or we are disconnected. */
+    if(is_connected) {
+        pdebug(DEBUG_INFO, "Waiting for PLC %s to disconnect.", plc->key);
+
+        timeout = time_ms() + DESTROY_DISCONNECT_TIMEOUT_MS;
+
+        while(is_connected && timeout > time_ms()) {
+            critical_block(plc->plc_mutex) {
+                is_connected = plc->is_connected;
+            }
+
+            if(is_connected) {
+                sleep_ms(10);
+            }
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Resetting PLC %s.", plc->key);
+
     /* reset the PLC to clean up more things. */
     reset_plc(plc);
+
+    pdebug(DEBUG_INFO, "Destroying PLC %s socket.", plc->key);
 
     if(plc->socket) {
         socket_destroy(&(plc->socket));
         plc->socket = NULL;
     }
+
+    pdebug(DEBUG_INFO, "Destroying PLC %s layers.", plc->key);
 
     /* if there is local context, destroy it. */
     if(plc->context) {
@@ -869,21 +896,29 @@ void plc_rc_destroy(void *plc_arg)
         plc->context = NULL;
     }
 
+    pdebug(DEBUG_INFO, "Destroying PLC %s mutex.", plc->key);
+
     rc = mutex_destroy(&(plc->plc_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, destroying PLC mutex!", plc_tag_decode_error(rc));
     }
     plc->plc_mutex = NULL;
 
+    pdebug(DEBUG_INFO, "Cleaning up PLC %s request list.", plc->key);
+
     if(plc->request_list) {
         pdebug(DEBUG_WARN, "Request list is not empty!");
     }
     plc->request_list = NULL;
 
+    pdebug(DEBUG_INFO, "Freeing PLC %s data buffer.", plc->key);
+
     if(plc->data) {
         mem_free(plc->data);
         plc->data = NULL;
     }
+
+    pdebug(DEBUG_INFO, "Freeing PLC %s key memory.", plc->key);
 
     if(plc->key) {
         mem_free(plc->key);
@@ -1740,6 +1775,43 @@ int state_layer_disconnect_response_ready(plc_p plc)
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 
     return rc;
+}
+
+
+
+
+/******** HELPER STATES *******/
+
+int state_error_retry(plc_p plc)
+{
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    /* double the interval each time. */
+    plc->retry_interval_ms *= 2;
+
+    if(plc->retry_interval_ms > MAX_RETRY_INTERVAL_MS) {
+        plc->retry_interval_ms = MAX_RETRY_INTERVAL_MS;
+    }
+
+    plc->next_retry_time = time_ms() + plc->retry_interval_ms;
+
+    NEXT_STATE(state_dispatch_requests);
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    /* wait because the heartbeat will help here. */
+    return PLCTAG_STATUS_OK;
+}
+
+
+
+int state_terminate(plc_p plc)
+{
+    pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
+
+    pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
+
+    return PLCTAG_STATUS_OK;
 }
 
 
