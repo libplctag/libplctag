@@ -697,6 +697,9 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
         /* set the flag so that we know the connection thread is running. */
         atomic_bool_set(&(sock->connection_thread_done), FALSE);
 
+        /* set the socket status that we are in flight. */
+        atomic_int_set(&(sock->status), PLCTAG_STATUS_PENDING);
+
         /* set up the connection thread. */
         rc = thread_create(&(sock->connection_thread), socket_connection_thread_func, 32768, sock);
         if(rc != PLCTAG_STATUS_OK) {
