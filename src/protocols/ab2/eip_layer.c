@@ -72,8 +72,8 @@ struct eip_layer_state_s {
 static int eip_layer_initialize(void *context);
 static int eip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
 // static int eip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
-static int eip_layer_prepare_for_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
-static int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
+static int eip_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
+static int eip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
 //static int eip_layer_prepare_for_response(void *context);
 static int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
 static int eip_layer_destroy_layer(void *context);
@@ -106,8 +106,8 @@ int eip_layer_setup(plc_p plc, int layer_index, attr attribs)
                        eip_layer_initialize,
                        eip_layer_connect,
                        /*eip_layer_disconnect*/ NULL,
-                       eip_layer_prepare_for_request,
-                       eip_layer_build_request,
+                       eip_layer_prepare,
+                       eip_layer_fix_up_request,
                        eip_layer_process_response,
                        eip_layer_destroy_layer);
     if(rc != PLCTAG_STATUS_OK) {
@@ -273,7 +273,7 @@ int eip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
 
 
 
-int eip_layer_prepare_for_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
+int eip_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -305,7 +305,7 @@ int eip_layer_prepare_for_request(void *context, uint8_t *buffer, int buffer_cap
 
 
 
-int eip_layer_build_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
+int eip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     struct eip_layer_state_s *state = (struct eip_layer_state_s *)context;
