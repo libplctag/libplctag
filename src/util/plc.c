@@ -355,14 +355,24 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 
             mem_free(host_segments);
 
+            /* we need a mutex in each PLC */
+            rc = mutex_create(&(plc->plc_mutex));
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to create PLC mutex for PLC %s!", plc->key);
+                plc = rc_dec(plc);
+                break;
+            }
+
+            /* the PLC-specific constructor can override this if needed or the application can. */
+            plc->idle_timeout_ms = attr_get_int(attribs, "idle_timeout_ms", DEFAULT_IDLE_TIMEOUT_MS);
+
+            /* as a last step, set up the heartbeat timer. */
             rc = timer_event_create(&(plc->heartbeat_timer));
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Unable to create heartbeat_timer, error %s!", plc_tag_decode_error(rc));
                 plc = rc_dec(plc);
                 break;
             }
-
-            plc->idle_timeout_ms = DEFAULT_IDLE_TIMEOUT_MS;
 
             /* start the idle heartbeat_timer */
             rc = timer_event_wake_at(plc->heartbeat_timer, time_ms() + PLC_HEARTBEAT_INTERVAL_MS, (void (*)(void*))plc_state_runner, plc);
