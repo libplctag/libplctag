@@ -219,7 +219,7 @@ int64_t timer_event_tickler(int64_t current_time)
         }
     }
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return next_wake_time;
 }
