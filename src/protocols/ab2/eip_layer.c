@@ -294,7 +294,7 @@ int eip_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *
     }
 
     if(*data_end < EIP_HEADER_SIZE) {
-        *data_end = EIP_HEADER_SIZE;
+        *data_end = buffer_capacity;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -330,6 +330,11 @@ int eip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity
         return PLCTAG_ERR_TOO_SMALL;
     }
 
+    if(*data_end <= EIP_HEADER_SIZE) {
+        pdebug(DEBUG_WARN, "data end is %d, payload would be zero length!", *data_end);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     /* this might be the first call. */
 
     /* what kind of request is it? Cheat and peak at the payload. */
@@ -349,13 +354,11 @@ int eip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity
         command = SEND_UNCONNECTED_DATA_CMD;
     }
 
-    /* fix up data end if this is the first time through. */
-    if(*data_end  < EIP_HEADER_SIZE) {
-        *data_end = EIP_HEADER_SIZE;
-    }
+    /* the payload starts after the header. */
+    *data_start = EIP_HEADER_SIZE;
 
     /* calculate the payload size. */
-    payload_size = *data_end - EIP_HEADER_SIZE;
+    payload_size = *data_end - *data_start;
 
     /* build packet */
     do {
@@ -472,17 +475,17 @@ int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
             state->is_connected = TRUE;
 
             /* signal that we have consumed the whole payload. */
-            *data_end = buffer_capacity;
-            *data_start = buffer_capacity;
+            *data_end = 0;
+            *data_start = 0;
         } else {
             /* other layers will need to process this. */
             *data_start = EIP_HEADER_SIZE;
-            *data_end = buffer_capacity;
+            *data_end = payload_size + EIP_HEADER_SIZE;
         }
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_PARTIAL) {
-        pdebug(DEBUG_WARN, "Unable to build EIP header packet, error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Unable to process EIP header packet, error %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
