@@ -49,7 +49,7 @@ int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file
     int rc = PLCTAG_STATUS_OK;
     const char *p = name;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting to parse %s.", name);
 
     do {
         if((rc = parse_df1_file_type(&p, file_type)) != PLCTAG_STATUS_OK) {
@@ -73,7 +73,7 @@ int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file
         }
     } while(0);
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Done with name %s.", name);
 
     return rc;
 }
