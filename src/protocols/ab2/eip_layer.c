@@ -455,8 +455,8 @@ int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
         TRY_GET_U32_LE(buffer, buffer_capacity, offset, status);
 
         /* do we have the whole packet? */
-        if(buffer_capacity < (int)(unsigned int)(payload_size + EIP_HEADER_SIZE)) {
-            pdebug(DEBUG_DETAIL, "Need more data than the header, we need %d bytes and have %d bytes.", buffer_capacity, (int)(unsigned int)(payload_size + EIP_HEADER_SIZE));
+        if(*data_end < (int)(unsigned int)(payload_size + EIP_HEADER_SIZE)) {
+            pdebug(DEBUG_DETAIL, "Need more data than the header, we need %d bytes and have %d bytes.", (int)(unsigned int)(payload_size + EIP_HEADER_SIZE), *data_end);
             rc = PLCTAG_ERR_PARTIAL;
             break;
         }
