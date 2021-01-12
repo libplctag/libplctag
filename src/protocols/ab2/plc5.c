@@ -70,7 +70,7 @@ typedef ab2_plc5_tag_t *ab2_plc5_tag_p;
 #define PLC5_RANGE_WRITE_FUNC ((uint8_t)(0x00))
 
 #define PLC5_WORD_RANGE_READ_MAX_PAYLOAD (244)
-#define PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD (244)
+#define PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD (240)
 
 static void plc5_tag_destroy(void *tag_arg);
 
@@ -235,7 +235,7 @@ int plc5_tag_tickler(plc_tag_p tag)
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    return PLCTAG_STATUS_OK;
 }
 
 
@@ -313,6 +313,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
     int num_elems = 0;
     int trans_size = 0;
 
+    (void)buffer_capacity;
     (void)req_id;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -321,10 +322,10 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
 
     do {
         /* PCCC command type byte */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PCCC_TYPED_CMD);
+        TRY_SET_BYTE(buffer, *data_end, req_off, PCCC_TYPED_CMD);
 
         /* status, always zero */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
+        TRY_SET_BYTE(buffer, *data_end, req_off, 0);
 
         /* TSN - 16-bit value */
         rc = (uint16_t)pccc_eip_plc_get_tsn(tag->plc, &(tag->tsn));
@@ -332,19 +333,19 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
             pdebug(DEBUG_WARN, "Unable to get TSN!");
             break;
         }
-        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->tsn);
+        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->tsn);
 
         /* PLC5 read function. */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PLC5_RANGE_READ_FUNC);
+        TRY_SET_BYTE(buffer, *data_end, req_off, PLC5_RANGE_READ_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->trans_offset);
+        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->trans_offset);
 
         /* total transfer size in words. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->base_tag.size/2);
+        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->base_tag.size/2);
 
         /* set the logical PLC-5 address. */
-        rc = encode_plc5_logical_address(buffer, buffer_capacity, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = encode_plc5_logical_address(buffer, *data_end, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size in bytes. */
@@ -369,7 +370,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
 
         pdebug(DEBUG_DETAIL, "Actual bytes to transfer %d.", trans_size);
 
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, trans_size);
+        TRY_SET_BYTE(buffer, *data_end, req_off, trans_size);
 
         *data_end = req_off;
     } while(0);
@@ -472,11 +473,14 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
-    int req_off = 0;
+    int req_off = *data_start;
     int encoded_file_start = 0;
     int max_trans_size = 0;
     int num_elems = 0;
     int trans_size = 0;
+
+    (void)buffer_capacity;
+    (void)req_id;
 
     pdebug(DEBUG_DETAIL, "Starting for request %" REQ_ID_FMT ".", req_id);
 
@@ -484,10 +488,10 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
 
     do {
         /* PCCC command type byte */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PCCC_TYPED_CMD);
+        TRY_SET_BYTE(buffer, *data_end, req_off, PCCC_TYPED_CMD);
 
         /* status, always zero */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, 0);
+        TRY_SET_BYTE(buffer, *data_end, req_off, 0);
 
         /* TSN - 16-bit value */
         rc = pccc_eip_plc_get_tsn(tag->plc, &(tag->tsn));
@@ -496,20 +500,20 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
             break;
         }
 
-        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->tsn);
+        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->tsn);
 
         /* PLC5 read function. */
-        TRY_SET_BYTE(buffer, buffer_capacity, req_off, PLC5_RANGE_WRITE_FUNC);
+        TRY_SET_BYTE(buffer, *data_end, req_off, PLC5_RANGE_WRITE_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->trans_offset/2);
+        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->trans_offset/2);
 
         /* total transfer size in words. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, req_off, tag->base_tag.size/2);
+        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->base_tag.size/2);
 
         /* set the logical PLC-5 address. */
         encoded_file_start = req_off;
-        rc = encode_plc5_logical_address(buffer, buffer_capacity, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = encode_plc5_logical_address(buffer, *data_end, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size. */
@@ -523,7 +527,12 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
             max_trans_size = (int)(tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset);
         }
 
-        pdebug(DEBUG_DETAIL, "Available transfer size %d.", max_trans_size);
+        if(*data_end - req_off > max_trans_size) {
+            pdebug(DEBUG_DETAIL, "Write won't fit in remaining space, truncate it.");
+            max_trans_size = *data_end - req_off;
+        }
+
+        pdebug(DEBUG_DETAIL, "Available transfer data size %d.", max_trans_size);
 
         /* The transfer must be a multiple of the element size. */
         num_elems = max_trans_size / tag->elem_size;
@@ -536,9 +545,9 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
 
         /* copy the data. */
         for(int i=0; i < trans_size; i++) {
-            buffer[req_off] = tag->base_tag.data[tag->trans_offset + i];
-            req_off++;
+            buffer[req_off + i] = tag->base_tag.data[tag->trans_offset + i];
         }
+        req_off += trans_size;
 
         if(rc != PLCTAG_STATUS_OK) break;
 
