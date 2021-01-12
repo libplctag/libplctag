@@ -101,6 +101,7 @@ int event_loop_init(void)
     }
 
     /* create the platform thread. */
+    pdebug(DEBUG_INFO, "Creating event loop thread.");
     rc = thread_create(&event_loop_thread, even_loop_handler, 32768, NULL);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to create event loop thread, error %s!", plc_tag_decode_error(rc));
