@@ -735,6 +735,8 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
     critical_block(socket_event_mutex) {
         /* if we are enabling the event, set the FD and raise the recalc count. */
         if(callback) {
+            pdebug(DEBUG_DETAIL, "Setting up new read complete callback.");
+
             /* set the socket status that we are in flight. */
             atomic_int_set(&(sock->status), PLCTAG_STATUS_PENDING);
 
@@ -744,6 +746,8 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
 
             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
         } else {
+            pdebug(DEBUG_DETAIL, "Clearing read complete callback.");
+
             /* set the socket status that we are NOT in flight. */
             atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
 
@@ -762,6 +766,9 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
         sock->read_buffer = buffer;
         sock->read_buffer_capacity = buffer_capacity;
         sock->read_amount = amount;
+
+        /* wake up the socket select() that could be waiting. */
+        socket_event_loop_wake();
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -809,6 +816,9 @@ int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context)
         sock->write_done_context = context;
         sock->write_buffer = buffer;
         sock->write_amount = amount;
+
+        /* wake up the socket select() that could be waiting. */
+        socket_event_loop_wake();
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -1064,10 +1074,18 @@ void destroy_event_wakeup_channel(void)
 
 void socket_event_loop_wake(void)
 {
+    int bytes_written = 0;
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    uint8_t dummy[32] = {0};
-    write(wake_fds[1], &dummy[0], sizeof(dummy));
+    uint8_t dummy[16] = {0};
+    bytes_written = (int)write(wake_fds[1], &dummy[0], sizeof(dummy));
+
+    if(bytes_written >= 0) {
+        pdebug(DEBUG_DETAIL, "Wrote %d bytes to the wake channel.", bytes_written);
+    } else {
+        pdebug(DEBUG_WARN, "Error writing to wake channel!");
+    }
 
     pdebug(DEBUG_DETAIL, "Done.");
 }
@@ -1089,7 +1107,8 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 
     /* do we need to recalculate fd sets for the sockets? */
     recalc_count = atomic_bool_get(&need_recalculate_socket_fd_sets);
-    if(recalc_count >= 10) {
+    // DEBUG FIXME
+    if(1 || recalc_count >= 10) {
         pdebug(DEBUG_DETAIL, "Recalculating the select fd sets.");
 
         critical_block(socket_event_mutex) {
@@ -1101,6 +1120,8 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 
             for(sock_p tmp_sock = socket_list; tmp_sock; tmp_sock = tmp_sock->next) {
                 if(tmp_sock->read_done_callback) {
+                    pdebug(DEBUG_DETAIL, "Setting select() read fd set for fd %d.", tmp_sock->fd);
+
                     FD_SET(tmp_sock->fd, &global_read_fds);
 
                     /* only do this inside the if.   Some events are not part of the fd set. */
@@ -1108,6 +1129,8 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                 }
 
                 if(tmp_sock->write_done_callback) {
+                    pdebug(DEBUG_DETAIL, "Setting select() write fd set for fd %d.", tmp_sock->fd);
+
                     FD_SET(tmp_sock->fd, &global_write_fds);
 
                     /* only do this inside the if.   Some events are not part of the fd set. */
@@ -1116,6 +1139,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
             }
 
             /* make sure the wake channel is in the read set. */
+            pdebug(DEBUG_DETAIL, "Setting select() read fd set for wake fd %d.", wake_fds[0]);
             FD_SET(wake_fds[0], &global_read_fds);
             max_socket_fd = (max_socket_fd < wake_fds[0] ? wake_fds[0] : max_socket_fd);
         }
@@ -1165,6 +1189,10 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     critical_block(socket_event_mutex) {
         local_read_fds = global_read_fds;
         local_write_fds = global_write_fds;
+
+        FD_SET(wake_fds[0], &local_read_fds);
+
+        max_socket_fd = (wake_fds[0] > max_socket_fd ? wake_fds[0] : max_socket_fd);
     }
 
     pdebug(DEBUG_DETAIL, "Calculating the wait time.");
@@ -1182,20 +1210,45 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     timeval_wait.tv_sec = 0;
     timeval_wait.tv_usec = wait_time_ms * 1000;
 
+    pdebug(DEBUG_DETAIL, "Calling select().");
     num_signaled_fds = select(max_socket_fd + 1, &local_read_fds, &local_write_fds, NULL, &timeval_wait);
-    if(num_signaled_fds > 0) {
+    pdebug(DEBUG_DETAIL, "select() returned with status %d.", num_signaled_fds);
+
+    pdebug(DEBUG_DETAIL, "max_socket_fd=%d", max_socket_fd);
+
+    for(int index=0; index < (max_socket_fd+1); index++) {
+        if(FD_ISSET(index, &local_read_fds)) {
+            pdebug(DEBUG_DETAIL, "fd %d is set for reading.", index);
+        } else {
+            pdebug(DEBUG_DETAIL, "fd %d is NOT set for reading.", index);
+        }
+        if(FD_ISSET(index, &local_write_fds)) {
+            pdebug(DEBUG_DETAIL, "fd %d is set for writing.", index);
+        } else {
+            pdebug(DEBUG_DETAIL, "fd %d is NOT set for writing.", index);
+        }
+    }
+
+    // FIXME DEBUG
+    if(1  || num_signaled_fds > 0) {
         /* Were we woken up by the waker channel? */
         if(FD_ISSET(wake_fds[0], &local_read_fds)) {
             uint8_t dummy[48];
+            int bytes_read = 0;
+
+            pdebug(DEBUG_INFO, "Wake channel may have woken us up.");
 
             /* pull all the data out to clear the status. */
-            while(read(wake_fds[0], &dummy[0], sizeof(dummy)) > 0) { /* nothing */ }
+            while((bytes_read = (int)read(wake_fds[0], &dummy[0], sizeof(dummy))) > 0) {
+                pdebug(DEBUG_DETAIL, "Read %d bytes from the wake channel.", bytes_read);
+            }
 
             num_signaled_fds--;
         }
 
         /* is there still work to do? */
-        if(num_signaled_fds > 0) {
+        // FIXME DEBUG
+        if(1 && num_signaled_fds > 0) {
             /* the callbacks can mutate the socket list and the global FD sets. */
             critical_block(socket_event_mutex) {
                 /* loop, but use an iterator so that sockets can be closed while in the mutex. */
@@ -1207,28 +1260,41 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                         pdebug(DEBUG_DETAIL, "Socket %d has data to read.", sock->fd);
 
                         byte_count = socket_tcp_read(sock, sock->read_buffer + *(sock->read_amount), sock->read_buffer_capacity - *(sock->read_amount));
+                        if(byte_count > 0) {
+                            /* we got data! */
+                            pdebug(DEBUG_DETAIL, "IO thread read data:");
+                            pdebug_dump_bytes(DEBUG_DETAIL, sock->read_buffer + *(sock->read_amount), byte_count);
+
+                            *(sock->read_amount) += byte_count;
+
+                            rc = PLCTAG_STATUS_OK;
+                        } else if(byte_count < 0) {
+                            /* set the status if we had an error. */
+                            pdebug(DEBUG_WARN, "Got error %s trying to read from socket %s:%d!", plc_tag_decode_error(rc), sock->host, sock->port);
+                            rc = byte_count;
+                        }
+
                         if(byte_count != 0) {
-                            if(byte_count > 0) {
-                                /* we got data! */
-                                pdebug(DEBUG_DETAIL, "IO thread read data:");
-                                pdebug_dump_bytes(DEBUG_DETAIL, sock->read_buffer + *(sock->read_amount), byte_count);
+                            void (*callback)(void *) = sock->read_done_callback;
 
-                                *(sock->read_amount) += byte_count;
-
-                                rc = PLCTAG_STATUS_OK;
-                            } else if(byte_count < 0) {
-                                /* set the status if we had an error. */
-                                pdebug(DEBUG_WARN, "Got error %s trying to read from socket %s:%d!", plc_tag_decode_error(rc), sock->host, sock->port);
-                                rc = byte_count;
-                            }
+                            pdebug(DEBUG_DETAIL, "Read had data or error.");
 
                             /* do not keep calling this, we got data or an error. */
                             FD_CLR(sock->fd, &global_read_fds);
+                            sock->read_done_callback = NULL;
+
+                            /* tickle the recalculation. */
                             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
 
-                            /* call the callback either way. */
+                            /* set up state. */
                             atomic_int_set(&(sock->status), (unsigned int)rc);
-                            sock->read_done_callback(sock->read_done_context);
+
+                            /* call the callback either way. */
+                            if(callback) {
+                                callback(sock->read_done_context);
+                            } else {
+                                pdebug(DEBUG_DETAIL, "Write complete callback is NULL.");
+                            }
                         } /* else no data and not an error, just keep waiting. */
                     }
 
@@ -1247,6 +1313,8 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             sock->write_buffer += byte_count;
                             *(sock->write_amount) -= byte_count;
 
+                            pdebug(DEBUG_DETAIL, "Wrote %d bytes, %d remaining.", byte_count, *(sock->write_amount));
+
                             rc = PLCTAG_STATUS_OK;
                         } else if(byte_count < 0) {
                             /* error! */
@@ -1257,12 +1325,23 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 
                         /* are we done writing?   Either all data sent or an error. */
                         if(*(sock->write_amount) <= 0 || rc < 0) {
+                            void (*callback)(void *) = sock->write_done_callback;
+
+                            pdebug(DEBUG_DETAIL, "Write done or error.");
+
+                            /* prevent another call. */
                             FD_CLR(sock->fd, &global_write_fds);
+                            sock->write_done_callback = NULL;
+
                             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
 
                             /* call the callback */
                             atomic_int_set(&(sock->status), (unsigned int)rc);
-                            sock->write_done_callback(sock->write_done_context);
+                            if(callback) {
+                                callback(sock->write_done_context);
+                            } else {
+                                pdebug(DEBUG_DETAIL, "Write complete callback is NULL.");
+                            }
                         }
 
                         /* if the byte_count was zero then we keep trying. */
@@ -1308,7 +1387,7 @@ int socket_event_loop_init(void)
 
     /* set the fds for the waker channel */
     FD_SET(wake_fds[0], &global_read_fds);
-    FD_SET(wake_fds[1], &global_write_fds);
+//    FD_SET(wake_fds[1], &global_write_fds);
 
     socket_list = NULL;
     global_socket_iterator = NULL;
