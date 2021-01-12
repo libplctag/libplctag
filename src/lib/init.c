@@ -157,11 +157,11 @@ void destroy_modules(void)
 
     mb_teardown();
 
-    plc_module_teardown();
+    lib_teardown();
 
     event_loop_teardown();
 
-    lib_teardown();
+    plc_module_teardown();
 
     spin_block(&library_initialization_lock) {
         if(lib_mutex != NULL) {
@@ -219,7 +219,12 @@ int initialize_modules(void)
                 /* initialize a random seed value. */
                 srand((unsigned int)time_ms());
 
-                pdebug(DEBUG_INFO,"Initializing platform module.");
+                pdebug(DEBUG_INFO,"Initializing PLC module.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = plc_module_init();
+                }
+
+                pdebug(DEBUG_INFO,"Initializing event loop.");
                 if(rc == PLCTAG_STATUS_OK) {
                     rc = event_loop_init();
                 }
@@ -227,15 +232,6 @@ int initialize_modules(void)
                 pdebug(DEBUG_INFO,"Initialized library modules.");
                 rc = lib_init();
 
-                pdebug(DEBUG_INFO,"Initializing event loop.");
-                if(rc == PLCTAG_STATUS_OK) {
-                    rc = event_loop_init();
-                }
-
-                pdebug(DEBUG_INFO,"Initializing PLC module.");
-                if(rc == PLCTAG_STATUS_OK) {
-                    rc = plc_module_init();
-                }
 
                 // pdebug(DEBUG_INFO,"Initializing AB2 module.");
                 // if(rc == PLCTAG_STATUS_OK) {
