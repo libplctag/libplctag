@@ -40,5 +40,5 @@
 
 extern plc_tag_p ab2_tag_create(attr attribs);
 
-extern int ab2_protocol_init(void);
-extern void ab2_protocol_teardown(void);
+// extern int ab2_protocol_init(void);
+// extern void ab2_protocol_teardown(void);

@@ -72,17 +72,17 @@ plc_tag_p ab2_tag_create(attr attribs)
 
 
 
-int ab2_protocol_init(void)
-{
-    return PLCTAG_STATUS_OK;
-}
+// int ab2_protocol_init(void)
+// {
+//     return PLCTAG_STATUS_OK;
+// }
 
 
 
-void ab2_protocol_teardown(void)
-{
+// void ab2_protocol_teardown(void)
+// {
 
-}
+// }
 
 
 /* helper functions */

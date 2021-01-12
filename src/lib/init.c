@@ -153,7 +153,7 @@ void destroy_modules(void)
 {
     ab_teardown();
 
-    ab2_protocol_teardown();
+    // ab2_protocol_teardown();
 
     mb_teardown();
 
@@ -237,10 +237,10 @@ int initialize_modules(void)
                     rc = plc_module_init();
                 }
 
-                pdebug(DEBUG_INFO,"Initializing AB2 module.");
-                if(rc == PLCTAG_STATUS_OK) {
-                    rc = ab2_protocol_init();
-                }
+                // pdebug(DEBUG_INFO,"Initializing AB2 module.");
+                // if(rc == PLCTAG_STATUS_OK) {
+                //     rc = ab2_protocol_init();
+                // }
 
                 pdebug(DEBUG_INFO,"Initializing AB module.");
                 if(rc == PLCTAG_STATUS_OK) {
