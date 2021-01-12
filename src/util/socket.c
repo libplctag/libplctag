@@ -735,10 +735,18 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
     critical_block(socket_event_mutex) {
         /* if we are enabling the event, set the FD and raise the recalc count. */
         if(callback) {
+            /* set the socket status that we are in flight. */
+            atomic_int_set(&(sock->status), PLCTAG_STATUS_PENDING);
+
+            /* set the FD set and max socket level. */
             FD_SET(sock->fd, &global_read_fds);
             max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
+
             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
         } else {
+            /* set the socket status that we are NOT in flight. */
+            atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+
             FD_CLR(sock->fd, &global_read_fds);
             if(sock->fd >= max_socket_fd) {
                 /* the top FD has possibly changed, force a recalculation. */
@@ -776,10 +784,17 @@ int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context)
     critical_block(socket_event_mutex) {
         /* if we are enabling the event, set the FD and raise the recalc count. */
         if(callback) {
+            /* set the socket status that we are in flight. */
+            atomic_int_set(&(sock->status), PLCTAG_STATUS_PENDING);
+
             FD_SET(sock->fd, &global_write_fds);
             max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
+
             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
         } else {
+            /* set the socket status that we are NOT in flight. */
+            atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+
             FD_CLR(sock->fd, &global_write_fds);
             if(sock->fd >= max_socket_fd) {
                 /* the top FD has possibly changed, force a recalculation. */
@@ -1186,6 +1201,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                 /* loop, but use an iterator so that sockets can be closed while in the mutex. */
                 for(global_socket_iterator = socket_list; global_socket_iterator; global_socket_iterator = global_socket_iterator->next) {
                     sock_p sock = global_socket_iterator;
+                    int rc = PLCTAG_STATUS_OK;
 
                     if(sock->read_done_callback && FD_ISSET(sock->fd, &local_read_fds)) {
                         pdebug(DEBUG_DETAIL, "Socket %d has data to read.", sock->fd);
@@ -1195,28 +1211,31 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             if(byte_count > 0) {
                                 /* we got data! */
                                 pdebug(DEBUG_DETAIL, "IO thread read data:");
-                                pdebug_dump_bytes(DEBUG_DETAIL, sock->read_buffer, byte_count);
+                                pdebug_dump_bytes(DEBUG_DETAIL, sock->read_buffer + *(sock->read_amount), byte_count);
 
-                                atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+                                *(sock->read_amount) += byte_count;
+
+                                rc = PLCTAG_STATUS_OK;
                             } else if(byte_count < 0) {
                                 /* set the status if we had an error. */
-                                atomic_int_set(&(sock->status), (unsigned int)byte_count);
+                                pdebug(DEBUG_WARN, "Got error %s trying to read from socket %s:%d!", plc_tag_decode_error(rc), sock->host, sock->port);
+                                rc = byte_count;
                             }
 
                             /* do not keep calling this, we got data or an error. */
                             FD_CLR(sock->fd, &global_read_fds);
                             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
 
-                            /* communicate the amount or error back to the caller. */
-                            *(sock->read_amount) = byte_count;
-
                             /* call the callback either way. */
+                            atomic_int_set(&(sock->status), (unsigned int)rc);
                             sock->read_done_callback(sock->read_done_context);
                         } /* else no data and not an error, just keep waiting. */
                     }
 
                     if(sock->write_done_callback && FD_ISSET(sock->fd, &local_write_fds)) {
                         pdebug(DEBUG_DETAIL, "Socket %d can write data.", sock->fd);
+
+                        rc = PLCTAG_STATUS_PENDING;
 
                         byte_count = socket_tcp_write(sock, sock->write_buffer, *(sock->write_amount));
                         if(byte_count > 0) {
@@ -1228,21 +1247,21 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             sock->write_buffer += byte_count;
                             *(sock->write_amount) -= byte_count;
 
-                            atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+                            rc = PLCTAG_STATUS_OK;
                         } else if(byte_count < 0) {
                             /* error! */
                             pdebug(DEBUG_WARN, "Got error %s trying to write data to socket %d!", plc_tag_decode_error(byte_count), sock->fd);
 
-                            *(sock->write_amount) = byte_count;
-                            atomic_int_set(&(sock->status), (unsigned int)byte_count);
+                            rc = byte_count;
                         }
 
-                        /* are we done writing?   Either all data sent, amount==0, or an error, amount < 0. */
-                        if(*(sock->write_amount) <= 0) {
+                        /* are we done writing?   Either all data sent or an error. */
+                        if(*(sock->write_amount) <= 0 || rc < 0) {
                             FD_CLR(sock->fd, &global_write_fds);
                             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
 
                             /* call the callback */
+                            atomic_int_set(&(sock->status), (unsigned int)rc);
                             sock->write_done_callback(sock->write_done_context);
                         }
 
