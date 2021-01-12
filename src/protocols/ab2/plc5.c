@@ -278,6 +278,8 @@ int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_
         res = tag->elem_size;
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
+    } else if(str_cmp_i(attrib_name, "idle_timeout_ms") == 0) {
+        res = plc_get_idle_timeout(tag->plc);
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         tag->base_tag.status = PLCTAG_ERR_UNSUPPORTED;
@@ -292,14 +294,22 @@ int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_
 
 int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 {
-    (void)attrib_name;
-    (void)new_value;
+    int rc = PLCTAG_STATUS_OK;
+    ab2_plc5_tag_p tag = (ab2_plc5_tag_p)raw_tag;
 
-    pdebug(DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
+    pdebug(DEBUG_DETAIL, "Starting.");
 
-    raw_tag->status  = PLCTAG_ERR_UNSUPPORTED;
+    if(str_cmp_i(attrib_name, "idle_timeout_ms") == 0) {
+        rc = plc_set_idle_timeout(tag->plc, new_value);
+    } else {
+        pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
+        rc = PLCTAG_ERR_UNSUPPORTED;
+        tag->base_tag.status = (int8_t)rc;
+    }
 
-    return PLCTAG_ERR_UNSUPPORTED;
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
 }
 
 
