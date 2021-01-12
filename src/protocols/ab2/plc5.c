@@ -108,7 +108,6 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = NULL;
-    plc_p plc = NULL;
     const char *tag_name = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -134,8 +133,8 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
         return NULL;
     }
 
-    plc = pccc_eip_plc_get(attribs);
-    if(!plc) {
+    tag->plc = pccc_eip_plc_get(attribs);
+    if(!tag->plc) {
         pdebug(DEBUG_WARN, "Unable to get PLC!");
         rc_dec(tag);
         return NULL;
