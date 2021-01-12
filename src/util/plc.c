@@ -104,6 +104,13 @@ if(CONDITION) { \
     break; \
 }
 
+#define SPURIOUS_WAKEUP_IF(CONDITION, ...)  \
+if(CONDITION) { \
+    pdebug(DEBUG_INFO, __VA_ARGS__ ); \
+    rc = PLCTAG_STATUS_OK; \
+    break; \
+}
+
 #define CHECK_TERMINATION() \
 if(plc->is_terminating == TRUE) { \
     pdebug(DEBUG_DETAIL, "PLC %s is terminating.", plc->key); \
@@ -199,18 +206,10 @@ static void plc_heartbeat(plc_p plc);
 
 /* main dispatch states. */
 static int state_dispatch_requests(plc_p plc);
-
-/* FIXME - refactor these into one state. */
 static int state_prepare_protocol_layers_for_tag_request(plc_p plc);
 static int state_build_tag_request(plc_p plc);
-/* FIXME - above here. */
-
 static int state_tag_request_sent(plc_p plc);
-
-/* FIXME - refactor these into one state. */
 static int state_tag_response_ready(plc_p plc);
-/* FIXME - above here. */
-
 
 /* connection states. */
 static int state_start_connect(plc_p plc);
@@ -707,8 +706,10 @@ int plc_start_request(plc_p plc,
 
         *walker = request;
 
-        /* call the dispatcher */
-        plc_state_runner(plc);
+        /* call the runner if we are dispatching */
+        if(plc->state_func == state_dispatch_requests) {
+            plc_state_runner(plc);
+        }
     }
 
     if(rc == PLCTAG_STATUS_OK) {
@@ -990,7 +991,7 @@ int state_dispatch_requests(plc_p plc)
         }
 
         /* check idle time. */
-        if(plc->next_idle_timeout < now) {
+        if((plc->is_connected == TRUE) && (plc->next_idle_timeout < now)) {
             pdebug(DEBUG_INFO, "Starting idle disconnect.");
             NEXT_STATE(state_start_disconnect);
             rc = PLCTAG_STATUS_PENDING;
@@ -1011,13 +1012,17 @@ int state_dispatch_requests(plc_p plc)
             rc = PLCTAG_STATUS_PENDING;
             break;
         }
+
+        /* nothing to do. Stay in the dispatcher and wait for something to happen. */
+        NEXT_STATE(state_dispatch_requests);
+        rc = PLCTAG_STATUS_OK;
     } while(0);
 
     if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_DETAIL, "Done dispatching for PLC %s.", plc->key);
         return rc;
     } else {
-        pdebug(DEBUG_WARN, "Error %s while trying to dispatch for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        pdebug(DEBUG_WARN, "Unexpected error %s while trying to dispatch for PLC %s!", plc_tag_decode_error(rc), plc->key);
         return rc;
     }
 
@@ -1315,6 +1320,13 @@ int state_start_connect(plc_p plc)
 
         CONTINUE_UNLESS(plc->is_connected == TRUE, "PLC %s is already connected!", plc->key);
 
+        if(!plc->socket) {
+            pdebug(DEBUG_INFO, "Creating socket.");
+
+            rc = socket_create(&(plc->socket));
+            RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while attempting to create socket object, resetting PLC %s!", plc_tag_decode_error(rc), plc->key);
+        }
+
         /* initialize the layers */
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
             plc->layers[index].is_connected = FALSE;
@@ -1353,7 +1365,11 @@ int state_build_layer_connect_request(plc_p plc)
         CHECK_TERMINATION();
 
         /* we can get here from the socket callback. Check the socket state. */
-        DISCONNECT_ON_ERROR(socket_status(plc->socket) != PLCTAG_STATUS_OK, "Connection failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        rc = socket_status(plc->socket);
+
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket connect is still PENDING for PLC %s.", plc->key);
+
+        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Connection failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* find the first layer needing to connect. */
         while(plc->current_layer_index < plc->num_layers && !plc->layers[plc->current_layer_index].connect) {
@@ -1430,7 +1446,11 @@ int state_layer_connect_request_sent(plc_p plc)
         CHECK_TERMINATION();
 
         /* is the socket in good shape? */
-        DISCONNECT_ON_ERROR((rc = socket_status(plc->socket)) != PLCTAG_STATUS_OK, "Connection request write failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        rc = socket_status(plc->socket);
+
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket write is still PENDING for PLC %s.", plc->key);
+
+        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Connection request write failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* OK, so prep for receiving the response. */
         plc->data_size = plc->payload_end = plc->payload_start = 0;
@@ -1471,7 +1491,11 @@ int state_layer_connect_response_ready(plc_p plc)
         CHECK_TERMINATION();
 
         /* is the socket in good shape? */
-        DISCONNECT_ON_ERROR((rc = socket_status(plc->socket)) != PLCTAG_STATUS_OK, "Connection response read failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        rc = socket_status(plc->socket);
+
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket read is still PENDING for PLC %s.", plc->key);
+
+        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Connection request read failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* check to see if we got the entire response back. */
         for(int index=0; index <= plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
@@ -1641,7 +1665,11 @@ int state_layer_disconnect_request_sent(plc_p plc)
 
     do {
         /* is the socket in good shape? */
-        RESET_ON_ERROR((rc = socket_status(plc->socket)) != PLCTAG_STATUS_OK, "Disconnection request write failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        rc = socket_status(plc->socket);
+
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket write is still PENDING for PLC %s.", plc->key);
+
+        RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Disconnection request write failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* OK, so prep for receiving the response. */
         plc->data_size = plc->payload_end = plc->payload_start = 0;
@@ -1679,7 +1707,11 @@ int state_layer_disconnect_response_ready(plc_p plc)
 
     do {
         /* is the socket in good shape? */
-        RESET_ON_ERROR((rc = socket_status(plc->socket)) != PLCTAG_STATUS_OK, "Disconnection response read failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        rc = socket_status(plc->socket);
+
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket read is still PENDING for PLC %s.", plc->key);
+
+        RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Disconnection request read failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* check to see if we got the entire response back. */
         for(int index=0; index <= plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
