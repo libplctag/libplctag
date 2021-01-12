@@ -1143,7 +1143,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     }
 
     /* copy the fd sets safely */
-    pdebug(DEBUG_DETAIL, "Code the FD sets for safety.");
+    pdebug(DEBUG_DETAIL, "Copy the FD sets for safety.");
     critical_block(socket_event_mutex) {
         local_read_fds = global_read_fds;
         local_write_fds = global_write_fds;
