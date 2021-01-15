@@ -109,6 +109,7 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = NULL;
     const char *tag_name = NULL;
+    int tmp = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -129,6 +130,47 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
     rc = df1_parse_logical_address(tag_name, &(tag->data_file_type),&(tag->data_file_num), &(tag->data_file_elem), &(tag->data_file_sub_elem));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Malformed data file name!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    /* set up the tag data buffer. This involves getting the element size and element count. */
+    tmp = df1_element_size(tag->data_file_type);
+    if(tmp < 0) {
+        pdebug(DEBUG_WARN, "Unsupported or unknown data file type, got error %s converting data file type to element size!", plc_tag_decode_error(tag->elem_size));
+        rc_dec(tag);
+        return NULL;
+    }
+
+    /* see if the user overrode the element size */
+    tag->elem_size = (uint16_t)attr_get_int(attribs, "elem_size", tmp);
+
+    if(tag->elem_size == 0) {
+        pdebug(DEBUG_WARN, "Data file type unsupported or unknown, unable to determine element size automatically!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tmp = attr_get_int(attribs, "elem_count", 1);
+    if(tmp < 1) {
+        pdebug(DEBUG_WARN, "Element count must be greater than zero or missing and will default to one!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tag->elem_count = (uint16_t)tmp;
+
+    tag->base_tag.size = tag->elem_count * tag->elem_size;
+
+    if(tag->base_tag.size <= 0) {
+        pdebug(DEBUG_WARN, "Tag size must be a positive number of bytes!");
+        rc_dec(tag);
+        return NULL;
+    }
+
+    tag->base_tag.data = mem_alloc(tag->base_tag.size);
+    if(!tag->base_tag.data) {
+        pdebug(DEBUG_WARN, "Unable to allocate internal tag data buffer!");
         rc_dec(tag);
         return NULL;
     }
