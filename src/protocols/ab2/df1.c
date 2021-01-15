@@ -80,6 +80,34 @@ int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file
 
 
 
+int df1_element_size(df1_file_t file_type)
+{
+    int result = PLCTAG_ERR_UNSUPPORTED;
+
+    switch(file_type) {
+        case PCCC_FILE_UNKNOWN: result = PLCTAG_ERR_UNSUPPORTED; break;
+        case PCCC_FILE_ASCII: result = 0; break; /* specific to the data file. */
+        case PCCC_FILE_BCD: result = 2; break;
+        case PCCC_FILE_BIT: result = 2; break;
+        case PCCC_FILE_CONTROL: result = 6; break;
+        case PCCC_FILE_COUNTER: result = 6; break;
+        case PCCC_FILE_FLOAT: result = 4; break;
+        case PCCC_FILE_INPUT: result = 2; break;
+        case PCCC_FILE_INT: result = 2; break;
+        case PCCC_FILE_LONG_INT: result = 4; break;
+        case PCCC_FILE_MESSAGE: result = 112; break;
+        case PCCC_FILE_OUTPUT: result = 2; break;
+        case PCCC_FILE_PID: result = 0; break; /* differs in size! */
+        case PCCC_FILE_STATUS: result = 2; break;
+        case PCCC_FILE_STRING: result = 84; break;
+        case PCCC_FILE_TIMER: result = 6; break;
+        default: result = PLCTAG_ERR_UNSUPPORTED; break;
+    }
+
+    return result;
+}
+
+
 
 int parse_df1_file_type(const char **str, df1_file_t *file_type)
 {
