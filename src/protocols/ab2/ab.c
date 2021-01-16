@@ -41,7 +41,7 @@
 #include <util/string.h>
 
 
-static plc_type_t get_plc_type(attr attribs);
+static plc_type_t ab2_get_plc_type(attr attribs);
 
 
 
@@ -52,10 +52,10 @@ plc_tag_p ab2_tag_create(attr attribs)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    plc_type = get_plc_type(attribs);
+    plc_type = ab2_get_plc_type(attribs);
 
     switch(plc_type) {
-        case AB_PLC_PLC5:
+        case AB2_PLC_PLC5:
             result = ab2_plc5_tag_create(attribs);
             break;
 
@@ -72,54 +72,39 @@ plc_tag_p ab2_tag_create(attr attribs)
 
 
 
-// int ab2_protocol_init(void)
-// {
-//     return PLCTAG_STATUS_OK;
-// }
 
-
-
-// void ab2_protocol_teardown(void)
-// {
-
-// }
-
-
-/* helper functions */
-
-
-plc_type_t get_plc_type(attr attribs)
+ab2_plc_type_t ab2_get_plc_type(attr attribs)
 {
     const char *cpu_type = attr_get_str(attribs, "plc", attr_get_str(attribs, "cpu", "NONE"));
 
     if (!str_cmp_i(cpu_type, "plc") || !str_cmp_i(cpu_type, "plc5")) {
         pdebug(DEBUG_DETAIL,"Found PLC/5 PLC.");
-        return AB_PLC_PLC5;
+        return AB2_PLC_PLC5;
     } else if ( !str_cmp_i(cpu_type, "slc") || !str_cmp_i(cpu_type, "slc500")) {
         pdebug(DEBUG_DETAIL,"Found SLC 500 PLC.");
-        return AB_PLC_SLC;
+        return AB2_PLC_SLC;
     } else if (!str_cmp_i(cpu_type, "lgxpccc") || !str_cmp_i(cpu_type, "logixpccc") || !str_cmp_i(cpu_type, "lgxplc5") || !str_cmp_i(cpu_type, "logixplc5") ||
                !str_cmp_i(cpu_type, "lgx-pccc") || !str_cmp_i(cpu_type, "logix-pccc") || !str_cmp_i(cpu_type, "lgx-plc5") || !str_cmp_i(cpu_type, "logix-plc5")) {
         pdebug(DEBUG_DETAIL,"Found Logix-class PLC using PCCC protocol.");
-        return AB_PLC_LGX_PCCC;
+        return AB2_PLC_LGX_PCCC;
     } else if (!str_cmp_i(cpu_type, "micrologix800") || !str_cmp_i(cpu_type, "mlgx800") || !str_cmp_i(cpu_type, "micro800")) {
         pdebug(DEBUG_DETAIL,"Found Micro8xx PLC.");
-        return AB_PLC_MLGX800;
+        return AB2_PLC_MLGX800;
     } else if (!str_cmp_i(cpu_type, "micrologix") || !str_cmp_i(cpu_type, "mlgx")) {
         pdebug(DEBUG_DETAIL,"Found MicroLogix PLC.");
-        return AB_PLC_MLGX;
+        return AB2_PLC_MLGX;
     } else if (!str_cmp_i(cpu_type, "compactlogix") || !str_cmp_i(cpu_type, "clgx") || !str_cmp_i(cpu_type, "lgx") ||
                !str_cmp_i(cpu_type, "controllogix") || !str_cmp_i(cpu_type, "contrologix") ||
                !str_cmp_i(cpu_type, "logix")) {
         pdebug(DEBUG_DETAIL,"Found ControlLogix/CompactLogix PLC.");
-        return AB_PLC_LGX;
+        return AB2_PLC_LGX;
     } else if (!str_cmp_i(cpu_type, "omron-njnx") || !str_cmp_i(cpu_type, "omron-nj") || !str_cmp_i(cpu_type, "omron-nx") || !str_cmp_i(cpu_type, "njnx")
                || !str_cmp_i(cpu_type, "nx1p2")) {
         pdebug(DEBUG_DETAIL,"Found OMRON NJ/NX Series PLC.");
-        return AB_PLC_OMRON_NJNX;
+        return AB2_PLC_OMRON_NJNX;
     } else {
         pdebug(DEBUG_WARN, "Unsupported device type: %s", cpu_type);
 
-        return AB_PLC_NONE;
+        return AB2_PLC_NONE;
     }
 }
