@@ -48,7 +48,7 @@
 plc_tag_p ab2_tag_create(attr attribs)
 {
     plc_tag_p result = NULL;
-    plc_type_t plc_type;
+    ab2_plc_type_t plc_type;
 
     pdebug(DEBUG_INFO, "Starting.");
 
