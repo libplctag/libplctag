@@ -41,7 +41,7 @@
 #include <util/string.h>
 
 
-static plc_type_t ab2_get_plc_type(attr attribs);
+//static plc_type_t ab2_get_plc_type(attr attribs);
 
 
 
