@@ -55,14 +55,34 @@
 #define CIP_LGX_CONN_PARAM_EX ((uint32_t)0x42000000)
 #define LOGIX_LARGE_PAYLOAD_SIZE (4002)
 
+#define CIP_CMD_EXECUTED_FLAG (0x80)
+#define CIP_FORWARD_CLOSE_REQUEST (0x4E)
 #define CIP_FORWARD_OPEN_REQUEST (0x54)
-#define FORWARD_OPEN_REQUEST_SIZE (88)
-#define FORWARD_OPEN_REQUEST_EX_SIZE (92)
+
+#define CIP_SERVICE_STATUS_OK   (0x00)
+
+#define CPF_UNCONNECTED_HEADER_SIZE (16)
+#define CPF_CONNECTED_HEADER_SIZE (20)
 
 /* CPF definitions */
 
 /* Unconnected data item type */
+#define CPF_UNCONNECTED_ADDRESS_ITEM ((uint16_t)0x0000)
 #define CPF_UNCONNECTED_DATA_ITEM ((uint16_t)0x00B2)
+#define CPF_CONNECTED_ADDRESS_ITEM ((uint16_t)0x00A1)
+#define CPF_CONNECTED_DATA_ITEM ((uint16_t)0x00B1)
+
+/* forward open constants */
+#define FORWARD_OPEN_SECONDS_PER_TICK (10)
+#define FORWARD_OPEN_TIMEOUT_TICKS  (5)
+#define CIP_VENDOR_ID ((uint16_t)0xF33D)
+#define CIP_VENDOR_SERIAL_NUMBER ((uint32_t)0x21504345)   /* "!pce" */
+#define CIP_TIMEOUT_MULTIPLIER (1)
+#define CIP_RPI_uS (1000000)
+#define CIP_CONNECTION_TYPE (0xA3)
+
+
+#define MAX_CIP_PATH_SIZE (256)
 
 
 struct cip_layer_state_s {
@@ -74,10 +94,19 @@ struct cip_layer_state_s {
 
     uint32_t conn_params;
 
-    uint32_t connection_id;
     uint16_t sequence_id;
+    uint16_t max_cip_payload;
+    uint32_t connection_id;
+    uint32_t plc_connection_id;
 
-    const char *path;
+    int cip_header_start_offset;
+
+    bool is_dhp;
+    uint8_t dhp_port;
+    uint8_t dhp_dest;
+
+    int encoded_path_size;
+    uint8_t encoded_path[];
 };
 
 
@@ -89,12 +118,10 @@ static int cip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_c
 static int cip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
 static int cip_layer_destroy_layer(void *context);
 
-
-static int cip_encode_path(uint8_t *data, int data_capacity, int *data_offset, const char *path);
-static int encode_dhp_addr_segment(uint8_t *data, int data_capacity, int *data_offset, const char *segment, uint8_t *port, uint8_t *src_node, uint8_t *dest_node);
-static int encode_ip_addr_segment(uint8_t *data, int data_capacity, int *data_offset, const char *segment, uint8_t *conn_path, size_t *conn_path_index);
-static int match_numeric_segment(uint8_t *data, int data_capacity, int *data_offset, const char *segment, uint8_t *conn_path, size_t *conn_path_index);
-
+static int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char *path);
+static int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index);
+static int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index);
+static int encode_numeric_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index);
 
 
 
@@ -103,10 +130,40 @@ int cip_layer_setup(plc_p plc, int layer_index, attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     struct cip_layer_state_s *state = NULL;
-    ab2_plc_type_t plc_type;
+    const char *path = NULL;
+    int encoded_path_size = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    path = attr_get_str(attribs, "path", "");
+
+    /* call once for the size and validation. */
+    rc = encode_cip_path(state, NULL, MAX_CIP_PATH_SIZE, &encoded_path_size, path);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Path, \"%s\", check failed with error %s!", path, plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* now we have the size so we can allocate the state. */
+
+    state = mem_alloc((int)(unsigned int)sizeof(*state) + encoded_path_size);
+    if(!state) {
+        pdebug(DEBUG_WARN, "Unable to allocate CIP layer state!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    state->is_connected = FALSE;
+    state->plc = plc;
+
+    /* now encode it for real */
+    state->encoded_path_size = 0;
+    rc = encode_cip_path(state, &(state->encoded_path[0]), encoded_path_size, &(state->encoded_path_size), path);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Path, \"%s\", encoding failed with error %s!", path, plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* finally set up the layer. */
     rc = plc_set_layer(plc,
                        layer_index,
                        state,
@@ -118,72 +175,8 @@ int cip_layer_setup(plc_p plc, int layer_index, attr attribs)
                        cip_layer_process_response,
                        cip_layer_destroy_layer);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error setting layer!");
+        pdebug(DEBUG_WARN, "Error setting up layer!");
         return rc;
-    }
-
-    state = mem_alloc(sizeof(*state));
-    if(!state) {
-        pdebug(DEBUG_WARN, "Unable to allocate CIP layer state!");
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    state->is_connected = FALSE;
-    state->plc = plc;
-
-    state->path = str_dup(attr_get_str(attribs, "path", ""));
-    if(state->path) {
-        pdebug(DEBUG_WARN, "Unable to copy path string!");
-        mem_free(state);
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    plc_type = ab2_get_plc_type(attribs);
-
-
-    /* STOPPED
-        * Untangle cip path encoding.
-           * split path into segments.
-           * encode each segment type.
-        * make DHP check public so that it can be used in the tag code. */
-
-    /* TODO set up path */
-
-    switch(plc_type) {
-        case AB2_PLC_PLC5:
-            /* fall through */
-        case AB2_PLC_SLC:
-            /* fall through */
-        case AB2_PLC_MLGX:
-            /* fall through */
-        case AB2_PLC_LGX_PCCC:
-            pdebug(DEBUG_DETAIL, "Setting up for PCCC-based PLC connection.");
-            state->forward_open_ex_enabled = FALSE;
-            state->conn_params = CIP_PLC5_CONN_PARAM;
-            break;
-
-        case AB2_PLC_LGX:
-            pdebug(DEBUG_DETAIL, "Setting up for Logix PLC connection.");
-            state->forward_open_ex_enabled = TRUE;
-            state->conn_params = CIP_LGX_CONN_PARAM_EX | LOGIX_LARGE_PAYLOAD_SIZE;
-            break;
-
-        case AB2_PLC_MLGX800:
-            pdebug(DEBUG_DETAIL, "Setting up for Micro800 PLC connection.");
-            state->forward_open_ex_enabled = FALSE;
-            state->conn_params = CIP_LGX_CONN_PARAM;
-            break;
-
-        case AB2_PLC_OMRON_NJNX:
-            pdebug(DEBUG_DETAIL, "Setting up for Omron NJ/NX PLC connection.");
-            state->forward_open_ex_enabled = FALSE;
-            state->conn_params = CIP_LGX_CONN_PARAM;
-            break;
-
-        default:
-            pdebug(DEBUG_WARN, "Unsupported PLC type!");
-            return PLCTAG_ERR_UNSUPPORTED;
-            break;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -200,7 +193,7 @@ int cip_layer_initialize(void *context)
     int rc = PLCTAG_STATUS_OK;
     struct cip_layer_state_s *state = (struct cip_layer_state_s *)context;
 
-    pdebug(DEBUG_INFO, "Initializing CIP layer.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     state->is_connected = FALSE;
 
@@ -229,7 +222,7 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
     }
 
     /* check space */
-    if(max_payload_size < FORWARD_OPEN_REQUEST_SIZE) {
+    if(max_payload_size < 92) { /* MAGIC */
         pdebug(DEBUG_WARN, "Insufficient space to build CIP connection request!");
         return PLCTAG_ERR_TOO_SMALL;
     }
@@ -238,32 +231,6 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
 
     do {
         /* build a Forward Open or Forward Open Extended request. */
-
-    // uint32_le interface_handle;      /* ALWAYS 0 */
-    // uint16_le router_timeout;        /* in seconds */
-
-    // /* Common Packet Format - CPF Unconnected */
-    // uint16_le cpf_item_count;        /* ALWAYS 2 */
-    // uint16_le cpf_nai_item_type;     /* ALWAYS 0 */
-    // uint16_le cpf_nai_item_length;   /* ALWAYS 0 */
-    // uint16_le cpf_udi_item_type;     /* ALWAYS 0x00B2 - Unconnected Data Item */
-    // uint16_le cpf_udi_item_length;   /* REQ: fill in with length of remaining data. */
-
-    // /* CM Service Request - Connection Manager */
-    // uint8_t cm_service_code;        /* ALWAYS 0x54 Forward Open Request */
-    // uint8_t cm_req_path_size;       /* ALWAYS 2, size in words of path, next field */
-    // uint8_t cm_req_path[4];         /* ALWAYS 0x20,0x06,0x24,0x01 for CM, instance 1*/
-
-    // /* Forward Open Params */
-    // uint8_t secs_per_tick;          /* seconds per tick */
-    // uint8_t timeout_ticks;          /* timeout = srd_secs_per_tick * src_timeout_ticks */
-    // uint32_le orig_to_targ_conn_id;  /* 0, returned by target in reply. */
-    // uint32_le targ_to_orig_conn_id;  /* what is _our_ ID for this connection, use ab_connection ptr as id ? */
-    // uint16_le conn_serial_number;    /* our connection ID/serial number */
-    // uint16_le orig_vendor_id;        /* our unique vendor ID */
-    // uint32_le orig_serial_number;    /* our unique serial number */
-    // uint8_t conn_timeout_multiplier;/* timeout = mult * RPI */
-    // uint8_t reserved[3];            /* reserved, set to 0 */
 
         /* header part. */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
@@ -288,13 +255,6 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
         TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x24); /* instance, 8-bits */
         TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x01); /* Connection Manager, instance 1 */
 
-#define FORWARD_OPEN_SECONDS_PER_TICK (10)
-#define FORWARD_OPEN_TIMEOUT_TICKS  (5)
-#define CIP_VENDOR_ID ((uint16_t)0xF33D)
-#define CIP_VENDOR_SERIAL_NUMBER ((uint32_t)0x21504345)   /* "!pce" */
-#define CIP_TIMEOUT_MULTIPLIER (1)
-#define CIP_RPI_uS (1000000)
-#define CIP_CONNECTION_TYPE (0xA3)
 
         /* the actual Forward Open parameters */
 
@@ -305,7 +265,7 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
         /* connection ID params. */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0); /* will be returned with the PLC's connection ID */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, state->connection_id); /* our connection ID */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, state->sequence_id);   /* our connection sequence ID */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, state->sequence_id++);   /* our connection sequence ID */
 
         /* identify us */
         TRY_SET_U16_LE(buffer, buffer_capacity, offset, CIP_VENDOR_ID);
@@ -330,63 +290,28 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
         /* What kind of connection are we asking for?  Class 3, connected, application trigger. */
         TRY_SET_BYTE(buffer, buffer_capacity, offset, CIP_CONNECTION_TYPE);
 
-        rc = cip_path_encode(buffer, buffer_capacity, &offset, state->path);
+        /* copy the encoded path */
+        for(int index = 0; index < state->encoded_path_size; index++) {
+            TRY_SET_BYTE(buffer, buffer_capacity, offset, state->encoded_path[index]);
+        }
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to encode CIP path!");
+            pdebug(DEBUG_WARN, "Error %s while copying encoded path!", plc_tag_decode_error(rc));
             break;
         }
 
-
-
-    uint32_le orig_to_targ_rpi;      /* us to target RPI - Request Packet Interval in microseconds */
-    uint16_le orig_to_targ_conn_params; /* some sort of identifier of what kind of PLC we are??? */
-    uint32_le targ_to_orig_rpi;      /* target to us RPI, in microseconds */
-    uint16_le targ_to_orig_conn_params; /* some sort of identifier of what kind of PLC the target is ??? */
-    uint8_t transport_class;        /* ALWAYS 0xA3, server transport, class 3, application trigger */
-    uint8_t path_size;              /* size of connection path in 16-bit words
-                                     * connection path from MSG instruction.
-                                     *
-                                     * EG LGX with 1756-ENBT and CPU in slot 0 would be:
-                                     * 0x01 - backplane port of 1756-ENBT
-                                     * 0x00 - slot 0 for CPU
-                                     * 0x20 - class
-                                     * 0x02 - MR Message Router
-                                     * 0x24 - instance
-                                     * 0x01 - instance #1.
-                                     */
-
-        /* command */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, REGISTER_SESSION_CMD);
-
-        /* packet/payload length. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 4);
-
-        /* session handle, zero here. */
-        TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
-
-        /* session status, zero here. */
-        TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
-
-        /* session context, zero here. */
-        TRY_SET_U64_LE(buffer, buffer_capacity, offset, 0);
-
-        /* options, unused, zero here. */
-        TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
-
-        /* payload */
-
-        /* requested CIP version. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, CIP_VERSION);
-
-        /* requested CIP options. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 0);
-
+        /* the next payload will start after this one. */
         *data_start = offset;
-        *data_end = offset;
+        pdebug(DEBUG_DETAIL, "Set data_start=%d", *data_start);
+
+        /* if the data end is not set, then make it the maximum we can have. */
+        if(*data_end < *data_start) {
+            *data_end = buffer_capacity;
+            pdebug(DEBUG_DETAIL, "Set data_end=%d", *data_end);
+        }
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error, %s, building session registration request!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Error, %s, building CIP forward open request!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -397,61 +322,85 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
 
 
 
-/* NOT USED */
 int cip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end)
 {
     int rc = PLCTAG_STATUS_OK;
     struct cip_layer_state_s *state = (struct cip_layer_state_s *)context;
-    int offset = 0;
+    int offset = *data_start;
+    int max_payload_size = buffer_capacity - *data_start;
 
-    pdebug(DEBUG_INFO, "Building CIP disconnect packet.");
+    pdebug(DEBUG_INFO, "Building CIP connect packet.");
 
-    if(state->is_connected == FALSE) {
-        pdebug(DEBUG_WARN, "Disconnect called while CIP layer is not connected!");
+    if(state->is_connected == TRUE) {
+        pdebug(DEBUG_WARN, "Connect called while CIP layer is already connected!");
         return PLCTAG_ERR_BUSY;
     }
 
     /* check space */
-    if(buffer_capacity < SESSION_REQUEST_SIZE) {
-        pdebug(DEBUG_WARN, "Insufficient space to build session request!");
+    if(max_payload_size < 92) { /* MAGIC */
+        pdebug(DEBUG_WARN, "Insufficient space to build CIP connection request!");
         return PLCTAG_ERR_TOO_SMALL;
     }
 
     offset = 0;
 
     do {
-        /* command */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, UNREGISTER_SESSION_CMD);
+        /* build a Forward Close request. */
 
-        /* packet/payload length. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 4);
-
-        /* session handle, session handle from session setup. */
-        TRY_SET_U32_LE(buffer, buffer_capacity, offset, state->session_handle);
-
-        /* session status, zero here. */
+        /* header part. */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 5); /* TODO MAGIC */
 
-        /* session context, zero here. */
-        TRY_SET_U64_LE(buffer, buffer_capacity, offset, 0);
+        /* now the unconnected CPF (Common Packet Format) */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 2); /* two items. */
 
-        /* options, unused, zero here. */
-        TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
+        /* first item, the address. */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 0); /* Null Address Item type */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 0); /* null address length = 0 */
 
-        /* payload */
+        /* second item, the payload type and length */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, CPF_UNCONNECTED_DATA_ITEM);
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, (*data_end < offset ? 0 : *data_end - offset));
 
-        /* requested CIP version. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, CIP_VERSION);
+        /* now the connection manager request. */
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, CIP_FORWARD_CLOSE_REQUEST);
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, 2); /* size in words of the path. */
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x20); /* class, 8-bits */
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x06); /* Connection Manager class */
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x24); /* instance, 8-bits */
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x01); /* Connection Manager, instance 1 */
 
-        /* requested CIP options. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 0);
+        /* overall timeout parameters. */
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, FORWARD_OPEN_SECONDS_PER_TICK);
+        TRY_SET_BYTE(buffer, buffer_capacity, offset, FORWARD_OPEN_TIMEOUT_TICKS);
 
+        /* connection ID params. */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, state->sequence_id++);   /* our connection sequence ID */
+
+        /* identify us */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, CIP_VENDOR_ID);
+        TRY_SET_U32_LE(buffer, buffer_capacity, offset, CIP_VENDOR_SERIAL_NUMBER);
+
+        /* copy the encoded path */
+        for(int index = 0; index < state->encoded_path_size; index++) {
+            TRY_SET_BYTE(buffer, buffer_capacity, offset, state->encoded_path[index]);
+        }
+
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s while copying encoded path!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* There is no next payload. */
         *data_start = offset;
         *data_end = offset;
+
+        pdebug(DEBUG_DETAIL, "Set data_start=%d", *data_start);
+        pdebug(DEBUG_DETAIL, "Set data_end=%d", *data_end);
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error, %s, building session registration request!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Error, %s, building CIP forward open request!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -462,10 +411,12 @@ int cip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, in
 
 
 
-
 int cip_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
+    struct cip_layer_state_s *state = (struct cip_layer_state_s *)context;
+    int needed_capacity = (state->is_connected == TRUE ? CPF_CONNECTED_HEADER_SIZE : CPF_UNCONNECTED_HEADER_SIZE);
+    int remaining_capacity = buffer_capacity - *data_start;
 
     (void)context;
     (void)buffer;
@@ -474,16 +425,18 @@ int cip_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *
     pdebug(DEBUG_INFO, "Preparing layer for building a request.");
 
     /* allocate space for the CIP header. */
-    if(buffer_capacity < CIP_HEADER_SIZE) {
-        pdebug(DEBUG_WARN, "Buffer size, (%d) is too small for CIP header (size %d)!", buffer_capacity, CIP_HEADER_SIZE);
+    if(remaining_capacity < needed_capacity) {
+        pdebug(DEBUG_WARN, "Buffer size, (%d) is too small for CIP CPF header (size %d)!", remaining_capacity, needed_capacity);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    if(*data_start < CIP_HEADER_SIZE) {
-        *data_start = CIP_HEADER_SIZE;
+    state->cip_header_start_offset = *data_start;
+
+    if(*data_start < needed_capacity) {
+        *data_start = needed_capacity;
     }
 
-    if(*data_end < CIP_HEADER_SIZE) {
+    if(*data_end < needed_capacity) {
         *data_end = buffer_capacity;
     }
 
@@ -499,9 +452,8 @@ int cip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity
 {
     int rc = PLCTAG_STATUS_OK;
     struct cip_layer_state_s *state = (struct cip_layer_state_s *)context;
-    int offset = 0;
+    int offset = *data_start;
     int payload_size = 0;
-    uint16_t command = SEND_UNCONNECTED_DATA_CMD;
 
     pdebug(DEBUG_INFO, "Building a request.");
 
@@ -515,71 +467,38 @@ int cip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity
         return PLCTAG_ERR_BAD_CONNECTION;
     }
 
-    if(buffer_capacity < CIP_HEADER_SIZE) {
-        pdebug(DEBUG_WARN, "Insufficient space for new request!");
-        return PLCTAG_ERR_TOO_SMALL;
-    }
-
-    if(*data_end <= CIP_HEADER_SIZE) {
-        pdebug(DEBUG_WARN, "data end is %d, payload would be zero length!", *data_end);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* this might be the first call. */
-
-    /* what kind of request is it? Cheat and peak at the payload. */
-    if(*data_end >= CIP_HEADER_SIZE + 10) {
-        uint16_t address_item_type = 0;
-
-        address_item_type = (uint16_t)(buffer[CIP_HEADER_SIZE + 8])
-                          + (uint16_t)(((uint16_t)buffer[CIP_HEADER_SIZE + 9]) << 8);
-
-        if(address_item_type == 0) {
-            /* unconnected message. */
-            command = SEND_UNCONNECTED_DATA_CMD;
-        } else {
-            command = SEND_CONNECTED_DATA_CMD;
-        }
-    } else {
-        command = SEND_UNCONNECTED_DATA_CMD;
-    }
-
-    /* the payload starts after the header. */
-    *data_start = CIP_HEADER_SIZE;
-
-    /* calculate the payload size. */
-    payload_size = *data_end - *data_start;
-
-    /* build packet */
+    /* build CPF header. */
     do {
-        /* set the command */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, command);
-
-        /* payload length. */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, payload_size);
-
-        /* session handle. */
-        TRY_SET_U32_LE(buffer, buffer_capacity, offset, state->session_handle);
-
-        /* session status, zero here. */
-        TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
-
-        if(command == SEND_CONNECTED_DATA_CMD) {
-            /* session context, zero here. */
-            TRY_SET_U64_LE(buffer, buffer_capacity, offset, 0);
-        } else {
-            state->session_context++;
-
-            /* session context. */
-            TRY_SET_U64_LE(buffer, buffer_capacity, offset, state->session_context);
+        payload_size = *data_end - (*data_start + CPF_CONNECTED_HEADER_SIZE);
+        if(payload_size <= 2) {  /* MAGIC - leave space for the sequence ID */
+            pdebug(DEBUG_WARN, "Insufficient space for payload!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
         }
 
-        /* options, unused, zero here. */
+        /* header part. */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 5); /* TODO MAGIC */
 
-        /* fix up data start for next layer */
-        *data_start = CIP_HEADER_SIZE;
+        /* now the connected CPF (Common Packet Format) */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 2); /* two items. */
+
+        /* first item, the connected address. */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, CPF_CONNECTED_ADDRESS_ITEM); /* Null Address Item type */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 4); /* address length = 4 */
+        TRY_SET_U32_LE(buffer, buffer_capacity, offset, state->plc_connection_id);
+
+        /* second item, the data item and size */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, CPF_CONNECTED_DATA_ITEM); /* Null Address Item type */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, payload_size); /* data length, note includes the sequence ID below! */
+
+        /* set the connection sequence id */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, state->sequence_id++);
+
+        /* mark where the payload packet can start. */
+        *data_start = offset;
     } while(0);
+
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build CIP header packet, error %s!", plc_tag_decode_error(rc));
@@ -594,83 +513,135 @@ int cip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity
 
 
 
-// int cip_layer_prepare_for_response(void *context)
-// {
-//     int rc = PLCTAG_STATUS_OK;
-
-//     (void)context;
-
-//     pdebug(DEBUG_INFO, "Preparing for response.");
-
-//     pdebug(DEBUG_INFO, "Done.");
-
-//     return rc;
-// }
-
-
-
-
 int cip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     struct cip_layer_state_s *state = (struct cip_layer_state_s *)context;
-    uint16_t command = 0;
-    uint16_t payload_size = 0;
-    uint32_t status = 0;
-    uint32_t session_handle = 0;
-    int offset = 0;
+    int offset = *data_start;
+    int payload_size = *data_end - *data_start;
+    int min_decode_size = (state->is_connected == TRUE ? CPF_CONNECTED_HEADER_SIZE : CPF_UNCONNECTED_HEADER_SIZE);
 
     pdebug(DEBUG_INFO, "Processing CIP response.");
 
     /* there is only one CIP response in a packet. */
     *req_id = 1;
 
-    if(buffer_capacity < CIP_HEADER_SIZE){
-        pdebug(DEBUG_DETAIL, "Need more data!");
-        return PLCTAG_ERR_PARTIAL;
-    }
-
-    /* we at least have the header, now get the command, payload size and status. */
+    /* we at least have the header */
     do {
-        /* command */
-        TRY_GET_U16_LE(buffer, buffer_capacity, offset, command);
-
-        /* get the payload size */
-        TRY_GET_U16_LE(buffer, buffer_capacity, offset, payload_size);
-
-        /* get the session handle */
-        TRY_GET_U32_LE(buffer, buffer_capacity, offset, session_handle);
-
-        /* get the status */
-        TRY_GET_U32_LE(buffer, buffer_capacity, offset, status);
-
-        /* do we have the whole packet? */
-        if(*data_end < (int)(unsigned int)(payload_size + CIP_HEADER_SIZE)) {
-            pdebug(DEBUG_DETAIL, "Need more data than the header, we need %d bytes and have %d bytes.", (int)(unsigned int)(payload_size + CIP_HEADER_SIZE), *data_end);
+        if(payload_size < min_decode_size) {
+            pdebug(DEBUG_DETAIL, "Amount of data is insufficient to decode CPF header.");
             rc = PLCTAG_ERR_PARTIAL;
             break;
         }
 
-        if(status != 0) {
-            pdebug(DEBUG_WARN, "Got bad CIP status %d!", (int)(unsigned int)status);
-            rc = PLCTAG_ERR_BAD_REPLY;
+        /* we have enough to decode the CPF header, which kind is it? */
+        if(state->is_connected == FALSE) {
+            uint32_t dummy_u32;
+            uint16_t dummy_u16;
+            uint16_t cpf_payload_size;
+            uint8_t cip_service_code;
+
+            /* get the interface handle and router timeout, discard */
+            TRY_GET_U32_LE(buffer, buffer_capacity, offset, dummy_u32);
+            TRY_GET_U16_LE(buffer, buffer_capacity, offset, dummy_u16);
+
+            /* get the CPF header */
+            TRY_GET_U16_LE(buffer, buffer_capacity, offset, dummy_u16); /* item count */
+            TRY_GET_U16_LE(buffer, buffer_capacity, offset, dummy_u16); /* null address item */
+            TRY_GET_U16_LE(buffer, buffer_capacity, offset, dummy_u16); /* null address size */
+            TRY_GET_U16_LE(buffer, buffer_capacity, offset, dummy_u16); /* unconnected data item */
+            TRY_GET_U16_LE(buffer, buffer_capacity, offset, cpf_payload_size); /* payload size */
+
+            if(payload_size < (CPF_UNCONNECTED_HEADER_SIZE + (int)(unsigned int)cpf_payload_size)) {
+                pdebug(DEBUG_DETAIL, "Insufficient data for full payload.");
+                rc = PLCTAG_ERR_PARTIAL;
+                break;
+            }
+
+            /* we might have a Forward Open reply */
+            if(cpf_payload_size < 4) {
+                pdebug(DEBUG_WARN, "Illformed CIP response packet.");
+                rc = PLCTAG_ERR_BAD_REPLY;
+                break;
+            }
+
+            TRY_GET_BYTE(buffer, buffer_capacity, offset, cip_service_code);
+
+            /* don't destructively get this as we might not handle it. */
+            cip_service_code = buffer[offset];
+
+            if(cip_service_code == (CIP_FORWARD_OPEN_REQUEST | CIP_CMD_EXECUTED_FLAG) || cip_service_code == (CIP_FORWARD_OPEN_REQUEST | CIP_CMD_EXECUTED_FLAG)) {
+                uint8_t dummy_u8;
+                uint8_t status;
+                uint8_t status_size;
+                uint16_t extended_status;
+
+                /* now move past the service code */
+                offset++;
+
+                /* it is a response to Forward Open, one of them at least. */
+                TRY_GET_BYTE(buffer, buffer_capacity, offset, dummy_u8); /* reserved byte. */
+                TRY_GET_BYTE(buffer, buffer_capacity, offset, status); /* status byte. */
+                TRY_GET_BYTE(buffer, buffer_capacity, offset, status_size); /* extended status size in 16-bit words. */
+
+                if(status == CIP_SERVICE_STATUS_OK) {
+                    /* get the target PLC's connection ID and save it. */
+                    TRY_GET_U32_LE(buffer, buffer_capacity, offset, state->plc_connection_id);
+
+                    /* TODO - decode some of the rest of the packet, might be useful. */
+
+                    *data_start = *data_end;
+
+                    state->is_connected = TRUE;
+
+                    rc = PLCTAG_STATUS_OK;
+                    break;
+                } else {
+                    /* Oops, now check to see what to do. */
+                    if(status == 0x01 && status_size >= 2) {
+                        uint16_t extended_status;
+
+                        /* we might have an error that tells us the actual size to use. */
+                        TRY_GET_U16_LE(buffer, buffer_capacity, offset, extended_status);
+
+                        if(extended_status == 0x109) { /* MAGIC */
+                            uint16_t supported_size = 0;
+
+                            TRY_GET_U16_LE(buffer, buffer_capacity, offset, supported_size);
+
+                            pdebug(DEBUG_WARN, "Error from Forward Open request, unsupported size, but size %d is supported.", supported_size);
+
+                            state->max_cip_payload = supported_size;
+
+                            /* retry */
+                            rc = PLCTAG_STATUS_PENDING;
+                            break;
+                        } else if(extended_status == 0x100) { /* MAGIC */
+                            pdebug(DEBUG_WARN, "Error from forward open request, duplicate connection ID.  Need to try again.");
+                            /* retry */
+                            rc = PLCTAG_STATUS_PENDING;
+                            break;
+                        } else {
+                            // pdebug(DEBUG_WARN, "CIP error %d (%s)!", decode_cip_error_short(&fo_resp->general_status), decode_cip_error_long(&fo_resp->general_status));
+                            pdebug(DEBUG_WARN, "CIP error %x (extended error %x)!", (unsigned int)status, (unsigned int)extended_status);
+                            rc = PLCTAG_ERR_REMOTE_ERR;
+                            break;
+                        }
+                    } else {
+                        // pdebug(DEBUG_WARN, "CIP error code %s (%s)!", decode_cip_error_short(&fo_resp->general_status), decode_cip_error_long(&fo_resp->general_status));
+                        pdebug(DEBUG_WARN, "CIP error %x!", (unsigned int)status,);
+                        rc = PLCTAG_ERR_REMOTE_ERR;
+                        break;
+                    }
+                }
+
+            }
+
+            *data_start = *data_start + CPF_CONNECTED_HEADER_SIZE + 2;
             break;
-        }
-
-        /* what we do depends on the command */
-        if(command == REGISTER_SESSION_CMD) {
-            /* copy the information into the state. */
-            state->session_handle = session_handle;
-
-            state->is_connected = TRUE;
-
-            /* signal that we have consumed the whole payload. */
-            *data_end = 0;
-            *data_start = 0;
         } else {
-            /* other layers will need to process this. */
-            *data_start = CIP_HEADER_SIZE;
-            *data_end = payload_size + CIP_HEADER_SIZE;
+            /* the only thing here we expect is a Forward Open response. */
+            *data_start = *data_start + CPF_UNCONNECTED_HEADER_SIZE;
         }
     } while(0);
 
@@ -709,433 +680,413 @@ int cip_layer_destroy_layer(void *context)
 }
 
 
-
-
-int cip_encode_path(uint8_t *data, int data_capacity, int *data_offset, const char *path)
+int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char *path)
 {
-    size_t path_len = 0;
-    size_t conn_path_index = 0;
-    size_t path_index = 0;
-    int is_dhp = 0;
-    uint8_t dhp_port;
-    uint8_t dhp_src_node;
-    uint8_t dhp_dest_node;
-    uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    int rc = PLCTAG_STATUS_OK;
+    int segment_index = 0;
+    const char **path_segments = NULL;
+    int path_len = 0;
+    int path_len_offset = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting");
+    pdebug(DEBUG_INFO, "Starting with path \"%s\".", path);
 
-    // if(!path || str_length(path) == (size_t)0) {
-    //     pdebug(DEBUG_DETAIL, "Path is NULL or empty.");
-    //     return PLCTAG_ERR_NULL_PTR;
-    // }
+    do {
+        if(!path) {
+            pdebug(DEBUG_WARN, "Path string pointer is null!");
+            rc = PLCTAG_ERR_NULL_PTR;
+            break;
+        }
 
-    path_len = (size_t)(ssize_t)str_length(path);
+        /* split the path and then encode the parts. */
+        path_segments = str_split(path, ",");
+        if(!path_segments) {
+            pdebug(DEBUG_WARN, "Unable to split path string!");
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
 
-    while(path_index < path_len && path[path_index] && conn_path_index < MAX_CONN_PATH) {
-        if(path[path_index] == ',') {
-            /* skip separators. */
-            pdebug(DEBUG_DETAIL, "Skipping separator character '%c'.", (char)path[path_index]);
+        path_len_offset = *data_offset;
+        TRY_SET_BYTE(data, data_capacity, *data_offset, 0); /* filler */
 
-            path_index++;
-        } else if(match_numeric_segment(path, &path_index, tmp_conn_path, &conn_path_index) == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Found numeric segment.");
-        } else if(encode_ip_addr_segment(path, &path_index, tmp_conn_path, &conn_path_index) == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Found IP address segment.");
-        } else if(encode_dhp_addr_segment(path, &path_index, &dhp_port, &dhp_src_node, &dhp_dest_node) == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Found DH+ address segment.");
-
-            /* check if it is last. */
-            if(path_index < path_len) {
-                pdebug(DEBUG_WARN, "DH+ address must be the last segment in a path! %d %d", (int)(ssize_t)path_index, (int)(ssize_t)path_len);
-                return PLCTAG_ERR_BAD_PARAM;
+        while(path_segments[segment_index] != NULL) {
+            if(str_length(path_segments[segment_index]) == 0) {
+                pdebug(DEBUG_WARN, "Path segment %d is zero length!", segment_index+1);
+                rc = PLCTAG_ERR_BAD_PARAM;
+                break;
             }
 
-            is_dhp = 1;
+            /* try the different types. */
+            do {
+                rc = encode_bridge_segment(data, data_capacity, data_offset, path_segments, &segment_index);
+                if(rc != PLCTAG_ERR_NO_MATCH) break;
+
+                rc = encode_dhp_addr_segment(data, data_capacity, data_offset, path_segments, &segment_index);
+                if(rc != PLCTAG_ERR_NO_MATCH) break;
+
+                rc = encode_numeric_segment(data, data_capacity, data_offset, path_segments, &segment_index);
+                if(rc != PLCTAG_ERR_NO_MATCH) break;
+            } while(0);
+
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to match segment %d \"%s\", error %s.", segment_index + 1, path_segments[segment_index], plc_tag_decode_error(rc));
+                break;
+            }
+        }
+
+        if(rc != PLCTAG_STATUS_OK) {
+            break;
+        }
+
+        /* build the routing part. */
+        if(state->is_dhp) {
+            /* build the DH+ encoding. */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x20); /* class, 8-bit id */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0xA6); /* DH+ Router class */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x24); /* instance, 8-bit id */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, state->dhp_port); /* port as 8-bit value */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x2C); /* ?? 8-bit id */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x01); /* maybe an 8-bit instance id? */
         } else {
-            /* unknown, cannot parse this! */
-            pdebug(DEBUG_WARN, "Unable to parse remaining path string from position %d, \"%s\".", (int)(ssize_t)path_index, (char*)&path[path_index]);
-            return PLCTAG_ERR_BAD_PARAM;
-        }
-    }
-
-    if(conn_path_index >= MAX_CONN_PATH) {
-        pdebug(DEBUG_WARN, "Encoded connection path is too long (%d >= %d).", (int)(ssize_t)conn_path_index, MAX_CONN_PATH);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
-    if(is_dhp && (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX)) {
-        /* DH+ bridging always needs a connection. */
-        *needs_connection = 1;
-
-        /* add the special PCCC/DH+ routing on the end. */
-        tmp_conn_path[conn_path_index + 0] = 0x20;
-        tmp_conn_path[conn_path_index + 1] = 0xA6;
-        tmp_conn_path[conn_path_index + 2] = 0x24;
-        tmp_conn_path[conn_path_index + 3] = dhp_port;
-        tmp_conn_path[conn_path_index + 4] = 0x2C;
-        tmp_conn_path[conn_path_index + 5] = 0x01;
-        conn_path_index += 6;
-
-        *dhp_dest = (uint16_t)dhp_dest_node;
-    } else if(!is_dhp) {
-        if(*needs_connection) {
-            pdebug(DEBUG_DETAIL, "PLC needs connection, adding path to the router object.");
-
-            /*
-             * we do a generic path to the router
-             * object in the PLC.  But only if the PLC is
-             * one that needs a connection.  For instance a
-             * Micro850 needs to work in connected mode.
-             */
-            tmp_conn_path[conn_path_index + 0] = 0x20;
-            tmp_conn_path[conn_path_index + 1] = 0x02;
-            tmp_conn_path[conn_path_index + 2] = 0x24;
-            tmp_conn_path[conn_path_index + 3] = 0x01;
-            conn_path_index += 4;
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x20); /* class, 8-bit id */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x02); /* Message Router class */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x24); /* instance, 8-bit id */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x01); /* Message Router instance */
         }
 
-        *dhp_dest = 0;
-    } else {
         /*
-         *we had the special DH+ format and it was
-         * either not last or not a PLC5/SLC.  That
-         * is an error.
+         * zero pad the path to a multiple of 16-bit
+         * words.
+         */
+        path_len = *data_offset - (path_len_offset + 1);
+        pdebug(DEBUG_DETAIL,"Path length before %d", path_len);
+        if(path_len & 0x01) {
+            TRY_SET_BYTE(data, data_capacity, *data_offset, 0x00); /* pad with zero bytes */
+            path_len++;
+        }
+
+        /* back fill the path length, in 16-bit words. */
+        TRY_SET_BYTE(data, data_capacity, path_len_offset, path_len/2);
+    } while(0);
+
+    if(path_segments) {
+        mem_free(path_segments);
+    }
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Done with path \"\%s\".", path);
+    } else {
+        pdebug(DEBUG_WARN, "Unable to encode CIP path, error %s!", plc_tag_decode_error(rc));
+    }
+
+    return rc;
+}
+
+
+int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int local_seg_index = *segment_index;
+    const char *port_seg = NULL;
+    int port = 0;
+    const char *addr = NULL;
+    int addr_len = 0;
+    int next_dot = 0;
+    int num_dots = 0;
+
+    (void)state;
+
+    pdebug(DEBUG_DETAIL, "Starting with path segment \"%s\"", path_segments[*segment_index]);
+
+    /* the pattern we want is a port specifier, 18/A, or 19/B, followed by a dotted quad IP address. */
+
+    do {
+        if(path_segments[*segment_index] == NULL) {
+            pdebug(DEBUG_WARN, "Segment is NULL!");
+            rc = PLCTAG_ERR_NULL_PTR;
+            break;
+        }
+
+        /* is there a next element? */
+        if(path_segments[local_seg_index + 1] == NULL) {
+            pdebug(DEBUG_DETAIL, "Need two segments to match a bridge, but there is only one left.  Not a bridge segment.");
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
+        }
+
+        /* match the port. */
+        port_seg = path_segments[local_seg_index];
+        if(str_cmp_i("a",port_seg) == 0 || str_cmp("18", port_seg) == 0) {
+            pdebug(DEBUG_DETAIL, "Matched first bridge segment with port A.");
+            port = 18;
+        } else if(str_cmp_i("b",port_seg) == 0 || str_cmp("19", port_seg) == 0) {
+            pdebug(DEBUG_DETAIL, "Matched first bridge segment with port B.");
+            port = 19;
+        } else {
+            pdebug(DEBUG_DETAIL, "Segment \"%s\" is not a matching port for a bridge segment.", port_seg);
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
+        }
+
+        /* match the IP address.
+         *
+         * We want a dotted quad.   Each octet must be 0-255.
          */
 
-        *dhp_dest = 0;
+        addr = path_segments[local_seg_index + 1];
 
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /*
-     * zero pad the path to a multiple of 16-bit
-     * words.
-     */
-    pdebug(DEBUG_DETAIL,"IOI size before %d", conn_path_index);
-    if(conn_path_index & 0x01) {
-        tmp_conn_path[conn_path_index] = 0;
-        conn_path_index++;
-    }
-
-    if(conn_path_index > 0) {
-        /* allocate space for the connection path */
-        *conn_path = mem_alloc((int)(unsigned int)conn_path_index);
-        if(! *conn_path) {
-            pdebug(DEBUG_WARN, "Unable to allocate connection path!");
-            return PLCTAG_ERR_NO_MEM;
+        /* do initial sanity checks */
+        addr_len = str_length(addr);
+        if(addr_len < 7) {
+            pdebug(DEBUG_DETAIL, "Checked for an IP address, but found \"%s\".", addr);
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
         }
 
-        mem_copy(*conn_path, &tmp_conn_path[0], (int)(unsigned int)conn_path_index);
+        if(addr_len > 15) {
+            pdebug(DEBUG_DETAIL, "Possible address segment, \"%s\", is too long to be a valid IP address.", addr);
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
+        }
+
+        /* is the addr part only digits and dots? */
+        for(int index = 0; index < addr_len; index++) {
+            if(!isdigit(addr[index]) && addr[index] != '.') {
+                pdebug(DEBUG_DETAIL, "The possible address string, \"%s\", contains characters other than digits and dots.  Not an IP address.", addr);
+                rc = PLCTAG_ERR_NO_MATCH;
+                break;
+            }
+
+            if(addr[index] == '.') {
+                num_dots++;
+            }
+        }
+        if(rc != PLCTAG_STATUS_OK) {
+            break;
+        }
+
+        if(num_dots != 3) {
+            pdebug(DEBUG_DETAIL, "The possible address string \"%s\" is not a valid dotted quad.", addr);
+        }
+
+        /* TODO add checks to make sure each octet is in 0-255 */
+
+        /* build the encoded segment. */
+        TRY_SET_BYTE(data, data_capacity, *data_offset, port);
+
+        /* address length */
+        TRY_SET_BYTE(data, data_capacity, *data_offset, addr_len);
+
+        /* copy the address string data. */
+        for(int index = 0; index < addr_len; index++) {
+            TRY_SET_BYTE(data, data_capacity, *data_offset, addr[index]);
+        }
+    } while(0);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_DETAIL, "Matched bridge segment.");
+        *segment_index += 2;
     } else {
-        *conn_path = NULL;
+        pdebug(DEBUG_DETAIL, "Did not match bridge segment.");
     }
 
-    *conn_path_size = (uint8_t)conn_path_index;
-
-    pdebug(DEBUG_DETAIL, "Done");
-
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
-
-int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *conn_path_index)
+int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index)
 {
+    int rc = PLCTAG_STATUS_OK;
+    int local_seg_index = *segment_index;
+    const char *port_seg = NULL;
+    int port = 0;
+    const char *addr = NULL;
+    int addr_len = 0;
+    int addr_index = 0;
     int val = 0;
-    size_t p_index = *path_index;
-    size_t c_index = *conn_path_index;
 
-    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_DETAIL, "Starting with path segment \"%s\"", path_segments[*segment_index]);
 
-    while(isdigit(path[p_index])) {
-        val = (val * 10) + (path[p_index] - '0');
-        p_index++;
-    }
+    /* the pattern we want is port:src:dest where src can be ignored and dest is 0-255.
+     * Port needs to be 2/A, or 3/B. */
 
-    /* did we match anything? */
-    if(p_index == *path_index) {
-        pdebug(DEBUG_DETAIL,"Did not find numeric path segment at position %d.", (int)(ssize_t)p_index);
-        return PLCTAG_ERR_NOT_FOUND;
-    }
+    do {
+        /* sanity checks. */
+        addr = path_segments[*segment_index];
 
-    /* was the numeric segment valid? */
-    if(val < 0 || val > 0x0F) {
-        pdebug(DEBUG_WARN, "Numeric segment in path at position %d is out of bounds!", (int)(ssize_t)(*path_index));
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
+        if(addr == NULL) {
+            pdebug(DEBUG_WARN, "Segment is NULL!");
+            rc = PLCTAG_ERR_NULL_PTR;
+            break;
+        }
 
-    /* store the encoded segment data. */
-    conn_path[c_index] = (uint8_t)(unsigned int)(val);
-    c_index++;
-    *conn_path_index = c_index;
+        addr_len = str_length(addr);
 
-    /* bump past our last read character. */
-    *path_index = p_index;
+        if(addr_len < 5) {
+            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", is too short to be a valid IP address.", addr);
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
+        }
 
-    pdebug(DEBUG_DETAIL, "Done.   Found numeric segment %d.", val);
+        if(addr_len > 9) {
+            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", is too long to be a valid IP address.", addr);
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
+        }
 
-    return PLCTAG_STATUS_OK;
-}
+        /* scan the DH+ address */
 
-/*
- * match symbolic IP address segments.
- *  18,10.206.10.14 - port 2/A -> 10.206.10.14
- *  19,10.206.10.14 - port 3/B -> 10.206.10.14
- */
+        /* Get the port part. */
+        addr_index = 0;
+        switch(addr[addr_index]) {
+            case 'A':
+                /* fall through */
+            case 'a':
+                /* fall through */
+            case '2':
+                port = 1;
+                break;
 
-int encode_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *conn_path_index)
-{
-    uint8_t *addr_seg_len = NULL;
-    int val = 0;
-    size_t p_index = *path_index;
-    size_t c_index = *conn_path_index;
+            case 'B':
+                /* fall through */
+            case 'b':
+                /* fall through */
+            case '3':
+                port = 2;
+                break;
 
-    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+            default:
+                pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", does not have a valid port identifier.", addr);
+                return PLCTAG_ERR_NO_MATCH;
+                break;
+        }
 
-    /* first part, the extended address marker*/
-    val = 0;
-    while(isdigit(path[p_index])) {
-        val = (val * 10) + (path[p_index] - '0');
-        p_index++;
-    }
+        addr_index++;
 
-    if(val != 18 && val != 19) {
-        pdebug(DEBUG_DETAIL, "Path segment at %d does not match IP address segment.", (int)(ssize_t)*path_index);
-        return PLCTAG_ERR_NOT_FOUND;
-    }
+        /* is the next character a colon? */
+        if(addr[addr_index] != ':') {
+            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", does not have a colon after the port.", addr);
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
+        }
 
-    if(val == 18) {
-        pdebug(DEBUG_DETAIL, "Extended address on port A.");
+        addr_index++;
+
+        /* get the source node */
+        val = 0;
+        while(isdigit(addr[addr_index])) {
+            val = (val * 10) + (addr[addr_index] - '0');
+            addr_index++;
+        }
+
+        /* is the source node a valid number? */
+        if(val < 0 || val > 255) {
+            pdebug(DEBUG_WARN, "Source node DH+ address part is out of bounds (0 <= %d < 256).", val);
+            rc = PLCTAG_ERR_BAD_PARAM;
+            break;
+        }
+
+        /* we ignore the source node. */
+
+        addr_index++;
+
+        /* is the next character a colon? */
+        if(addr[addr_index] != ':') {
+            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", does not have a colon after the port.", addr);
+            rc = PLCTAG_ERR_NO_MATCH;
+            break;
+        }
+
+        addr_index++;
+
+        /* get the destination node */
+        val = 0;
+        while(isdigit(addr[addr_index])) {
+            val = (val * 10) + (addr[addr_index] - '0');
+            addr_index++;
+        }
+
+        /* is the destination node a valid number? */
+        if(val < 0 || val > 255) {
+            pdebug(DEBUG_WARN, "Destination node DH+ address part is out of bounds (0 <= %d < 256).", val);
+            rc = PLCTAG_ERR_BAD_PARAM;
+            break;
+        }
+
+        /* store the destination node for later */
+        state->is_dhp = TRUE;
+        state->dhp_port = (uint8_t)(unsigned int)port;
+        state->dhp_dest = (uint8_t)(unsigned int)val;
+    } while(0);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_DETAIL, "Matched DH+ segment.");
+        (*segment_index)++;
     } else {
-        pdebug(DEBUG_DETAIL, "Extended address on port B.");
+        pdebug(DEBUG_DETAIL, "Did not match DH+ segment.");
     }
 
-    /* is the next character a comma? */
-    if(path[p_index] != ',') {
-        pdebug(DEBUG_DETAIL, "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".",(int)(ssize_t)p_index, &path[p_index]);
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-
-    p_index++;
-
-    /* start building up the connection path. */
-    conn_path[c_index] = (uint8_t)(unsigned int)val;
-    c_index++;
-
-    /* point into the encoded path for the symbolic segment length. */
-    addr_seg_len = &conn_path[c_index];
-    *addr_seg_len = 0;
-    c_index++;
-
-    /* get the first IP address digit. */
-    val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val = (val * 10) + (path[p_index] - '0');
-        conn_path[c_index] = (uint8_t)path[p_index];
-        c_index++;
-        p_index++;
-        (*addr_seg_len)++;
-    }
-
-    if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "First IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    pdebug(DEBUG_DETAIL, "First IP segment: %d.", val);
-
-    /* is the next character a dot? */
-    if(path[p_index] != '.') {
-        pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in first IP address part.", path[p_index], p_index);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* copy the dot. */
-    conn_path[c_index] = (uint8_t)path[p_index];
-    c_index++;
-    p_index++;
-    (*addr_seg_len)++;
-
-    /* get the second part. */
-    val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val = (val * 10) + (path[p_index] - '0');
-        conn_path[c_index] = (uint8_t)path[p_index];
-        c_index++;
-        p_index++;
-        (*addr_seg_len)++;
-    }
-
-    if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Second IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    pdebug(DEBUG_DETAIL, "Second IP segment: %d.", val);
-
-    /* is the next character a dot? */
-    if(path[p_index] != '.') {
-        pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in second IP address part.", path[p_index], p_index);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* copy the dot. */
-    conn_path[c_index] = (uint8_t)path[p_index];
-    c_index++;
-    p_index++;
-    (*addr_seg_len)++;
-
-    /* get the third part. */
-    val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val = (val * 10) + (path[p_index] - '0');
-        conn_path[c_index] = (uint8_t)path[p_index];
-        c_index++;
-        p_index++;
-        (*addr_seg_len)++;
-    }
-
-    if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Third IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    pdebug(DEBUG_DETAIL, "Third IP segment: %d.", val);
-
-    /* is the next character a dot? */
-    if(path[p_index] != '.') {
-        pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in third IP address part.", path[p_index], p_index);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    /* copy the dot. */
-    conn_path[c_index] = (uint8_t)path[p_index];
-    c_index++;
-    p_index++;
-    (*addr_seg_len)++;
-
-    /* get the fourth part. */
-    val = 0;
-    while(isdigit(path[p_index]) && (int)(unsigned int)(*addr_seg_len) < (MAX_IP_ADDR_SEG_LEN - 1)) {
-        val = (val * 10) + (path[p_index] - '0');
-        conn_path[c_index] = (uint8_t)path[p_index];
-        c_index++;
-        p_index++;
-        (*addr_seg_len)++;
-    }
-
-    if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Fourth IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    pdebug(DEBUG_DETAIL, "Fourth IP segment: %d.", val);
-
-    /* We need to zero pad if the length is not a multiple of two. */
-    if((*addr_seg_len) && (uint8_t)0x01) {
-        conn_path[c_index] = (uint8_t)0;
-        c_index++;
-    }
-
-    /* set the return values. */
-    *path_index = p_index;
-    *conn_path_index = c_index;
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
-/*
- * match DH+ address segments.
- *  A:1:2 - port 2/A -> DH+ node 2
- *  B:1:2 - port 3/B -> DH+ node 2
- *
- * A and B can be lowercase or numeric.
- */
 
-int encode_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, uint8_t *src_node, uint8_t *dest_node)
+int encode_numeric_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index)
 {
+    int rc = PLCTAG_STATUS_OK;
+    const char *segment = path_segments[*segment_index];
+    int seg_len = 0;
     int val = 0;
-    size_t p_index = *path_index;
+    int seg_index = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    (void)state;
 
-    /* Get the port part. */
-    switch(path[p_index]) {
-        case 'A':
-            /* fall through */
-        case 'a':
-            /* fall through */
-        case '2':
-            *port = 1;
+    pdebug(DEBUG_DETAIL, "Starting with segment \"%s\".", segment);
+
+    do {
+        if(segment == NULL) {
+            pdebug(DEBUG_WARN, "Segment is NULL!");
+            rc = PLCTAG_ERR_NULL_PTR;
             break;
+        }
 
-        case 'B':
-            /* fall through */
-        case 'b':
-            /* fall through */
-        case '3':
-            *port = 2;
+        seg_len = str_length(segment);
+
+        if(seg_len > 3) {
+            pdebug(DEBUG_DETAIL, "Possible numeric address segment, \"%s\", is too long to be valid.", segment);
+            rc = PLCTAG_ERR_NO_MATCH;
             break;
+        }
 
-        default:
-            pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match start of DH+ segment.", path[p_index], (int)(ssize_t)p_index);
-            return PLCTAG_ERR_NOT_FOUND;
+        seg_index = 0;
+        while(isdigit(segment[seg_index])) {
+            val = (val * 10) + (segment[seg_index] - '0');
+            seg_index++;
+        }
+
+        if(!isdigit(segment[seg_index]) && segment[seg_index] != 0) {
+            pdebug(DEBUG_DETAIL, "Possible numeric address segment, \"%s\", contains non-numeric characters.", segment);
+            rc = PLCTAG_ERR_NO_MATCH;
             break;
+        }
+
+        if(val < 0 || val > 255) {
+            pdebug(DEBUG_WARN, "Numeric segment must be between 0 and 255, inclusive!");
+            rc = PLCTAG_ERR_BAD_PARAM;
+            break;
+        }
+
+        TRY_SET_BYTE(data, data_capacity, *data_offset, val);
+    } while(0);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_DETAIL, "Matched numeric segment.");
+        *segment_index ++;
+    } else {
+        pdebug(DEBUG_DETAIL, "Did not match numeric segment.");
     }
 
-    p_index++;
-
-    /* is the next character a colon? */
-    if(path[p_index] != ':') {
-        pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match first colon expected in DH+ segment.", path[p_index], (int)(ssize_t)p_index);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    p_index++;
-
-    /* get the source node */
-    val = 0;
-    while(isdigit(path[p_index])) {
-        val = (val * 10) + (path[p_index] - '0');
-        p_index++;
-    }
-
-    /* is the source node a valid number? */
-    if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Source node DH+ address part is out of bounds (0 <= %d < 256).", val);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    *src_node = (uint8_t)(unsigned int)val;
-
-    /* is the next character a colon? */
-    if(path[p_index] != ':') {
-        pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match the second colon expected in DH+ segment.", path[p_index], (int)(ssize_t)p_index);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    p_index++;
-
-    /* get the destination node */
-    val = 0;
-    while(isdigit(path[p_index])) {
-        val = (val * 10) + (path[p_index] - '0');
-        p_index++;
-    }
-
-    /* is the destination node a valid number? */
-    if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Destination node DH+ address part is out of bounds (0 <= %d < 256).", val);
-        return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    *dest_node = (uint8_t)(unsigned int)val;
-    *path_index = p_index;
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
+
+
+
