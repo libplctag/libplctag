@@ -1519,7 +1519,7 @@ int state_layer_connect_response_ready(plc_p plc)
         }
 
         if(retry_layer == FALSE) {
-            pdebug(DEBUG_INFO, "Connection attempt succeeded, going to next layer.");
+            pdebug(DEBUG_INFO, "Connection attempt succeeded, going to next layer %d.", plc->current_layer_index + 1);
 
             plc->layers[plc->current_layer_index].is_connected = TRUE;
 
