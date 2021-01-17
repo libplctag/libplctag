@@ -65,7 +65,7 @@ int sleep_ms(int ms)
     int done = 1;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(ms < 0) {
         pdebug(DEBUG_WARN, "called with negative time %d!", ms);
@@ -91,7 +91,7 @@ int sleep_ms(int ms)
         }
     } while(!done);
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
