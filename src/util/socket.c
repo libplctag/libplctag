@@ -1214,20 +1214,18 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     num_signaled_fds = select(max_socket_fd + 1, &local_read_fds, &local_write_fds, NULL, &timeval_wait);
     pdebug(DEBUG_DETAIL, "select() returned with status %d.", num_signaled_fds);
 
-    pdebug(DEBUG_DETAIL, "max_socket_fd=%d", max_socket_fd);
-
-    for(int index=0; index < (max_socket_fd+1); index++) {
-        if(FD_ISSET(index, &local_read_fds)) {
-            pdebug(DEBUG_DETAIL, "fd %d is set for reading.", index);
-        } else {
-            pdebug(DEBUG_DETAIL, "fd %d is NOT set for reading.", index);
-        }
-        if(FD_ISSET(index, &local_write_fds)) {
-            pdebug(DEBUG_DETAIL, "fd %d is set for writing.", index);
-        } else {
-            pdebug(DEBUG_DETAIL, "fd %d is NOT set for writing.", index);
-        }
-    }
+    // for(int index=0; index < (max_socket_fd+1); index++) {
+    //     if(FD_ISSET(index, &local_read_fds)) {
+    //         pdebug(DEBUG_SPEW, "fd %d is set for reading.", index);
+    //     } else {
+    //         pdebug(DEBUG_SPEW, "fd %d is NOT set for reading.", index);
+    //     }
+    //     if(FD_ISSET(index, &local_write_fds)) {
+    //         pdebug(DEBUG_SPEW, "fd %d is set for writing.", index);
+    //     } else {
+    //         pdebug(DEBUG_SPEW, "fd %d is NOT set for writing.", index);
+    //     }
+    // }
 
     // FIXME DEBUG
     if(1  || num_signaled_fds > 0) {
@@ -1236,11 +1234,11 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
             uint8_t dummy[48];
             int bytes_read = 0;
 
-            pdebug(DEBUG_INFO, "Wake channel may have woken us up.");
+            pdebug(DEBUG_DETAIL, "Wake channel is active.");
 
             /* pull all the data out to clear the status. */
             while((bytes_read = (int)read(wake_fds[0], &dummy[0], sizeof(dummy))) > 0) {
-                pdebug(DEBUG_DETAIL, "Read %d bytes from the wake channel.", bytes_read);
+                pdebug(DEBUG_SPEW, "Read %d bytes from the wake channel.", bytes_read);
             }
 
             num_signaled_fds--;
