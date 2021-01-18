@@ -258,11 +258,11 @@ int plc5_tag_status(plc_tag_p tag_arg)
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)tag_arg;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     rc = tag->base_tag.status;
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -272,9 +272,9 @@ int plc5_tag_tickler(plc_tag_p tag)
 {
     (void)tag;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
