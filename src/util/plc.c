@@ -1394,11 +1394,13 @@ int state_build_layer_connect_request(plc_p plc)
         /* prepare the layers up to the current layer. */
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
             rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
+            pdebug(DEBUG_DETAIL, "Layer %d used up to byte %d in the buffer.", index, plc->payload_start);
         }
 
         DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for connect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* build the connect request. */
+        pdebug(DEBUG_DETAIL, "Building connect packet for layer %d starting at offset %d.", plc->current_layer_index, plc->payload_start);
         rc = plc->layers[plc->current_layer_index].connect(plc->layers[plc->current_layer_index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end));
 
         DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing connect attempt for layer %d for PLC %s!", plc_tag_decode_error(rc), plc->current_layer_index, plc->key);
