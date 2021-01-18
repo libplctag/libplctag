@@ -31,12 +31,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <ab2/ab.h>
 #include <ab2/eip_layer.h>
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
+#include <util/debug.h>
 #include <util/mem.h>
 #include <util/mutex.h>
 #include <util/plc.h>
@@ -61,8 +63,14 @@
 
 #define CIP_SERVICE_STATUS_OK   (0x00)
 
+#define CIP_ERR_UNSUPPORTED (0x08)
+
 #define CPF_UNCONNECTED_HEADER_SIZE (16)
 #define CPF_CONNECTED_HEADER_SIZE (20)
+
+#define CIP_MAX_EX_PAYLOAD (4002)
+#define CIP_MAX_PAYLOAD (504)
+#define CIP_PAYLOAD_HEADER_FUDGE (40)  /* Measured, might even be right. */
 
 /* CPF definitions */
 
@@ -75,8 +83,6 @@
 /* forward open constants */
 #define FORWARD_OPEN_SECONDS_PER_TICK (10)
 #define FORWARD_OPEN_TIMEOUT_TICKS  (5)
-#define CIP_VENDOR_ID ((uint16_t)0xF33D)
-#define CIP_VENDOR_SERIAL_NUMBER ((uint32_t)0x21504345)   /* "!pce" */
 #define CIP_TIMEOUT_MULTIPLIER (1)
 #define CIP_RPI_uS (1000000)
 #define CIP_CONNECTION_TYPE (0xA3)
@@ -118,10 +124,13 @@ static int cip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_c
 static int cip_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
 static int cip_layer_destroy_layer(void *context);
 
+static int process_forward_open_response(struct cip_layer_state_s *state, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
+static int process_forward_close_response(struct cip_layer_state_s *state, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
+
 static int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char *path);
-static int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index);
-static int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index);
-static int encode_numeric_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index);
+static int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, char **path_segments, int *segment_index);
+static int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, char **path_segments, int *segment_index);
+static int encode_numeric_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, char **path_segments, int *segment_index);
 
 
 
@@ -144,6 +153,8 @@ int cip_layer_setup(plc_p plc, int layer_index, attr attribs)
         return rc;
     }
 
+    pdebug(DEBUG_DETAIL, "Encoded CIP path size: %d.", encoded_path_size);
+
     /* now we have the size so we can allocate the state. */
 
     state = mem_alloc((int)(unsigned int)sizeof(*state) + encoded_path_size);
@@ -162,6 +173,8 @@ int cip_layer_setup(plc_p plc, int layer_index, attr attribs)
         pdebug(DEBUG_WARN, "Path, \"%s\", encoding failed with error %s!", path, plc_tag_decode_error(rc));
         return rc;
     }
+
+    pdebug(DEBUG_DETAIL, "Encoded CIP path size again): %d.", state->encoded_path_size);
 
     /* finally set up the layer. */
     rc = plc_set_layer(plc,
@@ -195,7 +208,18 @@ int cip_layer_initialize(void *context)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    /* fill back in a few things. */
     state->is_connected = FALSE;
+
+    state->cip_header_start_offset = 0;
+
+    if(state->conn_params == 0) {
+        if(state->forward_open_ex_enabled == TRUE) {
+            state->conn_params = CIP_LGX_CONN_PARAM_EX | (uint32_t)CIP_MAX_EX_PAYLOAD;
+        } else {
+            state->conn_params = CIP_LGX_CONN_PARAM;
+        }
+    }
 
     state->connection_id = (uint32_t)rand() & (uint32_t)0xFFFFFFFF;
     state->sequence_id = (uint16_t)rand() & 0xFFFF;
@@ -213,8 +237,10 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
     struct cip_layer_state_s *state = (struct cip_layer_state_s *)context;
     int offset = *data_start;
     int max_payload_size = buffer_capacity - *data_start;
+    int unconnected_payload_size_index = 0;
+    int payload_start_index = 0;
 
-    pdebug(DEBUG_INFO, "Building CIP connect packet.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     if(state->is_connected == TRUE) {
         pdebug(DEBUG_WARN, "Connect called while CIP layer is already connected!");
@@ -227,10 +253,9 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    offset = 0;
-
     do {
         /* build a Forward Open or Forward Open Extended request. */
+        pdebug(DEBUG_DETAIL, "Building Forward Open request starting at offset %d.", offset);
 
         /* header part. */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, 0);
@@ -245,16 +270,17 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
 
         /* second item, the payload description */
         TRY_SET_U16_LE(buffer, buffer_capacity, offset, CPF_UNCONNECTED_DATA_ITEM);
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, (*data_end < offset ? 0 : *data_end - offset));
+        unconnected_payload_size_index = offset;
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 0);  /* fill this in at the end */
 
         /* now the connection manager request. */
+        payload_start_index = offset;
         TRY_SET_BYTE(buffer, buffer_capacity, offset, CIP_FORWARD_OPEN_REQUEST);
         TRY_SET_BYTE(buffer, buffer_capacity, offset, 2); /* size in words of the path. */
         TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x20); /* class, 8-bits */
         TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x06); /* Connection Manager class */
         TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x24); /* instance, 8-bits */
         TRY_SET_BYTE(buffer, buffer_capacity, offset, 0x01); /* Connection Manager, instance 1 */
-
 
         /* the actual Forward Open parameters */
 
@@ -299,15 +325,19 @@ int cip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
             break;
         }
 
-        /* the next payload will start after this one. */
-        *data_start = offset;
-        pdebug(DEBUG_DETAIL, "Set data_start=%d", *data_start);
+        /* backfill the payload size. */
+        pdebug(DEBUG_DETAIL, "Forward Open payload size: %d.", offset - payload_start_index);
+        TRY_SET_U16_LE(buffer, buffer_capacity, unconnected_payload_size_index, offset - payload_start_index);
 
-        /* if the data end is not set, then make it the maximum we can have. */
-        if(*data_end < *data_start) {
-            *data_end = buffer_capacity;
-            pdebug(DEBUG_DETAIL, "Set data_end=%d", *data_end);
-        }
+        pdebug(DEBUG_DETAIL, "offset=%d", offset);
+
+        pdebug(DEBUG_INFO, "Built Forward Open request:");
+        pdebug_dump_bytes(DEBUG_INFO, buffer + *data_start, offset - *data_start);
+
+        /* No next payload. */
+        *data_end = *data_start = offset;
+
+        pdebug(DEBUG_DETAIL, "Set data_start=%d and data_end=%d.", *data_start, *data_end);
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -391,12 +421,14 @@ int cip_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, in
             break;
         }
 
+        pdebug(DEBUG_INFO, "Build Forward Close request:");
+        pdebug_dump_bytes(DEBUG_INFO, buffer + *data_start, offset - *data_start);
+
         /* There is no next payload. */
         *data_start = offset;
         *data_end = offset;
 
-        pdebug(DEBUG_DETAIL, "Set data_start=%d", *data_start);
-        pdebug(DEBUG_DETAIL, "Set data_end=%d", *data_end);
+        pdebug(DEBUG_INFO, "Set data_start=%d and data_end=%d", *data_start, *data_end);
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -415,10 +447,9 @@ int cip_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *
 {
     int rc = PLCTAG_STATUS_OK;
     struct cip_layer_state_s *state = (struct cip_layer_state_s *)context;
-    int needed_capacity = (state->is_connected == TRUE ? CPF_CONNECTED_HEADER_SIZE : CPF_UNCONNECTED_HEADER_SIZE);
+    int needed_capacity = (state->is_connected == TRUE ? CPF_CONNECTED_HEADER_SIZE + 2 : CPF_UNCONNECTED_HEADER_SIZE);
     int remaining_capacity = buffer_capacity - *data_start;
 
-    (void)context;
     (void)buffer;
     (void)req_id;
 
@@ -432,13 +463,46 @@ int cip_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *
 
     state->cip_header_start_offset = *data_start;
 
-    if(*data_start < needed_capacity) {
-        *data_start = needed_capacity;
+    /* calculate the actual amount we can use. */
+
+    /* TODO - refactor this out into a separate function. */
+
+    if(state->max_cip_payload == 0) {
+        if(state->forward_open_ex_enabled) {
+            state->max_cip_payload = CIP_MAX_EX_PAYLOAD;
+        } else {
+            state->max_cip_payload = CIP_MAX_PAYLOAD;
+        }
+
+        /* do we have the right size buffer? */
+        pdebug(DEBUG_INFO, "Setting PLC buffer size to %d bytes.", state->max_cip_payload + CIP_PAYLOAD_HEADER_FUDGE);
+        if(plc_get_buffer_size(state->plc) != state->max_cip_payload + CIP_PAYLOAD_HEADER_FUDGE) {
+            rc = plc_set_buffer_size(state->plc, state->max_cip_payload + CIP_PAYLOAD_HEADER_FUDGE);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error %s while setting PLC buffer!", plc_tag_decode_error(rc));
+                return rc;
+            }
+        }
     }
 
-    if(*data_end < needed_capacity) {
+    /* bump the start index past the header.  Start for the next layer. */
+    *data_start = *data_start + needed_capacity;
+
+    /* where could the CIP payload end? */
+    *data_end = state->max_cip_payload + CIP_PAYLOAD_HEADER_FUDGE;
+
+    /* clamp data_end to the end of the buffer size. */
+    if(*data_end > buffer_capacity) {
+        /* clamp it. */
         *data_end = buffer_capacity;
     }
+
+    if(*data_start > *data_end) {
+        pdebug(DEBUG_WARN, "Not enough data in the buffer for a payload!");
+        return PLCTAG_ERR_TOO_SMALL;
+    }
+
+    pdebug(DEBUG_INFO, "Set data_start=% and data_end=%d.", *data_start, *data_end);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -485,18 +549,25 @@ int cip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity
 
         /* first item, the connected address. */
         TRY_SET_U16_LE(buffer, buffer_capacity, offset, CPF_CONNECTED_ADDRESS_ITEM); /* Null Address Item type */
-        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 4); /* address length = 4 */
+        TRY_SET_U16_LE(buffer, buffer_capacity, offset, 4); /* address length = 4 bytes */
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, state->plc_connection_id);
 
         /* second item, the data item and size */
         TRY_SET_U16_LE(buffer, buffer_capacity, offset, CPF_CONNECTED_DATA_ITEM); /* Null Address Item type */
         TRY_SET_U16_LE(buffer, buffer_capacity, offset, payload_size); /* data length, note includes the sequence ID below! */
 
+        /* this is not considered part of the header but part of the payload for size calculation... */
+
         /* set the connection sequence id */
         TRY_SET_U16_LE(buffer, buffer_capacity, offset, state->sequence_id++);
 
+        pdebug(DEBUG_INFO, "Build CIP CPF header:");
+        pdebug_dump_bytes(DEBUG_INFO, buffer + *data_start, offset - *data_start);
+
         /* mark where the payload packet can start. */
         *data_start = offset;
+
+        pdebug(DEBUG_INFO, "Set data_start=% and data_end=%d.", *data_start, *data_end);
     } while(0);
 
 
@@ -509,7 +580,6 @@ int cip_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity
 
     return rc;
 }
-
 
 
 
@@ -552,96 +622,41 @@ int cip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
             TRY_GET_U16_LE(buffer, buffer_capacity, offset, dummy_u16); /* unconnected data item */
             TRY_GET_U16_LE(buffer, buffer_capacity, offset, cpf_payload_size); /* payload size */
 
+            pdebug(DEBUG_INFO, "CIP unconnected payload size: %d.", (int)(unsigned int)cpf_payload_size);
+
             if(payload_size < (CPF_UNCONNECTED_HEADER_SIZE + (int)(unsigned int)cpf_payload_size)) {
-                pdebug(DEBUG_DETAIL, "Insufficient data for full payload.");
+                pdebug(DEBUG_DETAIL, "Insufficient data for full payload.  Expected %d bytes but got %d bytes.", (CPF_UNCONNECTED_HEADER_SIZE + (int)(unsigned int)cpf_payload_size), payload_size);
                 rc = PLCTAG_ERR_PARTIAL;
                 break;
             }
 
             /* we might have a Forward Open reply */
             if(cpf_payload_size < 4) {
-                pdebug(DEBUG_WARN, "Illformed CIP response packet.");
+                pdebug(DEBUG_WARN, "Malformed CIP response packet.");
                 rc = PLCTAG_ERR_BAD_REPLY;
                 break;
             }
 
-            TRY_GET_BYTE(buffer, buffer_capacity, offset, cip_service_code);
-
             /* don't destructively get this as we might not handle it. */
             cip_service_code = buffer[offset];
 
+            *data_start = offset;
+
             if(cip_service_code == (CIP_FORWARD_OPEN_REQUEST | CIP_CMD_EXECUTED_FLAG) || cip_service_code == (CIP_FORWARD_OPEN_REQUEST | CIP_CMD_EXECUTED_FLAG)) {
-                uint8_t dummy_u8;
-                uint8_t status;
-                uint8_t status_size;
-                uint16_t extended_status;
-
-                /* now move past the service code */
-                offset++;
-
-                /* it is a response to Forward Open, one of them at least. */
-                TRY_GET_BYTE(buffer, buffer_capacity, offset, dummy_u8); /* reserved byte. */
-                TRY_GET_BYTE(buffer, buffer_capacity, offset, status); /* status byte. */
-                TRY_GET_BYTE(buffer, buffer_capacity, offset, status_size); /* extended status size in 16-bit words. */
-
-                if(status == CIP_SERVICE_STATUS_OK) {
-                    /* get the target PLC's connection ID and save it. */
-                    TRY_GET_U32_LE(buffer, buffer_capacity, offset, state->plc_connection_id);
-
-                    /* TODO - decode some of the rest of the packet, might be useful. */
-
-                    *data_start = *data_end;
-
-                    state->is_connected = TRUE;
-
-                    rc = PLCTAG_STATUS_OK;
-                    break;
-                } else {
-                    /* Oops, now check to see what to do. */
-                    if(status == 0x01 && status_size >= 2) {
-                        uint16_t extended_status;
-
-                        /* we might have an error that tells us the actual size to use. */
-                        TRY_GET_U16_LE(buffer, buffer_capacity, offset, extended_status);
-
-                        if(extended_status == 0x109) { /* MAGIC */
-                            uint16_t supported_size = 0;
-
-                            TRY_GET_U16_LE(buffer, buffer_capacity, offset, supported_size);
-
-                            pdebug(DEBUG_WARN, "Error from Forward Open request, unsupported size, but size %d is supported.", supported_size);
-
-                            state->max_cip_payload = supported_size;
-
-                            /* retry */
-                            rc = PLCTAG_STATUS_PENDING;
-                            break;
-                        } else if(extended_status == 0x100) { /* MAGIC */
-                            pdebug(DEBUG_WARN, "Error from forward open request, duplicate connection ID.  Need to try again.");
-                            /* retry */
-                            rc = PLCTAG_STATUS_PENDING;
-                            break;
-                        } else {
-                            // pdebug(DEBUG_WARN, "CIP error %d (%s)!", decode_cip_error_short(&fo_resp->general_status), decode_cip_error_long(&fo_resp->general_status));
-                            pdebug(DEBUG_WARN, "CIP error %x (extended error %x)!", (unsigned int)status, (unsigned int)extended_status);
-                            rc = PLCTAG_ERR_REMOTE_ERR;
-                            break;
-                        }
-                    } else {
-                        // pdebug(DEBUG_WARN, "CIP error code %s (%s)!", decode_cip_error_short(&fo_resp->general_status), decode_cip_error_long(&fo_resp->general_status));
-                        pdebug(DEBUG_WARN, "CIP error %x!", (unsigned int)status,);
-                        rc = PLCTAG_ERR_REMOTE_ERR;
-                        break;
-                    }
-                }
-
+                rc = process_forward_open_response(state, buffer, buffer_capacity, data_start, data_end);
+                break;
+            } else if(cip_service_code == (CIP_FORWARD_CLOSE_REQUEST | CIP_CMD_EXECUTED_FLAG)) {
+                rc = process_forward_close_response(state, buffer, buffer_capacity, data_start, data_end);
+                break;
+            } else {
+                /* not our packet */
+                *data_start = *data_start + CPF_UNCONNECTED_HEADER_SIZE;
+                break;
             }
 
-            *data_start = *data_start + CPF_CONNECTED_HEADER_SIZE + 2;
-            break;
         } else {
-            /* the only thing here we expect is a Forward Open response. */
-            *data_start = *data_start + CPF_UNCONNECTED_HEADER_SIZE;
+            /* We do not process connected responses. */
+            *data_start = *data_start + CPF_CONNECTED_HEADER_SIZE + 2;
         }
     } while(0);
 
@@ -649,6 +664,8 @@ int cip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
         pdebug(DEBUG_WARN, "Unable to process CIP header packet, error %s!", plc_tag_decode_error(rc));
         return rc;
     }
+
+    pdebug(DEBUG_INFO, "Set data_start=%d and data_end=%d.", *data_start, *data_end);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -666,11 +683,6 @@ int cip_layer_destroy_layer(void *context)
     pdebug(DEBUG_INFO, "Cleaning up CIP layer.");
 
     if(state) {
-        if(state->path) {
-            mem_free(state->path);
-            state->path = NULL;
-        }
-
         mem_free(state);
     }
 
@@ -680,13 +692,176 @@ int cip_layer_destroy_layer(void *context)
 }
 
 
+
+
+
+int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting with payload:");
+    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *data_start, *data_end - *data_start);
+
+    do {
+        uint8_t dummy_u8;
+        uint8_t status;
+        uint8_t status_size;
+
+        /* it is a response to Forward Open, one of them at least. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), dummy_u8); /* service code. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), dummy_u8); /* reserved byte. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), status); /* status byte. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), status_size); /* extended status size in 16-bit words. */
+
+        if(dummy_u8 != 0) {
+            pdebug(DEBUG_DETAIL, "Reserved byte is not zero!");
+        }
+
+        if(status == CIP_SERVICE_STATUS_OK) {
+            pdebug(DEBUG_INFO, "Processing successful Forward Open response:");
+            pdebug_dump_bytes(DEBUG_INFO, buffer + *data_start, *data_end - *data_start);
+
+            /* get the target PLC's connection ID and save it. */
+            TRY_GET_U32_LE(buffer, buffer_capacity, (*data_start), state->plc_connection_id);
+
+            pdebug(DEBUG_INFO, "Using connection ID %" PRIx32 " for PLC connection ID.", state->plc_connection_id);
+
+            /* TODO - decode some of the rest of the packet, might be useful. */
+
+            *data_start = *data_end;
+
+            state->is_connected = TRUE;
+
+            rc = PLCTAG_STATUS_OK;
+            break;
+        } else {
+            pdebug(DEBUG_INFO, "Processing UNSUCCESSFUL Forward Open response:");
+            pdebug_dump_bytes(DEBUG_INFO, buffer + *data_start, *data_end - *data_start);
+
+            /* Oops, now check to see what to do. */
+            if(status == 0x01 && status_size >= 2) {
+                uint16_t extended_status;
+
+                /* we might have an error that tells us the actual size to use. */
+                TRY_GET_U16_LE(buffer, buffer_capacity, (*data_start), extended_status);
+
+                if(extended_status == 0x109) { /* MAGIC */
+                    uint16_t supported_size = 0;
+
+                    TRY_GET_U16_LE(buffer, buffer_capacity, (*data_start), supported_size);
+
+                    pdebug(DEBUG_WARN, "Error from Forward Open request, unsupported size, but size %d is supported.", (int)(unsigned int)supported_size);
+
+                    state->max_cip_payload = supported_size;
+
+                    /* retry */
+                    rc = PLCTAG_STATUS_PENDING;
+                    break;
+                } else if(extended_status == 0x100) { /* MAGIC */
+                    pdebug(DEBUG_WARN, "Error from forward open request, duplicate connection ID.  Need to try again.");
+                    /* retry */
+                    rc = PLCTAG_STATUS_PENDING;
+                    break;
+                } else {
+                    // pdebug(DEBUG_WARN, "CIP error %d (%s)!", decode_cip_error_short(&fo_resp->general_status), decode_cip_error_long(&fo_resp->general_status));
+                    pdebug(DEBUG_WARN, "CIP error %x (extended error %x)!", (unsigned int)status, (unsigned int)extended_status);
+                    rc = PLCTAG_ERR_REMOTE_ERR;
+                    break;
+                }
+            } else if(status == CIP_ERR_UNSUPPORTED) {
+                if(state->forward_open_ex_enabled) {
+                    /* we do not support extended forward open. */
+                    state->forward_open_ex_enabled = FALSE;
+                    rc = PLCTAG_STATUS_PENDING;
+                    break;
+                } else {
+                    pdebug(DEBUG_WARN, "CIP error, unsupported CIP request!");
+                    break;
+                }
+            } else {
+                // pdebug(DEBUG_WARN, "CIP error code %s (%s)!", decode_cip_error_short(&fo_resp->general_status), decode_cip_error_long(&fo_resp->general_status));
+                pdebug(DEBUG_WARN, "CIP error %x!", (unsigned int)status);
+                rc = PLCTAG_ERR_REMOTE_ERR;
+                break;
+            }
+        }
+    } while(0);
+
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int process_forward_close_response(struct cip_layer_state_s *state,uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting with payload:");
+    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *data_start, *data_end - *data_start);
+
+    do {
+        uint8_t dummy_u8;
+        uint8_t status;
+        uint8_t status_size;
+
+        /* regardless of the status, we are disconnected. */
+        state->is_connected = FALSE;
+
+        /* it is a response to Forward Close. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), dummy_u8); /* service code. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), dummy_u8); /* reserved byte. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), status); /* status byte. */
+        TRY_GET_BYTE(buffer, buffer_capacity, (*data_start), status_size); /* extended status size in 16-bit words. */
+
+        if(dummy_u8 != 0) {
+            pdebug(DEBUG_DETAIL, "Reserved byte is not zero!");
+        }
+
+        if(status == CIP_SERVICE_STATUS_OK) {
+            /* TODO - decode some of the payload. */
+            *data_start = *data_end;
+
+            rc = PLCTAG_STATUS_OK;
+            break;
+        } else {
+            /* Oops, now check to see what to do. */
+            if(status == 0x01 && status_size >= 2) {
+                uint16_t extended_status;
+
+                /* Get the extended error */
+                TRY_GET_U16_LE(buffer, buffer_capacity, (*data_start), extended_status);
+
+                pdebug(DEBUG_WARN, "CIP error %x (extended error %x)!", (unsigned int)status, (unsigned int)extended_status);
+                rc = PLCTAG_ERR_REMOTE_ERR;
+                break;
+            } else {
+                pdebug(DEBUG_WARN, "CIP error %x!", (unsigned int)status);
+                rc = PLCTAG_ERR_REMOTE_ERR;
+                break;
+            }
+        }
+    } while(0);
+
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+
+
 int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char *path)
 {
     int rc = PLCTAG_STATUS_OK;
     int segment_index = 0;
-    const char **path_segments = NULL;
+    char **path_segments = NULL;
     int path_len = 0;
     int path_len_offset = 0;
+    bool is_dhp = FALSE;
 
     pdebug(DEBUG_INFO, "Starting with path \"%s\".", path);
 
@@ -717,13 +892,14 @@ int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_cap
 
             /* try the different types. */
             do {
-                rc = encode_bridge_segment(data, data_capacity, data_offset, path_segments, &segment_index);
+                rc = encode_bridge_segment(state, data, data_capacity, data_offset, path_segments, &segment_index);
                 if(rc != PLCTAG_ERR_NO_MATCH) break;
 
-                rc = encode_dhp_addr_segment(data, data_capacity, data_offset, path_segments, &segment_index);
+                rc = encode_dhp_addr_segment(state, data, data_capacity, data_offset, path_segments, &segment_index);
                 if(rc != PLCTAG_ERR_NO_MATCH) break;
+                if(rc == PLCTAG_STATUS_OK) { is_dhp = TRUE; }
 
-                rc = encode_numeric_segment(data, data_capacity, data_offset, path_segments, &segment_index);
+                rc = encode_numeric_segment(state, data, data_capacity, data_offset, path_segments, &segment_index);
                 if(rc != PLCTAG_ERR_NO_MATCH) break;
             } while(0);
 
@@ -738,12 +914,14 @@ int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_cap
         }
 
         /* build the routing part. */
-        if(state->is_dhp) {
+        if(is_dhp) {
             /* build the DH+ encoding. */
+            uint8_t dhp_port = (state ? 0 : state->dhp_port);
+
             TRY_SET_BYTE(data, data_capacity, *data_offset, 0x20); /* class, 8-bit id */
             TRY_SET_BYTE(data, data_capacity, *data_offset, 0xA6); /* DH+ Router class */
             TRY_SET_BYTE(data, data_capacity, *data_offset, 0x24); /* instance, 8-bit id */
-            TRY_SET_BYTE(data, data_capacity, *data_offset, state->dhp_port); /* port as 8-bit value */
+            TRY_SET_BYTE(data, data_capacity, *data_offset, dhp_port); /* port as 8-bit value */
             TRY_SET_BYTE(data, data_capacity, *data_offset, 0x2C); /* ?? 8-bit id */
             TRY_SET_BYTE(data, data_capacity, *data_offset, 0x01); /* maybe an 8-bit instance id? */
         } else {
@@ -773,7 +951,7 @@ int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_cap
     }
 
     if(rc == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_INFO, "Done with path \"\%s\".", path);
+        pdebug(DEBUG_INFO, "Done with path \"%s\".", path);
     } else {
         pdebug(DEBUG_WARN, "Unable to encode CIP path, error %s!", plc_tag_decode_error(rc));
     }
@@ -782,7 +960,7 @@ int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_cap
 }
 
 
-int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index)
+int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, char **path_segments, int *segment_index)
 {
     int rc = PLCTAG_STATUS_OK;
     int local_seg_index = *segment_index;
@@ -790,7 +968,6 @@ int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int da
     int port = 0;
     const char *addr = NULL;
     int addr_len = 0;
-    int next_dot = 0;
     int num_dots = 0;
 
     (void)state;
@@ -893,16 +1070,18 @@ int encode_bridge_segment(struct cip_layer_state_s *state, uint8_t *data, int da
 }
 
 
-int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index)
+int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, char **path_segments, int *segment_index)
 {
     int rc = PLCTAG_STATUS_OK;
-    int local_seg_index = *segment_index;
-    const char *port_seg = NULL;
     int port = 0;
     const char *addr = NULL;
     int addr_len = 0;
     int addr_index = 0;
     int val = 0;
+
+    (void)data;
+    (void)data_capacity;
+    (void)data_offset;
 
     pdebug(DEBUG_DETAIL, "Starting with path segment \"%s\"", path_segments[*segment_index]);
 
@@ -1013,9 +1192,13 @@ int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int 
         }
 
         /* store the destination node for later */
-        state->is_dhp = TRUE;
-        state->dhp_port = (uint8_t)(unsigned int)port;
-        state->dhp_dest = (uint8_t)(unsigned int)val;
+
+        /* we might be called before the state is allocated for size calculation. */
+        if(state) {
+            state->is_dhp = TRUE;
+            state->dhp_port = (uint8_t)(unsigned int)port;
+            state->dhp_dest = (uint8_t)(unsigned int)val;
+        }
     } while(0);
 
     if(rc == PLCTAG_STATUS_OK) {
@@ -1030,7 +1213,7 @@ int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int 
 
 
 
-int encode_numeric_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, const char **path_segments, int *segment_index)
+int encode_numeric_segment(struct cip_layer_state_s *state, uint8_t *data, int data_capacity, int *data_offset, char **path_segments, int *segment_index)
 {
     int rc = PLCTAG_STATUS_OK;
     const char *segment = path_segments[*segment_index];
@@ -1080,7 +1263,7 @@ int encode_numeric_segment(struct cip_layer_state_s *state, uint8_t *data, int d
 
     if(rc == PLCTAG_STATUS_OK) {
         pdebug(DEBUG_DETAIL, "Matched numeric segment.");
-        *segment_index ++;
+        (*segment_index)++;
     } else {
         pdebug(DEBUG_DETAIL, "Did not match numeric segment.");
     }

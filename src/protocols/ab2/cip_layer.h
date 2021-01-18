@@ -36,6 +36,10 @@
 #include <util/attr.h>
 #include <util/plc.h>
 
+/* these are used elsewhere */
+#define CIP_VENDOR_ID ((uint16_t)0xF33D)
+#define CIP_VENDOR_SERIAL_NUMBER ((uint32_t)0x21504345)   /* "!pce" */
+
 
 extern int cip_layer_setup(plc_p plc, int layer_index, attr attribs);
 
