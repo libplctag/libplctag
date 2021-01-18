@@ -509,12 +509,13 @@ extern int socket_close(sock_p sock)
 
         if(*walker && *walker == sock) {
             *walker = sock->next;
-
-            /* fix up the iterator. */
-            if(global_socket_iterator == sock) {
-                global_socket_iterator = sock->next;
-            }
         } /* else not on the list. */
+
+        /* fix up the iterator. */
+        if(global_socket_iterator == sock) {
+            pdebug(DEBUG_DETAIL, "Iterator is processing this socket, moving iterator.");
+            global_socket_iterator = sock->next;
+        }
 
         /* clear the FD sets */
         FD_CLR(sock->fd, &global_read_fds);
@@ -1250,7 +1251,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
             /* the callbacks can mutate the socket list and the global FD sets. */
             critical_block(socket_event_mutex) {
                 /* loop, but use an iterator so that sockets can be closed while in the mutex. */
-                for(global_socket_iterator = socket_list; global_socket_iterator; global_socket_iterator = global_socket_iterator->next) {
+                for(global_socket_iterator = socket_list; global_socket_iterator; (global_socket_iterator ? global_socket_iterator = global_socket_iterator->next : NULL)) {
                     sock_p sock = global_socket_iterator;
                     int rc = PLCTAG_STATUS_OK;
 
