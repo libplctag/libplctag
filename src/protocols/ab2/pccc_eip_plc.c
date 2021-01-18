@@ -37,6 +37,7 @@
 #include <ab2/cip_layer.h>
 #include <ab2/eip_layer.h>
 #include <ab2/pccc_eip_plc.h>
+#include <ab2/pccc_layer.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -133,7 +134,7 @@ int pccc_constructor(plc_p plc, attr attribs)
     }
 
     /* start building up the layers. */
-    rc = plc_set_number_of_layers(plc, 2); /* 3 layers */
+    rc = plc_set_number_of_layers(plc, 3); /* 3 layers */
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize the PLC with the layer count and context, error %s!", plc_tag_decode_error(rc));
         return rc;
@@ -148,6 +149,13 @@ int pccc_constructor(plc_p plc, attr attribs)
 
     /* second layer, CIP */
     rc = cip_layer_setup(plc, 1, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to initialize the CIP layer, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* second layer, PCCC */
+    rc = pccc_layer_setup(plc, 1, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize the CIP layer, error %s!", plc_tag_decode_error(rc));
         return rc;

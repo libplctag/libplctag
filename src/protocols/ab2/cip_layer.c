@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <ab2/ab.h>
+#include <ab2/cip_layer.h>
 #include <ab2/eip_layer.h>
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
