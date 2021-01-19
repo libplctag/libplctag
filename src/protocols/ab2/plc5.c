@@ -32,6 +32,8 @@
  ***************************************************************************/
 
 #include <stddef.h>
+#include <lib/libplctag.h>
+#include <lib/tag.h>
 #include <ab2/plc5.h>
 #include <ab2/common_defs.h>
 #include <ab2/df1.h>
@@ -83,6 +85,29 @@ static int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int d
 static int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
 
 
+tag_byte_order_t plc5_tag_byte_order = {
+    .is_allocated = 0,
+
+    .int16_order = {0,1},
+    .int32_order = {0,1,2,3},
+    .int64_order = {0,1,2,3,4,5,6,7},
+    .float32_order = {2,3,0,1}, /* yes, it is that weird. */
+    .float64_order = {0,1,2,3,4,5,6,7},
+
+    .str_is_defined = 1,
+    .str_is_counted = 1,
+    .str_is_fixed_length = 1,
+    .str_is_zero_terminated = 0,
+    .str_is_byte_swapped = 1,
+
+    .str_count_word_bytes = 2,
+    .str_max_capacity = 82,
+    .str_total_length = 84,
+    .str_pad_bytes = 0
+};
+
+
+
 /* vtable for PLC-5 tags */
 static struct tag_vtable_t plc5_vtable = {
     plc5_tag_abort,
@@ -97,10 +122,10 @@ static struct tag_vtable_t plc5_vtable = {
 };
 
 
-static int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
-static int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
-static int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
-static int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id);
+static int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
+static int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
+static int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
+static int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 
 static int encode_plc5_logical_address(uint8_t *buffer, int buffer_capacity, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem);
 
@@ -184,6 +209,9 @@ plc_tag_p ab2_plc5_tag_create(attr attribs)
 
     /* set the vtable for base functions. */
     tag->base_tag.vtable = &plc5_vtable;
+
+    /* set up the byte order */
+    tag->base_tag.byte_order = &plc5_tag_byte_order;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -355,11 +383,11 @@ int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_valu
 
 
 
-int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
+int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
-    int req_off = *data_start;
+    int req_off = *payload_start;
     int max_trans_size = 0;
     int num_elems = 0;
     int trans_size = 0;
@@ -373,10 +401,10 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
 
     do {
         /* PCCC command type byte */
-        TRY_SET_BYTE(buffer, *data_end, req_off, PCCC_TYPED_CMD);
+        TRY_SET_BYTE(buffer, *payload_end, req_off, DF1_TYPED_CMD);
 
         /* status, always zero */
-        TRY_SET_BYTE(buffer, *data_end, req_off, 0);
+        TRY_SET_BYTE(buffer, *payload_end, req_off, 0);
 
         /* TSN - 16-bit value */
         rc = (uint16_t)pccc_eip_plc_get_tsn(tag->plc, &(tag->tsn));
@@ -384,19 +412,19 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
             pdebug(DEBUG_WARN, "Unable to get TSN!");
             break;
         }
-        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->tsn);
+        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->tsn);
 
         /* PLC5 read function. */
-        TRY_SET_BYTE(buffer, *data_end, req_off, PLC5_RANGE_READ_FUNC);
+        TRY_SET_BYTE(buffer, *payload_end, req_off, PLC5_RANGE_READ_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->trans_offset);
+        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->trans_offset);
 
         /* total transfer size in words. */
-        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->base_tag.size/2);
+        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->base_tag.size/2);
 
         /* set the logical PLC-5 address. */
-        rc = encode_plc5_logical_address(buffer, *data_end, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = encode_plc5_logical_address(buffer, *payload_end, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size in bytes. */
@@ -421,9 +449,9 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
 
         pdebug(DEBUG_DETAIL, "Actual bytes to transfer %d.", trans_size);
 
-        TRY_SET_BYTE(buffer, *data_end, req_off, trans_size);
+        TRY_SET_BYTE(buffer, *payload_end, req_off, trans_size);
 
-        *data_end = req_off;
+        *payload_end = req_off;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -433,7 +461,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
     }
 
     pdebug(DEBUG_DETAIL, "Read request packet:");
-    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *data_start, *data_end - *data_start);
+    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -441,40 +469,50 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
 }
 
 
-int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
+int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
     int resp_data_size = 0;
-    uint8_t *data = buffer + *data_start;
-    int data_size = *data_end - *data_start;
+    int offset = *payload_start;
+    int payload_size = *payload_end - *payload_start;
 
     (void)buffer_capacity;
 
     pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_id);
 
     do {
-        /* check the response */
-        if(data_size < 4) {
+        uint8_t df1_cmd_response = 0;
+        uint8_t cmd_status;
+        uint16_t tsn;
+
+        pdebug(DEBUG_DETAIL, "Read response packet:");
+        pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, payload_size);
+
+        if(payload_size < 4) {
             pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        if(data[0] != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
-            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)data[0]);
+        /* check the response */
+        TRY_GET_BYTE(buffer, buffer_capacity, offset, df1_cmd_response);
+        TRY_GET_BYTE(buffer, buffer_capacity, offset, cmd_status); /* TODO check order! */
+        TRY_GET_U16_LE(buffer, buffer_capacity, offset, tsn);
+
+        if(df1_cmd_response != (DF1_TYPED_CMD | DF1_CMD_OK)) {
+            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)df1_cmd_response);
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
 
-        if(data[1] != 0) {
-            pdebug(DEBUG_WARN, "Received error response %s (%d)!", df1_decode_error(&(data[1]), data_size - 1));
+        if(cmd_status != 0) {
+            uint16_t extended_status = 0;
+
+            pdebug(DEBUG_WARN, "Received error response %s!", df1_decode_error(cmd_status, extended_status));
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
-
-        pdebug(DEBUG_DETAIL, "Read response packet:");
-        pdebug_dump_bytes(DEBUG_DETAIL, data, data_size);
 
         /*
         * copy the data.
@@ -482,10 +520,10 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
         * Note that we start at byte 4.  Bytes 0 and 1 are the CMD and
         * STS bytes, respectively, then we have the TSN.
         */
-        resp_data_size = data_size - 4;
+        resp_data_size = *payload_end - offset;
 
         for(int i=0; i < resp_data_size; i++) {
-            tag->base_tag.data[tag->trans_offset + i] = data[i + 4];
+            TRY_GET_BYTE(buffer, buffer_capacity, offset, tag->base_tag.data[tag->trans_offset + i]);
         }
 
         tag->trans_offset += (uint16_t)(unsigned int)resp_data_size;
@@ -505,7 +543,7 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
             tag->base_tag.status = (int8_t)rc;
         }
 
-        *data_start = *data_end;
+        *payload_start = *payload_end;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -520,11 +558,11 @@ int handle_read_response_callback(void *context, uint8_t *buffer, int buffer_cap
 }
 
 
-int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
+int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
-    int req_off = *data_start;
+    int req_off = *payload_start;
     int encoded_file_start = 0;
     int max_trans_size = 0;
     int num_elems = 0;
@@ -539,10 +577,10 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
 
     do {
         /* PCCC command type byte */
-        TRY_SET_BYTE(buffer, *data_end, req_off, PCCC_TYPED_CMD);
+        TRY_SET_BYTE(buffer, *payload_end, req_off, DF1_TYPED_CMD);
 
         /* status, always zero */
-        TRY_SET_BYTE(buffer, *data_end, req_off, 0);
+        TRY_SET_BYTE(buffer, *payload_end, req_off, 0);
 
         /* TSN - 16-bit value */
         rc = pccc_eip_plc_get_tsn(tag->plc, &(tag->tsn));
@@ -551,20 +589,20 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
             break;
         }
 
-        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->tsn);
+        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->tsn);
 
         /* PLC5 read function. */
-        TRY_SET_BYTE(buffer, *data_end, req_off, PLC5_RANGE_WRITE_FUNC);
+        TRY_SET_BYTE(buffer, *payload_end, req_off, PLC5_RANGE_WRITE_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->trans_offset/2);
+        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->trans_offset/2);
 
         /* total transfer size in words. */
-        TRY_SET_U16_LE(buffer, *data_end, req_off, tag->base_tag.size/2);
+        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->base_tag.size/2);
 
         /* set the logical PLC-5 address. */
         encoded_file_start = req_off;
-        rc = encode_plc5_logical_address(buffer, *data_end, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = encode_plc5_logical_address(buffer, *payload_end, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size. */
@@ -578,9 +616,9 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
             max_trans_size = (int)(tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset);
         }
 
-        if(*data_end - req_off > max_trans_size) {
+        if(*payload_end - req_off > max_trans_size) {
             pdebug(DEBUG_DETAIL, "Write won't fit in remaining space, truncate it.");
-            max_trans_size = *data_end - req_off;
+            max_trans_size = *payload_end - req_off;
         }
 
         pdebug(DEBUG_DETAIL, "Available transfer data size %d.", max_trans_size);
@@ -606,10 +644,10 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
         tag->trans_offset += (uint16_t)(unsigned int)trans_size;
 
         pdebug(DEBUG_DETAIL, "Write request packet:");
-        pdebug_dump_bytes(DEBUG_DETAIL, buffer + *data_start, req_off - *data_start);
+        pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, req_off - *payload_start);
 
         /* we are done, mark the packet space as used. */
-        *data_start = *data_end = req_off;
+        *payload_start = *payload_end = req_off;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -624,39 +662,47 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
 }
 
 
-int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id req_id)
+int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
-    int data_size = *data_end - *data_start;
-    uint8_t *data = buffer + *data_start;
-
-    (void)buffer_capacity;
+    int payload_size = *payload_end - *payload_start;
+    int offset = *payload_start;
 
     pdebug(DEBUG_DETAIL, "Starting for request %" REQ_ID_FMT ".", req_id);
 
     do {
-        /* check the response */
-        if(data_size < 4) {
+        uint8_t df1_cmd_response = 0;
+        uint8_t cmd_status;
+        uint16_t tsn;
+
+        pdebug(DEBUG_DETAIL, "Write response packet:");
+        pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, payload_size);
+
+        if(payload_size < 4) {
             pdebug(DEBUG_WARN, "Unexpectedly short PCCC response!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        if(data[0] != (PCCC_TYPED_CMD | PCCC_CMD_OK)) {
-            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)data[0]);
+        /* check the response */
+        TRY_GET_BYTE(buffer, buffer_capacity, offset, df1_cmd_response);
+        TRY_GET_BYTE(buffer, buffer_capacity, offset, cmd_status); /* TODO check order! */
+        TRY_GET_U16_LE(buffer, buffer_capacity, offset, tsn);
+
+        if(df1_cmd_response != (DF1_TYPED_CMD | DF1_CMD_OK)) {
+            pdebug(DEBUG_WARN, "Unexpected PCCC packet response type %d!", (int)(unsigned int)df1_cmd_response);
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
 
-        if(data[1] != 0) {
-            pdebug(DEBUG_WARN, "Received error response %s (%d)!", df1_decode_error(&data[1], data_size - 1), (int)(unsigned int)data[1]);
+        if(cmd_status != 0) {
+            uint16_t extended_status = 0;
+
+            pdebug(DEBUG_WARN, "Received error response %s!", df1_decode_error(cmd_status, extended_status));
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
-
-        pdebug(DEBUG_DETAIL, "Write response packet:");
-        pdebug_dump_bytes(DEBUG_DETAIL, data, data_size);
 
         /* do we have more work to do? */
         if(tag->trans_offset < tag->base_tag.size) {
@@ -680,7 +726,7 @@ int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_ca
     }
 
     /* Clear out the buffer.   This marks that we processed it all. */
-    *data_start = *data_end;
+    *payload_start = *payload_end;
 
     pdebug(DEBUG_DETAIL, "Done.");
 

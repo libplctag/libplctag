@@ -51,6 +51,8 @@
 
 #define PCCC_CIP_EIP_STACK "PCCC+CIP+EIP"
 
+#define PCCC_CIP_MAX_PAYLOAD (258)
+
 
 struct local_plc_context_s {
     atomic_int tsn;
@@ -106,15 +108,30 @@ int pccc_constructor(plc_p plc, attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     struct local_plc_context_s *context = NULL;
+    int max_packet = PCCC_CIP_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     /* set up the PLC buffer */
-    rc = plc_set_buffer_size(plc, PCCC_PLC_MAX_PACKET);
+    rc = plc_set_buffer_size(plc, max_packet);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error %s while trying to set PCCC PLC buffer size.", plc_tag_decode_error(rc));
         return rc;
     }
+
+    /* set special attribute for the regular CIP payload. */
+    rc = attr_set_int(attribs, "cip_payload", PCCC_CIP_MAX_PAYLOAD);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error %s while trying to set max CIP payload size.", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    // /* set special attribute. */
+    // rc = attr_set_int(attribs, "forward_open_ex_enabled", 0);
+    // if(rc != PLCTAG_STATUS_OK) {
+    //     pdebug(DEBUG_WARN, "Error %s while trying to disable forward open extended packet.", plc_tag_decode_error(rc));
+    //     return rc;
+    // }
 
     /* allocate and set up our local data. */
     context = mem_alloc(sizeof(*context));
@@ -155,7 +172,7 @@ int pccc_constructor(plc_p plc, attr attribs)
     }
 
     /* second layer, PCCC */
-    rc = pccc_layer_setup(plc, 1, attribs);
+    rc = pccc_layer_setup(plc, 2, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize the CIP layer, error %s!", plc_tag_decode_error(rc));
         return rc;

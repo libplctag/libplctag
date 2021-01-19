@@ -36,6 +36,9 @@
 #include <util/attr.h>
 #include <util/plc.h>
 
+#define PCCC_PACKET_OVERHEAD (64)
+
+
 extern int pccc_layer_setup(plc_p plc, int layer_index, attr attribs);
 
 

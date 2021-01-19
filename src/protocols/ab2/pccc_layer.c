@@ -33,6 +33,7 @@
 
 #include <stdlib.h>
 #include <ab2/cip_layer.h>
+#include <ab2/df1.h>
 #include <ab2/pccc_layer.h>
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
@@ -45,7 +46,7 @@
 #include <util/string.h>
 
 
-#define CIP_PCCC_CMD ((uint8_t)0x4E)
+#define CIP_PCCC_CMD ((uint8_t)0x4B)
 #define CIP_CMD_OK ((uint8_t)0x80)
 
 #define PCCC_REQ_HEADER_SIZE (13)
@@ -54,15 +55,17 @@
 struct pccc_layer_state_s {
     /* session data */
     plc_p plc;
+
+    int pccc_header_start_offset;
 };
 
 
 static int pccc_layer_initialize(void *context);
-// static int pccc_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
-// static int pccc_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
-static int pccc_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
-static int pccc_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
-static int pccc_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id);
+// static int pccc_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end);
+// static int pccc_layer_disconnect(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end);
+static int pccc_layer_reserve_space(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id *req_id);
+static int pccc_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id *req_id);
+static int pccc_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id *req_id);
 static int pccc_layer_destroy_layer(void *context);
 
 
@@ -91,12 +94,13 @@ int pccc_layer_setup(plc_p plc, int layer_index, attr attribs)
                        pccc_layer_initialize,
                        /*pccc_layer_connect*/ NULL,
                        /*pccc_layer_disconnect*/ NULL,
-                       pccc_layer_prepare,
+                       pccc_layer_reserve_space,
                        pccc_layer_fix_up_request,
                        pccc_layer_process_response,
                        pccc_layer_destroy_layer);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error setting layer!");
+        mem_free(state);
         return rc;
     }
 
@@ -126,49 +130,66 @@ int pccc_layer_initialize(void *context)
 
 
 
+/* called bottom up */
 
-
-int pccc_layer_prepare(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
+int pccc_layer_reserve_space(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
-    int max_payload_size = *data_end - *data_start;
+    struct pccc_layer_state_s *state = (struct pccc_layer_state_s *)context;
+    int max_payload_size = *payload_end - *payload_start;
 
-    (void)context;
     (void)buffer;
-    (void)req_id;
 
     pdebug(DEBUG_INFO, "Preparing layer for building a request.");
 
-    /* allocate space for the EIP header. */
+    /* only one packet possible. */
+    *req_id = 1;
+
+    /* allocate space for the PCCC header. */
     if(max_payload_size < PCCC_REQ_HEADER_SIZE) {
         pdebug(DEBUG_WARN, "Buffer size, (%d) is too small for EIP header (size %d)!", buffer_capacity, PCCC_REQ_HEADER_SIZE);
         return PLCTAG_ERR_TOO_SMALL;
     }
 
-    *data_start += PCCC_REQ_HEADER_SIZE;
+    /* store the payload start for the header. */
+    state->pccc_header_start_offset = *payload_start;
 
-    pdebug(DEBUG_INFO, "Done with data_start=%d and data_end=%d.", *data_start, *data_end);
+    /* bump the start for the next payload. */
+    *payload_start += PCCC_REQ_HEADER_SIZE;
+
+    /* clamp the payload_end to what is possible for PCCC */
+    if(*payload_end > (DF1_PLC5_WRITE_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD)) {
+        pdebug(DEBUG_INFO, "Clamping payload end to max PCCC packet size.");
+        *payload_end = DF1_PLC5_WRITE_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD;
+    }
+
+    pdebug(DEBUG_INFO, "Done with payload_start=%d and payload_end=%d.", *payload_start, *payload_end);
 
     return rc;
 }
 
 
 
+/* call top down. */
 
-int pccc_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
+int pccc_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     struct pccc_layer_state_s *state = (struct pccc_layer_state_s *)context;
-    int offset = *data_start;
+    int offset = state->pccc_header_start_offset;
 
-    (void)state;
+    (void)req_id;
 
-    pdebug(DEBUG_INFO, "Starting with data_start=%d and data_end=%d.", *data_start, *data_end);
-
-    /* set this to something.   Not used at this layer. */
-    *req_id = 1;
+    pdebug(DEBUG_INFO, "Starting with payload_start=%d and payload_end=%d.", *payload_start, *payload_end);
 
     do {
+        /* check the start against our header size. */
+        if(*payload_start - PCCC_REQ_HEADER_SIZE != state->pccc_header_start_offset) {
+            pdebug(DEBUG_WARN, "Unexpected offsets.  Payload start less the header size, %d, is not equal to the saved header start, %d!", *payload_start - PCCC_REQ_HEADER_SIZE, state->pccc_header_start_offset);
+            rc = PLCTAG_ERR_BAD_CONFIG;
+            break;
+        }
+
         /* put in the PCCC CIP command */
         TRY_SET_BYTE(buffer, buffer_capacity, offset, CIP_PCCC_CMD);
 
@@ -184,12 +205,19 @@ int pccc_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacit
         TRY_SET_U16_LE(buffer, buffer_capacity, offset, CIP_VENDOR_ID);
         TRY_SET_U32_LE(buffer, buffer_capacity, offset, CIP_VENDOR_SERIAL_NUMBER);
 
-        pdebug(DEBUG_DETAIL, "Build PCCC header:");
-        pdebug_dump_bytes(DEBUG_DETAIL, buffer + *data_start, offset - *data_start);
+        if(offset != *payload_start) {
+            pdebug(DEBUG_WARN, "The offset after building the header, %d, is not equal start of the next layer up, %d!", offset, *payload_start);
+            rc = PLCTAG_ERR_BAD_CONFIG;
+            break;
+        }
 
-        *data_start = offset;
+        /* move the start backward for the next layer down. */
+        *payload_start = state->pccc_header_start_offset;
 
-        pdebug(DEBUG_INFO, "Set data_start=%d and data_end=%d.", *data_start, *data_end);
+        pdebug(DEBUG_DETAIL, "Build PCCC packet:");
+        pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
+
+        pdebug(DEBUG_INFO, "Set payload_start=%d and payload_end=%d.", *payload_start, *payload_end);
     } while(0);
 
 
@@ -204,16 +232,17 @@ int pccc_layer_fix_up_request(void *context, uint8_t *buffer, int buffer_capacit
 }
 
 
+/* bottom up. */
 
-int pccc_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_id)
+int pccc_layer_process_response(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id *req_id)
 {
     int rc = PLCTAG_STATUS_OK;
     struct pccc_layer_state_s *state = (struct pccc_layer_state_s *)context;
-    int offset = *data_start;
+    int offset = *payload_start;
 
     (void)state;
 
-    pdebug(DEBUG_INFO, "Starting with data_start=%d and data_end=%d.", *data_start, *data_end);
+    pdebug(DEBUG_INFO, "Starting with payload_start=%d and payload_end=%d.", *payload_start, *payload_end);
 
     /* there is only one PCCC response in a packet. */
     *req_id = 1;
@@ -241,7 +270,10 @@ int pccc_layer_process_response(void *context, uint8_t *buffer, int buffer_capac
 
         if(status == 0) {
             /* all good. */
-            *data_start += PCCC_RESP_HEADER_SIZE;
+            *payload_start += PCCC_RESP_HEADER_SIZE;
+
+            pdebug(DEBUG_INFO, "Set payload_start=%d and payload_end=%d.", *payload_start, *payload_end);
+
             break;
         } else {
             /* error! */
