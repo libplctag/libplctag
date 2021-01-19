@@ -78,6 +78,8 @@ if(CONDITION) { \
     if(plc->retry_interval_ms > MAX_RETRY_INTERVAL_MS) { \
         plc->retry_interval_ms = MAX_RETRY_INTERVAL_MS; \
     } \
+    pdebug(DEBUG_WARN, "Retry in %dms.", plc->retry_interval_ms); \
+    plc->next_retry_time = time_ms() + plc->retry_interval_ms; \
     NEXT_STATE(state_start_disconnect); \
     rc = PLCTAG_STATUS_PENDING; \
     break; \
@@ -91,6 +93,8 @@ if(CONDITION) { \
     if(plc->retry_interval_ms > MAX_RETRY_INTERVAL_MS) { \
         plc->retry_interval_ms = MAX_RETRY_INTERVAL_MS; \
     } \
+    pdebug(DEBUG_WARN, "Retry in %dms.", plc->retry_interval_ms); \
+    plc->next_retry_time = time_ms() + plc->retry_interval_ms; \
     NEXT_STATE(state_dispatch_requests); \
     rc = PLCTAG_STATUS_OK; \
     break; \
@@ -127,7 +131,7 @@ struct plc_layer_s {
     int (*initialize)(void *context);
     int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
     int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end);
-    int (*prepare)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
+    int (*reserve_space)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*fix_up_layer)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num);
     int (*destroy_layer)(void *context);
@@ -202,7 +206,7 @@ static void plc_heartbeat(plc_p plc);
 
 /* main dispatch states. */
 static int state_dispatch_requests(plc_p plc);
-static int state_prepare_protocol_layers_for_tag_request(plc_p plc);
+static int state_reserve_space_for_tag_request(plc_p plc);
 static int state_build_tag_request(plc_p plc);
 static int state_tag_request_sent(plc_p plc);
 static int state_tag_response_ready(plc_p plc);
@@ -477,7 +481,7 @@ int plc_set_layer(plc_p plc,
                   int (*initialize)(void *context),
                   int (*connect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
                   int (*disconnect)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end),
-                  int (*prepare)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
+                  int (*reserve_space)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                   int (*fix_up_layer)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                   int (*process_response)(void *context, uint8_t *buffer, int buffer_capacity, int *data_start, int *data_end, plc_request_id *req_num),
                   int (*destroy_layer)(void *context)
@@ -499,7 +503,7 @@ int plc_set_layer(plc_p plc,
     plc->layers[layer_index].initialize = initialize;
     plc->layers[layer_index].connect = connect;
     plc->layers[layer_index].disconnect = disconnect;
-    plc->layers[layer_index].prepare = prepare;
+    plc->layers[layer_index].reserve_space = reserve_space;
     plc->layers[layer_index].fix_up_layer = fix_up_layer;
     plc->layers[layer_index].process_response = process_response;
     plc->layers[layer_index].destroy_layer = destroy_layer;
@@ -961,6 +965,7 @@ void plc_heartbeat(plc_p plc)
 
 
 
+
 /* dispatch states. */
 
 
@@ -994,6 +999,13 @@ int state_dispatch_requests(plc_p plc)
             break;
         }
 
+        /* check the error timeout. */
+        if(plc->next_retry_time > event_loop_time()) {
+            pdebug(DEBUG_DETAIL, "Punting because we have not waited long enough from previous error.");
+            rc = PLCTAG_STATUS_OK;
+            break;
+        }
+
         /* are there requests queued? */
         if(plc->request_list) {
             /* are we connected? */
@@ -1004,7 +1016,7 @@ int state_dispatch_requests(plc_p plc)
             }
 
             /* we have requests and we are connected, dispatch! */
-            NEXT_STATE(state_prepare_protocol_layers_for_tag_request);
+            NEXT_STATE(state_reserve_space_for_tag_request);
             rc = PLCTAG_STATUS_PENDING;
             break;
         }
@@ -1026,7 +1038,7 @@ int state_dispatch_requests(plc_p plc)
 }
 
 
-int state_prepare_protocol_layers_for_tag_request(plc_p plc)
+int state_reserve_space_for_tag_request(plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
     int data_start = 0;
@@ -1036,9 +1048,9 @@ int state_prepare_protocol_layers_for_tag_request(plc_p plc)
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
     do {
-        /* prepare the layers for a request. */
+        /* reserve space in the layers for a request. Bottom up.*/
         for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+            rc = plc->layers[index].reserve_space(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
         }
 
         DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while preparing layers for tag request for PLC %s!", plc_tag_decode_error(rc), plc->key);
@@ -1090,7 +1102,7 @@ int state_build_tag_request(plc_p plc)
 
         pdebug(DEBUG_INFO, "Processing request %" REQ_ID_FMT ".", req_id);
 
-        /* build the tag request on top of the prepared layers. */
+        /* build the tag request on top of the reserved space. */
         rc = current_request->build_request(current_request->context, plc->data, plc->data_capacity, &data_start, &data_end, req_id);
 
         DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_TOO_SMALL, "Error %s building tag request for PLC %s!", plc_tag_decode_error(rc), plc->key);
@@ -1106,18 +1118,21 @@ int state_build_tag_request(plc_p plc)
             old_data_end = data_end;
         }
 
-        /* fix up the layers */
-        for(int index = 0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
+        /* set the request ID to match later. */
+        current_request->req_id = req_id;
+
+        /* fix up the layers. */
+        for(int index = plc->num_layers - 1; index >= 0 && rc == PLCTAG_STATUS_OK; index--) {
             rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
         }
 
-        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s while building request layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING, "Error %s while building request layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* if there was more space, see if we can find more requests. */
-        if(data_start >= data_end) {
+        if(rc == PLCTAG_STATUS_OK) {
             pdebug(DEBUG_INFO, "Done setting up layers and no further packets allowed for PLC %s", plc->key);
             done = TRUE;
-        } else {
+        } else { /* rc == PLCTAG_STATUS_PENDING */
             /* check if we can find another request */
             current_request = current_request->next;
 
@@ -1173,10 +1188,10 @@ int state_tag_request_sent(plc_p plc)
 
         /* all good!  We send the request.  Prepare the layers for receiving the response. */
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
+            rc = plc->layers[index].reserve_space(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
         }
 
-        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to prepare layers for response in PLC %s!", plc_tag_decode_error(rc), plc->key)
+        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to reserve space for response in PLC %s!", plc_tag_decode_error(rc), plc->key)
 
         /* ready to wait for the response. */
         NEXT_STATE(state_tag_response_ready);
@@ -1264,13 +1279,13 @@ int state_tag_response_ready(plc_p plc)
                 plc->request_list = plc->request_list->next;
                 request->next = NULL;
 
-                data_start = plc->payload_start;
-                data_end = plc->payload_end;
+                // data_start = plc->payload_start;
+                // data_end = plc->payload_end;
 
                 pdebug(DEBUG_DETAIL, "Attempting to process request %" REQ_ID_FMT " for PLC %s.", request->req_id, plc->key);
 
-                pdebug(DEBUG_DETAIL, "Got possible response:");
-                pdebug_dump_bytes(DEBUG_DETAIL, plc->data + data_start, data_end - data_start);
+                // pdebug(DEBUG_DETAIL, "Got possible response:");
+                // pdebug_dump_bytes(DEBUG_DETAIL, plc->data + data_start, data_end - data_start);
 
                 rc = request->process_response(request->context, plc->data, plc->data_capacity, &data_start, &data_end, request->req_id);
 
@@ -1391,9 +1406,9 @@ int state_build_layer_connect_request(plc_p plc)
         /* clean up state. */
         plc->payload_end = plc->payload_start = 0;
 
-        /* prepare the layers up to the current layer. */
+        /* reserve space in the layers up to the current layer. */
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
+            rc = plc->layers[index].reserve_space(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
             pdebug(DEBUG_DETAIL, "Layer %d used up to byte %d in the buffer.", index, plc->payload_start);
         }
 
@@ -1405,11 +1420,8 @@ int state_build_layer_connect_request(plc_p plc)
 
         DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing connect attempt for layer %d for PLC %s!", plc_tag_decode_error(rc), plc->current_layer_index, plc->key);
 
-        /* save the amount. */
-        plc->payload_start = 0;
-
         /* fix up the layers up to the current layer. */
-        for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
+        for(int index=plc->current_layer_index-1; index >= 0 && rc == PLCTAG_STATUS_OK; index--) {
             rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
         }
 
@@ -1452,14 +1464,14 @@ int state_layer_connect_request_sent(plc_p plc)
         /* OK, so prep for receiving the response. */
         plc->payload_end = plc->payload_start = 0;
 
-        for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
-        }
+        // for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
+        //     rc = plc->layers[index].reserve_space(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
+        // }
 
-        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for connect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        // DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for connect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
-        /* get ready to receive a response. */
-        plc->payload_end = plc->payload_start = 0;
+        // /* get ready to receive a response. */
+        // plc->payload_end = plc->payload_start = 0;
 
         NEXT_STATE(state_layer_connect_response_ready);
         rc = socket_callback_when_read_done(plc->socket, (void(*)(void*))plc_state_runner, plc, plc->data, plc->data_capacity, &(plc->payload_end));
@@ -1557,22 +1569,6 @@ int state_start_disconnect(plc_p plc)
         /* initialize the layers */
         plc->payload_end = plc->payload_start = 0;
 
-        for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
-        }
-
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s preparing layers for disconnect for PLC %s!  Resetting PLC!", plc_tag_decode_error(rc), plc->key);
-
-            reset_plc(plc);
-
-            NEXT_STATE(state_dispatch_requests);
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s initializing layers for PLC %s!", plc_tag_decode_error(rc), plc->key);
-
         /* we start at the lowest layer */
         plc->current_layer_index = plc->num_layers - 1;
 
@@ -1600,6 +1596,7 @@ int state_build_layer_disconnect_request(plc_p plc)
     do {
         /* find the first layer needing to disconnect. */
         while(plc->current_layer_index >= 0 && (plc->layers[plc->current_layer_index].is_connected == FALSE || !plc->layers[plc->current_layer_index].disconnect)) {
+            pdebug(DEBUG_DETAIL, "Skipping layer %d as it has no disconnect behavior.", plc->current_layer_index);
             plc->current_layer_index--;
         }
 
@@ -1616,29 +1613,30 @@ int state_build_layer_disconnect_request(plc_p plc)
         /* still some layers to disconnect. */
 
         /* clean up state. */
-        plc->payload_end = plc->payload_start = 0;
+        data_end = data_start = 0;
 
-        /* prepare the layers up to the current layer. */
+        /* reserve space in the layers up to the current layer. */
         for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(data_start), &(data_end), &(req_id));
+            rc = plc->layers[index].reserve_space(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &(req_id));
         }
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for disconnect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* build the disconnect request. */
-        rc = plc->layers[plc->current_layer_index].disconnect(plc->layers[plc->current_layer_index].context, plc->data, plc->data_capacity, &(data_start), &(data_end));
+        rc = plc->layers[plc->current_layer_index].disconnect(plc->layers[plc->current_layer_index].context, plc->data, plc->data_capacity, &data_start, &data_end);
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing disconnect attempt for layer %d for PLC %s!", plc_tag_decode_error(rc), plc->current_layer_index, plc->key);
 
-        /* save the amount. */
-        data_start = 0;
-
         /* fix up the layers up to the current layer. */
-        for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_capacity, &(data_start), &(data_end), &(req_id));
+        for(int index = plc->current_layer_index-1; index >= 0 && rc == PLCTAG_STATUS_OK; index--) {
+            rc = plc->layers[index].fix_up_layer(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
         }
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s fixing up layers for disconnect attempt for PLC %s!", plc_tag_decode_error(rc), plc->key);
+
+        /* store the payload size. */
+        plc->payload_start = 0;
+        plc->payload_end = data_end;
 
         /* send the connect request. */
         NEXT_STATE(state_layer_disconnect_request_sent);
@@ -1671,15 +1669,6 @@ int state_layer_disconnect_request_sent(plc_p plc)
         SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket write is still PENDING for PLC %s.", plc->key);
 
         RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Disconnection request write failed with error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
-
-        /* OK, so prep for receiving the response. */
-        plc->payload_end = plc->payload_start = 0;
-
-        for(int index=0; index < plc->current_layer_index && rc == PLCTAG_STATUS_OK; index++) {
-            rc = plc->layers[index].prepare(plc->layers[index].context, plc->data, plc->data_capacity, &(plc->payload_start), &(plc->payload_end), &(plc->current_request_id));
-        }
-
-        RESET_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s preparing layers for disconnect response for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         /* get ready to receive a response. */
         plc->payload_end = plc->payload_start = 0;
