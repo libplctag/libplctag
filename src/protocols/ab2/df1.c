@@ -486,22 +486,17 @@ int parse_df1_subelem_num(const char **str, df1_file_t file_type, int *subelem_n
 
 
 
-const char *df1_decode_error(uint8_t *data, int capacity)
+const char *df1_decode_error(uint8_t status, uint16_t extended_status)
 {
     unsigned int error = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    error = data[0];
+    error = status;
 
     /* extended error? */
     if(error == 0xF0) {
-        if(capacity < 5) {
-            pdebug(DEBUG_WARN, "Unable to get additional error status, no capacity!");
-            return "Error translating PCCC error!";
-        }
-
-        error = (unsigned int)data[3] | (data[4] << 8);
+        error = extended_status;
     }
 
     switch(error) {

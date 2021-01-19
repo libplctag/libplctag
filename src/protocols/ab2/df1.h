@@ -35,9 +35,11 @@
 
 #include <stdint.h>
 
-#define PCCC_CMD_OK ((uint8_t)(0x40))
-#define PCCC_TYPED_CMD ((uint8_t)(0x0F))
+#define DF1_CMD_OK ((uint8_t)(0x40))
+#define DF1_TYPED_CMD ((uint8_t)(0x0F))
 
+#define DF1_PLC5_READ_MAX_PAYLOAD (244)
+#define DF1_PLC5_WRITE_MAX_PAYLOAD (240)
 
 
 // #define LIBPLCTAG_VENDOR_ID ((uint16_t)0xF33D)      /* no idea what this needs to be */
@@ -66,5 +68,5 @@ typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
 
 extern int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
 extern int df1_element_size(df1_file_t file_type);
-extern const char *df1_decode_error(uint8_t *data, int capacity);
+extern const char *df1_decode_error(uint8_t status, uint16_t extended_status);
 
