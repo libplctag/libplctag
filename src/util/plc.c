@@ -1229,7 +1229,11 @@ int state_tag_response_ready(plc_p plc)
         CHECK_TERMINATION();
 
         /* check socket status.  Might be an error */
-        DISCONNECT_ON_ERROR((rc = socket_status(plc->socket)), "Error %s from socket read for PLC %s!", plc_tag_decode_error(rc), plc->key);
+        rc = socket_status(plc->socket);
+
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wake up.");
+
+        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s from socket read for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
         // pdebug(DEBUG_DETAIL, "Got possible full response:");
         // pdebug_dump_bytes(DEBUG_DETAIL, plc->data, data_end);
