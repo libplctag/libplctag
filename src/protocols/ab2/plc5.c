@@ -71,7 +71,7 @@ typedef ab2_plc5_tag_t *ab2_plc5_tag_p;
 #define PLC5_RANGE_READ_FUNC ((uint8_t)(0x01))
 #define PLC5_RANGE_WRITE_FUNC ((uint8_t)(0x00))
 
-#define PLC5_WORD_RANGE_READ_MAX_PAYLOAD (244)
+#define PLC5_WORD_RANGE_READ_MAX_PAYLOAD (240)
 #define PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD (240)
 
 static void plc5_tag_destroy(void *tag_arg);
@@ -418,7 +418,7 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
         TRY_SET_BYTE(buffer, *payload_end, req_off, PLC5_RANGE_READ_FUNC);
 
         /* offset of the transfer in words */
-        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->trans_offset);
+        TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->trans_offset/2);
 
         /* total transfer size in words. */
         TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->base_tag.size/2);
@@ -428,17 +428,18 @@ int build_read_request_callback(void *context, uint8_t *buffer, int buffer_capac
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* max transfer size in bytes. */
-        /* TODO - is this correct logic?  What about the TSN in the response? */
-        max_trans_size = PLC5_WORD_RANGE_READ_MAX_PAYLOAD;
 
-        pdebug(DEBUG_DETAIL, "Maximum transfer size %d.", max_trans_size);
+        /* how much is available? */
+        max_trans_size = (int)(tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset);
 
-        /* max or remaining size of the transfer in bytes. */
-        if((tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset) < max_trans_size) {
-            max_trans_size = (int)(tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset);
+        pdebug(DEBUG_DETAIL, "Available data size %d.", max_trans_size);
+
+        /* clamp the transfer down to the maximum payload. */
+        if(max_trans_size > PLC5_WORD_RANGE_READ_MAX_PAYLOAD)  {
+            pdebug(DEBUG_DETAIL, "Clamping maximum size to maximum payload.");
+            max_trans_size = PLC5_WORD_RANGE_READ_MAX_PAYLOAD;
         }
-
-        pdebug(DEBUG_DETAIL, "Available transfer size %d.", max_trans_size);
+        pdebug(DEBUG_DETAIL, "Maximum allowed transfer size %d.", max_trans_size);
 
         /* The transfer must be a multiple of the element size. */
         num_elems = max_trans_size / tag->elem_size;
