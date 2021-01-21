@@ -1188,7 +1188,11 @@ int state_tag_request_sent(plc_p plc)
 
     do {
         /* find out why we got called. */
-        DISCONNECT_ON_ERROR((rc = socket_status(plc->socket)), "Error %s when trying to write socket in PLC %s!", plc_tag_decode_error(rc), plc->key)
+        rc = socket_status(plc->socket);
+
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket write is still PENDING for PLC %s.", plc->key);
+
+        DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s when trying to write socket in PLC %s!", plc_tag_decode_error(rc), plc->key)
 
         /* all good!  We send the request.  Prepare the layers for receiving the response. */
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
@@ -1235,7 +1239,7 @@ int state_tag_response_ready(plc_p plc)
         /* check socket status.  Might be an error */
         rc = socket_status(plc->socket);
 
-        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wake up.");
+        SPURIOUS_WAKEUP_IF(rc == PLCTAG_STATUS_PENDING, "Spurious wakeup, socket read is still PENDING for PLC %s.", plc->key);
 
         DISCONNECT_ON_ERROR(rc != PLCTAG_STATUS_OK, "Error %s from socket read for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
