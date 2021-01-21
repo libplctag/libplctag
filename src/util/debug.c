@@ -189,7 +189,7 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
         int row_offset = 0;
 
         /* print the prefix and address */
-        //row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s %s:%d %05d", prefix, debug_level_name[debug_level], func, line_num, offset);
+        row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%04d ", offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
