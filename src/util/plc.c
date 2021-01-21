@@ -391,6 +391,10 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 
             /* start the state machine. */
             plc->state_func = state_dispatch_requests;
+
+            /* put the PLC on the list. */
+            plc->next = plc_list;
+            plc_list = plc;
         }
 
         *plc_return = plc;
