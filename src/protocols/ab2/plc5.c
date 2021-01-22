@@ -62,8 +62,9 @@ typedef struct {
     struct plc_request_s request;
 
     uint16_t tsn; /* transfer sequence number of the most recent request. */
-    uint16_t trans_offset;
 
+    /* count of bytes sent or received. */
+    uint16_t trans_offset;
 } ab2_plc5_tag_t;
 typedef ab2_plc5_tag_t *ab2_plc5_tag_p;
 
@@ -72,7 +73,7 @@ typedef ab2_plc5_tag_t *ab2_plc5_tag_p;
 #define PLC5_RANGE_WRITE_FUNC ((uint8_t)(0x00))
 
 #define PLC5_WORD_RANGE_READ_MAX_PAYLOAD (240)
-#define PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD (240)
+#define PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD (242)
 
 static void plc5_tag_destroy(void *tag_arg);
 
@@ -322,7 +323,7 @@ int plc5_tag_write(plc_tag_p tag_arg)
 
     rc = plc_start_request(tag->plc, &(tag->request), (void *)tag, build_write_request_callback, handle_write_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to start read request!");
+        pdebug(DEBUG_WARN, "Unable to start write request!");
         return rc;
     }
 
@@ -564,10 +565,10 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
     int rc = PLCTAG_STATUS_OK;
     ab2_plc5_tag_p tag = (ab2_plc5_tag_p)context;
     int req_off = *payload_start;
-    int encoded_file_start = 0;
     int max_trans_size = 0;
     int num_elems = 0;
     int trans_size = 0;
+    int max_payload = 0;
 
     (void)buffer_capacity;
     (void)req_id;
@@ -602,27 +603,30 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
         TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->base_tag.size/2);
 
         /* set the logical PLC-5 address. */
-        encoded_file_start = req_off;
+        // encoded_file_start = req_off;
         rc = encode_plc5_logical_address(buffer, *payload_end, &req_off, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
-        /* max transfer size. */
-        /* TODO - is this correct logic?   What about the TSN? */
-        max_trans_size = PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD - (req_off - encoded_file_start);
+        /* how much is available? */
+        max_trans_size = (int)(tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset);
 
-        pdebug(DEBUG_DETAIL, "Maximum transfer size %d.", max_trans_size);
+        pdebug(DEBUG_DETAIL, "Available data size %d.", max_trans_size);
 
-        /* size of the transfer in bytes. */
-        if((tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset) < max_trans_size) {
-            max_trans_size = (int)(tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset);
+        /* clamp to both the documented payload size and the documented write payload size. */
+        max_payload = PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD - (req_off - *payload_start);
+
+        pdebug(DEBUG_DETAIL, "max_payload=%d from protocol payload limit.", max_payload);
+
+        max_payload = ((*payload_end - req_off) < max_payload ? (*payload_end - req_off) : max_payload);
+
+        pdebug(DEBUG_DETAIL, "max_payload=%d after clamping to actual max payload.", max_payload);
+
+        /* clamp the transfer down to the maximum payload. */
+        if(max_trans_size > max_payload)  {
+            pdebug(DEBUG_DETAIL, "Clamping maximum transfer size to maximum payload %d.", max_payload);
+            max_trans_size = max_payload;
         }
-
-        if(*payload_end - req_off > max_trans_size) {
-            pdebug(DEBUG_DETAIL, "Write won't fit in remaining space, truncate it.");
-            max_trans_size = *payload_end - req_off;
-        }
-
-        pdebug(DEBUG_DETAIL, "Available transfer data size %d.", max_trans_size);
+        pdebug(DEBUG_DETAIL, "Maximum allowed transfer size %d.", max_trans_size);
 
         /* The transfer must be a multiple of the element size. */
         num_elems = max_trans_size / tag->elem_size;
@@ -648,7 +652,7 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
         pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, req_off - *payload_start);
 
         /* we are done, mark the packet space as used. */
-        *payload_start = *payload_end = req_off;
+        *payload_end = req_off;
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -661,6 +665,7 @@ int build_write_request_callback(void *context, uint8_t *buffer, int buffer_capa
 
     return rc;
 }
+
 
 
 int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
@@ -688,7 +693,7 @@ int handle_write_response_callback(void *context, uint8_t *buffer, int buffer_ca
 
         /* check the response */
         TRY_GET_BYTE(buffer, buffer_capacity, offset, df1_cmd_response);
-        TRY_GET_BYTE(buffer, buffer_capacity, offset, cmd_status); /* TODO check order! */
+        TRY_GET_BYTE(buffer, buffer_capacity, offset, cmd_status);
         TRY_GET_U16_LE(buffer, buffer_capacity, offset, tsn);
 
         if(df1_cmd_response != (DF1_TYPED_CMD | DF1_CMD_OK)) {
