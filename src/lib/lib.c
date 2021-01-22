@@ -1414,7 +1414,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
         /* a write is now in flight. */
         tag->write_in_flight = 1;
-        tag->status = PLCTAG_STATUS_OK;
+        tag->status = PLCTAG_STATUS_PENDING;
 
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->write(tag);
