@@ -42,31 +42,31 @@
 #define DF1_PLC5_WRITE_MAX_PAYLOAD (240)
 
 
-// #define LIBPLCTAG_VENDOR_ID ((uint16_t)0xF33D)      /* no idea what this needs to be */
-// #define LIBPLCTAG_VENDOR_SN ((uint32_t)0x21504345)  /* the string !PCE */
 
+typedef enum { DF1_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
+               DF1_FILE_ASCII          = 0x8e,
+               DF1_FILE_BCD            = 0x8f,
+               DF1_FILE_BIT            = 0x85,
+               DF1_FILE_BLOCK_TRANSFER = 0x00, /* UNKNOWN! */
+               DF1_FILE_CONTROL        = 0x88,
+               DF1_FILE_COUNTER        = 0x87,
+               DF1_FILE_FLOAT          = 0x8a,
+               DF1_FILE_INPUT          = 0x8c,
+               DF1_FILE_INT            = 0x89,
+               DF1_FILE_LONG_INT       = 0x91,
+               DF1_FILE_MESSAGE        = 0x92,
+               DF1_FILE_OUTPUT         = 0x8b,
+               DF1_FILE_PID            = 0x93,
+               DF1_FILE_SFC            = 0x00, /* UNKNOWN! */
+               DF1_FILE_STATUS         = 0x84,
+               DF1_FILE_STRING         = 0x8d,
+               DF1_FILE_TIMER          = 0x86,
 
-typedef enum { PCCC_FILE_UNKNOWN        = 0x00, /* UNKNOWN! */
-               PCCC_FILE_ASCII          = 0x8e,
-               PCCC_FILE_BCD            = 0x8f,
-               PCCC_FILE_BIT            = 0x85,
-               PCCC_FILE_BLOCK_TRANSFER = 0x00, /* UNKNOWN! */
-               PCCC_FILE_CONTROL        = 0x88,
-               PCCC_FILE_COUNTER        = 0x87,
-               PCCC_FILE_FLOAT          = 0x8a,
-               PCCC_FILE_INPUT          = 0x8c,
-               PCCC_FILE_INT            = 0x89,
-               PCCC_FILE_LONG_INT       = 0x91,
-               PCCC_FILE_MESSAGE        = 0x92,
-               PCCC_FILE_OUTPUT         = 0x8b,
-               PCCC_FILE_PID            = 0x93,
-               PCCC_FILE_SFC            = 0x00, /* UNKNOWN! */
-               PCCC_FILE_STATUS         = 0x84,
-               PCCC_FILE_STRING         = 0x8d,
-               PCCC_FILE_TIMER          = 0x86
+               /* fake types for use in things like strings. */
+               DF1_FILE_BYTE           = 0x1000
              } df1_file_t;
 
-extern int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);
+extern int df1_parse_logical_address(const char *name, df1_file_t *file_type, int *file_num, int *elem_num, int *subelem_num, bool *is_bit, uint8_t *bit_num);
 extern int df1_element_size(df1_file_t file_type);
 extern const char *df1_decode_error(uint8_t status, uint16_t extended_status);
 
