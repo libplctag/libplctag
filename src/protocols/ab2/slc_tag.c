@@ -80,7 +80,7 @@
 static int slc_tag_abort(plc_tag_p tag);
 static int slc_tag_read(plc_tag_p tag);
 static int slc_tag_status(plc_tag_p tag);
-static int slc_tag_tickler(plc_tag_p tag);
+// static int slc_tag_tickler(plc_tag_p tag);
 static int slc_tag_write(plc_tag_p tag);
 // static int slc_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
 // static int slc_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
@@ -93,7 +93,7 @@ struct tag_vtable_t slc_tag_vtable = {
     slc_tag_abort,
     slc_tag_read,
     slc_tag_status,
-    slc_tag_tickler,
+    /* slc_tag_tickler */ NULL,
     slc_tag_write,
 
     /* attribute accessors */
@@ -306,16 +306,16 @@ int slc_tag_status(plc_tag_p tag_arg)
 }
 
 
-int slc_tag_tickler(plc_tag_p tag)
-{
-    (void)tag;
+// int slc_tag_tickler(plc_tag_p tag)
+// {
+//     (void)tag;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+//     pdebug(DEBUG_SPEW, "Starting.");
 
-    pdebug(DEBUG_SPEW, "Done.");
+//     pdebug(DEBUG_SPEW, "Done.");
 
-    return PLCTAG_STATUS_OK;
-}
+//     return PLCTAG_STATUS_OK;
+// }
 
 
 int slc_tag_write(plc_tag_p tag_arg)

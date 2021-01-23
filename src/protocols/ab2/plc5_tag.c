@@ -80,7 +80,7 @@
 static int plc5_tag_abort(plc_tag_p tag);
 static int plc5_tag_read(plc_tag_p tag);
 static int plc5_tag_status(plc_tag_p tag);
-static int plc5_tag_tickler(plc_tag_p tag);
+// static int plc5_tag_tickler(plc_tag_p tag);
 static int plc5_tag_write(plc_tag_p tag);
 // static int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
 // static int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
@@ -91,7 +91,7 @@ struct tag_vtable_t plc5_tag_vtable = {
     plc5_tag_abort,
     plc5_tag_read,
     plc5_tag_status,
-    plc5_tag_tickler,
+    /* plc5_tag_tickler */ NULL,
     plc5_tag_write,
 
     /* attribute accessors */
@@ -305,16 +305,16 @@ int plc5_tag_status(plc_tag_p tag_arg)
 }
 
 
-int plc5_tag_tickler(plc_tag_p tag)
-{
-    (void)tag;
+// int plc5_tag_tickler(plc_tag_p tag)
+// {
+//     (void)tag;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+//     pdebug(DEBUG_SPEW, "Starting.");
 
-    pdebug(DEBUG_SPEW, "Done.");
+//     pdebug(DEBUG_SPEW, "Done.");
 
-    return PLCTAG_STATUS_OK;
-}
+//     return PLCTAG_STATUS_OK;
+// }
 
 
 int plc5_tag_write(plc_tag_p tag_arg)
