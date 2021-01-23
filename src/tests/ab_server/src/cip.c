@@ -140,7 +140,7 @@ typedef struct {
 } forward_open_s;
 
 /* the minimal Forward Open with no path */
-#define CIP_FORWARD_OPEN_MIN_SIZE   (48)
+#define CIP_FORWARD_OPEN_MIN_SIZE   (46)
 
 
 slice_s handle_forward_open(slice_s input, slice_s output, plc_s *plc)
@@ -156,6 +156,7 @@ slice_s handle_forward_open(slice_s input, slice_s output, plc_s *plc)
     /* minimum length check */
     if(slice_len(input) < CIP_FORWARD_OPEN_MIN_SIZE) {
         /* FIXME - send back the right error. */
+        info("Size of request too small!");
         return make_cip_error(output, (uint8_t)(slice_get_uint8(input, 0) | (uint8_t)CIP_DONE), (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
     }
 
