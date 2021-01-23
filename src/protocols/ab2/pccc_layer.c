@@ -158,10 +158,10 @@ int pccc_layer_reserve_space(void *context, uint8_t *buffer, int buffer_capacity
     *payload_start += PCCC_REQ_HEADER_SIZE;
 
     /* clamp the payload_end to what is possible for PCCC */
-    if(*payload_end > (DF1_PLC5_WRITE_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD)) {
-        pdebug(DEBUG_INFO, "Clamping payload end to max PCCC packet size.");
-        *payload_end = DF1_PLC5_WRITE_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD;
-    }
+    // if(*payload_end > (DF1_PLC5_WRITE_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD)) {
+    //     pdebug(DEBUG_INFO, "Clamping payload end to max PCCC packet size.");
+    //     *payload_end = DF1_PLC5_WRITE_MAX_PAYLOAD + PCCC_PACKET_OVERHEAD;
+    // }
 
     pdebug(DEBUG_INFO, "Done with payload_start=%d and payload_end=%d.", *payload_start, *payload_end);
 
