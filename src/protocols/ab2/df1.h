@@ -34,12 +34,13 @@
  #pragma once
 
 #include <stdint.h>
+#include <util/atomic_int.h>
 
 #define DF1_CMD_OK ((uint8_t)(0x40))
 #define DF1_TYPED_CMD ((uint8_t)(0x0F))
 
-#define DF1_PLC5_READ_MAX_PAYLOAD (244)
-#define DF1_PLC5_WRITE_MAX_PAYLOAD (240)
+// #define DF1_PLC5_READ_MAX_PAYLOAD (244)
+// #define DF1_PLC5_WRITE_MAX_PAYLOAD (240)
 
 
 

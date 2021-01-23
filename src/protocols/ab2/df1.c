@@ -355,8 +355,6 @@ int parse_df1_elem_num(const char **str, int *elem_num)
 
 int parse_df1_subelem_num(const char **str, df1_file_t *file_type, int *subelem_num)
 {
-    int tmp = 0;
-
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!str || !*str) {
@@ -388,29 +386,6 @@ int parse_df1_subelem_num(const char **str, df1_file_t *file_type, int *subelem_
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-
-    /* TODO
-
-    - make all bit handling set the tag bit flag.
-    - use the correct DF1 commands to mask the bit.
-    - perhaps another vtable to allow for PLC-specific functions for
-      request builders?
-    - copy first and then refactor?
-    - only allow bits on B, N and L fields or sub-elements
-      that are integral types.   How to determine sub-element
-      size?   Need that for typing and element size calculations.
-
-    - Fix handling of connection refusal.   It appears that
-      connections are marked as complete from the simulator
-      when they should not be.
-
-    - refactor to support multiple PCCC PLC types.   May
-      be best to simply refactor the inner part of the
-      request builders.
-
-    */
-
-
     /* mnemonic. */
 
     /* step past the . character */
@@ -435,7 +410,7 @@ int parse_df1_subelem_num(const char **str, df1_file_t *file_type, int *subelem_
         } else if(str_cmp_i(*str, "rgs") == 0) {
             *subelem_num = 5;
         } else {
-            pdebug(DEBUG_WARN, "Unsupported block transfer mnemonic!");
+            pdebug(DEBUG_WARN, "Unsupported block transfer mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
         }
 
@@ -451,7 +426,7 @@ int parse_df1_subelem_num(const char **str, df1_file_t *file_type, int *subelem_
         } else if(str_cmp_i(*str, "acc") == 0) {
             *subelem_num = 2;
         } else {
-            pdebug(DEBUG_WARN, "Unsupported %s mnemonic!", (file_type == DF1_FILE_COUNTER ? "counter" : "timer"));
+            pdebug(DEBUG_WARN, "Unsupported %s mnemonic %s!", (*file_type == DF1_FILE_COUNTER ? "counter" : "timer"), *str);
             return PLCTAG_ERR_BAD_PARAM;
         }
 
@@ -466,7 +441,7 @@ int parse_df1_subelem_num(const char **str, df1_file_t *file_type, int *subelem_
         } else if(str_cmp_i(*str, "pos") == 0) {
             *subelem_num = 2;
         } else {
-            pdebug(DEBUG_WARN, "Unsupported control mnemonic!");
+            pdebug(DEBUG_WARN, "Unsupported control mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
         }
 
@@ -488,7 +463,7 @@ int parse_df1_subelem_num(const char **str, df1_file_t *file_type, int *subelem_
         } else if(str_cmp_i(*str, "pv") == 0) {
             *subelem_num = 26;
         } else {
-            pdebug(DEBUG_WARN, "Unsupported PID mnemonic!");
+            pdebug(DEBUG_WARN, "Unsupported PID mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
         }
 
@@ -584,7 +559,7 @@ int parse_df1_bit_num(const char **str, bool *is_bit, uint8_t *bit_num)
         (*str)++;
     }
 
-    *bit_num = tmp;
+    *bit_num = (uint8_t)(unsigned int)tmp;
     *is_bit = TRUE;
 
     pdebug(DEBUG_DETAIL, "Done.");

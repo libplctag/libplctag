@@ -36,4 +36,6 @@
 #include <lib/tag.h>
 #include <util/attr.h>
 
-extern plc_tag_p ab2_plc5_tag_create(attr attribs);
+
+extern struct tag_vtable_t plc5_tag_vtable;
+extern tag_byte_order_t plc5_tag_byte_order;
