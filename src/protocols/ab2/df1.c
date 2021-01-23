@@ -690,6 +690,10 @@ const char *df1_decode_error(uint8_t status, uint16_t extended_status)
         return "Wait ACK (1775-KA buffer full)."; /* why is this duplicate? */
         break;
 
+    case 0xE5E:
+        return "Unsupported function.";
+        break;
+
     default:
         return "Unknown error response.";
         break;
