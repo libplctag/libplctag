@@ -45,29 +45,6 @@
 #include <util/string.h>
 
 
-// typedef struct {
-//     struct plc_tag_t base_tag;
-
-//     uint16_t elem_size;
-//     uint16_t elem_count;
-
-//     /* data type info */
-//     df1_file_t data_file_type;
-//     int data_file_num;
-//     int data_file_elem;
-//     int data_file_sub_elem;
-
-//     /* plc and request info */
-//     plc_p plc;
-//     struct plc_request_s request;
-
-//     uint16_t tsn; /* transfer sequence number of the most recent request. */
-
-//     /* count of bytes sent or received. */
-//     uint16_t trans_offset;
-// } ab2_plc5_tag_t;
-// typedef ab2_plc5_tag_t *pccc_tag_p;
-
 
 #define PLC5_RANGE_READ_FUNC ((uint8_t)(0x01))
 #define PLC5_RANGE_WRITE_FUNC ((uint8_t)(0x00))
@@ -75,15 +52,12 @@
 #define PLC5_WORD_RANGE_READ_MAX_PAYLOAD (240)
 #define PLC5_WORD_RANGE_WRITE_MAX_PAYLOAD (242)
 
-// static void plc5_tag_destroy(void *tag_arg);
 
+/* vtable functions */
 static int plc5_tag_abort(plc_tag_p tag);
 static int plc5_tag_read(plc_tag_p tag);
 static int plc5_tag_status(plc_tag_p tag);
-// static int plc5_tag_tickler(plc_tag_p tag);
 static int plc5_tag_write(plc_tag_p tag);
-// static int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
-// static int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
 
 
 /* vtable for PLC-5 tags */
@@ -129,127 +103,6 @@ static int plc5_build_write_request_callback(void *context, uint8_t *buffer, int
 static int plc5_handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 
 static int plc5_encode_logical_address(uint8_t *buffer, int buffer_capacity, int *offset, int data_file_num, int data_file_elem, int data_file_sub_elem);
-
-// plc_tag_p ab2_plc5_tag_create(attr attribs)
-// {
-//     int rc = PLCTAG_STATUS_OK;
-//     pccc_tag_p tag = NULL;
-//     const char *tag_name = NULL;
-//     int tmp = 0;
-//     bool is_bit = FALSE;
-//     uint8_t bit_num = 0;
-
-//     pdebug(DEBUG_INFO, "Starting.");
-
-//     tag = (pccc_tag_p)base_tag_create(sizeof(*tag), (void (*)(void*))plc5_tag_destroy);
-//     if(!tag) {
-//         pdebug(DEBUG_WARN, "Unable to allocate new PLC/5 tag!");
-//         return NULL;
-//     }
-
-//     /* parse the PLC-5 tag name */
-//     tag_name = attr_get_str(attribs, "name", NULL);
-//     if(!tag_name) {
-//         pdebug(DEBUG_WARN, "Data file name and offset missing!");
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     rc = df1_parse_logical_address(tag_name, &(tag->data_file_type),&(tag->data_file_num), &(tag->data_file_elem), &(tag->data_file_sub_elem), &is_bit, &bit_num);
-//     if(rc != PLCTAG_STATUS_OK) {
-//         pdebug(DEBUG_WARN, "Malformed data file name!");
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     /* if the tag is a bit tag, then fill in the parent tag structure. */
-//     if(is_bit == TRUE) {
-//         tag->base_tag.is_bit = 1;
-//         tag->base_tag.bit = bit_num;
-//     }
-
-//     /* set up the tag data buffer. This involves getting the element size and element count. */
-//     tmp = df1_element_size(tag->data_file_type);
-//     if(tmp < 0) {
-//         pdebug(DEBUG_WARN, "Unsupported or unknown data file type, got error %s converting data file type to element size!", plc_tag_decode_error(tag->elem_size));
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     /* see if the user overrode the element size */
-//     tag->elem_size = (uint16_t)attr_get_int(attribs, "elem_size", tmp);
-
-//     if(tag->elem_size == 0) {
-//         pdebug(DEBUG_WARN, "Data file type unsupported or unknown, unable to determine element size automatically!");
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     tmp = attr_get_int(attribs, "elem_count", 1);
-//     if(tmp < 1) {
-//         pdebug(DEBUG_WARN, "Element count must be greater than zero or missing and will default to one!");
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     tag->elem_count = (uint16_t)tmp;
-
-//     tag->base_tag.size = tag->elem_count * tag->elem_size;
-
-//     if(tag->base_tag.size <= 0) {
-//         pdebug(DEBUG_WARN, "Tag size must be a positive number of bytes!");
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     tag->base_tag.data = mem_alloc(tag->base_tag.size);
-//     if(!tag->base_tag.data) {
-//         pdebug(DEBUG_WARN, "Unable to allocate internal tag data buffer!");
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     tag->plc = pccc_eip_plc_get(attribs);
-//     if(!tag->plc) {
-//         pdebug(DEBUG_WARN, "Unable to get PLC!");
-//         rc_dec(tag);
-//         return NULL;
-//     }
-
-//     /* set the vtable for base functions. */
-//     tag->base_tag.vtable = &plc5_vtable;
-
-//     /* set up the byte order */
-//     tag->base_tag.byte_order = &plc5_tag_byte_order;
-
-//     pdebug(DEBUG_INFO, "Done.");
-
-//     return (plc_tag_p)tag;
-// }
-
-
-// /* helper functions. */
-// void plc5_tag_destroy(void *tag_arg)
-// {
-//     pccc_tag_p tag = (pccc_tag_p)tag_arg;
-
-//     pdebug(DEBUG_INFO, "Starting.");
-
-//     if(!tag) {
-//         pdebug(DEBUG_WARN, "Null tag pointer passed to destructor!");
-//         return;
-//     }
-
-//     /* get rid of any outstanding timers and events. */
-
-//     /* unlink the protocol layers. */
-//     tag->plc = rc_dec(tag->plc);
-
-//     /* delete the base tag parts. */
-//     base_tag_destroy((plc_tag_p)tag);
-
-//     pdebug(DEBUG_INFO, "Done.");
-// }
 
 
 int plc5_tag_abort(plc_tag_p tag_arg)
@@ -305,17 +158,6 @@ int plc5_tag_status(plc_tag_p tag_arg)
 }
 
 
-// int plc5_tag_tickler(plc_tag_p tag)
-// {
-//     (void)tag;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return PLCTAG_STATUS_OK;
-// }
-
 
 int plc5_tag_write(plc_tag_p tag_arg)
 {
@@ -339,56 +181,6 @@ int plc5_tag_write(plc_tag_p tag_arg)
 
     return PLCTAG_STATUS_PENDING;
 }
-
-
-// int plc5_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value)
-// {
-//     int res = default_value;
-//     pccc_tag_p tag = (pccc_tag_p)raw_tag;
-
-//     pdebug(DEBUG_DETAIL, "Starting.");
-
-//     /* assume we have a match. */
-//     tag->base_tag.status = PLCTAG_STATUS_OK;
-
-//     /* match the attribute. */
-//     if(str_cmp_i(attrib_name, "elem_size") == 0) {
-//         res = tag->elem_size;
-//     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
-//         res = tag->elem_count;
-//     } else if(str_cmp_i(attrib_name, "idle_timeout_ms") == 0) {
-//         res = plc_get_idle_timeout(tag->plc);
-//     } else {
-//         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
-//         tag->base_tag.status = PLCTAG_ERR_UNSUPPORTED;
-//         return default_value;
-//     }
-
-//     pdebug(DEBUG_DETAIL, "Done.");
-
-//     return res;
-// }
-
-
-// int plc5_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
-// {
-//     int rc = PLCTAG_STATUS_OK;
-//     pccc_tag_p tag = (pccc_tag_p)raw_tag;
-
-//     pdebug(DEBUG_DETAIL, "Starting.");
-
-//     if(str_cmp_i(attrib_name, "idle_timeout_ms") == 0) {
-//         rc = plc_set_idle_timeout(tag->plc, new_value);
-//     } else {
-//         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
-//         rc = PLCTAG_ERR_UNSUPPORTED;
-//         tag->base_tag.status = (int8_t)rc;
-//     }
-
-//     pdebug(DEBUG_DETAIL, "Done.");
-
-//     return rc;
-// }
 
 
 
