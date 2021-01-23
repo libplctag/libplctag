@@ -35,6 +35,7 @@
 
 
 #include <limits.h>
+#include <lib/libplctag.h>
 #include <util/debug.h>
 #include <util/lock.h>
 
