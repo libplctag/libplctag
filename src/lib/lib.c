@@ -3426,7 +3426,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_counted", NULL)) {
             str_param = attr_get_int(attribs, "str_is_counted", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_counted = (unsigned int)str_param;
+                tag->byte_order->str_is_counted = (str_param ? 1 : 0);
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_counted must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3437,7 +3437,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_fixed_length", NULL)) {
             str_param = attr_get_int(attribs, "str_is_fixed_length", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_fixed_length = (unsigned int)str_param;
+                tag->byte_order->str_is_fixed_length = (str_param ? 1: 0);
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_fixed_length must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3448,7 +3448,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_zero_terminated", NULL)) {
             str_param = attr_get_int(attribs, "str_is_zero_terminated", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_zero_terminated = (unsigned int)str_param;
+                tag->byte_order->str_is_zero_terminated = (str_param ? 1 : 0);
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_zero_terminated must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
@@ -3459,7 +3459,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
         if(attr_get_str(attribs, "str_is_byte_swapped", NULL)) {
             str_param = attr_get_int(attribs, "str_is_byte_swapped", 0);
             if(str_param == 1 || str_param == 0) {
-                tag->byte_order->str_is_byte_swapped = (unsigned int)str_param;
+                tag->byte_order->str_is_byte_swapped = (str_param ? 1 : 0);
             } else {
                 pdebug(DEBUG_WARN, "Tag string attribute str_is_byte_swapped must be missing, zero (0) or one (1)!");
                 return PLCTAG_ERR_BAD_PARAM;
