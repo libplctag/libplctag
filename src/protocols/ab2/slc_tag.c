@@ -49,8 +49,8 @@
 #define SLC_PROTECTED_TYPED_READ_3_ADDR ((uint8_t)(0xA2))
 #define SLC_PROTECTED_TYPED_WRITE_3_ADDR ((uint8_t)(0xAA))
 
-#define SLC_PROTECTED_READ_MAX_PAYLOAD (225)
-#define SLC_PROTECTED_WRITE_MAX_PAYLOAD (223)
+#define SLC_PROTECTED_READ_MAX_PAYLOAD (221)
+#define SLC_PROTECTED_WRITE_MAX_PAYLOAD (219)
 
 /* vtable functions */
 static int slc_tag_abort(plc_tag_p tag);
@@ -242,7 +242,7 @@ int slc_build_read_request_callback(void *context, uint8_t *buffer, int buffer_c
         TRY_SET_BYTE(buffer, *payload_end, req_off, trans_size);
 
         /* set the logical SLC address. */
-        rc = slc_encode_logical_address(buffer, *payload_end, &req_off, tag->data_file_type, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = slc_encode_logical_address(buffer, *payload_end, &req_off, tag->data_file_type, tag->data_file_num, tag->data_file_elem + (tag->trans_offset/tag->elem_size), tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         *payload_end = req_off;
@@ -316,6 +316,8 @@ int slc_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
         */
         resp_data_size = *payload_end - offset;
 
+        pdebug(DEBUG_DETAIL, "Got %d bytes of data in the read response.", resp_data_size);
+
         for(int i=0; i < resp_data_size; i++) {
             TRY_GET_BYTE(buffer, buffer_capacity, offset, tag->base_tag.data[tag->trans_offset + i]);
         }
@@ -324,7 +326,7 @@ int slc_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
         /* do we have more work to do? */
         if(tag->trans_offset < tag->base_tag.size) {
-            pdebug(DEBUG_DETAIL, "Starting new read request for remaining data.");
+            pdebug(DEBUG_DETAIL, "Starting new read request for remaining data of %d bytes.", tag->base_tag.size - tag->trans_offset);
             rc = plc_start_request(tag->plc, &(tag->request), tag, slc_build_read_request_callback, slc_handle_read_response_callback);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error queuing up next request!");
@@ -361,6 +363,7 @@ int slc_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
     int num_elems = 0;
     int trans_size = 0;
     int max_payload = 0;
+    int tmp_index = 0;
 
     (void)buffer_capacity;
     (void)req_id;
@@ -390,13 +393,22 @@ int slc_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
 
         /* determine how much to write. */
 
+        /* how big is the encoded tag name going to be? */
+        tmp_index = 0;
+        rc = slc_encode_logical_address(NULL, *payload_end, &tmp_index, tag->data_file_type, tag->data_file_num, tag->data_file_elem + (tag->trans_offset/tag->elem_size), tag->data_file_sub_elem);
+        if(rc != PLCTAG_STATUS_OK) break;
+
+        pdebug(DEBUG_DETAIL, "Encoded tag name will take %d bytes.", tmp_index);
+
+        /* tmp_index now holds the length of the encoded tag name. Add one for the transfer size byte itself.*/
+
         /* how much is available? */
         max_trans_size = (int)(tag->base_tag.size - (int32_t)(uint32_t)tag->trans_offset);
 
         pdebug(DEBUG_DETAIL, "Available data size %d.", max_trans_size);
 
         /* clamp to both the documented payload size and the documented write payload size. */
-        max_payload = SLC_PROTECTED_WRITE_MAX_PAYLOAD - (req_off - *payload_start);
+        max_payload = SLC_PROTECTED_WRITE_MAX_PAYLOAD - ((req_off + tmp_index + 1) - *payload_start);
 
         pdebug(DEBUG_DETAIL, "max_payload=%d from protocol payload limit.", max_payload);
 
@@ -423,7 +435,7 @@ int slc_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
         TRY_SET_BYTE(buffer, buffer_capacity, req_off, trans_size);
 
         /* set the logical SLC address. */
-        rc = slc_encode_logical_address(buffer, *payload_end, &req_off, tag->data_file_type, tag->data_file_num, tag->data_file_elem, tag->data_file_sub_elem);
+        rc = slc_encode_logical_address(buffer, *payload_end, &req_off, tag->data_file_type, tag->data_file_num, tag->data_file_elem + (tag->trans_offset/tag->elem_size), tag->data_file_sub_elem);
         if(rc != PLCTAG_STATUS_OK) break;
 
         /* copy the data. */
