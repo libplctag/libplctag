@@ -284,8 +284,8 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
-                plc->client_to_server_max_packet = 244;
-                plc->server_to_client_max_packet = 244;
+                plc->client_to_server_max_packet = 302;
+                plc->server_to_client_max_packet = 302;
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
@@ -296,8 +296,8 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
-                plc->client_to_server_max_packet = 244;
-                plc->server_to_client_max_packet = 244;
+                plc->client_to_server_max_packet = 302;
+                plc->server_to_client_max_packet = 302;
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
@@ -308,8 +308,8 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
-                plc->client_to_server_max_packet = 244;
-                plc->server_to_client_max_packet = 244;
+                plc->client_to_server_max_packet = 302;
+                plc->server_to_client_max_packet = 302;
                 needs_path = false;
                 has_plc = true;
             } else {

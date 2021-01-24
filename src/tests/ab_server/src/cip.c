@@ -97,6 +97,8 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc)
     info("Got packet:");
     slice_dump(input);
 
+    info("Output buffer size %u.", (unsigned int)slice_len(output));
+
     /* match the prefix and dispatch. */
     if(slice_match_bytes(input, CIP_READ, sizeof(CIP_READ))) {
         return handle_read_request(input, output, plc);
@@ -229,10 +231,10 @@ slice_s handle_forward_open(slice_s input, slice_s output, plc_s *plc)
     plc->server_connection_seq = (uint16_t)rand();
 
     /* store the allowed packet sizes. */
-    plc->client_to_server_max_packet = fo_req.client_to_server_conn_params &
-                               ((fo_cmd == CIP_FORWARD_OPEN[0]) ? 0x1FF : 0x0FFF);
-    plc->server_to_client_max_packet = fo_req.server_to_client_conn_params &
-                               ((fo_cmd == CIP_FORWARD_OPEN[0]) ? 0x1FF : 0x0FFF);
+    // plc->client_to_server_max_packet = fo_req.client_to_server_conn_params &
+    //                            ((fo_cmd == CIP_FORWARD_OPEN[0]) ? 0x1FF : 0x0FFF);
+    // plc->server_to_client_max_packet = fo_req.server_to_client_conn_params &
+    //                            ((fo_cmd == CIP_FORWARD_OPEN[0]) ? 0x1FF : 0x0FFF);
 
     /* FIXME - check that the packet sizes are valid 508 or 4002 */
 
