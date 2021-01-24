@@ -124,7 +124,7 @@ int64_t util_time_ms(void)
     return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
 }
 
-#endif 
+#endif
 
 
 /*
@@ -208,7 +208,7 @@ void slice_dump(slice_s s)
         size_t row_offset;
 
         /* print the prefix and address */
-        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf),"%03zu", offset);
+        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf),"%04zu  ", offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < slice_len(s) && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;

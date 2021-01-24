@@ -74,6 +74,9 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc)
     info("eip_dispatch_request(): got packet:");
     slice_dump(input);
 
+    info("Raw output buffer size %u.", (unsigned int)slice_len(raw_output));
+    info("Output buffer size %u.", (unsigned int)slice_len(output));
+
     /* unpack header. */
     header.command = slice_get_uint16_le(input, 0);
     header.length = slice_get_uint16_le(input, 2);

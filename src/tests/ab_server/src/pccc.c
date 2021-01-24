@@ -68,8 +68,11 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc)
 {
     slice_s pccc_input;
     slice_s pccc_output;
+
     info("Got packet:");
     slice_dump(input);
+
+    info("Output buffer size %u.", (unsigned int)slice_len(output));
 
     if(slice_len(input) < 20) { /* FIXME - 13 + 7 */
         info("Packet too short!");
@@ -120,7 +123,8 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
 {
     uint16_t offset = 0;
     size_t start_byte_offset = 0;
-    uint16_t transfer_size = 0;
+    uint16_t total_transfer_size = 0;
+    uint8_t transfer_size = 0;
     size_t end_byte_offset = 0;
     size_t tag_size = 0;
     size_t data_file_num = 0;
@@ -132,7 +136,9 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
     slice_dump(input);
 
     offset = slice_get_uint16_le(input, 1);
-    transfer_size = slice_get_uint16_le(input, 3);
+    total_transfer_size = slice_get_uint16_le(input, 3);
+
+    info("Transfer starting from word %u of total length (in words) of %u.", offset, total_transfer_size);
 
     /* decode the data file. */
     data_file_prefix = slice_get_uint8(input, 5);
@@ -149,6 +155,11 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
     /* get the data element number. */
     data_file_element = slice_get_uint8(input, 7);
 
+    /* get the number of bytes requested. */
+    transfer_size = slice_get_uint8(input, 8);
+
+    info("Read will attempt to transfer %d bytes.", (int)(unsigned int)transfer_size);
+
     /* find the tag. */
     while(tag && tag->data_file_num != data_file_num) {
         tag = tag->next_tag;
@@ -162,7 +173,9 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
     /* now we can check the start and end offsets. */
     tag_size = tag->elem_count * tag->elem_size;
     start_byte_offset = offset + (data_file_element * tag->elem_size);
-    end_byte_offset = start_byte_offset + (transfer_size * tag->elem_size);
+    end_byte_offset = start_byte_offset + transfer_size;
+
+    info("Request to transfer %u bytes.", end_byte_offset - start_byte_offset);
 
     if(start_byte_offset >= tag_size) {
         info("Starting offset, %u, is greater than tag size, %d!", (unsigned int)start_byte_offset, (unsigned int)tag_size);
@@ -180,21 +193,21 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
         return make_pccc_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
-    info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size, transfer_size * tag->elem_size);
+    info("Tag elem size %u, bytes to transfer %d.", tag->elem_size, transfer_size);
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
     slice_set_uint8(output, 1, 0); /* no error */
     slice_set_uint16_le(output, 2, plc->pccc_seq_id);
 
-    for(size_t i = 0; i < (transfer_size * tag->elem_size); i++) {
+    for(size_t i = 0; i < (size_t)(unsigned int)transfer_size; i++) {
         info("setting byte %d to value %d.", 4 + i, tag->data[start_byte_offset + i]);
         slice_set_uint8(output, 4 + i, tag->data[start_byte_offset + i]);
     }
 
-    info("Output slice length %d.", slice_len(slice_from_slice(output, 0, 4 + (transfer_size * tag->elem_size))));
+    info("Output slice length %d.", slice_len(slice_from_slice(output, 0, (size_t)4 + (size_t)transfer_size)));
 
-    return slice_from_slice(output, 0, 4 + (transfer_size * tag->elem_size));
+    return slice_from_slice(output, 0, (size_t)4 + (size_t)transfer_size);
 }
 
 
@@ -298,9 +311,13 @@ slice_s handle_slc_read_request(slice_s input, slice_s output, plc_s *plc)
     size_t data_file_element = 0;
     size_t data_file_subelement = 0;
     tag_def_s *tag = plc->tags;
+    slice_s result;
+    size_t total_result_size = 0;
 
     info("Got packet:");
     slice_dump(input);
+
+    info("Output buffer size %u.", (unsigned int)slice_len(output));
 
     /*
      * a2 - SLC-type read.
@@ -372,9 +389,17 @@ slice_s handle_slc_read_request(slice_s input, slice_s output, plc_s *plc)
         slice_set_uint8(output, 4 + i, tag->data[start_byte_offset + i]);
     }
 
-    info("Output slice length %d.", slice_len(slice_from_slice(output, 0, (size_t)4 + (size_t)transfer_size)));
+    total_result_size = (size_t)4 + (size_t)transfer_size;
 
-    return slice_from_slice(output, 0, (size_t)4 + (size_t)transfer_size);
+    info("Output buffer length %u, total result size %u", (unsigned int)slice_len(output), (unsigned int)total_result_size);
+
+    result = slice_from_slice(output, 0, (size_t)4 + (size_t)transfer_size);
+    info("Created output PCCC/DF1 response:");
+    slice_dump(result);
+
+    info("Output slice length %d.", slice_len(result));
+
+    return result;
 }
 
 

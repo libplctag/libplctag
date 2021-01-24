@@ -79,6 +79,8 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc)
     info("handle_cpf_unconnected(): got packet:");
     slice_dump(input);
 
+    info("Output buffer size %u.", (unsigned int)slice_len(output));
+
     /* we must have some sort of payload. */
     if(slice_len(input) <= CPF_UCONN_HEADER_SIZE) {
         info("Unusable size of unconnected CPF packet!");
