@@ -1276,7 +1276,11 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                         if(byte_count != 0) {
                             void (*callback)(void *) = sock->read_done_callback;
 
-                            pdebug(DEBUG_DETAIL, "Read had data or error.");
+                            if(byte_count > 0) {
+                                pdebug(DEBUG_DETAIL, "Read had %d bytes of data.", byte_count);
+                            } else {
+                                pdebug(DEBUG_DETAIL, "Read had error %s!", plc_tag_decode_error(rc));
+                            }
 
                             /* do not keep calling this, we got data or an error. */
                             FD_CLR(sock->fd, &global_read_fds);
@@ -1326,7 +1330,11 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                         if(*(sock->write_amount) <= 0 || rc < 0) {
                             void (*callback)(void *) = sock->write_done_callback;
 
-                            pdebug(DEBUG_DETAIL, "Write done or error.");
+                            if(rc < 0) {
+                                pdebug(DEBUG_DETAIL, "Write error %d.", plc_tag_decode_error(rc));
+                            } else {
+                                pdebug(DEBUG_DETAIL, "Write done.");
+                            }
 
                             /* prevent another call. */
                             FD_CLR(sock->fd, &global_write_fds);
