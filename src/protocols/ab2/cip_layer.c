@@ -955,14 +955,20 @@ int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_cap
 
                 rc = encode_dhp_addr_segment(state, data, data_capacity, data_offset, path_segments, &segment_index);
                 if(rc != PLCTAG_ERR_NO_MATCH) break;
-                if(rc == PLCTAG_STATUS_OK) { is_dhp = TRUE; }
+                if(rc == PLCTAG_STATUS_OK) { is_dhp = TRUE; break; } /* DH+ must be last */
 
                 rc = encode_numeric_segment(state, data, data_capacity, data_offset, path_segments, &segment_index);
                 if(rc != PLCTAG_ERR_NO_MATCH) break;
             } while(0);
 
             if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to match segment %d \"%s\", error %s.", segment_index + 1, path_segments[segment_index], plc_tag_decode_error(rc));
+                pdebug(DEBUG_WARN, "Unable to match segment %d \"%s\", error %s.", segment_index, path_segments[segment_index], plc_tag_decode_error(rc));
+                break;
+            }
+
+            if(rc == PLCTAG_STATUS_OK && path_segments[segment_index] != NULL && is_dhp == TRUE) {
+                pdebug(DEBUG_WARN, "DH+ path segment must be the last one in the path!");
+                rc = PLCTAG_ERR_BAD_PARAM;
                 break;
             }
         }
@@ -970,6 +976,13 @@ int encode_cip_path(struct cip_layer_state_s *state, uint8_t *data, int data_cap
         if(rc != PLCTAG_STATUS_OK) {
             break;
         }
+
+        /* TODO
+         *
+         * Move all this to the PLC-specific part and out of this layer completely.
+         * The PLC definition should set up either additional path elements ("path_suffix") or
+         * modify the path for the specific type of PLC and connection.
+         */
 
         /* build the routing part. */
         if(is_dhp) {
