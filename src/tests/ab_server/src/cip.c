@@ -210,7 +210,7 @@ slice_s handle_forward_open(slice_s input, slice_s output, plc_s *plc)
     if(plc->reject_fo_count > 0) {
         plc->reject_fo_count--;
         info("Forward open request being bounced for debugging. %d to go.", plc->reject_fo_count);
-        return make_cip_error(output, 
+        return make_cip_error(output,
                              (uint8_t)(slice_get_uint8(input, 0) | CIP_DONE),
                              (uint8_t)CIP_ERR_0x01,
                              true,
