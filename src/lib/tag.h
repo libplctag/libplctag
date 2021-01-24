@@ -69,37 +69,29 @@ typedef struct tag_vtable_t *tag_vtable_p;
 /* byte ordering */
 
 struct tag_byte_order_s {
-    unsigned int int16_order_0:1;
-    unsigned int int16_order_1:1;
+    /* set if we allocated this specifically for the tag. */
+    unsigned int is_allocated:1;
 
-    unsigned int int32_order_0:2;
-    unsigned int int32_order_1:2;
-    unsigned int int32_order_2:2;
-    unsigned int int32_order_3:2;
+    /* string type and ordering. */
+    unsigned int str_is_defined:1;
+    unsigned int str_is_counted:1;
+    unsigned int str_is_fixed_length:1;
+    unsigned int str_is_zero_terminated:1;
+    unsigned int str_is_byte_swapped:1;
 
-    unsigned int float32_order_0:2;
-    unsigned int float32_order_1:2;
-    unsigned int float32_order_2:2;
-    unsigned int float32_order_3:2;
+    unsigned int str_count_word_bytes;
+    unsigned int str_max_capacity;
+    unsigned int str_total_length;
+    unsigned int str_pad_bytes;
 
-    unsigned int int64_order_0:3;
-    unsigned int int64_order_1:3;
-    unsigned int int64_order_2:3;
-    unsigned int int64_order_3:3;
-    unsigned int int64_order_4:3;
-    unsigned int int64_order_5:3;
-    unsigned int int64_order_6:3;
-    unsigned int int64_order_7:3;
+    int int16_order[2];
+    int int32_order[4];
+    int int64_order[8];
 
-    unsigned int float64_order_0:3;
-    unsigned int float64_order_1:3;
-    unsigned int float64_order_2:3;
-    unsigned int float64_order_3:3;
-    unsigned int float64_order_4:3;
-    unsigned int float64_order_5:3;
-    unsigned int float64_order_6:3;
-    unsigned int float64_order_7:3;
+    int float32_order[4];
+    int float64_order[8];
 };
+
 
 typedef struct tag_byte_order_s tag_byte_order_t;
 
@@ -125,16 +117,16 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         int32_t tag_id; \
                         int32_t auto_sync_read_ms; \
                         int32_t auto_sync_write_ms; \
+                        uint8_t *data; \
+                        tag_byte_order_t *byte_order; \
                         mutex_p ext_mutex; \
                         mutex_p api_mutex; \
                         tag_vtable_p vtable; \
                         void (*callback)(int32_t tag_id, int event, int status); \
-                        uint8_t *data; \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \
-                        int64_t auto_sync_last_read; \
-                        int64_t auto_sync_next_write; \
-                        tag_byte_order_t byte_order
+                        int64_t auto_sync_next_read; \
+                        int64_t auto_sync_next_write
 
 
 
@@ -151,4 +143,3 @@ extern void lib_teardown(void);
 extern int plc_tag_abort_mapped(plc_tag_p tag);
 extern int plc_tag_destroy_mapped(plc_tag_p tag);
 extern int plc_tag_status_mapped(plc_tag_p tag);
-

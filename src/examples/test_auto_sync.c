@@ -37,6 +37,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <sys/time.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
@@ -53,13 +54,14 @@
 void *reader_function(void *tag_arg)
 {
     int32_t tag = (int32_t)(intptr_t)tag_arg;
-    int64_t run_until = util_time_ms() + RUN_PERIOD;
+    int64_t start_time = util_time_ms();
+    int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
     while(run_until > util_time_ms()) {
         int32_t val = plc_tag_get_int32(tag, 0);
 
-        fprintf(stderr, "READER: Iteration %d, got value: %d\n", iteration++, val);
+        fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val, util_time_ms()-start_time);
 
         util_sleep_ms(READ_SLEEP_MS);
     }
@@ -71,7 +73,8 @@ void *reader_function(void *tag_arg)
 void *writer_function(void *tag_arg)
 {
     int32_t tag = (int32_t)(intptr_t)tag_arg;
-    int64_t run_until = util_time_ms() + RUN_PERIOD;
+    int64_t start_time = util_time_ms();
+    int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
     util_sleep_ms(WRITE_SLEEP_MS);
@@ -83,7 +86,7 @@ void *writer_function(void *tag_arg)
         /* write the value */
         plc_tag_set_int32(tag, 0, new_val);
 
-        fprintf(stderr, "WRITER: Iteration %d, wrote value: %d\n", iteration++, new_val);
+        fprintf(stderr, "WRITER: Iteration %d, wrote value: %d at time %" PRId64 "\n", iteration++, new_val, util_time_ms()-start_time);
 
         util_sleep_ms(WRITE_SLEEP_MS);
     }
@@ -154,7 +157,7 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     tag = plc_tag_create(TAG_ATTRIBS, DATA_TIMEOUT);
     if(tag < 0) {

@@ -44,7 +44,7 @@
 void test_version(void)
 {
     int32_t tag = 0;
-    int i;
+    int rc = PLCTAG_STATUS_OK;
     char ver[16] = {0,};
 
     fprintf(stderr,"Testing version tag.\n");
@@ -57,8 +57,11 @@ void test_version(void)
 
     plc_tag_read(tag, 0);
 
-    for(i=0; i < 16 && plc_tag_get_uint8(tag,i) != 0; i++) {
-        ver[i] = (char)plc_tag_get_uint8(tag,i);
+    rc = plc_tag_get_string(tag, 0, ver, (int)(unsigned int)sizeof(ver));
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "ERROR: %s: Could not get version string!\n", plc_tag_decode_error(rc));
+        plc_tag_destroy(tag);
+        return;
     }
 
     fprintf(stderr,"Library version %s\n", ver);

@@ -287,7 +287,7 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
  * This function registers the passed callback function with the library.  Only one callback function
  * may be registered with the library at a time!
  *
- * Once registered, the function will be called with any logging message that is normally printed due 
+ * Once registered, the function will be called with any logging message that is normally printed due
  * to the current log level setting.
  *
  * WARNING: the callback will usually be called when the internal tag API mutex is held.   You cannot
@@ -477,6 +477,13 @@ LIB_EXPORT int plc_tag_set_float64(int32_t tag, int offset, double val);
 LIB_EXPORT float plc_tag_get_float32(int32_t tag, int offset);
 LIB_EXPORT int plc_tag_set_float32(int32_t tag, int offset, float val);
 
+/* string accessors */
+
+LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char *buffer, int buffer_length);
+LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const char *string_val);
+LIB_EXPORT int plc_tag_get_string_length(int32_t tag_id, int string_start_offset);
+LIB_EXPORT int plc_tag_get_string_capacity(int32_t tag_id, int string_start_offset);
+LIB_EXPORT int plc_tag_get_string_total_length(int32_t tag_id, int string_start_offset);
 
 #ifdef __cplusplus
 }

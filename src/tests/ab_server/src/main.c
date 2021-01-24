@@ -184,20 +184,22 @@ void usage(void)
                     "\n"
                     "    PCCC-based PLC tags are in the format: <file>[<size>] where:\n"
                     "        <file> is the data file, only the following are supported:\n"
-                    "            N7 - 2-byte signed integer.\n"
-                    "            F8 - 4-byte floating point number.\n"
-                    "            L19 - 4-byte signed integer.\n"
+                    "            N7   - 2-byte signed integer.\n"
+                    "            F8   - 4-byte floating point number.\n"
+                    "            ST18 - 82-byte ASCII string.\n"
+                    "            L19  - 4-byte signed integer.\n"
                     "\n"
                     "        <size> field is the length of the data file.\n"
                     "\n"
                     "    CIP-based PLC tags are in the format: <name>:<type>[<sizes>] where:\n"
                     "        <name> is alphanumeric, starting with an alpha character.\n"
                     "        <type> is one of:\n"
-                    "            INT - 2-byte signed integer.  Requires array size(s).\n"
-                    "            DINT - 4-byte signed integer.  Requires array size(s).\n"
-                    "            LINT - 8-byte signed integer.  Requires array size(s).\n"
-                    "            REAL - 4-byte floating point number.  Requires array size(s).\n"
-                    "            LREAL - 8-byte floating point number.  Requires array size(s).\n"
+                    "            INT    - 2-byte signed integer.  Requires array size(s).\n"
+                    "            DINT   - 4-byte signed integer.  Requires array size(s).\n"
+                    "            LINT   - 8-byte signed integer.  Requires array size(s).\n"
+                    "            REAL   - 4-byte floating point number.  Requires array size(s).\n"
+                    "            LREAL  - 8-byte floating point number.  Requires array size(s).\n"
+                    "            STRING - 82-byte string.  Requires array size(s).\n"
                     "\n"
                     "        <sizes>> field is one or more (up to 3) numbers separated by commas.\n"
                     "\n"
@@ -265,9 +267,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[9] = (uint8_t)0x2e;  /* '.' */
                 plc->path[10] = (uint8_t)0x31; /* '1' */
                 plc->path[11] = (uint8_t)0x00; /* padding */
-                plc->path[12] = (uint8_t)0x20;  
+                plc->path[12] = (uint8_t)0x20;
                 plc->path[13] = (uint8_t)0x02;
-                plc->path[14] = (uint8_t)0x24; 
+                plc->path[14] = (uint8_t)0x24;
                 plc->path[15] = (uint8_t)0x01;
                 plc->path_len = 16;
                 plc->client_to_server_max_packet = 508;
@@ -277,9 +279,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "PLC/5") == 0) {
                 fprintf(stderr, "Selecting PLC/5 simulator.\n");
                 plc->plc_type = PLC_PLC5;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -289,9 +291,9 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
                 fprintf(stderr, "Selecting SLC 500 simulator.\n");
                 plc->plc_type = PLC_SLC;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -301,9 +303,33 @@ void process_args(int argc, const char **argv, plc_s *plc)
             } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
                 fprintf(stderr, "Selecting Micrologix simulator.\n");
                 plc->plc_type = PLC_MICROLOGIX;
-                plc->path[0] = (uint8_t)0x20;  
+                plc->path[0] = (uint8_t)0x20;
                 plc->path[1] = (uint8_t)0x02;
-                plc->path[2] = (uint8_t)0x24; 
+                plc->path[2] = (uint8_t)0x24;
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
+                fprintf(stderr, "Selecting SLC 500 simulator.\n");
+                plc->plc_type = PLC_SLC;
+                plc->path[0] = (uint8_t)0x20;
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24;
+                plc->path[3] = (uint8_t)0x01;
+                plc->path_len = 4;
+                plc->client_to_server_max_packet = 244;
+                plc->server_to_client_max_packet = 244;
+                needs_path = false;
+                has_plc = true;
+            } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
+                fprintf(stderr, "Selecting Micrologix simulator.\n");
+                plc->plc_type = PLC_MICROLOGIX;
+                plc->path[0] = (uint8_t)0x20;
+                plc->path[1] = (uint8_t)0x02;
+                plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
                 plc->client_to_server_max_packet = 244;
@@ -384,8 +410,9 @@ void parse_path(const char *path_str, plc_s *plc)
  * Where data file is one of the following:
  *     N7 - 2 byte signed integer.  Requires size.
  *     F8 - 4-byte floating point number.   Requires size.
+ *     ST18 - 82-byte string with 2-byte count word.
  *     L19 - 4 byte signed integer.   Requires size.
- * 
+ *
  * The size field is a single positive integer.
  */
 
@@ -427,12 +454,17 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
             tag->elem_size = 2;
             tag->data_file_num = 7;
         } else if(str_cmp_i(data_file_name, "F8") == 0) {
-            info("Found N7 data file.");
+            info("Found F8 data file.");
             tag->tag_type = TAG_PCCC_TYPE_REAL;
             tag->elem_size = 4;
             tag->data_file_num = 8;
+        } else if(str_cmp_i(data_file_name, "ST18") == 0) {
+            info("Found ST18 data file.");
+            tag->tag_type = TAG_PCCC_TYPE_STRING;
+            tag->elem_size = 84;
+            tag->data_file_num = 18;
         } else if(str_cmp_i(data_file_name, "L19") == 0) {
-            info("Found N7 data file.");
+            info("Found L19 data file.");
             tag->tag_type = TAG_PCCC_TYPE_DINT;
             tag->elem_size = 4;
             tag->data_file_num = 19;
@@ -491,7 +523,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
         tag->elem_count = tag->dimensions[0];
         tag->num_dimensions = 1;
     }
- 
+
     /* copy the tag name */
     tag->name = strdup(data_file_name);
     if (!tag->name) {
@@ -529,6 +561,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
  *     LINT - 8-byte signed integer.  Requires array size(s).
  *     REAL - 4-byte floating point number.  Requires array size(s).
  *     LREAL - 8-byte floating point number.  Requires array size(s).
+ *     STRING - 82-byte string with 4-byte count word and 2 bytes of padding.
  *
  * Array size field is one or more (up to 3) numbers separated by commas.
  */
@@ -630,6 +663,9 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
     } else if(str_cmp_i(type_str, "LREAL") == 0) {
         tag->tag_type = TAG_CIP_TYPE_LREAL;
         tag->elem_size = 8;
+    } else if(str_cmp_i(type_str, "STRING") == 0) {
+        tag->tag_type = TAG_CIP_TYPE_STRING;
+        tag->elem_size = 88;
     } else {
         fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
         usage();
@@ -668,7 +704,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
     } else {
         tag->dimensions[2] = 1;
     }
- 
+
     /* copy the tag name */
     tag->name = strdup(tag_name);
     if (!tag->name) {

@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <ctype.h>
 #include <limits.h>
 #include <float.h>
 #include <platform.h>
@@ -85,7 +86,6 @@ volatile int ab_protocol_terminating = 0;
 
 /* forward declarations*/
 static int get_tag_data_type(ab_tag_p tag, attr attribs);
-static void set_tag_byte_order(ab_tag_p tag);
 
 static void ab_tag_destroy(ab_tag_p tag);
 static int default_abort(plc_tag_p tag);
@@ -265,6 +265,14 @@ plc_tag_p ab_tag_create(attr attribs)
 
     pdebug(DEBUG_DETAIL, "using session=%p", tag->session);
 
+    /* get the tag data type, or try. */
+    rc = get_tag_data_type(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error getting tag element data type %s!", plc_tag_decode_error(rc));
+        tag->status = (int8_t)rc;
+        return (plc_tag_p)tag;
+    }
+
     /* set up PLC-specific information. */
     switch(tag->plc_type) {
     case AB_PLC_PLC5:
@@ -282,6 +290,8 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->use_connected_msg = 1;
             tag->vtable = &eip_plc5_dhp_vtable;
         }
+
+        tag->byte_order = &pccc_tag_byte_order;
 
         tag->allow_packing = 0;
         break;
@@ -303,6 +313,8 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->vtable = &eip_slc_dhp_vtable;
         }
 
+        tag->byte_order = &pccc_tag_byte_order;
+
         tag->allow_packing = 0;
         break;
 
@@ -311,6 +323,9 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->use_connected_msg = 0;
         tag->allow_packing = 0;
         tag->vtable = &lgx_pccc_vtable;
+
+        tag->byte_order = &pccc_tag_byte_order;
+
         break;
 
     case AB_PLC_LGX:
@@ -323,11 +338,10 @@ plc_tag_p ab_tag_create(attr attribs)
             return (plc_tag_p)tag;
         }
 
-        rc = get_tag_data_type(tag, attribs);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error getting tag element data type %s!", plc_tag_decode_error(rc));
-            tag->status = (int8_t)rc;
-            return (plc_tag_p)tag;
+        if(!tag->tag_list) {
+            tag->byte_order = &logix_tag_byte_order;
+        } else {
+            tag->byte_order = &logix_tag_listing_byte_order;
         }
 
         /* default to requiring a connection. */
@@ -344,6 +358,8 @@ plc_tag_p ab_tag_create(attr attribs)
             pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
         }
 
+        tag->byte_order = &logix_tag_byte_order;
+
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
         tag->vtable = &eip_cip_vtable;
@@ -357,6 +373,8 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->status = PLCTAG_ERR_BAD_PARAM;
             return (plc_tag_p)tag;
         }
+
+        tag->byte_order = &logix_tag_byte_order;
 
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
@@ -372,12 +390,8 @@ plc_tag_p ab_tag_create(attr attribs)
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);
 
-    /* set the byte order for the tag. */
-    set_tag_byte_order(tag);
-
     /* get the element count, default to 1 if missing. */
     tag->elem_count = attr_get_int(attribs,"elem_count", 1);
-
 
     switch(tag->plc_type) {
     case AB_PLC_OMRON_NJNX:
@@ -392,7 +406,7 @@ plc_tag_p ab_tag_create(attr attribs)
     case AB_PLC_LGX:
     case AB_PLC_MLGX800:
         /* fill this in when we read the tag. */
-        tag->elem_size = 0;
+        //tag->elem_size = 0;
         tag->size = 0;
         tag->data = NULL;
         break;
@@ -404,7 +418,7 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->elem_size = attr_get_int(attribs, "elem_size", 0);
         }
 
-        /* allocate memory for the data */
+        /* Determine the tag size */
         tag->size = (tag->elem_count) * (tag->elem_size);
         if(tag->size == 0) {
             /* failure! Need data_size! */
@@ -458,6 +472,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
     const char *elem_type = NULL;
     const char *tag_name = NULL;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     switch(tag->plc_type) {
     case AB_PLC_PLC5:
     case AB_PLC_SLC:
@@ -490,6 +506,14 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 pdebug(DEBUG_DETAIL,"Found tag element type of float.");
                 tag->elem_size=4;
                 tag->elem_type = AB_TYPE_FLOAT32;
+                break;
+
+            case 'l':
+            case 'L':
+                /* 32-bit integer */
+                pdebug(DEBUG_DETAIL,"Found tag element type of long int.");
+                tag->elem_size=4;
+                tag->elem_type = AB_TYPE_INT32;
                 break;
 
             case 'n':
@@ -534,9 +558,9 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
             default:
                 pdebug(DEBUG_DETAIL,"Unknown tag type for tag %s", tag_name);
+                return PLCTAG_ERR_UNSUPPORTED;
                 break;
             }
-
         }
 
         break;
@@ -589,25 +613,52 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 tag->elem_type = AB_TYPE_SHORT_STRING;
             } else {
                 pdebug(DEBUG_DETAIL, "Unknown tag type %s", elem_type);
+                return PLCTAG_ERR_UNSUPPORTED;
             }
         } else {
-            /* just for Logix, check for tag listing */
-            if(tag->plc_type == AB_PLC_LGX) {
-                const char *tag_name = attr_get_str(attribs, "name", NULL);
-                int tag_listing_rc = setup_tag_listing(tag, tag_name);
+            /* 
+             * We have two cases
+             *      * tag listing, but only for LGX.
+             *      * no type, just elem_size.
+             * Otherwise this is an error.
+             */
+            {
+                int elem_size = attr_get_int(attribs, "elem_size", 0);
 
-                if(tag_listing_rc == PLCTAG_ERR_BAD_PARAM) {
-                    pdebug(DEBUG_WARN, "Tag listing request is malformed!");
-                    return PLCTAG_ERR_BAD_PARAM;
+                if(tag->plc_type == AB_PLC_LGX) {
+                    const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
+                    int tag_listing_rc = setup_tag_listing(tag, tmp_tag_name);
+
+                    if(tag_listing_rc == PLCTAG_ERR_BAD_PARAM) {
+                        pdebug(DEBUG_WARN, "Error parsing tag listing name!");
+                        return PLCTAG_ERR_BAD_PARAM;
+                    }
                 }
-            }
+
+                /* if we did not set an element size yet, set one. */
+                if(tag->elem_size == 0) {
+                    if(elem_size > 0) {
+                        pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
+                        tag->elem_size = elem_size;
+                    } 
+                    
+                    // else {
+                    //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
+                    //     return PLCTAG_ERR_BAD_PARAM;
+                    // }
+                } else {
+                    if(elem_size > 0) {
+                        pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
+                    }
+                }
+            }            
         }
 
         break;
 
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
-        return PLCTAG_ERR_BAD_CONFIG;
+        return PLCTAG_ERR_BAD_DEVICE;
         break;
     }
 
@@ -615,56 +666,6 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
     return PLCTAG_STATUS_OK;
 }
-
-
-
-void set_tag_byte_order(ab_tag_p tag)
-{
-    /* 16-bit ints. */
-    tag->byte_order.int16_order_0 = 0;
-    tag->byte_order.int16_order_1 = 1;
-
-    /* 32-bit ints */
-    tag->byte_order.int32_order_0 = 0;
-    tag->byte_order.int32_order_1 = 1;
-    tag->byte_order.int32_order_2 = 2;
-    tag->byte_order.int32_order_3 = 3;
-
-    /* 64-bit ints */
-    tag->byte_order.int64_order_0 = 0;
-    tag->byte_order.int64_order_1 = 1;
-    tag->byte_order.int64_order_2 = 2;
-    tag->byte_order.int64_order_3 = 3;
-    tag->byte_order.int64_order_4 = 4;
-    tag->byte_order.int64_order_5 = 5;
-    tag->byte_order.int64_order_6 = 6;
-    tag->byte_order.int64_order_7 = 7;
-
-    /* 32-bit floats. */
-    if(tag->plc_type == AB_PLC_PLC5) {
-        tag->byte_order.float32_order_0 = 2;
-        tag->byte_order.float32_order_1 = 3;
-        tag->byte_order.float32_order_2 = 0;
-        tag->byte_order.float32_order_3 = 1;
-    } else {
-        tag->byte_order.float32_order_0 = 0;
-        tag->byte_order.float32_order_1 = 1;
-        tag->byte_order.float32_order_2 = 2;
-        tag->byte_order.float32_order_3 = 3;
-    }
-
-    /* 64-bit floats */
-    tag->byte_order.float64_order_0 = 0;
-    tag->byte_order.float64_order_1 = 1;
-    tag->byte_order.float64_order_2 = 2;
-    tag->byte_order.float64_order_3 = 3;
-    tag->byte_order.float64_order_4 = 4;
-    tag->byte_order.float64_order_5 = 5;
-    tag->byte_order.float64_order_6 = 6;
-    tag->byte_order.float64_order_7 = 7;
-}
-
-
 
 
 int default_abort(plc_tag_p tag)
@@ -827,6 +828,11 @@ void ab_tag_destroy(ab_tag_p tag)
     if(tag->api_mutex) {
         mutex_destroy(&(tag->api_mutex));
         tag->api_mutex = NULL;
+    }
+
+    if(tag->byte_order && tag->byte_order->is_allocated) {
+        mem_free(tag->byte_order);
+        tag->byte_order = NULL;
     }
 
     if (tag->data) {

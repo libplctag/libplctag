@@ -37,9 +37,9 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,1,16
 
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_size=4&elem_count=5&name=F8:10&debug=4"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_count=5&name=F8:10"
 #define ELEM_COUNT 5
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 5000
@@ -59,6 +59,14 @@ int main(int argc, char **argv)
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
+
+    fprintf(stderr, "Using library version %d.%d.%d.\n",
+                                            plc_tag_get_int_attribute(0, "version_major", -1),
+                                            plc_tag_get_int_attribute(0, "version_minor", -1),
+                                            plc_tag_get_int_attribute(0, "version_patch", -1));
+
+    /* turn off debugging output. */
+    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
     /* create the tag */
     tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);

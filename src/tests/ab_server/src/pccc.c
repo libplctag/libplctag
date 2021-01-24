@@ -243,7 +243,7 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc)
         return make_pccc_error(output, PCCC_ERR_ADDR_NOT_USABLE, plc);
     }
 
-    /* 
+    /*
      * we have the tag, now write the data.   The size of the write
      * needs to be less than the tag size.
      */

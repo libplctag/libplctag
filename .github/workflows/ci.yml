@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.1.22"
-      ARTIFACT: "libplctag_2.1.22_ubuntu_x64"
+      VERSION: "2.2.0"
+      ARTIFACT: "libplctag_2.2.0_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -90,7 +90,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Duplicate Connection ID 
+    - name: Test Duplicate Connection ID
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -101,7 +101,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Large Tags 
+    - name: Test Large Tags
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -124,8 +124,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.1.22"
-      ARTIFACT: "libplctag_2.1.22_ubuntu_x86"
+      VERSION: "2.2.0"
+      ARTIFACT: "libplctag_2.2.0_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -202,7 +202,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Duplicate Connection ID 
+    - name: Test Duplicate Connection ID
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -213,7 +213,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Large Tags 
+    - name: Test Large Tags
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -235,8 +235,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.1.22"
-      ARTIFACT: "libplctag_2.1.22_macos_x64"
+      VERSION: "2.2.0"
+      ARTIFACT: "libplctag_2.2.0_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -309,7 +309,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Duplicate Connection ID 
+    - name: Test Duplicate Connection ID
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -320,7 +320,7 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Large Tags 
+    - name: Test Large Tags
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -342,8 +342,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.1.22"
-      ARTIFACT: "libplctag_2.1.22_windows_x64"
+      VERSION: "2.2.0"
+      ARTIFACT: "libplctag_2.2.0_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
 
@@ -401,7 +401,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] 
+        start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10]
         timeout /T 5
         echo "test getting a tag on a PLC/5."
         .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0"
@@ -413,7 +413,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] 
+        start /b .\ab_server.exe --plc=SLC500 --tag=N7[10]
         timeout /T 5
         echo "test getting a tag on a SLC 500."
         .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0"
@@ -421,12 +421,12 @@ jobs:
         taskkill /F /IM ab_server.exe
       shell: cmd
 
-    - name: Test Duplicate Connection ID 
+    - name: Test Duplicate Connection ID
       run: |
         cd ${{ env.DIST }}\Release
         dir
         echo "start up simulator..."
-        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5
         timeout /T 5
         echo "test getting a tag with connection failures."
         .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray"
@@ -434,7 +434,7 @@ jobs:
         taskkill /F /IM ab_server.exe
       shell: cmd
 
-    - name: Test Large Tags 
+    - name: Test Large Tags
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
@@ -457,8 +457,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.1.22"
-      ARTIFACT: "libplctag_2.1.22_windows_x86"
+      VERSION: "2.2.0"
+      ARTIFACT: "libplctag_2.2.0_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -516,7 +516,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] 
+        start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10]
         timeout /T 5
         echo "test getting a tag on a PLC/5."
         .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0"
@@ -528,7 +528,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] 
+        start /b .\ab_server.exe --plc=SLC500 --tag=N7[10]
         timeout /T 5
         echo "test getting a tag on a SLC 500."
         .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0"
@@ -536,12 +536,12 @@ jobs:
         taskkill /F /IM ab_server.exe
       shell: cmd
 
-    - name: Test Duplicate Connection ID 
+    - name: Test Duplicate Connection ID
       run: |
         cd ${{ env.DIST }}\Release
         dir
         echo "start up simulator..."
-        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5
         timeout /T 5
         echo "test getting a tag with connection failures."
         .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray"
@@ -549,7 +549,7 @@ jobs:
         taskkill /F /IM ab_server.exe
       shell: cmd
 
-    - name: Test Large Tags 
+    - name: Test Large Tags
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."

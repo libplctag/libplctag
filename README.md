@@ -136,7 +136,7 @@ A good place to start is [simple.c](https://github.com/libplctag/libplctag/blob/
 
 This code reads several 32-bit signed integers (DINT), updates them,
 then writes them back out and rereads them from a tag named TestBigArray
-in a Logix-class Allen-Bradley PLC.  
+in a Logix-class Allen-Bradley PLC.
 
 The README file describes some of the more interesting ones.
 
@@ -207,7 +207,7 @@ This dual license applies to the core C library.  Additional wrappers for other 
 ## Attributions and Trademarks
 
 PLC5, SLC 500, MicroLogix, Micro8X0, CompactLogix and ControlLogix are trademarks of Rockwell/Allen Bradley.
-Windows and Visual Studio are trademarks of Microsoft.  Apple owns the trademark on macOS.  
+Windows and Visual Studio are trademarks of Microsoft.  Apple owns the trademark on macOS.
 
 Please let us know if we missed some so that we can get all the attributions correct!
 

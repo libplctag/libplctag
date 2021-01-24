@@ -39,4 +39,4 @@
 
 /* PLC-5  */
 extern struct tag_vtable_t plc5_vtable;
-
+extern tag_byte_order_t pccc_tag_byte_order;
