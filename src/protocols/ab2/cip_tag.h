@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2021 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,79 +31,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-
 #pragma once
 
-#include <lib/libplctag.h>
 #include <lib/tag.h>
-#include <ab2/df1.h>
 #include <util/attr.h>
-#include <util/plc.h>
-
-typedef enum { AB2_PLC_NONE = 0,
-               AB2_PLC_PLC5 = 1,
-               AB2_PLC_SLC,
-               AB2_PLC_MLGX,
-               AB2_PLC_LGX,
-               AB2_PLC_LGX_PCCC,
-               AB2_PLC_MLGX800,
-               AB2_PLC_OMRON_NJNX } ab2_plc_type_t;
 
 
-typedef struct {
-    struct plc_tag_t base_tag;
-
-    uint16_t elem_size;
-    uint16_t elem_count;
-
-    /* data type info */
-    df1_file_t data_file_type;
-    int data_file_num;
-    int data_file_elem;
-    int data_file_sub_elem;
-
-    /* plc and request info */
-    plc_p plc;
-    struct plc_request_s request;
-
-    uint16_t tsn; /* transfer sequence number of the most recent request. */
-
-    /* count of bytes sent or received. */
-    uint16_t trans_offset;
-} pccc_tag_t;
-typedef pccc_tag_t *pccc_tag_p;
-
-typedef struct {
-    struct plc_tag_t base_tag;
-
-    int elem_size;
-    int elem_count;
-
-    /* data type info */
-    uint8_t tag_type_info[4];
-    uint8_t tag_type_info_length;
-    bool is_raw_tag;
-
-    /* tag encoded name */
-    int encoded_name_length;
-    uint8_t *encoded_name;
-
-    /* plc and request info */
-    plc_p plc;
-    struct plc_request_s request;
-
-    /* count of bytes sent or received. */
-    uint32_t trans_offset;
-} cip_tag_t;
-typedef cip_tag_t *cip_tag_p;
-
-
-extern plc_tag_p ab2_tag_create(attr attribs);
-extern ab2_plc_type_t ab2_get_plc_type(attr attribs);
-
-/* common implementations */
-extern int pccc_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
-extern int pccc_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
-
-extern int cip_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
-extern int cip_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
+extern struct tag_vtable_t cip_tag_vtable;
+extern tag_byte_order_t cip_tag_byte_order;
