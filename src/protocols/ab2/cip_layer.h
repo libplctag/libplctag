@@ -43,5 +43,8 @@
 
 extern int cip_layer_setup(plc_p plc, int layer_index, attr attribs);
 
+extern const char *cip_decode_error_short(uint8_t err_status, uint16_t extended_err_status);
+extern const char *cip_decode_error_long(uint8_t err_status, uint16_t extended_err_status);
+extern int cip_decode_error_code(uint8_t err_status, uint16_t extended_err_status);
 
 
