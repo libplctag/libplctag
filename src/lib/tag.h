@@ -40,13 +40,8 @@
 #include <util/debug.h>
 #include <util/mutex.h>
 
-// #define PLCTAG_CANARY (0xACA7CAFE)
-// #define PLCTAG_DATA_LITTLE_ENDIAN   (0)
-// #define PLCTAG_DATA_BIG_ENDIAN      (1)
-
 
 typedef struct plc_tag_t *plc_tag_p;
-
 
 typedef int (*tag_vtable_func)(plc_tag_p tag);
 
