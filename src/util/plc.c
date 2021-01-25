@@ -1088,6 +1088,7 @@ int state_build_tag_request(plc_p plc)
     plc_request_id req_id = plc->current_request_id;
     struct plc_request_s *current_request = plc->request_list;
     bool done = TRUE;
+    bool first_try = TRUE;
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
@@ -1113,6 +1114,8 @@ int state_build_tag_request(plc_p plc)
 
         /* was there enough space? */
         if(rc == PLCTAG_ERR_TOO_SMALL) {
+            DISCONNECT_ON_ERROR(first_try == TRUE, "Insufficient space for even one new request!");
+
             pdebug(DEBUG_INFO, "Insufficient space to build for new request %" REQ_ID_FMT " for PLC %s.", req_id, plc->key);
 
             /* signal that we are unable to continue. */
@@ -1121,6 +1124,8 @@ int state_build_tag_request(plc_p plc)
             pdebug(DEBUG_INFO, "Filling in layers for new request %" REQ_ID_FMT " for PLC %s.", req_id, plc->key);
             old_data_end = data_end;
         }
+
+        first_try = FALSE;
 
         /* set the request ID to match later. */
         current_request->req_id = req_id;
