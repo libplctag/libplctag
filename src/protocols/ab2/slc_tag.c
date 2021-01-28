@@ -149,7 +149,7 @@ int slc_tag_status(plc_tag_p tag_arg)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    rc = tag->base_tag.status;
+    rc = atomic_int_get(&(tag->base_tag.status));
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -250,7 +250,7 @@ int slc_build_read_request_callback(void *context, uint8_t *buffer, int buffer_c
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -336,7 +336,7 @@ int slc_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
             /* done! */
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
-            tag->base_tag.status = (int8_t)rc;
+            atomic_int_set(&(tag->base_tag.status), rc);
         }
 
         *payload_start = *payload_end;
@@ -344,7 +344,7 @@ int slc_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, handling read response!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -458,7 +458,7 @@ int slc_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -523,12 +523,12 @@ int slc_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
             /* done! */
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
-            tag->base_tag.status = (int8_t)rc;
+            atomic_int_set(&(tag->base_tag.status), rc);
         }
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 

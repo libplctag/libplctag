@@ -141,7 +141,7 @@ plc_tag_p system_tag_create(attr attribs)
 static int system_tag_abort(plc_tag_p tag)
 {
     /* there are no outstanding operations, so everything is OK. */
-    tag->status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->status), PLCTAG_STATUS_OK);
     return PLCTAG_STATUS_OK;
 }
 
@@ -205,7 +205,7 @@ static int system_tag_read(plc_tag_p ptag)
 
 static int system_tag_status(plc_tag_p tag)
 {
-    tag->status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->status), PLCTAG_STATUS_OK);
     return PLCTAG_STATUS_OK;
 }
 

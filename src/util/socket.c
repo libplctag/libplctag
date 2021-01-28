@@ -635,7 +635,7 @@ THREAD_FUNC(socket_connection_thread_func)
     rc = socket_tcp_connect(sock, sock->host, sock->port);
 
     /* save our status for other callers. */
-    atomic_int_set(&(sock->status), (unsigned int)rc);
+    atomic_int_set(&(sock->status), rc);
 
     if(rc == PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO, "Blocking TCP connect call to %s:%d complete.", sock->host, sock->port);
@@ -707,7 +707,7 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
             pdebug(DEBUG_WARN, "Unable to create background connection thread!");
 
             sock->connection_thread = NULL;
-            atomic_int_set(&(sock->status), (unsigned int)rc);
+            atomic_int_set(&(sock->status), rc);
             atomic_bool_set(&(sock->connection_thread_done), TRUE);
 
             break;
@@ -1290,7 +1290,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
 
                             /* set up state. */
-                            atomic_int_set(&(sock->status), (unsigned int)rc);
+                            atomic_int_set(&(sock->status), rc);
 
                             /* call the callback either way. */
                             if(callback) {
@@ -1343,7 +1343,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             atomic_int_add(&need_recalculate_socket_fd_sets, 1);
 
                             /* call the callback */
-                            atomic_int_set(&(sock->status), (unsigned int)rc);
+                            atomic_int_set(&(sock->status), rc);
                             if(callback) {
                                 callback(sock->write_done_context);
                             } else {

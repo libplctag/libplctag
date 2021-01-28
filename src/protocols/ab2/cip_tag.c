@@ -171,7 +171,7 @@ int cip_tag_status(plc_tag_p tag_arg)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    rc = tag->base_tag.status;
+    rc = atomic_int_get(&(tag->base_tag.status));
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -250,7 +250,7 @@ int cip_build_read_request_callback(void *context, uint8_t *buffer, int buffer_c
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -306,7 +306,7 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
             rc = cip_decode_error_code(service_status, extended_err_status);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
-            tag->base_tag.status = (int8_t)rc;
+            atomic_int_set(&(tag->base_tag.status), rc);
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
 
@@ -385,7 +385,7 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
             /* done! */
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
-            tag->base_tag.status = (int8_t)rc;
+            atomic_int_set(&(tag->base_tag.status), rc);
         }
 
         *payload_start = *payload_end;
@@ -393,7 +393,7 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, handling read response!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -501,7 +501,7 @@ int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -554,7 +554,7 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
             rc = cip_decode_error_code(service_status, extended_err_status);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
-            tag->base_tag.status = (int8_t)rc;
+            atomic_int_set(&(tag->base_tag.status), rc);
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
 
@@ -573,12 +573,12 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
             /* done! */
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
-            tag->base_tag.status = (int8_t)rc;
+            atomic_int_set(&(tag->base_tag.status), rc);
         }
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -628,7 +628,7 @@ int raw_cip_build_request_callback(void *context, uint8_t *buffer, int buffer_ca
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build raw CIP request, got error %s!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 
@@ -681,7 +681,7 @@ int raw_cip_handle_response_callback(void *context, uint8_t *buffer, int buffer_
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, handling read response!", plc_tag_decode_error(rc));
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
         return rc;
     }
 

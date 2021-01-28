@@ -228,7 +228,7 @@ int tag_tickler(ab_tag_p tag)
             rc = check_read_status_unconnected(tag);
         }
 
-        tag->status = (int8_t)rc;
+        atomic_int_set(&(tag->status), rc);
 
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->read_in_progress) {
@@ -247,7 +247,7 @@ int tag_tickler(ab_tag_p tag)
             rc = check_write_status_unconnected(tag);
         }
 
-        tag->status = (int8_t)rc;
+        atomic_int_set(&(tag->status), rc);
 
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->write_in_progress) {
@@ -261,7 +261,7 @@ int tag_tickler(ab_tag_p tag)
 
     pdebug(DEBUG_SPEW, "Done.  No operation in progress.");
 
-    return tag->status;
+    return atomic_int_get(&(tag->status));
 }
 
 

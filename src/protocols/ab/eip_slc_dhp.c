@@ -179,7 +179,7 @@ int tag_status(ab_tag_p tag)
         return PLCTAG_STATUS_PENDING;
     }
 
-    return tag->status;
+    return atomic_int_get(&(tag->status));
 }
 
 
@@ -194,7 +194,7 @@ int tag_tickler(ab_tag_p tag)
     if(tag->read_in_progress) {
         pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
-        tag->status = (int8_t)rc;
+        atomic_int_set(&(tag->status), rc);
 
         /* check to see if the read finished. */
         if(!tag->read_in_progress) {
@@ -207,7 +207,7 @@ int tag_tickler(ab_tag_p tag)
     if(tag->write_in_progress) {
         pdebug(DEBUG_SPEW, "Write in progress.");
         rc = check_write_status(tag);
-        tag->status = (int8_t)rc;
+        atomic_int_set(&(tag->status), rc);
 
         /* check to see if the write finished. */
         if(!tag->write_in_progress) {
@@ -219,7 +219,7 @@ int tag_tickler(ab_tag_p tag)
 
     pdebug(DEBUG_SPEW, "Done.");
 
-    return tag->status;
+    return atomic_int_get(&(tag->status));
 }
 
 
@@ -283,7 +283,7 @@ int tag_read_start(ab_tag_p tag)
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    // Old PLC5 command. 
+    // Old PLC5 command.
     // /* amount of data to get this time */
     // *data = (uint8_t)(tag->size); /* bytes for this transfer */
     // data++;
@@ -436,7 +436,7 @@ int tag_write_start(ab_tag_p tag)
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
     pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
     pccc->cpf_conn_seq_num = h2le16(conn_seq_id);
-    
+
     /* DH+ Routing */
     pccc->dest_link = h2le16(0);
     pccc->dest_node = h2le16(tag->session->dhp_dest);

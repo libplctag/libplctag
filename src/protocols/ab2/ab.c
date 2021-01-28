@@ -288,7 +288,7 @@ int pccc_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* assume we have a match. */
-    tag->base_tag.status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->base_tag.status), PLCTAG_STATUS_OK);
 
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "elem_size") == 0) {
@@ -299,7 +299,7 @@ int pccc_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_
         res = plc_get_idle_timeout(tag->plc);
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
-        tag->base_tag.status = PLCTAG_ERR_UNSUPPORTED;
+        atomic_int_set(&(tag->base_tag.status), PLCTAG_ERR_UNSUPPORTED);
         return default_value;
     }
 
@@ -321,7 +321,7 @@ int pccc_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_valu
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         rc = PLCTAG_ERR_UNSUPPORTED;
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -501,7 +501,7 @@ int cip_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_v
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* assume we have a match. */
-    tag->base_tag.status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->base_tag.status), PLCTAG_STATUS_OK);
 
     /* match the attribute. Raw tags only have size.*/
     if((tag->is_raw_tag == FALSE) && (str_cmp_i(attrib_name, "elem_size") == 0)) {
@@ -514,7 +514,7 @@ int cip_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_v
         res = tag->base_tag.size;
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
-        tag->base_tag.status = PLCTAG_ERR_UNSUPPORTED;
+        atomic_int_set(&(tag->base_tag.status), PLCTAG_ERR_UNSUPPORTED);
         return default_value;
     }
 
@@ -553,7 +553,7 @@ int cip_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         rc = PLCTAG_ERR_UNSUPPORTED;
-        tag->base_tag.status = (int8_t)rc;
+        atomic_int_set(&(tag->base_tag.status), rc);
     }
 
     pdebug(DEBUG_DETAIL, "Done.");

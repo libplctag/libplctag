@@ -246,7 +246,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
-        tag->status = PLCTAG_ERR_BAD_CONFIG;
+        atomic_int_set(&(tag->status), PLCTAG_ERR_BAD_CONFIG);
         return (plc_tag_p)tag;
         break;
     }
@@ -264,7 +264,7 @@ plc_tag_p ab_tag_create(attr attribs)
      */
     if(session_find_or_create(&tag->session, attribs) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Unable to create session!");
-        tag->status = PLCTAG_ERR_BAD_GATEWAY;
+        atomic_int_set(&(tag->status), PLCTAG_ERR_BAD_GATEWAY);
         return (plc_tag_p)tag;
     }
 
@@ -274,7 +274,7 @@ plc_tag_p ab_tag_create(attr attribs)
     rc = get_tag_data_type(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error getting tag element data type %s!", plc_tag_decode_error(rc));
-        tag->status = (int8_t)rc;
+        atomic_int_set(&(tag->status), rc);
         return (plc_tag_p)tag;
     }
 
@@ -339,7 +339,7 @@ plc_tag_p ab_tag_create(attr attribs)
         /* Logix tags need a path. */
         if(path == NULL && tag->plc_type == AB_PLC_LGX) {
             pdebug(DEBUG_WARN,"A path is required for Logix-class PLCs!");
-            tag->status = PLCTAG_ERR_BAD_PARAM;
+            atomic_int_set(&(tag->status), PLCTAG_ERR_BAD_PARAM);
             return (plc_tag_p)tag;
         }
 
@@ -375,7 +375,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         if(str_length(path) == 0) {
             pdebug(DEBUG_WARN,"A path is required for this PLC type.");
-            tag->status = PLCTAG_ERR_BAD_PARAM;
+            atomic_int_set(&(tag->status), PLCTAG_ERR_BAD_PARAM);
             return (plc_tag_p)tag;
         }
 
@@ -388,7 +388,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
-        tag->status = PLCTAG_ERR_BAD_CONFIG;
+        atomic_int_set(&(tag->status), PLCTAG_ERR_BAD_CONFIG);
         return (plc_tag_p)tag;
     }
 
@@ -428,7 +428,7 @@ plc_tag_p ab_tag_create(attr attribs)
         if(tag->size == 0) {
             /* failure! Need data_size! */
             pdebug(DEBUG_WARN,"Tag size is zero!");
-            tag->status = PLCTAG_ERR_BAD_PARAM;
+            atomic_int_set(&(tag->status), PLCTAG_ERR_BAD_PARAM);
             return (plc_tag_p)tag;
         }
 
@@ -437,7 +437,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         if(tag->data == NULL) {
             pdebug(DEBUG_WARN,"Unable to allocate tag data!");
-            tag->status = PLCTAG_ERR_NO_MEM;
+            atomic_int_set(&(tag->status), PLCTAG_ERR_NO_MEM);
             return (plc_tag_p)tag;
         }
         break;
@@ -449,7 +449,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
     if(!tag->tag_list && check_tag_name(tag, attr_get_str(attribs,"name",NULL)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Bad tag name!");
-        tag->status = PLCTAG_ERR_BAD_PARAM;
+        atomic_int_set(&(tag->status), PLCTAG_ERR_BAD_PARAM);
         return (plc_tag_p)tag;
     }
 
@@ -697,7 +697,7 @@ int default_status(plc_tag_p tag)
     pdebug(DEBUG_WARN, "This should be overridden by a PLC-specific function!");
 
     if(tag) {
-        return tag->status;
+        return atomic_int_get(&(tag->status));
     } else {
         return PLCTAG_ERR_NOT_FOUND;
     }
@@ -778,7 +778,7 @@ int ab_tag_status(ab_tag_p tag)
     }
 
     if(tag->session) {
-        rc = tag->status;
+        rc = atomic_int_get(&(tag->status));
     } else {
         /* this is not OK.  This is fatal! */
         rc = PLCTAG_ERR_CREATE;
@@ -859,7 +859,7 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
     pdebug(DEBUG_SPEW, "Starting.");
 
     /* assume we have a match. */
-    tag->status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->status), PLCTAG_STATUS_OK);
 
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "elem_size") == 0) {
@@ -868,7 +868,7 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = tag->elem_count;
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        atomic_int_set(&(tag->status), PLCTAG_ERR_UNSUPPORTED);
     }
 
     return res;
@@ -882,7 +882,7 @@ int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 
     pdebug(DEBUG_WARN, "Unsupported attribute \"%s\"!", attrib_name);
 
-    raw_tag->status  = PLCTAG_ERR_UNSUPPORTED;
+    atomic_int_set(&(raw_tag->status), PLCTAG_ERR_UNSUPPORTED);
 
     return PLCTAG_ERR_UNSUPPORTED;
 }

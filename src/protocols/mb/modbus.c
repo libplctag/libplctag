@@ -36,6 +36,7 @@
 #include <float.h>
 #include <lib/libplctag.h>
 #include <mb/modbus.h>
+#include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/lock.h>
@@ -258,14 +259,14 @@ plc_tag_p mb_tag_create(attr attribs)
         tag->flags._read = 1;
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
-        tag->status = (int8_t)rc;
+        atomic_int_set(&(tag->status), rc);
     }
 
     /* Set up the tag byte order. */
     // rc = set_tag_byte_order(attribs, tag);
     // if(rc != PLCTAG_STATUS_OK) {
     //     pdebug(DEBUG_WARN, "Unable to set the tag byte order!");
-    //     tag->status = (int8_t)rc;
+    //     atomic_int_set(&(tag->status), rc);
     // }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -936,7 +937,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                     pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
                 }
 
-                tag->status = (int8_t)rc;
+                atomic_int_set(&(tag->status), rc);
             } else {
                 pdebug(DEBUG_SPEW, "No response yet.");
             }
@@ -948,7 +949,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                 pdebug(DEBUG_SPEW, "No buffer space for a response.");
             }
 
-            tag->status = (int8_t)rc;
+            atomic_int_set(&(tag->status), rc);
         }
     }
 
@@ -964,7 +965,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                     pdebug(DEBUG_SPEW, "We got an error on our read response check, %s!", plc_tag_decode_error(rc));
                 }
 
-                tag->status = (int8_t)rc;
+                atomic_int_set(&(tag->status), rc);
             } else {
                 pdebug(DEBUG_SPEW, "No response yet.");
             }
@@ -976,7 +977,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                 pdebug(DEBUG_SPEW, "No buffer space for a response.");
             }
 
-            tag->status = (int8_t)rc;
+            atomic_int_set(&(tag->status), rc);
         }
     }
 
@@ -1060,7 +1061,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->flags._busy = 0;
                 tag->seq_id = 0;
                 tag->read_complete = 1;
-                tag->status = (int8_t)rc;
+                atomic_int_set(&(tag->status), rc);
                 tag->request_num = 0;
             }
         } else {
@@ -1072,7 +1073,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->flags._read = 1;
                 tag->flags._busy = 0;
                 tag->request_num++;
-                tag->status = (int8_t)rc;
+                atomic_int_set(&(tag->status), rc);
             }
         }
     } else {
@@ -1258,7 +1259,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
                 tag->seq_id = 0;
                 tag->request_num = 0;
                 tag->write_complete = 1;
-                tag->status = (int8_t)rc;
+                atomic_int_set(&(tag->status), rc);
             }
         } else {
             /*
@@ -1268,7 +1269,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
             spin_block(&tag->tag_lock) {
                 tag->flags._write = 1;
                 tag->flags._busy = 0;
-                tag->status = (int8_t)rc;
+                atomic_int_set(&(tag->status), rc);
             }
         }
     } else {
@@ -1655,7 +1656,7 @@ int mb_read_start(plc_tag_p p_tag)
         return PLCTAG_ERR_BUSY;
     }
 
-    tag->status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->status), PLCTAG_STATUS_OK);
     tag_set_read_flag(tag, 1);
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1677,9 +1678,9 @@ int mb_tag_status(plc_tag_p p_tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(tag->status != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_SPEW, "Status not OK, returning %s.", plc_tag_decode_error(tag->status));
-        return tag->status;
+    if(atomic_int_get(&(tag->status)) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_SPEW, "Status not OK, returning %s.", plc_tag_decode_error(atomic_int_get(&(tag->status))));
+        return atomic_int_get(&(tag->status));
     }
 
     spin_block(&tag->tag_lock) {
@@ -1737,7 +1738,7 @@ int mb_write_start(plc_tag_p p_tag)
     }
 
     tag_set_write_flag(tag, 1);
-    tag->status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->status), PLCTAG_STATUS_OK);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1754,7 +1755,7 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    tag->status = PLCTAG_STATUS_OK;
+    atomic_int_set(&(tag->status), PLCTAG_STATUS_OK);
 
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "elem_size") == 0) {
@@ -1763,7 +1764,7 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = tag->elem_count;
     } else {
         pdebug(DEBUG_WARN,"Attribute \"%s\" is not supported.", attrib_name);
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        atomic_int_set(&(tag->status), PLCTAG_ERR_UNSUPPORTED);
     }
 
     return res;
@@ -1777,7 +1778,7 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 
     pdebug(DEBUG_WARN, "Attribute \"%s\" is unsupported!", attrib_name);
 
-    raw_tag->status = PLCTAG_ERR_UNSUPPORTED;
+    atomic_int_set(&(raw_tag->status), PLCTAG_ERR_UNSUPPORTED);
 
     return PLCTAG_ERR_UNSUPPORTED;
 }
