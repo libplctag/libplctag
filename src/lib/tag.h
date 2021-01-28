@@ -36,6 +36,7 @@
 
 #include <stdint.h>
 #include <lib/libplctag.h>
+#include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/mutex.h>
@@ -107,7 +108,6 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         uint8_t write_in_flight:1; \
                         uint8_t write_complete:1; \
                         uint8_t bit; \
-                        int8_t status; \
                         int32_t size; \
                         int32_t tag_id; \
                         int32_t auto_sync_read_ms; \
@@ -118,6 +118,7 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         mutex_p api_mutex; \
                         tag_vtable_p vtable; \
                         void (*callback)(int32_t tag_id, int event, int status); \
+                        atomic_int status; \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \
                         int64_t auto_sync_next_read; \
