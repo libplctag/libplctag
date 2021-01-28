@@ -56,13 +56,13 @@
 #define CIP_CMD_LIST_TAGS        ((uint8_t)0x55)
 
 /* flag set when command is OK */
-#define CIP_CMD_OK               ((uint8_t)0x80)
+#define CIP_CMD_OK                   ((uint8_t)0x80)
 
 #define CIP_STATUS_OK                ((uint8_t)0x00)
 #define CIP_STATUS_FRAG              ((uint8_t)0x06)
 
 #define CIP_ERR_UNSUPPORTED_SERVICE  ((uint8_t)0x08)
-#define CIP_ERR_PARTIAL_ERROR  ((uint8_t)0x1e)
+#define CIP_ERR_PARTIAL_ERROR        ((uint8_t)0x1e)
 
 
 /* vtable functions */
@@ -304,6 +304,12 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
             pdebug(DEBUG_WARN, "Error response %s (%s) from the PLC!", cip_decode_error_short(service_status, extended_err_status), cip_decode_error_long(service_status, extended_err_status));
             rc = cip_decode_error_code(service_status, extended_err_status);
+
+            /* this is an error we should report about the tag, but not kill the PLC over it. */
+            tag->base_tag.status = (int8_t)rc;
+            tag->trans_offset = 0;
+            rc = PLCTAG_STATUS_OK;
+
             break;
         }
 
@@ -546,6 +552,12 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
 
             pdebug(DEBUG_WARN, "Error response %s (%s) from the PLC!", cip_decode_error_short(service_status, extended_err_status), cip_decode_error_long(service_status, extended_err_status));
             rc = cip_decode_error_code(service_status, extended_err_status);
+
+            /* this is an error we should report about the tag, but not kill the PLC over it. */
+            tag->base_tag.status = (int8_t)rc;
+            tag->trans_offset = 0;
+            rc = PLCTAG_STATUS_OK;
+
             break;
         }
 
