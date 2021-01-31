@@ -38,83 +38,11 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,2,2
+#define REQUIRED_VERSION 2,2,1
 
-#define TAG_PATH "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@raw"
+#define TAG_PATH "protocol=ab-eip2&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@raw"
 #define DATA_TIMEOUT 5000
 
-typedef int32_t DINT;
-
-static volatile DINT *TestDINTArray = NULL;
-
-void tag_callback(int32_t tag_id, int event, int status)
-{
-    /* handle the events. */
-    switch(event) {
-        case PLCTAG_EVENT_ABORTED:
-            printf("Tag operation was aborted!\n");
-            break;
-
-        case PLCTAG_EVENT_DESTROYED:
-            if(TestDINTArray) {
-                free((void *)TestDINTArray);
-                TestDINTArray = NULL;
-            }
-            printf( "Tag was destroyed.\n");
-            break;
-
-        case PLCTAG_EVENT_READ_COMPLETED:
-            if(status == PLCTAG_STATUS_OK && TestDINTArray) {
-                int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
-                int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
-
-                for(int i = 0; i < elem_count; i++) {
-                    TestDINTArray[i] = plc_tag_get_int32(tag_id, (i * elem_size));
-                }
-            }
-
-            printf("Tag read operation completed with status %s.\n", plc_tag_decode_error(status));
-
-            break;
-
-        case PLCTAG_EVENT_READ_STARTED:
-            printf( "Tag read operation started.\n");
-            break;
-
-        case PLCTAG_EVENT_WRITE_COMPLETED:
-            if(status == PLCTAG_STATUS_OK) {
-                printf("Tag write operation completed.\n");
-            } else {
-                printf("Tag write operation failed with status %s!\n", plc_tag_decode_error(status));
-            }
-            break;
-
-        case PLCTAG_EVENT_WRITE_STARTED:
-            if(status == PLCTAG_STATUS_OK && TestDINTArray) {
-                int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
-                int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
-
-                for(int i = 0; i < elem_count; i++) {
-                    plc_tag_set_int32(tag_id, (i * elem_size), TestDINTArray[i]);
-                }
-            }
-
-            printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
-
-            break;
-
-        default:
-            printf("Unexpected event %d!\n", event);
-            break;
-
-    }
-}
-
-
-void log_callback(int32_t tag_id, int debug_level, const char *message)
-{
-    fprintf(stderr, "Log message of level %d for tag %d: %s", debug_level, tag_id, message);
-}
 
 int main()
 {
@@ -136,18 +64,20 @@ int main()
                               0x00,
                               0x02,
                               0x00,
-                              0x07
+                              0x07,
                               0x00,
                               0x08,
                               0x00,
                               0x01,
-                              0x00};
+                              0x00 };
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major, version_minor, version_patch);
         return 1;
     }
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
@@ -159,7 +89,7 @@ int main()
     }
 
     /* force the tag size. */
-    rc = plc_tag_set_int_attribute(tag, "payload_size", (int)(unsigned int)sizeof(raw_payload)));
+    rc = plc_tag_set_int_attribute(tag, "payload_size", (int)(unsigned int)sizeof(raw_payload));
     if(rc != PLCTAG_STATUS_OK) {
         printf( "Unable to set the payload size on the tag %s!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
