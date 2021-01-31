@@ -1605,19 +1605,30 @@ static int check_read_status_connected(ab_tag_p tag)
             payload_size = (data_end - data);
 
             /* copy the data into the tag and realloc if we need more space. */
-            if(payload_size + tag->offset > tag->size) {
+            rc = base_tag_resize_data((plc_tag_p)tag, (int)payload_size + tag->offset);
+            if(rc == PLCTAG_STATUS_OK) {
                 tag->size = (int)payload_size + tag->offset;
                 tag->elem_size = tag->size / tag->elem_count;
-
-                pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
-
-                tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
-                if(!tag->data) {
-                    pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                    break;
-                }
+            } else {
+                pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
+                break;
             }
+
+            // REMOVE
+            // if(payload_size + tag->offset > tag->size) {
+            //     ptrdiff_t new_size = payload_size + tag->offset
+            //     tag->size = (int)payload_size + tag->offset;
+            //     tag->elem_size = tag->size / tag->elem_count;
+
+            //     pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
+
+            //     tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
+            //     if(!tag->data) {
+            //         pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
+            //         rc = PLCTAG_ERR_NO_MEM;
+            //         break;
+            //     }
+            // }
 
             pdebug(DEBUG_INFO, "Got %d bytes of data", (int)payload_size);
 
