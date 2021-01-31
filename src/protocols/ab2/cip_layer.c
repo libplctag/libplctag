@@ -1173,13 +1173,13 @@ int encode_dhp_addr_segment(struct cip_layer_state_s *state, uint8_t *data, int 
         addr_len = str_length(addr);
 
         if(addr_len < 5) {
-            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", is too short to be a valid IP address.", addr);
+            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", is too short to be a DH+ element.", addr);
             rc = PLCTAG_ERR_NO_MATCH;
             break;
         }
 
         if(addr_len > 9) {
-            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", is too long to be a valid IP address.", addr);
+            pdebug(DEBUG_DETAIL, "Possible DH+ address segment, \"%s\", is too long to be a DH+ element.", addr);
             rc = PLCTAG_ERR_NO_MATCH;
             break;
         }
