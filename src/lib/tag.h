@@ -118,7 +118,7 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         mutex_p api_mutex; \
                         tag_vtable_p vtable; \
                         void (*callback)(int32_t tag_id, int event, int status); \
-                        atomic_int status; \
+                        atomic_int8 status; \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \
                         int64_t auto_sync_next_read; \
@@ -131,6 +131,11 @@ struct plc_tag_t {
 };
 
 #define PLC_TAG_P_NULL ((plc_tag_p)0)
+
+
+#define GET_STATUS(status_field) (int)atomic_int8_load(&(status_field))
+#define SET_STATUS(status_field, status) atomic_int8_store(&(status_field), (int8_t)(status))
+
 
 
 /* the following may need to be used where the tag is already mapped or is not yet mapped */

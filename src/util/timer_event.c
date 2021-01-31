@@ -33,6 +33,7 @@
 
 #include <stddef.h>
 #include <lib/libplctag.h>
+#include <util/bool.h>
 #include <util/debug.h>
 #include <util/event_loop.h>
 #include <util/mem.h>

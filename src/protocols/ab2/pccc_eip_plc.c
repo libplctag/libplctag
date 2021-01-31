@@ -55,7 +55,7 @@
 
 
 struct local_plc_context_s {
-    atomic_int tsn;
+    atomic_uint16 tsn;
 };
 
 
@@ -92,7 +92,7 @@ int pccc_eip_plc_get_tsn(plc_p plc, uint16_t *tsn)
     context = plc_get_context(plc);
 
     if(context) {
-        *tsn = (uint16_t)atomic_int_add_mask(&(context->tsn), 1, (unsigned int)0xFFFF);
+        *tsn = atomic_uint16_add(&(context->tsn), 1);
     } else {
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -140,7 +140,7 @@ int pccc_constructor(plc_p plc, attr attribs)
         return PLCTAG_ERR_NO_MEM;
     }
 
-    atomic_int_set(&(context->tsn), rand() & 0xFFFF);
+    atomic_uint16_store(&(context->tsn), (uint16_t)(rand() & 0xFFFF));
 
     /* set the context for this type of PLC. */
     rc = plc_set_context(plc, context, NULL);

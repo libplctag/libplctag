@@ -150,7 +150,7 @@ int plc5_tag_status(plc_tag_p tag_arg)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    rc = atomic_int_get(&(tag->base_tag.status));
+    rc = GET_STATUS(tag->base_tag.status);
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -258,7 +258,7 @@ int plc5_build_read_request_callback(void *context, uint8_t *buffer, int buffer_
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
-        atomic_int_set(&(tag->base_tag.status), rc);
+        SET_STATUS(tag->base_tag.status, rc);
         return rc;
     }
 
@@ -342,7 +342,7 @@ int plc5_handle_read_response_callback(void *context, uint8_t *buffer, int buffe
             /* done! */
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
-            atomic_int_set(&(tag->base_tag.status), rc);
+            SET_STATUS(tag->base_tag.status, rc);
         }
 
         *payload_start = *payload_end;
@@ -350,7 +350,7 @@ int plc5_handle_read_response_callback(void *context, uint8_t *buffer, int buffe
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, handling read response!", plc_tag_decode_error(rc));
-        atomic_int_set(&(tag->base_tag.status), rc);
+        SET_STATUS(tag->base_tag.status, rc);
         return rc;
     }
 
@@ -457,7 +457,7 @@ int plc5_build_write_request_callback(void *context, uint8_t *buffer, int buffer
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
-        atomic_int_set(&(tag->base_tag.status), rc);
+        SET_STATUS(tag->base_tag.status, rc);
         return rc;
     }
 
@@ -522,12 +522,12 @@ int plc5_handle_write_response_callback(void *context, uint8_t *buffer, int buff
             /* done! */
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
-            atomic_int_set(&(tag->base_tag.status), rc);
+            SET_STATUS(tag->base_tag.status, rc);
         }
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        atomic_int_set(&(tag->base_tag.status), rc);
+        SET_STATUS(tag->base_tag.status, rc);
         return rc;
     }
 

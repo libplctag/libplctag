@@ -33,6 +33,7 @@
 
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
+#include <util/bool.h>
 #include <util/event_loop.h>
 #include <util/debug.h>
 #include <util/lock.h>
@@ -48,7 +49,7 @@ static THREAD_FUNC(even_loop_handler);
 static lock_t event_loop_current_time_lock = LOCK_INIT;
 static int64_t event_loop_current_time = 0;
 
-static atomic_int library_shutdown = ATOMIC_INT_STATIC_INIT(0);
+static atomic_bool library_shutdown = ATOMIC_INT_STATIC_INIT(0);
 
 
 static void set_event_loop_time(int64_t new_time)
@@ -86,7 +87,7 @@ int event_loop_init(void)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    atomic_int_set(&library_shutdown, 0);
+    atomic_bool_store(&library_shutdown, FALSE);
 
     rc = timer_event_init();
     if(rc != PLCTAG_STATUS_OK) {
@@ -121,7 +122,7 @@ void event_loop_teardown(void)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* destroy the platform thread. */
-    atomic_int_set(&library_shutdown, 1);
+    atomic_bool_store(&library_shutdown, TRUE);
 
     rc = thread_join(event_loop_thread);
     if(rc != PLCTAG_STATUS_OK) {
@@ -138,7 +139,7 @@ void event_loop_teardown(void)
     event_loop_thread = NULL;
 
     /* reset the shutdown flag to make sure that the library can restart. */
-    atomic_int_set(&library_shutdown, 0);
+    atomic_bool_store(&library_shutdown, FALSE);
 
     socket_event_loop_teardown();
 
@@ -175,7 +176,7 @@ THREAD_FUNC(even_loop_handler)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    while(! atomic_int_get(&library_shutdown)) {
+    while(atomic_bool_load(&library_shutdown) == FALSE) {
         event_loop_tickler();
     }
 

@@ -143,15 +143,3 @@
 #define container_of(ptr, type, member) ((type *)((char *)(1 ? (ptr) : &((type *)0)->member) - offsetof(type, member)))
 #endif
 
-/* handle bools */
-#ifndef bool
-    typedef int bool;
-#endif
-
-#ifndef TRUE
-    #define TRUE (1)
-#endif
-
-#ifndef FALSE
-    #define FALSE (0)
-#endif

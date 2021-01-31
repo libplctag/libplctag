@@ -39,6 +39,7 @@
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
+#include <util/bool.h>
 #include <util/debug.h>
 #include <util/mem.h>
 #include <util/mutex.h>

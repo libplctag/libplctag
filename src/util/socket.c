@@ -81,6 +81,12 @@
 #define TICKLER_MAX_WAIT_TIME_MS (50)
 
 
+#define MAX_RECALC_FD_SET_PRESSURE (10)
+
+
+#define SET_STATUS(status_field, status) atomic_int8_store(&(status_field), (int8_t)(status))
+#define GET_STATUS(status_field) (int)atomic_int8_load(&(status_field))
+
 enum {
     CONNECTION_THREAD_NOT_RUNNING,
     CONNECTION_THREAD_RUNNING,
@@ -97,7 +103,7 @@ struct sock_t {
     int port;
     const char *host;
 
-    atomic_int status;
+    atomic_int8 status;
 
     /* callbacks for events. */
     thread_p connection_thread;
@@ -128,8 +134,8 @@ static int wake_fds[2] = { INVALID_SOCKET, INVALID_SOCKET};
 static fd_set global_read_fds;
 static fd_set global_write_fds;
 static int max_socket_fd = -1;
-static atomic_bool need_recalculate_socket_fd_sets = ATOMIC_BOOL_STATIC_INIT(1);
-static atomic_int global_connection_thread_done = ATOMIC_INT_STATIC_INIT(0);
+static atomic_int32 recalculate_fd_set_pressure = ATOMIC_BOOL_STATIC_INIT(1);
+static atomic_int32 connect_thread_complete_count = ATOMIC_INT_STATIC_INIT(0);
 
 #define MAX_IPS (8)
 
@@ -156,7 +162,7 @@ int socket_create(sock_p *sock)
 
     /* set up connection callback support */
     (*sock)->connection_thread = NULL;
-    atomic_bool_set(&((*sock)->connection_thread_done), FALSE);
+    atomic_bool_store(&((*sock)->connection_thread_done), FALSE);
     (*sock)->connection_ready_callback = NULL;
     (*sock)->connection_ready_context = NULL;
 
@@ -229,7 +235,7 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     }
 #endif
 
-    timeout.tv_sec = 10;
+    timeout.tv_sec = 10; /* MAGIC */
     timeout.tv_usec = 0;
 
     if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
@@ -523,10 +529,10 @@ extern int socket_close(sock_p sock)
 
         /* force a recalculation of the FD set and max socket if we are the top one. */
         if(sock->fd >= max_socket_fd) {
-            atomic_int_add(&need_recalculate_socket_fd_sets, 10);
+            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)MAX_RECALC_FD_SET_PRESSURE);
         } else {
             /* not as urgent, recalculate eventually. */
-            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
         }
 
         /* close the socket fd */
@@ -618,7 +624,7 @@ int socket_destroy(sock_p *sock)
 int socket_status(sock_p sock)
 {
     if(sock) {
-        return (int)(unsigned int)atomic_int_get(&(sock->status));
+        return GET_STATUS(sock->status);
     } else {
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -635,7 +641,7 @@ THREAD_FUNC(socket_connection_thread_func)
     rc = socket_tcp_connect(sock, sock->host, sock->port);
 
     /* save our status for other callers. */
-    atomic_int_set(&(sock->status), rc);
+    SET_STATUS(sock->status, rc);
 
     if(rc == PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO, "Blocking TCP connect call to %s:%d complete.", sock->host, sock->port);
@@ -650,8 +656,8 @@ THREAD_FUNC(socket_connection_thread_func)
     }
 
     /* set a flag so that the system knows we are done. */
-    atomic_bool_set(&(sock->connection_thread_done), TRUE);
-    atomic_int_add(&global_connection_thread_done, 1);
+    atomic_bool_store(&(sock->connection_thread_done), TRUE);
+    atomic_int32_add(&connect_thread_complete_count, (int32_t)1);
 
     /* make sure the event thread cleans up this thread soon. */
     socket_event_loop_wake();
@@ -696,10 +702,10 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
         sock->connection_ready_context = context;
 
         /* set the flag so that we know the connection thread is running. */
-        atomic_bool_set(&(sock->connection_thread_done), FALSE);
+        atomic_bool_store(&(sock->connection_thread_done), FALSE);
 
         /* set the socket status that we are in flight. */
-        atomic_int_set(&(sock->status), PLCTAG_STATUS_PENDING);
+        SET_STATUS(sock->status, PLCTAG_STATUS_PENDING);
 
         /* set up the connection thread. */
         rc = thread_create(&(sock->connection_thread), socket_connection_thread_func, 32768, sock);
@@ -707,8 +713,8 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
             pdebug(DEBUG_WARN, "Unable to create background connection thread!");
 
             sock->connection_thread = NULL;
-            atomic_int_set(&(sock->status), rc);
-            atomic_bool_set(&(sock->connection_thread_done), TRUE);
+            SET_STATUS(sock->status, rc);
+            atomic_bool_store(&(sock->connection_thread_done), TRUE);
 
             break;
         }
@@ -739,26 +745,26 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
             pdebug(DEBUG_DETAIL, "Setting up new read complete callback.");
 
             /* set the socket status that we are in flight. */
-            atomic_int_set(&(sock->status), PLCTAG_STATUS_PENDING);
+            SET_STATUS(sock->status, PLCTAG_STATUS_PENDING);
 
             /* set the FD set and max socket level. */
             FD_SET(sock->fd, &global_read_fds);
             max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
 
-            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
         } else {
             pdebug(DEBUG_DETAIL, "Clearing read complete callback.");
 
             /* set the socket status that we are NOT in flight. */
-            atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+            SET_STATUS(sock->status, PLCTAG_STATUS_OK);
 
             FD_CLR(sock->fd, &global_read_fds);
             if(sock->fd >= max_socket_fd) {
                 /* the top FD has possibly changed, force a recalculation. */
-                atomic_int_add(&need_recalculate_socket_fd_sets, 10);
+                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)MAX_RECALC_FD_SET_PRESSURE);
             } else {
                 /* there was a change, so raise the need for recalculation. */
-                atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
             }
         }
 
@@ -793,23 +799,23 @@ int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context)
         /* if we are enabling the event, set the FD and raise the recalc count. */
         if(callback) {
             /* set the socket status that we are in flight. */
-            atomic_int_set(&(sock->status), PLCTAG_STATUS_PENDING);
+            SET_STATUS(sock->status, PLCTAG_STATUS_PENDING);
 
             FD_SET(sock->fd, &global_write_fds);
             max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
 
-            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
         } else {
             /* set the socket status that we are NOT in flight. */
-            atomic_int_set(&(sock->status), PLCTAG_STATUS_OK);
+            SET_STATUS(sock->status, PLCTAG_STATUS_OK);
 
             FD_CLR(sock->fd, &global_write_fds);
             if(sock->fd >= max_socket_fd) {
                 /* the top FD has possibly changed, force a recalculation. */
-                atomic_int_add(&need_recalculate_socket_fd_sets, 10);
+                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)MAX_RECALC_FD_SET_PRESSURE);
             } else {
                 /* there was a change, so raise the need for recalculation. */
-                atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
             }
         }
 
@@ -1095,8 +1101,8 @@ void socket_event_loop_wake(void)
 
 void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 {
-    int recalc_count = 0;
-    int connection_thread_cleanup_count = 0;
+    int32_t recalc_count = 0;
+    int32_t connection_thread_cleanup_count = 0;
     TIMEVAL timeval_wait;
     int64_t wait_time_ms = next_wake_time - current_time;
     fd_set local_read_fds;
@@ -1107,9 +1113,9 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     pdebug(DEBUG_SPEW, "Starting.");
 
     /* do we need to recalculate fd sets for the sockets? */
-    recalc_count = atomic_bool_get(&need_recalculate_socket_fd_sets);
+    recalc_count = atomic_int32_load(&recalculate_fd_set_pressure);
     // DEBUG FIXME
-    if(1 || recalc_count >= 10) {
+    if(recalc_count >= MAX_RECALC_FD_SET_PRESSURE) {
         pdebug(DEBUG_DETAIL, "Recalculating the select fd sets.");
 
         critical_block(socket_event_mutex) {
@@ -1153,18 +1159,18 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
          * This handles the race condition that the counter changes
          * after we recalculate and before we reset the counter.
          */
-        atomic_int_add(&need_recalculate_socket_fd_sets, -recalc_count);
+        atomic_int32_sub(&recalculate_fd_set_pressure, recalc_count);
     }
 
     /* do we need to clean up any dead connection threads? */
-    connection_thread_cleanup_count = (int)atomic_int_get(&global_connection_thread_done);
+    connection_thread_cleanup_count = atomic_int32_load(&connect_thread_complete_count);
     if(connection_thread_cleanup_count > 0) {
         critical_block(socket_event_mutex) {
             sock_p sock = socket_list;
 
             while(sock) {
                 /* does this socket have a completed connection thread? */
-                if(sock->connection_thread && (atomic_bool_get(&(sock->connection_thread_done)) == TRUE)) {
+                if(sock->connection_thread && (atomic_bool_load(&(sock->connection_thread_done)) == TRUE)) {
                     pdebug(DEBUG_INFO, "Cleaning up connection thread for socket %s:%d.", sock->host, sock->port);
                     thread_join(sock->connection_thread);
                     thread_destroy(&(sock->connection_thread));
@@ -1182,7 +1188,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
          * This handles the race condition that the counter changes
          * after we recalculate and before we reset the counter.
          */
-        atomic_int_add(&global_connection_thread_done, -connection_thread_cleanup_count);
+        atomic_int32_sub(&connect_thread_complete_count, connection_thread_cleanup_count);
     }
 
     /* copy the fd sets safely */
@@ -1229,7 +1235,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     // }
 
     // FIXME DEBUG
-    if(1  || num_signaled_fds > 0) {
+    if(num_signaled_fds > 0) {
         /* Were we woken up by the waker channel? */
         if(FD_ISSET(wake_fds[0], &local_read_fds)) {
             uint8_t dummy[48];
@@ -1246,8 +1252,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
         }
 
         /* is there still work to do? */
-        // FIXME DEBUG
-        if(1 && num_signaled_fds > 0) {
+        if(num_signaled_fds > 0) {
             /* the callbacks can mutate the socket list and the global FD sets. */
             critical_block(socket_event_mutex) {
                 /* loop, but use an iterator so that sockets can be closed while in the mutex. */
@@ -1287,10 +1292,10 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             sock->read_done_callback = NULL;
 
                             /* tickle the recalculation. */
-                            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+                            atomic_int32_add(&recalculate_fd_set_pressure, (uint32_t)1);
 
                             /* set up state. */
-                            atomic_int_set(&(sock->status), rc);
+                            SET_STATUS(sock->status, rc);
 
                             /* call the callback either way. */
                             if(callback) {
@@ -1340,10 +1345,11 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             FD_CLR(sock->fd, &global_write_fds);
                             sock->write_done_callback = NULL;
 
-                            atomic_int_add(&need_recalculate_socket_fd_sets, 1);
+                            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
 
                             /* call the callback */
-                            atomic_int_set(&(sock->status), rc);
+                            SET_STATUS(sock->status, rc);
+
                             if(callback) {
                                 callback(sock->write_done_context);
                             } else {
@@ -1399,7 +1405,7 @@ int socket_event_loop_init(void)
     socket_list = NULL;
     global_socket_iterator = NULL;
 
-    atomic_int_set(&global_connection_thread_done, 0);
+    atomic_int32_store(&connect_thread_complete_count, (uint32_t)0);
 
     /* create the socket mutex. */
     rc = mutex_create(&socket_event_mutex);
@@ -1437,7 +1443,7 @@ void socket_event_loop_teardown(void)
     socket_list = NULL;
     global_socket_iterator = NULL;
 
-    atomic_bool_set(&need_recalculate_socket_fd_sets, 0);
+    atomic_int32_store(&recalculate_fd_set_pressure, (int32_t)0);
 
     destroy_event_wakeup_channel();
 
