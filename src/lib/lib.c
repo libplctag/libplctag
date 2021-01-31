@@ -1232,6 +1232,29 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             break;
         }
 
+
+/*
+STOPPED here
+
+Release the API mutex after starting the read.
+
+Then go into timeout loop.  In loop check tag status via GET_STATUS() macro.   Return on
+timeout or error.  Let background thread run tickler.
+
+Do not call the tag tickler.   The background thread will
+do that, or we can use the timer_event API.  Check performance.
+
+Background thread running tickler should set tag state (read_in_flight etc. flags) correctly
+as it is already done for async code.
+
+Eventually use conditional vars per tag to avoid sleep_ms() calls.
+
+Perhaps introduce plc_tag_wait_for_tags(int32_t tags[], int num_tags, int timeout) API?  Difficult to do
+under Windows with 64-object limit.
+
+Use callbacks?
+*/
+
         /*
          * if there is a timeout, then loop until we get
          * an error or we timeout.
