@@ -84,12 +84,7 @@ static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
 static int set_tag_byte_order(plc_tag_p tag, attr attribs);
 static int check_byte_order_str(const char *byte_order, int length);
-// static int get_string_count_size_unsafe(plc_tag_p tag, int offset);
 static int get_string_length_unsafe(plc_tag_p tag, int offset);
-// static int get_string_capacity_unsafe(plc_tag_p tag, int offset);
-// static int get_string_padding_unsafe(plc_tag_p tag, int offset);
-// static int get_string_total_length_unsafe(plc_tag_p tag, int offset);
-// static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
 
 #ifdef PLATFORM_IS_WINDOWS
