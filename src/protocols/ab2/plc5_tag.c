@@ -340,8 +340,18 @@ int plc5_handle_read_response_callback(void *context, uint8_t *buffer, int buffe
             }
         } else {
             /* done! */
+            pdebug(DEBUG_DETAIL, "Read complete.");
+
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
+
+            /* clear any in-flight flags. */
+            critical_block(tag->base_tag.api_mutex) {
+                tag->base_tag.read_complete = 0;
+                tag->base_tag.read_in_flight = 0;
+            }
+
+            /* set the status last as that triggers the waiting thread. */
             SET_STATUS(tag->base_tag.status, rc);
         }
 
@@ -520,8 +530,18 @@ int plc5_handle_write_response_callback(void *context, uint8_t *buffer, int buff
             }
         } else {
             /* done! */
+            pdebug(DEBUG_DETAIL, "Write complete.");
+
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
+
+            /* clear any in-flight flags. */
+            critical_block(tag->base_tag.api_mutex) {
+                tag->base_tag.write_complete = 0;
+                tag->base_tag.write_in_flight = 0;
+            }
+
+            /* set the status last as that triggers the waiting thread. */
             SET_STATUS(tag->base_tag.status, rc);
         }
     } while(0);

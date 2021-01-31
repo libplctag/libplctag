@@ -392,8 +392,18 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
             }
         } else {
             /* done! */
+            pdebug(DEBUG_DETAIL, "Read complete.");
+
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
+
+            /* clear any in-flight flags. */
+            critical_block(tag->base_tag.api_mutex) {
+                tag->base_tag.read_complete = 0;
+                tag->base_tag.read_in_flight = 0;
+            }
+
+            /* set the status last as that triggers the waiting thread. */
             SET_STATUS(tag->base_tag.status, rc);
         }
 
@@ -580,8 +590,18 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
             }
         } else {
             /* done! */
+            pdebug(DEBUG_DETAIL, "Write complete.");
+
             tag->trans_offset = 0;
             rc = PLCTAG_STATUS_OK;
+
+            /* clear any in-flight flags. */
+            critical_block(tag->base_tag.api_mutex) {
+                tag->base_tag.write_complete = 0;
+                tag->base_tag.write_in_flight = 0;
+            }
+
+            /* set the status last as that triggers the waiting thread. */
             SET_STATUS(tag->base_tag.status, rc);
         }
     } while(0);
@@ -678,10 +698,26 @@ int raw_cip_handle_response_callback(void *context, uint8_t *buffer, int buffer_
         tag->trans_offset = (uint32_t)(int32_t)(resp_data_size);
 
         *payload_start = *payload_end;
+
+        pdebug(DEBUG_DETAIL, "Raw CIP operation complete.");
+
+        tag->trans_offset = 0;
+        rc = PLCTAG_STATUS_OK;
+
+        /* clear any in-flight flags. */
+        critical_block(tag->base_tag.api_mutex) {
+            tag->base_tag.read_complete = 0;
+            tag->base_tag.read_in_flight = 0;
+            tag->base_tag.write_complete = 0;
+            tag->base_tag.write_in_flight = 0;
+        }
+
+        /* set the status last as that triggers the waiting thread. */
+        SET_STATUS(tag->base_tag.status, rc);
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error, %s, handling read response!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Error, %s, handling raw CIP response!", plc_tag_decode_error(rc));
         SET_STATUS(tag->base_tag.status, rc);
         return rc;
     }
