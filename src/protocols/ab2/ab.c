@@ -505,7 +505,7 @@ int cip_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_v
     int res = default_value;
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting for attribute \"%s\".", attrib_name);
 
     /* assume we have a match. */
     SET_STATUS(tag->base_tag.status, PLCTAG_STATUS_OK);
@@ -519,13 +519,14 @@ int cip_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_v
         res = plc_get_idle_timeout(tag->plc);
     } else if((tag->is_raw_tag == TRUE) && (str_cmp_i(attrib_name, "payload_size") == 0)) {
         res = (int)(int32_t)tag->trans_offset;
+        pdebug(DEBUG_DETAIL, "Returning %d result for payload_size.", res);
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         SET_STATUS(tag->base_tag.status, PLCTAG_ERR_UNSUPPORTED);
         return default_value;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done for attribute \"%s\".", attrib_name);
 
     return res;
 }
@@ -536,7 +537,7 @@ int cip_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value
     int rc = PLCTAG_STATUS_OK;
     cip_tag_p tag = (cip_tag_p)raw_tag;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting for attribute \"%s\".", attrib_name);
 
     if(str_cmp_i(attrib_name, "idle_timeout_ms") == 0) {
         rc = plc_set_idle_timeout(tag->plc, new_value);
@@ -580,7 +581,7 @@ int cip_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value
         SET_STATUS(tag->base_tag.status, rc);
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done for attribute \"%s\".", attrib_name);
 
     return rc;
 }
