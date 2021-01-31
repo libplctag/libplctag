@@ -4079,3 +4079,39 @@ void base_tag_destroy(void *tag_arg)
 
     pdebug(DEBUG_INFO, "Done.");
 }
+
+
+int base_tag_resize_data(plc_tag_p tag, int new_size)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    critical_block(tag->api_mutex) {
+        if((int32_t)new_size > tag->size) {
+            uint8_t *new_data = NULL;
+
+            pdebug(DEBUG_INFO, "Expanding tag data buffer from %" PRId32 " to %d bytes.", tag->size, new_size);
+
+            /* TODO - refactor this out into a common function */
+            new_data = mem_realloc(tag->data, new_size);
+            if(new_data != NULL) {
+                tag->data = new_data;
+                tag->size = (int32_t)new_size;
+            } else {
+                pdebug(DEBUG_WARN, "Unable to allocate memory for new tag data buffer!");
+                rc = PLCTAG_ERR_NO_MEM;
+                break;
+            }
+        }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to resize data buffer, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
