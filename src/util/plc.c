@@ -376,7 +376,7 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
             }
 
             /* start the idle heartbeat_timer */
-            rc = timer_event_wake_at(plc->heartbeat_timer, time_ms() + PLC_HEARTBEAT_INTERVAL_MS, (void (*)(void*))plc_state_runner, plc);
+            rc = timer_event_wake_at(plc->heartbeat_timer, time_ms() + PLC_HEARTBEAT_INTERVAL_MS, (void (*)(void*))plc_heartbeat, plc);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Unable to start heartbeat timer, error %s for PLC %s!", plc_tag_decode_error(rc), plc->key);
 
