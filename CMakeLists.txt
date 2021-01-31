@@ -384,6 +384,7 @@ else()
                             busy_test
                             data_dumper
                             list_tags
+                            list_tags_raw
                             multithread
                             multithread_cached_read
                             multithread_plc5
@@ -415,6 +416,7 @@ else()
         set ( example_PROGRAMS async
                             async_stress
                             list_tags
+                            list_tags_raw
                             plc5
                             simple
                             simple_dual
