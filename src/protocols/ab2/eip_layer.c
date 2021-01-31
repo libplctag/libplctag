@@ -48,6 +48,7 @@
 #define EIP_VERSION ((uint16_t)1)
 
 #define EIP_HEADER_SIZE (24)
+#define MAX_EIP_PAYLOAD_SIZE (0x10000) /* 64k */
 #define SESSION_REQUEST_SIZE (28)
 #define SESSION_REQUEST_RESPONSE_SIZE (28)
 
@@ -232,7 +233,13 @@ int eip_layer_reserve_space(void *context, uint8_t *buffer, int buffer_capacity,
 
     /* set the payload boundaries for the next layer up. */
     *payload_start = EIP_HEADER_SIZE;
-    *payload_end = buffer_capacity;
+
+    if(buffer_capacity < (MAX_EIP_PAYLOAD_SIZE + EIP_HEADER_SIZE)) {
+        *payload_end = buffer_capacity;
+    } else {
+        pdebug(DEBUG_DETAIL, "Clamping total packet payload capacity to 64k for EIP.");
+        *payload_end = MAX_EIP_PAYLOAD_SIZE  + EIP_HEADER_SIZE;
+    }
 
     state->payload_start = *payload_start;
 
@@ -240,6 +247,7 @@ int eip_layer_reserve_space(void *context, uint8_t *buffer, int buffer_capacity,
 
     return rc;
 }
+
 
 
 /* called top down, the payload end is the end of the whole packet.  */
