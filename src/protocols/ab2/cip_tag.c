@@ -701,7 +701,6 @@ int raw_cip_handle_response_callback(void *context, uint8_t *buffer, int buffer_
 
         pdebug(DEBUG_DETAIL, "Raw CIP operation complete.");
 
-        tag->trans_offset = 0;
         rc = PLCTAG_STATUS_OK;
 
         /* clear any in-flight flags. */
