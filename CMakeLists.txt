@@ -397,6 +397,7 @@ else()
                             string
                             test_auto_sync
                             test_callback
+                            test_raw_cip
                             test_reconnect
                             test_shutdown
                             test_special
@@ -420,6 +421,7 @@ else()
                             slc500
                             string
                             test_callback
+                            test_raw_cip
                             test_shutdown
                             test_special
                             test_tag_attributes
