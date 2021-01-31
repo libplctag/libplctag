@@ -363,6 +363,12 @@ plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
         pdebug(DEBUG_INFO, "Raw CIP tag found.");
         tag->is_raw_tag = TRUE;
         tag->elem_size = 1;
+
+        tag->encoded_name = NULL;
+        tag->encoded_name_length = 0;
+
+        tag->base_tag.is_bit = 0;
+        tag->base_tag.bit = 0;
     } else {
         tag->is_raw_tag = FALSE;
 
