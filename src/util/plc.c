@@ -647,20 +647,29 @@ int plc_set_buffer_size(plc_p plc, int buffer_size)
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
-    if(buffer_size <= 0 || buffer_size > 65536) {
-        pdebug(DEBUG_WARN, "Illegal buffer size value %d!", buffer_size);
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    if(buffer_size <= 0) {
+        pdebug(DEBUG_WARN, "Illegal buffer size value %d, must be a positive number of bytes!", buffer_size);
+        return PLCTAG_ERR_TOO_SMALL;
     }
 
+    /* only resize up for now. */
+    /* TODO - do we want to allow downsizing the buffer? */
     critical_block(plc->plc_mutex) {
-        plc->data = mem_realloc(plc->data, buffer_size);
-        if(!plc->data) {
-            pdebug(DEBUG_WARN, "Unable to reallocate memory for data buffer!");
-            rc = PLCTAG_ERR_NO_MEM;
-            break;
-        }
+        /* do we need to resize the buffer? */
+        if(buffer_size > plc->data_capacity) {
+            pdebug(DEBUG_DETAIL, "Resizing the buffer from %d bytes to %d bytes.", plc->data_capacity, buffer_size);
 
-        plc->data_capacity = buffer_size;
+            plc->data = mem_realloc(plc->data, buffer_size);
+            if(!plc->data) {
+                pdebug(DEBUG_WARN, "Unable to reallocate memory for data buffer!");
+                rc = PLCTAG_ERR_NO_MEM;
+                break;
+            }
+
+            plc->data_capacity = buffer_size;
+        } else {
+            pdebug(DEBUG_DETAIL, "Buffer already %d which is greater than the requested %d bytes.", plc->data_capacity, buffer_size);
+        }
     }
 
     if(rc != PLCTAG_STATUS_OK) {
