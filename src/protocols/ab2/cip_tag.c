@@ -350,23 +350,31 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
         resp_data_size = *payload_end - offset;
 
-        /* check to see if the response fits. */
-        if(((int32_t)tag->trans_offset + (int32_t)resp_data_size) > tag->base_tag.size) {
-            uint8_t *new_data = NULL;
-            int total_bytes = (int)(unsigned int)tag->trans_offset + resp_data_size;
-
-            pdebug(DEBUG_INFO, "Expanding tag data buffer from %" PRId32 " to %d bytes.", tag->base_tag.size, total_bytes);
-
-            new_data = mem_realloc(tag->base_tag.data, total_bytes);
-            if(new_data != NULL) {
-                tag->base_tag.data = new_data;
-                tag->base_tag.size = total_bytes;
-            } else {
-                pdebug(DEBUG_WARN, "Unable to allocate memory for new tag data buffer!");
-                rc = PLCTAG_ERR_NO_MEM;
-                break;
-            }
+        /* resize the tag buffer, if needed. */
+        rc = base_tag_resize_data((plc_tag_p)tag, (int)(unsigned int)(tag->trans_offset) + resp_data_size);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
+            break;
         }
+
+        // REMOVE
+        // /* check to see if the response fits. */
+        // if(((int32_t)tag->trans_offset + (int32_t)resp_data_size) > tag->base_tag.size) {
+        //     uint8_t *new_data = NULL;
+        //     int total_bytes = (int)(unsigned int)tag->trans_offset + resp_data_size;
+
+        //     pdebug(DEBUG_INFO, "Expanding tag data buffer from %" PRId32 " to %d bytes.", tag->base_tag.size, total_bytes);
+
+        //     new_data = mem_realloc(tag->base_tag.data, total_bytes);
+        //     if(new_data != NULL) {
+        //         tag->base_tag.data = new_data;
+        //         tag->base_tag.size = total_bytes;
+        //     } else {
+        //         pdebug(DEBUG_WARN, "Unable to allocate memory for new tag data buffer!");
+        //         rc = PLCTAG_ERR_NO_MEM;
+        //         break;
+        //     }
+        // }
 
         for(int i=0; i < resp_data_size; i++) {
             TRY_GET_BYTE(buffer, buffer_capacity, offset, tag->base_tag.data[tag->trans_offset + (uint32_t)i]);
@@ -602,25 +610,24 @@ int raw_cip_build_request_callback(void *context, uint8_t *buffer, int buffer_ca
     cip_tag_p tag = (cip_tag_p)context;
     int req_off = *payload_start;
     int max_trans_size = 0;
-    // int num_elems = 0;
-    // int trans_size = 0;
+    int trans_size = 0;
 
     (void)buffer_capacity;
     (void)req_id;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-
     do {
+        trans_size = (int)(unsigned int)(tag->trans_offset);
         max_trans_size = *payload_end - *payload_start;
 
-        if(max_trans_size < tag->base_tag.size) {
+        if(max_trans_size < trans_size) {
             pdebug(DEBUG_WARN, "Tag raw CIP command too large to fit!");
-            rc = PLCTAG_ERR_TOO_SMALL;
+            rc = PLCTAG_ERR_TOO_LARGE;
             break;
         }
 
-        for(int index=0; index < (int)tag->base_tag.size; index++) {
+        for(int index=0; index < trans_size; index++) {
             TRY_SET_BYTE(buffer, *payload_end, req_off, tag->base_tag.data[index]);
         }
 
@@ -656,26 +663,19 @@ int raw_cip_handle_response_callback(void *context, uint8_t *buffer, int buffer_
     do {
         resp_data_size = *payload_end - *payload_start;
 
-        /* check to see if the response fits. */
-        if(resp_data_size > tag->base_tag.size) {
-            uint8_t *new_data = NULL;
-
-            pdebug(DEBUG_INFO, "Expanding tag data buffer from %" PRId32 " to %d bytes.", tag->base_tag.size, resp_data_size);
-
-            new_data = mem_realloc(tag->base_tag.data, resp_data_size);
-            if(new_data != NULL) {
-                tag->base_tag.data = new_data;
-                tag->base_tag.size = resp_data_size;
-            } else {
-                pdebug(DEBUG_WARN, "Unable to allocate memory for new tag data buffer!");
-                rc = PLCTAG_ERR_NO_MEM;
-                break;
-            }
+        /* resize the tag's data buffer. */
+        rc = base_tag_resize_data((plc_tag_p)tag, resp_data_size);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
+            break;
         }
 
         for(int index=0; index < resp_data_size; index++) {
             TRY_GET_BYTE(buffer, buffer_capacity, offset, tag->base_tag.data[index]);
         }
+
+        /* save the payload size in the tag. */
+        tag->trans_offset = (uint32_t)(int32_t)(resp_data_size);
 
         *payload_start = *payload_end;
     } while(0);
