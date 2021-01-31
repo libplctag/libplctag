@@ -1166,7 +1166,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
-    int is_done = 0;
+    bool is_done = FALSE;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -1191,21 +1191,21 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         if(tag->read_cache_expire > time_ms()) {
             pdebug(DEBUG_INFO, "Returning cached data.");
             rc = PLCTAG_STATUS_OK;
-            is_done = 1;
+            is_done = TRUE;
             break;
         }
 
         if(tag->read_in_flight || tag->write_in_flight) {
             pdebug(DEBUG_WARN, "An operation is already in flight!");
             rc = PLCTAG_ERR_BUSY;
-            is_done = 1;
+            is_done = TRUE;
             break;
         }
 
         if(tag->tag_is_dirty) {
             pdebug(DEBUG_WARN, "Tag has locally updated data that will be overwritten!");
             rc = PLCTAG_ERR_BUSY;
-            is_done = 1;
+            is_done = TRUE;
             break;
         }
 
@@ -1228,9 +1228,10 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             }
 
             tag->read_in_flight = 0;
-            is_done = 1;
+            is_done = TRUE;
             break;
         }
+    } /* end of mutex block */
 
 
 /*
@@ -1255,60 +1256,63 @@ under Windows with 64-object limit.
 Use callbacks?
 */
 
-        /*
-         * if there is a timeout, then loop until we get
-         * an error or we timeout.
-         */
-        if(timeout) {
-            int64_t timeout_time = timeout + time_ms();
-            int64_t start_time = time_ms();
+    /*
+        * if there is a timeout, then loop until we get
+        * an error or we timeout.
+        */
+    if(rc == PLCTAG_STATUS_PENDING && timeout > 0) {
+        int64_t timeout_time = timeout + time_ms();
+        int64_t start_time = time_ms();
 
-            while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
-                /* give some time to the tickler function. */
-                if(tag->vtable->tickler) {
-                    tag->vtable->tickler(tag);
-                }
+        while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
+            /* give some time to the tickler function. */
+            // if(tag->vtable->tickler) {
+            //     tag->vtable->tickler(tag);
+            // }
 
-                rc = tag->vtable->status(tag);
-
-                /*
-                 * terminate early and do not wait again if the
-                 * IO is done.
-                 */
-                if(rc != PLCTAG_STATUS_PENDING) {
-                    break;
-                }
-
-                sleep_ms(1); /* MAGIC */
-            }
+            // rc = tag->vtable->status(tag);
+            rc = plc_tag_status(id);
 
             /*
-             * if we dropped out of the while loop but the status is
-             * still pending, then we timed out.
-             *
-             * Abort the operation and set the status to show the timeout.
-             */
-            if(rc != PLCTAG_STATUS_OK) {
-                /* abort the request. */
-                if(tag->vtable->abort) {
-                    tag->vtable->abort(tag);
-                }
-
-                /* translate error if we are still pending. */
-                if(rc == PLCTAG_STATUS_PENDING) {
-                    pdebug(DEBUG_WARN, "Read operation timed out.");
-                    rc = PLCTAG_ERR_TIMEOUT;
-                }
+                * terminate early and do not wait again if the
+                * IO is done.
+                */
+            if(rc != PLCTAG_STATUS_PENDING) {
+                break;
             }
 
-            /* we are done. */
-            tag->read_complete = 0;
-            tag->read_in_flight = 0;
-            is_done = 1;
-
-            pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms",(time_ms()-start_time));
+            sleep_ms(1); /* MAGIC */
         }
-    } /* end of api mutex block */
+
+        /*
+         * if we dropped out of the while loop but the status is
+         * still pending, then we timed out.
+         *
+         * Abort the operation and set the status to show the timeout.
+         */
+        if(rc != PLCTAG_STATUS_OK) {
+            /* abort the request. */
+            // if(tag->vtable->abort) {
+            //     tag->vtable->abort(tag);
+            // }
+
+            /* translate error if we are still pending. */
+            if(rc == PLCTAG_STATUS_PENDING) {
+                pdebug(DEBUG_WARN, "Read operation timed out.");
+                rc = PLCTAG_ERR_TIMEOUT;
+            }
+
+            /* regardless, we abort anything in flight. */
+            plc_tag_abort(id);
+        }
+
+        /* we are done. */
+        // tag->read_complete = 0;
+        // tag->read_in_flight = 0;
+        is_done = TRUE;
+
+        pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms",(time_ms()-start_time));
+    }
 
     if(rc == PLCTAG_STATUS_OK) {
         /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
@@ -1316,7 +1320,7 @@ Use callbacks?
     }
 
     if(tag->callback) {
-        if(is_done) {
+        if(is_done == TRUE) {
             pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
             tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
         }
