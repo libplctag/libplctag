@@ -48,6 +48,7 @@
 #include <util/hashtable.h>
 #include <util/mem.h>
 #include <util/mutex.h>
+#include <util/platform.h>
 #include <util/thread.h>
 #include <util/time.h>
 #include <util/sleep.h>
@@ -91,7 +92,7 @@ static int get_string_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
 
-#if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
+#ifdef PLATFORM_IS_WINDOWS
 #include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {

@@ -33,7 +33,7 @@
 
 #include "compat.h"
 
-#if IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
     #include <winsock2.h>
     #include <ws2tcpip.h>
 #else
@@ -74,7 +74,7 @@ int socket_open(const char *host, const char *port)
     int sock_opt = 0;
     int rc;
 
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
 	/* Windows needs special initialization. */
 	static WSADATA winsock_data;
 	rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
@@ -213,7 +213,7 @@ int socket_open(const char *host, const char *port)
 void socket_close(int sock)
 {
     if(sock >= 0) {
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
         closesocket(sock);
 #else
         close(sock);
@@ -225,7 +225,7 @@ void socket_close(int sock)
 int socket_accept(int sock)
 {
     fd_set accept_fd_set;
-    TIMEVAL timeout; 
+    TIMEVAL timeout;
     int num_accept_ready = 0;
 
     /* set the timeout to zero */
@@ -248,7 +248,7 @@ int socket_accept(int sock)
     } else if (num_accept_ready < 0) {
         info("Error selecting the listen socket!");
         return SOCKET_ERR_SELECT;
-    } 
+    }
 
     return SOCKET_STATUS_OK;
 }
@@ -256,14 +256,14 @@ int socket_accept(int sock)
 
 slice_s socket_read(int sock, slice_s in_buf)
 {
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
     int rc = (int)recv(sock, (char *)in_buf.data, (int)in_buf.len, 0);
 #else
     int rc = (int)recv(sock, (char *)in_buf.data, (size_t)in_buf.len, 0);
-#endif 
+#endif
 
     if(rc < 0) {
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
         rc = WSAGetLastError();
         if(rc == WSAEWOULDBLOCK) {
 #else
@@ -292,7 +292,7 @@ int socket_write(int sock, slice_s out_buf)
     slice_dump(out_buf);
 
     do {
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
         rc = (int)send(sock, (char *)tmp_out_buf.data, (int)tmp_out_buf.len, 0);
 #else
         rc = (int)send(sock, (char *)tmp_out_buf.data, (size_t)tmp_out_buf.len, 0);
@@ -304,7 +304,7 @@ int socket_write(int sock, slice_s out_buf)
              * check the return value.  If it is an interrupted system call
              * or would block, just keep looping.
              */
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
             rc = WSAGetLastError();
             if(rc != WSAEWOULDBLOCK) {
 #else

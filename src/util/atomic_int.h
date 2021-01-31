@@ -56,7 +56,7 @@ typedef struct { uint8_t val; } atomic_uint8;
 #define ATOMIC_BOOL_STATIC_INIT(b) {b}
 typedef struct { bool val; } atomic_bool;
 
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_IS_WINDOWS
 
 
 #else
