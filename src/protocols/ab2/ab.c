@@ -511,8 +511,8 @@ int cip_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_v
         res = tag->elem_count;
     } else if(str_cmp_i(attrib_name, "idle_timeout_ms") == 0) {
         res = plc_get_idle_timeout(tag->plc);
-    } else if((tag->is_raw_tag == TRUE) && (str_cmp_i(attrib_name, "size") == 0)) {
-        res = tag->base_tag.size;
+    } else if((tag->is_raw_tag == TRUE) && (str_cmp_i(attrib_name, "payload_size") == 0)) {
+        res = (int)(int32_t)tag->trans_offset;
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         SET_STATUS(tag->base_tag.status, PLCTAG_ERR_UNSUPPORTED);
@@ -534,27 +534,44 @@ int cip_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value
 
     if(str_cmp_i(attrib_name, "idle_timeout_ms") == 0) {
         rc = plc_set_idle_timeout(tag->plc, new_value);
-    } else if((tag->is_raw_tag == TRUE) && (str_cmp_i(attrib_name, "size") == 0)) {
+    } else if((tag->is_raw_tag == TRUE) && (str_cmp_i(attrib_name, "payload_size") == 0)) {
         if(new_value > 0) {
-            uint8_t *new_data = NULL;
-
-            tag->elem_count = new_value;
-            new_data = mem_realloc(tag->base_tag.data, new_value);
-
-            if(new_data) {
-                pdebug(DEBUG_DETAIL, "Updating tag buffer size to %d from %" PRId32 ".", new_value, tag->base_tag.size);
-                tag->base_tag.size = tag->elem_count;
-                tag->base_tag.data = new_data;
-            } else {
-                pdebug(DEBUG_WARN, "Unable to reallocate tag data buffer to new size!");
-                rc = PLCTAG_ERR_NO_MEM;
+            rc = base_tag_resize_data((plc_tag_p)tag, new_value);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
                 return rc;
             }
+
+            // REMOVE
+            // /* do we need to allocate a bigger buffer? */
+            // if(new_value > tag->base_tag.size) {
+            //     uint8_t *new_data = NULL;
+
+            //     tag->elem_count = new_value;
+            //     new_data = mem_realloc(tag->base_tag.data, new_value);
+
+            //     if(new_data) {
+            //         pdebug(DEBUG_DETAIL, "Updating tag buffer size to %d from %" PRId32 ".", new_value, tag->base_tag.size);
+            //         tag->base_tag.size = tag->elem_count;
+            //         tag->base_tag.data = new_data;
+            //     } else {
+            //         pdebug(DEBUG_WARN, "Unable to reallocate tag data buffer to new size!");
+            //         rc = PLCTAG_ERR_NO_MEM;
+            //         return rc;
+            //     }
+            // }
+
+            /* store the payload size in the trans_offset field */
+            tag->trans_offset = (uint32_t)(int32_t)new_value;
+        } else {
+            pdebug(DEBUG_WARN, "The payload size must be greater than zero!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            return rc;
         }
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         rc = PLCTAG_ERR_UNSUPPORTED;
-        SET_STATUS(tag->base_tag.status, (int8_t)rc);
+        SET_STATUS(tag->base_tag.status, rc);
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
