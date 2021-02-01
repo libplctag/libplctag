@@ -236,7 +236,7 @@ int main(int argc, char **argv)
     struct program_entry_s *programs = NULL;
     struct tag_entry_s *tags = NULL;
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
