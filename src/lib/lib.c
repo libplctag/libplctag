@@ -1548,6 +1548,9 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             }  else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
                 SET_STATUS(tag->status, PLCTAG_STATUS_OK);
                 res = (int)tag->auto_sync_write_ms;
+            } else if(str_cmp_i(attrib_name, "bit_num") == 0) {
+                SET_STATUS(tag->status, PLCTAG_STATUS_OK);
+                res = (int)(unsigned int)(tag->bit);
             } else  {
                 if(tag->vtable->get_int_attrib) {
                     res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
