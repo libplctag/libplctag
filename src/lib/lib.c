@@ -1540,6 +1540,8 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             res = (int)version_minor;
         } else if(str_cmp_i(attrib_name, "version_patch") == 0) {
             res = (int)version_patch;
+        } else if(str_cmp_i(attrib_name, "bit_num") == 0) {
+            res = (int)(unsigned int)(tag->bit);
         } else if(str_cmp_i(attrib_name, "debug") == 0) {
             res = (int)get_debug_level();
         } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
