@@ -89,6 +89,7 @@ struct udt_entry_s {
     char *name;
     uint16_t id;
     uint16_t num_fields;
+    uint32_t instance_size;
     struct udt_field_entry_s fields[];
 };
 
@@ -98,7 +99,7 @@ struct udt_entry_s {
 static void usage(void);
 static int open_raw_tag(int argc, char **argv);
 static int get_tag_list(int32_t tag_id, struct tag_entry_s **tag_list, struct tag_entry_s *parent);
-static void print_type(uint16_t element_type);
+static void print_element_type(uint16_t element_type);
 static int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct tag_entry_s **tag_list, struct tag_entry_s *parent);
 static int get_udt_definition(int32_t tag, uint16_t udt_id);
 static int encode_request_prefix(const char *name, uint8_t *buffer, int *encoded_size);
@@ -127,7 +128,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
@@ -205,8 +206,9 @@ int main(int argc, char **argv)
         }
 
         /* handle the type. */
-        print_type(tag->type);
-        printf("\".  ");
+        printf("\" ");
+        print_element_type(tag->type);
+        printf(".  ");
 
         /* print the tag string */
         printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\"\n", host, path, tag->elem_size, tag->elem_count, tag->name);
@@ -219,11 +221,21 @@ int main(int argc, char **argv)
         struct udt_entry_s *udt = udts[index];
 
         if(udt) {
-            printf(" UDT %s (%d bytes):\n", udt->name, /*udt->size*/ 0); /* FIXME */
+            printf(" UDT %s (%d bytes):\n", udt->name, (int)(unsigned int)udt->instance_size); /* FIXME */
 
             for(int field_index = 0; field_index < udt->num_fields; field_index++) {
-                printf("    Field %d: %s, offset %d, type ", field_index, udt->fields[field_index].name, udt->fields[field_index].offset);
-                print_type(udt->fields[field_index].type);
+                printf("    Field %d: %s, offset %d, ", field_index, udt->fields[field_index].name, udt->fields[field_index].offset);
+                if(udt->fields[field_index].type & 0x2000) { /* MAGIC */
+                    printf("array [%d] of type ", (int)(unsigned int)(udt->fields[field_index].metadata));
+                } else {
+                    printf(" type ");
+                }
+                print_element_type(udt->fields[field_index].type);
+                if(udt->fields[field_index].type == 0xC1) {
+                    /* bit type, the metadata is the bit number. */
+                    printf(" bit %d", (int)(unsigned int)(udt->fields[field_index].metadata));
+                }
+                if(udt->fields[field_index].type )
                 printf(".\n");
             }
         }
@@ -571,18 +583,18 @@ int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct ta
 
 
 
-void print_type(uint16_t element_type)
+void print_element_type(uint16_t element_type)
 {
     if(element_type & TYPE_IS_SYSTEM) {
-        printf(" (element type SYSTEM %04x) ", (unsigned int)(element_type));
+        printf("element type SYSTEM %04x", (unsigned int)(element_type));
     } else if(element_type & TYPE_IS_STRUCT) {
-        printf(" (element type UDT %s) ", udts[(size_t)(unsigned int)(element_type & TYPE_UDT_ID_MASK)]->name);
+        printf("element type UDT (0x%04x) %s", (unsigned int)(element_type), udts[(size_t)(unsigned int)(element_type & TYPE_UDT_ID_MASK)]->name);
     } else {
         uint16_t atomic_type = element_type & 0xFF; /* MAGIC */
         const char *type = NULL;
 
         switch(atomic_type) {
-            case 0xC1: type = "BOOL: Boolean value, 1 bit"; break;
+            case 0xC1: type = "BOOL: Boolean value"; break;
             case 0xC2: type = "SINT: Signed 8–bit integer value"; break;
             case 0xC3: type = "INT: Signed 16–bit integer value"; break;
             case 0xC4: type = "DINT: Signed 32–bit integer value"; break;
@@ -615,9 +627,9 @@ void print_type(uint16_t element_type)
         }
 
         if(type) {
-            printf(" (%s) ", type);
+            printf("(%04x) %s", (unsigned int)element_type, type);
         } else {
-            printf(" (UNKNOWN TYPE %04x) ", (unsigned int)atomic_type);
+            printf("UNKNOWN TYPE %04x", (unsigned int)element_type);
         }
     }
 }
@@ -680,6 +692,7 @@ int get_udt_definition(int32_t tag, uint16_t udt_id)
 
     udts[(size_t)udt_id]->id = udt_id;
     udts[(size_t)udt_id]->num_fields = num_members;
+    udts[(size_t)udt_id]->instance_size = udt_instance_size;
 
     rc = get_template_field_info(tag, udt_id, udt_definition_dwords);
     if(rc != PLCTAG_STATUS_OK) {
@@ -811,6 +824,7 @@ int get_template_info(int32_t tag, uint16_t udt_id, uint16_t *num_members, uint3
             case 0x05:
                 /* template instance size in bytes */
                 *udt_instance_size = plc_tag_get_uint32(tag, offset);
+                printf("UDT intance size %d bytes.\n", (int)(unsigned int)(*udt_instance_size));
                 offset += 4;
                 break;
 
