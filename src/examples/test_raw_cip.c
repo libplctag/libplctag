@@ -118,7 +118,7 @@ int main()
     /* get the size of the returned data. */
     size = plc_tag_get_int_attribute(tag, "payload_size", -1);
     if(size <= 0) {
-        printf("ERROR: Unable to get the data size, got %s (%s)!\n", size, plc_tag_decode_error(size));
+        printf("ERROR: Unable to get the data size!\n");
         plc_tag_destroy(tag);
         return 1;
     }
