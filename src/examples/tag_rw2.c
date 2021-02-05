@@ -752,13 +752,14 @@ void dump_values(struct run_args *args)
     /* display the data */
     if(args->element_type == TYPE_BIT) {
         int rc = plc_tag_get_bit(tag, 0);
+        int bit_num = plc_tag_get_int_attribute(tag, "bit_num", -1);
 
         if(rc < 0) {
             printf("Error received trying to read bit tag: %s!\n", plc_tag_decode_error(rc));
             cleanup(args);
             exit(1);
         } else {
-            printf("data=%d\n", rc);
+            printf("data bit %d=%d\n", bit_num, rc);
         }
     } else {
         int len = plc_tag_get_size(tag);

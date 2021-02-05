@@ -1524,8 +1524,6 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             res = (int)version_minor;
         } else if(str_cmp_i(attrib_name, "version_patch") == 0) {
             res = (int)version_patch;
-        } else if(str_cmp_i(attrib_name, "bit_num") == 0) {
-            res = (int)(unsigned int)(tag->bit);
         } else if(str_cmp_i(attrib_name, "debug") == 0) {
             res = (int)get_debug_level();
         } else if(str_cmp_i(attrib_name, "debug_level") == 0) {
@@ -1552,12 +1550,15 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
                 /* FIXME - what happens if this overflows? */
                 tag->status = PLCTAG_STATUS_OK;
                 res = (int)tag->read_cache_ms;
-            }  else if(str_cmp_i(attrib_name, "auto_sync_read_ms") == 0) {
+            } else if(str_cmp_i(attrib_name, "auto_sync_read_ms") == 0) {
                 tag->status = PLCTAG_STATUS_OK;
                 res = (int)tag->auto_sync_read_ms;
-            }  else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
+            } else if(str_cmp_i(attrib_name, "auto_sync_write_ms") == 0) {
                 tag->status = PLCTAG_STATUS_OK;
                 res = (int)tag->auto_sync_write_ms;
+            } else if(str_cmp_i(attrib_name, "bit_num") == 0) {
+                tag->status = PLCTAG_STATUS_OK;
+                res = (int)(unsigned int)(tag->bit);
             } else  {
                 if(tag->vtable->get_int_attrib) {
                     res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
