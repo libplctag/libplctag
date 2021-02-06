@@ -36,6 +36,7 @@
 #include <lib/tag.h>
 #include <ab2/df1.h>
 #include <ab2/ab.h>
+#include <ab2/cip.h>
 #include <ab2/cip_layer.h>
 #include <ab2/cip_tag.h>
 #include <ab2/cip_plc.h>
@@ -116,10 +117,6 @@ static int cip_handle_read_response_callback(void *context, uint8_t *buffer, int
 static int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 static int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 
-static int raw_cip_build_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
-static int raw_cip_handle_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
-
-
 
 
 int cip_tag_abort(plc_tag_p tag_arg)
@@ -148,11 +145,7 @@ int cip_tag_read(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(tag->is_raw_tag == FALSE) {
-        rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_read_request_callback, cip_handle_read_response_callback);
-    } else {
-        rc = plc_start_request(tag->plc, &(tag->request), tag, raw_cip_build_request_callback, raw_cip_handle_response_callback);
-    }
+    rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_read_request_callback, cip_handle_read_response_callback);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
@@ -193,11 +186,7 @@ int cip_tag_write(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(tag->is_raw_tag == FALSE) {
         rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_write_request_callback, cip_handle_write_response_callback);
-    } else {
-        rc = plc_start_request(tag->plc, &(tag->request), tag, raw_cip_build_request_callback, raw_cip_handle_response_callback);
-    }
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start write request!");
@@ -619,110 +608,4 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
     return rc;
 }
 
-
-
-
-/* this just copies the tag's buffer into the output. */
-
-int raw_cip_build_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
-{
-    int rc = PLCTAG_STATUS_OK;
-    cip_tag_p tag = (cip_tag_p)context;
-    int req_off = *payload_start;
-    int max_trans_size = 0;
-    int trans_size = 0;
-
-    (void)buffer_capacity;
-    (void)req_id;
-
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    do {
-        trans_size = (int)(unsigned int)(tag->trans_offset);
-        max_trans_size = *payload_end - *payload_start;
-
-        if(max_trans_size < trans_size) {
-            pdebug(DEBUG_WARN, "Tag raw CIP command too large to fit!");
-            rc = PLCTAG_ERR_TOO_LARGE;
-            break;
-        }
-
-        for(int index=0; index < trans_size; index++) {
-            TRY_SET_BYTE(buffer, *payload_end, req_off, tag->base_tag.data[index]);
-        }
-
-        *payload_end = req_off;
-    } while(0);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to build raw CIP request, got error %s!", plc_tag_decode_error(rc));
-        SET_STATUS(tag->base_tag.status, rc);
-        return rc;
-    }
-
-    pdebug(DEBUG_DETAIL, "Raw CIP request packet:");
-    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return rc;
-}
-
-
-int raw_cip_handle_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
-{
-    int rc = PLCTAG_STATUS_OK;
-    cip_tag_p tag = (cip_tag_p)context;
-    int resp_data_size = 0;
-    int offset = *payload_start;
-
-    (void)buffer_capacity;
-
-    pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_id);
-
-    do {
-        resp_data_size = *payload_end - *payload_start;
-
-        /* resize the tag's data buffer. */
-        rc = base_tag_resize_data((plc_tag_p)tag, resp_data_size);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
-            break;
-        }
-
-        for(int index=0; index < resp_data_size; index++) {
-            TRY_GET_BYTE(buffer, buffer_capacity, offset, tag->base_tag.data[index]);
-        }
-
-        /* save the payload size in the tag. */
-        tag->trans_offset = (uint32_t)(int32_t)(resp_data_size);
-
-        *payload_start = *payload_end;
-
-        pdebug(DEBUG_DETAIL, "Raw CIP operation complete.");
-
-        rc = PLCTAG_STATUS_OK;
-
-        /* clear any in-flight flags. */
-        critical_block(tag->base_tag.api_mutex) {
-            tag->base_tag.read_complete = 0;
-            tag->base_tag.read_in_flight = 0;
-            tag->base_tag.write_complete = 0;
-            tag->base_tag.write_in_flight = 0;
-        }
-
-        /* set the status last as that triggers the waiting thread. */
-        SET_STATUS(tag->base_tag.status, rc);
-    } while(0);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error, %s, handling raw CIP response!", plc_tag_decode_error(rc));
-        SET_STATUS(tag->base_tag.status, rc);
-        return rc;
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return rc;
-}
 

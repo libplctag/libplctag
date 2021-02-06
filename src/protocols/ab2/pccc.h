@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2021 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,28 +31,39 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+ #pragma once
 
-#pragma once
-
-#include <lib/libplctag.h>
+#include <stdint.h>
 #include <lib/tag.h>
-#include <ab2/df1.h>
+#include <ab2/ab.h>
+#include <util/atomic_int.h>
 #include <util/attr.h>
-#include <util/bool.h>
 #include <util/plc.h>
 
-typedef enum { AB2_PLC_NONE = 0,
-               AB2_PLC_PLC5 = 1,
-               AB2_PLC_SLC,
-               AB2_PLC_MLGX,
-               AB2_PLC_LGX,
-               AB2_PLC_LGX_PCCC,
-               AB2_PLC_MLGX800,
-               AB2_PLC_OMRON_NJNX } ab2_plc_type_t;
+typedef struct {
+    struct plc_tag_t base_tag;
 
+    uint16_t elem_size;
+    uint16_t elem_count;
 
-extern plc_tag_p ab2_tag_create(attr attribs);
-extern ab2_plc_type_t ab2_get_plc_type(attr attribs);
+    /* data type info */
+    df1_file_t data_file_type;
+    int data_file_num;
+    int data_file_elem;
+    int data_file_sub_elem;
 
-/* common implementations */
+    /* plc and request info */
+    plc_p plc;
+    struct plc_request_s request;
+
+    uint16_t tsn; /* transfer sequence number of the most recent request. */
+
+    /* count of bytes sent or received. */
+    uint16_t trans_offset;
+} pccc_tag_t;
+typedef pccc_tag_t *pccc_tag_p;
+
+extern plc_tag_p pccc_tag_create(ab2_plc_type_t plc_type, attr attribs);
+extern int pccc_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
+extern int pccc_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
 

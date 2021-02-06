@@ -37,6 +37,7 @@
 #include <ab2/ab.h>
 #include <ab2/df1.h>
 #include <ab2/slc_tag.h>
+#include <ab2/pccc.h>
 #include <ab2/pccc_eip_plc.h>
 #include <util/attr.h>
 #include <util/debug.h>
