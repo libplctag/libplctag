@@ -36,8 +36,4 @@
 #include <lib/tag.h>
 #include <util/attr.h>
 
-
-// extern struct tag_vtable_t raw_cip_tag_vtable;
-// extern tag_byte_order_t raw_cip_tag_byte_order;
-
 extern plc_tag_p raw_cip_tag_create(ab2_plc_type_t plc_type, attr attribs);
