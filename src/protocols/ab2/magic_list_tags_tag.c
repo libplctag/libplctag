@@ -474,11 +474,6 @@ int magic_list_tags_handle_response_callback(void *context, uint8_t *buffer, int
             break;
         }
 
-        // if(service_status == CIP_STATUS_FRAG) {
-        //     pdebug(DEBUG_DETAIL, "Need additional requests to get all tags.");
-        //     need_additional_request = TRUE;
-        // }
-
         /* how much data do we have? */
         response_start = offset;
         resp_data_size = *payload_end - offset;
@@ -523,6 +518,11 @@ int magic_list_tags_handle_response_callback(void *context, uint8_t *buffer, int
         /* copy the tag listing data into the tag. */
         for(int index=0; index < resp_data_size; index++) {
             TRY_GET_BYTE(buffer, *payload_end, response_start, tag->base_tag.data[tag->request_offset + index]);
+        }
+        if(rc != PLCTAG_STATUS_OK) {
+            /* this is fatal! */
+            pdebug(DEBUG_WARN, "Unable to copy data into the tag data buffer, error %s!", plc_tag_decode_error(rc));
+            break;
         }
 
         if(service_status == CIP_STATUS_FRAG) {
