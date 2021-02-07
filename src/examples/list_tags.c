@@ -75,9 +75,9 @@ int32_t setup_tag(char *plc_ip, char *path, char *program)
     char tag_string[TAG_STRING_SIZE] = {0,};
 
     if(!program || strlen(program) == 0) {
-        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&name=@tags", plc_ip, path);
+        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip2&gateway=%s&path=%s&plc=ControlLogix&name=@tags", plc_ip, path);
     } else {
-        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&name=%s.@tags", plc_ip, path, program);
+        snprintf(tag_string, TAG_STRING_SIZE-1,"protocol=ab-eip2&gateway=%s&path=%s&plc=ControlLogix&name=%s.@tags", plc_ip, path, program);
     }
 
     //printf("Using tag string: %s\n", tag_string);
