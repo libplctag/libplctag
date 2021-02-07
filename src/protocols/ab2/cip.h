@@ -39,6 +39,22 @@
 #include <util/attr.h>
 #include <util/plc.h>
 
+#define CIP_CMD_MULTI            ((uint8_t)0x0A)
+#define CIP_CMD_READ             ((uint8_t)0x4C)
+#define CIP_CMD_WRITE            ((uint8_t)0x4D)
+#define CIP_CMD_RMW              ((uint8_t)0x4E)
+#define CIP_CMD_READ_FRAG        ((uint8_t)0x52)
+#define CIP_CMD_WRITE_FRAG       ((uint8_t)0x53)
+#define CIP_CMD_LIST_TAGS        ((uint8_t)0x55)
+
+/* flag set when command is OK */
+#define CIP_CMD_OK                   ((uint8_t)0x80)
+
+#define CIP_STATUS_OK                ((uint8_t)0x00)
+#define CIP_STATUS_FRAG              ((uint8_t)0x06)
+
+#define CIP_ERR_UNSUPPORTED_SERVICE  ((uint8_t)0x08)
+#define CIP_ERR_PARTIAL_ERROR        ((uint8_t)0x1e)
 
 
 typedef struct {
