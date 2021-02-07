@@ -100,6 +100,11 @@ plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
         }
     }
 
+    if(str_cmp_i(tag_name, "@change") == 0) {
+        pdebug(DEBUG_DETAIL, "Creating tag mapping change detection tag.");
+        return magic_detect_change_tag_create(plc_type, attribs);
+    }
+
     tag = (cip_tag_p)base_tag_create(sizeof(*tag), (void (*)(void*))cip_tag_destroy);
     if(!tag) {
         pdebug(DEBUG_WARN, "Unable to allocate new CIP tag!");
