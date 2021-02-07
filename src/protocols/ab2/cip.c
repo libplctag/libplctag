@@ -40,6 +40,7 @@
 #include <ab2/cip.h>
 #include <ab2/cip_tag.h>
 #include <ab2/cip_plc.h>
+#include <ab2/magic_list_tags_tag.h>
 #include <ab2/raw_cip_tag.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -81,6 +82,22 @@ plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
     /* handle magic tags. */
     if(str_cmp_i("@raw", tag_name) == 0) {
         return raw_cip_tag_create(plc_type, attribs);
+    }
+
+    /* bare tag listing tag. */
+    if(str_cmp_i("@tags", tag_name) == 0) {
+        pdebug(DEBUG_DETAIL, "Creating controller level tag listing tag.");
+        return magic_list_tags_tag_create(plc_type, attribs);
+    }
+
+    /* program tag listing tag. */
+    if(str_cmp_i_n(tag_name, "Program:", str_length("Program:")) == 0) {
+        /* the tag name has a prefix of "Program:" */
+        if(str_cmp_i(tag_name + str_length(tag_name) - str_length("@tags"), "@tags") == 0) {
+            /* and it ends with "@tags" */
+            pdebug(DEBUG_DETAIL, "Creating program level tag listing tag.");
+            return magic_list_tags_tag_create(plc_type, attribs);
+        }
     }
 
     tag = (cip_tag_p)base_tag_create(sizeof(*tag), (void (*)(void*))cip_tag_destroy);
