@@ -49,22 +49,6 @@
 
 
 
-#define CIP_CMD_MULTI            ((uint8_t)0x0A)
-#define CIP_CMD_READ             ((uint8_t)0x4C)
-#define CIP_CMD_WRITE            ((uint8_t)0x4D)
-#define CIP_CMD_RMW              ((uint8_t)0x4E)
-#define CIP_CMD_READ_FRAG        ((uint8_t)0x52)
-#define CIP_CMD_WRITE_FRAG       ((uint8_t)0x53)
-#define CIP_CMD_LIST_TAGS        ((uint8_t)0x55)
-
-/* flag set when command is OK */
-#define CIP_CMD_OK                   ((uint8_t)0x80)
-
-#define CIP_STATUS_OK                ((uint8_t)0x00)
-#define CIP_STATUS_FRAG              ((uint8_t)0x06)
-
-#define CIP_ERR_UNSUPPORTED_SERVICE  ((uint8_t)0x08)
-#define CIP_ERR_PARTIAL_ERROR        ((uint8_t)0x1e)
 
 
 /* vtable functions */
@@ -204,9 +188,6 @@ int cip_build_read_request_callback(void *context, uint8_t *buffer, int buffer_c
     int rc = PLCTAG_STATUS_OK;
     cip_tag_p tag = (cip_tag_p)context;
     int req_off = *payload_start;
-    // int max_trans_size = 0;
-    // int num_elems = 0;
-    // int trans_size = 0;
 
     (void)buffer_capacity;
     (void)req_id;
@@ -259,7 +240,6 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
     cip_tag_p tag = (cip_tag_p)context;
     int resp_data_size = 0;
     int offset = *payload_start;
-    // int payload_size = *payload_end - *payload_start;
 
     (void)buffer_capacity;
 
@@ -346,25 +326,7 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
             break;
         }
 
-        // REMOVE
-        // /* check to see if the response fits. */
-        // if(((int32_t)tag->trans_offset + (int32_t)resp_data_size) > tag->base_tag.size) {
-        //     uint8_t *new_data = NULL;
-        //     int total_bytes = (int)(unsigned int)tag->trans_offset + resp_data_size;
-
-        //     pdebug(DEBUG_INFO, "Expanding tag data buffer from %" PRId32 " to %d bytes.", tag->base_tag.size, total_bytes);
-
-        //     new_data = mem_realloc(tag->base_tag.data, total_bytes);
-        //     if(new_data != NULL) {
-        //         tag->base_tag.data = new_data;
-        //         tag->base_tag.size = total_bytes;
-        //     } else {
-        //         pdebug(DEBUG_WARN, "Unable to allocate memory for new tag data buffer!");
-        //         rc = PLCTAG_ERR_NO_MEM;
-        //         break;
-        //     }
-        // }
-
+        /* copy the data. */
         for(int i=0; i < resp_data_size; i++) {
             TRY_GET_BYTE(buffer, buffer_capacity, offset, tag->base_tag.data[tag->trans_offset + (uint32_t)i]);
         }
@@ -372,7 +334,7 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
         tag->trans_offset += (uint16_t)(unsigned int)resp_data_size;
 
         /* do we have more work to do? */
-        if(tag->trans_offset < (uint32_t)tag->base_tag.size) {
+        if(service_status == CIP_STATUS_FRAG) {
             pdebug(DEBUG_DETAIL, "Starting new read request for remaining data.");
             rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_read_request_callback, cip_handle_read_response_callback);
             if(rc != PLCTAG_STATUS_OK) {
