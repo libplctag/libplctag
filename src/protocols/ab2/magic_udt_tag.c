@@ -48,6 +48,7 @@
 #include <util/string.h>
 
 
+#define UDT_HEADER_SIZE (10)
 
 typedef struct {
     struct plc_tag_t base_tag;
@@ -58,6 +59,7 @@ typedef struct {
 
     uint16_t udt_id;
     uint16_t field_count;
+    uint16_t struct_handle;
     uint32_t field_def_size;
     uint32_t instance_size;
 
@@ -309,7 +311,8 @@ int magic_udt_info_build_request_callback(void *context, uint8_t *buffer, int bu
                               0x25,  /* 16-bit instance ID next. */
                               0x00,  /* padding */
                               0x00, 0x00,  /* instance ID bytes, fill in with the UDT ID */
-                              0x03, 0x00,  /* get 3 attributes. */
+                              0x04, 0x00,  /* get 4 attributes. */
+                              0x01, 0x00,  /* Attribute 1: Struct handle.  CRC of field definitions. */
                               0x02, 0x00,  /* Attribute 2: Template Member Count: number of fields in the template/UDT. */
                               0x04, 0x00,  /* Attribute 4: Template Object Definition Size, in 32-bit words. */
                               0x05, 0x00   /* Attribute 5: Template Structure Size, in bytes.   Size of the object. */
@@ -373,7 +376,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
     uint8_t service_status;
     uint8_t status_extra_words;
     uint16_t num_attribs = 0;
-    int response_start = 0;
+    // int response_start = 0;
     bool fatal = FALSE;
 
     (void)buffer_capacity;
@@ -427,22 +430,22 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
         }
 
         /* how much data do we have? */
-        response_start = offset;
+        // response_start = offset;
         resp_data_size = *payload_end - offset;
 
-        /* TODO - move this.
-        make sure that the tag can hold the new payload. */
-        rc = base_tag_resize_data((plc_tag_p)tag, tag->request_offset + resp_data_size);
-        if(rc != PLCTAG_STATUS_OK) {
-            /* this is fatal! */
-            pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
-            break;
-        }
+        // /* TODO - move this.
+        // make sure that the tag can hold the new payload. */
+        // rc = base_tag_resize_data((plc_tag_p)tag, tag->request_offset + resp_data_size);
+        // if(rc != PLCTAG_STATUS_OK) {
+        //     /* this is fatal! */
+        //     pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
+        //     break;
+        // }
 
         /* get the number of attribute results, we want 3. */
         TRY_GET_U16_LE(buffer, *payload_end, offset, num_attribs);
-        if(num_attribs != 3) {
-            pdebug(DEBUG_WARN, "Unexpected number of attributes.  Expected 3 attributes got %u!", num_attribs);
+        if(num_attribs != 4) {
+            pdebug(DEBUG_WARN, "Unexpected number of attributes.  Expected 4 attributes got %u!", num_attribs);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
             rc = PLCTAG_ERR_BAD_DATA;
@@ -452,7 +455,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
             break;
         }
 
-        /* read all 3 attributes, not clear that they will come in order. */
+        /* read all 4 attributes, not clear that they will come in order. */
         for(int attrib_num=0; attrib_num < (int)(unsigned int)num_attribs; attrib_num++) {
             uint16_t attrib_id = 0;
             uint16_t attrib_status = 0;
@@ -461,7 +464,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
             TRY_GET_U16_LE(buffer, *payload_end, offset, attrib_status);
 
             if(attrib_status != 0) {
-                printf("Unable to get attribute ID %x, got error %x!\n", attrib_id, attrib_status);
+                pdebug(DEBUG_WARN, "Unable to get attribute ID %x, got error %x!", attrib_id, attrib_status);
 
                 rc = PLCTAG_ERR_BAD_DATA;
                 fatal = FALSE;
@@ -472,12 +475,10 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
 
             /* process each attribute.   Each one has an ID, a status and a value. */
             switch(attrib_id) {
-                // case 0x01:
-                //     /* CRC of the fields, used as a struct handle. */
-                //     struct_handle = plc_tag_get_uint16(tag, offset);
-                //     offset += 2;
-                //     TRY_GET_U16_LE(buffer, *payload_end, offset, tag->struct_handle);
-                //     break;
+                case 0x01:
+                    /* CRC of the fields, used as a struct handle. */
+                    TRY_GET_U16_LE(buffer, *payload_end, offset, tag->struct_handle);
+                    break;
 
                 case 0x02:
                     /* number of members in the template */
@@ -495,7 +496,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
                     break;
 
                 default:
-                    printf("Unexpected attribute %x found!\n", (unsigned int)attrib_id);
+                    pdebug(DEBUG_WARN, "Unexpected attribute %x found!", (unsigned int)attrib_id);
 
                     rc = PLCTAG_ERR_BAD_DATA;
                     tag->request_offset = 0;
@@ -523,7 +524,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, processing response!", plc_tag_decode_error(rc));
         SET_STATUS(tag->base_tag.status, rc);
-        if(fatal = FALSE) {
+        if(fatal == FALSE) {
             return PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Error is fatal, restarting PLC!");
@@ -618,7 +619,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
     uint8_t reserved;
     uint8_t service_status;
     uint8_t status_extra_words;
-    int response_start = 0;
+    // int response_start = 0;
     bool fatal = FALSE;
 
     (void)buffer_capacity;
@@ -672,7 +673,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
         }
 
         /* how much data do we have? */
-        response_start = offset;
+        // response_start = offset;
         resp_data_size = *payload_end - offset;
 
         /* we are going to copy the data into the tag buffer almost exactly as is. */
@@ -683,6 +684,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
          *
          * uint16_t - UDT ID
          * uint16_t - number of members (including invisible ones)
+         * uint16_t - struct handle/CRC of field defs.
          * uint32_t - instance size in bytes.
          *
          * Then the raw field info.
@@ -701,7 +703,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
 
         /* resize the tag buffer for this and some additional fields. */
 
-        rc = base_tag_resize_data((plc_tag_p)tag, tag->request_offset + resp_data_size + 8);
+        rc = base_tag_resize_data((plc_tag_p)tag, tag->request_offset + resp_data_size + UDT_HEADER_SIZE);
         if(rc != PLCTAG_STATUS_OK) {
             /* this is fatal! */
             pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
@@ -713,25 +715,27 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
         /* if there is no data copied yet, copy the header */
         if(tag->request_offset == 0) {
             /* copy the UDT ID */
-            tag->base_tag.data[0] = (tag->udt_id & 0xFF);
-            tag->base_tag.data[1] = ((tag->udt_id >> 8) & 0xFF);
+            tag->base_tag.data[0] = (uint8_t)(tag->udt_id & 0xFF);
+            tag->base_tag.data[1] = (uint8_t)((tag->udt_id >> 8) & 0xFF);
 
             /* number of members */
-            tag->base_tag.data[2] = (tag->field_count & 0xFF);
-            tag->base_tag.data[3] = ((tag->field_count >> 8) & 0xFF);
+            tag->base_tag.data[2] = (uint8_t)(tag->field_count & 0xFF);
+            tag->base_tag.data[3] = (uint8_t)((tag->field_count >> 8) & 0xFF);
+
+            /* struct handle */
+            tag->base_tag.data[4] = (uint8_t)(tag->struct_handle & 0xFF);
+            tag->base_tag.data[5] = (uint8_t)((tag->struct_handle >> 8) & 0xFF);
 
             /* instance size in bytes. */
-            tag->base_tag.data[4] = (tag->instance_size & 0xFF);
-            tag->base_tag.data[5] = ((tag->instance_size >> 8) & 0xFF);
-            tag->base_tag.data[6] = ((tag->instance_size >> 16) & 0xFF);
-            tag->base_tag.data[7] = ((tag->instance_size >> 24) & 0xFF);
-
-            tag->request_offset = 8;
+            tag->base_tag.data[6] = (uint8_t)(tag->instance_size & 0xFF);
+            tag->base_tag.data[7] = (uint8_t)((tag->instance_size >> 8) & 0xFF);
+            tag->base_tag.data[8] = (uint8_t)((tag->instance_size >> 16) & 0xFF);
+            tag->base_tag.data[9] = (uint8_t)((tag->instance_size >> 24) & 0xFF);
         }
 
         /* copy the remaining data. */
         for(int index = 0; index < resp_data_size && rc == PLCTAG_STATUS_OK; index++) {
-            TRY_GET_BYTE(buffer, *payload_end, offset, tag->base_tag.data[tag->request_offset + index]);
+            TRY_GET_BYTE(buffer, *payload_end, offset, tag->base_tag.data[UDT_HEADER_SIZE + tag->request_offset + index]);
         }
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error %s while copying data into tag data buffer!", plc_tag_decode_error(rc));
@@ -774,7 +778,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, processing response!", plc_tag_decode_error(rc));
         SET_STATUS(tag->base_tag.status, rc);
-        if(fatal = FALSE) {
+        if(fatal == FALSE) {
             return PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Error is fatal, restarting PLC!");

@@ -89,6 +89,7 @@ struct udt_entry_s {
     char *name;
     uint16_t id;
     uint16_t num_fields;
+    uint16_t struct_handle;
     uint32_t instance_size;
     struct udt_field_entry_s fields[];
 };
@@ -174,7 +175,7 @@ int main(int argc, char **argv)
             char buf[256] = {0};
 
             /* this is a program tag, check for its tags. */
-            printf("Getting tags for program: \"%s\".\n", entry->name);
+            printf("Getting tags for program \"%s\".\n", entry->name);
 
             snprintf(buf, sizeof(buf), "%s.@tags", entry->name);
 
@@ -268,7 +269,7 @@ int main(int argc, char **argv)
         struct udt_entry_s *udt = udts[index];
 
         if(udt) {
-            printf(" UDT %s (%d bytes):\n", udt->name, (int)(unsigned int)udt->instance_size); /* FIXME */
+            printf(" UDT %s (%d bytes, field CRC %x):\n", udt->name, (int)(unsigned int)udt->instance_size, (int)(unsigned int)udt->struct_handle);
 
             for(int field_index = 0; field_index < udt->num_fields; field_index++) {
                 printf("    Field %d: %s, offset %d, ", field_index, udt->fields[field_index].name, udt->fields[field_index].offset);
@@ -646,6 +647,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     int offset = 0;
     uint16_t template_id = 0;
     uint16_t num_members = 0;
+    uint16_t struct_handle = 0;
     uint32_t udt_instance_size = 0;
     int name_index_start;
     int name_index_end;
@@ -679,6 +681,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
      *
      * uint16_t - UDT ID
      * uint16_t - number of members (including invisible ones)
+     * uint16_t - struct handle/CRC of field defs.
      * uint32_t - instance size in bytes.
      *
      * Then the raw field info.
@@ -699,7 +702,11 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     /* get the ID, number of members and the instance size. */
     template_id = plc_tag_get_uint16(udt_info_tag, 0);
     num_members = plc_tag_get_uint16(udt_info_tag, 2);
-    udt_instance_size = plc_tag_get_uint32(udt_info_tag, 4);
+    struct_handle = plc_tag_get_uint16(udt_info_tag, 4);
+    udt_instance_size = plc_tag_get_uint32(udt_info_tag, 6);
+
+    /* skip past this header. */
+    offset = 10;
 
     /* just a sanity check */
     if(template_id != udt_id) {
@@ -716,10 +723,8 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     udts[(size_t)udt_id]->id = udt_id;
     udts[(size_t)udt_id]->num_fields = num_members;
+    udts[(size_t)udt_id]->struct_handle = struct_handle;
     udts[(size_t)udt_id]->instance_size = udt_instance_size;
-
-    /* get the rest of the data. */
-    offset = 8;
 
     /* first section is the field type and size info for all fields. */
     for(int field_index=0; field_index < udts[udt_id]->num_fields; field_index++) {
