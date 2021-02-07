@@ -644,6 +644,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     int tag_size = 0;
     char buf[32] = {0};
     int offset = 0;
+    uint16_t template_id = 0;
     uint16_t num_members = 0;
     uint32_t udt_instance_size = 0;
     int name_index_start;
@@ -672,10 +673,39 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     tag_size = plc_tag_get_size(udt_info_tag);
 
+    /* the format in the tag buffer is:
+     *
+     * A new header:
+     *
+     * uint16_t - UDT ID
+     * uint16_t - number of members (including invisible ones)
+     * uint32_t - instance size in bytes.
+     *
+     * Then the raw field info.
+     *
+     * N x field info entries
+     *     uint16_t field_metadata - array element count or bit field number
+     *     uint16_t field_type
+     *     uint32_t field_offset
+     *
+     * int8_t string - zero-terminated string, UDT name, but name stops at first semicolon!
+     *
+     * N x field names
+     *     int8_t string - zero-terminated.
+     *
+     */
+
+
     /* get the ID, number of members and the instance size. */
-    /* ID is at offset 0 */
+    template_id = plc_tag_get_uint16(udt_info_tag, 0);
     num_members = plc_tag_get_uint16(udt_info_tag, 2);
     udt_instance_size = plc_tag_get_uint32(udt_info_tag, 4);
+
+    /* just a sanity check */
+    if(template_id != udt_id) {
+        printf("The ID, %x, of the UDT we are reading is not the same as the UDT ID we requested, %x!\n",(unsigned int)template_id, (unsigned int)udt_id);
+        usage();
+    }
 
     /* allocate a UDT struct with this info. */
     udts[(size_t)udt_id] = calloc(1, sizeof(struct udt_entry_s) + (sizeof(struct udt_field_entry_s) * num_members));
@@ -706,8 +736,8 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
         field_offset = plc_tag_get_uint32(udt_info_tag, offset);
         offset += 4;
 
-        udts[udt_id]->fields[field_index].type = field_element_type;
         udts[udt_id]->fields[field_index].metadata = field_metadata;
+        udts[udt_id]->fields[field_index].type = field_element_type;
         udts[udt_id]->fields[field_index].offset = field_offset;
 
         /* make sure that we have or will get any UDT field types */
@@ -730,10 +760,11 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     name_index_start = offset;
 
-    do {
-        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
+    tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
+    while(tmp_char != ';' && tmp_char != 0) {
         offset++;
-    } while(tmp_char != ';' && tmp_char != 0);
+        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
+    }
 
     name_index_end = offset;
 
@@ -750,11 +781,11 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     /* skip to the end of the string.  Looks zero-terminated. */
     while(tmp_char != 0) {
-        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
         offset++;
+        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
     }
 
-    /* step past the zero. */
+    /* skip past the zero terminator. */
     offset++;
 
     /*
@@ -768,10 +799,11 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
         name_index_start = offset;
 
-        do {
-            tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
+        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
+        while(tmp_char != 0) {
             offset++;
-        } while(tmp_char != ';' && tmp_char != 0);
+            tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
+        }
 
         name_index_end = offset;
 
