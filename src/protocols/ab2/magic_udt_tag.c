@@ -57,9 +57,9 @@ typedef struct {
     struct plc_request_s request;
 
     uint16_t udt_id;
-
-    int num_fields;
+    uint16_t field_count;
     uint32_t field_def_size;
+    uint32_t instance_size;
 
 
     /* count of bytes sent or received. */
@@ -120,12 +120,16 @@ static tag_byte_order_t magic_udt_tag_byte_order = {
 
 static int magic_udt_info_build_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 static int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
+static int magic_udt_field_info_build_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
+static int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 
 
 plc_tag_p magic_udt_tag_create(ab2_plc_type_t plc_type, attr attribs)
 {
+    int rc = PLCTAG_STATUS_OK;
     magic_udt_tag_p tag = NULL;
     const char *name = NULL;
+    int id = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -140,8 +144,6 @@ plc_tag_p magic_udt_tag_create(ab2_plc_type_t plc_type, attr attribs)
     tag->base_tag.data = NULL;
     tag->base_tag.size = 0;
 
-    tag->last_tag_id = 0;
-
     /* check the name. */
     name = attr_get_str(attribs, "name", NULL);
     if(name == NULL || str_length(name) == 0) {
@@ -149,34 +151,20 @@ plc_tag_p magic_udt_tag_create(ab2_plc_type_t plc_type, attr attribs)
         return rc_dec(tag);
     }
 
-    /* is there a prefix? */
-    if(str_cmp_i_n("program:", name, str_length("program:")) == 0) {
-        int prefix_size = 0;
-
-        /* there is a prefix, copy it. */
-
-        while(name[prefix_size] != '.' && name[prefix_size] != 0) {
-            prefix_size++;
-        }
-
-        if(name[prefix_size] == 0) {
-            pdebug(DEBUG_WARN, "Malformed program prefix, \"%s\", found while trying to create tag listing tag!");
-            return rc_dec(tag);
-        }
-
-        tag->prefix = mem_alloc(prefix_size+1); /* +1 for zero termination */
-        if(tag->prefix == NULL) {
-            pdebug(DEBUG_WARN, "Unable to allocate prefix!");
-            return rc_dec(tag);
-        }
-
-        /* copy the prefix */
-        for(int index=0; index < prefix_size; index++) {
-            tag->prefix[index] = name[index];
-        }
-    } else {
-        tag->prefix = NULL;
+    /* parse the UDT ID */
+    if(str_length(name) <= str_length("@udt/")) {
+        pdebug(DEBUG_WARN, "Tag name is not long enough to contain the UDT ID!");
+        return rc_dec(tag);
     }
+
+    rc = str_to_int(name + str_length("@udt/"), &id);
+    if(rc != PLCTAG_STATUS_OK || id < 0 || id > 4095) {
+        /* ID can only be 0-4095 */
+        pdebug(DEBUG_WARN, "UDT IDs must be from 0 to 4095, inclusive.");
+        return rc_dec(tag);
+    }
+
+    tag->udt_id = (uint16_t)(unsigned int)id;
 
     /* get the PLC */
 
@@ -225,12 +213,6 @@ void magic_udt_tag_destroy(void *tag_arg)
 
         /* unlink the protocol layers. */
         tag->plc = rc_dec(tag->plc);
-    }
-
-    /* get rid of any tag prefix. */
-    if(tag->prefix) {
-        mem_free(tag->prefix);
-        tag->prefix = NULL;
     }
 
     /* delete the base tag parts. */
@@ -390,19 +372,20 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
     uint8_t reserved;
     uint8_t service_status;
     uint8_t status_extra_words;
+    uint16_t num_attribs = 0;
     int response_start = 0;
+    bool fatal = FALSE;
 
     (void)buffer_capacity;
 
     pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_id);
 
     do {
-
-
         resp_data_size = *payload_end - *payload_start;
 
         if(resp_data_size < 4) {
             pdebug(DEBUG_WARN, "Unexpectedly small response size!");
+            fatal = TRUE;
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -418,10 +401,10 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
         if(service_response != (CIP_CMD_OK | CIP_CMD_LIST_TAGS)) {
             pdebug(DEBUG_WARN, "Unexpected CIP service response type %" PRIu8 "!", service_response);
 
-            /* this is an error we should report about the tag, but not kill the PLC over it. */
-            SET_STATUS(tag->base_tag.status, PLCTAG_ERR_BAD_REPLY);
+            rc = PLCTAG_ERR_BAD_REPLY;
+            fatal = FALSE;
             tag->request_offset = 0;
-            rc = PLCTAG_STATUS_OK;
+
             break;
         }
 
@@ -437,9 +420,8 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
             rc = cip_decode_error_code(service_status, extended_err_status);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
-            SET_STATUS(tag->base_tag.status, rc);
+            fatal = FALSE;
             tag->request_offset = 0;
-            rc = PLCTAG_STATUS_OK;
 
             break;
         }
@@ -463,18 +445,17 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
             pdebug(DEBUG_WARN, "Unexpected number of attributes.  Expected 3 attributes got %u!", num_attribs);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
-            SET_STATUS(tag->base_tag.status, PLCTAG_ERR_BAD_DATA);
+            rc = PLCTAG_ERR_BAD_DATA;
+            fatal = FALSE;
             tag->request_offset = 0;
-            rc = PLCTAG_STATUS_OK;
 
             break;
         }
 
         /* read all 3 attributes, not clear that they will come in order. */
         for(int attrib_num=0; attrib_num < (int)(unsigned int)num_attribs; attrib_num++) {
-            uint16_t attrib_id = plc_tag_get_uint16(tag, offset);
-            uint16_t attrib_status = plc_tag_get_uint16(tag, offset +2);
-            // uint16_t struct_handle = 0;
+            uint16_t attrib_id = 0;
+            uint16_t attrib_status = 0;
 
             TRY_GET_U16_LE(buffer, *payload_end, offset, attrib_id);
             TRY_GET_U16_LE(buffer, *payload_end, offset, attrib_status);
@@ -482,98 +463,293 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
             if(attrib_status != 0) {
                 printf("Unable to get attribute ID %x, got error %x!\n", attrib_id, attrib_status);
 
-                /* this is an error we should report about the tag, but not kill the PLC over it. */
-                SET_STATUS(tag->base_tag.status, PLCTAG_ERR_BAD_DATA);
+                rc = PLCTAG_ERR_BAD_DATA;
+                fatal = FALSE;
                 tag->request_offset = 0;
-                rc = PLCTAG_STATUS_OK;
 
                 break;
             }
 
-
-            /* Stopped here */
-
+            /* process each attribute.   Each one has an ID, a status and a value. */
             switch(attrib_id) {
                 // case 0x01:
                 //     /* CRC of the fields, used as a struct handle. */
                 //     struct_handle = plc_tag_get_uint16(tag, offset);
                 //     offset += 2;
+                //     TRY_GET_U16_LE(buffer, *payload_end, offset, tag->struct_handle);
                 //     break;
 
                 case 0x02:
                     /* number of members in the template */
-                    *num_members = plc_tag_get_uint16(tag, offset);
-                    offset += 2;
+                    TRY_GET_U16_LE(buffer, *payload_end, offset, tag->field_count);
                     break;
-
-                /* 3? */
 
                 case 0x04:
                     /* template definitions size in DINTs */
-                    *udt_definition_dwords = plc_tag_get_uint32(tag, offset);
-                    offset += 4;
+                    TRY_GET_U32_LE(buffer, *payload_end, offset, tag->field_def_size);
                     break;
 
                 case 0x05:
                     /* template instance size in bytes */
-                    *udt_instance_size = plc_tag_get_uint32(tag, offset);
-                    printf("UDT intance size %d bytes.\n", (int)(unsigned int)(*udt_instance_size));
-                    offset += 4;
+                    TRY_GET_U32_LE(buffer, *payload_end, offset, tag->instance_size);
                     break;
 
                 default:
-                    printf("Unexpected attribute %x found!\n", attrib_id);
-                    usage();
+                    printf("Unexpected attribute %x found!\n", (unsigned int)attrib_id);
+
+                    rc = PLCTAG_ERR_BAD_DATA;
+                    tag->request_offset = 0;
+
                     break;
             }
         }
 
-        /* cycle through the data to get the last tag ID */
-        while(offset < *payload_end) {
-            uint32_t instance_id = 0;
-            uint16_t string_len = 0;
-            int cursor_index = offset;
+        tag->request_offset = 0;
 
-            /* each entry looks like this:
-                uint32_t instance_id    monotonically increasing but not contiguous
-                uint16_t symbol_type    type of the symbol.
-                uint16_t element_length length of one array element in bytes.
-                uint32_t array_dims[3]  array dimensions.
-                uint16_t string_len     string length count.
-                uint8_t string_data[]   string bytes (string_len of them)
-            */
-
-            TRY_GET_U32_LE(buffer, *payload_end, cursor_index, instance_id);
-
-            /* skip the fields we do not care about. */
-            cursor_index += 2 + 2 + 12;
-
-            TRY_GET_U16_LE(buffer, *payload_end, cursor_index, string_len);
-
-            pdebug(DEBUG_DETAIL, "tag id %u.", (unsigned int)instance_id);
-            tag->last_tag_id = instance_id + 1;
-
-            /* skip past the name. */
-            offset += 4 + 2 + 2 + 12 + 2 + (int)(unsigned int)string_len;
+        pdebug(DEBUG_DETAIL, "Starting new request for UDT field information.");
+        rc = plc_start_request(tag->plc, &(tag->request), tag, magic_udt_field_info_build_request_callback, magic_udt_field_info_handle_response_callback);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error queuing up next request!");
+            break;
         }
 
-        /* copy the tag listing data into the tag. */
-        for(int index=0; index < resp_data_size; index++) {
-            TRY_GET_BYTE(buffer, *payload_end, response_start, tag->base_tag.data[tag->request_offset + index]);
+        *payload_start = *payload_end;
+
+        pdebug(DEBUG_DETAIL, "Raw CIP operation complete.");
+
+        rc = PLCTAG_STATUS_OK;
+    } while(0);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error, %s, processing response!", plc_tag_decode_error(rc));
+        SET_STATUS(tag->base_tag.status, rc);
+        if(fatal = FALSE) {
+            return PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_WARN, "Error is fatal, restarting PLC!");
+            return rc;
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+
+
+int magic_udt_field_info_build_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
+{
+    int rc = PLCTAG_STATUS_OK;
+    magic_udt_tag_p tag = (magic_udt_tag_p)context;
+    int req_off = *payload_start;
+    uint8_t raw_payload[] = {
+                              0x4C,  /* Read Template Service */
+                              0x03,  /* path is 3 words, 6 bytes. */
+                              0x20,  /* class, 8-bit */
+                              0x6C,  /* Template class */
+                              0x25,  /* 16-bit instance ID next. */
+                              0x00,  /* padding */
+                              0x00, 0x00,  /* template/UDT instance ID bytes */
+                              0x00, 0x00, 0x00, 0x00, /* byte offset. */
+                              0x00, 0x00   /* Total bytes to transfer. */
+                            };
+    int raw_payload_size = (int)(unsigned int)sizeof(raw_payload);
+    int udt_id_index = 0;
+    int offset_index = 0;
+
+    (void)buffer_capacity;
+    (void)req_id;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        /* copy the UDT info request payload. */
+        for(int index=0; index < raw_payload_size && rc == PLCTAG_STATUS_OK; index++) {
+            /* capture the location of the tag ID */
+            if(index == 6) {
+                udt_id_index = req_off;
+                offset_index = req_off + 2;
+            }
+            TRY_SET_BYTE(buffer, *payload_end, req_off, raw_payload[index]);
+        }
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s while filling in the UDT info request!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* pull the UDT ID. */
+        TRY_SET_U16_LE(buffer, *payload_end, udt_id_index, tag->udt_id);
+
+        /* start with the existing offset. */
+        TRY_SET_U32_LE(buffer, *payload_end, offset_index, tag->request_offset);
+
+        /* done! */
+
+        *payload_end = req_off;
+    } while(0);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to build UDT info request, got error %s!", plc_tag_decode_error(rc));
+        SET_STATUS(tag->base_tag.status, rc);
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Tag listing request packet:");
+    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+
+int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id)
+{
+    int rc = PLCTAG_STATUS_OK;
+    magic_udt_tag_p tag = (magic_udt_tag_p)context;
+    int resp_data_size = 0;
+    int offset = *payload_start;
+    uint8_t service_response;
+    uint8_t reserved;
+    uint8_t service_status;
+    uint8_t status_extra_words;
+    int response_start = 0;
+    bool fatal = FALSE;
+
+    (void)buffer_capacity;
+
+    pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_id);
+
+    do {
+        resp_data_size = *payload_end - *payload_start;
+
+        if(resp_data_size < 4) {
+            pdebug(DEBUG_WARN, "Unexpectedly small response size!");
+            fatal = TRUE;
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        TRY_GET_BYTE(buffer, *payload_end, offset, service_response);
+        TRY_GET_BYTE(buffer, *payload_end, offset, reserved);
+        TRY_GET_BYTE(buffer, *payload_end, offset, service_status);
+        TRY_GET_BYTE(buffer, *payload_end, offset, status_extra_words);
+
+        /* ignore reserved byte. */
+        (void)reserved;
+
+        if(service_response != (CIP_CMD_OK | CIP_CMD_LIST_TAGS)) {
+            pdebug(DEBUG_WARN, "Unexpected CIP service response type %" PRIu8 "!", service_response);
+
+            rc = PLCTAG_ERR_BAD_REPLY;
+            fatal = FALSE;
+            tag->request_offset = 0;
+
+            break;
+        }
+
+        /* check the error response */
+        if(service_status != CIP_STATUS_OK && service_status != CIP_STATUS_FRAG) {
+            uint16_t extended_err_status = 0;
+
+            if(status_extra_words > 0) {
+                TRY_GET_U16_LE(buffer, *payload_end, offset, extended_err_status);
+            }
+
+            pdebug(DEBUG_WARN, "Error response %s (%s) from the PLC!", cip_decode_error_short(service_status, extended_err_status), cip_decode_error_long(service_status, extended_err_status));
+            rc = cip_decode_error_code(service_status, extended_err_status);
+
+            /* this is an error we should report about the tag, but not kill the PLC over it. */
+            fatal = FALSE;
+            tag->request_offset = 0;
+
+            break;
+        }
+
+        /* how much data do we have? */
+        response_start = offset;
+        resp_data_size = *payload_end - offset;
+
+        /* we are going to copy the data into the tag buffer almost exactly as is. */
+
+        /* the format in memory will be:
+         *
+         * A new header:
+         *
+         * uint16_t - UDT ID
+         * uint16_t - number of members (including invisible ones)
+         * uint32_t - instance size in bytes.
+         *
+         * Then the raw field info.
+         *
+         * N x field info entries
+         *     uint16_t field_data - array element count or bit field number
+         *     uint16_t field_type
+         *     uint32_t field_offset
+         *
+         * int8_t string - zero-terminated string, UDT name, but name stops at first semicolon!
+         *
+         * N x field names
+         *     int8_t string - zero-terminated.
+         *
+         */
+
+        /* resize the tag buffer for this and some additional fields. */
+
+        rc = base_tag_resize_data((plc_tag_p)tag, tag->request_offset + resp_data_size + 8);
+        if(rc != PLCTAG_STATUS_OK) {
+            /* this is fatal! */
+            pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* copy the data. */
+
+        /* if there is no data copied yet, copy the header */
+        if(tag->request_offset == 0) {
+            /* copy the UDT ID */
+            tag->base_tag.data[0] = (tag->udt_id & 0xFF);
+            tag->base_tag.data[1] = ((tag->udt_id >> 8) & 0xFF);
+
+            /* number of members */
+            tag->base_tag.data[2] = (tag->field_count & 0xFF);
+            tag->base_tag.data[3] = ((tag->field_count >> 8) & 0xFF);
+
+            /* instance size in bytes. */
+            tag->base_tag.data[4] = (tag->instance_size & 0xFF);
+            tag->base_tag.data[5] = ((tag->instance_size >> 8) & 0xFF);
+            tag->base_tag.data[6] = ((tag->instance_size >> 16) & 0xFF);
+            tag->base_tag.data[7] = ((tag->instance_size >> 24) & 0xFF);
+
+            tag->request_offset = 8;
+        }
+
+        /* copy the remaining data. */
+        for(int index = 0; index < resp_data_size && rc == PLCTAG_STATUS_OK; index++) {
+            TRY_GET_BYTE(buffer, *payload_end, offset, tag->base_tag.data[tag->request_offset + index]);
+        }
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s while copying data into tag data buffer!", plc_tag_decode_error(rc));
+            break;
         }
 
         if(service_status == CIP_STATUS_FRAG) {
             tag->request_offset += resp_data_size;
 
-            pdebug(DEBUG_DETAIL, "Starting new tag listing request for remaining data.");
-            rc = plc_start_request(tag->plc, &(tag->request), tag, magic_udt_info_build_request_callback, magic_udt_info_handle_response_callback);
+            pdebug(DEBUG_DETAIL, "Starting new request for more UDT field information.");
+            rc = plc_start_request(tag->plc, &(tag->request), tag, magic_udt_field_info_build_request_callback, magic_udt_field_info_handle_response_callback);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error queuing up next request!");
                 break;
             }
         } else {
             /* done! */
-            pdebug(DEBUG_DETAIL, "Read of tag listing data complete.");
+            pdebug(DEBUG_DETAIL, "Read of UDT field data complete.");
 
             tag->request_offset = 0;
             rc = PLCTAG_STATUS_OK;
@@ -596,15 +772,22 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error, %s, handling CIP response!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Error, %s, processing response!", plc_tag_decode_error(rc));
         SET_STATUS(tag->base_tag.status, rc);
-        return rc;
+        if(fatal = FALSE) {
+            return PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_WARN, "Error is fatal, restarting PLC!");
+            return rc;
+        }
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
+
+
 
 
 
