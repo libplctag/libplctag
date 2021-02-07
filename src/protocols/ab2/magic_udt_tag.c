@@ -106,12 +106,12 @@ static tag_byte_order_t magic_udt_tag_byte_order = {
     .float64_order = {0,1,2,3,4,5,6,7},
 
     .str_is_defined = 1,
-    .str_is_counted = 1,
+    .str_is_counted = 0,
     .str_is_fixed_length = 0,
-    .str_is_zero_terminated = 0,
+    .str_is_zero_terminated = 1,
     .str_is_byte_swapped = 0,
 
-    .str_count_word_bytes = 2,
+    .str_count_word_bytes = 0,
     .str_max_capacity = 0,
     .str_total_length = 0,
     .str_pad_bytes = 0
