@@ -4084,6 +4084,8 @@ int base_tag_resize_data(plc_tag_p tag, int new_size)
                 rc = PLCTAG_ERR_NO_MEM;
                 break;
             }
+        } else {
+            pdebug(DEBUG_DETAIL, "Tag data buffer already %" PRId32 " bytes which is larger than the requested %d bytes.", tag->size, new_size);
         }
     }
 
