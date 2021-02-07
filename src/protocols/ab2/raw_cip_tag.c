@@ -152,7 +152,7 @@ plc_tag_p raw_cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
             break;
 
         default:
-            pdebug(DEBUG_WARN, "Unsupported PLC type %d!");
+            pdebug(DEBUG_WARN, "Unsupported PLC type %d!", plc_type);
             tag->plc = NULL;
             break;
     }
