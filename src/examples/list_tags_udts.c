@@ -42,7 +42,7 @@
 #define REQUIRED_VERSION 2,2,1
 
 #define TAG_STRING_SIZE (200)
-#define TAG_STRING_TEMPLATE "protocol=ab-eip2&gateway=%s&path=%s&plc=ControlLogix&name=@raw"
+#define TAG_STRING_TEMPLATE "protocol=ab-eip2&gateway=%s&path=%s&plc=ControlLogix&name="
 #define TIMEOUT_MS 5000
 
 
@@ -97,11 +97,12 @@ struct udt_entry_s {
 
 
 static void usage(void);
-static int open_raw_tag(int argc, char **argv);
+static char *setup_tag_string(int argc, char **argv);
+static int open_tag(char *base, char *tag_name);
 static int get_tag_list(int32_t tag_id, struct tag_entry_s **tag_list, struct tag_entry_s *parent);
 static void print_element_type(uint16_t element_type);
 static int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct tag_entry_s **tag_list, struct tag_entry_s *parent);
-static int get_udt_definition(int32_t tag, uint16_t udt_id);
+static int get_udt_definition(char *base, uint16_t udt_id);
 static int encode_request_prefix(const char *name, uint8_t *buffer, int *encoded_size);
 static int get_template_info(int32_t tag, uint16_t udt_id, uint16_t *num_members, uint32_t *udt_definition_dwords, uint32_t *udt_instance_size);
 static int get_template_field_info(int32_t tag, uint16_t udt_id, uint32_t template_definition_size_dwords);
@@ -109,6 +110,9 @@ static int get_template_field_info(int32_t tag, uint16_t udt_id, uint32_t templa
 
 /* a local cache of all found UDT definitions. */
 static struct udt_entry_s *udts[MAX_UDTS] = { NULL };
+static uint16_t udts_to_process[MAX_UDTS] = {0};
+static int last_udt = 0;
+static int current_udt = 0;
 
 
 int main(int argc, char **argv)
@@ -116,7 +120,10 @@ int main(int argc, char **argv)
     int rc = PLCTAG_STATUS_OK;
     char *host = NULL;
     char *path = NULL;
-    int32_t tag = 0;
+    char *tag_string_base = NULL;
+    int32_t controller_listing_tag = 0;
+    int32_t program_listing_tag = 0;
+    int32_t udt_info_tag = 0;
     struct tag_entry_s *tag_list = NULL;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
@@ -137,19 +144,28 @@ int main(int argc, char **argv)
         udts[index] = NULL;
     }
 
-    /* set up the tag. */
-    tag = open_raw_tag(argc, argv);
-    if(tag <= 0) {
-        printf("Unable to create raw tag, error %s!\n", plc_tag_decode_error(tag));
+    tag_string_base = setup_tag_string(argc, argv);
+    if(tag_string_base == NULL) {
+        printf("Unable to set up the tag string base!\n");
+        usage();
+    }
+
+    /* set up the tag for the listing first. */
+    controller_listing_tag = open_tag(argc, argv, "@tags");
+    if(controller_listing_tag <= 0) {
+        printf("Unable to create listing tag, error %s!\n", plc_tag_decode_error(controller_listing_tag));
         usage();
     }
 
     /* get the list of controller tags. */
-    rc = get_tag_list(tag, &tag_list, NULL);
+    rc = get_tag_list(controller_listing_tag, &tag_list, NULL);
     if(rc != PLCTAG_STATUS_OK) {
         printf("Unable to get tag list or no tags visible in the target PLC, error %s!\n", plc_tag_decode_error(rc));
         usage();
     }
+
+    /* this is bad for performance. Should keep this one open to keep the PLC connection live. */
+    plc_tag_destroy(controller_listing_tag);
 
     /*
      * now loop through the tags and get the list for the program tags.
@@ -159,14 +175,26 @@ int main(int argc, char **argv)
      */
     for(struct tag_entry_s *entry = tag_list; entry; entry = entry->next) {
         if(strncmp(entry->name, "Program:", strlen("Program:")) == 0) {
+            const char buf[256] = {0};
+
             /* this is a program tag, check for its tags. */
             printf("Getting tags for program: \"%s\".\n", entry->name);
 
-            rc = get_tag_list(tag, &tag_list, entry);
+            snprintf(buf, sizeof(buf), "%s.@tags", entry->name);
+
+            program_listing_tag = open_tag(argc, argv, buf);
+            if(program_listing_tag <= 0) {
+                printf("Unable to create listing tag, error %s!\n", plc_tag_decode_error(program_listing_tag));
+                usage();
+            }
+
+            rc = get_tag_list(program_listing_tag, &tag_list, entry);
             if(rc != PLCTAG_STATUS_OK) {
                 printf("Unable to get program tag list or no tags visible in the target PLC, error %s!\n", plc_tag_decode_error(rc));
                 usage();
             }
+
+            plc_tag_destroy(program_listing_tag);
         }
     }
 
@@ -177,14 +205,35 @@ int main(int argc, char **argv)
 
         /* if this is a structure, make sure we have the definition. */
         if((element_type & TYPE_IS_STRUCT) && !(element_type & TYPE_IS_SYSTEM)) {
-            rc = get_udt_definition(tag, element_type & TYPE_UDT_ID_MASK);
-            if(rc != PLCTAG_STATUS_OK) {
-                printf("Unable to get UDT template ID %u, error %s!\n", (unsigned int)(element_type & TYPE_UDT_ID_MASK), plc_tag_decode_error(rc));
+            uint16_t udt_id = element_type & TYPE_UDT_ID_MASK;
+
+            udts_to_process[last_udt] = udt_id;
+            last_udt++;
+
+            if(last_udt >= MAX_UDTS) {
+                printf("More than %d UDTs are requested!\n", MAX_UDTS);
                 usage();
             }
         }
     }
 
+    /* get all the UDTs that we have touched. Note that this can add UDTs to the stack to process! */
+    while(current_udt < last_udt) {
+        uint16_t udt_id = udts_to_process[current_udt];
+
+        /* see if we already have it. */
+        if(udts[udt_id] == NULL) {
+            rc = get_udt_definition(tag_string_base, udt_id);
+            if(rc != PLCTAG_STATUS_OK) {
+                printf("Unable to get UDT template ID %u, error %s!\n", (unsigned int)(udt_id), plc_tag_decode_error(rc));
+                usage();
+            }
+        } else {
+            printf("Already have UDT (%04x) %s.\n", (unsigned int)udt_id, udts[udt_id]->name);
+        }
+
+        current_udt++;
+    }
     /* output all the tags. */
     for(struct tag_entry_s *tag = tag_list; tag; tag = tag->next) {
         printf("Tag \"%s", tag->name);
@@ -292,12 +341,9 @@ void usage()
     exit(1);
 }
 
-
-
-int open_raw_tag(int argc, char **argv)
+char *setup_tag_string(int argc, char **argv)
 {
-    int32_t tag = PLCTAG_ERR_CREATE;
-    char tag_string[TAG_STRING_SIZE] = {0,};
+    char tag_string[TAG_STRING_SIZE+1] = {0};
     const char *gateway = NULL;
     const char *path = NULL;
 
@@ -320,9 +366,27 @@ int open_raw_tag(int argc, char **argv)
     path = argv[2];
 
     /* build the tag string. */
-    snprintf(tag_string, TAG_STRING_SIZE-1,TAG_STRING_TEMPLATE, gateway, path);
+    snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway, path);
 
     /* FIXME - check size! */
+    printf("Using tag string \"%s\".\n", tag_string);
+
+    return strdup(tag_string);
+}
+
+int open_tag(char *base, char *tag_name)
+{
+    int32_t tag = PLCTAG_ERR_CREATE;
+    char tag_string[TAG_STRING_SIZE+1] = {0,};
+    const char *gateway = NULL;
+    const char *path = NULL;
+
+    /* build the tag string. */
+    strncpy(tag_string, base, TAG_STRING_SIZE);
+
+    strncat(tag_string, tag_name, TAG_STRING_SIZE);
+
+    printf("Using tag string \"%s\".\n", tag_string);
 
     tag = plc_tag_create(tag_string, TIMEOUT_MS);
     if(tag < 0) {
@@ -665,9 +729,12 @@ int encode_request_prefix(const char *name, uint8_t *buffer, int *encoded_size)
 }
 
 
-int get_udt_definition(int32_t tag, uint16_t udt_id)
+int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 {
     int rc = PLCTAG_STATUS_OK;
+    int32_t udt_info_tag = 0;
+    int32_t udt_field_info_tag = 0;
+    char buf[32] = {0};
     uint16_t num_members = 0;
     uint32_t udt_definition_dwords = 0;
     uint32_t udt_instance_size = 0;
@@ -677,11 +744,21 @@ int get_udt_definition(int32_t tag, uint16_t udt_id)
         return PLCTAG_STATUS_OK;
     }
 
-    rc = get_template_info(tag, udt_id, &num_members, &udt_definition_dwords, &udt_instance_size);
+    snprintf(buf, sizeof(buf), "@udt/%u", (unsigned int)udt_id);
+
+    udt_info_tag = open_tag(tag_string_base, buf);
+    if(udt_info_tag < 0) {
+        printf("Unable to open UDT info tag, error %s!\n", plc_tag_decode_error(udt_info_tag));
+        usage();
+    }
+
+    rc = get_template_info(udt_info_tag, udt_id, &num_members, &udt_definition_dwords, &udt_instance_size);
     if(rc != PLCTAG_STATUS_OK) {
         printf("Unable to get template information for UDT %04x, error %s!\n", (unsigned int)udt_id, plc_tag_decode_error(rc));
         usage();
     }
+
+    plc_tag_destroy(udt_info_tag);
 
     /* allocate a UDT struct with this info. */
     udts[(size_t)udt_id] = calloc(1, sizeof(struct udt_entry_s) + (sizeof(struct udt_field_entry_s) * num_members));
