@@ -46,7 +46,7 @@
 
 #define REQUIRED_VERSION 2,1,0
 
-#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[%d]&debug=4"
+#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=%d&name=TestBigArray[%d]"
 #define NUM_TAGS  (5)
 #define NUM_ELEMS (10)
 #define DATA_TIMEOUT (1000)
@@ -67,6 +67,14 @@ int main()
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
+
+    fprintf(stderr, "Using library version %d.%d.%d.\n",
+                                            plc_tag_get_int_attribute(0, "version_major", -1),
+                                            plc_tag_get_int_attribute(0, "version_minor", -1),
+                                            plc_tag_get_int_attribute(0, "version_patch", -1));
+
+    /* turn off debugging output. */
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* create the tags */
     for(i=0; i< NUM_TAGS; i++) {

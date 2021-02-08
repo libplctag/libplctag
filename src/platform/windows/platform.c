@@ -383,6 +383,7 @@ extern int str_cmp_i_n(const char *first, const char *second, int count)
 
 
 
+
 /*
  * str_copy
  *

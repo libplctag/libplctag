@@ -33,9 +33,10 @@
 
 #define LIBPLCTAGDLL_EXPORTS 1
 
+#include <ctype.h>
+#include <float.h>
 #include <inttypes.h>
 #include <limits.h>
-#include <float.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <lib/init.h>
@@ -75,7 +76,14 @@ static plc_tag_p lookup_tag(int32_t id);
 static int add_tag_lookup(plc_tag_p tag);
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
-//static int to_tag_index(int id);
+static int set_tag_byte_order(plc_tag_p tag, attr attribs);
+static int check_byte_order_str(const char *byte_order, int length);
+// static int get_string_count_size_unsafe(plc_tag_p tag, int offset);
+static int get_string_length_unsafe(plc_tag_p tag, int offset);
+// static int get_string_capacity_unsafe(plc_tag_p tag, int offset);
+// static int get_string_padding_unsafe(plc_tag_p tag, int offset);
+// static int get_string_total_length_unsafe(plc_tag_p tag, int offset);
+// static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
 
 #if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
@@ -271,10 +279,14 @@ THREAD_FUNC(tag_tickler_func)
 
                     /* if this tag has automatic reads, we need to check that state too. */
                     if(tag->auto_sync_read_ms > 0) {
+                        int64_t current_time = time_ms();
+
                         /* do we need to read? */
-                        if(tag->auto_sync_last_read + tag->auto_sync_read_ms <= time_ms()) {
+                        if(tag->auto_sync_next_read <= current_time) {
                             /* make sure that we do not have an outstanding read or write. */
                             if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
+                                int64_t periods = 0;
+
                                 pdebug(DEBUG_DETAIL, "Triggering automatic read start.");
 
                                 tag->read_in_flight = 1;
@@ -282,6 +294,24 @@ THREAD_FUNC(tag_tickler_func)
                                 if(tag->vtable->read) {
                                     tag->status = (int8_t)tag->vtable->read(tag);
                                 }
+
+                                /*
+                                 * schedule the next read.
+                                 *
+                                 * Note that there will be some jitter.  In that case we want to skip
+                                 * to the next read time that is a whole multiple of the read period.
+                                 *
+                                 * This keeps the jitter from slowly moving the polling cycle.
+                                 */
+                                periods = (current_time - tag->auto_sync_next_read)/tag->auto_sync_read_ms;
+
+                                /* warn if we need to skip more than one period. */
+                                if(tag->auto_sync_next_read && periods > 0) {
+                                    pdebug(DEBUG_WARN, "Skipping multiple read periods due to long delay!");
+                                }
+
+                                tag->auto_sync_next_read += (periods + 1) * tag->auto_sync_read_ms;
+                                pdebug(DEBUG_WARN, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
 
                                 events[PLCTAG_EVENT_READ_STARTED] = 1;
                             }
@@ -296,17 +326,6 @@ THREAD_FUNC(tag_tickler_func)
                         if(tag->read_complete) {
                             tag->read_complete = 0;
                             tag->read_in_flight = 0;
-
-                            /* if we have automatic read enabled, make sure we set up correct times. */
-                            if(tag->auto_sync_read_ms > 0) {
-                                /* when do we read again? */
-                                tag->auto_sync_last_read += tag->auto_sync_read_ms;
-
-                                /* if we are behind, catch up by pushing the next read out. */
-                                if(tag->auto_sync_last_read <= time_ms()) {
-                                    tag->auto_sync_last_read = time_ms() + tag->auto_sync_read_ms;
-                                }
-                            }
 
                             events[PLCTAG_EVENT_READ_COMPLETED] = 1;
                         }
@@ -641,6 +660,10 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         pdebug(DEBUG_WARN, "auto_sync_read_ms value must be positive!");
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
+    } else if(tag->auto_sync_read_ms > 0) {
+        /* how many periods did we already pass? */
+        int64_t periods = (time_ms() / tag->auto_sync_read_ms);
+        tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
     }
 
     tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
@@ -650,6 +673,14 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         return PLCTAG_ERR_BAD_PARAM;
     } else {
         tag->auto_sync_next_write = 0;
+    }
+
+    /* set up the tag byte order if there are any overrides. */
+    rc = set_tag_byte_order(tag, attribs);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to correctly set tag data byte order: %s!", plc_tag_decode_error(rc));
+        rc_dec(tag);
+        return rc;
     }
 
     /*
@@ -1676,6 +1707,7 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN, "Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -1722,6 +1754,7 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN, "Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -1777,6 +1810,7 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -1785,14 +1819,14 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
-                res =   ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_0]) << 0 ) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_1]) << 8 ) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_2]) << 16) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_3]) << 24) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_4]) << 32) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_5]) << 40) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_6]) << 48) +
-                        ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_7]) << 56);
+                res =   ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0 ) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8 ) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48) +
+                        ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -1830,6 +1864,7 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -1842,14 +1877,14 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
                     tag->tag_is_dirty = 1;
                 }
 
-                tag->data[offset + tag->byte_order.int64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_2] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_3] = (uint8_t)((val >> 24) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_4] = (uint8_t)((val >> 32) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_5] = (uint8_t)((val >> 40) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_6] = (uint8_t)((val >> 48) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_7] = (uint8_t)((val >> 56) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -1888,6 +1923,7 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -1896,14 +1932,14 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
-                res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order.int64_order_0]) << 0 ) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_1]) << 8 ) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_2]) << 16) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_3]) << 24) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_4]) << 32) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_5]) << 40) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_6]) << 48) +
-                                ((uint64_t)(tag->data[offset + tag->byte_order.int64_order_7]) << 56));
+                res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0 ) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8 ) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48) +
+                                ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56));
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -1942,6 +1978,7 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -1954,14 +1991,14 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
                     tag->tag_is_dirty = 1;
                 }
 
-                tag->data[offset + tag->byte_order.int64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_2] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_3] = (uint8_t)((val >> 24) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_4] = (uint8_t)((val >> 32) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_5] = (uint8_t)((val >> 40) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_6] = (uint8_t)((val >> 48) & 0xFF);
-                tag->data[offset + tag->byte_order.int64_order_7] = (uint8_t)((val >> 56) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
+                tag->data[offset + tag->byte_order->int64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -2003,6 +2040,7 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2011,10 +2049,10 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
-                res =   ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_0]) << 0 ) +
-                        ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_1]) << 8 ) +
-                        ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_2]) << 16) +
-                        ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_3]) << 24);
+                res =   ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0 ) +
+                        ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8 ) +
+                        ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16) +
+                        ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -2052,6 +2090,7 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2064,10 +2103,10 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
                     tag->tag_is_dirty = 1;
                 }
 
-                tag->data[offset + tag->byte_order.int32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int32_order_2] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order.int32_order_3] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -2106,6 +2145,7 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2114,10 +2154,10 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
-                res = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order.int32_order_0]) << 0 ) +
-                                ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_1]) << 8 ) +
-                                ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_2]) << 16) +
-                                ((uint32_t)(tag->data[offset + tag->byte_order.int32_order_3]) << 24));
+                res = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0 ) +
+                                ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8 ) +
+                                ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16) +
+                                ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24));
 
                 tag->status = PLCTAG_STATUS_OK;
             }  else {
@@ -2156,6 +2196,7 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2168,10 +2209,10 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
                     tag->tag_is_dirty = 1;
                 }
 
-                tag->data[offset + tag->byte_order.int32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int32_order_2] = (uint8_t)((val >> 16) & 0xFF);
-                tag->data[offset + tag->byte_order.int32_order_3] = (uint8_t)((val >> 24) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+                tag->data[offset + tag->byte_order->int32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -2213,6 +2254,7 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2221,8 +2263,8 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
-                res =   (uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order.int16_order_0]) << 0 ) +
-                                   ((uint16_t)(tag->data[offset + tag->byte_order.int16_order_1]) << 8 ));
+                res =   (uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0 ) +
+                                   ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8 ));
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -2261,6 +2303,7 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2273,8 +2316,8 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
                     tag->tag_is_dirty = 1;
                 }
 
-                tag->data[offset + tag->byte_order.int16_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int16_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -2318,6 +2361,7 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2326,8 +2370,8 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
     if(!tag->is_bit) {
         critical_block(tag->api_mutex) {
             if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
-                res =   (int16_t)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order.int16_order_0]) << 0 ) +
-                                            ((uint16_t)(tag->data[offset + tag->byte_order.int16_order_1]) << 8 ));
+                res =   (int16_t)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0 ) +
+                                            ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8 ));
                 tag->status = PLCTAG_STATUS_OK;
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
@@ -2366,6 +2410,7 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2378,8 +2423,8 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
                     tag->tag_is_dirty = 1;
                 }
 
-                tag->data[offset + tag->byte_order.int16_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-                tag->data[offset + tag->byte_order.int16_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int16_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+                tag->data[offset + tag->byte_order->int16_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
 
                 tag->status = PLCTAG_STATUS_OK;
             } else {
@@ -2422,6 +2467,7 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2468,6 +2514,7 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2520,6 +2567,7 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2567,6 +2615,7 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2622,6 +2671,7 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2635,14 +2685,14 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(double)) <= tag->size)) {
-            ures =  ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_0]) << 0 ) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_1]) << 8 ) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_2]) << 16) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_3]) << 24) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_4]) << 32) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_5]) << 40) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_6]) << 48) +
-                    ((uint64_t)(tag->data[offset + tag->byte_order.float64_order_7]) << 56);
+            ures =  ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[0]]) << 0 ) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[1]]) << 8 ) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[2]]) << 16) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[3]]) << 24) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[4]]) << 32) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[5]]) << 40) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[6]]) << 48) +
+                    ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[7]]) << 56);
 
             tag->status = PLCTAG_STATUS_OK;
             rc = PLCTAG_STATUS_OK;
@@ -2683,6 +2733,7 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2703,14 +2754,14 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
                 tag->tag_is_dirty = 1;
             }
 
-            tag->data[offset + tag->byte_order.float64_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-            tag->data[offset + tag->byte_order.float64_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
-            tag->data[offset + tag->byte_order.float64_order_2] = (uint8_t)((val >> 16) & 0xFF);
-            tag->data[offset + tag->byte_order.float64_order_3] = (uint8_t)((val >> 24) & 0xFF);
-            tag->data[offset + tag->byte_order.float64_order_4] = (uint8_t)((val >> 32) & 0xFF);
-            tag->data[offset + tag->byte_order.float64_order_5] = (uint8_t)((val >> 40) & 0xFF);
-            tag->data[offset + tag->byte_order.float64_order_6] = (uint8_t)((val >> 48) & 0xFF);
-            tag->data[offset + tag->byte_order.float64_order_7] = (uint8_t)((val >> 56) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[3]] = (uint8_t)((val >> 24) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[4]] = (uint8_t)((val >> 32) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[5]] = (uint8_t)((val >> 40) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[6]] = (uint8_t)((val >> 48) & 0xFF);
+            tag->data[offset + tag->byte_order->float64_order[7]] = (uint8_t)((val >> 56) & 0xFF);
 
             tag->status = PLCTAG_STATUS_OK;
         } else {
@@ -2743,6 +2794,7 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return res;
@@ -2756,10 +2808,10 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 
     critical_block(tag->api_mutex) {
         if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
-            ures =  (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order.float32_order_0]) << 0 ) +
-                               ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_1]) << 8 ) +
-                               ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_2]) << 16) +
-                               ((uint32_t)(tag->data[offset + tag->byte_order.float32_order_3]) << 24));
+            ures =  (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order->float32_order[0]]) << 0 ) +
+                               ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[1]]) << 8 ) +
+                               ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[2]]) << 16) +
+                               ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[3]]) << 24));
 
             tag->status = PLCTAG_STATUS_OK;
             rc = PLCTAG_STATUS_OK;
@@ -2800,6 +2852,7 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 
     /* is there data? */
     if(!tag->data) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
         return PLCTAG_ERR_NO_DATA;
@@ -2820,10 +2873,10 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
                 tag->tag_is_dirty = 1;
             }
 
-            tag->data[offset + tag->byte_order.float32_order_0] = (uint8_t)((val >> 0 ) & 0xFF);
-            tag->data[offset + tag->byte_order.float32_order_1] = (uint8_t)((val >> 8 ) & 0xFF);
-            tag->data[offset + tag->byte_order.float32_order_2] = (uint8_t)((val >> 16) & 0xFF);
-            tag->data[offset + tag->byte_order.float32_order_3] = (uint8_t)((val >> 24) & 0xFF);
+            tag->data[offset + tag->byte_order->float32_order[0]] = (uint8_t)((val >> 0 ) & 0xFF);
+            tag->data[offset + tag->byte_order->float32_order[1]] = (uint8_t)((val >> 8 ) & 0xFF);
+            tag->data[offset + tag->byte_order->float32_order[2]] = (uint8_t)((val >> 16) & 0xFF);
+            tag->data[offset + tag->byte_order->float32_order[3]] = (uint8_t)((val >> 24) & 0xFF);
 
             tag->status = PLCTAG_STATUS_OK;
         } else {
@@ -2839,10 +2892,714 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 }
 
 
+LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char *buffer, int buffer_length)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+    int max_len = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting a string value from a bit tag is not supported!");
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* set all buffer bytes to zero. */
+    mem_set(buffer, 0, buffer_length);
+
+    critical_block(tag->api_mutex) {
+        int string_length = get_string_length_unsafe(tag, string_start_offset);
+
+        /* determine the maximum number of characters/bytes to copy. */
+        if(buffer_length < string_length) {
+            pdebug(DEBUG_WARN, "Buffer length, %d, is less than the string length, %d!", buffer_length, string_length);
+            max_len = buffer_length;
+        } else {
+            max_len = string_length;
+        }
+
+        /* check the amount of space. */
+        if(string_start_offset + (int)tag->byte_order->str_count_word_bytes + max_len <= tag->size) {
+            for(int i = 0; i < max_len; i++) {
+                size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                                  + (size_t)(unsigned int)string_start_offset
+                                  + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+                buffer[i] = (char)tag->data[char_index];
+            }
+
+            tag->status = PLCTAG_STATUS_OK;
+            rc = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_WARN, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+        }
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const char *string_val)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
+    int string_length = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    if(!string_val) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "New string value pointer is null!");
+        tag->status = PLCTAG_ERR_NULL_PTR;
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* note that passing a zero-length string is valid. */
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Setting a string value on a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    string_length = str_length(string_val);
+
+    critical_block(tag->api_mutex) {
+        int string_capacity = (tag->byte_order->str_max_capacity ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset));
+
+        /* determine the maximum number of characters/bytes to copy. */
+        if(string_capacity >= string_length) {
+            /* is there sufficient room in the tag? */
+            if(string_start_offset + (int)(tag->byte_order->str_count_word_bytes) + string_length + (tag->byte_order->str_is_zero_terminated ? 1 : 0) <= tag->size) {
+                /* set the status, we might change it below. */
+                rc = PLCTAG_STATUS_OK;
+                tag->status = (int8_t)rc;
+
+                /* copy the string data into the tag. */
+                for(int i = 0; i < string_length; i++) {
+                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                                    + (size_t)(unsigned int)string_start_offset
+                                    + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+                    tag->data[char_index] = (uint8_t)string_val[i];
+                }
+
+                /* zero pad the rest. */
+                for(int i = string_length; i < string_capacity; i++) {
+                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                                    + (size_t)(unsigned int)string_start_offset
+                                    + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+                    tag->data[char_index] = (uint8_t)0;
+                }
+
+                /* if the string is counted, set the length */
+                if(tag->byte_order->str_is_counted) {
+                    switch(tag->byte_order->str_count_word_bytes) {
+                        case 1:
+                            tag->data[string_start_offset] = (uint8_t)(unsigned int)string_length;
+                            break;
+
+                        case 2:
+                            tag->data[string_start_offset + tag->byte_order->int16_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
+                            tag->data[string_start_offset + tag->byte_order->int16_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
+                            break;
+
+                        case 4:
+                            tag->data[string_start_offset + tag->byte_order->int32_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
+                            tag->data[string_start_offset + tag->byte_order->int32_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
+                            tag->data[string_start_offset + tag->byte_order->int32_order[2]] = (uint8_t)((((unsigned int)string_length) >> 16) & 0xFF);
+                            tag->data[string_start_offset + tag->byte_order->int32_order[3]] = (uint8_t)((((unsigned int)string_length) >> 24) & 0xFF);
+                            break;
+
+                        default:
+                            pdebug(DEBUG_WARN, "Unsupported string count size, %d!", tag->byte_order->str_count_word_bytes);
+                            rc = PLCTAG_ERR_UNSUPPORTED;
+                            tag->status = (int8_t)rc;
+                            break;
+                    }
+                }
+
+                if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+            } else {
+                pdebug(DEBUG_WARN, "Writing the full string would go out of bounds in the tag buffer!");
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                tag->status = (int8_t)rc;
+            }
+        } else {
+            pdebug(DEBUG_WARN, "String capacity, %d, is less than the string length, %d!", string_capacity, string_length);
+            rc = PLCTAG_ERR_TOO_LARGE;
+            tag->status = (int8_t)rc;
+        }
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+
+
+LIB_EXPORT int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
+{
+    int string_capacity = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting string capacity from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) {
+        string_capacity = (tag->byte_order->str_max_capacity ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset));
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return string_capacity;
+}
+
+
+
+LIB_EXPORT int plc_tag_get_string_length(int32_t id, int string_start_offset)
+{
+    int string_length = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting string length from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) {
+        string_length = get_string_length_unsafe(tag, string_start_offset);
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return string_length;
+}
+
+
+
+
+LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offset)
+{
+    int total_length = 0;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* are strings defined for this tag? */
+    if(!tag->byte_order || !tag->byte_order->str_is_defined) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(tag->is_bit) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN, "Getting a string total length from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        return PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    critical_block(tag->api_mutex) {
+        total_length = (int)(tag->byte_order->str_count_word_bytes)
+                     + (tag->byte_order->str_is_fixed_length ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset))
+                     + (int)(tag->byte_order->str_pad_bytes);
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return total_length;
+}
+
+
+
 
 /*****************************************************************************************************
  *****************************  Support routines for extra indirection *******************************
  ****************************************************************************************************/
+
+int set_tag_byte_order(plc_tag_p tag, attr attribs)
+
+{
+    int use_default = 1;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* the default values are already set in the tag. */
+
+    /* check for overrides. */
+    if(attr_get_str(attribs,  "int16_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "int32_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "int64_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "float32_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs,  "float64_byte_order", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_is_counted", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_is_fixed_length", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_is_zero_terminated", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_is_byte_swapped", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_count_word_bytes", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_max_capacity", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_total_length", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    if(attr_get_str(attribs, "str_pad_bytes", NULL) != NULL) {
+        use_default = 0;
+    }
+
+    /* if we need to override something, build a new byte order structure. */
+    if(!use_default) {
+        const char *byte_order_str = NULL;
+        int str_param = 0;
+        int rc = PLCTAG_STATUS_OK;
+        tag_byte_order_t *new_byte_order = mem_alloc((int)(unsigned int)sizeof(*(tag->byte_order)));
+
+        if(!new_byte_order) {
+            pdebug(DEBUG_WARN, "Unable to allocate byte order struct for tag!");
+            return PLCTAG_ERR_NO_MEM;
+        }
+
+        /* copy the defaults. */
+        *new_byte_order = *(tag->byte_order);
+
+        /* replace the old byte order. */
+        tag->byte_order = new_byte_order;
+
+        /* mark it as allocated so that we free it later. */
+        tag->byte_order->is_allocated = 1;
+
+        /* 16-bit ints. */
+        byte_order_str = attr_get_str(attribs, "int16_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order int16_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 2);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string int16_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            /* strange gyrations to make the compiler happy.   MSVC will probably complain. */
+            tag->byte_order->int16_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x01);
+            tag->byte_order->int16_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x01);
+        }
+
+        /* 32-bit ints. */
+        byte_order_str = attr_get_str(attribs, "int32_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order int32_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 4);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string int32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->int32_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->int32_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->int32_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->int32_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
+        }
+
+        /* 64-bit ints. */
+        byte_order_str = attr_get_str(attribs, "int64_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order int64_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 8);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string int64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->int64_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[4] = (int)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[5] = (int)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[6] = (int)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->int64_order[7] = (int)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
+        }
+
+        /* 32-bit floats. */
+        byte_order_str = attr_get_str(attribs, "float32_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order float32_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 4);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string float32_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->float32_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->float32_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->float32_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x03);
+            tag->byte_order->float32_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x03);
+        }
+
+        /* 64-bit floats */
+        byte_order_str = attr_get_str(attribs, "float64_byte_order", NULL);
+        if(byte_order_str) {
+            pdebug(DEBUG_DETAIL, "Override byte order float64_byte_order=%s", byte_order_str);
+
+            rc = check_byte_order_str(byte_order_str, 8);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Byte order string float64_byte_order, \"%s\", is illegal or malformed.", byte_order_str);
+                return rc;
+            }
+
+            tag->byte_order->float64_order[0] = (int)(unsigned int)(((unsigned int)byte_order_str[0] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[1] = (int)(unsigned int)(((unsigned int)byte_order_str[1] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[2] = (int)(unsigned int)(((unsigned int)byte_order_str[2] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[3] = (int)(unsigned int)(((unsigned int)byte_order_str[3] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[4] = (int)(unsigned int)(((unsigned int)byte_order_str[4] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[5] = (int)(unsigned int)(((unsigned int)byte_order_str[5] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[6] = (int)(unsigned int)(((unsigned int)byte_order_str[6] - (unsigned int)('0')) & 0x07);
+            tag->byte_order->float64_order[7] = (int)(unsigned int)(((unsigned int)byte_order_str[7] - (unsigned int)('0')) & 0x07);
+        }
+
+        /* string information. */
+
+        /* is the string counted? */
+        if(attr_get_str(attribs, "str_is_counted", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_counted", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_counted = (str_param ? 1 : 0);
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_counted must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* is the string a fixed length? */
+        if(attr_get_str(attribs, "str_is_fixed_length", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_fixed_length", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_fixed_length = (str_param ? 1: 0);
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_fixed_length must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* is the string zero terminated? */
+        if(attr_get_str(attribs, "str_is_zero_terminated", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_zero_terminated", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_zero_terminated = (str_param ? 1 : 0);
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_zero_terminated must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* is the string byteswapped like PLC/5? */
+        if(attr_get_str(attribs, "str_is_byte_swapped", NULL)) {
+            str_param = attr_get_int(attribs, "str_is_byte_swapped", 0);
+            if(str_param == 1 || str_param == 0) {
+                tag->byte_order->str_is_byte_swapped = (str_param ? 1 : 0);
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_is_byte_swapped must be missing, zero (0) or one (1)!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* main string parameters. */
+
+        /* how many bytes is the string count word? */
+        if(attr_get_str(attribs, "str_count_word_bytes", NULL)) {
+            str_param = attr_get_int(attribs, "str_count_word_bytes", 0);
+            if(str_param == 0 || str_param == 1 || str_param == 2 || str_param == 4 || str_param == 8) {
+                tag->byte_order->str_count_word_bytes = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_count_word_bytes must be missing, 0, 1, 2, 4, or 8!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* What is the string maximum capacity */
+        if(attr_get_str(attribs, "str_max_capacity", NULL)) {
+            str_param = attr_get_int(attribs, "str_max_capacity", 0);
+            if(str_param >= 0) {
+                tag->byte_order->str_max_capacity = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_max_capacity must be missing, 0, or positive!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* What is the string total length */
+        if(attr_get_str(attribs, "str_total_length", NULL)) {
+            str_param = attr_get_int(attribs, "str_total_length", 0);
+            if(str_param >= 0) {
+                tag->byte_order->str_total_length = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_total_length must be missing, 0, or positive!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* What is the string padding length */
+        if(attr_get_str(attribs, "str_pad_bytes", NULL)) {
+            str_param = attr_get_int(attribs, "str_pad_bytes", 0);
+            if(str_param >= 0) {
+                tag->byte_order->str_pad_bytes = (unsigned int)str_param;
+            } else {
+                pdebug(DEBUG_WARN, "Tag string attribute str_pad_bytes must be missing, 0, or positive!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* now make sure that the combination of settings works. */
+
+        /* if we have a counted string, we need the count! */
+        if(tag->byte_order->str_is_counted) {
+            if(tag->byte_order->str_count_word_bytes == 0) {
+                pdebug(DEBUG_WARN, "If a string definition is counted, you must use both \"str_is_counted\" and \"str_count_word_bytes\" parameters!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* if we have a fixed length string, we need to know what the length is! */
+        if(tag->byte_order->str_is_fixed_length) {
+            if(tag->byte_order->str_total_length == 0) {
+                pdebug(DEBUG_WARN, "If a string definition is fixed length, you must use both \"str_is_fixed_length\" and \"str_total_length\" parameters!");
+                return PLCTAG_ERR_BAD_PARAM;
+            }
+        }
+
+        /* check the total length. */
+        if(tag->byte_order->str_total_length > 0
+          && (tag->byte_order->str_is_zero_terminated
+            + tag->byte_order->str_max_capacity
+            + tag->byte_order->str_count_word_bytes
+            + tag->byte_order->str_pad_bytes)
+          > tag->byte_order->str_total_length)
+        {
+            pdebug(DEBUG_WARN, "Tag string total length must be at least the sum of the other string components!");
+            return PLCTAG_ERR_BAD_PARAM;
+        }
+
+        /* Do we have enough of a definition for a string? */
+        /* FIXME - This is probably not enough checking! */
+        if(tag->byte_order->str_is_counted || tag->byte_order->str_is_zero_terminated) {
+            tag->byte_order->str_is_defined = 1;
+        } else {
+            pdebug(DEBUG_WARN, "Insufficient definitions found to support strings!");
+        }
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+int check_byte_order_str(const char *byte_order, int length)
+{
+    int taken[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int byte_order_len = str_length(byte_order);
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* check the size. */
+    if(byte_order_len != length) {
+        pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be %d characters long!", byte_order, length);
+        return (byte_order_len < length ? PLCTAG_ERR_TOO_SMALL : PLCTAG_ERR_TOO_LARGE);
+    }
+
+    /* check each character. */
+    for(int i=0; i < byte_order_len; i++) {
+        int val = 0;
+
+        if(!isdigit(byte_order[i]) || byte_order[i] < '0' || byte_order[i] > '7') {
+            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must be only characters from '0' to '7'!", byte_order);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        /* get the numeric value. */
+        val = byte_order[i] - '0';
+
+        if(val < 0 || val > (length-1)) {
+            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must only values from 0 to %d!", byte_order, (length - 1));
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        if(taken[val]) {
+            pdebug(DEBUG_WARN, "Byte order string, \"%s\", must use each digit exactly once!", byte_order);
+            return PLCTAG_ERR_BAD_DATA;
+        }
+
+        taken[val] = 1;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
 
 
 plc_tag_p lookup_tag(int32_t tag_id)
@@ -2941,3 +3698,292 @@ int add_tag_lookup(plc_tag_p tag)
 
     return new_id;
 }
+
+
+
+/*
+ * get the string count length depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+// int get_string_count_size_unsafe(plc_tag_p tag, int offset)
+// {
+//     int string_count_length = 0;
+//     string_type_t string_type = tag->byte_order.string_type;
+
+//     /* FIXME - do something with the offset! */
+//     (void)offset;
+
+//     switch(string_type) {
+//         case STRING_AB_MICRO800:
+//             string_count_length = 1; /* FIXME - is this correct? */
+//             break;
+
+//         case STRING_AB_PLC5:
+//             string_count_length = 2;
+//             break;
+
+//         case STRING_AB_LGX:
+//             string_count_length = 4;
+//             break;
+
+//         case STRING_AB_TAG_NAME:
+//             string_count_length = 2;
+//             break;
+
+//         case STRING_ZERO_TERM:
+//             string_count_length = 0;
+//             break;
+
+//         default:
+//             pdebug(DEBUG_WARN, "Unsupported string type!");
+//             string_count_length = PLCTAG_ERR_UNSUPPORTED;
+//             break;
+//     }
+
+//     return string_count_length;
+// }
+
+
+
+/*
+ * get the string length depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+int get_string_length_unsafe(plc_tag_p tag, int offset)
+{
+    int string_length = 0;
+
+    if(tag->byte_order->str_is_counted) {
+        switch(tag->byte_order->str_count_word_bytes) {
+            case 1:
+                string_length = (int)(unsigned int)(tag->data[offset]);
+                break;
+
+            case 2:
+                string_length = (int16_t)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0 ) +
+                                                    ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8 ));
+                break;
+
+            case 4:
+                string_length = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0 ) +
+                                          ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8 ) +
+                                          ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[2]]) << 16) +
+                                          ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[3]]) << 24));
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unsupported string count word size, %d bytes!", tag->byte_order->str_count_word_bytes);
+                return 0; /* FIXME - this should be an error code. */
+                break;
+        }
+
+    } else {
+        if(tag->byte_order->str_is_zero_terminated) {
+            /* slow, but hopefully correct. */
+            for(int i = offset + (int)(tag->byte_order->str_count_word_bytes); i < tag->size; i++) {
+                size_t char_index = (((size_t)(unsigned int)string_length) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                                + (size_t)(unsigned int)offset
+                                + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+
+                if(tag->data[char_index] == (uint8_t)0) {
+                    /* found the end. */
+                    break;
+                }
+
+                string_length++;
+            }
+        } else {
+            /* it is not counted or zero terminated, so it is not supported. */
+            pdebug(DEBUG_WARN, "Unsupported string length type.   Must be counted or zero-terminated!");
+            return 0; /* FIXME this should be an error code. */
+        }
+    }
+
+    return string_length;
+}
+
+
+/*
+ * get the string capacity depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+// int get_string_capacity_unsafe(plc_tag_p tag, int offset)
+// {
+//     int string_capacity = 0;
+//     string_type_t string_type = tag->byte_order.string_type;
+
+//     /* FIXME - do something with the offset! */
+//     (void)offset;
+
+//     switch(string_type) {
+//         case STRING_AB_MICRO800:
+//             string_capacity = 255; /* FIXME - is this correct? */
+//             break;
+
+//         case STRING_AB_PLC5:
+//             string_capacity = 82;
+//             break;
+
+//         case STRING_AB_LGX:
+//             string_capacity = 82;
+//             break;
+
+//         case STRING_AB_TAG_NAME:
+//             string_capacity = get_string_length_unsafe(tag, offset);
+//             break;
+
+//         case STRING_ZERO_TERM:
+//             string_capacity = get_string_length_unsafe(tag, offset);
+//             break;
+
+//         default:
+//             pdebug(DEBUG_WARN, "Unsupported string type!");
+//             string_capacity = PLCTAG_ERR_UNSUPPORTED;
+//             break;
+//     }
+
+//     return string_capacity;
+// }
+
+
+/*
+ * get the string padding depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+// int get_string_padding_unsafe(plc_tag_p tag, int offset)
+// {
+//     int string_padding = 0;
+//     string_type_t string_type = tag->byte_order.string_type;
+
+//     /* FIXME - do something with the offset! */
+//     (void)offset;
+
+//     switch(string_type) {
+//         case STRING_AB_MICRO800:
+//             string_padding = 0; /* FIXME - is this correct? */
+//             break;
+
+//         case STRING_AB_PLC5:
+//             string_padding = 0;
+//             break;
+
+//         case STRING_AB_LGX:
+//             string_padding = 2;
+//             break;
+
+//         case STRING_AB_TAG_NAME:
+//             string_padding = 0;
+//             break;
+
+//         case STRING_ZERO_TERM:
+//             string_padding = 1; /* for the zero char termination. */
+//             break;
+
+//         default:
+//             pdebug(DEBUG_WARN, "Unsupported string type!");
+//             string_padding = PLCTAG_ERR_UNSUPPORTED;
+//             break;
+//     }
+
+//     return string_padding;
+// }
+
+
+/*
+ * get the string total length depending on the PLC string type.
+ *
+ * This is called in other functions so is separated out.
+ *
+ * This must be called with the tag API mutex held!
+ */
+
+
+// int get_string_total_length_unsafe(plc_tag_p tag, int offset)
+// {
+//     int string_count_word_size = get_string_count_size_unsafe(tag, offset);
+//     int string_capacity = get_string_capacity_unsafe(tag, offset);
+//     int string_padding = get_string_padding_unsafe(tag, offset);
+
+//     if(string_count_word_size < 0) {
+//         return string_count_word_size;
+//     }
+
+//     if(string_capacity < 0) {
+//         return string_capacity;
+//     }
+
+//     if(string_padding < 0) {
+//         return string_padding;
+//     }
+
+//     return string_count_word_size + string_capacity + string_padding;
+// }
+
+
+// int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index)
+// {
+//     int new_index = 0;
+//     string_type_t string_type = tag->byte_order.string_type;
+
+//     /* FIXME - do something with the offset! */
+//     (void)offset;
+
+//     switch(string_type) {
+//         case STRING_AB_MICRO800:
+//             new_index = char_index;
+
+//             break;
+
+//         case STRING_AB_PLC5:
+//             /* thank you, AB */
+//             /* byte swap the index, odd -> even and even -> odd */
+//             if(char_index & 0x01) {
+//                 /* odd */
+//                 new_index = char_index - 1;
+//             } else {
+//                 /* even */
+//                 new_index = char_index + 1;
+//             }
+
+//             break;
+
+//         case STRING_AB_LGX:
+//             new_index = char_index;
+//             break;
+
+//         case STRING_AB_TAG_NAME:
+//             new_index = char_index;
+//             break;
+
+//         case STRING_ZERO_TERM:
+//             new_index = char_index;
+//             break;
+
+//         default:
+//             pdebug(DEBUG_WARN, "Unsupported string type!");
+//             new_index = PLCTAG_ERR_UNSUPPORTED;
+
+//             break;
+//     }
+
+//     return new_index;
+// }
+
+
+

@@ -40,7 +40,7 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,2,0
 
 #define TAG_STRING_SIZE (200)
 #define TIMEOUT_MS (5000)
@@ -96,12 +96,19 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
 {
     int rc = PLCTAG_STATUS_OK;
     int offset = 0;
-    int index = 0;
+    int prefix_size = 0;
 
     rc = plc_tag_read(tag, TIMEOUT_MS);
     if(rc != PLCTAG_STATUS_OK) {
         printf("Unable to read tag!  Return code %s\n",plc_tag_decode_error(tag));
         usage();
+    }
+
+    /* get the prefix length */
+    if(prefix && strlen(prefix) > 0) {
+        prefix_size = (int)(unsigned int)strlen(prefix) + 1; /* +1 for the dot */
+    } else {
+        prefix_size = 0;
     }
 
     /* process each tag entry. */
@@ -110,20 +117,16 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         uint16_t tag_type = 0;
         uint16_t element_length = 0;
         uint16_t array_dims[3] = {0,};
-        uint16_t tag_name_len = 0;
-        char tag_name[TAG_STRING_SIZE * 2] = {0,};
-        size_t prefix_size = 0;
-        size_t i;
-
-        //offset = index * 104; /* MAGIC - size of a symbol entry. */
+        int tag_name_len = 0;
+        char *tag_name = NULL;
 
         /* each entry looks like this:
-        uint32_t instance_id    monotonically increasing but not contiguous
-        uint16_t symbol_type    type of the symbol.
-        uint16_t element_length length of one array element in bytes.
-        uint32_t array_dims[3]  array dimensions.
-        uint16_t string_len     string length count.
-        uint8_t string_data[]   string bytes (string_len of them)
+            uint32_t instance_id    monotonically increasing but not contiguous
+            uint16_t symbol_type    type of the symbol.
+            uint16_t element_length length of one array element in bytes.
+            uint32_t array_dims[3]  array dimensions.
+            uint16_t string_len     string length count.
+            uint8_t string_data[]   string bytes (string_len of them)
         */
 
         /* we do not actually need this.
@@ -144,26 +147,31 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
         array_dims[2] = (uint16_t)plc_tag_get_uint32(tag, offset);
         offset += 4;
 
-        tag_name_len = plc_tag_get_uint16(tag, offset);
-        offset += 2;
+        /* use library support for strings. Offset points to the start of the string. */
+        tag_name_len = plc_tag_get_string_length(tag, offset) + 1; /* add +1 for the zero byte. */
+
+        /* allocate space for the prefix plus the tag name. */
+        tag_name = malloc((size_t)(unsigned int)(tag_name_len + prefix_size));
+        if(!tag_name) {
+            fprintf(stderr, "Unable to allocate memory for the tag name!\n");
+            usage();
+        }
 
         /* copy the prefix string. */
-        if(prefix && strlen(prefix) > 0) {
-            snprintf(tag_name, sizeof(tag_name), "%s.",prefix);
-            prefix_size = strlen(prefix) + 1;
-            //printf("Tag name before: %s\n", tag_name);
-        } else {
-            prefix_size = 0;
+        if(prefix_size > 0) {
+            snprintf(tag_name, (size_t)(unsigned int)(tag_name_len + prefix_size), "%s.", prefix);
         }
 
-        /* copy the name string bytes. */
-        for(i=0; i < (size_t)tag_name_len && (size_t)(i + prefix_size) < (size_t)((TAG_STRING_SIZE*2)-1); i++) {
-            tag_name[i + prefix_size] = plc_tag_get_int8(tag,offset);
-            offset++;
-            tag_name[i + prefix_size +1] = 0;
+        rc = plc_tag_get_string(tag, offset, tag_name + prefix_size, tag_name_len);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Unable to get the tag name string, got error %s!\n", plc_tag_decode_error(rc));
+            usage();
         }
 
-        index++;
+        /* fprintf(stderr, "Tag %s, string length: %d.\n", tag_name, (int)(unsigned int)strlen(tag_name)); */
+
+        /* skip past the string. */
+        offset += plc_tag_get_string_total_length(tag, offset);
 
         /* if the tag is actually a program, put it on the program list for later. */
         if(prog_list && strncmp(tag_name, "Program:", strlen("Program:")) == 0) {
@@ -177,7 +185,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
             //printf("index %d: Found program: %s\n", index, tag_name);
 
             entry->next = *prog_list;
-            entry->program_name = strdup(tag_name);
+            entry->program_name = tag_name;
 
             *prog_list = entry;
         } else if(!(tag_type & TAG_IS_SYSTEM)) {
@@ -193,7 +201,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
             //printf("index %d: Found tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
 
             /* fill in the fields. */
-            tag_entry->name = strdup(tag_name);
+            tag_entry->name = tag_name;
             tag_entry->type = tag_type;
             tag_entry->elem_size = element_length;
             tag_entry->num_dimensions = (uint16_t)((tag_type & TAG_DIM_MASK) >> 13);
@@ -210,6 +218,7 @@ void get_list(int32_t tag, char *prefix, struct tag_entry_s **tag_list, struct p
             *tag_list = tag_entry;
         } else {
             //printf("index %d: Found system tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", index, tag_name, tag_instance_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
+            free(tag_name);
         }
     } while(rc == PLCTAG_STATUS_OK && offset < plc_tag_get_size(tag));
 
@@ -275,7 +284,9 @@ int main(int argc, char **argv)
     }
 
     /* loop over the tags and output their connection strings. */
-    for(struct tag_entry_s *old_tag = NULL, *tag = tags; tag; old_tag = tag, tag = tag->next, free(old_tag->name), free(old_tag)) {
+    while(tags) {
+        struct tag_entry_s *tag = tags;
+
         printf("Tag \"%s", tag->name);
         switch(tag->num_dimensions) {
             case 1:
@@ -295,6 +306,11 @@ int main(int argc, char **argv)
         }
 
         printf("\" (%04x): protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\n", tag->type, host, path, tag->elem_size, tag->elem_count, tag->name);
+
+        tags = tag->next;
+
+        free(tag->name);
+        free(tag);
     }
 
     return 0;

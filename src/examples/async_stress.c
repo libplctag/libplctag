@@ -217,26 +217,29 @@ int main(int argc, char **argv)
     start = util_time_ms();
 
     /* create the tags */
-    for(i=0; i< num_tags; i++) {
+    for(i=0; i< num_tags && !done; i++) {
         tags[i]  = plc_tag_create(argv[2], 0);
         statuses[i] = plc_tag_status(tags[i]);
 
         if(tags[i] < 0) {
             fprintf(stderr,"Error %s: could not create tag %d\n", plc_tag_decode_error(tags[i]), i);
+            done = 1;
         }
     }
 
-    rc = wait_for_tags(tags, statuses, num_tags, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        for(int i=0; i<num_tags; i++) {
-            if(statuses[i] != PLCTAG_STATUS_OK) {
-                fprintf(stderr, "Creation of tag %d failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
+    if(!done) {
+        rc = wait_for_tags(tags, statuses, num_tags, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            for(int i=0; i<num_tags; i++) {
+                if(statuses[i] != PLCTAG_STATUS_OK) {
+                    fprintf(stderr, "Creation of tag %d failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
+                }
+
+                plc_tag_destroy(tags[i]);
             }
 
-            plc_tag_destroy(tags[i]);
+            done = 1;
         }
-
-        exit(PLCTAG_ERR_CREATE);
     }
 
     end = util_time_ms();
@@ -251,6 +254,7 @@ int main(int argc, char **argv)
         if(rc != PLCTAG_STATUS_OK) {
             for(int i=0; i<num_tags; i++) {
                 fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
+                done = 1;
             }
         }
 

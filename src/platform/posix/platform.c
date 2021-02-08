@@ -1259,18 +1259,57 @@ extern int socket_destroy(sock_p *s)
 /*
  * sleep_ms
  *
- * Sleep the passed number of milliseconds.  Note that signals
- * will cause this to terminate early!  Check the time before
- * you assume that the total time has passed.
+ * Sleep the passed number of milliseconds.  This handles the case of being
+ * interrupted by a signal.
+ *
+ * FIXME - should the signal interrupt handling be done here or in app code?
  */
 int sleep_ms(int ms)
 {
-    struct timeval tv;
+    struct timespec wait_time;
+    struct timespec remainder;
+    int done = 1;
+    int rc = PLCTAG_STATUS_OK;
 
-    tv.tv_sec = ms/1000;
-    tv.tv_usec = (ms % 1000)*1000;
+    if(ms < 0) {
+        pdebug(DEBUG_WARN, "called with negative time %d!", ms);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
 
-    return select(0,NULL,NULL,NULL, &tv);
+    wait_time.tv_sec = ms/1000;
+    wait_time.tv_nsec = ((int64_t)ms % 1000)*1000000; /* convert to nanoseconds */
+
+    do {
+        int rc = nanosleep(&wait_time, &remainder);
+        if(rc < 0 && errno == EINTR) {
+            /* we were interrupted, keep going. */
+            wait_time = remainder;
+            done = 0;
+        } else {
+            done = 1;
+
+            if(rc < 0) {
+                /* error condition. */
+                rc = PLCTAG_ERR_BAD_REPLY;
+            }
+        }
+    } while(!done);
+
+    return rc;
+
+
+    // rc = nanosleep(&wait_time, &remainder);
+    // if(rc < 0 && errno != EINTR) {
+    //     rc = PLCTAG_ERR_BAD_REPLY;
+    // }
+
+    // return rc;
+    // struct timeval tv;
+
+    // tv.tv_sec = ms/1000;
+    // tv.tv_usec = (ms % 1000)*1000;
+
+    // return select(0,NULL,NULL,NULL, &tv);
 }
 
 
