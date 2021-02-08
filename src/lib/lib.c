@@ -2021,9 +2021,122 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
 }
 
 
+LIB_EXPORT int plc_tag_set_block(int32_t id, int offset, uint8_t *block, int blocksize)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(!block) {
+        pdebug(DEBUG_WARN,"Block not assigned.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(!blocksize) {
+        pdebug(DEBUG_WARN,"Zero size block.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }    
+
+    if(!tag->is_bit) {
+        critical_block(tag->api_mutex) {
+            if((offset >= 0) && ((offset + blocksize) <= tag->size)) {
+                if(tag->auto_sync_write_ms > 0) {
+                    tag->tag_is_dirty = 1;
+                }
+
+                int i;
+                for (i=0;i<blocksize;i++) {
+                    tag->data[offset + i] = block[i];
+                }                
+
+                tag->status = PLCTAG_STATUS_OK;
+            } else {
+                pdebug(DEBUG_WARN, "Data offset out of bounds!");
+                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+        }
+    } else {
+        pdebug(DEBUG_WARN,"Trying to write a list of value on a Tag bit.");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc=PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    rc_dec(tag);
+
+    return rc;
+}
 
 
+LIB_EXPORT int plc_tag_get_block(int32_t id, int offset, uint8_t *buffer, int buffersize)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
 
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    /* is there data? */
+    if(!tag->data) {
+        rc_dec(tag);
+        pdebug(DEBUG_WARN,"Tag has no data!");
+        tag->status = PLCTAG_ERR_NO_DATA;
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    if(!buffer) {
+        pdebug(DEBUG_WARN,"Block not assigned.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(!buffersize) {
+        pdebug(DEBUG_WARN,"Zero size block.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }    
+
+    if(!tag->is_bit) {
+        critical_block(tag->api_mutex) {
+            if((offset >= 0) && ((offset + buffersize) <= tag->size)) {
+                int i;
+                for (i=0;i<buffersize;i++) {
+                    buffer[i] = tag->data[offset + i];
+                }                
+
+                tag->status = PLCTAG_STATUS_OK;
+            } else {
+                pdebug(DEBUG_WARN, "Data offset out of bounds!");
+                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            }
+        }
+    } else {
+        pdebug(DEBUG_WARN,"Trying to read a list of values from a Tag bit.");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    rc_dec(tag);
+
+    return rc;
+}
 
 
 LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
@@ -3984,6 +4097,5 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
 
 //     return new_index;
 // }
-
 
 
