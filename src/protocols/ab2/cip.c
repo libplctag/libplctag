@@ -40,7 +40,9 @@
 #include <ab2/cip.h>
 #include <ab2/cip_tag.h>
 #include <ab2/cip_plc.h>
+#include <ab2/magic_detect_change_tag.h>
 #include <ab2/magic_list_tags_tag.h>
+#include <ab2/magic_udt_tag.h>
 #include <ab2/raw_cip_tag.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -98,6 +100,11 @@ plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
             pdebug(DEBUG_DETAIL, "Creating program level tag listing tag.");
             return magic_list_tags_tag_create(plc_type, attribs);
         }
+    }
+
+    if(str_cmp_i_n(tag_name, "@udt/", str_length("@udt/")) == 0) {
+        pdebug(DEBUG_DETAIL, "Creating UDT information tag.");
+        return magic_udt_tag_create(plc_type, attribs);
     }
 
     if(str_cmp_i(tag_name, "@change") == 0) {
