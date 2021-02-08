@@ -55,21 +55,11 @@ typedef struct {
     /* plc and request info */
     plc_p plc;
     struct plc_request_s request;
-
-    /* request prefix, program name */
-    char *prefix;
-
-    /* count of bytes sent or received. */
-    int request_offset;
-
-    /* the last tag ID we saw. */
-    uint32_t last_tag_id;
 } magic_detect_change_tag_t;
 typedef magic_detect_change_tag_t *magic_detect_change_tag_p;
 
 
 static void magic_detect_change_tag_destroy(void *tag_arg);
-static int encode_request_prefix(const char *name, uint8_t *buffer, int *encoded_size);
 
 
 /* vtable functions */
@@ -119,7 +109,6 @@ static tag_byte_order_t magic_detect_change_tag_byte_order = {
 
 
 
-
 static int magic_detect_change_build_request_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 static int magic_detect_change_handle_response_callback(void *context, uint8_t *buffer, int buffer_capacity, int *payload_start, int *payload_end, plc_request_id req_id);
 
@@ -133,7 +122,7 @@ plc_tag_p magic_detect_change_tag_create(ab2_plc_type_t plc_type, attr attribs)
 
     tag = (magic_detect_change_tag_p)base_tag_create(sizeof(*tag), (void (*)(void*))magic_detect_change_tag_destroy);
     if(!tag) {
-        pdebug(DEBUG_WARN, "Unable to allocate new magic tag listing tag!");
+        pdebug(DEBUG_WARN, "Unable to allocate new magic change detection tag!");
         return NULL;
     }
 
@@ -142,42 +131,11 @@ plc_tag_p magic_detect_change_tag_create(ab2_plc_type_t plc_type, attr attribs)
     tag->base_tag.data = NULL;
     tag->base_tag.size = 0;
 
-    tag->last_tag_id = 0;
-
     /* check the name. */
     name = attr_get_str(attribs, "name", NULL);
     if(name == NULL || str_length(name) == 0) {
         pdebug(DEBUG_WARN, "Tag name must not be missing or zero length!");
         return rc_dec(tag);
-    }
-
-    /* is there a prefix? */
-    if(str_cmp_i_n("program:", name, str_length("program:")) == 0) {
-        int prefix_size = 0;
-
-        /* there is a prefix, copy it. */
-
-        while(name[prefix_size] != '.' && name[prefix_size] != 0) {
-            prefix_size++;
-        }
-
-        if(name[prefix_size] == 0) {
-            pdebug(DEBUG_WARN, "Malformed program prefix, \"%s\", found while trying to create tag listing tag!");
-            return rc_dec(tag);
-        }
-
-        tag->prefix = mem_alloc(prefix_size+1); /* +1 for zero termination */
-        if(tag->prefix == NULL) {
-            pdebug(DEBUG_WARN, "Unable to allocate prefix!");
-            return rc_dec(tag);
-        }
-
-        /* copy the prefix */
-        for(int index=0; index < prefix_size; index++) {
-            tag->prefix[index] = name[index];
-        }
-    } else {
-        tag->prefix = NULL;
     }
 
     /* get the PLC */
@@ -227,12 +185,6 @@ void magic_detect_change_tag_destroy(void *tag_arg)
 
         /* unlink the protocol layers. */
         tag->plc = rc_dec(tag->plc);
-    }
-
-    /* get rid of any tag prefix. */
-    if(tag->prefix) {
-        mem_free(tag->prefix);
-        tag->prefix = NULL;
     }
 
     /* delete the base tag parts. */
@@ -320,27 +272,20 @@ int magic_detect_change_build_request_callback(void *context, uint8_t *buffer, i
     int rc = PLCTAG_STATUS_OK;
     magic_detect_change_tag_p tag = (magic_detect_change_tag_p)context;
     int req_off = *payload_start;
-    // int max_trans_size = 0;
-    // int trans_size = 0;
-    uint8_t encoded_prefix[256 + 3] = {0}; /* FIXME MAGIC */
-    int encoded_prefix_size = 0;
-    uint8_t raw_payload[] = { 0x20,
-                              0x6b,
-                              0x25,
-                              0x00,
-                              0x00, /* tag entry ID byte 0 */
-                              0x00, /* tag entry ID byte 1 */
-                              0x04, /* get 4 attributes */
-                              0x00,
-                              0x02, /* symbol type */
-                              0x00,
-                              0x07, /* element length */
-                              0x00,
-                              0x08, /* array dimensions */
-                              0x00,
-                              0x01, /* symbol name string */
-                              0x00 };
-    int tag_id_index = 0;
+    uint8_t raw_payload[] = {
+                              CIP_CMD_GET_ATTRIBS,  /* get multiple attributes. */
+                              0x03,  /* path is 3 words long. */
+                              0x20,  /* 8-bit class follows */
+                              0xAC,  /* class 0xAC */
+                              0x25, 0x00,  /* 16-bit instance ID follows */
+                              0x01, 0x00, /* instance ID 1. */
+                              0x05, 0x00, /* attribute count, 5 */
+                              0x01, 0x00, /* attribute #1 */
+                              0x02, 0x00, /* attribute #2 */
+                              0x03, 0x00, /* attribute #3 */
+                              0x04, 0x00, /* attribute #4 */
+                              0x0A, 0x00  /* attribute #10 */
+                            };
 
     (void)buffer_capacity;
     (void)req_id;
@@ -349,44 +294,14 @@ int magic_detect_change_build_request_callback(void *context, uint8_t *buffer, i
 
 
     do {
-        if(tag->prefix && str_length(tag->prefix) > 0) {
-            rc = encode_request_prefix(tag->prefix, &encoded_prefix[0], &encoded_prefix_size);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Unable to encode program prefix \"%s\", error %s!", tag->prefix, plc_tag_decode_error(rc));
-                break;
-            }
-        }
-
-        /* set the CIP command */
-        TRY_SET_BYTE(buffer, *payload_end, req_off, CIP_CMD_LIST_TAGS);
-
-        /* set the path length. */
-        TRY_SET_BYTE(buffer, *payload_end, req_off, (uint8_t)(unsigned int)((6 + encoded_prefix_size)/2)); /* MAGIC - 6 = raw payload/request path */
-
-        /* copy the encoded prefix, if any */
-        for(int index=0; index < encoded_prefix_size  && rc == PLCTAG_STATUS_OK; index++) {
-            TRY_SET_BYTE(buffer, *payload_end, req_off, encoded_prefix[index]);
-        }
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while copying the encoded prefix into the request!", plc_tag_decode_error(rc));
-            break;
-        }
-
-        /* copy the tag list request payload. */
+        /* copy the change detection request payload. */
         for(int index=0; index < (int)(unsigned int)(sizeof(raw_payload)) && rc == PLCTAG_STATUS_OK; index++) {
-            /* capture the location of the tag ID */
-            if(index == 4) {
-                tag_id_index = req_off;
-            }
             TRY_SET_BYTE(buffer, *payload_end, req_off, raw_payload[index]);
         }
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while filling in the tag listing CIP request!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_WARN, "Error %s while filling in the change detection CIP request!", plc_tag_decode_error(rc));
             break;
         }
-
-        /* start from the last recorded ID. */
-        TRY_SET_U16_LE(buffer, *payload_end, tag_id_index, tag->last_tag_id);
 
         /* done! */
 
@@ -399,7 +314,7 @@ int magic_detect_change_build_request_callback(void *context, uint8_t *buffer, i
         return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Tag listing request packet:");
+    pdebug(DEBUG_DETAIL, "Change detection request packet:");
     pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -420,7 +335,6 @@ int magic_detect_change_handle_response_callback(void *context, uint8_t *buffer,
     uint8_t reserved;
     uint8_t service_status;
     uint8_t status_extra_words;
-    int response_start = 0;
 
     (void)buffer_capacity;
 
@@ -445,18 +359,22 @@ int magic_detect_change_handle_response_callback(void *context, uint8_t *buffer,
         /* ignore reserved byte. */
         (void)reserved;
 
-        if(service_response != (CIP_CMD_OK | CIP_CMD_LIST_TAGS)) {
+        if(service_response != (CIP_CMD_OK | CIP_CMD_GET_ATTRIBS)) {
             pdebug(DEBUG_WARN, "Unexpected CIP service response type %" PRIu8 "!", service_response);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
             SET_STATUS(tag->base_tag.status, PLCTAG_ERR_BAD_REPLY);
-            tag->request_offset = 0;
             rc = PLCTAG_STATUS_OK;
             break;
         }
 
         /* check the error response */
-        if(service_status != CIP_STATUS_OK && service_status != CIP_STATUS_FRAG) {
+        if(service_status == CIP_STATUS_FRAG) {
+            /* For some reason we did not get all the data. */
+            SET_STATUS(tag->base_tag.status, PLCTAG_ERR_PARTIAL);
+            rc = PLCTAG_STATUS_OK;
+            break;
+        } else if(service_status != CIP_STATUS_OK) {
             uint16_t extended_err_status = 0;
 
             if(status_extra_words > 0) {
@@ -468,92 +386,48 @@ int magic_detect_change_handle_response_callback(void *context, uint8_t *buffer,
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
             SET_STATUS(tag->base_tag.status, rc);
-            tag->request_offset = 0;
             rc = PLCTAG_STATUS_OK;
 
             break;
         }
 
-        // if(service_status == CIP_STATUS_FRAG) {
-        //     pdebug(DEBUG_DETAIL, "Need additional requests to get all tags.");
-        //     need_additional_request = TRUE;
-        // }
-
         /* how much data do we have? */
-        response_start = offset;
         resp_data_size = *payload_end - offset;
 
         /* make sure that the tag can hold the new payload. */
-        rc = base_tag_resize_data((plc_tag_p)tag, tag->request_offset + resp_data_size);
+        rc = base_tag_resize_data((plc_tag_p)tag, resp_data_size);
         if(rc != PLCTAG_STATUS_OK) {
             /* this is fatal! */
             pdebug(DEBUG_WARN, "Unable to resize tag data buffer, error %s!", plc_tag_decode_error(rc));
             break;
         }
 
-        /* cycle through the data to get the last tag ID */
-        while(offset < *payload_end) {
-            uint32_t instance_id = 0;
-            uint16_t string_len = 0;
-            int cursor_index = offset;
-
-            /* each entry looks like this:
-                uint32_t instance_id    monotonically increasing but not contiguous
-                uint16_t symbol_type    type of the symbol.
-                uint16_t element_length length of one array element in bytes.
-                uint32_t array_dims[3]  array dimensions.
-                uint16_t string_len     string length count.
-                uint8_t string_data[]   string bytes (string_len of them)
-            */
-
-            TRY_GET_U32_LE(buffer, *payload_end, cursor_index, instance_id);
-
-            /* skip the fields we do not care about. */
-            cursor_index += 2 + 2 + 12;
-
-            TRY_GET_U16_LE(buffer, *payload_end, cursor_index, string_len);
-
-            pdebug(DEBUG_DETAIL, "tag id %u.", (unsigned int)instance_id);
-            tag->last_tag_id = instance_id + 1;
-
-            /* skip past the name. */
-            offset += 4 + 2 + 2 + 12 + 2 + (int)(unsigned int)string_len;
-        }
-
-        /* copy the tag listing data into the tag. */
+        /* copy the data into the tag buffer. */
         for(int index=0; index < resp_data_size; index++) {
-            TRY_GET_BYTE(buffer, *payload_end, response_start, tag->base_tag.data[tag->request_offset + index]);
+            TRY_GET_BYTE(buffer, *payload_end, offset, tag->base_tag.data[index]);
+        }
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to copy data into the tag buffer, error %s!", plc_tag_decode_error(rc));
+            break;
         }
 
-        if(service_status == CIP_STATUS_FRAG) {
-            tag->request_offset += resp_data_size;
+        /* done! */
+        pdebug(DEBUG_DETAIL, "Read of tag change detection data complete.");
 
-            pdebug(DEBUG_DETAIL, "Starting new tag listing request for remaining data.");
-            rc = plc_start_request(tag->plc, &(tag->request), tag, magic_detect_change_build_request_callback, magic_detect_change_handle_response_callback);
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Error queuing up next request!");
-                break;
-            }
-        } else {
-            /* done! */
-            pdebug(DEBUG_DETAIL, "Read of tag listing data complete.");
+        rc = PLCTAG_STATUS_OK;
 
-            tag->request_offset = 0;
-            rc = PLCTAG_STATUS_OK;
-
-            /* clear any in-flight flags. */
-            critical_block(tag->base_tag.api_mutex) {
-                tag->base_tag.read_complete = 0;
-                tag->base_tag.read_in_flight = 0;
-            }
-
-            /* set the status last as that triggers the waiting thread. */
-            SET_STATUS(tag->base_tag.status, rc);
+        /* clear any in-flight flags. */
+        critical_block(tag->base_tag.api_mutex) {
+            tag->base_tag.read_complete = 0;
+            tag->base_tag.read_in_flight = 0;
         }
+
+        /* set the status last as that triggers the waiting thread. */
+        SET_STATUS(tag->base_tag.status, rc);
 
         *payload_start = *payload_end;
 
-        pdebug(DEBUG_DETAIL, "Raw CIP operation complete.");
+        pdebug(DEBUG_DETAIL, "Change detection data read complete.");
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
