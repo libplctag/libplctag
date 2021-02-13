@@ -484,6 +484,24 @@ const
   //LIB_EXPORT int plc_tag_set_float32(int32_t tag, int offset, float val);
   function plc_tag_set_float32(tag:cint32; offset:cint; val:cfloat):cint; cdecl; external LibPLCTagLibName;
 
+  //LIB_EXPORT int plc_tag_set_block(int32_t id, int offset, uint8_t *block, int blocksize);
+  function plc_tag_set_block(tag:cint32; offset:cint; block:PUInt8; blocksize:cuint):cint;
+  //LIB_EXPORT int plc_tag_get_block(int32_t id, int offset, uint8_t *buffer, int buffersize);
+  function plc_tag_get_block(tag:cint32; offset:cint; buffer:PUInt8; buffersize:cint):cint;
+
+  // string accessors
+
+  //LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char *buffer, int buffer_length);
+  function plc_tag_get_string(tag_id:cint32; string_start_offset:cint; buffer:PChar; buffer_length:cint):cint;
+  //LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const char *string_val);
+  function plc_tag_set_string(tag_id:cint32; string_start_offset:cint; const string_val:PChar):cint;
+  //LIB_EXPORT int plc_tag_get_string_length(int32_t tag_id, int string_start_offset);
+  function plc_tag_get_string_length(tag_id:cint32; string_start_offset:cint):cint;
+  //LIB_EXPORT int plc_tag_get_string_capacity(int32_t tag_id, int string_start_offset);
+  function plc_tag_get_string_capacity(tag_id:cint32; string_start_offset:cint):cint;
+  //LIB_EXPORT int plc_tag_get_string_total_length(int32_t tag_id, int string_start_offset);
+  function plc_tag_get_string_total_length(tag_id:cint32; string_start_offset:cint):cint;
+
 implementation
 
 end.
