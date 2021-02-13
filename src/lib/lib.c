@@ -3251,7 +3251,7 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     if(!tag->data) {
         rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
+        SET_STATUS(tag->status, PLCTAG_ERR_NO_DATA);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -3277,17 +3277,17 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
                     tag->data[offset + i] = buffer[i];
                 }
 
-                tag->status = PLCTAG_STATUS_OK;
+                SET_STATUS(tag->status, PLCTAG_STATUS_OK);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
-                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                SET_STATUS(tag->status, rc);
             }
         }
     } else {
         pdebug(DEBUG_WARN,"Trying to write a list of value on a Tag bit.");
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
         rc=PLCTAG_ERR_UNSUPPORTED;
+        SET_STATUS(tag->status, rc);
     }
 
     rc_dec(tag);
@@ -3312,7 +3312,7 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     if(!tag->data) {
         rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
+        SET_STATUS(tag->status, PLCTAG_ERR_NO_DATA);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -3334,17 +3334,17 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
                     buffer[i] = tag->data[offset + i];
                 }
 
-                tag->status = PLCTAG_STATUS_OK;
+                SET_STATUS(tag->status, PLCTAG_STATUS_OK);
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
-                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                SET_STATUS(tag->status, rc);
             }
         }
     } else {
         pdebug(DEBUG_WARN,"Trying to read a list of values from a Tag bit.");
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
         rc = PLCTAG_ERR_UNSUPPORTED;
+        SET_STATUS(tag->status, rc);
     }
 
     rc_dec(tag);
@@ -3815,53 +3815,6 @@ int add_tag_lookup(plc_tag_p tag)
 
 
 
-/*
- * get the string count length depending on the PLC string type.
- *
- * This is called in other functions so is separated out.
- *
- * This must be called with the tag API mutex held!
- */
-
-// int get_string_count_size_unsafe(plc_tag_p tag, int offset)
-// {
-//     int string_count_length = 0;
-//     string_type_t string_type = tag->byte_order.string_type;
-
-//     /* FIXME - do something with the offset! */
-//     (void)offset;
-
-//     switch(string_type) {
-//         case STRING_AB_MICRO800:
-//             string_count_length = 1; /* FIXME - is this correct? */
-//             break;
-
-//         case STRING_AB_PLC5:
-//             string_count_length = 2;
-//             break;
-
-//         case STRING_AB_LGX:
-//             string_count_length = 4;
-//             break;
-
-//         case STRING_AB_TAG_NAME:
-//             string_count_length = 2;
-//             break;
-
-//         case STRING_ZERO_TERM:
-//             string_count_length = 0;
-//             break;
-
-//         default:
-//             pdebug(DEBUG_WARN, "Unsupported string type!");
-//             string_count_length = PLCTAG_ERR_UNSUPPORTED;
-//             break;
-//     }
-
-//     return string_count_length;
-// }
-
-
 
 /*
  * get the string length depending on the PLC string type.
@@ -3924,180 +3877,6 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
     return string_length;
 }
 
-
-/*
- * get the string capacity depending on the PLC string type.
- *
- * This is called in other functions so is separated out.
- *
- * This must be called with the tag API mutex held!
- */
-
-// int get_string_capacity_unsafe(plc_tag_p tag, int offset)
-// {
-//     int string_capacity = 0;
-//     string_type_t string_type = tag->byte_order.string_type;
-
-//     /* FIXME - do something with the offset! */
-//     (void)offset;
-
-//     switch(string_type) {
-//         case STRING_AB_MICRO800:
-//             string_capacity = 255; /* FIXME - is this correct? */
-//             break;
-
-//         case STRING_AB_PLC5:
-//             string_capacity = 82;
-//             break;
-
-//         case STRING_AB_LGX:
-//             string_capacity = 82;
-//             break;
-
-//         case STRING_AB_TAG_NAME:
-//             string_capacity = get_string_length_unsafe(tag, offset);
-//             break;
-
-//         case STRING_ZERO_TERM:
-//             string_capacity = get_string_length_unsafe(tag, offset);
-//             break;
-
-//         default:
-//             pdebug(DEBUG_WARN, "Unsupported string type!");
-//             string_capacity = PLCTAG_ERR_UNSUPPORTED;
-//             break;
-//     }
-
-//     return string_capacity;
-// }
-
-
-/*
- * get the string padding depending on the PLC string type.
- *
- * This is called in other functions so is separated out.
- *
- * This must be called with the tag API mutex held!
- */
-
-// int get_string_padding_unsafe(plc_tag_p tag, int offset)
-// {
-//     int string_padding = 0;
-//     string_type_t string_type = tag->byte_order.string_type;
-
-//     /* FIXME - do something with the offset! */
-//     (void)offset;
-
-//     switch(string_type) {
-//         case STRING_AB_MICRO800:
-//             string_padding = 0; /* FIXME - is this correct? */
-//             break;
-
-//         case STRING_AB_PLC5:
-//             string_padding = 0;
-//             break;
-
-//         case STRING_AB_LGX:
-//             string_padding = 2;
-//             break;
-
-//         case STRING_AB_TAG_NAME:
-//             string_padding = 0;
-//             break;
-
-//         case STRING_ZERO_TERM:
-//             string_padding = 1; /* for the zero char termination. */
-//             break;
-
-//         default:
-//             pdebug(DEBUG_WARN, "Unsupported string type!");
-//             string_padding = PLCTAG_ERR_UNSUPPORTED;
-//             break;
-//     }
-
-//     return string_padding;
-// }
-
-
-/*
- * get the string total length depending on the PLC string type.
- *
- * This is called in other functions so is separated out.
- *
- * This must be called with the tag API mutex held!
- */
-
-
-// int get_string_total_length_unsafe(plc_tag_p tag, int offset)
-// {
-//     int string_count_word_size = get_string_count_size_unsafe(tag, offset);
-//     int string_capacity = get_string_capacity_unsafe(tag, offset);
-//     int string_padding = get_string_padding_unsafe(tag, offset);
-
-//     if(string_count_word_size < 0) {
-//         return string_count_word_size;
-//     }
-
-//     if(string_capacity < 0) {
-//         return string_capacity;
-//     }
-
-//     if(string_padding < 0) {
-//         return string_padding;
-//     }
-
-//     return string_count_word_size + string_capacity + string_padding;
-// }
-
-
-// int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index)
-// {
-//     int new_index = 0;
-//     string_type_t string_type = tag->byte_order.string_type;
-
-//     /* FIXME - do something with the offset! */
-//     (void)offset;
-
-//     switch(string_type) {
-//         case STRING_AB_MICRO800:
-//             new_index = char_index;
-
-//             break;
-
-//         case STRING_AB_PLC5:
-//             /* thank you, AB */
-//             /* byte swap the index, odd -> even and even -> odd */
-//             if(char_index & 0x01) {
-//                 /* odd */
-//                 new_index = char_index - 1;
-//             } else {
-//                 /* even */
-//                 new_index = char_index + 1;
-//             }
-
-//             break;
-
-//         case STRING_AB_LGX:
-//             new_index = char_index;
-//             break;
-
-//         case STRING_AB_TAG_NAME:
-//             new_index = char_index;
-//             break;
-
-//         case STRING_ZERO_TERM:
-//             new_index = char_index;
-//             break;
-
-//         default:
-//             pdebug(DEBUG_WARN, "Unsupported string type!");
-//             new_index = PLCTAG_ERR_UNSUPPORTED;
-
-//             break;
-//     }
-
-//     return new_index;
-// }
 
 
 /*
