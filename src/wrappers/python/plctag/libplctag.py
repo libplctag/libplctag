@@ -1,6 +1,6 @@
 #!/usr/bin/python
-import ctypes
 import platform
+import ctypes
 
 PLCTAG_STATUS_PENDING = 1
 PLCTAG_STATUS_OK      = 0
@@ -89,11 +89,38 @@ def defineStringFunc(name, args):
 # succeed for the python bindings to work.  The system must be able
 # to load the compiled libplctag C library from the current environment
 # or LD_LIBRARY path.
+
+# New:
+# Updated code requires creating a folder structure as it is in the
+# included pictures, with each folder containing its corresponding library.
+# Optionally, you can only create the folder for the Operating System you will be using.
+# The string tag data accessors were introduced in v2.2.0, so get at least that release.
+
 system = platform.system()
-library = "libplctag.so"
-if system == "Windows": library = "plctag.dll"
-if system == "Darwin": library = "libplctag.dylib"
-lib = ctypes.cdll.LoadLibrary(library)
+
+library = ""
+
+if system == "Windows":
+    if platform.machine().endswith('64'):
+        library = "./windows_x64/plctag.dll"
+    else:
+        library = "./windows_x86/plctag.dll"
+elif system == "Darwin":
+    library = "./macos_x64/libplctag.dylib"
+elif system == "Linux":
+    if platform.machine() == 'armv7l': # Android or Linux
+        library = "./armeabi-v7a/libplctag.so"
+    elif platform.machine().startswith('aarch64') or platform.machine().startswith('armv8'): # Android or Linux
+        library = "./arm64-v8a/libplctag.so"
+    elif platform.machine().endswith('64'):
+        library = "./ubuntu_x64/libplctag.so"
+    else:
+        library = "./ubuntu_x86/libplctag.so"
+else: # Java or some other
+    pass
+
+if library != "":
+    lib = ctypes.cdll.LoadLibrary(library)
 
 
 # Create the tag functions below
@@ -112,6 +139,17 @@ plcTagWrite   = defineIntFunc(lib.plc_tag_write, [ctypes.c_int, ctypes.c_int])
 # Create the tag data accessor functions below:
 
 plcTagGetSize = defineIntFunc(lib.plc_tag_get_size, [ctypes.c_int])
+
+# create the bit/bool tag data accessors
+plcTagGetBit = defineIntFunc(lib.plc_tag_get_bit, [ctypes.c_int, ctypes.c_int])
+plcTagSetBit = defineIntFunc(lib.plc_tag_set_bit, [ctypes.c_int, ctypes.c_int, ctypes.c_int])
+
+# create the string tag data accessors
+plcTagGetString = defineIntFunc(lib.plc_tag_get_string, [ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_int])
+plcTagSetString = defineIntFunc(lib.plc_tag_set_string, [ctypes.c_int, ctypes.c_int, ctypes.c_char_p])
+plcTagGetStringLength = defineIntFunc(lib.plc_tag_get_string_length, [ctypes.c_int, ctypes.c_int])
+plcTagGetStringCapacity = defineIntFunc(lib.plc_tag_get_string_capacity, [ctypes.c_int, ctypes.c_int])
+plcTagGetStringTotalLength = defineIntFunc(lib.plc_tag_get_string_total_length, [ctypes.c_int, ctypes.c_int])
 
 # create the 64-bit tag data accessors
 plcTagGetInt64 = defineLongFunc(lib.plc_tag_get_int64, [ctypes.c_int, ctypes.c_int])
@@ -206,7 +244,7 @@ def plc_tag_decode_error(errCode):
 # the status.
 #
 def plc_tag_create(attributeString, timeout):
-    # print ("Creating tag with attributes '%s' and timeout %d" % (attributeString, timeout))
+    print ("Creating tag with attributes '%s' and timeout %d" % (attributeString, timeout))
     return plcTagCreate(attributeString.encode(), timeout)
 
 # plc_tag_lock
@@ -296,6 +334,22 @@ def plc_tag_write(tag, timeout):
 
 def plc_tag_get_size(tag):
     return plcTagGetSize(tag)
+
+# String
+def plc_tag_get_string(tag, string_start_offset, char_buffer, buffer_length):
+    return plcTagGetString(tag, string_start_offset, char_buffer, buffer_length)
+
+def plc_tag_set_string(tag, string_start_offset, string_value):
+    return plcTagSetString(tag, string_start_offset, string_value)
+
+def plc_tag_get_string_length(tag, string_start_offset):
+    return plcTagGetStringLength(tag, string_start_offset)
+
+def plc_tag_get_string_capacity(tag, string_start_offset):
+    return plcTagGetStringCapacity(tag, string_start_offset)
+
+def plc_tag_get_string_total_length(tag, string_start_offset):
+    return plcTagGetStringTotalLength(tag, string_start_offset)
 
 # 64-bit
 def plc_tag_get_uint64(tag, offset):
