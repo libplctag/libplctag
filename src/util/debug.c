@@ -154,7 +154,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     /* FIXME - check the output size */
     /*output_size = */vsnprintf(output, sizeof(output), prefix, va);
     if(log_callback_func) {
-        log_callback_func(tag_id, get_debug_level(), output);
+        log_callback_func(tag_id, debug_level, output);
     } else {
         fputs(output, stderr);
     }

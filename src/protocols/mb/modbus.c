@@ -342,6 +342,9 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
     /* set up the vtable */
     (*tag)->vtable = &modbus_vtable;
 
+    /* set the default byte order */
+    (*tag)->byte_order = &modbus_tag_byte_order;
+
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
