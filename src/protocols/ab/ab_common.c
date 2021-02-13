@@ -120,6 +120,8 @@ int ab_init(void)
 
     pdebug(DEBUG_INFO,"Initializing AB protocol library.");
 
+    ab_protocol_terminating = 0;
+
     if((rc = session_startup()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to initialize session library!");
         return rc;
@@ -137,13 +139,17 @@ void ab_teardown(void)
 {
     pdebug(DEBUG_INFO,"Releasing global AB protocol resources.");
 
-    pdebug(DEBUG_INFO,"Terminating IO thread.");
-    /* kill the IO thread first. */
-    ab_protocol_terminating = 1;
+    if(io_handler_thread) {
+        pdebug(DEBUG_INFO,"Terminating IO thread.");
+        /* signal the IO thread to quit first. */
+        ab_protocol_terminating = 1;
 
-    /* wait for the thread to die */
-    thread_join(io_handler_thread);
-    thread_destroy((thread_p*)&io_handler_thread);
+        /* wait for the thread to die */
+        thread_join(io_handler_thread);
+        thread_destroy((thread_p*)&io_handler_thread);
+    } else {
+        pdebug(DEBUG_INFO, "IO thread already stopped.");
+    }
 
     pdebug(DEBUG_INFO,"Freeing session information.");
 
@@ -616,7 +622,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 return PLCTAG_ERR_UNSUPPORTED;
             }
         } else {
-            /* 
+            /*
              * We have two cases
              *      * tag listing, but only for LGX.
              *      * no type, just elem_size.
@@ -640,8 +646,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                     if(elem_size > 0) {
                         pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
                         tag->elem_size = elem_size;
-                    } 
-                    
+                    }
+
                     // else {
                     //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
                     //     return PLCTAG_ERR_BAD_PARAM;
@@ -651,7 +657,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                         pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
                     }
                 }
-            }            
+            }
         }
 
         break;

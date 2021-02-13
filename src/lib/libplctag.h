@@ -477,6 +477,10 @@ LIB_EXPORT int plc_tag_set_float64(int32_t tag, int offset, double val);
 LIB_EXPORT float plc_tag_get_float32(int32_t tag, int offset);
 LIB_EXPORT int plc_tag_set_float32(int32_t tag, int offset, float val);
 
+//bulk access
+LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *block, int blocksize);
+LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, int buffersize);
+
 /* string accessors */
 
 LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char *buffer, int buffer_length);
