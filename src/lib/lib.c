@@ -3262,8 +3262,8 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!buffer_size) {
-        pdebug(DEBUG_WARN,"Zero size block.");
+    if(buffer_size <= 0) {
+        pdebug(DEBUG_WARN,"The buffer must have some capacity for data.");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -3319,12 +3319,12 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     }
 
     if(!buffer) {
-        pdebug(DEBUG_WARN,"Block not assigned.");
-        return PLCTAG_ERR_BAD_PARAM;
+        pdebug(DEBUG_WARN,"Buffer is null!");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!buffer_size) {
-        pdebug(DEBUG_WARN,"Zero size block.");
+    if(buffer_size <= 0) {
+        pdebug(DEBUG_WARN,"The buffer must have some capacity for data.");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
