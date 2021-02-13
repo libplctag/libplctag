@@ -74,14 +74,14 @@ const
   PLCTAG_EVENT_WRITE_STARTED   = TLibPLCEvents(3);
   PLCTAG_EVENT_WRITE_COMPLETED = TLibPLCEvents(4);
   PLCTAG_EVENT_ABORTED         = TLibPLCEvents(5);
-  PLCTAG_EVENT_DESTROYED       = TLibPLCEvents(6);  
+  PLCTAG_EVENT_DESTROYED       = TLibPLCEvents(6);
 
   PLCTAG_DEBUG_NONE   = TLibPLCDebug(0);
   PLCTAG_DEBUG_ERROR  = TLibPLCDebug(1);
   PLCTAG_DEBUG_WARN   = TLibPLCDebug(2);
   PLCTAG_DEBUG_INFO   = TLibPLCDebug(3);
   PLCTAG_DEBUG_DETAIL = TLibPLCDebug(4);
-  PLCTAG_DEBUG_SPEW   = TLibPLCDebug(5);  
+  PLCTAG_DEBUG_SPEW   = TLibPLCDebug(5);
 
 
 
@@ -92,12 +92,12 @@ const
    * This takes one of the above errors and turns it into a const char * suitable
    * for printing.
   }
-  
+
   //LIB_EXPORT const char *plc_tag_decode_error(int err);
   function plc_tag_decode_error(err:cint):PChar; cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * Set the debug level.
    *
@@ -105,13 +105,13 @@ const
    * the debug level to the passed value.  Higher numbers output increasing amounts
    * of information.   Input values not defined below will be ignored.
   }
-  
-  
+
+
   //LIB_EXPORT void plc_tag_set_debug_level(int debug_level);
   procedure plc_tag_set_debug_level(debug_level:TLibPLCDebug); cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * Check that the library supports the required API version.
    *
@@ -133,13 +133,13 @@ const
    * To match version 2.1.4, call plc_tag_check_lib_version(2, 1, 4).
    *
   }
-  
+
   //LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_patch);
   function plc_tag_check_lib_version(req_major, req_minor, req_patch:cint):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
+
+
+
+
   {
    * tag functions
    *
@@ -147,7 +147,7 @@ const
    *
    * These are implemented in a protocol-specific manner.
   }
-  
+
   {
    * plc_tag_create
    *
@@ -167,12 +167,12 @@ const
    * tag was not created and the failure error is one of the PLCTAG_ERR_xyz
    * errors.
   }
-  
+
   //LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
   function plc_tag_create(const attrib_str:PChar; timeout:cint):cint32; cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * plc_tag_shutdown
    *
@@ -188,12 +188,12 @@ const
    * operating environments that use libraries in ways that prevent the normal exit handlers
    * from working.
   }
-  
+
   //LIB_EXPORT void plc_tag_shutdown(void);
   procedure  plc_tag_shutdown(); cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * plc_tag_register_callback
    *
@@ -229,15 +229,15 @@ const
    *
    * If all is successful, the function will return PLCTAG_STATUS_OK.
   }
-  
+
   //LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void ( *tag_callback_func)(int32_t tag_id, int event, int status));
   function plc_tag_register_callback(tag_id:cint32; callback:TTagCallbackFunc):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
-  
-  
+
+
+
+
+
+
   {
    * plc_tag_unregister_callback
    *
@@ -248,19 +248,19 @@ const
    * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
    * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
   }
-  
+
   //LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id);
   function plc_tag_unregister_callback(tag_id:cint32):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * plc_tag_register_logger
    *
    * This function registers the passed callback function with the library.  Only one callback function
    * may be registered with the library at a time!
    *
-   * Once registered, the function will be called with any logging message that is normally printed due 
+   * Once registered, the function will be called with any logging message that is normally printed due
    * to the current log level setting.
    *
    * WARNING: the callback will usually be called when the internal tag API mutex is held.   You cannot
@@ -273,12 +273,12 @@ const
    *
    * If all is successful, the function will return PLCTAG_STATUS_OK.
   }
-  
+
   //LIB_EXPORT int plc_tag_register_logger(void ( *log_callback_func)(int32_t tag_id, int debug_level, const char *message));
   function plc_tag_register_logger(log_callback_func:TLogCallbackFunc):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * plc_tag_unregister_logger
    *
@@ -289,12 +289,12 @@ const
    * The function returns PLCTAG_STATUS_OK if there was a registered callback and removing it went well.
    * An error of PLCTAG_ERR_NOT_FOUND is returned if there was no registered callback.
   }
-  
+
   //LIB_EXPORT int plc_tag_unregister_logger(void);
   function plc_tag_unregister_logger():cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * plc_tag_lock
    *
@@ -307,27 +307,27 @@ const
    * This should be used to initially lock a tag when starting operations with it
    * followed by a call to plc_tag_unlock when you have everything you need from the tag.
   }
-  
-  
+
+
   //LIB_EXPORT int plc_tag_lock(int32_t tag);
   function plc_tag_lock(tag:cint32):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
+
+
+
   {
    * plc_tag_unlock
    *
    * The opposite action of plc_tag_unlock.  This allows other threads to access the
    * tag.
   }
-  
+
   //LIB_EXPORT int plc_tag_unlock(int32_t tag);
   function plc_tag_unlock(tag:cint32):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
-  
+
+
+
+
+
   {
    * plc_tag_abort
    *
@@ -342,10 +342,10 @@ const
   }
   //LIB_EXPORT int plc_tag_abort(int32_t tag);
   function plc_tag_abort(tag:cint32):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
+
+
+
+
   {
    * plc_tag_destroy
    *
@@ -356,12 +356,12 @@ const
   }
   //LIB_EXPORT int plc_tag_destroy(int32_t tag);
   function plc_tag_destroy(tag:cint32):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
-  
-  
+
+
+
+
+
+
   {
    * plc_tag_read
    *
@@ -374,10 +374,10 @@ const
   }
   //LIB_EXPORT int plc_tag_read(int32_t tag, int timeout);
   function plc_tag_read(tag:cint32; timeout:cint):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
+
+
+
+
   {
    * plc_tag_status
    *
@@ -389,12 +389,12 @@ const
   }
   //LIB_EXPORT int plc_tag_status(int32_t tag);
   function plc_tag_status(tag:cint32):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
-  
-  
+
+
+
+
+
+
   {
    * plc_tag_write
    *
@@ -408,86 +408,88 @@ const
   }
   //LIB_EXPORT int plc_tag_write(int32_t tag, int timeout);
   function plc_tag_write(tag:cint32; timeout:cint):cint; cdecl; external LibPLCTagLibName;
-  
-  
-  
-  
+
+
+
+
   {
    * Tag data accessors.
   }
-  
-  
+
+
   //LIB_EXPORT int plc_tag_get_int_attribute(int32_t tag, const char *attrib_name, int default_value);
   function plc_tag_get_int_attribute(tag:cint32; const attrib_name:PChar; default_value:cint):cint; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_int_attribute(int32_t tag, const char *attrib_name, int new_value);
   function plc_tag_set_int_attribute(tag:cint32; const attrib_name:PChar; new_value:cint):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT int plc_tag_get_size(int32_t tag);
   function plc_tag_get_size(tag:cint32):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT int plc_tag_get_bit(int32_t tag, int offset_bit);
   function plc_tag_get_bit(tag:cint32; offset_bit:cint):cint; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_bit(int32_t tag, int offset_bit, int val);
   function plc_tag_set_bit(tag:cint32; offset_bit:cint; val:cint):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t tag, int offset);
   function plc_tag_get_uint64(tag:cint32; offset:cint):cuint64; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_uint64(int32_t tag, int offset, uint64_t val);
   function plc_tag_set_uint64(tag:cint32; offset:cint; val:cuint64):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT int64_t plc_tag_get_int64(int32_t tag, int offset);
   function plc_tag_get_int64(tag:cint32; offset:cint):cint64; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_int64(int32_t, int offset, int64_t val);
   function plc_tag_set_int64(tag:cint32; offset:cint; val:cint64):cint; cdecl; external LibPLCTagLibName;
-  
-  
+
+
   //LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t tag, int offset);
   function plc_tag_get_uint32(tag:cint32; offset:cint):cuint32; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_uint32(int32_t tag, int offset, uint32_t val);
   function plc_tag_set_uint32(tag:cint32; offset:cint; val:cuint32):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT int32_t plc_tag_get_int32(int32_t tag, int offset);
   function plc_tag_get_int32(tag:cint32; offset:cint):cint32; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_int32(int32_t, int offset, int32_t val);
   function plc_tag_set_int32(tag:cint32; offset:cint; val:cint32):cint; cdecl; external LibPLCTagLibName;
-  
-  
+
+
   //LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t tag, int offset);
   function plc_tag_get_uint16(tag:cint32; offset:cint):cuint16; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_uint16(int32_t tag, int offset, uint16_t val);
   function plc_tag_set_uint16(tag:cint32; offset:cint; val:cuint16):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT int16_t plc_tag_get_int16(int32_t tag, int offset);
   function plc_tag_get_int16(tag:cint32; offset:cint):cint16; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_int16(int32_t, int offset, int16_t val);
   function plc_tag_set_int16(tag:cint32; offset:cint; val:cint16):cint; cdecl; external LibPLCTagLibName;
-  
-  
+
+
   //LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t tag, int offset);
   function plc_tag_get_uint8(tag:cint32; offset:cint):cuint8; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_uint8(int32_t tag, int offset, uint8_t val);
   function plc_tag_set_uint8(tag:cint32; offset:cint; val:cuint8):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT int8_t plc_tag_get_int8(int32_t tag, int offset);
   function plc_tag_get_int8(tag:cint32; offset:cint):cint8; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_int8(int32_t, int offset, int8_t val);
   function plc_tag_set_int8(tag:cint32; offset:cint; val:cint8):cint; cdecl; external LibPLCTagLibName;
-  
-  
+
+
   //LIB_EXPORT double plc_tag_get_float64(int32_t tag, int offset);
   function plc_tag_get_float64(tag:cint32; offset:cint):cdouble; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_float64(int32_t tag, int offset, double val);
   function plc_tag_set_float64(tag:cint32; offset:cint; val:cdouble):cint; cdecl; external LibPLCTagLibName;
-  
+
   //LIB_EXPORT float plc_tag_get_float32(int32_t tag, int offset);
   function plc_tag_get_float32(tag:cint32; offset:cint):cfloat; cdecl; external LibPLCTagLibName;
   //LIB_EXPORT int plc_tag_set_float32(int32_t tag, int offset, float val);
   function plc_tag_set_float32(tag:cint32; offset:cint; val:cfloat):cint; cdecl; external LibPLCTagLibName;
 
-  //LIB_EXPORT int plc_tag_set_block(int32_t id, int offset, uint8_t *block, int blocksize);
-  function plc_tag_set_block(tag:cint32; offset:cint; block:PUInt8; blocksize:cuint):cint;
-  //LIB_EXPORT int plc_tag_get_block(int32_t id, int offset, uint8_t *buffer, int buffersize);
-  function plc_tag_get_block(tag:cint32; offset:cint; buffer:PUInt8; buffersize:cint):cint;
+  // raw byte accessors
+
+  //LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *block, int blocksize);
+  function plc_tag_set_raw_bytes(tag:cint32; offset:cint; block:PUInt8; blocksize:cuint):cint;
+  //LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, int buffersize);
+  function plc_tag_get_raw_bytes(tag:cint32; offset:cint; buffer:PUInt8; buffersize:cint):cint;
 
   // string accessors
 
