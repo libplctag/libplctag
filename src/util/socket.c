@@ -537,7 +537,14 @@ extern int socket_close(sock_p sock)
 
         /* close the socket fd */
         if(sock->fd != INVALID_SOCKET) {
-            if(!socketclose(sock->fd)) {
+            /* try to do this gently */
+            if(shutdown(sock->fd, SHUT_RDWR)) {
+                pdebug(DEBUG_WARN, "Error while shutting down socket: %d!", errno);
+                rc = PLCTAG_ERR_CLOSE;
+            }
+
+            /* close either way */
+            if(socketclose(sock->fd)) {
                 pdebug(DEBUG_WARN, "Error while closing socket: %d!", errno);
                 rc = PLCTAG_ERR_CLOSE;
             }
