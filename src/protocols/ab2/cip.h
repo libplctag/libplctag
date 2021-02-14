@@ -35,6 +35,7 @@
 
 #include <stdint.h>
 #include <lib/tag.h>
+#include <ab2/ab.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/plc.h>
@@ -57,6 +58,11 @@
 
 #define CIP_ERR_UNSUPPORTED_SERVICE  ((uint8_t)0x08)
 #define CIP_ERR_PARTIAL_ERROR        ((uint8_t)0x1e)
+
+#define CIP_MAX_PAYLOAD (60000)
+#define CIP_STD_EX_PAYLOAD (4002)
+#define CIP_STD_PAYLOAD (508)
+#define CIP_MIN_PAYLOAD (92)
 
 
 typedef struct {
