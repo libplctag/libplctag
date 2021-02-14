@@ -193,8 +193,8 @@ plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
     /* TODO - add any PLC-specific attributes here. */
     switch(plc_type) {
         case AB2_PLC_LGX:
-            /* if it is not set, set it to true/1. */
-            attr_set_int(attribs, "forward_open_ex_enabled", attr_get_int(attribs, "forward_open_ex_enabled", 1));
+            /* Set the max payload size up high to enable Forward Open Extended use and negotiation. */
+            attr_set_int(attribs, "cip_payload", attr_get_int(attribs, "cip_payload", CIP_MAX_PAYLOAD));
 
             tag->base_tag.vtable = &cip_tag_vtable;
             tag->base_tag.byte_order = &cip_tag_byte_order;
@@ -202,12 +202,14 @@ plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
             break;
 
         case AB2_PLC_MLGX800:
+            attr_set_int(attribs, "cip_payload", attr_get_int(attribs, "cip_payload", CIP_STD_PAYLOAD));
             tag->base_tag.vtable = &cip_tag_vtable;
             tag->base_tag.byte_order = &cip_tag_byte_order;
             tag->plc = cip_plc_get(attribs);
             break;
 
         case AB2_PLC_OMRON_NJNX:
+            attr_set_int(attribs, "cip_payload", attr_get_int(attribs, "cip_payload", CIP_STD_PAYLOAD));
             tag->base_tag.vtable = &cip_tag_vtable;
             tag->base_tag.byte_order = &cip_tag_byte_order;
             tag->plc = cip_plc_get(attribs);
@@ -223,6 +225,18 @@ plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs)
         pdebug(DEBUG_WARN, "Unable to get PLC!");
         rc_dec(tag);
         return NULL;
+    }
+
+    /* if this is a normal tag, trigger a read. */
+    if(tag->is_raw_tag != TRUE) {
+        pdebug(DEBUG_DETAIL, "Trigger initial read.");
+        tag->base_tag.read_in_flight = 1;
+        rc = tag->base_tag.vtable->read((plc_tag_p)tag);
+        if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+            pdebug(DEBUG_WARN, "Error %s while trying to trigger initial read!", plc_tag_decode_error(rc));
+            rc_dec(tag);
+            return NULL;
+        }
     }
 
     pdebug(DEBUG_INFO, "Done.");
