@@ -130,7 +130,6 @@ int cip_tag_read(plc_tag_p tag_arg)
     }
 
     rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_read_request_callback, cip_handle_read_response_callback);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
         return rc;
@@ -170,8 +169,7 @@ int cip_tag_write(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-        rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_write_request_callback, cip_handle_write_response_callback);
-
+    rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_write_request_callback, cip_handle_write_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start write request!");
         return rc;
@@ -245,6 +243,9 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
     pdebug(DEBUG_DETAIL, "Starting for %" REQ_ID_FMT ".", req_id);
 
+    pdebug(DEBUG_DETAIL, "Processing CIP response:");
+    pdebug_dump_bytes(DEBUG_DETAIL, buffer + (*payload_start), (*payload_end) - (*payload_start));
+
     do {
         uint8_t service_response;
         uint8_t reserved;
@@ -285,10 +286,12 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
         /* all good. Copy the data type and data. */
 
-        /* get the data type. */
+        /* get the data type initial byte. */
         TRY_GET_BYTE(buffer, *payload_end, offset, tag->tag_type_info[0]);
 
-        if(tag->tag_type_info[0] < 0xA0) {
+        pdebug(DEBUG_DETAIL, "Tag type byte is %u.", (unsigned int)(tag->tag_type_info[0]));
+
+        if(tag->tag_type_info[0] > (uint8_t)0xA3) {
             pdebug(DEBUG_DETAIL, "Tag type is a standard atomic type.");
 
             /* two byte type */
@@ -350,7 +353,7 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
 
             /* clear any in-flight flags. */
             critical_block(tag->base_tag.api_mutex) {
-                tag->base_tag.read_complete = 0;
+                tag->base_tag.read_complete = 1;
                 tag->base_tag.read_in_flight = 0;
             }
 
@@ -493,6 +496,9 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
 
     pdebug(DEBUG_DETAIL, "Starting for request %" REQ_ID_FMT ".", req_id);
 
+    pdebug(DEBUG_DETAIL, "Processing CIP response:");
+    pdebug_dump_bytes(DEBUG_DETAIL, buffer + (*payload_start), (*payload_end) - (*payload_start));
+
     do {
         uint8_t service_response;
         uint8_t reserved;
@@ -548,7 +554,7 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
 
             /* clear any in-flight flags. */
             critical_block(tag->base_tag.api_mutex) {
-                tag->base_tag.write_complete = 0;
+                tag->base_tag.write_complete = 1;
                 tag->base_tag.write_in_flight = 0;
             }
 
