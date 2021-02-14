@@ -199,15 +199,15 @@ int cip_layer_setup(plc_p plc, int layer_index, attr attribs)
     }
 
     cip_payload_size = attr_get_int(attribs, "cip_payload", 92); /* MAGIC default to small size. */
-    if(cip_payload_size <= 0 || cip_payload_size > 65525) {
-        pdebug(DEBUG_WARN, "CIP payload size must be between 0 and 65535, was %d!", cip_payload_size);
+    if(cip_payload_size <= 0 || cip_payload_size > 508) {
+        pdebug(DEBUG_WARN, "CIP payload size must be between 0 and 508, was %d!", cip_payload_size);
         mem_free(state);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
     state->cip_payload = (uint16_t)(unsigned int)cip_payload_size;
 
-    pdebug(DEBUG_DETAIL, "Encoded CIP path size again): %d.", state->encoded_path_size);
+    pdebug(DEBUG_DETAIL, "Encoded CIP path size: %d.", state->encoded_path_size);
 
     /* finally set up the layer. */
     rc = plc_set_layer(plc,
