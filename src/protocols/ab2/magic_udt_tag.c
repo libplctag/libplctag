@@ -137,7 +137,7 @@ plc_tag_p magic_udt_tag_create(ab2_plc_type_t plc_type, attr attribs)
 
     tag = (magic_udt_tag_p)base_tag_create(sizeof(*tag), (void (*)(void*))magic_udt_tag_destroy);
     if(!tag) {
-        pdebug(DEBUG_WARN, "Unable to allocate new magic tag listing tag!");
+        pdebug(DEBUG_WARN, "Unable to allocate new magic UDT tag!");
         return NULL;
     }
 
@@ -291,7 +291,7 @@ int magic_udt_tag_write(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    pdebug(DEBUG_WARN, "Tag listing tag does not support write operations.");
+    pdebug(DEBUG_WARN, "UDT info tag does not support write operations.");
 
     return PLCTAG_ERR_UNSUPPORTED;
 }
@@ -304,7 +304,7 @@ int magic_udt_info_build_request_callback(void *context, uint8_t *buffer, int bu
     magic_udt_tag_p tag = (magic_udt_tag_p)context;
     int req_off = *payload_start;
     uint8_t raw_payload[] = {
-                              0x03,  /* Get Attributes List Service */
+                              CIP_CMD_GET_ATTRIBS,  /* Get Attributes List Service */
                               0x03,  /* path is 3 words, 6 bytes. */
                               0x20,  /* class, 8-bit */
                               0x6C,  /* Template class */
@@ -354,7 +354,7 @@ int magic_udt_info_build_request_callback(void *context, uint8_t *buffer, int bu
         return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Tag listing request packet:");
+    pdebug(DEBUG_DETAIL, "UDT info request packet:");
     pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -401,7 +401,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
         /* ignore reserved byte. */
         (void)reserved;
 
-        if(service_response != (CIP_CMD_OK | CIP_CMD_LIST_TAGS)) {
+        if(service_response != (CIP_CMD_OK | CIP_CMD_GET_ATTRIBS)) {
             pdebug(DEBUG_WARN, "Unexpected CIP service response type %" PRIu8 "!", service_response);
 
             rc = PLCTAG_ERR_BAD_REPLY;
@@ -442,7 +442,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
         //     break;
         // }
 
-        /* get the number of attribute results, we want 3. */
+        /* get the number of attribute results, we want 4. */
         TRY_GET_U16_LE(buffer, *payload_end, offset, num_attribs);
         if(num_attribs != 4) {
             pdebug(DEBUG_WARN, "Unexpected number of attributes.  Expected 4 attributes got %u!", num_attribs);
@@ -478,21 +478,25 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
                 case 0x01:
                     /* CRC of the fields, used as a struct handle. */
                     TRY_GET_U16_LE(buffer, *payload_end, offset, tag->struct_handle);
+                    pdebug(DEBUG_DETAIL, "UDT struct handle is %x.", (unsigned int)(tag->struct_handle));
                     break;
 
                 case 0x02:
                     /* number of members in the template */
                     TRY_GET_U16_LE(buffer, *payload_end, offset, tag->field_count);
+                    pdebug(DEBUG_DETAIL, "UDT field count is %u.", (unsigned int)(tag->field_count));
                     break;
 
                 case 0x04:
                     /* template definitions size in DINTs */
                     TRY_GET_U32_LE(buffer, *payload_end, offset, tag->field_def_size);
+                    pdebug(DEBUG_DETAIL, "UDT definition size is %u DINTS.", (unsigned int)(tag->field_def_size));
                     break;
 
                 case 0x05:
                     /* template instance size in bytes */
                     TRY_GET_U32_LE(buffer, *payload_end, offset, tag->instance_size);
+                    pdebug(DEBUG_DETAIL, "UDT instance size in bytes is %u.", (unsigned int)(tag->instance_size));
                     break;
 
                 default:
@@ -547,7 +551,7 @@ int magic_udt_field_info_build_request_callback(void *context, uint8_t *buffer, 
     magic_udt_tag_p tag = (magic_udt_tag_p)context;
     int req_off = *payload_start;
     uint8_t raw_payload[] = {
-                              0x4C,  /* Read Template Service */
+                              CIP_CMD_READ_TEMPLATE,  /* Read Template Service */
                               0x03,  /* path is 3 words, 6 bytes. */
                               0x20,  /* class, 8-bit */
                               0x6C,  /* Template class */
@@ -560,6 +564,7 @@ int magic_udt_field_info_build_request_callback(void *context, uint8_t *buffer, 
     int raw_payload_size = (int)(unsigned int)sizeof(raw_payload);
     int udt_id_index = 0;
     int offset_index = 0;
+    int transfer_index = 0;
 
     (void)buffer_capacity;
     (void)req_id;
@@ -573,6 +578,7 @@ int magic_udt_field_info_build_request_callback(void *context, uint8_t *buffer, 
             if(index == 6) {
                 udt_id_index = req_off;
                 offset_index = req_off + 2;
+                transfer_index = offset_index + 4;
             }
             TRY_SET_BYTE(buffer, *payload_end, req_off, raw_payload[index]);
         }
@@ -587,6 +593,9 @@ int magic_udt_field_info_build_request_callback(void *context, uint8_t *buffer, 
         /* start with the existing offset. */
         TRY_SET_U32_LE(buffer, *payload_end, offset_index, tag->request_offset);
 
+        /* how many bytes to transfer? */
+        TRY_SET_U16_LE(buffer, *payload_end, transfer_index, (tag->field_def_size * 4) - 23); /* formula from the docs. */
+
         /* done! */
 
         *payload_end = req_off;
@@ -598,7 +607,7 @@ int magic_udt_field_info_build_request_callback(void *context, uint8_t *buffer, 
         return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Tag listing request packet:");
+    pdebug(DEBUG_DETAIL, "UDT field info request packet:");
     pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -644,7 +653,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
         /* ignore reserved byte. */
         (void)reserved;
 
-        if(service_response != (CIP_CMD_OK | CIP_CMD_LIST_TAGS)) {
+        if(service_response != (CIP_CMD_OK | CIP_CMD_READ_TEMPLATE)) {
             pdebug(DEBUG_WARN, "Unexpected CIP service response type %" PRIu8 "!", service_response);
 
             rc = PLCTAG_ERR_BAD_REPLY;
@@ -741,6 +750,9 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
             pdebug(DEBUG_WARN, "Error %s while copying data into tag data buffer!", plc_tag_decode_error(rc));
             break;
         }
+
+        pdebug(DEBUG_DETAIL, "Built result tag data:");
+        pdebug_dump_bytes(DEBUG_DETAIL, tag->base_tag.data, tag->base_tag.size);
 
         if(service_status == CIP_STATUS_FRAG) {
             tag->request_offset += resp_data_size;

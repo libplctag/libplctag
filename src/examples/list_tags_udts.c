@@ -269,21 +269,26 @@ int main(int argc, char **argv)
         struct udt_entry_s *udt = udts[index];
 
         if(udt) {
-            printf(" UDT %s (%d bytes, field CRC %x):\n", udt->name, (int)(unsigned int)udt->instance_size, (int)(unsigned int)udt->struct_handle);
+            printf(" UDT %s (ID %x, %d bytes, struct handle %x):\n", udt->name, (unsigned int)(udt->id), (int)(unsigned int)udt->instance_size, (int)(unsigned int)udt->struct_handle);
 
             for(int field_index = 0; field_index < udt->num_fields; field_index++) {
-                printf("    Field %d: %s, offset %d, ", field_index, udt->fields[field_index].name, udt->fields[field_index].offset);
-                if(udt->fields[field_index].type & 0x2000) { /* MAGIC */
-                    printf("array [%d] of type ", (int)(unsigned int)(udt->fields[field_index].metadata));
-                } else {
-                    printf(" type ");
-                }
-                print_element_type(udt->fields[field_index].type);
+                printf("    Field %d: %s, offset %d", field_index, udt->fields[field_index].name, udt->fields[field_index].offset);
+
+                /* is it a bit? */
                 if(udt->fields[field_index].type == 0xC1) {
                     /* bit type, the metadata is the bit number. */
-                    printf(" bit %d", (int)(unsigned int)(udt->fields[field_index].metadata));
+                    printf(":%d", (int)(unsigned int)(udt->fields[field_index].metadata));
                 }
-                if(udt->fields[field_index].type )
+
+                /* is it an array? */
+                if(udt->fields[field_index].type & 0x2000) { /* MAGIC */
+                    printf(", array [%d] of type ", (int)(unsigned int)(udt->fields[field_index].metadata));
+                } else {
+                    printf(", type ");
+                }
+
+                print_element_type(udt->fields[field_index].type);
+
                 printf(".\n");
             }
         }
@@ -379,8 +384,6 @@ int open_tag(char *base, char *tag_name)
 {
     int32_t tag = PLCTAG_ERR_CREATE;
     char tag_string[TAG_STRING_SIZE+1] = {0,};
-    // const char *gateway = NULL;
-    // const char *path = NULL;
 
     /* build the tag string. */
     strncpy(tag_string, base, TAG_STRING_SIZE);
@@ -402,60 +405,36 @@ int open_tag(char *base, char *tag_name)
 int get_tag_list(int32_t tag, struct tag_entry_s **tag_list, struct tag_entry_s *parent)
 {
     int rc = PLCTAG_STATUS_OK;
-    int done = 1;
     uint16_t last_tag_entry_id = 0;
     int payload_size = 0;
+    int offset = 0;
 
+    /* go get it. */
+    rc = plc_tag_read(tag, TIMEOUT_MS);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("Error %s trying to send CIP request!\n", plc_tag_decode_error(rc));
+        usage();
+    }
+
+    /* process the raw data. */
+    payload_size = plc_tag_get_size(tag);
+    if(payload_size < 0) {
+        printf("Error getting payload size!\n");
+        usage();
+    }
+
+    fprintf(stderr, "Listing tag read, result of size %d.\n", payload_size);
+
+    /* check the payload size. */
+    if(payload_size < 4) {
+        printf("Unexpectedly small payload size %d!\n", payload_size);
+        usage();
+    }
+
+    /* process each entry */
     do {
-        uint8_t status_code = 0;
-        int offset = 0;
-
-        /* go get it. */
-        rc = plc_tag_read(tag, TIMEOUT_MS);
-        if(rc != PLCTAG_STATUS_OK) {
-            printf("Error %s trying to send CIP request!\n", plc_tag_decode_error(rc));
-            usage();
-        }
-
-        /* process the raw data. */
-        payload_size = plc_tag_get_size(tag);
-        if(payload_size < 0) {
-            printf("Error getting payload size!\n");
-            usage();
-        }
-
-        /* check the payload size. */
-        if(payload_size < 4) {
-            printf("Unexpectedly small payload size %d!\n", payload_size);
-            usage();
-        }
-
-        /* get the CIP response header status */
-        status_code = plc_tag_get_uint8(tag, 2);
-
-        /* step past the CIP response header. */
-        offset = 4;
-
-        if(status_code == 6) {
-            /* need to keep going */
-            done = 0;
-        } else {
-            if(status_code != 0) {
-                printf("CIP error in tag listing response, %u!\n", status_code);
-                usage();
-            }
-
-            done = 1;
-        }
-
-        /* process each entry */
-        do {
-            rc = process_tag_entry(tag, &offset, &last_tag_entry_id, tag_list, parent);
-        } while(rc == PLCTAG_STATUS_OK && offset < payload_size);
-
-        /* increment last_tag_entry_id so that we do not process the same one twice. */
-        last_tag_entry_id++;
-    } while(!done);
+        rc = process_tag_entry(tag, &offset, &last_tag_entry_id, tag_list, parent);
+    } while(rc == PLCTAG_STATUS_OK && offset < payload_size);
 
     return PLCTAG_STATUS_OK;
 }
@@ -465,10 +444,11 @@ int get_tag_list(int32_t tag, struct tag_entry_s **tag_list, struct tag_entry_s 
 
 int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct tag_entry_s **tag_list, struct tag_entry_s *parent)
 {
+    int rc = PLCTAG_STATUS_OK;
     uint16_t tag_type = 0;
     uint16_t element_length = 0;
     uint16_t array_dims[3] = {0,};
-    uint16_t tag_name_len = 0;
+    int tag_name_len = 0;
     char *tag_name = NULL;
     struct tag_entry_s *tag_entry = NULL;
 
@@ -498,8 +478,8 @@ int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct ta
     *offset += 4;
 
     /* get the tag name length. */
-    tag_name_len = plc_tag_get_uint16(tag, *offset);
-    *offset += 2;
+    tag_name_len = plc_tag_get_string_length(tag, *offset);
+    // *offset += 2;
 
     /* allocate space for the the tag name.  Add one for the zero termination. */
     tag_name = calloc((size_t)(unsigned int)(tag_name_len + 1), 1);
@@ -508,16 +488,15 @@ int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct ta
         return PLCTAG_ERR_NO_MEM;
     }
 
-    /* copy the string data. */
-    for(int index=0; index < (int)(unsigned int)tag_name_len; index++) {
-        tag_name[index] = (char)plc_tag_get_uint8(tag, (*offset) + index);
+    rc = plc_tag_get_string(tag, *offset, tag_name, tag_name_len + 1);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("Unable to get tag name string, error %s!\n", plc_tag_decode_error(rc));
+        free(tag_name);
+        return rc;
     }
 
-    /* terminate the string. */
-    tag_name[(size_t)tag_name_len] = 0;
-
-    /* bump the offset past the string. */
-    *offset += (int)(unsigned int)tag_name_len;
+    /* skip past the string. */
+    (*offset) += plc_tag_get_string_total_length(tag, *offset);
 
     fprintf(stderr, "Tag %s, string length: %d.\n", tag_name, (int)(unsigned int)strlen(tag_name));
 
@@ -649,9 +628,10 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     uint16_t num_members = 0;
     uint16_t struct_handle = 0;
     uint32_t udt_instance_size = 0;
-    int name_index_start;
-    int name_index_end;
-    char tmp_char = 0;
+    int name_len = 0;
+    char *name_str = NULL;
+    int name_index = 0;
+
 
 
     /* check to see if we have this type already. */
@@ -763,446 +743,94 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
      * seems to be enough for now.
      */
 
-    name_index_start = offset;
+    /* first get the zero-terminated string length */
+    name_len = plc_tag_get_string_length(udt_info_tag, offset);
 
-    tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
-    while(tmp_char != ';' && tmp_char != 0) {
-        offset++;
-        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
-    }
-
-    name_index_end = offset;
-
-    udts[udt_id]->name = calloc((size_t)(unsigned int)((name_index_end - name_index_start) + 1), (size_t)1);
-    if(!udts[udt_id]->name) {
-        printf("Unable to allocate name for Template/UDT!\n");
+    if(name_len <=0 || name_len >= 256) {
+        printf("Unexpected UDT name length: %d!\n", name_len);
         usage();
     }
 
-    /* copy the data, the name is already zero terminated by calloc */
-    for(int name_index=0; name_index < (name_index_end - name_index_start); name_index++) {
-        udts[udt_id]->name[name_index] = (char)plc_tag_get_uint8(udt_info_tag, name_index_start + name_index);
+    /* create a string for this. */
+    name_str = calloc((size_t)(name_len + 1), (size_t)1);
+    if(!name_str) {
+        printf("Unable to allocate UDT name string!\n");
+        usage();
     }
 
-    /* skip to the end of the string.  Looks zero-terminated. */
-    while(tmp_char != 0) {
-        offset++;
-        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
+    /* copy the name */
+    rc = plc_tag_get_string(udt_info_tag, offset, name_str, name_len + 1);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("Error %s retrieving UDT name string from the tag!\n", plc_tag_decode_error(rc));
+        free(name_str);
+        usage();
     }
 
-    /* skip past the zero terminator. */
-    offset++;
+    /* zero terminate the name when we hit the first semicolon. */
+    for(name_index = 0; name_index < name_len && name_str[name_index] != ';'; name_index++) { };
+
+    if(name_str[name_index] == ';') {
+        name_str[name_index] = 0;
+    }
+
+    udts[udt_id]->name = name_str;
+
+    fprintf(stderr, "Getting data from UDT \"%s\".\n", udts[udt_id]->name);
+
+    /* skip past the UDT name. */
+    offset += plc_tag_get_string_total_length(udt_info_tag, offset);
 
     /*
      * This is the second section of the data, the field names.   They appear
      * to be zero terminated.
      */
 
+    fprintf(stderr, "Getting %d field names for UDT %s.\n", udts[udt_id]->num_fields, udts[udt_id]->name);
+    fprintf(stderr, "offset=%u, tag_size=%u.\n", offset, tag_size);
+
     /* loop over all fields and get name strings.  They are zero terminated. */
     for(int field_index=0; field_index < udts[udt_id]->num_fields && offset < tag_size; field_index++) {
-        int name_size = 0;
+        fprintf(stderr, "Getting name for field %u.\n", field_index);
 
-        name_index_start = offset;
-
-        tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
-        while(tmp_char != 0) {
-            offset++;
-            tmp_char = (char)plc_tag_get_uint8(udt_info_tag, offset);
-        }
-
-        name_index_end = offset;
-
-        name_size = name_index_end - name_index_start;
-
-        /* debug */
-        printf("Field %d name is %d chars long.\n", field_index, name_size);
-
-        udts[udt_id]->fields[field_index].name = calloc((size_t)(unsigned int)(name_size + 1), (size_t)1);
-        if(!(udts[udt_id]->fields[field_index].name)) {
-            printf("Unable to allocate field name!");
+        /* first get the zero-terminated string length */
+        name_len = plc_tag_get_string_length(udt_info_tag, offset);
+        if(name_len <=0 || name_len >= 256) {
+            printf("Unexpected UDT field name length: %d!\n", name_len);
             usage();
         }
 
-        /* copy the data, the name is already zero terminated by calloc */
-        for(int name_index=0; name_index < name_size; name_index++) {
-            udts[udt_id]->fields[field_index].name[name_index] = (char)plc_tag_get_uint8(udt_info_tag, name_index_start + name_index);
+        fprintf(stderr, "The name for field %u is %u characters long.\n", field_index, name_len);
+
+        /* create a string for this. */
+        name_str = calloc((size_t)(name_len + 1), (size_t)1);
+        if(!name_str) {
+            printf("Unable to allocate UDT field name string!\n");
+            usage();
         }
 
-        /* zero terminated by calloc */
+        fprintf(stderr, "The string for field %u is at %p.\n", field_index, name_str);
 
-        /* step past the zero. */
-        offset++;
+        /* copy the name */
+        rc = plc_tag_get_string(udt_info_tag, offset, name_str, name_len + 1);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("Error %s retrieving UDT field name string from the tag!\n", plc_tag_decode_error(rc));
+            free(name_str);
+            usage();
+        }
+
+        udts[udt_id]->fields[field_index].name = name_str;
+
+        fprintf(stderr, "UDT field %d is \"%s\".\n", field_index, udts[udt_id]->fields[field_index].name);
+
+        offset += plc_tag_get_string_total_length(udt_info_tag, offset);
     }
 
     /* sanity check */
     if(offset != tag_size - 1) {
-        printf("Did not process whole buffer.  Processed %d bytes out of %d bytes.", offset, tag_size);
+        fprintf(stderr, "Processed %d bytes out of %d bytes.\n", offset, tag_size);
     }
 
     return PLCTAG_STATUS_OK;
 }
-
-
-
-// int get_template_info(int32_t tag, uint16_t udt_id, uint16_t *num_members, uint32_t *udt_definition_dwords, uint32_t *udt_instance_size)
-// {
-//     int rc = PLCTAG_STATUS_OK;
-//     int offset = 0;
-//     uint8_t raw_payload[] = { 0x03,  /* Get Attributes List Service */
-//                               0x03,  /* path is 3 words, 6 bytes. */
-//                               0x20,  /* class, 8-bit */
-//                               0x6C,  /* Template class */
-//                               0x25,  /* 16-bit instance ID next. */
-//                               0x00,  /* padding */
-//                               0x00, 0x00,  /* instance ID bytes */
-//                               0x03, 0x00,  /* get 3 attributes. */
-//                               0x02, 0x00,  /* Attribute 2: Template Member Count: number of fields in the template/UDT. */
-//                               0x04, 0x00,  /* Attribute 4: Template Object Definition Size, in 32-bit words. */
-//                               0x05, 0x00   /* Attribute 5: Template Structure Size, in bytes.   Size of the object. */
-//                             };
-//     int raw_payload_size = (int)(unsigned int)sizeof(raw_payload);
-//     uint8_t status_code = 0;
-//     int response_size = 0;
-//     uint16_t result_count = 0;
-
-//     /* Set the payload length */
-//     rc = plc_tag_set_int_attribute(tag, "payload_size", raw_payload_size);
-
-//     /* copy the data into the tag. */
-//     for(int payload_index=0; payload_index < raw_payload_size && rc == PLCTAG_STATUS_OK; payload_index++) {
-//         rc = plc_tag_set_uint8(tag, payload_index, raw_payload[payload_index]);
-//     }
-
-//     if(rc != PLCTAG_STATUS_OK) {
-//         printf("Unable to copy default template info request payload into the tag buffer, error %s!\n", plc_tag_decode_error(rc));
-//         usage();
-//     }
-
-//     /* back fill the UDT ID */
-//     rc = plc_tag_set_uint16(tag, 6, udt_id); /* MAGIC */
-
-//     /* go get it. */
-//     rc = plc_tag_read(tag, TIMEOUT_MS);
-//     if(rc != PLCTAG_STATUS_OK) {
-//         printf("Error %s trying to send CIP request!\n", plc_tag_decode_error(rc));
-//         usage();
-//     }
-
-//     /* process the raw data. */
-//     response_size = plc_tag_get_int_attribute(tag, "payload_size", -1);
-//     if(response_size < 0) {
-//         printf("Error getting payload size!\n");
-//         usage();
-//     }
-
-//     /* check the payload size. */
-//     if(response_size < 4) {
-//         printf("Unexpectedly small response size %d!\n", response_size);
-//         usage();
-//     }
-
-//     /* get the CIP response header. 4 bytes. */
-//     status_code = plc_tag_get_uint8(tag, 2);
-
-//     /* step past the CIP response header. */
-//     offset = 4;
-
-//     if(status_code == 6) {
-//         /* need to keep going */
-//         printf("Getting more than a packet of template info results is unsupported!");
-//         usage();
-//     } else {
-//         if(status_code != 0) {
-//             printf("CIP error in template info response, %u!\n", status_code);
-//             usage();
-//         }
-//     }
-
-//     result_count = plc_tag_get_uint16(tag, offset);
-//     offset += 2;
-
-//     if(result_count != 3) {
-//         printf("Unexpected number of attribute results, %d!", (int)(unsigned int)result_count);
-//         usage();
-//     }
-
-//     /* read all 3 attributes, not clear that they will come in order. */
-//     for(int attrib_num=0; attrib_num < 3; attrib_num++) {
-//         uint16_t attrib_id = plc_tag_get_uint16(tag, offset);
-//         uint16_t attrib_status = plc_tag_get_uint16(tag, offset +2);
-//         // uint16_t struct_handle = 0;
-
-//         offset += 4;
-
-//         if(attrib_status != 0) {
-//             printf("Unable to get attribute ID %x, got error %x!\n", attrib_id, attrib_status);
-//             usage();
-//         }
-
-//         switch(attrib_id) {
-//             // case 0x01:
-//             //     /* CRC of the fields, used as a struct handle. */
-//             //     struct_handle = plc_tag_get_uint16(tag, offset);
-//             //     offset += 2;
-//             //     break;
-
-//             case 0x02:
-//                 /* number of members in the template */
-//                 *num_members = plc_tag_get_uint16(tag, offset);
-//                 offset += 2;
-//                 break;
-
-//             /* 3? */
-
-//             case 0x04:
-//                 /* template definitions size in DINTs */
-//                 *udt_definition_dwords = plc_tag_get_uint32(tag, offset);
-//                 offset += 4;
-//                 break;
-
-//             case 0x05:
-//                 /* template instance size in bytes */
-//                 *udt_instance_size = plc_tag_get_uint32(tag, offset);
-//                 printf("UDT intance size %d bytes.\n", (int)(unsigned int)(*udt_instance_size));
-//                 offset += 4;
-//                 break;
-
-//             default:
-//                 printf("Unexpected attribute %x found!\n", attrib_id);
-//                 usage();
-//                 break;
-//         }
-//     }
-
-//     return PLCTAG_STATUS_OK;
-// }
-
-
-
-
-// int get_template_field_info(int32_t tag, uint16_t udt_id, uint32_t template_definition_size_dwords)
-// {
-//     int rc = PLCTAG_STATUS_OK;
-//     int offset = 0;
-//     uint8_t raw_payload[] = { 0x4C,  /* Read Template Service */
-//                               0x03,  /* path is 3 words, 6 bytes. */
-//                               0x20,  /* class, 8-bit */
-//                               0x6C,  /* Template class */
-//                               0x25,  /* 16-bit instance ID next. */
-//                               0x00,  /* padding */
-//                               0x00, 0x00,  /* template/UDT instance ID bytes */
-//                               0x00, 0x00, 0x00, 0x00, /* byte offset. */
-//                               0x00, 0x00   /* Total bytes to transfer. */
-//                             };
-//     int raw_payload_size = (int)(unsigned int)sizeof(raw_payload);
-//     // uint8_t service_type = 0;
-//     uint8_t status_code = 0;
-//     int response_size = 0;
-//     uint8_t *buffer = NULL;
-//     uint32_t buffer_capacity = (template_definition_size_dwords * 4) - 23;
-//     uint32_t buffer_offset = 0;
-//     uint16_t field_metadata = 0;
-//     uint16_t field_element_type = 0;
-//     uint32_t field_offset = 0;
-
-//     /* make a buffer for this data. */
-//     buffer = calloc(template_definition_size_dwords, 4); /* allocates a little too much, but that is OK */
-//     if(!buffer) {
-//         printf("Unable to allocate template field info buffer!");
-//         usage();
-//     }
-
-//     /* loop until we get all the data. */
-//     do {
-//         /* Set the payload length */
-//         rc = plc_tag_set_int_attribute(tag, "payload_size", raw_payload_size);
-
-//         /* copy the data into the tag. */
-//         for(int payload_index=0; payload_index < raw_payload_size && rc == PLCTAG_STATUS_OK; payload_index++) {
-//             rc = plc_tag_set_uint8(tag, payload_index, raw_payload[payload_index]);
-//         }
-
-//         if(rc != PLCTAG_STATUS_OK) {
-//             printf("Unable to copy default template info request payload into the tag buffer, error %s!\n", plc_tag_decode_error(rc));
-//             usage();
-//         }
-
-//         /* back fill the UDT ID */
-//         rc = plc_tag_set_uint16(tag, 6, udt_id); /* MAGIC */
-//         if(rc != PLCTAG_STATUS_OK) {
-//             printf("Error %s trying to send CIP request!\n", plc_tag_decode_error(rc));
-//             usage();
-//         }
-
-//         /* back fill the offset */
-//         rc = plc_tag_set_uint32(tag, 8, buffer_offset); /* MAGIC */
-//         if(rc != PLCTAG_STATUS_OK) {
-//             printf("Error %s trying to backfill offset in CIP request!\n", plc_tag_decode_error(rc));
-//             usage();
-//         }
-
-//         /* back fill the total transfer size */
-//         rc = plc_tag_set_uint16(tag, 12, (uint16_t)buffer_capacity); /* MAGIC */
-//         if(rc != PLCTAG_STATUS_OK) {
-//             printf("Error %s trying to backfill total transfer size request!\n", plc_tag_decode_error(rc));
-//             usage();
-//         }
-
-//         /* go get it. */
-//         rc = plc_tag_read(tag, TIMEOUT_MS);
-//         if(rc != PLCTAG_STATUS_OK) {
-//             printf("Error %s trying to send CIP request!\n", plc_tag_decode_error(rc));
-//             usage();
-//         }
-
-//         /* process the raw data. */
-//         response_size = plc_tag_get_int_attribute(tag, "payload_size", -1);
-//         if(response_size < 0) {
-//             printf("Error getting template field info response size!\n");
-//             usage();
-//         }
-
-//         /* check the payload size. */
-//         if(response_size < 4) {
-//             printf("Unexpectedly small template field response size %d!\n", response_size);
-//             usage();
-//         }
-
-//         /* get the CIP response header. 4 bytes. */
-//         status_code = plc_tag_get_uint8(tag, 2);
-
-//         /* step past the CIP response header. */
-//         offset = 4;
-
-//         /* copy the data into the buffer. */
-//         for(int data_index=offset; data_index < response_size; data_index++) {
-//             buffer[(uint32_t)(unsigned int)(data_index - offset) + buffer_offset] = plc_tag_get_uint8(tag, data_index);
-//         }
-
-//         buffer_offset += (uint32_t)(unsigned int)(response_size - offset);
-//     } while(status_code == 6);
-
-//     if(status_code != 0) {
-//         printf("Got unexpected error status, %d, while reading template field info!", (int)(unsigned int)status_code);
-//         usage();
-//     }
-
-//     if(buffer_offset != buffer_capacity) {
-//         printf("Got unexpected amount of data!  Got %u bytes but expected %u bytes!\n", buffer_offset, buffer_capacity);
-//         usage();
-//     }
-
-//     /* process the data. */
-//     buffer_offset = 0;
-
-//     /* first section is the field type and size info for all fields. */
-//     for(int field_index=0; field_index < udts[udt_id]->num_fields; field_index++) {
-//         field_metadata = (uint16_t)(buffer[buffer_offset]) + (uint16_t)((uint16_t)(buffer[buffer_offset+1]) << 8);
-//         buffer_offset += 2;
-
-//         field_element_type = (uint16_t)(buffer[buffer_offset]) + (uint16_t)((uint16_t)(buffer[buffer_offset+1]) << 8);
-//         buffer_offset += 2;
-
-//         field_offset = (uint32_t)(buffer[buffer_offset])
-//                      + (uint32_t)((uint32_t)(buffer[buffer_offset+1]) << 8)
-//                      + (uint32_t)((uint32_t)(buffer[buffer_offset+2]) << 16)
-//                      + (uint32_t)((uint32_t)(buffer[buffer_offset+3]) << 24);
-//         buffer_offset += 4;
-
-//         udts[udt_id]->fields[field_index].type = field_element_type;
-//         udts[udt_id]->fields[field_index].metadata = field_metadata;
-//         udts[udt_id]->fields[field_index].offset = field_offset;
-
-//         /* make sure that we have all the Template/UDT info */
-//         if((field_element_type & TYPE_IS_STRUCT) && !(field_element_type & TYPE_IS_SYSTEM)) {
-//             rc = get_udt_definition(tag, field_element_type & TYPE_UDT_ID_MASK);
-//         }
-//     }
-
-//     /*
-//      * then get the template/UDT name.   This is weird.
-//      * Scan until we see a 0x3B, semicolon, byte.   That is the end of the
-//      * template name.   Actually we should look for ";n" but the semicolon
-//      * seems to be enough for now.
-//      */
-
-//     int name_index_start = (int)(unsigned int)buffer_offset;
-
-//     while(buffer[buffer_offset] != 0x3B && buffer[buffer_offset] != 0) {
-//         buffer_offset++;
-//     }
-
-//     int name_index_end = (int)(unsigned int)buffer_offset;
-
-//     udts[udt_id]->name = calloc((size_t)(unsigned int)((name_index_end - name_index_start) + 1), (size_t)1);
-//     if(!udts[udt_id]->name) {
-//         printf("Unable to allocate name for Template/UDT!\n");
-//         usage();
-//     }
-
-//     /* copy the data, the name is already zero terminated by calloc */
-//     for(int name_index=0; name_index < (name_index_end - name_index_start); name_index++) {
-//         udts[udt_id]->name[name_index] = (char)buffer[name_index_start + name_index];
-//     }
-
-//     /* skip to the end of the string.  Looks zero-terminated. */
-//     while(buffer[buffer_offset] != 0) {
-//         buffer_offset++;
-//     }
-
-//     /* step past the zero. */
-//     buffer_offset++;
-
-//     /*
-//      * This is the second section of the data, the field names.   They appear
-//      * to be zero terminated.
-//      */
-
-//     /* loop over all fields and get name strings.  They are zero terminated. */
-//     for(int field_index=0; field_index < udts[udt_id]->num_fields && buffer_offset < buffer_capacity; field_index++) {
-//         int name_size = 0;
-
-//         name_index_start = (int)(unsigned int)buffer_offset;
-
-//         while(buffer[buffer_offset] != 0) {
-//             buffer_offset++;
-//         }
-
-//         name_index_end = (int)(unsigned int)buffer_offset;
-
-//         name_size = name_index_end - name_index_start;
-
-//         /* debug */
-//         printf("Field %d name is %d chars long.\n", field_index, name_size);
-
-//         udts[udt_id]->fields[field_index].name = calloc((size_t)(unsigned int)(name_size + 1), (size_t)1);
-//         if(!(udts[udt_id]->fields[field_index].name)) {
-//             printf("Unable to allocate field name!");
-//             usage();
-//         }
-
-//         /* copy the name. */
-//         for(int name_index=0; name_index < name_size; name_index++) {
-//             udts[udt_id]->fields[field_index].name[name_index] = (char)buffer[name_index_start + name_index];
-
-//             printf("Field %d name character %d is '%c'.\n", field_index, name_index, (char)buffer[name_index_start + name_index]);
-//         }
-
-//         /* zero terminated by calloc */
-
-//         /* step past the zero. */
-//         buffer_offset++;
-//     }
-
-//     /* sanity check */
-//     if(buffer_offset != buffer_capacity - 1) {
-//         printf("Did not process whole buffer.  Processed %d bytes out of %d bytes.", buffer_offset, buffer_capacity);
-//     }
-
-//     free(buffer);
-
-
-//     return PLCTAG_STATUS_OK;
-// }
 
 
