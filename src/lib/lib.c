@@ -323,21 +323,21 @@ THREAD_FUNC(tag_tickler_func)
                     if(tag->vtable->tickler) {
                         /* call the tickler on the tag. */
                         tag->vtable->tickler(tag);
+                    }
 
-                        if(tag->read_complete) {
-                            tag->read_complete = 0;
-                            tag->read_in_flight = 0;
+                    if(tag->read_complete) {
+                        tag->read_complete = 0;
+                        tag->read_in_flight = 0;
 
-                            events[PLCTAG_EVENT_READ_COMPLETED] = 1;
-                        }
+                        events[PLCTAG_EVENT_READ_COMPLETED] = 1;
+                    }
 
-                        if(tag->write_complete) {
-                            tag->write_complete = 0;
-                            tag->write_in_flight = 0;
-                            tag->auto_sync_next_write = 0;
+                    if(tag->write_complete) {
+                        tag->write_complete = 0;
+                        tag->write_in_flight = 0;
+                        tag->auto_sync_next_write = 0;
 
-                            events[PLCTAG_EVENT_WRITE_COMPLETED] = 1;
-                        }
+                        events[PLCTAG_EVENT_WRITE_COMPLETED] = 1;
                     }
 
                     /* we are done with the tag API mutex now. */
@@ -1227,7 +1227,6 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
                 }
             }
 
-            tag->read_in_flight = 0;
             is_done = TRUE;
             break;
         }
@@ -1253,7 +1252,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
                 break;
             }
 
-            sleep_ms(1); /* MAGIC */
+            sleep_ms(2); /* MAGIC */
         }
 
         /*
@@ -1286,6 +1285,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
     if(tag->callback) {
         if(is_done == TRUE) {
+            /* clear read state. */
+            critical_block(tag->api_mutex) {
+                tag->read_in_flight = 0;
+                tag->read_complete = 0;
+            }
+
             pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
             tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
         }
@@ -1419,11 +1424,10 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 }
             }
 
-            tag->write_in_flight = 0;
             is_done = 1;
             break;
         }
-    }
+    } /* end of critical block */
 
     /*
      * if there is a timeout, then loop until we get
@@ -1444,7 +1448,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 break;
             }
 
-            sleep_ms(1); /* MAGIC */
+            sleep_ms(2); /* MAGIC */
         }
 
         /*
@@ -1472,6 +1476,12 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
     if(tag->callback) {
         if(is_done) {
+            /* clear the write state. */
+            critical_block(tag->api_mutex) {
+                tag->write_in_flight = 0;
+                tag->write_complete = 0;
+            }
+
             pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
             tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
         }
