@@ -56,7 +56,7 @@ int main()
         exit(1);
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
     /* create the tag */
     tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
