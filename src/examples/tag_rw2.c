@@ -70,7 +70,7 @@ struct run_args {
     } write_vals;
 };
 
-#define REQUIRED_VERSION 2,2,0
+#define REQUIRED_VERSION 2,2,1
 #define DEFAULT_TIMEOUT (5000)
 
 
@@ -205,7 +205,8 @@ void parse_args(int argc, char **argv, struct run_args *args)
     bool has_write_vals = false;
     char *write_vals = NULL;
 
-    for(i = 0; i < argc; i++) {
+    /* argv[0] is the tag_rw2 command itself. */
+    for(i = 1; i < argc; i++) {
 
         /* DEBUG */
         printf("Processing argument %d \"%s\".\n", i, argv[i]);
@@ -752,13 +753,14 @@ void dump_values(struct run_args *args)
     /* display the data */
     if(args->element_type == TYPE_BIT) {
         int rc = plc_tag_get_bit(tag, 0);
+        int bit_num = plc_tag_get_int_attribute(tag, "bit_num", -1);
 
         if(rc < 0) {
             printf("Error received trying to read bit tag: %s!\n", plc_tag_decode_error(rc));
             cleanup(args);
             exit(1);
         } else {
-            printf("data=%d\n", rc);
+            printf("bit %d = %d\n", bit_num, rc);
         }
     } else {
         int len = plc_tag_get_size(tag);
