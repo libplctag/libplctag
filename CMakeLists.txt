@@ -388,7 +388,7 @@ else()
                             busy_test
                             data_dumper
                             list_tags
-                            list_tags_udts
+                            list_tags_old
                             multithread
                             multithread_cached_read
                             multithread_plc5
@@ -402,6 +402,7 @@ else()
                             string
                             test_auto_sync
                             test_callback
+                            test_change_tag
                             test_raw_cip
                             test_reconnect
                             test_shutdown
@@ -420,13 +421,14 @@ else()
         set ( example_PROGRAMS async
                             async_stress
                             list_tags
-                            list_tags_udts
+                            list_tags_old
                             plc5
                             simple
                             simple_dual
                             slc500
                             string
                             test_callback
+                            test_change_tag
                             test_raw_cip
                             test_shutdown
                             test_special
