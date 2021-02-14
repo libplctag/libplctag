@@ -126,13 +126,6 @@ int pccc_constructor(plc_p plc, attr attribs)
         return rc;
     }
 
-    // /* set special attribute. */
-    // rc = attr_set_int(attribs, "forward_open_ex_enabled", 0);
-    // if(rc != PLCTAG_STATUS_OK) {
-    //     pdebug(DEBUG_WARN, "Error %s while trying to disable forward open extended packet.", plc_tag_decode_error(rc));
-    //     return rc;
-    // }
-
     /* allocate and set up our local data. */
     context = mem_alloc(sizeof(*context));
     if(!context) {
