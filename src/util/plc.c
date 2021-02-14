@@ -755,7 +755,7 @@ int plc_stop_request(plc_p plc, plc_request_p request)
         if(*walker) {
             *walker = request->next;
         } else {
-            pdebug(DEBUG_WARN, "Request not on the PLC's list.");
+            pdebug(DEBUG_INFO, "Request not on the PLC's list.");
             rc = PLCTAG_ERR_NOT_FOUND;
         }
 
