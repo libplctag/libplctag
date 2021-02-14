@@ -42,6 +42,7 @@
 #define CIP_CMD_GET_ATTRIBS      ((uint8_t)0x03)
 #define CIP_CMD_MULTI            ((uint8_t)0x0A)
 #define CIP_CMD_READ             ((uint8_t)0x4C)
+#define CIP_CMD_READ_TEMPLATE    ((uint8_t)0x4C)
 #define CIP_CMD_WRITE            ((uint8_t)0x4D)
 #define CIP_CMD_RMW              ((uint8_t)0x4E)
 #define CIP_CMD_READ_FRAG        ((uint8_t)0x52)
