@@ -105,7 +105,7 @@ void mem_free_impl(const char *func, int line_num, const void *mem)
 
         pdebug(DEBUG_DETAIL, "Done.");
     } else {
-        pdebug(DEBUG_WARN, "Null pointer passed at %s:%d!", func, line_num);
+        pdebug(DEBUG_INFO, "Null pointer passed at %s:%d.", func, line_num);
     }
 }
 
@@ -196,6 +196,7 @@ void mem_move(void *dest, void *src, int size)
 
     if(size == 0) {
         /* nothing to do. */
+        pdebug(DEBUG_INFO, "Number of bytes to move is zero.");
         return;
     }
 
