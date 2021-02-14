@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <ab2/ab.h>
+#include <ab2/cip.h>
 #include <ab2/cip_layer.h>
 #include <ab2/eip_layer.h>
 #include <lib/libplctag.h>
@@ -68,12 +69,11 @@
 #define CIP_SERVICE_STATUS_OK   (0x00)
 
 #define CIP_ERR_UNSUPPORTED (0x08)
+#define CIP_ERR_NO_RESOURCES (0x02)
 
 #define CPF_UNCONNECTED_HEADER_SIZE (16)
 #define CPF_CONNECTED_HEADER_SIZE (20)
 
-#define CIP_MAX_EX_PAYLOAD (4002)
-#define CIP_MAX_PAYLOAD (504)
 #define CIP_PAYLOAD_HEADER_FUDGE (40)  /* Measured, might even be right. */
 
 /* CPF definitions */
@@ -179,35 +179,29 @@ int cip_layer_setup(plc_p plc, int layer_index, attr attribs)
         return rc;
     }
 
+    pdebug(DEBUG_DETAIL, "Encoded CIP path size: %d.", state->encoded_path_size);
+
     /* get special attributes */
-    state->forward_open_ex_enabled = attr_get_int(attribs, "forward_open_ex_enabled", 0); /* default to off */
 
     /* do we have a default payload size for the large CIP packets? */
-    cip_payload_size = attr_get_int(attribs, "cip_payload_ex", 0);
+    cip_payload_size = attr_get_int(attribs, "cip_payload", CIP_STD_PAYLOAD);
     if(cip_payload_size < 0 || cip_payload_size > 65525) {
         pdebug(DEBUG_WARN, "CIP extended payload size must be between 0 and 65535, was %d!", cip_payload_size);
         mem_free(state);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
-    if(cip_payload_size != 0) {
+    if(cip_payload_size > CIP_STD_PAYLOAD) {
         pdebug(DEBUG_INFO, "Setting CIP extended payload size to %d.", cip_payload_size);
         state->cip_payload_ex = (uint16_t)(unsigned int)cip_payload_size;
+        state->cip_payload = CIP_STD_PAYLOAD;
         state->forward_open_ex_enabled = TRUE;
     } else {
+        state->cip_payload = (uint16_t)(unsigned int)cip_payload_size;
         state->forward_open_ex_enabled = FALSE;
     }
 
-    cip_payload_size = attr_get_int(attribs, "cip_payload", 92); /* MAGIC default to small size. */
-    if(cip_payload_size <= 0 || cip_payload_size > 508) {
-        pdebug(DEBUG_WARN, "CIP payload size must be between 0 and 508, was %d!", cip_payload_size);
-        mem_free(state);
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
-    }
 
-    state->cip_payload = (uint16_t)(unsigned int)cip_payload_size;
-
-    pdebug(DEBUG_DETAIL, "Encoded CIP path size: %d.", state->encoded_path_size);
 
     /* finally set up the layer. */
     rc = plc_set_layer(plc,
@@ -692,7 +686,7 @@ int cip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
 
             *payload_start = offset;
 
-            if(cip_service_code == (CIP_FORWARD_OPEN_REQUEST | CIP_CMD_EXECUTED_FLAG) || cip_service_code == (CIP_FORWARD_OPEN_REQUEST | CIP_CMD_EXECUTED_FLAG)) {
+            if(cip_service_code == (CIP_FORWARD_OPEN_REQUEST | CIP_CMD_EXECUTED_FLAG) || cip_service_code == (CIP_FORWARD_OPEN_REQUEST_EX | CIP_CMD_EXECUTED_FLAG)) {
                 rc = process_forward_open_response(state, buffer, buffer_capacity, payload_start, payload_end);
                 break;
             } else if(cip_service_code == (CIP_FORWARD_CLOSE_REQUEST | CIP_CMD_EXECUTED_FLAG)) {
@@ -713,7 +707,12 @@ int cip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
     } while(0);
 
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_PARTIAL) {
-        pdebug(DEBUG_WARN, "Unable to process CIP header packet, error %s!", plc_tag_decode_error(rc));
+        if(rc == PLCTAG_STATUS_PENDING) {
+            pdebug(DEBUG_INFO, "CIP response had a problem, retrying.");
+        } else {
+            pdebug(DEBUG_WARN, "Unable to process CIP header packet, error %s!", plc_tag_decode_error(rc));
+        }
+
         return rc;
     }
 
@@ -779,6 +778,13 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
 
             /* TODO - decode some of the rest of the packet, might be useful. */
 
+            /* make sure PLC has sufficient buffer. */
+            rc = plc_set_buffer_size(state->plc, CIP_PAYLOAD_HEADER_FUDGE + (state->forward_open_ex_enabled ? state->cip_payload_ex : state->cip_payload));
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to set PLC buffer, error %s!", plc_tag_decode_error(rc));
+                break;
+            }
+
             *payload_start = *payload_end;
 
             state->is_connected = TRUE;
@@ -801,13 +807,13 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
 
                     TRY_GET_U16_LE(buffer, buffer_capacity, (*payload_start), supported_size);
 
-                    pdebug(DEBUG_WARN, "Error from Forward Open request, unsupported size, but size %d is supported.", (int)(unsigned int)supported_size);
+                    pdebug(DEBUG_INFO, "Error from Forward Open request, unsupported size, but size %d is supported.", (int)(unsigned int)supported_size);
 
                     if(state->forward_open_ex_enabled == TRUE) {
                         state->cip_payload_ex = supported_size;
                     } else {
                         if(supported_size > 0x1F8) {
-                            pdebug(DEBUG_WARN, "Supported size is greater than will fit into 9 bits.  Clamping to 0x1f8.");
+                            pdebug(DEBUG_INFO, "Supported size is greater than will fit into 9 bits.  Clamping to 0x1f8.");
                             supported_size = 0x1F8; /* MAGIC default for small CIP packets. */
                         }
 
@@ -818,12 +824,12 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
                     rc = PLCTAG_STATUS_PENDING;
                     break;
                 } else if(extended_status == 0x100) { /* MAGIC */
-                    pdebug(DEBUG_WARN, "Error from Forward Open request, duplicate connection ID.  Need to try again.");
+                    pdebug(DEBUG_INFO, "Error from Forward Open request, duplicate connection ID.  Need to try again.");
                     /* retry */
                     rc = PLCTAG_STATUS_PENDING;
                     break;
                 } else {
-                    // pdebug(DEBUG_WARN, "CIP error %d (%s)!", cip_decode_error_short(&fo_resp->general_status), cip_decode_error_long(&fo_resp->general_status));
+                    pdebug(DEBUG_WARN, "CIP error %d (%s)!", cip_decode_error_short(status, extended_status), cip_decode_error_long(status, extended_status));
                     pdebug(DEBUG_WARN, "CIP error %x (extended error %x)!", (unsigned int)status, (unsigned int)extended_status);
                     rc = PLCTAG_ERR_REMOTE_ERR;
                     break;
@@ -838,9 +844,32 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
                     pdebug(DEBUG_WARN, "CIP error, unsupported CIP request!");
                     break;
                 }
+            } else if(status == CIP_ERR_NO_RESOURCES) {
+                if(state->forward_open_ex_enabled == TRUE) {
+                    /* try a smaller size */
+                    if(state->cip_payload_ex > CIP_STD_EX_PAYLOAD) {
+                        pdebug(DEBUG_INFO, "Original payload size of %u is too large trying %d.", (unsigned int)(state->cip_payload_ex), CIP_STD_EX_PAYLOAD);
+                        state->cip_payload_ex = CIP_STD_EX_PAYLOAD;
+                        rc = PLCTAG_STATUS_PENDING;
+                        break;
+                    } else if(state->cip_payload_ex > CIP_STD_PAYLOAD) {
+                        pdebug(DEBUG_INFO, "Original payload size of %u is too large trying %d.", (unsigned int)(state->cip_payload_ex), CIP_STD_PAYLOAD);
+                        state->cip_payload_ex = CIP_STD_PAYLOAD;
+                        rc = PLCTAG_STATUS_PENDING;
+                        break;
+                    } else {
+                        /* we do not support extended forward open. */
+                        state->forward_open_ex_enabled = FALSE;
+                        rc = PLCTAG_STATUS_PENDING;
+                        break;
+                    }
+                } else {
+                    rc = cip_decode_error_code(status, 0);
+                    pdebug(DEBUG_WARN, "Error %s returned in CIP forward open response!", cip_decode_error_short(status, 0));
+                    break;
+                }
             } else {
-                // pdebug(DEBUG_WARN, "CIP error code %s (%s)!", cip_decode_error_short(&fo_resp->general_status), cip_decode_error_long(&fo_resp->general_status));
-                pdebug(DEBUG_WARN, "CIP error %x!", (unsigned int)status);
+                pdebug(DEBUG_WARN, "CIP error code %s (%s)!", cip_decode_error_short(status, 0), cip_decode_error_long(status, 0));
                 rc = PLCTAG_ERR_REMOTE_ERR;
                 break;
             }
