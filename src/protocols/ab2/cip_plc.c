@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <lib/libplctag.h>
+#include <ab2/cip.h>
 #include <ab2/cip_layer.h>
 #include <ab2/eip_layer.h>
 #include <ab2/cip_plc.h>
@@ -84,37 +85,23 @@ int cip_constructor(plc_p plc, attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
     struct cip_plc_context_s *context = NULL;
-    int max_packet = CIP_PLC_MAX_PAYLOAD + CIP_OVERHEAD;
-    int forward_open_ex_enabled = -1;
+    int max_packet = CIP_STD_PAYLOAD + CIP_OVERHEAD;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     /* set up the PLC buffer */
     rc = plc_set_buffer_size(plc, max_packet);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error %s while trying to set PCCC PLC buffer size.", plc_tag_decode_error(rc));
+        pdebug(DEBUG_WARN, "Error %s while trying to set CIP PLC buffer size.", plc_tag_decode_error(rc));
         return rc;
     }
 
     /* set special attribute for the regular CIP payload. */
-    rc = attr_set_int(attribs, "cip_payload", RAW_CIP_PLC_MAX_PAYLOAD);
+    rc = attr_set_int(attribs, "cip_payload", attr_get_int(attribs, "cip_payload", CIP_STD_PAYLOAD));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error %s while trying to set max CIP payload size.", plc_tag_decode_error(rc));
         return rc;
     }
-
-    /* set special attribute. */
-    forward_open_ex_enabled = attr_get_int(attribs, "forward_open_ex_enabled", -1);
-    if(forward_open_ex_enabled == -1) {
-        /* not overridden in the tag, so set it here. */
-        pdebug(DEBUG_INFO, "No override, enabling large Forward Open attempt.");
-
-        rc = attr_set_int(attribs, "forward_open_ex_enabled", 1);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while trying to disable forward open extended packet.", plc_tag_decode_error(rc));
-            return rc;
-        }
-    } /* otherwise let the override win */
 
     /* allocate and set up our local data. */
     context = mem_alloc(sizeof(*context));
