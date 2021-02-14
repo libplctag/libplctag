@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.3.0"
-      ARTIFACT: "libplctag_2.3.0_ubuntu_x64"
+      VERSION: "2.3.1"
+      ARTIFACT: "libplctag_2.3.1_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -124,8 +124,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.3.0"
-      ARTIFACT: "libplctag_2.3.0_ubuntu_x86"
+      VERSION: "2.3.1"
+      ARTIFACT: "libplctag_2.3.1_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -235,8 +235,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.3.0"
-      ARTIFACT: "libplctag_2.3.0_macos_x64"
+      VERSION: "2.3.1"
+      ARTIFACT: "libplctag_2.3.1_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -342,8 +342,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.3.0"
-      ARTIFACT: "libplctag_2.3.0_windows_x64"
+      VERSION: "2.3.1"
+      ARTIFACT: "libplctag_2.3.1_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
 
@@ -457,8 +457,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.3.0"
-      ARTIFACT: "libplctag_2.3.0_windows_x86"
+      VERSION: "2.3.1"
+      ARTIFACT: "libplctag_2.3.1_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
