@@ -348,7 +348,7 @@ int plc5_handle_read_response_callback(void *context, uint8_t *buffer, int buffe
 
             /* clear any in-flight flags. */
             critical_block(tag->base_tag.api_mutex) {
-                tag->base_tag.read_complete = 0;
+                tag->base_tag.read_complete = 1;
                 tag->base_tag.read_in_flight = 0;
             }
 
@@ -538,7 +538,7 @@ int plc5_handle_write_response_callback(void *context, uint8_t *buffer, int buff
 
             /* clear any in-flight flags. */
             critical_block(tag->base_tag.api_mutex) {
-                tag->base_tag.write_complete = 0;
+                tag->base_tag.write_complete = 1;
                 tag->base_tag.write_in_flight = 0;
             }
 
