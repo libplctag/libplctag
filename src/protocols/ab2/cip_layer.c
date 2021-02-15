@@ -840,6 +840,9 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
             } else if(status == CIP_ERR_UNSUPPORTED) {
                 if(state->forward_open_ex_enabled == true) {
                     /* we do not support extended forward open. */
+
+                    pdebug(DEBUG_INFO, "Forward Open Extended request is not supported, trying old Forward Open.");
+
                     state->forward_open_ex_enabled = false;
                     rc = PLCTAG_STATUS_PENDING;
                     break;
