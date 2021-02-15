@@ -129,6 +129,12 @@ int cip_tag_read(plc_tag_p tag_arg)
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    /* ASSUME THAT THIS IS SAFE BECAUSE WE ARE IN THE MUTEX IN THE CALLER! */
+
+    /* set up the initial state. */
+    tag->trans_offset = 0;
+    tag->base_tag.read_in_flight = 1;
+
     rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_read_request_callback, cip_handle_read_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to start read request!");
@@ -168,6 +174,12 @@ int cip_tag_write(plc_tag_p tag_arg)
         pdebug(DEBUG_WARN, "Tag pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
+
+    /* ASSUME THAT THIS IS SAFE BECAUSE WE ARE IN THE MUTEX IN THE CALLER! */
+
+    /* set up the initial state. */
+    tag->trans_offset = 0;
+    tag->base_tag.write_in_flight = 1;
 
     rc = plc_start_request(tag->plc, &(tag->request), tag, cip_build_write_request_callback, cip_handle_write_response_callback);
     if(rc != PLCTAG_STATUS_OK) {
@@ -381,10 +393,7 @@ int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
     int rc = PLCTAG_STATUS_OK;
     cip_tag_p tag = (cip_tag_p)context;
     int req_off = *payload_start;
-    // int max_trans_size = 0;
-    // int num_elems = 0;
-    int trans_size = 0;
-    int max_payload = 0;
+    int write_payload_size = 0;
     bool use_frag = FALSE;
 
     (void)buffer_capacity;
@@ -397,73 +406,92 @@ int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
     do {
         int cmd_index = req_off;
 
-        if(tag->trans_offset != 0) {
-            /* we may still patch this. */
-            TRY_SET_BYTE(buffer, *payload_end, req_off, CIP_CMD_WRITE);
+        /* we may patch this. */
+        TRY_SET_BYTE(buffer, *payload_end, req_off, CIP_CMD_WRITE);
+
+        /*
+         * if we are already doing a fragmented transfer, keep
+         * doing it even if the remaining data will fit in this
+         * request packet.
+         */
+        if(tag->trans_offset == 0) {
+            use_frag = FALSE;
         } else {
-            TRY_SET_BYTE(buffer, *payload_end, req_off, CIP_CMD_WRITE_FRAG);
+            use_frag = TRUE;
         }
 
         /* copy the encoded tag name. */
         for(int index=0; index < tag->encoded_name_length; index++) {
             TRY_SET_BYTE(buffer, *payload_end, req_off, tag->encoded_name[index]);
         }
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to write tag name in write request, error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* copy the data type. */
+        for(int index=0; index < tag->tag_type_info_length; index++) {
+            TRY_SET_BYTE(buffer, *payload_end, req_off, tag->tag_type_info[index]);
+        }
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to write tag type in write request, error %s!", plc_tag_decode_error(rc));
+            break;
+        }
 
         /* add the element count */
         TRY_SET_U16_LE(buffer, *payload_end, req_off, tag->elem_count);
 
         /* calculate the maximum possible payload. */
-        max_payload = *payload_end - req_off;
+        write_payload_size = *payload_end - req_off;
+
+        pdebug(DEBUG_DETAIL, "Maximum possible space in this request is %d bytes.", write_payload_size);
 
         /* Clamp to 4-byte boundaries. */
-        pdebug(DEBUG_DETAIL, "Clamping to 4-byte boundary.");
+        write_payload_size = write_payload_size & (INT_MAX - 3);
+        pdebug(DEBUG_DETAIL, "Clamping to 4-byte boundary gives %d bytes of payload.", write_payload_size);
 
-        max_payload = max_payload & (INT_MAX - 3);
-
-        if((int32_t)max_payload < (tag->base_tag.size - (int32_t)tag->trans_offset)) {
+        if((int32_t)write_payload_size < (tag->base_tag.size - (int32_t)tag->trans_offset)) {
             pdebug(DEBUG_DETAIL, "We will need to use fragmented writes.");
-
             use_frag = TRUE;
+        } else {
+            pdebug(DEBUG_DETAIL, "We will NOT need to use fragmented writes.");
+            use_frag = FALSE;
+            write_payload_size = (tag->base_tag.size - (int32_t)tag->trans_offset);
+            pdebug(DEBUG_DETAIL, "Clamping to tag size gives %d bytes of payload.", write_payload_size);
         }
 
         /* patch the command type and write out the offset. */
         if(use_frag == TRUE) {
+            /* patch the CIP service. */
             TRY_SET_BYTE(buffer, *payload_end, cmd_index, CIP_CMD_WRITE_FRAG);
 
+            /* now we need to write out the transfer offset. */
             TRY_SET_U32_LE(buffer, *payload_end, req_off, tag->trans_offset);
 
-            /* remove the overhed of the offset */
-            max_payload -= 4;
+            /* remove the overhead of the offset */
+            write_payload_size -= 4;
+
+            pdebug(DEBUG_DETAIL, "Adding transfer offset to packet header size gives %d bytes of payload.", write_payload_size);
         }
 
         /* do we still have enough room left to write something? */
-        if(max_payload <= 0) {
+        if(write_payload_size <= 0) {
             pdebug(DEBUG_INFO, "Insufficient space to write out request.");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        /* add the offset if we are doing a fragmented read. */
-        if(use_frag) {
-            TRY_SET_U32_LE(buffer, *payload_end, req_off, tag->trans_offset);
-        }
-
         /* copy the write data. */
-        for(int index=0; index < max_payload; index++) {
+        for(int index=0; index < write_payload_size; index++) {
             TRY_SET_BYTE(buffer, *payload_end, req_off, tag->base_tag.data[tag->trans_offset + (uint32_t)index]);
         }
-
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error copying data to the output buffer!");
             break;
         }
 
-        req_off += max_payload;
-
-        if(rc != PLCTAG_STATUS_OK) break;
-
         /* update the amount transfered. */
-        tag->trans_offset += (uint16_t)(unsigned int)trans_size;
+        tag->trans_offset += (uint16_t)(unsigned int)write_payload_size;
 
         pdebug(DEBUG_DETAIL, "Write request packet:");
         pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, req_off - *payload_start);
@@ -475,6 +503,7 @@ int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to build read request, got error %s!", plc_tag_decode_error(rc));
         SET_STATUS(tag->base_tag.status, rc);
+        tag->trans_offset = 0;
         return rc;
     }
 
