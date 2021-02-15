@@ -817,7 +817,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
             usage();
         }
 
-        if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "The string for field %u is at %p.\n", field_index, name_str);
+        if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "The string for field %u is at %p.\n", field_index, (void *)name_str);
 
         /* copy the name */
         rc = plc_tag_get_string(udt_info_tag, offset, name_str, name_len + 1);
