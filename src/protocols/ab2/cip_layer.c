@@ -749,8 +749,8 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting with payload:");
-    pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
+    // pdebug(DEBUG_DETAIL, "Starting with payload:");
+    // pdebug_dump_bytes(DEBUG_DETAIL, buffer + *payload_start, *payload_end - *payload_start);
 
     do {
         uint8_t dummy_u8;
@@ -807,7 +807,7 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
 
                     TRY_GET_U16_LE(buffer, buffer_capacity, (*payload_start), supported_size);
 
-                    pdebug(DEBUG_INFO, "Error from Forward Open request, unsupported size, but size %d is supported.", (int)(unsigned int)supported_size);
+                    pdebug(DEBUG_INFO, "Error from Forward Open request, unsupported size, but size %u is supported.", (unsigned int)supported_size);
 
                     if(state->forward_open_ex_enabled == TRUE) {
                         state->cip_payload_ex = supported_size;
@@ -835,13 +835,13 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
                     break;
                 }
             } else if(status == CIP_ERR_UNSUPPORTED) {
-                if(state->forward_open_ex_enabled) {
+                if(state->forward_open_ex_enabled == TRUE) {
                     /* we do not support extended forward open. */
                     state->forward_open_ex_enabled = FALSE;
                     rc = PLCTAG_STATUS_PENDING;
                     break;
                 } else {
-                    pdebug(DEBUG_WARN, "CIP error, unsupported CIP request!");
+                    pdebug(DEBUG_WARN, "CIP error, Forward Open is unsupported!");
                     break;
                 }
             } else if(status == CIP_ERR_NO_RESOURCES) {
@@ -860,6 +860,11 @@ int process_forward_open_response(struct cip_layer_state_s *state,uint8_t *buffe
                     } else {
                         /* we do not support extended forward open. */
                         state->forward_open_ex_enabled = FALSE;
+
+                        if(state->cip_payload == 0) {
+                            state->cip_payload = CIP_STD_PAYLOAD;
+                        }
+
                         rc = PLCTAG_STATUS_PENDING;
                         break;
                     }
