@@ -259,10 +259,10 @@ int cip_handle_read_response_callback(void *context, uint8_t *buffer, int buffer
     pdebug_dump_bytes(DEBUG_DETAIL, buffer + (*payload_start), (*payload_end) - (*payload_start));
 
     do {
-        uint8_t service_response;
-        uint8_t reserved;
-        uint8_t service_status;
-        uint8_t status_extra_words;
+        uint8_t service_response = 0;
+        uint8_t reserved = 0;
+        uint8_t service_status = 0;
+        uint8_t status_extra_words = 0;
 
         TRY_GET_BYTE(buffer, *payload_end, offset, service_response);
         TRY_GET_BYTE(buffer, *payload_end, offset, reserved);
@@ -529,10 +529,10 @@ int cip_handle_write_response_callback(void *context, uint8_t *buffer, int buffe
     pdebug_dump_bytes(DEBUG_DETAIL, buffer + (*payload_start), (*payload_end) - (*payload_start));
 
     do {
-        uint8_t service_response;
-        uint8_t reserved;
-        uint8_t service_status;
-        uint8_t status_extra_words;
+        uint8_t service_response = 0;
+        uint8_t reserved = 0;
+        uint8_t service_status = 0;
+        uint8_t status_extra_words = 0;
 
         TRY_GET_BYTE(buffer, *payload_end, offset, service_response);
         TRY_GET_BYTE(buffer, *payload_end, offset, reserved);
