@@ -3225,6 +3225,7 @@ LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offs
     critical_block(tag->api_mutex) {
         total_length = (int)(tag->byte_order->str_count_word_bytes)
                      + (tag->byte_order->str_is_fixed_length ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset))
+                     + (tag->byte_order->str_is_zero_terminated ? (int)1 : (int)0)
                      + (int)(tag->byte_order->str_pad_bytes);
     }
 

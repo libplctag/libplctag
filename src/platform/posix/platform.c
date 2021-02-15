@@ -1217,12 +1217,13 @@ extern int socket_close(sock_p s)
         return PLCTAG_STATUS_OK;
     }
 
-    if(!close(s->fd)) {
+    s->is_open = 0;
+
+    if(close(s->fd)) {
         return PLCTAG_ERR_CLOSE;
     }
 
     s->fd = 0;
-    s->is_open = 0;
 
     return PLCTAG_STATUS_OK;
 }
