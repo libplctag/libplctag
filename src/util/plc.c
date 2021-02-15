@@ -31,16 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-
-
-
-
-//FIXME - make sure connect goes bottom up and disconnect goes top down.
-
-
-
-
 #include <inttypes.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
@@ -116,7 +108,7 @@ if(CONDITION) { \
 }
 
 #define CHECK_TERMINATION() \
-if(plc->is_terminating == TRUE) { \
+if(plc->is_terminating == true) { \
     pdebug(DEBUG_DETAIL, "PLC %s is terminating.", plc->key); \
     NEXT_STATE(state_dispatch_requests); \
     rc = PLCTAG_STATUS_PENDING; \
@@ -779,7 +771,7 @@ void plc_rc_destroy(void *plc_arg)
     int rc = PLCTAG_STATUS_OK;
     plc_p plc = (plc_p)plc_arg;
     int64_t timeout = 0;
-    bool is_connected = TRUE;
+    bool is_connected = true;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -814,16 +806,16 @@ void plc_rc_destroy(void *plc_arg)
 
     /* lock the PLC mutex for some of these operations. */
     critical_block(plc->plc_mutex) {
-        plc->is_terminating = TRUE;
+        plc->is_terminating = true;
 
-        plc->is_terminating = TRUE;
+        plc->is_terminating = true;
 
         /*
          * if the PLC is connected, run the state loop to try to get through
          * any terminatable states.
          */
         if(plc->is_connected) {
-            is_connected = TRUE;
+            is_connected = true;
             plc_state_runner(plc);
         }
     }
@@ -920,11 +912,11 @@ void reset_plc(plc_p plc)
 
     /* reset the layers */
     for(int index = 0; index < plc->num_layers; index++) {
-        plc->layers[index].is_connected = FALSE;
+        plc->layers[index].is_connected = false;
         plc->layers[index].initialize(plc->layers[index].context);
     }
 
-    plc->is_connected = FALSE;
+    plc->is_connected = false;
 
     pdebug(DEBUG_INFO, "Done for PLC %s.", plc->key);
 }
@@ -992,7 +984,7 @@ int state_dispatch_requests(plc_p plc)
     do {
         /* if we are terminating, then close down. */
         if(plc->is_terminating) {
-            if(plc->is_connected == TRUE) {
+            if(plc->is_connected == true) {
                 pdebug(DEBUG_INFO, "PLC terminating, starting disconnect.");
                 NEXT_STATE(state_start_disconnect);
                 rc = PLCTAG_STATUS_PENDING;
@@ -1005,7 +997,7 @@ int state_dispatch_requests(plc_p plc)
         }
 
         /* check idle time. */
-        if((plc->is_connected == TRUE) && (plc->next_idle_timeout < now)) {
+        if((plc->is_connected == true) && (plc->next_idle_timeout < now)) {
             pdebug(DEBUG_INFO, "Starting idle disconnect.");
             NEXT_STATE(state_start_disconnect);
             rc = PLCTAG_STATUS_PENDING;
@@ -1022,7 +1014,7 @@ int state_dispatch_requests(plc_p plc)
         /* are there requests queued? */
         if(plc->request_list) {
             /* are we connected? */
-            if(plc->is_connected == FALSE) {
+            if(plc->is_connected == false) {
                 NEXT_STATE(state_start_connect);
                 rc = PLCTAG_STATUS_PENDING;
                 break;
@@ -1096,8 +1088,8 @@ int state_build_tag_request(plc_p plc)
     int old_data_end = data_end;
     plc_request_id req_id = plc->current_request_id;
     struct plc_request_s *current_request = plc->request_list;
-    bool done = TRUE;
-    bool first_try = TRUE;
+    bool done = true;
+    bool first_try = true;
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
@@ -1123,7 +1115,7 @@ int state_build_tag_request(plc_p plc)
 
         /* was there enough space? */
         if(rc == PLCTAG_ERR_TOO_SMALL) {
-            DISCONNECT_ON_ERROR(first_try == TRUE, "Insufficient space for even one new request!");
+            DISCONNECT_ON_ERROR(first_try == true, "Insufficient space for even one new request!");
 
             pdebug(DEBUG_INFO, "Insufficient space to build for new request %" REQ_ID_FMT " for PLC %s.", req_id, plc->key);
 
@@ -1134,7 +1126,7 @@ int state_build_tag_request(plc_p plc)
             old_data_end = data_end;
         }
 
-        first_try = FALSE;
+        first_try = false;
 
         /* set the request ID to match later. */
         current_request->req_id = req_id;
@@ -1149,7 +1141,7 @@ int state_build_tag_request(plc_p plc)
         /* if there was more space, see if we can find more requests. */
         if(rc == PLCTAG_STATUS_OK) {
             pdebug(DEBUG_INFO, "Done setting up layers and no further packets allowed for PLC %s", plc->key);
-            done = TRUE;
+            done = true;
         } else { /* rc == PLCTAG_STATUS_PENDING */
             /* check if we can find another request */
             current_request = current_request->next;
@@ -1157,15 +1149,15 @@ int state_build_tag_request(plc_p plc)
             /* check to see if we have a valid request. */
             if(current_request) {
                 pdebug(DEBUG_INFO, "Another request is possible to pack for PLC %s.", plc->key);
-                done = FALSE;
+                done = false;
             } else {
                 pdebug(DEBUG_INFO, "Ran out of requests to handle.");
                 data_end = old_data_end;
-                done = TRUE;
+                done = true;
             }
         }
 
-        if(done == TRUE) {
+        if(done == true) {
             /* check before we commit to sending a packet. */
             CHECK_TERMINATION();
 
@@ -1243,7 +1235,7 @@ int state_tag_response_ready(plc_p plc)
     int data_start = 0;
     int data_end = plc->payload_end;
     plc_request_id req_id = 0;
-    bool done = TRUE;
+    bool done = true;
 
     pdebug(DEBUG_DETAIL, "Starting for PLC %s.", plc->key);
 
@@ -1268,7 +1260,7 @@ int state_tag_response_ready(plc_p plc)
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
             rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_capacity, &data_start, &data_end, &req_id);
             if(rc == PLCTAG_STATUS_PENDING) {
-                done = FALSE;
+                done = false;
                 rc = PLCTAG_STATUS_OK;
             }
         }
@@ -1322,10 +1314,10 @@ int state_tag_response_ready(plc_p plc)
             }
         } else {
             pdebug(DEBUG_INFO, "No requests left to process for PLC %s.", plc->key);
-            done = TRUE;
+            done = true;
         }
 
-        if(done == TRUE) {
+        if(done == true) {
             pdebug(DEBUG_INFO, "Finished processing response for PLC %s.", plc->key);
             NEXT_STATE(state_dispatch_requests);
             rc = PLCTAG_STATUS_PENDING;
@@ -1355,7 +1347,7 @@ int state_start_connect(plc_p plc)
 
         CONTINUE_UNLESS(plc->next_retry_time > event_loop_time(), "Retry time is not past for PLC %s.", plc->key);
 
-        CONTINUE_UNLESS(plc->is_connected == TRUE, "PLC %s is already connected!", plc->key);
+        CONTINUE_UNLESS(plc->is_connected == true, "PLC %s is already connected!", plc->key);
 
         if(!plc->socket) {
             pdebug(DEBUG_INFO, "Creating socket.");
@@ -1366,7 +1358,7 @@ int state_start_connect(plc_p plc)
 
         /* initialize the layers */
         for(int index=0; index < plc->num_layers && rc == PLCTAG_STATUS_OK; index++) {
-            plc->layers[index].is_connected = FALSE;
+            plc->layers[index].is_connected = false;
             rc = plc->layers[index].initialize(plc->layers[index].context);
         }
 
@@ -1417,7 +1409,7 @@ int state_build_layer_connect_request(plc_p plc)
             pdebug(DEBUG_INFO, "Connected to PLC %s.", plc->key);
 
             /* set the state for the new connection. */
-            plc->is_connected = TRUE;
+            plc->is_connected = true;
             plc->retry_interval_ms = MIN_RETRY_INTERVAL_MS/2;
             plc->next_retry_time = 0;
             plc->next_idle_timeout = time_ms() + plc->idle_timeout_ms;
@@ -1520,7 +1512,7 @@ int state_layer_connect_response_ready(plc_p plc)
     int rc = PLCTAG_STATUS_OK;
     int data_start = 0;
     int data_end = plc->payload_end;
-    bool retry_layer = FALSE;
+    bool retry_layer = false;
 
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
@@ -1539,7 +1531,7 @@ int state_layer_connect_response_ready(plc_p plc)
             rc = plc->layers[index].process_response(plc->layers[index].context, plc->data, plc->data_capacity, &(data_start), &(data_end), &(plc->current_request_id));
             if(rc == PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_INFO, "Connection attempt rejected, trying again.");
-                retry_layer = TRUE;
+                retry_layer = true;
                 rc = PLCTAG_STATUS_OK;
             }
         }
@@ -1558,10 +1550,10 @@ int state_layer_connect_response_ready(plc_p plc)
             break;
         }
 
-        if(retry_layer == FALSE) {
+        if(retry_layer == false) {
             pdebug(DEBUG_INFO, "Connection attempt succeeded, going to next layer %d.", plc->current_layer_index + 1);
 
-            plc->layers[plc->current_layer_index].is_connected = TRUE;
+            plc->layers[plc->current_layer_index].is_connected = true;
 
             /* continue to the next layer. */
             plc->current_layer_index++;
@@ -1590,7 +1582,7 @@ int state_start_disconnect(plc_p plc)
     pdebug(DEBUG_INFO, "Starting for PLC %s.", plc->key);
 
     do {
-        CONTINUE_UNLESS(plc->is_connected == FALSE, "PLC %s is already disconnected!", plc->key);
+        CONTINUE_UNLESS(plc->is_connected == false, "PLC %s is already disconnected!", plc->key);
 
         /* initialize the layers */
         plc->payload_end = plc->payload_start = 0;
@@ -1621,7 +1613,7 @@ int state_build_layer_disconnect_request(plc_p plc)
 
     do {
         /* find the first layer needing to disconnect. */
-        while(plc->current_layer_index >= 0 && (plc->layers[plc->current_layer_index].is_connected == FALSE || !plc->layers[plc->current_layer_index].disconnect)) {
+        while(plc->current_layer_index >= 0 && (plc->layers[plc->current_layer_index].is_connected == false || !plc->layers[plc->current_layer_index].disconnect)) {
             pdebug(DEBUG_DETAIL, "Skipping layer %d as it has no disconnect behavior.", plc->current_layer_index);
             plc->current_layer_index--;
         }
@@ -1751,7 +1743,7 @@ int state_layer_disconnect_response_ready(plc_p plc)
         }
 
         /* mark layer as disconnected. */
-        plc->layers[plc->current_layer_index].is_connected = FALSE;
+        plc->layers[plc->current_layer_index].is_connected = false;
 
         /* next layer down. */
         plc->current_layer_index--;

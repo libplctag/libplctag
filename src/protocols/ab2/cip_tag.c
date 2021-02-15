@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
@@ -41,7 +42,6 @@
 #include <ab2/cip_tag.h>
 #include <ab2/cip_plc.h>
 #include <util/attr.h>
-#include <util/bool.h>
 #include <util/debug.h>
 #include <util/mem.h>
 #include <util/plc.h>
@@ -394,7 +394,7 @@ int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
     cip_tag_p tag = (cip_tag_p)context;
     int req_off = *payload_start;
     int write_payload_size = 0;
-    bool use_frag = FALSE;
+    bool use_frag = false;
 
     (void)buffer_capacity;
     (void)req_id;
@@ -415,9 +415,9 @@ int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
          * request packet.
          */
         if(tag->trans_offset == 0) {
-            use_frag = FALSE;
+            use_frag = false;
         } else {
-            use_frag = TRUE;
+            use_frag = true;
         }
 
         /* copy the encoded tag name. */
@@ -452,16 +452,16 @@ int cip_build_write_request_callback(void *context, uint8_t *buffer, int buffer_
 
         if((int32_t)write_payload_size < (tag->base_tag.size - (int32_t)tag->trans_offset)) {
             pdebug(DEBUG_DETAIL, "We will need to use fragmented writes.");
-            use_frag = TRUE;
+            use_frag = true;
         } else {
             pdebug(DEBUG_DETAIL, "We will NOT need to use fragmented writes.");
-            use_frag = FALSE;
+            use_frag = false;
             write_payload_size = (tag->base_tag.size - (int32_t)tag->trans_offset);
             pdebug(DEBUG_DETAIL, "Clamping to tag size gives %d bytes of payload.", write_payload_size);
         }
 
         /* patch the command type and write out the offset. */
-        if(use_frag == TRUE) {
+        if(use_frag == true) {
             /* patch the CIP service. */
             TRY_SET_BYTE(buffer, *payload_end, cmd_index, CIP_CMD_WRITE_FRAG);
 

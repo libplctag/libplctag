@@ -33,6 +33,7 @@
 
  #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <lib/tag.h>
 #include <ab2/ab.h>
@@ -93,3 +94,13 @@ typedef cip_tag_t *cip_tag_p;
 extern plc_tag_p cip_tag_create(ab2_plc_type_t plc_type, attr attribs);
 extern int cip_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value);
 extern int cip_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value);
+
+/* generic CIP functions */
+extern int ab2_cip_encode_tag_name(const char *name, uint8_t **encoded_tag_name, int *encoded_name_length, bool *is_bit, uint8_t *bit_num);
+extern int ab2_cip_encode_path(uint8_t *data, int data_capacity, int *data_offset, const char *path, bool *is_dhp, uint8_t *target_dhp_port, uint8_t *target_dhp_id);
+
+/* generic CIP error translation */
+extern const char *cip_decode_error_short(uint8_t err_status, uint16_t extended_err_status);
+extern const char *cip_decode_error_long(uint8_t err_status, uint16_t extended_err_status);
+extern int cip_decode_error_code(uint8_t err_status, uint16_t extended_err_status);
+

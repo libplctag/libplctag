@@ -31,9 +31,9 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <lib/libplctag.h>
-#include <util/bool.h>
 #include <util/debug.h>
 #include <util/event_loop.h>
 #include <util/mem.h>
@@ -81,7 +81,7 @@ int timer_event_create(timer_p *timer)
 int timer_event_wake_at(timer_p timer, int64_t wake_time, void (*callback)(void *context), void *context)
 {
     int rc = PLCTAG_STATUS_OK;
-    bool need_wake_up = FALSE;
+    bool need_wake_up = false;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -112,7 +112,7 @@ int timer_event_wake_at(timer_p timer, int64_t wake_time, void (*callback)(void 
 
         /* do we have a new wake up time? */
         if(timer_list == timer) {
-            need_wake_up = TRUE;
+            need_wake_up = true;
         }
     }
 

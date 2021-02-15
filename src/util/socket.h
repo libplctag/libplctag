@@ -34,7 +34,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <util/slice.h>
 
 typedef int socket_t;
 

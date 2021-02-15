@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-
+#include <stddef.h>
 #include <lib/libplctag.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>

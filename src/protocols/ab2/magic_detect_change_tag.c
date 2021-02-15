@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
@@ -41,7 +42,6 @@
 #include <ab2/magic_detect_change_tag.h>
 #include <ab2/cip_plc.h>
 #include <util/attr.h>
-#include <util/bool.h>
 #include <util/debug.h>
 #include <util/mem.h>
 #include <util/plc.h>

@@ -51,7 +51,7 @@ plc_tag_p pccc_tag_create(ab2_plc_type_t plc_type, attr attribs)
     pccc_tag_p tag = NULL;
     const char *tag_name = NULL;
     int tmp = 0;
-    bool is_bit = FALSE;
+    bool is_bit = false;
     uint8_t bit_num = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -78,7 +78,7 @@ plc_tag_p pccc_tag_create(ab2_plc_type_t plc_type, attr attribs)
     }
 
     /* if the tag is a bit tag, then fill in the parent tag structure. */
-    if(is_bit == TRUE) {
+    if(is_bit == true) {
         tag->base_tag.is_bit = 1;
         tag->base_tag.bit = bit_num;
     }

@@ -34,11 +34,11 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <ab2/df1.h>
 #include <util/attr.h>
-#include <util/bool.h>
 #include <util/plc.h>
 
 typedef enum { AB2_PLC_NONE = 0,

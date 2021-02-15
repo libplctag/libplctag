@@ -34,6 +34,7 @@
 #include <ctype.h>
 #include <float.h>
 #include <limits.h>
+#include <stddef.h>
 #include <string.h>
 #include <ab/ab_common.h>
 #include <ab/pccc.h>
@@ -41,6 +42,7 @@
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <util/debug.h>
+#include <util/string.h>
 
 
 static int parse_pccc_logical_address(const char *name, pccc_file_t *file_type, int *file_num, int *elem_num, int *sub_elem_num);

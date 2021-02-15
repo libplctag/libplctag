@@ -64,6 +64,7 @@
 #include <util/mutex.h>
 #include <util/platform.h>
 #include <util/socket.h>
+#include <util/string.h>
 #include <util/thread.h>
 
 
@@ -128,7 +129,7 @@ static mutex_p socket_event_mutex = NULL;
 static sock_p socket_list = NULL;
 static sock_p global_socket_iterator = NULL;
 
-// static THREAD_LOCAL atomic_bool socket_event_mutex_held_in_this_thread = ATOMIC_BOOL_STATIC_INIT(FALSE);
+// static THREAD_LOCAL atomic_bool socket_event_mutex_held_in_this_thread = ATOMIC_BOOL_STATIC_INIT(false);
 
 static int wake_fds[2] = { INVALID_SOCKET, INVALID_SOCKET};
 static fd_set global_read_fds;
@@ -162,7 +163,7 @@ int socket_create(sock_p *sock)
 
     /* set up connection callback support */
     (*sock)->connection_thread = NULL;
-    atomic_bool_store(&((*sock)->connection_thread_done), FALSE);
+    atomic_bool_store(&((*sock)->connection_thread_done), false);
     (*sock)->connection_ready_callback = NULL;
     (*sock)->connection_ready_context = NULL;
 
@@ -306,7 +307,7 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     i = 0;
     done = 0;
 
-    memset((void *)&gw_addr,0, sizeof(gw_addr));
+    mem_set((void *)&gw_addr,0, (int)(unsigned int)sizeof(gw_addr));
     gw_addr.sin_family = AF_INET ;
     gw_addr.sin_port = htons((uint16_t)port);
 
@@ -663,7 +664,7 @@ THREAD_FUNC(socket_connection_thread_func)
     }
 
     /* set a flag so that the system knows we are done. */
-    atomic_bool_store(&(sock->connection_thread_done), TRUE);
+    atomic_bool_store(&(sock->connection_thread_done), true);
     atomic_int32_add(&connect_thread_complete_count, (int32_t)1);
 
     /* make sure the event thread cleans up this thread soon. */
@@ -709,7 +710,7 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
         sock->connection_ready_context = context;
 
         /* set the flag so that we know the connection thread is running. */
-        atomic_bool_store(&(sock->connection_thread_done), FALSE);
+        atomic_bool_store(&(sock->connection_thread_done), false);
 
         /* set the socket status that we are in flight. */
         SET_STATUS(sock->status, PLCTAG_STATUS_PENDING);
@@ -721,7 +722,7 @@ int socket_callback_when_connection_ready(sock_p sock, void (*callback)(void *co
 
             sock->connection_thread = NULL;
             SET_STATUS(sock->status, rc);
-            atomic_bool_store(&(sock->connection_thread_done), TRUE);
+            atomic_bool_store(&(sock->connection_thread_done), true);
 
             break;
         }
@@ -1177,7 +1178,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
 
             while(sock) {
                 /* does this socket have a completed connection thread? */
-                if(sock->connection_thread && (atomic_bool_load(&(sock->connection_thread_done)) == TRUE)) {
+                if(sock->connection_thread && (atomic_bool_load(&(sock->connection_thread_done)) == true)) {
                     pdebug(DEBUG_INFO, "Cleaning up connection thread for socket %s:%d.", sock->host, sock->port);
                     thread_join(sock->connection_thread);
                     thread_destroy(&(sock->connection_thread));

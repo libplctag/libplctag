@@ -33,9 +33,9 @@
 
  #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <util/atomic_int.h>
-#include <util/bool.h>
 
 #define DF1_CMD_OK ((uint8_t)(0x40))
 #define DF1_TYPED_CMD ((uint8_t)(0x0F))

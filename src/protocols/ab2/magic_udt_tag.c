@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
@@ -41,7 +42,6 @@
 #include <ab2/magic_udt_tag.h>
 #include <ab2/cip_plc.h>
 #include <util/attr.h>
-#include <util/bool.h>
 #include <util/debug.h>
 #include <util/mem.h>
 #include <util/plc.h>
@@ -376,7 +376,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
     uint8_t service_status = 0;
     uint8_t status_extra_words = 0;
     uint16_t num_attribs = 0;
-    bool fatal = FALSE;
+    bool fatal = false;
 
     (void)buffer_capacity;
 
@@ -387,7 +387,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
 
         if(resp_data_size < 4) {
             pdebug(DEBUG_WARN, "Unexpectedly small response size!");
-            fatal = TRUE;
+            fatal = true;
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -404,7 +404,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
             pdebug(DEBUG_WARN, "Unexpected CIP service response type %" PRIu8 "!", service_response);
 
             rc = PLCTAG_ERR_BAD_REPLY;
-            fatal = FALSE;
+            fatal = false;
             tag->request_offset = 0;
 
             break;
@@ -422,7 +422,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
             rc = cip_decode_error_code(service_status, extended_err_status);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
-            fatal = FALSE;
+            fatal = false;
             tag->request_offset = 0;
 
             break;
@@ -448,7 +448,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
             rc = PLCTAG_ERR_BAD_DATA;
-            fatal = FALSE;
+            fatal = false;
             tag->request_offset = 0;
 
             break;
@@ -466,7 +466,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
                 pdebug(DEBUG_WARN, "Unable to get attribute ID %x, got error %x!", attrib_id, attrib_status);
 
                 rc = PLCTAG_ERR_BAD_DATA;
-                fatal = FALSE;
+                fatal = false;
                 tag->request_offset = 0;
 
                 break;
@@ -527,7 +527,7 @@ int magic_udt_info_handle_response_callback(void *context, uint8_t *buffer, int 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, processing response!", plc_tag_decode_error(rc));
         SET_STATUS(tag->base_tag.status, rc);
-        if(fatal == FALSE) {
+        if(fatal == false) {
             return PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Error is fatal, restarting PLC!");
@@ -628,7 +628,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
     uint8_t service_status = 0;
     uint8_t status_extra_words = 0;
     // int response_start = 0;
-    bool fatal = FALSE;
+    bool fatal = false;
 
     (void)buffer_capacity;
 
@@ -639,7 +639,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
 
         if(resp_data_size < 4) {
             pdebug(DEBUG_WARN, "Unexpectedly small response size!");
-            fatal = TRUE;
+            fatal = true;
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
@@ -656,7 +656,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
             pdebug(DEBUG_WARN, "Unexpected CIP service response type %" PRIu8 "!", service_response);
 
             rc = PLCTAG_ERR_BAD_REPLY;
-            fatal = FALSE;
+            fatal = false;
             tag->request_offset = 0;
 
             break;
@@ -674,7 +674,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
             rc = cip_decode_error_code(service_status, extended_err_status);
 
             /* this is an error we should report about the tag, but not kill the PLC over it. */
-            fatal = FALSE;
+            fatal = false;
             tag->request_offset = 0;
 
             break;
@@ -789,7 +789,7 @@ int magic_udt_field_info_handle_response_callback(void *context, uint8_t *buffer
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Error, %s, processing response!", plc_tag_decode_error(rc));
         SET_STATUS(tag->base_tag.status, rc);
-        if(fatal == FALSE) {
+        if(fatal == false) {
             return PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Error is fatal, restarting PLC!");

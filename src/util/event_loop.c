@@ -31,9 +31,10 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
-#include <util/bool.h>
 #include <util/event_loop.h>
 #include <util/debug.h>
 #include <util/lock.h>
@@ -87,7 +88,7 @@ int event_loop_init(void)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    atomic_bool_store(&library_shutdown, FALSE);
+    atomic_bool_store(&library_shutdown, false);
 
     rc = timer_event_init();
     if(rc != PLCTAG_STATUS_OK) {
@@ -122,7 +123,7 @@ void event_loop_teardown(void)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* destroy the platform thread. */
-    atomic_bool_store(&library_shutdown, TRUE);
+    atomic_bool_store(&library_shutdown, true);
 
     rc = thread_join(event_loop_thread);
     if(rc != PLCTAG_STATUS_OK) {
@@ -139,7 +140,7 @@ void event_loop_teardown(void)
     event_loop_thread = NULL;
 
     /* reset the shutdown flag to make sure that the library can restart. */
-    atomic_bool_store(&library_shutdown, FALSE);
+    atomic_bool_store(&library_shutdown, false);
 
     socket_event_loop_teardown();
 
@@ -176,7 +177,7 @@ THREAD_FUNC(even_loop_handler)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    while(atomic_bool_load(&library_shutdown) == FALSE) {
+    while(atomic_bool_load(&library_shutdown) == false) {
         event_loop_tickler();
     }
 

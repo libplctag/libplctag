@@ -530,7 +530,7 @@ int parse_df1_bit_num(const char **str, bool *is_bit, uint8_t *bit_num)
 
     if((**str) == 0) {
         pdebug(DEBUG_DETAIL, "No bit field in this name.");
-        *is_bit = FALSE;
+        *is_bit = false;
         return PLCTAG_STATUS_OK;
     }
 
@@ -560,7 +560,7 @@ int parse_df1_bit_num(const char **str, bool *is_bit, uint8_t *bit_num)
     }
 
     *bit_num = (uint8_t)(unsigned int)tmp;
-    *is_bit = TRUE;
+    *is_bit = true;
 
     pdebug(DEBUG_DETAIL, "Done.");
 

@@ -114,7 +114,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             break;
     }
 
-    return TRUE;
+    return true;
 }
 
 #endif
@@ -1166,7 +1166,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
-    bool is_done = FALSE;
+    bool is_done = false;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -1191,21 +1191,21 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         if(tag->read_cache_expire > time_ms()) {
             pdebug(DEBUG_INFO, "Returning cached data.");
             rc = PLCTAG_STATUS_OK;
-            is_done = TRUE;
+            is_done = true;
             break;
         }
 
         if(tag->read_in_flight || tag->write_in_flight) {
             pdebug(DEBUG_WARN, "An operation is already in flight!");
             rc = PLCTAG_ERR_BUSY;
-            is_done = TRUE;
+            is_done = true;
             break;
         }
 
         if(tag->tag_is_dirty) {
             pdebug(DEBUG_WARN, "Tag has locally updated data that will be overwritten!");
             rc = PLCTAG_ERR_BUSY;
-            is_done = TRUE;
+            is_done = true;
             break;
         }
 
@@ -1227,7 +1227,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
                 }
             }
 
-            is_done = TRUE;
+            is_done = true;
             break;
         }
     } /* end of mutex block */
@@ -1273,7 +1273,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         }
 
         /* we are done. */
-        is_done = TRUE;
+        is_done = true;
 
         pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms",(time_ms()-start_time));
     }
@@ -1284,7 +1284,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
     }
 
     if(tag->callback) {
-        if(is_done == TRUE) {
+        if(is_done == true) {
             /* clear read state. */
             critical_block(tag->api_mutex) {
                 tag->read_in_flight = 0;

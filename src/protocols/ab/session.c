@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <stddef.h>
 #include <ab/ab_common.h>
 #include <ab/cip.h>
 #include <ab/defs.h>
@@ -42,6 +43,7 @@
 #include <time.h>
 #include <util/debug.h>
 #include <util/sleep.h>
+#include <util/string.h>
 #include <util/time.h>
 
 #define MAX_REQUESTS (200)

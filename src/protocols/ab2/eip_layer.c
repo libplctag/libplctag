@@ -39,7 +39,6 @@
 #include <util/mem.h>
 #include <util/mutex.h>
 #include <util/plc.h>
-#include <util/slice.h>
 #include <util/socket.h>
 #include <util/string.h>
 
@@ -100,7 +99,7 @@ int eip_layer_setup(plc_p plc, int layer_index, attr attribs)
         return PLCTAG_ERR_NO_MEM;
     }
 
-    state->is_connected = FALSE;
+    state->is_connected = false;
     state->plc = plc;
 
     rc = plc_set_layer(plc,
@@ -135,7 +134,7 @@ int eip_layer_initialize(void *context)
 
     pdebug(DEBUG_INFO, "Initializing EIP layer.");
 
-    state->is_connected = FALSE;
+    state->is_connected = false;
 
     state->session_handle = 0;
     state->session_context = (uint64_t)rand();
@@ -154,7 +153,7 @@ int eip_layer_connect(void *context, uint8_t *buffer, int buffer_capacity, int *
 
     pdebug(DEBUG_INFO, "Building EIP connect packet.");
 
-    if(state->is_connected == TRUE) {
+    if(state->is_connected == true) {
         pdebug(DEBUG_WARN, "Connect called while EIP layer is already connected!");
         return PLCTAG_ERR_BUSY;
     }
@@ -418,7 +417,7 @@ int eip_layer_process_response(void *context, uint8_t *buffer, int buffer_capaci
             /* copy the information into the state. */
             state->session_handle = session_handle;
 
-            state->is_connected = TRUE;
+            state->is_connected = true;
 
             /* signal that we have consumed the whole payload. */
             *payload_end = 0;

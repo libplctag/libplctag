@@ -34,10 +34,10 @@
 #pragma once
 
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <limits.h>
 #include <lib/libplctag.h>
-#include <util/bool.h>
 #include <util/debug.h>
 #include <util/platform.h>
 // #include <util/lock.h>
@@ -54,7 +54,8 @@ typedef struct { uint8_t val; } atomic_uint8;
 
 
 #define ATOMIC_BOOL_STATIC_INIT(b) {b}
-typedef struct { bool val; } atomic_bool;
+/* we have to fake this. */
+typedef struct { uint8_t val; } atomic_bool;
 
 #ifdef PLATFORM_IS_WINDOWS
 
@@ -288,259 +289,15 @@ static inline uint8_t atomic_uint8_sub(atomic_uint8 *atomic_val, uint8_t subend)
 
 static inline bool atomic_bool_load(atomic_bool *atomic_val)
 {
-    return  __sync_fetch_and_or((bool *)atomic_val, 0);
+    uint8_t tmp = __sync_fetch_and_or((uint8_t *)atomic_val, 0);
+    return (tmp == 0 ? false : true);
 }
 
-static inline bool atomic_bool_store(atomic_bool *atomic_val, bool new_val)
+static inline bool atomic_bool_store(atomic_bool *atomic_val, bool new_bool_val)
 {
-    bool old_val = 0;
-    bool result_val = new_val;
-
-    do {
-        old_val = __sync_val_compare_and_swap((bool *)atomic_val, old_val, new_val);
-
-        if(old_val != new_val) {
-            result_val = old_val;
-        }
-    } while(old_val != new_val);
-
-    return result_val;
+    return (atomic_uint8_store((atomic_uint8 *)atomic_val, (new_bool_val ? 1 : 0)) ? true : false);
 }
 
 
 #endif
-
-
-// typedef struct { lock_t lock; volatile int val; } atomic_int;
-
-// #define ATOMIC_INT_STATIC_INIT(n) {0, n}
-
-// static inline int atomic_int_get(atomic_int *a)
-// {
-//     int val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     if(!a) {
-//         return INT_MAX;
-//     }
-
-//     spin_block(&a->lock) {
-//         val = a->val;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return val;
-// }
-
-
-
-// static inline int atomic_int_set(atomic_int *a, int new_val)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     if(!a) {
-//         return INT_MAX;
-//     }
-
-//     spin_block(&a->lock) {
-//         old_val = a->val;
-//         a->val = new_val;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
-
-
-// static inline int atomic_int_add(atomic_int *a, int other)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     spin_block(&a->lock) {
-//         old_val = a->val;
-
-//         a->val += other;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
-
-
-// static inline int atomic_int_add_mask(atomic_int *a, int addend, unsigned int mask)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     spin_block(&a->lock) {
-//         old_val = a->val;
-//         a->val += addend;
-//         a->val &= (int)(unsigned int)mask;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
-
-// static inline int atomic_int_and(atomic_int *a, int other)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     spin_block(&a->lock) {
-//         old_val = a->val;
-//         a->val &= other;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
-
-
-// static inline int atomic_int_or(atomic_int *a, int other)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     spin_block(&a->lock) {
-//         old_val = a->val;
-//         a->val |= other;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
-
-
-// static inline int atomic_int_xor(atomic_int *a, int other)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     spin_block(&a->lock) {
-//         old_val = a->val;
-//         a->val ^= other;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
-
-// /* atomic bit manipulation */
-
-// static inline int atomic_int_get_bit(atomic_int *a, int bit)
-// {
-//     int val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     if(bit < 0 || (bit >= (((int)(unsigned int)sizeof(int)*CHAR_BIT)))) {
-//         pdebug(DEBUG_WARN, "Bit must be between 0 and %d!", ((int)(unsigned int)(sizeof(int)*CHAR_BIT)) - 1);
-//         return PLCTAG_ERR_OUT_OF_BOUNDS;
-//     }
-
-//     spin_block(&a->lock) {
-//         val = (a->val & (1 << bit)) ? 1 : 0;
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return val;
-// }
-
-// static inline int atomic_int_set_bit(atomic_int *a, int bit, int new_val)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     if(bit < 0 || (bit >= (((int)(unsigned int)sizeof(int)*CHAR_BIT)))) {
-//         pdebug(DEBUG_WARN, "Bit must be between 0 and %d!", ((int)(unsigned int)(sizeof(int)*CHAR_BIT)) - 1);
-//         return PLCTAG_ERR_OUT_OF_BOUNDS;
-//     }
-
-//     spin_block(&a->lock) {
-//         /* save old value */
-//         old_val = (a->val & ((int)1 << bit)) ? 1 : 0;
-
-//         if(new_val) {
-//             a->val |= ((int)1 << bit);
-//         } else {
-//             a->val &= (~((int)1 << bit));
-//         }
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
-
-
-// /* convenience for single bools */
-
-// typedef atomic_int atomic_bool;
-
-// #ifndef bool
-// #define bool int
-// #endif
-
-// #define ATOMIC_BOOL_STATIC_INIT(n) {0, n}
-
-
-// static inline bool atomic_bool_get(atomic_bool *ab)
-// {
-//     int val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     spin_block(&ab->lock) {
-//         val = (ab->val ? 1 : 0);
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return val;
-// }
-
-
-// static inline bool atomic_bool_set(atomic_bool *ab, bool new_val)
-// {
-//     int old_val = 0;
-
-//     pdebug(DEBUG_SPEW, "Starting.");
-
-//     spin_block(&ab->lock) {
-//         old_val = (ab->val ? 1 : 0);
-
-//         ab->val = (new_val ? 1 : 0);
-//     }
-
-//     pdebug(DEBUG_SPEW, "Done.");
-
-//     return old_val;
-// }
-
 

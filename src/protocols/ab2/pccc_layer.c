@@ -41,7 +41,6 @@
 #include <util/mem.h>
 #include <util/mutex.h>
 #include <util/plc.h>
-#include <util/slice.h>
 #include <util/socket.h>
 #include <util/string.h>
 

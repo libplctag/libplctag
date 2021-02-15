@@ -32,8 +32,9 @@
  ***************************************************************************/
 
 #include <ctype.h>
-#include <limits.h>
 #include <float.h>
+#include <limits.h>
+#include <stddef.h>
 #include <lib/libplctag.h>
 #include <mb/modbus.h>
 #include <util/atomic_int.h>
@@ -43,6 +44,7 @@
 #include <util/mem.h>
 #include <util/sleep.h>
 #include <util/socket.h>
+#include <util/string.h>
 #include <util/thread.h>
 #include <util/time.h>
 
