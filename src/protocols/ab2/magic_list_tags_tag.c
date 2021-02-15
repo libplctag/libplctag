@@ -416,10 +416,10 @@ int magic_list_tags_handle_response_callback(void *context, uint8_t *buffer, int
     magic_list_tags_tag_p tag = (magic_list_tags_tag_p)context;
     int resp_data_size = 0;
     int offset = *payload_start;
-    uint8_t service_response;
-    uint8_t reserved;
-    uint8_t service_status;
-    uint8_t status_extra_words;
+    uint8_t service_response = 0;
+    uint8_t reserved = 0;
+    uint8_t service_status = 0;
+    uint8_t status_extra_words = 0;
     int response_start = 0;
 
     (void)buffer_capacity;
