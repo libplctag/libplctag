@@ -98,7 +98,6 @@ def defineStringFunc(name, args):
 
 system = platform.system()
 
-stringAPI = -1
 library = ""
 
 if system == "Windows":
