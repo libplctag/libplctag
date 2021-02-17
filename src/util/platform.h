@@ -39,6 +39,8 @@
  */
 
 #if defined(_WIN32) || defined(WIN32) || defined (_WIN64) || defined (WIN64)
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
     #define PLATFORM_IS_WINDOWS 1
 #else
     #define PLATFORM_IS_POSIX 1

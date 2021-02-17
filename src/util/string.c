@@ -37,13 +37,15 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-
 #include <lib/libplctag.h>
 #include <util/debug.h>
 #include <util/mem.h>
 #include <util/platform.h>
 #include <util/string.h>
+
+#ifndef PLATFORM_IS_WINDOWS
+#include <strings.h>
+#endif
 
 
 /*

@@ -36,27 +36,25 @@
 #include <util/platform.h>
 
 typedef struct thread_t *thread_p;
-typedef void *(*thread_func_t)(void *arg);
-extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg);
 
-#ifdef PLATFORM_IS_POSIX
-    extern void thread_stop(void) __attribute__((noreturn));
-#else
-    extern void thread_stop(void)
-#endif
-
-extern int thread_kill(thread_p t);
-extern int thread_join(thread_p t);
-extern int thread_detach();
-extern int thread_destroy(thread_p *t);
 
 #ifdef PLATFORM_IS_WINDOWS
+    typedef LPTHREAD_START_ROUTINE thread_func_t;
+    extern int thread_create(thread_p* t, thread_func_t func, int stacksize, void *arg);
+    extern void thread_stop(void);
     #define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
     #define THREAD_RETURN(val) return (DWORD)val;
     #define THREAD_LOCAL __declspec(thread)
 #else
+    typedef void* (*thread_func_t)(void *arg);
+    extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg);
+    extern void thread_stop(void) __attribute__((noreturn));
     #define THREAD_FUNC(func) void *func(void *arg)
     #define THREAD_RETURN(val) return (void *)val;
     #define THREAD_LOCAL __thread
 #endif
 
+    extern int thread_kill(thread_p t);
+    extern int thread_join(thread_p t);
+    extern int thread_detach();
+    extern int thread_destroy(thread_p *t);

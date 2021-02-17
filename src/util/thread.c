@@ -175,7 +175,9 @@ int thread_kill(thread_p t)
 
 int thread_join(thread_p t)
 {
+#ifndef PLATFORM_IS_WINDOWS
     void *unused;
+#endif
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -195,7 +197,7 @@ int thread_join(thread_p t)
         return PLCTAG_ERR_THREAD_JOIN;
     }
 #else
-    if(pthread_join(t->p_thread,&unused)) {
+    if(pthread_join(t->p_thread, &unused)) {
         pdebug(DEBUG_ERROR, "Error joining thread.");
         return PLCTAG_ERR_THREAD_JOIN;
     }

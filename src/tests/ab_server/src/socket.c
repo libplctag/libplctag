@@ -33,7 +33,7 @@
 
 #include "compat.h"
 
-#ifdef PLATFORM_IS_WINDOWS
+#ifdef IS_WINDOWS
     #include <winsock2.h>
     #include <ws2tcpip.h>
 #else
@@ -74,7 +74,7 @@ int socket_open(const char *host, const char *port)
     int sock_opt = 0;
     int rc;
 
-#ifdef PLATFORM_IS_WINDOWS
+#ifdef IS_WINDOWS
 	/* Windows needs special initialization. */
 	static WSADATA winsock_data;
 	rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
@@ -213,7 +213,7 @@ int socket_open(const char *host, const char *port)
 void socket_close(int sock)
 {
     if(sock >= 0) {
-#ifdef PLATFORM_IS_WINDOWS
+#ifdef IS_WINDOWS
         closesocket(sock);
 #else
         close(sock);
@@ -256,14 +256,14 @@ int socket_accept(int sock)
 
 slice_s socket_read(int sock, slice_s in_buf)
 {
-#ifdef PLATFORM_IS_WINDOWS
+#ifdef IS_WINDOWS
     int rc = (int)recv(sock, (char *)in_buf.data, (int)in_buf.len, 0);
 #else
     int rc = (int)recv(sock, (char *)in_buf.data, (size_t)in_buf.len, 0);
 #endif
 
     if(rc < 0) {
-#ifdef PLATFORM_IS_WINDOWS
+#ifdef IS_WINDOWS
         rc = WSAGetLastError();
         if(rc == WSAEWOULDBLOCK) {
 #else
@@ -292,7 +292,7 @@ int socket_write(int sock, slice_s out_buf)
     slice_dump(out_buf);
 
     do {
-#ifdef PLATFORM_IS_WINDOWS
+#ifdef IS_WINDOWS
         rc = (int)send(sock, (char *)tmp_out_buf.data, (int)tmp_out_buf.len, 0);
 #else
         rc = (int)send(sock, (char *)tmp_out_buf.data, (size_t)tmp_out_buf.len, 0);
@@ -304,7 +304,7 @@ int socket_write(int sock, slice_s out_buf)
              * check the return value.  If it is an interrupted system call
              * or would block, just keep looping.
              */
-#ifdef PLATFORM_IS_WINDOWS
+#ifdef IS_WINDOWS
             rc = WSAGetLastError();
             if(rc != WSAEWOULDBLOCK) {
 #else

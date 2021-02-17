@@ -31,31 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#if PLATFORM_IS_WINDOWS
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
 
-    #ifndef IPPROTO_TCP
-        #define IPPROTO_TCP (0)
-    #endif
 
-    typedef SOCKET socket_t;
-#else
-    #include <arpa/inet.h>
-    #include <errno.h>
-    #include <netdb.h>
-    #include <netinet/in.h>
-    #include <sys/socket.h>
-    #include <sys/time.h>
-    #include <sys/types.h>
-    #include <unistd.h>
-
-    typedef struct timeval TIMEVAL;
-#endif
-
-#include <fcntl.h>
-#include <sys/select.h>
-#include <unistd.h>
 
 #include <lib/libplctag.h>
 #include <util/atomic_int.h>
@@ -68,43 +45,101 @@
 #include <util/thread.h>
 
 
-#ifdef PLATFORM_IS_WINDOWS
-    #define errno WSAGetLastError()
-    #define socketclose(s) closesocket(s)
+#if PLATFORM_IS_WINDOWS
+//#define WIN32_LEAN_AND_MEAN
+#undef INVALID_SOCKET
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#ifndef AF_IPX
+#include <ws2def.h>
 #endif
 
-#ifdef PLATFORM_IS_POSIX
-    #define socketclose(s) close(s)
+#ifndef IPPROTO_TCP
+#define IPPROTO_TCP (0)
+#endif
+
+#define sock_errno WSAGetLastError()
+#define SOCK_CLOSE(s) closesocket(s)
+
+#define SHUT_RDWR SD_BOTH
+
+//typedef SOCKET socket_t;
+#define SOCK_ERR WSAGetLastError()
+#define SOCK_WOULD_BLOCK(err) ((err) == WSAEWOULDBLOCK)
+
+#define SOCK_WRITE(fd, buf, size)  ((int)send((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
+#define SOCK_READ(fd, buf, size)  ((int)recv((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
+
+#else
+
+/* POSIX-friendly platforms */
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+typedef struct timeval TIMEVAL;
+
+#define sock_errno errno
+#define SOCK_CLOSE(s) close(s)
+
+#ifdef PLATFORM_IS_BSD
+/* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
+#define SOCKET_SEND(fd, buf, size) ((int)write((int)(fd), (void *)(buf), (size_t)(unsigned int)(size)))
+//rc = (int)write(s->fd, buf, (size_t)(unsigned int)size);
+#else
+/* on Linux, we use MSG_NOSIGNAL */
+#define SOCKET_SEND(fd, buf, size) ((int)send((int)(fd), (void*)(buf), (size_t)(unsigned int)(size), MSG_NOSIGNAL))
+//rc = (int)send(s->fd, buf, (size_t)(unsigned int)size, MSG_NOSIGNAL);
+#endif
+
+#define SOCK_ERR errno
+#define SOCK_WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
+
+#define SOCK_WRITE(fd, buf, size)  ((int)send((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), MSG_NOSIGNAL))
+#define SOCK_READ(fd, buf, size)  ((int)recv((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
+
+typedef socket_t SOCKET;
+
 #endif
 
 
 /* maximum time to wait for a socket to be ready. */
 #define TICKLER_MAX_WAIT_TIME_MS (50)
 
+#define FD_SET_RECALC_MAX_PRESSURE (10)
+#define FD_SET_RECALC_PRESSURE_INCREMENT (1)
 
-#define MAX_RECALC_FD_SET_PRESSURE (10)
+#define SET_STATUS(status_field, status) atomic_int_store(&(status_field), (int)(status))
+#define GET_STATUS(status_field) (int)atomic_int_load(&(status_field))
 
-
-#define SET_STATUS(status_field, status) atomic_int8_store(&(status_field), (int8_t)(status))
-#define GET_STATUS(status_field) (int)atomic_int8_load(&(status_field))
-
+/*
 enum {
     CONNECTION_THREAD_NOT_RUNNING,
     CONNECTION_THREAD_RUNNING,
     CONNECTION_THREAD_TERMINATE,
     CONNECTION_THREAD_DEAD
 };
+*/
 
 struct sock_t {
     /* next in the list of sockets. */
     struct sock_t *next;
 
-    socket_t fd;
+    SOCKET fd;
 
     int port;
     const char *host;
 
-    atomic_int8 status;
+    atomic_int status;
 
     /* callbacks for events. */
     thread_p connection_thread;
@@ -129,14 +164,12 @@ static mutex_p socket_event_mutex = NULL;
 static sock_p socket_list = NULL;
 static sock_p global_socket_iterator = NULL;
 
-// static THREAD_LOCAL atomic_bool socket_event_mutex_held_in_this_thread = ATOMIC_BOOL_STATIC_INIT(false);
-
-static int wake_fds[2] = { INVALID_SOCKET, INVALID_SOCKET};
+static SOCKET wake_fds[2] = { INVALID_SOCKET, INVALID_SOCKET};
 static fd_set global_read_fds;
 static fd_set global_write_fds;
-static int max_socket_fd = -1;
-static atomic_int32 recalculate_fd_set_pressure = ATOMIC_BOOL_STATIC_INIT(1);
-static atomic_int32 connect_thread_complete_count = ATOMIC_INT_STATIC_INIT(0);
+static SOCKET max_socket_fd = INVALID_SOCKET;
+static atomic_int recalculate_fd_set_pressure = ATOMIC_BOOL_STATIC_INIT(1);
+static atomic_int connect_thread_complete_count = ATOMIC_INT_STATIC_INIT(0);
 
 #define MAX_IPS (8)
 
@@ -191,38 +224,46 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     int sock_opt = 1;
     int i = 0;
     int done = 0;
-    int fd;
-    int flags;
+    SOCKET fd;
+//    int flags;
     TIMEVAL timeout;  /* used for timing out connections etc. */
     struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
+#ifdef PLATFORM_IS_WINDOWS
+    u_long non_blocking = 1;
+#endif
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
+    mem_set(&ips[0], 0, (int)sizeof(ips));
+
     /* Open a socket for communication with the gateway. */
-    fd = (socket_t)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    /* check the size of the fd set. */
-    if(fd >= FD_SETSIZE) {
-        pdebug(DEBUG_WARN, "Socket fd, %d, is too large to fit in a fd set!");
-
-        socketclose(fd);
-
-        return PLCTAG_ERR_TOO_LARGE;
-    }
+    fd = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     /* check for errors */
     if(fd < 0) {
-        pdebug(DEBUG_ERROR,"Socket creation failed, err: %d", errno);
+        pdebug(DEBUG_ERROR,"Socket creation failed, err: %d", SOCK_ERR);
         return PLCTAG_ERR_OPEN;
     }
+
+ /* Under Windows we have fewer guarantees about fd numbers. */
+#ifndef PLATFORM_IS_WINDOWS
+    /* check the size of the fd set. */
+    if (fd >= FD_SETSIZE) {
+        pdebug(DEBUG_WARN, "Socket fd, %d, is too large to fit in a fd set!");
+
+        SOCK_CLOSE(fd);
+
+        return PLCTAG_ERR_NO_RESOURCES;
+    }
+#endif
 
     /* set up our socket to allow reuse if we crash suddenly. */
     sock_opt = 1;
 
     if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
-        pdebug(DEBUG_ERROR, "Error setting socket reuse option, err: %d",errno);
+        pdebug(DEBUG_ERROR, "Error setting socket reuse option, err: %d",SOCK_ERR);
 
-        socketclose(fd);
+        SOCK_CLOSE(fd);
 
         return PLCTAG_ERR_OPEN;
     }
@@ -230,8 +271,8 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
 #ifdef PLATFORM_IS_BSD
     /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
     if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
-        socketclose(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket SIGPIPE suppression option, errno: %d", errno);
+        SOCK_CLOSE(fd);
+        pdebug(DEBUG_ERROR, "Error setting socket SIGPIPE suppression option, err: %d", SOCK_ERR);
         return PLCTAG_ERR_OPEN;
     }
 #endif
@@ -240,14 +281,14 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     timeout.tv_usec = 0;
 
     if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
-        pdebug(DEBUG_ERROR, "Error setting socket receive timeout option, err: %d", errno);
-        socketclose(fd);
+        pdebug(DEBUG_ERROR, "Error setting socket receive timeout option, err: %d", SOCK_ERR);
+        SOCK_CLOSE(fd);
         return PLCTAG_ERR_OPEN;
     }
 
     if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
-        pdebug(DEBUG_ERROR, "Error setting socket send timeout option, err: %d", errno);
-        socketclose(fd);
+        pdebug(DEBUG_ERROR, "Error setting socket send timeout option, err: %d", SOCK_ERR);
+        SOCK_CLOSE(fd);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -256,15 +297,15 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     so_linger.l_linger = 0;
 
     if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
-        pdebug(DEBUG_ERROR, "Error setting socket close linger option, err: %d", errno);
-        socketclose(fd);
+        pdebug(DEBUG_ERROR, "Error setting socket close linger option, err: %d", SOCK_ERR);
+        SOCK_CLOSE(fd);
         return PLCTAG_ERR_OPEN;
     }
 
     /* figure out what address we are connecting to. */
 
     /* try a numeric IP address conversion first. */
-    if(inet_pton(AF_INET,host,(struct in_addr *)ips) > 0) {
+    if(inet_pton(AF_INET, host, (struct in_addr *)ips) > 0) {
         pdebug(DEBUG_DETAIL, "Found numeric IP address: %s",host);
         num_ips = 1;
     } else {
@@ -286,7 +327,8 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
                 freeaddrinfo(res_head);
             }
 
-            socketclose(fd);
+            SOCK_CLOSE(fd);
+
             return PLCTAG_ERR_BAD_GATEWAY;
         }
 
@@ -313,25 +355,27 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
 
     do {
         int rc;
+        char addr_buf[12 + 3 + 1] = { 0 };
+
         /* try each IP until we run out or get a connection. */
         gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
-        pdebug(DEBUG_DETAIL, "Attempting to connect to %s", inet_ntoa(*((struct in_addr *)&ips[i])));
+        inet_ntop(AF_INET, (struct in_addr*)&ips[i], (char*)&addr_buf[0], sizeof(addr_buf));
+        pdebug(DEBUG_DETAIL, "Attempting to connect to %s", addr_buf);
 
         rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
-
         if( rc == 0) {
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.", inet_ntoa(*((struct in_addr *)&ips[i])));
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.", addr_buf);
             done = 1;
         } else {
-            int err = errno;
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, err: %d", inet_ntoa(*((struct in_addr *)&ips[i])), err);
+            int err = SOCK_ERR;
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, err: %d", addr_buf, err);
             i++;
         }
     } while(!done && i < num_ips);
 
     if(!done) {
-        socketclose(fd);
+        SOCK_CLOSE(fd);
         pdebug(DEBUG_ERROR, "Unable to connect to any gateway host IP address!");
         return PLCTAG_ERR_OPEN;
     }
@@ -343,22 +387,22 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
 #ifdef PLATFORM_IS_WINDOWS
     if(ioctlsocket(fd,FIONBIO,&non_blocking)) {
         pdebug(DEBUG_ERROR, "Error getting socket options, err: %d", WSAGetLastError());
-        socketclose(fd);
+        SOCK_CLOSE(fd);
         return PLCTAG_ERR_OPEN;
     }
 #else
     flags=fcntl(fd,F_GETFL,0);
     if(flags<0) {
-        pdebug(DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
-        socketclose(fd);
+        pdebug(DEBUG_ERROR, "Error getting socket options, err: %d", SOCK_ERR);
+        SOCK_CLOSE(fd);
         return PLCTAG_ERR_OPEN;
     }
 
     flags |= O_NONBLOCK;
 
     if(fcntl(fd,F_SETFL,flags)<0) {
-        pdebug(DEBUG_ERROR, "Error setting socket to non-blocking, errno: %d", errno);
-        socketclose(fd);
+        pdebug(DEBUG_ERROR, "Error setting socket to non-blocking, err: %d", SOCK_ERR);
+        SOCK_CLOSE(fd);
         return PLCTAG_ERR_OPEN;
     }
 #endif
@@ -402,28 +446,40 @@ extern int socket_tcp_read(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-    rc = (int)read(s->fd, buf, INT_TO_SIZE_T(size));
-#ifdef PLATFORM_IS_WINDOWS
+    rc = SOCK_READ(s->fd, buf, size);
     if(rc < 0) {
-        err = WSAGetLastError();
-        if(err == WSAEWOULDBLOCK) {
+        err = SOCK_ERR;
+        if (SOCK_WOULD_BLOCK(err)) {
             rc = 0;
         } else {
-            pdebug(DEBUG_WARN,"Socket read error: rc=%d, err=%d", rc, err);
-            rc = PLCTAG_ERR_READ;
+            pdebug(DEBUG_WARN, "Socket read error: rc=%d, err=%d", rc, err);
+            return PLCTAG_ERR_READ;
         }
     }
-#else
-    if(rc < 0) {
-        err = errno;
-        if(err == EAGAIN || err == EWOULDBLOCK) {
-            rc = 0;
-        } else {
-            pdebug(DEBUG_WARN,"Socket read error: rc=%d, err=%d", rc, err);
-            rc = PLCTAG_ERR_READ;
-        }
-    }
-#endif
+
+//#ifdef PLATFORM_IS_WINDOWS
+//    rc = recv(s->fd, (char*)buf, size, 0);
+//    if(rc < 0) {
+//        err = WSAGetLastError();
+//        if(err == WSAEWOULDBLOCK) {
+//            rc = 0;
+//        } else {
+//            pdebug(DEBUG_WARN,"Socket read error: rc=%d, err=%d", rc, err);
+//            rc = PLCTAG_ERR_READ;
+//        }
+//    }
+//#else
+//    rc = (int)read(s->fd, buf, INT_TO_SIZE_T(size));
+//    if(rc < 0) {
+//        err = errno;
+//        if(err == EAGAIN || err == EWOULDBLOCK) {
+//            rc = 0;
+//        } else {
+//            pdebug(DEBUG_WARN,"Socket read error: rc=%d, err=%d", rc, err);
+//            rc = PLCTAG_ERR_READ;
+//        }
+//    }
+//#endif
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -449,40 +505,51 @@ extern int socket_tcp_write(sock_p s, uint8_t *buf, int size)
     }
 
     /* The socket is non-blocking. */
-#ifdef PLATFORM_IS_WINDOWS
-    /* no signals in Windows. */
-    rc = (int)send(s->fd, buf, size, 0);
-#else
-    #ifdef PLATFORM_IS_BSD
-    /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
-    rc = (int)write(s->fd, buf, (size_t)(unsigned int)size);
-    #else
-    /* on Linux, we use MSG_NOSIGNAL */
-    rc = (int)send(s->fd, buf, (size_t)(unsigned int)size, MSG_NOSIGNAL);
-    #endif
-#endif
+//#ifdef PLATFORM_IS_WINDOWS
+//    /* no signals in Windows. */
+//    rc = (int)send(s->fd, buf, size, 0);
+//#else
+//    #ifdef PLATFORM_IS_BSD
+//    /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
+//    rc = (int)write(s->fd, buf, (size_t)(unsigned int)size);
+//    #else
+//    /* on Linux, we use MSG_NOSIGNAL */
+//    rc = (int)send(s->fd, buf, (size_t)(unsigned int)size, MSG_NOSIGNAL);
+//    #endif
+//#endif
 
-#ifdef PLATFORM_IS_WINDOWS
-    if(rc < 0) {
-        err = WSAGetLastError();
-        if(err == WSAWOULDBLOCK) {
+    rc = SOCK_WRITE(s->fd, buf, size);
+    if (rc < 0) {
+        err = SOCK_ERR;
+        if(SOCK_WOULD_BLOCK(err)) {
             return PLCTAG_ERR_NO_DATA;
         } else {
             pdebug(DEBUG_WARN, "Socket write error: rc=%d, err=%d", rc, err);
             return PLCTAG_ERR_WRITE;
         }
     }
-#else
-    if(rc < 0) {
-        err = errno;
-        if(err == EAGAIN || err == EWOULDBLOCK) {
-            return PLCTAG_ERR_NO_DATA;
-        } else {
-            pdebug(DEBUG_WARN, "Socket write error: rc=%d, err=%d", rc, err);
-            return PLCTAG_ERR_WRITE;
-        }
-    }
-#endif
+
+//#ifdef PLATFORM_IS_WINDOWS
+//    if(rc < 0) {
+//        err = WSAGetLastError();
+//        if(err == WSAEWOULDBLOCK) {
+//            return PLCTAG_ERR_NO_DATA;
+//        } else {
+//            pdebug(DEBUG_WARN, "Socket write error: rc=%d, err=%d", rc, err);
+//            return PLCTAG_ERR_WRITE;
+//        }
+//    }
+//#else
+//    if(rc < 0) {
+//        err = errno;
+//        if(err == EAGAIN || err == EWOULDBLOCK) {
+//            return PLCTAG_ERR_NO_DATA;
+//        } else {
+//            pdebug(DEBUG_WARN, "Socket write error: rc=%d, err=%d", rc, err);
+//            return PLCTAG_ERR_WRITE;
+//        }
+//    }
+//#endif
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -530,10 +597,10 @@ extern int socket_close(sock_p sock)
 
         /* force a recalculation of the FD set and max socket if we are the top one. */
         if(sock->fd >= max_socket_fd) {
-            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)MAX_RECALC_FD_SET_PRESSURE);
+            atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_MAX_PRESSURE);
         } else {
             /* not as urgent, recalculate eventually. */
-            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
+            atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_PRESSURE_INCREMENT);
         }
 
         /* close the socket fd */
@@ -545,7 +612,7 @@ extern int socket_close(sock_p sock)
             }
 
             /* close either way */
-            if(socketclose(sock->fd)) {
+            if(SOCK_CLOSE(sock->fd)) {
                 pdebug(DEBUG_WARN, "Error while closing socket: %d!", errno);
                 rc = PLCTAG_ERR_CLOSE;
             }
@@ -665,7 +732,7 @@ THREAD_FUNC(socket_connection_thread_func)
 
     /* set a flag so that the system knows we are done. */
     atomic_bool_store(&(sock->connection_thread_done), true);
-    atomic_int32_add(&connect_thread_complete_count, (int32_t)1);
+    atomic_int_add(&connect_thread_complete_count, (int32_t)1);
 
     /* make sure the event thread cleans up this thread soon. */
     socket_event_loop_wake();
@@ -759,7 +826,7 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
             FD_SET(sock->fd, &global_read_fds);
             max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
 
-            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
+            atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_PRESSURE_INCREMENT);
         } else {
             pdebug(DEBUG_DETAIL, "Clearing read complete callback.");
 
@@ -769,10 +836,10 @@ int socket_callback_when_read_done(sock_p sock, void (*callback)(void *context),
             FD_CLR(sock->fd, &global_read_fds);
             if(sock->fd >= max_socket_fd) {
                 /* the top FD has possibly changed, force a recalculation. */
-                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)MAX_RECALC_FD_SET_PRESSURE);
+                atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_MAX_PRESSURE);
             } else {
                 /* there was a change, so raise the need for recalculation. */
-                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
+                atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_PRESSURE_INCREMENT);
             }
         }
 
@@ -812,7 +879,7 @@ int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context)
             FD_SET(sock->fd, &global_write_fds);
             max_socket_fd = (sock->fd > max_socket_fd ? sock->fd : max_socket_fd);
 
-            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
+            atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_PRESSURE_INCREMENT);
         } else {
             /* set the socket status that we are NOT in flight. */
             SET_STATUS(sock->status, PLCTAG_STATUS_OK);
@@ -820,10 +887,10 @@ int socket_callback_when_write_done(sock_p sock, void (*callback)(void *context)
             FD_CLR(sock->fd, &global_write_fds);
             if(sock->fd >= max_socket_fd) {
                 /* the top FD has possibly changed, force a recalculation. */
-                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)MAX_RECALC_FD_SET_PRESSURE);
+                atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_MAX_PRESSURE);
             } else {
                 /* there was a change, so raise the need for recalculation. */
-                atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
+                atomic_int_add(&recalculate_fd_set_pressure, (int)FD_SET_RECALC_PRESSURE_INCREMENT);
             }
         }
 
@@ -852,8 +919,8 @@ int create_event_wakeup_channel(void)
     int rc = PLCTAG_STATUS_OK;
     SOCKET listener = INVALID_SOCKET;
     struct sockaddr_in listener_addr_info;
-    struct sockaddr_in reader_addr_info;
-    struct sockaddr_in writer_addr_info;
+//    struct sockaddr_in reader_addr_info;
+//    struct sockaddr_in writer_addr_info;
     socklen_t addr_info_size = sizeof(struct sockaddr_in);
     int non_blocking = 1;
 
@@ -906,7 +973,7 @@ int create_event_wakeup_channel(void)
 
         /* first we bind the listener to the loopback and let the OS choose the port. */
         if(bind(listener, (struct sockaddr *)&listener_addr_info, addr_info_size)){
-            pdebug(DEBUG_WARN, "Error %d binding the listener socker!", WSAGetLastError())
+            pdebug(DEBUG_WARN, "Error %d binding the listener socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
@@ -916,14 +983,14 @@ int create_event_wakeup_channel(void)
          * Notice that this _sets_ the address size!.
          */
         if(getsockname(listener, (struct sockaddr *)&listener_addr_info, &addr_info_size)) {
-            pdebug(DEBUG_WARN, "Error %d getting the listener socker address info!", WSAGetLastError())
+            pdebug(DEBUG_WARN, "Error %d getting the listener socket address info!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
 
         /* Phwew.   We can actually listen now. Notice that this is blocking! */
         if(listen(listener, 1)) { /* MAGIC constant - We do not want any real queue! */
-            pdebug(DEBUG_WARN, "Error %d listening on the listener socket!", WSAGetLastError())
+            pdebug(DEBUG_WARN, "Error %d listening on the listener socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
@@ -934,7 +1001,7 @@ int create_event_wakeup_channel(void)
          */
 
         if(connect(wake_fds[0], (struct sockaddr *)&listener_addr_info, addr_info_size)) {
-            pdebug(DEBUG_WARN, "Error %d connecting to the listener socket!", WSAGetLastError())
+            pdebug(DEBUG_WARN, "Error %d connecting to the listener socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
@@ -942,7 +1009,7 @@ int create_event_wakeup_channel(void)
         /* now we accept our own connection. This becomes the writer side. */
         wake_fds[1] = accept(listener, 0, 0);
         if (wake_fds[1] == INVALID_SOCKET) {
-            pdebug(DEBUG_WARN, "Error %d connecting to the listener socket!", WSAGetLastError())
+            pdebug(DEBUG_WARN, "Error %d connecting to the listener socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
@@ -951,14 +1018,14 @@ int create_event_wakeup_channel(void)
 
         /* reader */
         if(ioctlsocket(wake_fds[0], FIONBIO, &non_blocking)) {
-            pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError())
+            pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
 
         /* writer */
         if(ioctlsocket(wake_fds[1], FIONBIO, &non_blocking)) {
-            pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError())
+            pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
@@ -985,7 +1052,6 @@ int create_event_wakeup_channel(void)
     } else {
         pdebug(DEBUG_INFO, "Done.");
     }
-
 
     return rc;
 }
@@ -1072,12 +1138,12 @@ void destroy_event_wakeup_channel(void)
     pdebug(DEBUG_INFO, "Starting.");
 
     if(wake_fds[0] != INVALID_SOCKET) {
-        socketclose(wake_fds[0]);
+        SOCK_CLOSE(wake_fds[0]);
         wake_fds[0] = INVALID_SOCKET;
     }
 
     if(wake_fds[1] != INVALID_SOCKET) {
-        socketclose(wake_fds[1]);
+        SOCK_CLOSE(wake_fds[1]);
         wake_fds[1] = INVALID_SOCKET;
     }
 
@@ -1090,11 +1156,15 @@ void destroy_event_wakeup_channel(void)
 void socket_event_loop_wake(void)
 {
     int bytes_written = 0;
+    uint8_t dummy[16] = { 0 };
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    uint8_t dummy[16] = {0};
+#ifdef PLATFORM_IS_WINDOWS
+    bytes_written = send(wake_fds[1], (char*)dummy, (int)(unsigned int)sizeof(dummy), MSG_NOSIGNAL);
+#else
     bytes_written = (int)write(wake_fds[1], &dummy[0], sizeof(dummy));
+#endif
 
     if(bytes_written >= 0) {
         pdebug(DEBUG_DETAIL, "Wrote %d bytes to the wake channel.", bytes_written);
@@ -1121,9 +1191,9 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
     pdebug(DEBUG_SPEW, "Starting.");
 
     /* do we need to recalculate fd sets for the sockets? */
-    recalc_count = atomic_int32_load(&recalculate_fd_set_pressure);
-    // DEBUG FIXME
-    if(recalc_count >= MAX_RECALC_FD_SET_PRESSURE) {
+    recalc_count = atomic_int_load(&recalculate_fd_set_pressure);
+    if(recalc_count >= FD_SET_RECALC_MAX_PRESSURE) {
+
         pdebug(DEBUG_DETAIL, "Recalculating the select fd sets.");
 
         critical_block(socket_event_mutex) {
@@ -1167,11 +1237,11 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
          * This handles the race condition that the counter changes
          * after we recalculate and before we reset the counter.
          */
-        atomic_int32_sub(&recalculate_fd_set_pressure, recalc_count);
+        atomic_int_sub(&recalculate_fd_set_pressure, recalc_count);
     }
 
     /* do we need to clean up any dead connection threads? */
-    connection_thread_cleanup_count = atomic_int32_load(&connect_thread_complete_count);
+    connection_thread_cleanup_count = atomic_int_load(&connect_thread_complete_count);
     if(connection_thread_cleanup_count > 0) {
         critical_block(socket_event_mutex) {
             sock_p sock = socket_list;
@@ -1196,7 +1266,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
          * This handles the race condition that the counter changes
          * after we recalculate and before we reset the counter.
          */
-        atomic_int32_sub(&connect_thread_complete_count, connection_thread_cleanup_count);
+        atomic_int_sub(&connect_thread_complete_count, connection_thread_cleanup_count);
     }
 
     /* copy the fd sets safely */
@@ -1222,11 +1292,16 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
         wait_time_ms = TICKLER_MAX_WAIT_TIME_MS;
     }
 
+#ifndef PLATFORM_IS_WINDOWS
     timeval_wait.tv_sec = 0;
     timeval_wait.tv_usec = wait_time_ms * 1000;
+#else
+    timeval_wait.tv_sec = 0;
+    timeval_wait.tv_usec = (long)wait_time_ms * (long)1000;
+#endif
 
     pdebug(DEBUG_DETAIL, "Calling select().");
-    num_signaled_fds = select(max_socket_fd + 1, &local_read_fds, &local_write_fds, NULL, &timeval_wait);
+    num_signaled_fds = select((int)max_socket_fd + 1, &local_read_fds, &local_write_fds, NULL, &timeval_wait);
     pdebug(DEBUG_DETAIL, "select() returned with status %d.", num_signaled_fds);
 
     // for(int index=0; index < (max_socket_fd+1); index++) {
@@ -1252,12 +1327,17 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
             pdebug(DEBUG_DETAIL, "Wake channel is active.");
 
             /* pull all the data out to clear the status. */
+#ifndef PLATFORM_IS_WINDOWS
             while((bytes_read = (int)read(wake_fds[0], &dummy[0], sizeof(dummy))) > 0) {
                 pdebug(DEBUG_SPEW, "Read %d bytes from the wake channel.", bytes_read);
             }
-
+#else
+            while ((bytes_read = (int)recv(wake_fds[0], (char*)&dummy[0], (int)sizeof(dummy), MSG_NOSIGNAL)) > 0) {
+                pdebug(DEBUG_SPEW, "Read %d bytes from the wake channel.", bytes_read);
+            }
             num_signaled_fds--;
         }
+#endif
 
         /* is there still work to do? */
         if(num_signaled_fds > 0) {
@@ -1300,7 +1380,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             sock->read_done_callback = NULL;
 
                             /* tickle the recalculation. */
-                            atomic_int32_add(&recalculate_fd_set_pressure, (uint32_t)1);
+                            atomic_int_add(&recalculate_fd_set_pressure, (uint32_t)1);
 
                             /* set up state. */
                             SET_STATUS(sock->status, rc);
@@ -1353,7 +1433,7 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
                             FD_CLR(sock->fd, &global_write_fds);
                             sock->write_done_callback = NULL;
 
-                            atomic_int32_add(&recalculate_fd_set_pressure, (int32_t)1);
+                            atomic_int_add(&recalculate_fd_set_pressure, (int32_t)1);
 
                             /* call the callback */
                             SET_STATUS(sock->status, rc);
@@ -1389,10 +1469,9 @@ int socket_event_loop_init(void)
 	/* Windows needs special initialization. */
 	rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
 	if (rc != NO_ERROR) {
-		info("WSAStartup failed with error: %d\n", rc);
-		return SOCKET_ERR_STARTUP;
+		pdebug(DEBUG_WARN, "WSAStartup failed with error: %d\n", rc);
+		return PLCTAG_ERR_WINSOCK;
 	}
-
 #endif
 
     /* set up the waker channel, platform specific. */
@@ -1408,12 +1487,11 @@ int socket_event_loop_init(void)
 
     /* set the fds for the waker channel */
     FD_SET(wake_fds[0], &global_read_fds);
-//    FD_SET(wake_fds[1], &global_write_fds);
 
     socket_list = NULL;
     global_socket_iterator = NULL;
 
-    atomic_int32_store(&connect_thread_complete_count, (uint32_t)0);
+    atomic_int_store(&connect_thread_complete_count, (int)0);
 
     /* create the socket mutex. */
     rc = mutex_create(&socket_event_mutex);
@@ -1451,7 +1529,7 @@ void socket_event_loop_teardown(void)
     socket_list = NULL;
     global_socket_iterator = NULL;
 
-    atomic_int32_store(&recalculate_fd_set_pressure, (int32_t)0);
+    atomic_int_store(&recalculate_fd_set_pressure, (int32_t)0);
 
     destroy_event_wakeup_channel();
 

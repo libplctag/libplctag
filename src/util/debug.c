@@ -41,6 +41,7 @@
 #include <lib/version.h>
 #include <util/debug.h>
 #include <util/lock.h>
+#include <util/platform.h>
 #include <util/thread.h>
 #include <util/time.h>
 
@@ -55,6 +56,19 @@ static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
 static lock_t logger_callback_lock = LOCK_INIT;
 static void (* volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
+
+
+#ifdef PLATFORM_IS_WINDOWS
+static struct tm* localtime_r(const time_t* timep, struct tm* result)
+{
+    time_t t = *timep;
+
+    localtime_s(result, &t);
+
+    return result;
+}
+#endif
+
 
 
 /*
