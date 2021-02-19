@@ -46,68 +46,68 @@
 
 
 #if PLATFORM_IS_WINDOWS
-//#define WIN32_LEAN_AND_MEAN
-#undef INVALID_SOCKET
-#include <winsock2.h>
-#include <ws2tcpip.h>
+    //#define WIN32_LEAN_AND_MEAN
+    #undef INVALID_SOCKET
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
 
-#ifndef AF_IPX
-#include <ws2def.h>
-#endif
+    #ifndef AF_IPX
+    #include <ws2def.h>
+    #endif
 
-#ifndef IPPROTO_TCP
-#define IPPROTO_TCP (0)
-#endif
+    #ifndef IPPROTO_TCP
+    #define IPPROTO_TCP (0)
+    #endif
 
-#define sock_errno WSAGetLastError()
-#define SOCK_CLOSE(s) closesocket(s)
+    #define sock_errno WSAGetLastError()
+    #define SOCK_CLOSE(s) closesocket(s)
 
-#define SHUT_RDWR SD_BOTH
+    #define SHUT_RDWR SD_BOTH
 
-//typedef SOCKET socket_t;
-#define SOCK_ERR WSAGetLastError()
-#define SOCK_WOULD_BLOCK(err) ((err) == WSAEWOULDBLOCK)
+    //typedef SOCKET socket_t;
+    #define SOCK_ERR WSAGetLastError()
+    #define SOCK_WOULD_BLOCK(err) ((err) == WSAEWOULDBLOCK)
 
-#define SOCK_WRITE(fd, buf, size)  ((int)send((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
-#define SOCK_READ(fd, buf, size)  ((int)recv((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
+    #define SOCK_WRITE(fd, buf, size)  ((int)send((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
+    #define SOCK_READ(fd, buf, size)  ((int)recv((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
 
 #else
 
-/* POSIX-friendly platforms */
+    /* POSIX-friendly platforms */
 
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
+    #include <arpa/inet.h>
+    #include <errno.h>
+    #include <fcntl.h>
+    #include <netdb.h>
+    #include <netinet/in.h>
+    #include <sys/select.h>
+    #include <sys/socket.h>
+    #include <sys/time.h>
+    #include <sys/types.h>
+    #include <unistd.h>
 
-typedef struct timeval TIMEVAL;
+    typedef struct timeval TIMEVAL;
 
-#define sock_errno errno
-#define SOCK_CLOSE(s) close(s)
+    #define sock_errno errno
+    #define SOCK_CLOSE(s) close(s)
 
-#ifdef PLATFORM_IS_BSD
-/* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
-#define SOCKET_SEND(fd, buf, size) ((int)write((int)(fd), (void *)(buf), (size_t)(unsigned int)(size)))
-//rc = (int)write(s->fd, buf, (size_t)(unsigned int)size);
-#else
-/* on Linux, we use MSG_NOSIGNAL */
-#define SOCKET_SEND(fd, buf, size) ((int)send((int)(fd), (void*)(buf), (size_t)(unsigned int)(size), MSG_NOSIGNAL))
-//rc = (int)send(s->fd, buf, (size_t)(unsigned int)size, MSG_NOSIGNAL);
-#endif
+    #ifdef PLATFORM_IS_BSD
+        /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
+        #define SOCKET_SEND(fd, buf, size) ((int)write((int)(fd), (void *)(buf), (size_t)(unsigned int)(size)))
+        //rc = (int)write(s->fd, buf, (size_t)(unsigned int)size);
+    #else
+        /* on Linux, we use MSG_NOSIGNAL */
+        #define SOCKET_SEND(fd, buf, size) ((int)send((int)(fd), (void*)(buf), (size_t)(unsigned int)(size), MSG_NOSIGNAL))
+        //rc = (int)send(s->fd, buf, (size_t)(unsigned int)size, MSG_NOSIGNAL);
+    #endif
 
-#define SOCK_ERR errno
-#define SOCK_WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
+    #define SOCK_ERR errno
+    #define SOCK_WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
 
-#define SOCK_WRITE(fd, buf, size)  ((int)send((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), MSG_NOSIGNAL))
-#define SOCK_READ(fd, buf, size)  ((int)recv((SOCKET)(fd), (char*)(buf), (int)(unsigned int)(size), 0))
+    #define SOCK_WRITE(fd, buf, size)  ((int)send((SOCKET)(fd), (char*)(buf), (size_t)(unsigned int)(size), MSG_NOSIGNAL))
+    #define SOCK_READ(fd, buf, size)  ((int)recv((SOCKET)(fd), (char*)(buf), (size_t)(unsigned int)(size), 0))
 
-typedef socket_t SOCKET;
+    typedef socket_t SOCKET;
 
 #endif
 
@@ -121,14 +121,6 @@ typedef socket_t SOCKET;
 #define SET_STATUS(status_field, status) atomic_int_store(&(status_field), (int)(status))
 #define GET_STATUS(status_field) (int)atomic_int_load(&(status_field))
 
-/*
-enum {
-    CONNECTION_THREAD_NOT_RUNNING,
-    CONNECTION_THREAD_RUNNING,
-    CONNECTION_THREAD_TERMINATE,
-    CONNECTION_THREAD_DEAD
-};
-*/
 
 struct sock_t {
     /* next in the list of sockets. */
@@ -225,11 +217,12 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     int i = 0;
     int done = 0;
     SOCKET fd;
-//    int flags;
     TIMEVAL timeout;  /* used for timing out connections etc. */
     struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
 #ifdef PLATFORM_IS_WINDOWS
     u_long non_blocking = 1;
+#else
+    int flags = 0;
 #endif
 
     pdebug(DEBUG_DETAIL,"Starting.");
@@ -249,10 +242,8 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
 #ifndef PLATFORM_IS_WINDOWS
     /* check the size of the fd set. */
     if (fd >= FD_SETSIZE) {
-        pdebug(DEBUG_WARN, "Socket fd, %d, is too large to fit in a fd set!");
-
+        pdebug(DEBUG_WARN, "Socket fd, %d, is too large to fit in a fd set!", fd);
         SOCK_CLOSE(fd);
-
         return PLCTAG_ERR_NO_RESOURCES;
     }
 #endif
@@ -364,7 +355,7 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
         pdebug(DEBUG_DETAIL, "Attempting to connect to %s", addr_buf);
 
         rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
-        if( rc == 0) {
+        if(rc == 0) {
             pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.", addr_buf);
             done = 1;
         } else {
@@ -392,7 +383,7 @@ int socket_tcp_connect(sock_p s, const char *host, int port)
     }
 #else
     flags=fcntl(fd,F_GETFL,0);
-    if(flags<0) {
+    if(flags < 0) {
         pdebug(DEBUG_ERROR, "Error getting socket options, err: %d", SOCK_ERR);
         SOCK_CLOSE(fd);
         return PLCTAG_ERR_OPEN;
@@ -1335,9 +1326,9 @@ void socket_event_loop_tickler(int64_t next_wake_time, int64_t current_time)
             while ((bytes_read = (int)recv(wake_fds[0], (char*)&dummy[0], (int)sizeof(dummy), MSG_NOSIGNAL)) > 0) {
                 pdebug(DEBUG_SPEW, "Read %d bytes from the wake channel.", bytes_read);
             }
+#endif
             num_signaled_fds--;
         }
-#endif
 
         /* is there still work to do? */
         if(num_signaled_fds > 0) {
@@ -1540,3 +1531,4 @@ void socket_event_loop_teardown(void)
 
     pdebug(DEBUG_INFO, "Done.");
 }
+
