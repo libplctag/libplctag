@@ -754,10 +754,9 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     /* first get the zero-terminated string length */
     name_len = plc_tag_get_string_length(udt_info_tag, offset);
-
     if(name_len <=0 || name_len >= 256) {
-        fprintf(stderr, "Unexpected UDT name length: %d!\n", name_len);
-        usage();
+        fprintf(stderr, "Unexpected raw UDT name length: %d!\n", name_len);
+        //usage();
     }
 
     /* create a string for this. */
@@ -780,6 +779,12 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     if(name_str[name_index] == ';') {
         name_str[name_index] = 0;
+    }
+
+    /* check the name length again. */
+    name_len = (int)(unsigned int)strlen(name_str);
+    if(name_len ==0 || name_len >= 256) {
+        fprintf(stderr, "Unexpected UDT name length: %d!\n", name_len);
     }
 
     udts[udt_id]->name = name_str;
