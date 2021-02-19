@@ -52,6 +52,6 @@ extern int str_to_float(const char *str, float *val);
 extern char **str_split(const char *str, const char *sep);
 //#define str_concat_2(num_args, str1, ...) str_concat_impl(num_args, str1, __VA_ARGS__)
 //#define str_concat(str1, ...) str_concat_2(COUNT_NARG(__VA_ARGS__)+1, str1, __VA_ARGS__)
-#define str_concat(s1, ...) str_concat_impl(GET_ARG_COUNT(__VA_ARGS__)+1, s1, __VA_ARGS__)
-extern char *str_concat_impl(int num_args, ...);
+//#define str_concat(s1, ...) str_concat_impl(GET_ARG_COUNT(__VA_ARGS__)+1, s1, __VA_ARGS__)
+extern char *str_concat(const char *str_arg, ...);
 

@@ -375,22 +375,43 @@ char **str_split(const char *str, const char *sep)
 
 
 
-char *str_concat_impl(int num_args, ...)
+char *str_concat(const char *str_arg, ...)
 {
     va_list arg_list;
+    int num_args = 0;
     int total_length = 0;
     char *result = NULL;
     char *tmp = NULL;
 
-    /* first loop to find the length */
-    va_start(arg_list, num_args);
-    for(int i=0; i < num_args; i++) {
-        tmp = va_arg(arg_list, char *);
-        if(tmp) {
-            total_length += str_length(tmp);
-        }
+    if(str_arg == NULL) {
+        pdebug(DEBUG_WARN, "First argument is NULL!");
+        return NULL;
     }
+
+    total_length = str_length(str_arg);
+
+    /* first loop to find the length */
+    va_start(arg_list, str_arg);
+
+    do {
+        tmp = va_arg(arg_list, char*);
+        if (tmp != NULL) {
+            num_args++;
+            total_length += str_length(tmp);
+        } else {
+            break;
+        }
+    } while(tmp != NULL);
+    //for(int i=0; i < num_args; i++) {
+    //    tmp = va_arg(arg_list, char *);
+    //    if(tmp) {
+    //        total_length += str_length(tmp);
+    //    }
+    //}
+
     va_end(arg_list);
+
+    pdebug(DEBUG_DETAIL, "Got %d strings containing %d characters in total.", num_args+1, total_length);
 
     /* make a buffer big enough */
     total_length += 1;
@@ -403,7 +424,11 @@ char *str_concat_impl(int num_args, ...)
 
     /* loop to copy the strings */
     result[0] = 0;
-    va_start(arg_list, num_args);
+
+    str_copy(&result[0], total_length, str_arg);
+
+    /* restart the varargs */
+    va_start(arg_list, str_arg);
     for(int i=0; i < num_args; i++) {
         tmp = va_arg(arg_list, char *);
         if(tmp) {

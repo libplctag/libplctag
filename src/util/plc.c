@@ -248,7 +248,7 @@ int plc_get(const char *plc_type, attr attribs, plc_p *plc_return, int (*constru
 
     path = attr_get_str(attribs, "path", "NO_PATH");
 
-    plc_key = str_concat(plc_type, "/", gateway, "/", path);
+    plc_key = str_concat(plc_type, "/", gateway, "/", path, NULL);
     if(!plc_key) {
         pdebug(DEBUG_WARN, "Unable to allocate plc_key!");
         return PLCTAG_ERR_NO_MEM;
