@@ -945,8 +945,15 @@ int create_event_wakeup_channel(void)
 
     do {
         /*
-        * Set up our listening socket.
-        */
+         * Set up our listening socket.
+         */
+
+        listener = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if(listener < 0) {
+            pdebug(DEBUG_WARN, "Error %d creating the listener socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
 
         /* clear the listener address info */
         mem_set(&listener_addr_info, 0, addr_info_size);
@@ -982,6 +989,17 @@ int create_event_wakeup_channel(void)
         /* Phwew.   We can actually listen now. Notice that this is blocking! */
         if(listen(listener, 1)) { /* MAGIC constant - We do not want any real queue! */
             pdebug(DEBUG_WARN, "Error %d listening on the listener socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /*
+         * Set up our wake read side socket.
+         */
+
+        wake_fds[0] = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (wake_fds[0] < 0) {
+            pdebug(DEBUG_WARN, "Error %d creating the wake channel read side socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
