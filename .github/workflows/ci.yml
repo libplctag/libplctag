@@ -624,3 +624,101 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
+
+  ubuntu_cross_build_arm6:
+
+    runs-on: ubuntu-latest
+
+    env:
+      VERSION: "2.3.3"
+      ARTIFACT: "libplctag_2.3.3_linux_arm6hf_EXPERIMENTAL"
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+
+    steps:
+    - name: "Checkout library source."
+      uses: actions/checkout@v2
+
+    - name: Set up build environment
+      run: sudo apt install build-essential cmake crossbuild-essential-armhf
+
+    - name: Create build directory
+      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 ..
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build .
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}
+
+
+  ubuntu_cross_build_arm7:
+
+    runs-on: ubuntu-latest
+
+    env:
+      VERSION: "2.3.3"
+      ARTIFACT: "libplctag_2.3.3_linux_arm7l_EXPERIMENTAL"
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+
+    steps:
+    - name: "Checkout library source."
+      uses: actions/checkout@v2
+
+    - name: Set up build environment
+      run: sudo apt install build-essential cmake crossbuild-essential-armhf
+
+    - name: Create build directory
+      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 ..
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build .
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}
+
+  ubuntu_cross_build_aarch64:
+
+    runs-on: ubuntu-latest
+
+    env:
+      VERSION: "2.3.3"
+      ARTIFACT: "libplctag_2.3.3_linux_aarch64_EXPERIMENTAL"
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+
+    steps:
+    - name: "Checkout library source."
+      uses: actions/checkout@v2
+
+    - name: Set up build environment
+      run: sudo apt install build-essential cmake crossbuild-essential-arm64
+
+    - name: Create build directory
+      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 ..
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build .
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}
+
