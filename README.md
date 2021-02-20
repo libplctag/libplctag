@@ -2,6 +2,7 @@
 
 - [libplctag - a C library for PLC communication](#libplctag---a-c-library-for-plc-communication)
   - [WARNING - DISCLAIMER](#warning---disclaimer)
+  - [Get It!](#get-it)
   - [Features](#features)
     - [High Level Features](#high-level-features)
     - [Detailed Features](#detailed-features)
@@ -12,7 +13,7 @@
     - [How to Get The Code](#how-to-get-the-code)
     - [Example Code](#example-code)
     - [API](#api)
-  - [Help Wanted](#help-wanted)
+  - [Help Wanted!](#help-wanted)
     - [How to Contribute](#how-to-contribute)
   - [History](#history)
   - [Contact and Support](#contact-and-support)
@@ -22,28 +23,31 @@
   - [Attributions and Trademarks](#attributions-and-trademarks)
   - [End Note](#end-note)
 
-|   OS   | Version | 64-bit | 32-bit |
-|   --:  |   :-:   |   :-:  |   :-:  |
-|Ubuntu  |  18.04  | Supported | Supported |
-|Windows |  10 (Server 19) | Supported | Supported |
-|macOS   |  10.15  | Supported | Not Supported |
+|   OS   | Architecture/CPU | Version |  64-bit   | 32-bit    |
+|   --:  |         :-:      |   :-:   |    :-:    |    :-:    |
+|Ubuntu  |   x86, Arm       | 18.04   | Supported | Supported |
+|Windows |   x86, Arm       |10 (Server 19) | Supported | Supported |
+|macOS   |       x86        |  10.15  | Supported | Not Supported |
 
 ![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=release)
 
-This open source C library for Linux, Windows and macOS uses **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
+**libplctag** is an open source C library for Linux, Windows and macOS uses **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
 
-Current Stable Version: 2.1
+Current Stable Version: 2.3
 
-Old Stable Version: 2.0
+Old Stable Version: 2.2
 
 ## WARNING - DISCLAIMER
 
 Note: **PLCs control many kinds of equipment and loss of property, production or even life can happen if mistakes in programming or access are made.  Always use caution when accessing or programming PLCs!**
 
-We make no claims or warrants about the suitability of this code for
-any purpose.
+We make no claims or warrants about the suitability of this code for any purpose.
 
 Be careful!
+
+## Get It!
+
+Do you know what you want already?  Download it from the [releases page](https://github.com/libplctag/libplctag/releases)!
 
 ## Features
 
@@ -73,9 +77,9 @@ Be careful!
   - multiple-request support per packet.
   - packet size negotiation with newer firmware (version 20+) and hardware.
   - tag listing, both controller and program tags.
-- support for Rockwell/Allen-Bradley MicroLogix 850 PLCs.
+- support for Rockwell/Allen-Bradley Micro 850 PLCs.
   - Support as for ControlLogix where possible.
-- support for older Rockwell/Allen-Bradley such as PLC5 PLCs (E-series with Ethernet), SLC 500 and MicroLogix with Ethernet via CIP.
+- support for older Rockwell/Allen-Bradley such as PLC-5 PLCs (Ethernet upgraded to support Ethernet/IP), SLC 500 and MicroLogix with Ethernet via CIP.
   - read/write of 16-bit INT.
   - read/write of 32-bit floating point.
   - read/write of arrays of the above (arrays not tested on SLC 500).
@@ -138,7 +142,7 @@ This code reads several 32-bit signed integers (DINT), updates them,
 then writes them back out and rereads them from a tag named TestBigArray
 in a Logix-class Allen-Bradley PLC.
 
-The README file describes some of the more interesting ones.
+The README file in the examples directory describes some of the more interesting ones.
 
 ### API
 
@@ -147,7 +151,7 @@ Most of the functions in the API are for data access.   Direct support for singl
 
 See the [API](https://github.com/libplctag/libplctag/wiki/API) for more information.
 
-## Help Wanted
+## Help Wanted!
 
 We need and welcome help with the following:
 
@@ -158,13 +162,14 @@ We need and welcome help with the following:
 - changes and additions for other PLCs.
 - additional compilers.
 - more language wrappers!
+- patches and updates for existing language wrappers!
 - Testing and more testing!
 
 ### How to Contribute
 
 We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   **We ask that your code contributions to the core library are under the same dual MPL/LGPL license.**
 
-Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch and can also be downloaded from the [releases](https://github.com/libplctag/libplctag/releases) page!  We appreciate all the help we get from our users this way.
+Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch!  We appreciate all the help we get from our users this way.
 
 The easiest way to contribute to the core library is to raise a PR on GitHub.
 
@@ -186,12 +191,12 @@ library, its use, or about one of the wrapper libraries, please join the Google 
 
 The forum is open to all, but is by request only to keep the spammers down.  The traffic is fairly
 light with usually a small number of emails per month.  It is our primary means for users to
-ask questions and for discussions to happen.   Announcements about released happen on the forum.
+ask questions and for discussions to happen.   Announcements about releases happen on the forum.
 
 ### GitHub
 
-If you find bugs or need specific features, please file them on GitHub's issue tracker for
-the project.
+If you find bugs or need specific features, please file them on [GitHub's issue tracker](https://github.com/libplctag/libplctag/issues) for
+the main C library project.  Each individual wrapper project has its own issue tracker.
 
 If needed, we will initiate private communication from there.
 
