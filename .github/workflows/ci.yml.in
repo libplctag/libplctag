@@ -603,7 +603,7 @@ jobs:
 
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_windows_ARM"
+      ARTIFACT: "libplctag_@VERSION@_windows_Arm"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -624,6 +624,36 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
+
+
+  windows_ARM64:
+
+    runs-on: windows-latest
+
+    env:
+      VERSION: "@VERSION@"
+      ARTIFACT: "libplctag_@VERSION@_windows_Arm64_EXPERIMENTAL"
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Create build directory
+      run: mkdir ${{ env.BUILD }}
+
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}
+
 
   ubuntu_cross_build_arm6:
 
@@ -689,6 +719,7 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
+
 
   ubuntu_cross_build_aarch64:
 
