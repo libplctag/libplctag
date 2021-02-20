@@ -13,7 +13,7 @@
     - [How to Get The Code](#how-to-get-the-code)
     - [Example Code](#example-code)
     - [API](#api)
-  - [Help Wanted](#help-wanted)
+  - [Help Wanted!](#help-wanted)
     - [How to Contribute](#how-to-contribute)
   - [History](#history)
   - [Contact and Support](#contact-and-support)
@@ -151,7 +151,7 @@ Most of the functions in the API are for data access.   Direct support for singl
 
 See the [API](https://github.com/libplctag/libplctag/wiki/API) for more information.
 
-## Help Wanted
+## Help Wanted!
 
 We need and welcome help with the following:
 
@@ -169,7 +169,7 @@ We need and welcome help with the following:
 
 We love contributions!   Many users have contributed wrappers, extra functionality and bug fixes over the years.   The library is much better for all the help that users have provided.   **We ask that your code contributions to the core library are under the same dual MPL/LGPL license.**
 
-Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch and can also be downloaded from the [releases](https://github.com/libplctag/libplctag/releases) page!  We appreciate all the help we get from our users this way.
+Testing is difficult for us as we do not have access to all the different hardware out there.   If you can, a great way to contribute is to test prereleases.  These are on the _prerelease_ branch!  We appreciate all the help we get from our users this way.
 
 The easiest way to contribute to the core library is to raise a PR on GitHub.
 
