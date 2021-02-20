@@ -122,9 +122,11 @@ else: # Java or some other
 if library != "":
     lib = ctypes.cdll.LoadLibrary(library)
 
-
 # Create the tag functions below
 
+plcTagCheckLibVersion = defineIntFunc(lib.plc_tag_check_lib_version, [ctypes.c_int, ctypes.c_int, ctypes.c_int])
+plcTagGetIntAttribute = defineIntFunc(lib.plc_tag_get_int_attribute, [ctypes.c_int, ctypes.c_char_p, ctypes.c_int])
+plcTagSetIntAttribute = defineIntFunc(lib.plc_tag_set_int_attribute, [ctypes.c_int, ctypes.c_char_p, ctypes.c_int])
 plcTagDecodeError = defineStringFunc(lib.plc_tag_decode_error, [ctypes.c_int])
 plcTagCreate  = defineIntFunc(lib.plc_tag_create, [ctypes.c_char_p, ctypes.c_int])
 plcTagLock    = defineIntFunc(lib.plc_tag_lock, [ctypes.c_int])
@@ -135,7 +137,6 @@ plcTagRead    = defineIntFunc(lib.plc_tag_read, [ctypes.c_int, ctypes.c_int])
 plcTagStatus  = defineIntFunc(lib.plc_tag_status, [ctypes.c_int])
 plcTagWrite   = defineIntFunc(lib.plc_tag_write, [ctypes.c_int, ctypes.c_int])
 
-
 # Create the tag data accessor functions below:
 
 plcTagGetSize = defineIntFunc(lib.plc_tag_get_size, [ctypes.c_int])
@@ -143,13 +144,6 @@ plcTagGetSize = defineIntFunc(lib.plc_tag_get_size, [ctypes.c_int])
 # create the bit/bool tag data accessors
 plcTagGetBit = defineIntFunc(lib.plc_tag_get_bit, [ctypes.c_int, ctypes.c_int])
 plcTagSetBit = defineIntFunc(lib.plc_tag_set_bit, [ctypes.c_int, ctypes.c_int, ctypes.c_int])
-
-# create the string tag data accessors
-plcTagGetString = defineIntFunc(lib.plc_tag_get_string, [ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_int])
-plcTagSetString = defineIntFunc(lib.plc_tag_set_string, [ctypes.c_int, ctypes.c_int, ctypes.c_char_p])
-plcTagGetStringLength = defineIntFunc(lib.plc_tag_get_string_length, [ctypes.c_int, ctypes.c_int])
-plcTagGetStringCapacity = defineIntFunc(lib.plc_tag_get_string_capacity, [ctypes.c_int, ctypes.c_int])
-plcTagGetStringTotalLength = defineIntFunc(lib.plc_tag_get_string_total_length, [ctypes.c_int, ctypes.c_int])
 
 # create the 64-bit tag data accessors
 plcTagGetInt64 = defineLongFunc(lib.plc_tag_get_int64, [ctypes.c_int, ctypes.c_int])
@@ -170,7 +164,6 @@ plcTagGetInt32  = defineIntFunc(lib.plc_tag_get_int32, [ctypes.c_int, ctypes.c_i
 # Creates IntFunc because it returns int for the result, and sets int for the value
 plcTagSetInt32  = defineIntFunc(lib.plc_tag_set_int32, [ctypes.c_int, ctypes.c_int, ctypes.c_int])
 
-
 # Create the 16-bit tag data accessors
 
 # Creates UShortFunc because it returns a uint16_t type
@@ -183,7 +176,6 @@ plcTagGetInt16  = defineShortFunc(lib.plc_tag_get_int16, [ctypes.c_int, ctypes.c
 # Creates IntFunc because it returns int for the result, but notice it takes a short for the val
 plcTagSetInt16  = defineIntFunc(lib.plc_tag_set_int16, [ctypes.c_int, ctypes.c_int, ctypes.c_short])
 
-
 # Create the 8-bit tag data accessors
 
 # Creates UByteFunc because it returns a uint8_t type
@@ -195,7 +187,6 @@ plcTagSetUInt8 = defineIntFunc(lib.plc_tag_set_uint8, [ctypes.c_int, ctypes.c_in
 plcTagGetInt8  = defineByteFunc(lib.plc_tag_get_int8, [ctypes.c_int, ctypes.c_int])
 # Creates IntFunc because it returns int for the result, but notice it takes a byte for the val
 plcTagSetInt8  = defineIntFunc(lib.plc_tag_set_int8, [ctypes.c_int, ctypes.c_int, ctypes.c_byte])
-
 
 # Create the floating point tag data accessors
 
@@ -226,12 +217,48 @@ plcTagSetFloat32 = defineIntFunc(lib.plc_tag_set_float32, [ctypes.c_int, ctypes.
 # These are implemented in a protocol-specific manner.
 
 
+# plc_tag_check_lib_version
+#
+# Check that the library supports the required API version.
+#
+# PLCTAG_STATUS_OK (0) is returned if the version matches.  If it does not,
+# PLCTAG_ERR_UNSUPPORTED (-35) is returned.
+#
+def plc_tag_check_lib_version(req_major, req_minor, req_patch):
+    return plcTagCheckLibVersion(req_major, req_minor, req_patch)
+
+
+# plc_tag_get_int_attribute
+#
+# Get library attribute by specifying id as follows:
+# for id = 0 the following attributes are available
+# 'version_major', 'version_minor', 'version_patch', 'debug', deprecated 'debug_level'
+# for id = tag_id the following attributes are available
+# 'size', 'read_cache_ms', 'auto_sync_read_ms', 'auto_sync_write_ms'
+#
+def plc_tag_get_int_attribute(id, attrib_name, default_value):
+    return plcTagGetIntAttribute(id, attrib_name, default_value)
+
+
+# plc_tag_set_int_attribute
+#
+# Set library attribute by specifying id as follows:
+# for id = 0 the following attributes are available
+# 'debug', deprecated 'debug_level'
+# for id = tag_id the following attributes are available
+# 'read_cache_ms', 'auto_sync_read_ms', 'auto_sync_write_ms'
+#
+def plc_tag_set_int_attribute(id, attrib_name, new_value):
+    return plcTagSetIntAttribute(id, attrib_name, new_value)
+
+
 # plc_tag_decode_error
 #
 # decode the passed error integer value into a C string.
 #
 def plc_tag_decode_error(errCode):
     return plcTagDecodeError(errCode)
+
 
 # plc_tag_create
 #
@@ -244,8 +271,9 @@ def plc_tag_decode_error(errCode):
 # the status.
 #
 def plc_tag_create(attributeString, timeout):
-    print ("Creating tag with attributes '%s' and timeout %d" % (attributeString, timeout))
-    return plcTagCreate(attributeString.encode(), timeout)
+    #print ("Creating tag with attributes '%s' and timeout %d" % (attributeString, timeout))
+    return plcTagCreate(attributeString, timeout)
+
 
 # plc_tag_lock
 #
@@ -261,6 +289,7 @@ def plc_tag_create(attributeString, timeout):
 def plc_tag_lock(tag):
     return plcTagLock(tag)
 
+
 # plc_tag_unlock
 #
 # The opposite action of plc_tag_unlock.  This allows other threads to access the
@@ -268,6 +297,7 @@ def plc_tag_lock(tag):
 #
 def plc_tag_unlock(tag):
     return plcTagUnlock(tag)
+
 
 # plc_tag_abort
 #
@@ -283,6 +313,7 @@ def plc_tag_unlock(tag):
 def plc_tag_abort(tag):
     return plcTagAbort(tag)
 
+
 # plc_tag_destroy
 #
 # This frees all resources associated with the tag.  Internally, it may result in closed
@@ -292,6 +323,7 @@ def plc_tag_abort(tag):
 #
 def plc_tag_destroy(tag):
     return plcTagDestroy(tag)
+
 
 # plc_tag_read
 #
@@ -305,6 +337,7 @@ def plc_tag_destroy(tag):
 def plc_tag_read(tag, timeout):
     return plcTagRead(tag, timeout)
 
+
 # plc_tag_status
 #
 # Return the current status of the tag.  This will be PLCTAG_STATUS_PENDING if there is
@@ -315,6 +348,7 @@ def plc_tag_read(tag, timeout):
 #
 def plc_tag_status(tag):
     return plcTagStatus(tag)
+
 
 # plc_tag_write
 #
@@ -335,23 +369,16 @@ def plc_tag_write(tag, timeout):
 def plc_tag_get_size(tag):
     return plcTagGetSize(tag)
 
-# String
-def plc_tag_get_string(tag, string_start_offset, char_buffer, buffer_length):
-    return plcTagGetString(tag, string_start_offset, char_buffer, buffer_length)
+# bit/bool
 
-def plc_tag_set_string(tag, string_start_offset, string_value):
-    return plcTagSetString(tag, string_start_offset, string_value)
+def plc_tag_get_bit(tag, offset):
+    return plcTagGetBit(tag, offset)
 
-def plc_tag_get_string_length(tag, string_start_offset):
-    return plcTagGetStringLength(tag, string_start_offset)
-
-def plc_tag_get_string_capacity(tag, string_start_offset):
-    return plcTagGetStringCapacity(tag, string_start_offset)
-
-def plc_tag_get_string_total_length(tag, string_start_offset):
-    return plcTagGetStringTotalLength(tag, string_start_offset)
+def plc_tag_set_bit(tag, offset, value):
+    return plcTagSetBit(tag, offset, value)
 
 # 64-bit
+
 def plc_tag_get_uint64(tag, offset):
     return plcTagGetUInt64(tag, offset)
 
@@ -363,8 +390,6 @@ def plc_tag_get_int64(tag, offset):
 
 def plc_tag_set_int64(tag, offset, value):
     return plcTagSetInt64(tag, offset, value)
-
-
 
 # 32-bit
 
@@ -408,7 +433,6 @@ def plc_tag_get_int8(tag, offset):
 def plc_tag_set_int8(tag, offset, value):
     return plcTagSetInt8(tag, offset, value)
 
-
 # Floating point (real)
 
 def plc_tag_get_float64(tag, offset):
@@ -423,4 +447,27 @@ def plc_tag_get_float32(tag, offset):
 def plc_tag_set_float32(tag, offset, value):
     return plcTagSetFloat32(tag, offset, value)
 
+# String, library dependent
 
+if plc_tag_check_lib_version(2, 2, 0) == 0:
+    # create the string tag data accessors
+    plcTagGetString = defineIntFunc(lib.plc_tag_get_string, [ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_int])
+    plcTagSetString = defineIntFunc(lib.plc_tag_set_string, [ctypes.c_int, ctypes.c_int, ctypes.c_char_p])
+    plcTagGetStringLength = defineIntFunc(lib.plc_tag_get_string_length, [ctypes.c_int, ctypes.c_int])
+    plcTagGetStringCapacity = defineIntFunc(lib.plc_tag_get_string_capacity, [ctypes.c_int, ctypes.c_int])
+    plcTagGetStringTotalLength = defineIntFunc(lib.plc_tag_get_string_total_length, [ctypes.c_int, ctypes.c_int])
+
+    def plc_tag_get_string(tag, string_start_offset, char_buffer, buffer_length):
+        return plcTagGetString(tag, string_start_offset, char_buffer, buffer_length)
+
+    def plc_tag_set_string(tag, string_start_offset, string_value):
+        return plcTagSetString(tag, string_start_offset, string_value)
+
+    def plc_tag_get_string_length(tag, string_start_offset):
+        return plcTagGetStringLength(tag, string_start_offset)
+
+    def plc_tag_get_string_capacity(tag, string_start_offset):
+        return plcTagGetStringCapacity(tag, string_start_offset)
+
+    def plc_tag_get_string_total_length(tag, string_start_offset):
+        return plcTagGetStringTotalLength(tag, string_start_offset)
