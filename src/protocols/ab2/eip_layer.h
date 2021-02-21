@@ -36,14 +36,6 @@
 #include <util/attr.h>
 #include <util/plc.h>
 
-// typedef struct eip_s *eip_p;
-
-// struct eip_request_s {
-//     struct protocol_request_s protocol_request;
-// };
-
-// extern protocol_p eip_get(attr attribs);
-
 extern int eip_layer_setup(plc_p plc, int layer_index, attr attribs);
 
 
