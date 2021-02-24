@@ -61,8 +61,8 @@ struct tag_vtable_t plc5_vtable = {
 };
 
 
-/* default string types used for ControlLogix-class PLCs. */
-tag_byte_order_t pccc_tag_byte_order = {
+/* default string types used for PLC-5 PLCs. */
+tag_byte_order_t plc5_tag_byte_order = {
     .is_allocated = 0,
 
     .int16_order = {0,1},

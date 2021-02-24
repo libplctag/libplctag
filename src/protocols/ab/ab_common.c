@@ -297,7 +297,7 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->vtable = &eip_plc5_dhp_vtable;
         }
 
-        tag->byte_order = &pccc_tag_byte_order;
+        tag->byte_order = &plc5_tag_byte_order;
 
         tag->allow_packing = 0;
         break;
@@ -319,7 +319,7 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->vtable = &eip_slc_dhp_vtable;
         }
 
-        tag->byte_order = &pccc_tag_byte_order;
+        tag->byte_order = &slc_tag_byte_order;
 
         tag->allow_packing = 0;
         break;
@@ -330,7 +330,7 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->allow_packing = 0;
         tag->vtable = &lgx_pccc_vtable;
 
-        tag->byte_order = &pccc_tag_byte_order;
+        tag->byte_order = &slc_tag_byte_order;
 
         break;
 

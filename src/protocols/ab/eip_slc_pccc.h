@@ -39,4 +39,5 @@
 
 /* SLC */
 extern struct tag_vtable_t slc_vtable;
+extern tag_byte_order_t slc_tag_byte_order;
 
