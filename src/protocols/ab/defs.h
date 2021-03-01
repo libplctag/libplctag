@@ -143,16 +143,16 @@
 
 /* base data type byte values */
 #define AB_CIP_DATA_BIT         ((uint8_t)0xC1) /* Boolean value, 1 bit */
-#define AB_CIP_DATA_SINT        ((uint8_t)0xC2) /* Signed 8–bit integer value */
-#define AB_CIP_DATA_INT         ((uint8_t)0xC3) /* Signed 16–bit integer value */
-#define AB_CIP_DATA_DINT        ((uint8_t)0xC4) /* Signed 32–bit integer value */
-#define AB_CIP_DATA_LINT        ((uint8_t)0xC5) /* Signed 64–bit integer value */
-#define AB_CIP_DATA_USINT       ((uint8_t)0xC6) /* Unsigned 8–bit integer value */
-#define AB_CIP_DATA_UINT        ((uint8_t)0xC7) /* Unsigned 16–bit integer value */
-#define AB_CIP_DATA_UDINT       ((uint8_t)0xC8) /* Unsigned 32–bit integer value */
-#define AB_CIP_DATA_ULINT       ((uint8_t)0xC9) /* Unsigned 64–bit integer value */
-#define AB_CIP_DATA_REAL        ((uint8_t)0xCA) /* 32–bit floating point value, IEEE format */
-#define AB_CIP_DATA_LREAL       ((uint8_t)0xCB) /* 64–bit floating point value, IEEE format */
+#define AB_CIP_DATA_SINT        ((uint8_t)0xC2) /* Signed 8-bit integer value */
+#define AB_CIP_DATA_INT         ((uint8_t)0xC3) /* Signed 16-bit integer value */
+#define AB_CIP_DATA_DINT        ((uint8_t)0xC4) /* Signed 32-bit integer value */
+#define AB_CIP_DATA_LINT        ((uint8_t)0xC5) /* Signed 64-bit integer value */
+#define AB_CIP_DATA_USINT       ((uint8_t)0xC6) /* Unsigned 8-bit integer value */
+#define AB_CIP_DATA_UINT        ((uint8_t)0xC7) /* Unsigned 16-bit integer value */
+#define AB_CIP_DATA_UDINT       ((uint8_t)0xC8) /* Unsigned 32-bit integer value */
+#define AB_CIP_DATA_ULINT       ((uint8_t)0xC9) /* Unsigned 64-bit integer value */
+#define AB_CIP_DATA_REAL        ((uint8_t)0xCA) /* 32-bit floating point value, IEEE format */
+#define AB_CIP_DATA_LREAL       ((uint8_t)0xCB) /* 64-bit floating point value, IEEE format */
 #define AB_CIP_DATA_STIME       ((uint8_t)0xCC) /* Synchronous time value */
 #define AB_CIP_DATA_DATE        ((uint8_t)0xCD) /* Date value */
 #define AB_CIP_DATA_TIME_OF_DAY ((uint8_t)0xCE) /* Time of day value */

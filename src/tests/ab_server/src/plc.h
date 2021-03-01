@@ -40,22 +40,22 @@
 typedef uint16_t tag_type_t;
 
 /* CIP data types. */
-#define TAG_CIP_TYPE_SINT        ((tag_type_t)0x00C2) /* Signed 8–bit integer value */
-#define TAG_CIP_TYPE_INT         ((tag_type_t)0x00C3) /* Signed 16–bit integer value */
-#define TAG_CIP_TYPE_DINT        ((tag_type_t)0x00C4) /* Signed 32–bit integer value */
-#define TAG_CIP_TYPE_LINT        ((tag_type_t)0x00C5) /* Signed 64–bit integer value */
-#define TAG_CIP_TYPE_USINT       ((tag_type_t)0x00C6) /* Unsigned 8–bit integer value */
-#define TAG_CIP_TYPE_UINT        ((tag_type_t)0x00C7) /* Unsigned 16–bit integer value */
-#define TAG_CIP_TYPE_UDINT       ((tag_type_t)0x00C8) /* Unsigned 32–bit integer value */
-#define TAG_CIP_TYPE_ULINT       ((tag_type_t)0x00C9) /* Unsigned 64–bit integer value */
-#define TAG_CIP_TYPE_REAL        ((tag_type_t)0x00CA) /* 32–bit floating point value, IEEE format */
-#define TAG_CIP_TYPE_LREAL       ((tag_type_t)0x00CB) /* 64–bit floating point value, IEEE format */
+#define TAG_CIP_TYPE_SINT        ((tag_type_t)0x00C2) /* Signed 8-bit integer value */
+#define TAG_CIP_TYPE_INT         ((tag_type_t)0x00C3) /* Signed 16-bit integer value */
+#define TAG_CIP_TYPE_DINT        ((tag_type_t)0x00C4) /* Signed 32-bit integer value */
+#define TAG_CIP_TYPE_LINT        ((tag_type_t)0x00C5) /* Signed 64-bit integer value */
+#define TAG_CIP_TYPE_USINT       ((tag_type_t)0x00C6) /* Unsigned 8-bit integer value */
+#define TAG_CIP_TYPE_UINT        ((tag_type_t)0x00C7) /* Unsigned 16-bit integer value */
+#define TAG_CIP_TYPE_UDINT       ((tag_type_t)0x00C8) /* Unsigned 32-bit integer value */
+#define TAG_CIP_TYPE_ULINT       ((tag_type_t)0x00C9) /* Unsigned 64-bit integer value */
+#define TAG_CIP_TYPE_REAL        ((tag_type_t)0x00CA) /* 32-bit floating point value, IEEE format */
+#define TAG_CIP_TYPE_LREAL       ((tag_type_t)0x00CB) /* 64-bit floating point value, IEEE format */
 #define TAG_CIP_TYPE_STRING      ((tag_type_t)0x00D0) /* 88-byte string, with 82 bytes of data, 4-byte count and 2 bytes of padding */
 
 /* PCCC data types.   FIXME */
-#define TAG_PCCC_TYPE_INT         ((uint8_t)0x89) /* Signed 16–bit integer value */
-#define TAG_PCCC_TYPE_DINT        ((uint8_t)0x91) /* Signed 32–bit integer value */
-#define TAG_PCCC_TYPE_REAL        ((uint8_t)0x8a) /* 32–bit floating point value, IEEE format */
+#define TAG_PCCC_TYPE_INT         ((uint8_t)0x89) /* Signed 16-bit integer value */
+#define TAG_PCCC_TYPE_DINT        ((uint8_t)0x91) /* Signed 32-bit integer value */
+#define TAG_PCCC_TYPE_REAL        ((uint8_t)0x8a) /* 32-bit floating point value, IEEE format */
 #define TAG_PCCC_TYPE_STRING      ((uint8_t)0x8d) /* 82-byte string with 2-byte count word. */
 
 struct tag_def_s {

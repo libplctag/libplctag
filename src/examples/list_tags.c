@@ -556,16 +556,16 @@ void print_element_type(uint16_t element_type)
 
         switch(atomic_type) {
             case 0xC1: type = "BOOL: Boolean value"; break;
-            case 0xC2: type = "SINT: Signed 8–bit integer value"; break;
-            case 0xC3: type = "INT: Signed 16–bit integer value"; break;
-            case 0xC4: type = "DINT: Signed 32–bit integer value"; break;
-            case 0xC5: type = "LINT: Signed 64–bit integer value"; break;
-            case 0xC6: type = "USINT: Unsigned 8–bit integer value"; break;
-            case 0xC7: type = "UINT: Unsigned 16–bit integer value"; break;
-            case 0xC8: type = "UDINT: Unsigned 32–bit integer value"; break;
-            case 0xC9: type = "ULINT: Unsigned 64–bit integer value"; break;
-            case 0xCA: type = "32–bit floating point value, IEEE format"; break;
-            case 0xCB: type = "64–bit floating point value, IEEE format"; break;
+            case 0xC2: type = "SINT: Signed 8-bit integer value"; break;
+            case 0xC3: type = "INT: Signed 16-bit integer value"; break;
+            case 0xC4: type = "DINT: Signed 32-bit integer value"; break;
+            case 0xC5: type = "LINT: Signed 64-bit integer value"; break;
+            case 0xC6: type = "USINT: Unsigned 8-bit integer value"; break;
+            case 0xC7: type = "UINT: Unsigned 16-bit integer value"; break;
+            case 0xC8: type = "UDINT: Unsigned 32-bit integer value"; break;
+            case 0xC9: type = "ULINT: Unsigned 64-bit integer value"; break;
+            case 0xCA: type = "32-bit floating point value, IEEE format"; break;
+            case 0xCB: type = "64-bit floating point value, IEEE format"; break;
             case 0xCC: type = "Synchronous time value"; break;
             case 0xCD: type = "Date value"; break;
             case 0xCE: type = "Time of day value"; break;
