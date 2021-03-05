@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_ubuntu_x64"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -22,7 +22,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Set up build environment
-      run: sudo apt install build-essential cmake
+      run: sudo apt update; sudo apt install build-essential cmake
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -124,8 +124,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_ubuntu_x86"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -235,8 +235,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_macos_x64"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -342,8 +342,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_windows_x64"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
 
@@ -457,8 +457,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_windows_x86"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -572,8 +572,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_windows_Arm"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_windows_Arm"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -601,8 +601,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_windows_Arm64_EXPERIMENTAL"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_windows_Arm64_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -630,8 +630,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_linux_arm6hf_EXPERIMENTAL"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_linux_arm6hf_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -640,7 +640,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Set up build environment
-      run: sudo apt install build-essential cmake crossbuild-essential-armhf
+      run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -663,8 +663,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_linux_arm7l_EXPERIMENTAL"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_linux_arm7l_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -673,7 +673,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Set up build environment
-      run: sudo apt install build-essential cmake crossbuild-essential-armhf
+      run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -696,8 +696,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.3.4"
-      ARTIFACT: "libplctag_2.3.4_linux_aarch64_EXPERIMENTAL"
+      VERSION: "2.3.5"
+      ARTIFACT: "libplctag_2.3.5_linux_aarch64_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -706,7 +706,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Set up build environment
-      run: sudo apt install build-essential cmake crossbuild-essential-arm64
+      run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-arm64
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
