@@ -38,7 +38,7 @@ set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 2.8...3.19)
 
 # prevent expansion of quoted things that could be variables in if()
 if(${CMAKE_VERSION} VERSION_GREATER 3.1)
@@ -140,6 +140,10 @@ if (${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
 endif()
 
+# set flags for MacOSX
+if (APPLE)
+    set(CMAKE_MACOSX_RPATH ON)
+endif (APPLE)
 
 # default setting for 32-bit builds
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
@@ -164,6 +168,7 @@ set ( mb_SRC_PATH "${protocol_SRC_PATH}/mb" )
 set ( util_SRC_PATH "${base_SRC_PATH}/util" )
 set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
+set ( cli_SRC_PATH "${base_SRC_PATH}/cli" )
 
 # OS-specific files for the platform code.
 # FIXME - does this work for macOS?
@@ -524,6 +529,32 @@ else()
             set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
         endif()
     # endif()
+
+    # make sure the .h file is in the output directory
+    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+endif(ANDROID_BUILD)
+
+# add the cli
+# add the examples and tests
+if(ANDROID_BUILD)
+    MESSAGE("Building for Android.")
+else()
+    # build the cli.
+    set(CLI_FILES       ${cli_SRC_PATH}/cli.c
+                        ${cli_SRC_PATH}/cli.h
+    )
+
+    foreach(CLI_FILES ${CLI_FILES})
+        set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+    endforeach()
+
+    add_executable(cli ${CLI_FILES})
+
+    target_link_libraries(cli ${example_LIBRARIES} )
+
+    if(BASE_LINK_FLAGS)
+        set_target_properties(cli PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+    endif()
 
     # make sure the .h file is in the output directory
     CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
