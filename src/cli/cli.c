@@ -10,17 +10,20 @@ tag_array_t tags = {NULL};
 
 void parse_args(int argc, char *argv[], request_t *request)
 {
-    if (argc != 3) {
+    if (argc < 3) {
         printf("ERROR: invalid number of arguments!\n");
         return;
     }
 
     char *operation = argv[1];
-    char *args = argv[2];
+    char *arg_ip = argv[2];
 
     if (!strcmp(operation, "--read")) {
         request->operation = CLI_READ_OPERATION;
     } else if (!strcmp(operation, "--watch")) {
+        char *arg_ms = argv[3];
+        strtok(arg_ms, "=");
+        request->interval = strtok(NULL, "=");
         request->operation = CLI_WATCH_OPERATION;
     } else if (!strcmp(operation, "--write")) {
         request->operation = CLI_WRITE_OPERATION;
@@ -29,7 +32,7 @@ void parse_args(int argc, char *argv[], request_t *request)
         return;
     }
 
-    strtok(args, "=");
+    strtok(arg_ip, "=");
     request->ip = strtok(NULL, "=");
 
     return;    
@@ -108,7 +111,7 @@ void write_tags(platform_t *platform)
         if (quit != 1) {
             if (line[0] != '#') {
                 tag_t tag = {NULL};
-                
+
                 tag.id = (char *) malloc(100);
                 tag.type = (char *) malloc(100);
                 tag.write_value = (char *) malloc(100);
@@ -221,13 +224,6 @@ void do_tag_get(int32_t tag_handle) {
     char *tag_id = tags.tag_array[tag_handle].id;
     char *val_str;
     int val_str_length;
-
-    printf("tag.id=%s\ntag.type=%s\n", tag_id, tag_type);
-    printf("tag.path=%s\n", tags.tag_array[tag_handle].path);
-    printf("tag.watch=%d\n", tags.tag_array[tag_handle].watch);
-    printf("tag.handle=%d\n", tags.tag_array[tag_handle].handle);
-    printf("tag.last_value=%s\n", tags.tag_array[tag_handle].last_value);
-    printf("tag.write_value=%s\n", tags.tag_array[tag_handle].write_value);
 
     if (!strcmp(tag_type, "uint64")) {
         uint64_t val = plc_tag_get_uint64(tag_handle, 0);
@@ -627,7 +623,7 @@ int main(int argc, char *argv[])
     platform.path = "1,0";
     platform.plc = "controllogix";
     platform.debug = "2";
-    platform.sync_interval = "5000";
+    platform.sync_interval = request.interval;
 
     if(plc_tag_check_lib_version(LIBPLCTAG_REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         printf("ERROR: Required compatible library version %d.%d.%d not available!\n", LIBPLCTAG_REQUIRED_VERSION);

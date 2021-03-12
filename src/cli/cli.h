@@ -24,6 +24,7 @@
 typedef struct request_s {
     int operation;
     char *ip;
+    char *interval;
 } request_t; 
 
 typedef struct platform_s {
