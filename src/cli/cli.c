@@ -54,7 +54,7 @@ int get_stdin_l(char *line)
     return quit;
 }
 
-void read(platform_t *platform, bool watch)
+void read_tags(platform_t *platform, bool watch)
 {
     char *line;
     int quit;
@@ -89,7 +89,7 @@ void read(platform_t *platform, bool watch)
     return;
 }
 
-void write(platform_t *platform)
+void write_tags(platform_t *platform)
 {
     char *line;
     int quit;
@@ -619,13 +619,13 @@ int main(int argc, char *argv[])
 
     switch (request.operation) {
         case CLI_READ_OPERATION:
-            read(&platform, false);
+            read_tags(&platform, false);
             break;
         case CLI_WATCH_OPERATION:
-            read(&platform, true);
+            read_tags(&platform, true);
             break;
         case CLI_WRITE_OPERATION:
-            write(&platform);
+            write_tags(&platform);
             break;
         default:
             break;
