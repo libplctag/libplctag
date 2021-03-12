@@ -210,6 +210,13 @@ void do_tag_get(int32_t tag_handle) {
     char *val_str;
     int val_str_length;
 
+    printf("tag.id=%s\ntag.type=%s\n", tag_id, tag_type);
+    printf("tag.path=%s\n", tags.tag_array[tag_handle].path);
+    printf("tag.watch=%d\n", tags.tag_array[tag_handle].watch);
+    printf("tag.handle=%d\n", tags.tag_array[tag_handle].handle);
+    printf("tag.last_value=%s\n", tags.tag_array[tag_handle].last_value);
+    printf("tag.write_value=%s\n", tags.tag_array[tag_handle].write_value);
+
     if (!strcmp(tag_type, "uint64")) {
         uint64_t val = plc_tag_get_uint64(tag_handle, 0);
         // check if process_tag_get works here!
