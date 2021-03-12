@@ -61,17 +61,21 @@ void read_tags(platform_t *platform, bool watch)
     tag_t tag = {NULL};
     
     line = (char *) malloc(1024);
+    tag.id = (char *) malloc(100);
+    tag.type = (char *) malloc(100);
+    tag.path = (char *) malloc(100);
 
     do {
         quit = get_stdin_l(line);
         
         if (quit != 1) {
             if (line[0] != '#') {
-                tag.id = strtok(line, ",");
-                tag.type = strtok(NULL, ",");
-                tag.path = strtok(strtok(NULL, ","), "\n");
+                strcpy(tag.id, strtok(line, ","));
+                strcpy(tag.type, strtok(NULL, ","));
+                strcpy(tag.path, strtok(strtok(NULL, ","), "\n"));
                 tag.watch = watch;
                 tag.last_value = NULL;
+                tag.write_value = NULL;
                 
                 if (!tag.id || !tag.type || !tag.path) {
                     printf("ERROR: invalid input.\n");
@@ -96,16 +100,20 @@ void write_tags(platform_t *platform)
     tag_t tag = {NULL};
     
     line = (char *) malloc(1024);
+    tag.id = (char *) malloc(100);
+    tag.type = (char *) malloc(100);
+    tag.write_value = (char *) malloc(100);
+    tag.path = (char *) malloc(100);
 
     do {
         quit = get_stdin_l(line);
         
         if (quit != 1) {
             if (line[0] != '#') {
-                tag.id = strtok(line, ",");
-                tag.type = strtok(NULL, ",");
-                tag.write_value = strtok(NULL, ",");
-                tag.path = strtok(strtok(NULL, ","), "\n");
+                strcpy(tag.id, strtok(line, ","));
+                strcpy(tag.type, strtok(NULL, ","));
+                strcpy(tag.write_value, strtok(NULL, ","));
+                strcpy(tag.path, strtok(strtok(NULL, ","), "\n"));
                 tag.watch = false;
                 tag.last_value = NULL;
                 
