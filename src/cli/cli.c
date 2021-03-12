@@ -76,7 +76,7 @@ void read_tags(platform_t *platform, bool watch)
                 if (!tag.id || !tag.type || !tag.path) {
                     printf("ERROR: invalid input.\n");
                 } else {
-                    create_tag(platform, &tag, READ_SYNC);
+                    create_tag(platform, tag, READ_SYNC);
                 }
             }
         }
@@ -112,7 +112,7 @@ void write_tags(platform_t *platform)
                 if (!tag.id || !tag.type || !tag.path || !tag.write_value) {
                     printf("ERROR: invalid input.\n");
                 } else {
-                    create_tag(platform, &tag, WRITE_SYNC);
+                    create_tag(platform, tag, WRITE_SYNC);
                 }
             }
         }
@@ -125,7 +125,7 @@ void write_tags(platform_t *platform)
     return;
 }
 
-void create_tag(platform_t *platform, tag_t *tag, int sync_type) {
+void create_tag(platform_t *platform, tag_t tag, int sync_type) {
     char *tag_path = (char *) malloc(1024);
     int rc;
     int tag_path_size;
@@ -133,11 +133,11 @@ void create_tag(platform_t *platform, tag_t *tag, int sync_type) {
     switch (sync_type) {
         case READ_SYNC:
             tag_path_size = sprintf(tag_path, AB_TAG_PATH_READ_SYNC, platform->protocol, platform->gateway, 
-                platform->path, platform->plc, platform->debug, platform->sync_interval, tag->path);
+                platform->path, platform->plc, platform->debug, platform->sync_interval, tag.path);
             break;
         case WRITE_SYNC:
             tag_path_size = sprintf(tag_path, AB_TAG_PATH_WRITE_SYNC, platform->protocol, platform->gateway, 
-                platform->path, platform->plc, platform->debug, "50", tag->path);
+                platform->path, platform->plc, platform->debug, "50", tag.path);
             break;
         default:
             printf("ERROR: Invalid tag sync_type.\n");
@@ -147,21 +147,21 @@ void create_tag(platform_t *platform, tag_t *tag, int sync_type) {
     tag_path = realloc(tag_path, tag_path_size);
 
     printf("%s\n", tag_path);
-    tag->handle = plc_tag_create(tag_path, DATA_TIMEOUT);
-    if(tag->handle < 0) {
-        printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag->handle));
+    tag.handle = plc_tag_create(tag_path, DATA_TIMEOUT);
+    if(tag.handle < 0) {
+        printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag.handle));
         free(tag_path);
         return;
     }
 
-    add_tag_to_array(&tags, *tag);
+    add_tag_to_array(&tags, tag);
 
     switch (sync_type) {
         case READ_SYNC:
-            rc = plc_tag_register_callback(tag->handle, tag_read_callback);
+            rc = plc_tag_register_callback(tag.handle, tag_read_callback);
             break;
         case WRITE_SYNC:
-            rc = plc_tag_register_callback(tag->handle, tag_write_callback);
+            rc = plc_tag_register_callback(tag.handle, tag_write_callback);
             break;
         default:
             printf("ERROR: Invalid tag sync_type.\n");
@@ -169,7 +169,7 @@ void create_tag(platform_t *platform, tag_t *tag, int sync_type) {
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        plc_tag_destroy(tag->handle);
+        plc_tag_destroy(tag.handle);
         free(tag_path);
         return;
     }

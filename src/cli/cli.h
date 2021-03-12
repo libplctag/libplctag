@@ -58,7 +58,7 @@ void parse_args(int argc, char *argv[], request_t *request);
 int get_stdin_l(char *line);
 void read_tags(platform_t *platform,  bool watch);
 void write_tags(platform_t *platform);
-void create_tag(platform_t *platform, tag_t *tag, int sync_type);
+void create_tag(platform_t *platform, tag_t tag, int sync_type);
 void tag_read_callback(int32_t tag_handle, int event, int status);
 void do_tag_get(int32_t tag_handle);
 void process_tag_get(int32_t tag_handlde, char *tag_id, void *val, char *type_modifier);
