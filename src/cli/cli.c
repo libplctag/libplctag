@@ -362,7 +362,7 @@ void do_tag_get(int32_t tag_handle) {
             }
         }
     } else if (!strcmp(tag_type, "bool")) {
-        int val = plc_tag_get_bit(tag_handle, 0);
+        int val = plc_tag_get_uint8(tag_handle, 0);
         if (val) {
             val_str_length = snprintf(NULL, 0, "true");
             val_str = (char *) malloc(val_str_length + 1);
@@ -513,7 +513,7 @@ void do_tag_set(int32_t tag_handle) {
         } else {
             val = 0;
         }
-        plc_tag_set_bit(tag_handle, 0, val);
+        plc_tag_set_uint8(tag_handle, 0, val);
     } else {
         printf("ERROR: Invalid tag type referenced!\n");
         return;
