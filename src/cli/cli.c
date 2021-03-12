@@ -149,7 +149,7 @@ void create_tag(platform_t *platform, tag_t *tag, int sync_type) {
     printf("%s\n", tag_path);
     tag->handle = plc_tag_create(tag_path, DATA_TIMEOUT);
     if(tag->handle < 0) {
-        printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(rc));
+        printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag->handle));
         free(tag_path);
         return;
     }
@@ -559,7 +559,7 @@ void init_tag_array(tag_array_t *tag_array, size_t size) {
 void add_tag_to_array(tag_array_t *tag_array, tag_t tag) {
     size_t prev_size = tag_array->size;
     size_t new_size;
-    int i;
+    size_t i;
 
     if (tag.handle > tag_array->size - 1) {
         new_size = tag.handle + 1;
