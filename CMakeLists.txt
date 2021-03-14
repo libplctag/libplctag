@@ -543,6 +543,7 @@ else()
     set(CLI_FILES       ${cli_SRC_PATH}/cli.c
                         ${cli_SRC_PATH}/cli.h
                         ${cli_SRC_PATH}/getline.c
+                        ${cli_SRC_PATH}/uthash.h
     )
 
     foreach(CLI_FILES ${CLI_FILES})

@@ -1,69 +1,81 @@
 #pragma once
 
-#include <platform.h>
+#include "./uthash.h"
 
 /* cli requirements */
 #define LIBPLCTAG_REQUIRED_VERSION 2,1,4
 
+/* tag paths */
+#define TAG_PATH                  "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&name=%s"
+#define TAG_PATH_AUTO_READ_SYNC   "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&auto_sync_read_ms=%d&name=%s"
+#define DATA_TIMEOUT              5000
+
 /* cli operations */
-#define CLI_INVALID_OPERATION      (-1)
-#define CLI_READ_OPERATION          (0)
-#define CLI_WATCH_OPERATION         (1)
-#define CLI_WRITE_OPERATION         (2)
+typedef enum {
+    READ,
+    WRITE,
+    WATCH
+} cli_operation_t;
 
-/* tag sync type */
-#define READ_SYNC               (0)
-#define WRITE_SYNC              (1)
+/* cli request definition */
+typedef struct {
+    const char *protocol;
+    const char *ip;
+    const char *path;
+    const char *plc;
+    cli_operation_t operation;
+    int interval;
+    int debug_level;
+} cli_request_t;
 
-/* platform specifics */
-#define AB_TAG_PATH             "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%s&name=%s"
-#define AB_TAG_PATH_READ_SYNC   "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%s&auto_sync_read_ms=%s&name=%s"
-#define AB_TAG_PATH_WRITE_SYNC  "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%s&auto_sync_write_ms=%s&name=%s"
-#define DATA_TIMEOUT            0
+/* data types */
+typedef enum {
+    UINT64, INT64,
+    UINT32, INT32,
+    UINT16, INT16,
+    UINT8, INT8, 
+    FLOAT64, FLOAT32, 
+    BOOL 
+} data_type_t;
 
-typedef struct request_s {
-    int operation;
-    char *ip;
-    char *interval;
-} request_t; 
-
-typedef struct platform_s {
-    char *protocol;
-    char *gateway;
-    char *path;
-    char *plc;
-    char *debug;
-    char *sync_interval;
-} platform_t;
-
-typedef struct tag_s {
-    char *id;
-    char *type;
-    char *path;
-    bool watch;
-    int32_t handle;
-    char *last_value;
-    char *write_value;
+/* tag definition */
+typedef struct {
+    int id;
+    data_type_t type;
+    const char *name;
+    union {
+        uint64_t UINT64_val;
+        int64_t INT64_val;
+        uint32_t UINT32_val;
+        int32_t INT32_val;
+        uint16_t UINT16_val;
+        int16_t INT16_val;
+        uint8_t UINT8_val;
+        int8_t INT8_val;
+        double FLOAT64_val;
+        float FLOAT32_val;
+        bool BOOL_val;
+    } val, last_val, write_val;
 } tag_t;
 
-typedef struct tag_array_s {
-    tag_t *tag_array;
-    size_t size;
-} tag_array_t;
+/* tags hash definition */
+struct tags {
+    int tag_handle;
+    tag_t tag;
+    UT_hash_handle hh;
+};
 
-void init_tag_array(tag_array_t *tag_array, size_t size);
-void add_tag_to_array(tag_array_t *tag_array, tag_t tag);
-void free_tag_array(tag_array_t *tag_array);
-
-void parse_args(int argc, char *argv[], request_t *request);
-int get_stdin_l(char *line);
-void read_tags(platform_t *platform,  bool watch);
-void write_tags(platform_t *platform);
-void create_tag(platform_t *platform, tag_t tag, int sync_type);
-void tag_read_callback(int32_t tag_handle, int event, int status);
-void do_tag_get(int32_t tag_handle);
-void process_tag_get(int32_t tag_handlde, char *tag_id, void *val, char *type_modifier);
-void tag_write_callback(int32_t tag_handle, int event, int status);
-void do_tag_set(int32_t tag_handle);
-void destroy_tags(tag_array_t *tag_array);
-void destroy_tag(int32_t tag_handle);
+void usage(void);
+int parse_args(int argc, char *argv[]);
+void print_request();
+int process_tags();
+int is_comment(const char *line);
+void trim_line(char *line);
+char **split_string(const char *str, const char *sep);
+int process_line(const char *line, tag_t *tag);
+void add_tag(int32_t tag_handle, tag_t tag);
+int check_tags(void);
+int get_tag(int32_t tag_handle, tag_t tag, int offset);
+int read_tags(void);
+int write_tags(void);
+int watch_tags(void);
