@@ -35,11 +35,11 @@ int parse_args(int argc, char *argv[])
     int i = 0;
 
     char *operation = argv[++i];
-    if (!strcasecmp(operation, "--read")) {
+    if (!strcmp(operation, "--read")) {
         cli_request.operation = READ;
-    } else if (!strcasecmp(operation, "--write")) {
+    } else if (!strcmp(operation, "--write")) {
         cli_request.operation = WRITE;
-    } else if (!strcasecmp(operation, "--watch")) {
+    } else if (!strcmp(operation, "--watch")) {
          cli_request.operation = WATCH;
     } else {
         fprintf(stderr, "ERROR: invalid PLC operation.\n");
@@ -53,17 +53,17 @@ int parse_args(int argc, char *argv[])
         param = strtok(argv[i], "="); 
         val = strtok(NULL, "=");
 
-        if (!strcasecmp(param, "-protocol")) {
+        if (!strcmp(param, "-protocol")) {
             cli_request.protocol = val;
-        } else if (!strcasecmp(param, "-ip")) {
+        } else if (!strcmp(param, "-ip")) {
             cli_request.ip = val;
-        } else if (!strcasecmp(param, "-path")) {
+        } else if (!strcmp(param, "-path")) {
             cli_request.path = val; 
-        } else if (!strcasecmp(param, "-plc")) {
+        } else if (!strcmp(param, "-plc")) {
             cli_request.plc = val;
-        } else if (!strcasecmp(param, "-debug")) {
+        } else if (!strcmp(param, "-debug")) {
             sscanf(val, "%d", &cli_request.debug_level);
-        } else if (!strcasecmp(param, "-interval")) {
+        } else if (!strcmp(param, "-interval")) {
             sscanf(val, "%d", &cli_request.interval);
         } else {
             fprintf(stderr, "ERROR: invalid PLC parameter: %s.\n", param);
@@ -221,60 +221,60 @@ int process_line(const char *line, tag_t *tag)
     /* setup all the associated tag values here. */
     tag->id = atoi(parts[0]);
 
-    if(!strcasecmp("uint64", parts[1])) {
+    if(!strcmp("uint64", parts[1])) {
         tag->type = UINT64;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu64, &tag->write_val.UINT64_val);
         }
-    } else if(!strcasecmp("int64", parts[1])) {
+    } else if(!strcmp("int64", parts[1])) {
         tag->type = INT64;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi64, &tag->write_val.INT64_val); 
         }
-    } else if(!strcasecmp("uint32", parts[1])) {
+    } else if(!strcmp("uint32", parts[1])) {
         tag->type = UINT32;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu32, &tag->write_val.UINT32_val);
         }
-    } else if(!strcasecmp("int32", parts[1])) {
+    } else if(!strcmp("int32", parts[1])) {
         tag->type = INT32;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi32, &tag->write_val.INT32_val);
         }
-    } else if(!strcasecmp("uint16", parts[1])) {
+    } else if(!strcmp("uint16", parts[1])) {
         tag->type = UINT16;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu16, &tag->write_val.UINT16_val);
         }
-    } else if(!strcasecmp("int16", parts[1])) {
+    } else if(!strcmp("int16", parts[1])) {
         tag->type = INT16;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi16, &tag->write_val.INT16_val); 
         }
-    } else if(!strcasecmp("uint8", parts[1])) {
+    } else if(!strcmp("uint8", parts[1])) {
         tag->type = UINT8;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu8, &tag->write_val.UINT8_val);
         }
-    } else if(!strcasecmp("int8", parts[1])) {
+    } else if(!strcmp("int8", parts[1])) {
         tag->type = INT8;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi8, &tag->write_val.INT8_val); 
         }
-    } else if(!strcasecmp("float64", parts[1])) {
+    } else if(!strcmp("float64", parts[1])) {
         tag->type = FLOAT64;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%lf", &tag->write_val.FLOAT64_val); 
         }
-    } else if(!strcasecmp("float32", parts[1])) {
+    } else if(!strcmp("float32", parts[1])) {
         tag->type = FLOAT32;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%f", &tag->write_val.FLOAT32_val);
         }
-    } else if(!strcasecmp("bool", parts[1])) {
+    } else if(!strcmp("bool", parts[1])) {
         tag->type = BOOL;
         if (cli_request.operation == WRITE) {
-            if (!strcasecmp("true", parts[required-2])) {
+            if (!strcmp("true", parts[required-2])) {
                 tag->write_val.BOOL_val = true;
             } else {
                 tag->write_val.BOOL_val = false;
