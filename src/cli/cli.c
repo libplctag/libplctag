@@ -550,37 +550,37 @@ int read_tags(void) {
 int set_tag(int32_t tag_handle, tag_t tag, int offset) {
     switch (tag.type) {
     case UINT64:
-        plc_tag_set_uint64(tag_handle, offset, tag.val.UINT64_val);
+        plc_tag_set_uint64(tag_handle, offset, tag.write_val.UINT64_val);
         break;
     case INT64:
-        plc_tag_set_int64(tag_handle, offset, tag.val.INT64_val);
+        plc_tag_set_int64(tag_handle, offset, tag.write_val.INT64_val);
         break;
     case UINT32:
-        plc_tag_set_uint32(tag_handle, offset, tag.val.UINT32_val);
+        plc_tag_set_uint32(tag_handle, offset, tag.write_val.UINT32_val);
         break;
     case INT32:
-        plc_tag_set_int32(tag_handle, offset, tag.val.INT32_val);
+        plc_tag_set_int32(tag_handle, offset, tag.write_val.INT32_val);
         break;
     case UINT16:
-        plc_tag_set_uint16(tag_handle, offset, tag.val.UINT16_val);
+        plc_tag_set_uint16(tag_handle, offset, tag.write_val.UINT16_val);
         break;
     case INT16:
-        plc_tag_set_int16(tag_handle, offset, tag.val.INT16_val);
+        plc_tag_set_int16(tag_handle, offset, tag.write_val.INT16_val);
         break;
     case UINT8:
-        plc_tag_set_uint8(tag_handle, offset, tag.val.UINT8_val);
+        plc_tag_set_uint8(tag_handle, offset, tag.write_val.UINT8_val);
         break;
     case INT8:
-        plc_tag_set_int8(tag_handle, offset, tag.val.INT8_val);
+        plc_tag_set_int8(tag_handle, offset, tag.write_val.INT8_val);
         break;
     case FLOAT64:
-        plc_tag_set_float64(tag_handle, offset, tag.val.FLOAT64_val);
+        plc_tag_set_float64(tag_handle, offset, tag.write_val.FLOAT64_val);
         break;
     case FLOAT32:
-        plc_tag_set_float32(tag_handle, offset, tag.val.FLOAT32_val);
+        plc_tag_set_float32(tag_handle, offset, tag.write_val.FLOAT32_val);
         break;
     case BOOL:
-        plc_tag_set_uint8(tag_handle, offset, tag.val.BOOL_val);
+        plc_tag_set_uint8(tag_handle, offset, tag.write_val.BOOL_val);
         break;
     default:
         return PLCTAG_ERR_BAD_STATUS;
