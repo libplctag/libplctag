@@ -462,7 +462,156 @@ int read_tags(void) {
     return 0;
 }
 
+int set_tag(int32_t tag_handle, tag_t tag, int offset) {
+    switch (tag.type) {
+    case UINT64:
+        plc_tag_set_uint64(tag_handle, offset, tag.val.UINT64_val);
+        break;
+    case INT64:
+        plc_tag_set_int64(tag_handle, offset, tag.val.INT64_val);
+        break;
+    case UINT32:
+        plc_tag_set_uint32(tag_handle, offset, tag.val.UINT32_val);
+        break;
+    case INT32:
+        plc_tag_set_int32(tag_handle, offset, tag.val.INT32_val);
+        break;
+    case UINT16:
+        plc_tag_set_uint16(tag_handle, offset, tag.val.UINT16_val);
+        break;
+    case INT16:
+        plc_tag_set_int16(tag_handle, offset, tag.val.INT16_val);
+        break;
+    case UINT8:
+        plc_tag_set_uint8(tag_handle, offset, tag.val.UINT8_val);
+        break;
+    case INT8:
+        plc_tag_set_int8(tag_handle, offset, tag.val.INT8_val);
+        break;
+    case FLOAT64:
+        plc_tag_set_float64(tag_handle, offset, tag.val.FLOAT64_val);
+        break;
+    case FLOAT32:
+        plc_tag_set_float32(tag_handle, offset, tag.val.FLOAT32_val);
+        break;
+    case BOOL:
+        plc_tag_set_uint8(tag_handle, offset, tag.val.BOOL_val);
+        break;
+    default:
+        break;
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
+int verify_write_tags(void) {
+    int rc = PLCTAG_STATUS_OK;
+    struct tags *t;
+
+    for(t = tags; t != NULL; t = t->hh.next) {
+        switch (t->tag.type) {
+        case UINT64:
+            if (t->tag.last_val.UINT64_val != t->tag.write_val.UINT64_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case INT64:
+            if (t->tag.last_val.INT64_val != t->tag.write_val.INT64_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case UINT32:
+            if (t->tag.last_val.UINT32_val != t->tag.write_val.UINT32_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case INT32:
+            if (t->tag.last_val.INT32_val != t->tag.write_val.INT32_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case UINT16:
+            if (t->tag.last_val.UINT16_val != t->tag.write_val.UINT16_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case INT16:
+            if (t->tag.last_val.INT16_val != t->tag.write_val.INT16_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case UINT8:
+            if (t->tag.last_val.UINT8_val != t->tag.write_val.UINT8_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case INT8:
+            if (t->tag.last_val.INT8_val != t->tag.write_val.INT8_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case FLOAT64:
+            if (t->tag.last_val.FLOAT64_val != t->tag.write_val.FLOAT64_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case FLOAT32:
+            if (t->tag.last_val.FLOAT32_val != t->tag.write_val.FLOAT32_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        case BOOL:
+            if (t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
+                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                return PLCTAG_ERR_BAD_STATUS;
+            }
+            break;
+        default:
+            return PLCTAG_ERR_BAD_STATUS;
+            break;
+        }
+    }
+
+    return PLCTAG_STATUS_OK;
+}
+
 int write_tags(void) {
+    int rc = PLCTAG_STATUS_OK;
+    struct tags *t;
+
+    for(t = tags; t != NULL; t = t->hh.next) {
+        rc = set_tag(t->tag_handle, t->tag, 0);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"Unable to set value of tag %s!\n", plc_tag_decode_error(rc));
+            return rc;
+        }
+        rc = plc_tag_write(t->tag_handle, 0);
+        if(rc != PLCTAG_STATUS_PENDING) {
+            fprintf(stderr,"Unable to read tag %s!\n", plc_tag_decode_error(rc));
+            return rc;
+        }
+    }
+
+    /* wait for all tags to be ready */
+    while(check_tags() == PLCTAG_STATUS_PENDING){}
+
+    read_tags();
+
+    rc = verify_write_tags();
+    if (rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr,"Unable to write value to tag %s!\n", plc_tag_decode_error(rc));
+        return rc;
+    }
 
     return 0;
 }
@@ -509,6 +658,10 @@ int main(int argc, char *argv[])
         }
         break;
     case WATCH:
+        if (read_tags() != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "ERROR: Tag read failed.\n");
+            return -1;
+        }
         watch_tags();
         break;
     default:
