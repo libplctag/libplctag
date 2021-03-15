@@ -56,6 +56,7 @@ typedef struct {
         float FLOAT32_val;
         bool BOOL_val;
     } val, last_val, write_val;
+    bool watch;
 } tag_t;
 
 /* tags hash definition */
@@ -81,3 +82,4 @@ int set_tag(int32_t tag_handle, tag_t tag, int offset);
 int verify_write_tags(void);
 int write_tags(void);
 int watch_tags(void);
+void tag_callback(int32_t tag_handle, int event, int status);
