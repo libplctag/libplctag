@@ -746,6 +746,11 @@ int watch_tags(void) {
         }
     }
 
+    /* wait for all tags to be ready */
+    while(check_tags() == PLCTAG_STATUS_PENDING){}
+
+    while(true){}
+
     return 0;
 }
 
