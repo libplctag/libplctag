@@ -6,6 +6,7 @@
 #include <inttypes.h>
 #include "../lib/libplctag.h"
 #include "./cli.h"
+#include "../examples/utils.h"
 
 /* globals here */
 struct tags *tags = NULL;
@@ -16,7 +17,8 @@ cli_request_t cli_request = {
     "controllogix",
     READ,
     500,
-    2
+    2,
+    0 // offline
 };
 
 void usage(void) 
@@ -65,6 +67,8 @@ int parse_args(int argc, char *argv[])
             sscanf(val, "%d", &cli_request.debug_level);
         } else if (!strcmp(param, "-interval")) {
             sscanf(val, "%d", &cli_request.interval);
+        } else if (!strcmp(param, "-offline")) {
+            sscanf(val, "%d", &cli_request.offline);
         } else {
             fprintf(stderr, "ERROR: invalid PLC parameter: %s.\n", param);
             fprintf(stderr, "INFO: Supported params -ip, -debug, -interval.\n");
@@ -98,6 +102,7 @@ void print_request()
     }
     fprintf(stdout, "\tInterval: %d\n", cli_request.interval);
     fprintf(stdout, "\tDebug Level: %d\n", cli_request.debug_level);
+    fprintf(stdout, "\tOffline: %d\n", cli_request.offline);
 }
 
 int is_comment(const char *line)
@@ -220,6 +225,11 @@ int process_line(const char *line, tag_t *tag)
 
     /* setup all the associated tag values here. */
     tag->id = atoi(parts[0]);
+    /* TODO:
+    tag->bit_offset = -1;
+    char *type = parts[1];
+    if (strtok(type, "]"))
+    */ 
 
     if(!strcmp("uint64", parts[1])) {
         tag->type = UINT64;
@@ -753,9 +763,39 @@ int watch_tags(void) {
     }
 
     /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){}
+    while(check_tags() == PLCTAG_STATUS_PENDING){
+
+    }
 
     while(true){}
+
+    return 0;
+}
+
+int do_offline(void) {
+    struct tags *t = tags;
+    int val = 0;
+
+    printf("Running offline!\n");
+
+    switch (cli_request.operation) {
+    case READ:
+        fprintf(stdout, "{}\n");
+        break;
+    case WRITE:
+        fprintf(stdout, "{}\n");
+        break;
+    case WATCH:
+        while (true) {
+            ++val;
+            val = val%10;
+            fprintf(stdout, "{\"%d\":%d}\n", t->tag.id, val);
+            util_sleep_ms(5000);
+        }
+        break;
+    default:
+        break;
+    }
 
     return 0;
 }
@@ -778,6 +818,10 @@ int main(int argc, char *argv[])
     if (process_tags() != PLCTAG_STATUS_OK) {
         fprintf(stderr, "ERROR: Could not process tags.\n");
         return -1;
+    }
+
+    if (cli_request.offline == 1) {
+        return do_offline();
     }
 
     /* wait for all tags to be ready */

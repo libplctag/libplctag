@@ -26,6 +26,7 @@ typedef struct {
     cli_operation_t operation;
     int interval;
     int debug_level;
+    int offline;
 } cli_request_t;
 
 /* data types */
@@ -56,6 +57,7 @@ typedef struct {
         float FLOAT32_val;
         bool BOOL_val;
     } val, last_val, write_val;
+    int bit_offset;
     bool watch;
 } tag_t;
 
@@ -83,3 +85,4 @@ int verify_write_tags(void);
 int write_tags(void);
 int watch_tags(void);
 void tag_callback(int32_t tag_handle, int event, int status);
+int do_offline(void);
