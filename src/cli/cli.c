@@ -661,6 +661,8 @@ int verify_write_tags(void) {
             }
             break;
         case BOOL:
+            fprintf(stdout, "last_val: %d", t->tag.last_val.BOOL_val);
+            fprintf(stdout, "write_val: %d", t->tag.write_val.BOOL_val);
             if (t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
                 fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
                 return PLCTAG_ERR_BAD_STATUS;
