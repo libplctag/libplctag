@@ -539,21 +539,11 @@ endif(ANDROID_BUILD)
 if(ANDROID_BUILD)
     MESSAGE("Building for Android.")
 else()
-    if (UNIX)
-        set ( example_PROG_UTIL utils_posix.c )
-        set ( example_LIBRARIES ${tool_lib} pthread )
-    elseif(WIN32)
-        set ( example_PROG_UTIL utils_windows.c)
-        set ( example_LIBRARIES ${tool_lib} ws2_32 )
-    endif()
-
-    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
-
     # build the cli.
-    set(CLI_FILES       ${cli_SRC_PATH}/cli.c
-                        ${cli_SRC_PATH}/cli.h
-                        ${cli_SRC_PATH}/getline.c
-                        ${cli_SRC_PATH}/uthash.h
+    set(CLI_FILES   ${cli_SRC_PATH}/cli.c
+                    ${cli_SRC_PATH}/cli.h
+                    ${cli_SRC_PATH}/getline.c
+                    ${cli_SRC_PATH}/uthash.h
     )
 
     foreach(CLI_FILES ${CLI_FILES})

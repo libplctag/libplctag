@@ -225,7 +225,7 @@ int process_line(const char *line, tag_t *tag)
 
     /* setup all the associated tag values here. */
     tag->id = atoi(parts[0]);
-    /* TODO:
+    /* TODO
     tag->bit_offset = -1;
     char *type = parts[1];
     if (strtok(type, "]"))
