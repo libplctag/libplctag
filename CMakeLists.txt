@@ -540,17 +540,17 @@ if(ANDROID_BUILD)
     MESSAGE("Building for Android.")
 else()
     # build the cli.
-    set(CLI_FILES   ${cli_SRC_PATH}/cli.c
-                    ${cli_SRC_PATH}/cli.h
-                    ${cli_SRC_PATH}/getline.c
-                    ${cli_SRC_PATH}/uthash.h
+    set(CLI_FILES       ${cli_SRC_PATH}/cli.c
+                        ${cli_SRC_PATH}/cli.h
+                        ${cli_SRC_PATH}/getline.c
+                        ${cli_SRC_PATH}/uthash.h
     )
 
     foreach(CLI_FILES ${CLI_FILES})
         set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
     endforeach()
 
-    add_executable(cli ${CLI_FILES} )
+    add_executable(cli ${CLI_FILES})
 
     target_link_libraries(cli ${example_LIBRARIES} )
 
