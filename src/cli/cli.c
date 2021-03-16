@@ -513,6 +513,8 @@ int get_tag(int32_t tag_handle, tag_t tag, int offset) {
             fprintf(stdout, "last_val bool: %d\n", tag.last_val.BOOL_val);
             fprintf(stdout, "val bool: %d\n", tag.val.BOOL_val);
             tag.last_val.BOOL_val = tag.val.BOOL_val;
+            fprintf(stdout, "last_val bool: %d\n", tag.last_val.BOOL_val);
+            fprintf(stdout, "val bool: %d\n", tag.val.BOOL_val);
             if (tag.val.BOOL_val) {
                 fprintf(stdout, "{\"%d\"=true}\n", tag.id);
             } else {
