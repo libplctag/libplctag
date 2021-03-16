@@ -515,8 +515,6 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
             break;
         }
         if (tag->val.BOOL_val != tag->last_val.BOOL_val) {
-            fprintf(stdout, "last_val bool: %d\n", tag->last_val.BOOL_val);
-            fprintf(stdout, "val bool: %d\n", tag->val.BOOL_val);
             tag->last_val.BOOL_val = tag->val.BOOL_val;
             if (tag->val.BOOL_val) {
                 fprintf(stdout, "{\"%d\"=true}\n", tag->id);
@@ -672,8 +670,6 @@ int verify_write_tags(void) {
             break;
         case t_BOOL:
             if (t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
-                fprintf(stdout, "last_val: %d\n", t->tag.last_val.BOOL_val);
-                fprintf(stdout, "write_val: %d\n", t->tag.write_val.BOOL_val);
                 fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
@@ -728,24 +724,24 @@ void tag_callback(int32_t tag_handle, int event, int status) {
     /* handle the events. */
     switch(event) {
     case PLCTAG_EVENT_ABORTED:
-        printf("tag(%d)(%s): Tag operation was aborted!\n", t->tag.id, t->tag.name);
+        fprintf(stdout, "tag(%d)(%s): Tag operation was aborted!\n", t->tag.id, t->tag.name);
         break;
     case PLCTAG_EVENT_DESTROYED:
-        printf("tag(%d)(%s): Tag was destroyed.\n", t->tag.id, t->tag.name);
+        fprintf(stdout, "tag(%d)(%s): Tag was destroyed.\n", t->tag.id, t->tag.name);
         break;
     case PLCTAG_EVENT_READ_COMPLETED:
         get_tag(tag_handle, &t->tag, 0);
-        printf("tag(%d)(%s): Tag read operation completed with status %s.\n", t->tag.id, t->tag.name, plc_tag_decode_error(status));
+        fprintf(stdout, "tag(%d)(%s): Tag read operation completed with status %s.\n", t->tag.id, t->tag.name, plc_tag_decode_error(status));
         break;
     case PLCTAG_EVENT_READ_STARTED:
-        printf("tag(%d)(%s): Tag read operation started.\n", t->tag.id, t->tag.name);
+        fprintf(stdout, "tag(%d)(%s): Tag read operation started.\n", t->tag.id, t->tag.name);
         break;
     case PLCTAG_EVENT_WRITE_COMPLETED:
         break;
     case PLCTAG_EVENT_WRITE_STARTED:
         break;
     default:
-        printf("tag(%d)(%s): Unexpected event %d!\n", t->tag.id, t->tag.name, event);
+        fprintf(stdout, "tag(%d)(%s): Unexpected event %d!\n", t->tag.id, t->tag.name, event);
         break;
     }
 }
@@ -759,7 +755,7 @@ int watch_tags(void) {
         t->tag.watch = true;
         rc = plc_tag_register_callback(t->tag_handle, tag_callback);
         if(rc != PLCTAG_STATUS_OK) {
-            printf( "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
+            fprintf(stdout, "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -775,7 +771,7 @@ int do_offline(void) {
     struct tags *t = tags;
     int val = 0;
 
-    printf("Running offline!\n");
+    fprintf(stdout, "Running offline!\n");
 
     switch (cli_request.operation) {
     case READ:
