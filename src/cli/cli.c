@@ -234,6 +234,7 @@ int process_line(const char *line, tag_t *tag)
         bit++;
         bit = strtok(bit, "]");
         sscanf(bit, "%d", &tag->bit_offset);
+        type = "bool";
     }
 
     if(!strcmp("uint64", type)) {
