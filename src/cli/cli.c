@@ -795,6 +795,7 @@ int do_offline(void) {
             ++val;
             val = val%10;
             fprintf(stdout, "{\"%d\":%d}\n", t->tag.id, val);
+            fflush(stdout);
             util_sleep_ms(2000);
         }
         break;
