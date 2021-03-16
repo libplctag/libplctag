@@ -78,7 +78,7 @@ char **split_string(const char *str, const char *sep);
 int process_line(const char *line, tag_t *tag);
 void add_tag(int32_t tag_handle, tag_t tag);
 int check_tags(void);
-int get_tag(int32_t tag_handle, tag_t tag, int offset);
+int get_tag(int32_t tag_handle, tag_t *tag, int offset);
 int read_tags(void);
 int set_tag(int32_t tag_handle, tag_t tag, int offset);
 int verify_write_tags(void);

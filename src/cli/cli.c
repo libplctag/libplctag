@@ -381,147 +381,147 @@ int process_tags()
     return 0;
 }
 
-int get_tag(int32_t tag_handle, tag_t tag, int offset) {
-    switch (tag.type) {
+int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
+    switch (tag->type) {
     case t_UINT64:
-        tag.val.UINT64_val = plc_tag_get_uint64(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.UINT64_val = tag.val.UINT64_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIu64"}\n", tag.id, tag.val.UINT64_val);
+        tag->val.UINT64_val = plc_tag_get_uint64(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.UINT64_val = tag->val.UINT64_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIu64"}\n", tag->id, tag->val.UINT64_val);
             break;
         }
-        if (tag.val.UINT64_val != tag.last_val.UINT64_val) {
-            tag.last_val.UINT64_val = tag.val.UINT64_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIu64"}\n", tag.id, tag.val.UINT64_val);
+        if (tag->val.UINT64_val != tag->last_val.UINT64_val) {
+            tag->last_val.UINT64_val = tag->val.UINT64_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIu64"}\n", tag->id, tag->val.UINT64_val);
         }
         break;
     case t_INT64:
-        tag.val.INT64_val = plc_tag_get_int64(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.INT64_val = tag.val.INT64_val;
-            fprintf(stdout, "{\"%d\"=%" PRIi64"}\n", tag.id, tag.val.INT64_val);
+        tag->val.INT64_val = plc_tag_get_int64(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.INT64_val = tag->val.INT64_val;
+            fprintf(stdout, "{\"%d\"=%" PRIi64"}\n", tag->id, tag->val.INT64_val);
             break;
         }
-        if (tag.val.INT64_val != tag.last_val.INT64_val) {
-            tag.last_val.INT64_val = tag.val.INT64_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIi64"}\n", tag.id, tag.val.INT64_val);
+        if (tag->val.INT64_val != tag->last_val.INT64_val) {
+            tag->last_val.INT64_val = tag->val.INT64_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIi64"}\n", tag->id, tag->val.INT64_val);
         }
         break;
     case t_UINT32:
-        tag.val.UINT32_val = plc_tag_get_uint32(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.UINT32_val = tag.val.UINT32_val;
-            fprintf(stdout, "{\"%d\"=%" PRIu32"}\n", tag.id, tag.val.UINT32_val);
+        tag->val.UINT32_val = plc_tag_get_uint32(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.UINT32_val = tag->val.UINT32_val;
+            fprintf(stdout, "{\"%d\"=%" PRIu32"}\n", tag->id, tag->val.UINT32_val);
             break;
         }
-        if (tag.val.UINT32_val != tag.last_val.UINT32_val) {
-            tag.last_val.UINT32_val = tag.val.UINT32_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIu32"}\n", tag.id, tag.val.UINT32_val);
+        if (tag->val.UINT32_val != tag->last_val.UINT32_val) {
+            tag->last_val.UINT32_val = tag->val.UINT32_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIu32"}\n", tag->id, tag->val.UINT32_val);
         }
         break;
     case t_INT32:
-        tag.val.INT32_val = plc_tag_get_int32(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.INT32_val = tag.val.INT32_val;
-            fprintf(stdout, "{\"%d\"=%" PRIi32"}\n", tag.id, tag.val.INT32_val);
+        tag->val.INT32_val = plc_tag_get_int32(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.INT32_val = tag->val.INT32_val;
+            fprintf(stdout, "{\"%d\"=%" PRIi32"}\n", tag->id, tag->val.INT32_val);
             break;
         }
-        if (tag.val.INT32_val != tag.last_val.INT32_val) {
-            tag.last_val.INT32_val = tag.val.INT32_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIi32"}\n", tag.id, tag.val.INT32_val);
+        if (tag->val.INT32_val != tag->last_val.INT32_val) {
+            tag->last_val.INT32_val = tag->val.INT32_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIi32"}\n", tag->id, tag->val.INT32_val);
         }
         break;
     case t_UINT16:
-        tag.val.UINT16_val = plc_tag_get_uint16(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.UINT16_val = tag.val.UINT16_val;
-            fprintf(stdout, "{\"%d\"=%" PRIu16"}\n", tag.id, tag.val.UINT16_val);
+        tag->val.UINT16_val = plc_tag_get_uint16(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.UINT16_val = tag->val.UINT16_val;
+            fprintf(stdout, "{\"%d\"=%" PRIu16"}\n", tag->id, tag->val.UINT16_val);
             break;
         }
-        if (tag.val.UINT16_val != tag.last_val.UINT16_val) {
-            tag.last_val.UINT16_val = tag.val.UINT16_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIu16"}\n", tag.id, tag.val.UINT16_val);
+        if (tag->val.UINT16_val != tag->last_val.UINT16_val) {
+            tag->last_val.UINT16_val = tag->val.UINT16_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIu16"}\n", tag->id, tag->val.UINT16_val);
         }
         break;
     case t_INT16:
-        tag.val.INT16_val = plc_tag_get_int16(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.INT16_val = tag.val.INT16_val;
-            fprintf(stdout, "{\"%d\"=%" PRIi16"}\n", tag.id, tag.val.INT16_val);
+        tag->val.INT16_val = plc_tag_get_int16(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.INT16_val = tag->val.INT16_val;
+            fprintf(stdout, "{\"%d\"=%" PRIi16"}\n", tag->id, tag->val.INT16_val);
             break;
         }
-        if (tag.val.INT16_val != tag.last_val.INT16_val) {
-            tag.last_val.INT16_val = tag.val.INT16_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIi16"}\n", tag.id, tag.val.UINT16_val);
+        if (tag->val.INT16_val != tag->last_val.INT16_val) {
+            tag->last_val.INT16_val = tag->val.INT16_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIi16"}\n", tag->id, tag->val.UINT16_val);
         }
         break;
     case t_UINT8:
-        tag.val.UINT8_val = plc_tag_get_uint8(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.UINT8_val = tag.val.UINT8_val;
-            fprintf(stdout, "{\"%d\"=%" PRIu8"}\n", tag.id, tag.val.UINT8_val);
+        tag->val.UINT8_val = plc_tag_get_uint8(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.UINT8_val = tag->val.UINT8_val;
+            fprintf(stdout, "{\"%d\"=%" PRIu8"}\n", tag->id, tag->val.UINT8_val);
             break;
         }
-        if (tag.val.UINT8_val != tag.last_val.UINT8_val) {
-            tag.last_val.UINT8_val = tag.val.UINT8_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIu8"}\n", tag.id, tag.val.UINT8_val);
+        if (tag->val.UINT8_val != tag->last_val.UINT8_val) {
+            tag->last_val.UINT8_val = tag->val.UINT8_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIu8"}\n", tag->id, tag->val.UINT8_val);
         }
         break;
     case t_INT8:
-        tag.val.INT8_val = plc_tag_get_int8(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.INT8_val = tag.val.INT8_val;
-            fprintf(stdout, "{\"%d\"=%" PRIi8"}\n", tag.id, tag.val.INT8_val);
+        tag->val.INT8_val = plc_tag_get_int8(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.INT8_val = tag->val.INT8_val;
+            fprintf(stdout, "{\"%d\"=%" PRIi8"}\n", tag->id, tag->val.INT8_val);
             break;
         }
-        if (tag.val.INT8_val != tag.last_val.INT8_val) {
-            tag.last_val.INT8_val = tag.val.INT8_val; 
-            fprintf(stdout, "{\"%d\"=%" PRIi8"}\n", tag.id, tag.val.INT8_val);
+        if (tag->val.INT8_val != tag->last_val.INT8_val) {
+            tag->last_val.INT8_val = tag->val.INT8_val; 
+            fprintf(stdout, "{\"%d\"=%" PRIi8"}\n", tag->id, tag->val.INT8_val);
         }
         break;
     case t_FLOAT64:
-        tag.val.FLOAT64_val = plc_tag_get_float64(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.FLOAT64_val = tag.val.FLOAT64_val;
-            fprintf(stdout, "{\"%d\"=%lf}\n", tag.id, tag.val.FLOAT64_val);
+        tag->val.FLOAT64_val = plc_tag_get_float64(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
+            fprintf(stdout, "{\"%d\"=%lf}\n", tag->id, tag->val.FLOAT64_val);
             break;
         }
-        if (tag.val.FLOAT64_val != tag.last_val.FLOAT64_val) {
-            tag.last_val.FLOAT64_val = tag.val.FLOAT64_val; 
-            fprintf(stdout, "{\"%d\"=%lf}\n", tag.id, tag.val.FLOAT64_val);
+        if (tag->val.FLOAT64_val != tag->last_val.FLOAT64_val) {
+            tag->last_val.FLOAT64_val = tag->val.FLOAT64_val; 
+            fprintf(stdout, "{\"%d\"=%lf}\n", tag->id, tag->val.FLOAT64_val);
         }
         break;
     case t_FLOAT32:
-        tag.val.FLOAT32_val = plc_tag_get_float32(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.FLOAT32_val = tag.val.FLOAT32_val;
-            fprintf(stdout, "{\"%d\"=%f}\n", tag.id, tag.val.FLOAT32_val);
+        tag->val.FLOAT32_val = plc_tag_get_float32(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
+            fprintf(stdout, "{\"%d\"=%f}\n", tag->id, tag->val.FLOAT32_val);
             break;
         }
-        if (tag.val.FLOAT32_val != tag.last_val.FLOAT32_val) {
-            tag.last_val.FLOAT32_val = tag.val.FLOAT32_val; 
-            fprintf(stdout, "{\"%d\"=%f}\n", tag.id, tag.val.FLOAT32_val);
+        if (tag->val.FLOAT32_val != tag->last_val.FLOAT32_val) {
+            tag->last_val.FLOAT32_val = tag->val.FLOAT32_val; 
+            fprintf(stdout, "{\"%d\"=%f}\n", tag->id, tag->val.FLOAT32_val);
         }
         break;
     case t_BOOL:
-        tag.val.BOOL_val = plc_tag_get_uint8(tag_handle, offset);
-        if (!tag.watch) {
-            tag.last_val.BOOL_val = tag.val.BOOL_val;
-            if (tag.val.BOOL_val) {
-                fprintf(stdout, "{\"%d\"=true}\n", tag.id);
+        tag->val.BOOL_val = plc_tag_get_uint8(tag_handle, offset);
+        if (!tag->watch) {
+            tag->last_val.BOOL_val = tag->val.BOOL_val;
+            if (tag->val.BOOL_val) {
+                fprintf(stdout, "{\"%d\"=true}\n", tag->id);
             } else {
-                fprintf(stdout, "{\"%d\"=false}\n", tag.id);
+                fprintf(stdout, "{\"%d\"=false}\n", tag->id);
             }
             break;
         }
-        if (tag.val.BOOL_val != tag.last_val.BOOL_val) {
-            fprintf(stdout, "last_val bool: %d\n", tag.last_val.BOOL_val);
-            fprintf(stdout, "val bool: %d\n", tag.val.BOOL_val);
-            tag.last_val.BOOL_val = tag.val.BOOL_val;
-            if (tag.val.BOOL_val) {
-                fprintf(stdout, "{\"%d\"=true}\n", tag.id);
+        if (tag->val.BOOL_val != tag->last_val.BOOL_val) {
+            fprintf(stdout, "last_val bool: %d\n", tag->last_val.BOOL_val);
+            fprintf(stdout, "val bool: %d\n", tag->val.BOOL_val);
+            tag->last_val.BOOL_val = tag->val.BOOL_val;
+            if (tag->val.BOOL_val) {
+                fprintf(stdout, "{\"%d\"=true}\n", tag->id);
             } else {
-                fprintf(stdout, "{\"%d\"=false}\n", tag.id);
+                fprintf(stdout, "{\"%d\"=false}\n", tag->id);
             }
         }
         break;
