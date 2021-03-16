@@ -31,12 +31,12 @@ typedef struct {
 
 /* data types */
 typedef enum {
-    UINT64, INT64,
-    UINT32, INT32,
-    UINT16, INT16,
-    UINT8, INT8, 
-    FLOAT64, FLOAT32, 
-    BOOL 
+    t_UINT64, t_INT64,
+    t_UINT32, t_INT32,
+    t_UINT16, t_INT16,
+    t_UINT8, t_INT8, 
+    t_FLOAT64, t_FLOAT32, 
+    t_BOOL 
 } data_type_t;
 
 /* tag definition */

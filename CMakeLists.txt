@@ -550,7 +550,7 @@ else()
         set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
     endforeach()
 
-    add_executable(cli ${CLI_FILES})
+    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 
     target_link_libraries(cli ${example_LIBRARIES} )
 
