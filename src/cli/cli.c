@@ -506,6 +506,8 @@ int get_tag(int32_t tag_handle, tag_t tag, int offset) {
     case t_BOOL:
         tag.val.BOOL_val = plc_tag_get_uint8(tag_handle, offset);
         if (!tag.watch) {
+            fprintf(stdout, "last_val bool: %d\n", tag.last_val.BOOL_val);
+            fprintf(stdout, "val bool: %d\n", tag.val.BOOL_val);
             tag.last_val.BOOL_val = tag.val.BOOL_val;
             if (tag.val.BOOL_val) {
                 fprintf(stdout, "{\"%d\"=true}\n", tag.id);
@@ -515,6 +517,8 @@ int get_tag(int32_t tag_handle, tag_t tag, int offset) {
             break;
         }
         if (tag.val.BOOL_val != tag.last_val.BOOL_val) {
+            fprintf(stdout, "last_val bool: %d\n", tag.last_val.BOOL_val);
+            fprintf(stdout, "val bool: %d\n", tag.val.BOOL_val);
             tag.last_val.BOOL_val = tag.val.BOOL_val;
             if (tag.val.BOOL_val) {
                 fprintf(stdout, "{\"%d\"=true}\n", tag.id);
@@ -627,16 +631,12 @@ int verify_write_tags(void) {
             }
             break;
         case t_INT32:
-            fprintf(stdout, "last_val: %d", t->tag.last_val.INT32_val);
-            fprintf(stdout, "write_val: %d", t->tag.write_val.INT32_val);
             if (t->tag.last_val.INT32_val != t->tag.write_val.INT32_val) {
                 fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_UINT16:
-            fprintf(stdout, "last_val: %d", t->tag.last_val.UINT16_val);
-            fprintf(stdout, "write_val: %d", t->tag.write_val.UINT16_val);
             if (t->tag.last_val.UINT16_val != t->tag.write_val.UINT16_val) {
                 fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
                 return PLCTAG_ERR_BAD_STATUS;
@@ -673,8 +673,6 @@ int verify_write_tags(void) {
             }
             break;
         case t_BOOL:
-            fprintf(stdout, "last_val: %d", t->tag.last_val.BOOL_val);
-            fprintf(stdout, "write_val: %d", t->tag.write_val.BOOL_val);
             if (t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
                 fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
                 return PLCTAG_ERR_BAD_STATUS;
