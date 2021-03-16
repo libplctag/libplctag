@@ -545,7 +545,7 @@ int read_tags(void) {
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
-        util_sleep_ms(1);
+        //util_sleep_ms(1);
     }
 
     for(t = tags; t != NULL; t = t->hh.next) {
@@ -708,7 +708,7 @@ int write_tags(void) {
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
-        util_sleep_ms(1);
+        //util_sleep_ms(1);
     }
 
     read_tags();
@@ -768,11 +768,11 @@ int watch_tags(void) {
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
-        util_sleep_ms(1);
+        //util_sleep_ms(1);
     }
 
     while(true){
-        util_sleep_ms(1);
+        //util_sleep_ms(1);
     }
 
     return 0;
@@ -796,7 +796,7 @@ int do_offline(void) {
             ++val;
             val = val%10;
             fprintf(stdout, "{\"%d\":%d}\n", t->tag.id, val);
-            util_sleep_ms(5000);
+            //util_sleep_ms(5000);
         }
         break;
     default:
@@ -832,7 +832,7 @@ int main(int argc, char *argv[])
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
-        util_sleep_ms(1);
+        //util_sleep_ms(1);
     }
 
     switch (cli_request.operation) {
