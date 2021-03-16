@@ -544,7 +544,9 @@ int read_tags(void) {
     }
 
     /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){}
+    while(check_tags() == PLCTAG_STATUS_PENDING){
+        util_sleep_ms(1);
+    }
 
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = get_tag(t->tag_handle, t->tag, 0);
@@ -705,7 +707,9 @@ int write_tags(void) {
     }
 
     /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){}
+    while(check_tags() == PLCTAG_STATUS_PENDING){
+        util_sleep_ms(1);
+    }
 
     read_tags();
 
@@ -764,10 +768,12 @@ int watch_tags(void) {
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
-
+        util_sleep_ms(1);
     }
 
-    while(true){}
+    while(true){
+        util_sleep_ms(1);
+    }
 
     return 0;
 }
@@ -825,7 +831,9 @@ int main(int argc, char *argv[])
     }
 
     /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){}
+    while(check_tags() == PLCTAG_STATUS_PENDING){
+        util_sleep_ms(1);
+    }
 
     switch (cli_request.operation) {
     case READ:
