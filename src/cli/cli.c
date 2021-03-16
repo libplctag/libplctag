@@ -342,10 +342,6 @@ int process_tags()
             continue;
         }
 
-        if (!strcmp(line, "break\n")) {
-            break;
-        }
-
         fprintf(stdout, "%s", line);
         tag_t tag;
         trim_line(line);
