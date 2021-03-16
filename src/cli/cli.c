@@ -342,6 +342,10 @@ int process_tags()
             continue;
         }
 
+        if (!strcmp(line, "break\n")) {
+            break;
+        }
+
         fprintf(stdout, "%s", line);
         tag_t tag;
         trim_line(line);
@@ -764,13 +768,8 @@ int watch_tags(void) {
         }
     }
 
-    /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){
-        util_sleep_ms(1);
-    }
-
     while(true){
-        util_sleep_ms(1);
+        util_sleep_ms(1000);
     }
 
     return 0;
@@ -794,7 +793,7 @@ int do_offline(void) {
             ++val;
             val = val%10;
             fprintf(stdout, "{\"%d\":%d}\n", t->tag.id, val);
-            util_sleep_ms(5000);
+            util_sleep_ms(2000);
         }
         break;
     default:
