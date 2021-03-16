@@ -559,40 +559,40 @@ int read_tags(void) {
     return 0;
 }
 
-int set_tag(int32_t tag_handle, tag_t tag, int offset) {
-    switch (tag.type) {
+int set_tag(int32_t tag_handle, tag_t *tag, int offset) {
+    switch (tag->type) {
     case t_UINT64:
-        plc_tag_set_uint64(tag_handle, offset, tag.write_val.UINT64_val);
+        plc_tag_set_uint64(tag_handle, offset, tag->write_val.UINT64_val);
         break;
     case t_INT64:
-        plc_tag_set_int64(tag_handle, offset, tag.write_val.INT64_val);
+        plc_tag_set_int64(tag_handle, offset, tag->write_val.INT64_val);
         break;
     case t_UINT32:
-        plc_tag_set_uint32(tag_handle, offset, tag.write_val.UINT32_val);
+        plc_tag_set_uint32(tag_handle, offset, tag->write_val.UINT32_val);
         break;
     case t_INT32:
-        plc_tag_set_int32(tag_handle, offset, tag.write_val.INT32_val);
+        plc_tag_set_int32(tag_handle, offset, tag->write_val.INT32_val);
         break;
     case t_UINT16:
-        plc_tag_set_uint16(tag_handle, offset, tag.write_val.UINT16_val);
+        plc_tag_set_uint16(tag_handle, offset, tag->write_val.UINT16_val);
         break;
     case t_INT16:
-        plc_tag_set_int16(tag_handle, offset, tag.write_val.INT16_val);
+        plc_tag_set_int16(tag_handle, offset, tag->write_val.INT16_val);
         break;
     case t_UINT8:
-        plc_tag_set_uint8(tag_handle, offset, tag.write_val.UINT8_val);
+        plc_tag_set_uint8(tag_handle, offset, tag->write_val.UINT8_val);
         break;
     case t_INT8:
-        plc_tag_set_int8(tag_handle, offset, tag.write_val.INT8_val);
+        plc_tag_set_int8(tag_handle, offset, tag->write_val.INT8_val);
         break;
     case t_FLOAT64:
-        plc_tag_set_float64(tag_handle, offset, tag.write_val.FLOAT64_val);
+        plc_tag_set_float64(tag_handle, offset, tag->write_val.FLOAT64_val);
         break;
     case t_FLOAT32:
-        plc_tag_set_float32(tag_handle, offset, tag.write_val.FLOAT32_val);
+        plc_tag_set_float32(tag_handle, offset, tag->write_val.FLOAT32_val);
         break;
     case t_BOOL:
-        plc_tag_set_uint8(tag_handle, offset, tag.write_val.BOOL_val);
+        plc_tag_set_uint8(tag_handle, offset, tag->write_val.BOOL_val);
         break;
     default:
         return PLCTAG_ERR_BAD_STATUS;
@@ -688,7 +688,7 @@ int write_tags(void) {
     struct tags *t;
 
     for(t = tags; t != NULL; t = t->hh.next) {
-        rc = set_tag(t->tag_handle, t->tag, 0);
+        rc = set_tag(t->tag_handle, &t->tag, 0);
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr,"Unable to set value of tag %s!\n", plc_tag_decode_error(rc));
             return rc;

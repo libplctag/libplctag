@@ -80,7 +80,7 @@ void add_tag(int32_t tag_handle, tag_t tag);
 int check_tags(void);
 int get_tag(int32_t tag_handle, tag_t *tag, int offset);
 int read_tags(void);
-int set_tag(int32_t tag_handle, tag_t tag, int offset);
+int set_tag(int32_t tag_handle, tag_t *tag, int offset);
 int verify_write_tags(void);
 int write_tags(void);
 int watch_tags(void);
