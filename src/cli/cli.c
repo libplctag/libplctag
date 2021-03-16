@@ -551,7 +551,7 @@ int read_tags(void) {
     }
 
     for(t = tags; t != NULL; t = t->hh.next) {
-        rc = get_tag(t->tag_handle, t->tag, 0);
+        rc = get_tag(t->tag_handle, &t->tag, 0);
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr,"Unable to parse value of tag %s!\n", plc_tag_decode_error(rc));
             return rc;
@@ -734,7 +734,7 @@ void tag_callback(int32_t tag_handle, int event, int status) {
         printf("tag(%d)(%s): Tag was destroyed.\n", t->tag.id, t->tag.name);
         break;
     case PLCTAG_EVENT_READ_COMPLETED:
-        get_tag(tag_handle, t->tag, 0);
+        get_tag(tag_handle, &t->tag, 0);
         printf("tag(%d)(%s): Tag read operation completed with status %s.\n", t->tag.id, t->tag.name, plc_tag_decode_error(status));
         break;
     case PLCTAG_EVENT_READ_STARTED:
