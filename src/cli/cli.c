@@ -620,67 +620,67 @@ int verify_write_tags(void) {
         switch (t->tag.type) {
         case t_UINT64:
             if (t->tag.last_val.UINT64_val != t->tag.write_val.UINT64_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT64:
             if (t->tag.last_val.INT64_val != t->tag.write_val.INT64_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_UINT32:
             if (t->tag.last_val.UINT32_val != t->tag.write_val.UINT32_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT32:
             if (t->tag.last_val.INT32_val != t->tag.write_val.INT32_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_UINT16:
             if (t->tag.last_val.UINT16_val != t->tag.write_val.UINT16_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT16:
             if (t->tag.last_val.INT16_val != t->tag.write_val.INT16_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_UINT8:
             if (t->tag.last_val.UINT8_val != t->tag.write_val.UINT8_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT8:
             if (t->tag.last_val.INT8_val != t->tag.write_val.INT8_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_FLOAT64:
             if (t->tag.last_val.FLOAT64_val != t->tag.write_val.FLOAT64_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_FLOAT32:
             if (t->tag.last_val.FLOAT32_val != t->tag.write_val.FLOAT32_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_BOOL:
             if (t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", plc_tag_decode_error(rc));
+                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.name);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
@@ -719,7 +719,7 @@ int write_tags(void) {
 
     rc = verify_write_tags();
     if (rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Unable to write value to tag %s!\n", plc_tag_decode_error(rc));
+        fprintf(stderr,"Unable to write value to tags %s!\n", plc_tag_decode_error(rc));
         return rc;
     }
 
