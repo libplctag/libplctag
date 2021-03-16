@@ -225,63 +225,68 @@ int process_line(const char *line, tag_t *tag)
 
     /* setup all the associated tag values here. */
     tag->id = atoi(parts[0]);
-    /* TODO
     tag->bit_offset = -1;
     char *type = parts[1];
-    if (strtok(type, "]"))
-    */ 
 
-    if(!strcmp("uint64", parts[1])) {
+    char *bit = strchr(type, '[');
+    if(bit != NULL) {
+        type = strtok(type, "[");
+        bit++;
+        bit = strtok(bit, "]");
+        sscanf(bit, "%d", &tag->bit_offset);
+    }
+
+    if(!strcmp("uint64", type)) {
         tag->type = t_UINT64;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu64, &tag->write_val.UINT64_val);
         }
-    } else if(!strcmp("int64", parts[1])) {
+    } else if(!strcmp("int64", type)) {
         tag->type = t_INT64;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi64, &tag->write_val.INT64_val); 
         }
-    } else if(!strcmp("uint32", parts[1])) {
+    } else if(!strcmp("uint32", type)) {
         tag->type = t_UINT32;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu32, &tag->write_val.UINT32_val);
         }
-    } else if(!strcmp("int32", parts[1])) {
+    } else if(!strcmp("int32", type)) {
         tag->type = t_INT32;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi32, &tag->write_val.INT32_val);
         }
-    } else if(!strcmp("uint16", parts[1])) {
+    } else if(!strcmp("uint16", type)) {
         tag->type = t_UINT16;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu16, &tag->write_val.UINT16_val);
         }
-    } else if(!strcmp("int16", parts[1])) {
+    } else if(!strcmp("int16", type)) {
         tag->type = t_INT16;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi16, &tag->write_val.INT16_val); 
         }
-    } else if(!strcmp("uint8", parts[1])) {
+    } else if(!strcmp("uint8", type)) {
         tag->type = t_UINT8;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNu8, &tag->write_val.UINT8_val);
         }
-    } else if(!strcmp("int8", parts[1])) {
+    } else if(!strcmp("int8", type)) {
         tag->type = t_INT8;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%" SCNi8, &tag->write_val.INT8_val); 
         }
-    } else if(!strcmp("float64", parts[1])) {
+    } else if(!strcmp("float64", type)) {
         tag->type = t_FLOAT64;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%lf", &tag->write_val.FLOAT64_val); 
         }
-    } else if(!strcmp("float32", parts[1])) {
+    } else if(!strcmp("float32", type)) {
         tag->type = t_FLOAT32;
         if (cli_request.operation == WRITE) {
             sscanf(parts[required-2], "%f", &tag->write_val.FLOAT32_val);
         }
-    } else if(!strcmp("bool", parts[1])) {
+    } else if(!strcmp("bool", type)) {
         tag->type = t_BOOL;
         if (cli_request.operation == WRITE) {
             if (!strcmp("true", parts[required-2])) {
@@ -291,7 +296,7 @@ int process_line(const char *line, tag_t *tag)
             }
         }
     } else {
-        fprintf(stderr, "Unknown data type for %s!\n", parts[1]);
+        fprintf(stderr, "Unknown data type for %s!\n", type);
         return -1;
     }
 
