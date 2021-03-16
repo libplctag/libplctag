@@ -510,7 +510,11 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_BOOL:
-        tag->val.BOOL_val = plc_tag_get_uint8(tag_handle, offset);
+        if (tag->bit_offset == -1) {
+            tag->val.BOOL_val = plc_tag_get_uint8(tag_handle, offset);
+        } else {
+            tag->val.BOOL_val = plc_tag_get_bit(tag_handle, tag->bit_offset);
+        }
         if (!tag->watch) {
             tag->last_val.BOOL_val = tag->val.BOOL_val;
             if (tag->val.BOOL_val) {
@@ -598,7 +602,11 @@ int set_tag(int32_t tag_handle, tag_t *tag, int offset) {
         plc_tag_set_float32(tag_handle, offset, tag->write_val.FLOAT32_val);
         break;
     case t_BOOL:
-        plc_tag_set_uint8(tag_handle, offset, tag->write_val.BOOL_val);
+        if (tag->bit_offset == -1) {
+            plc_tag_set_uint8(tag_handle, offset, tag->write_val.BOOL_val);
+            break;
+        }
+        plc_tag_set_bit(tag_handle, tag->bit_offset, tag->write_val.BOOL_val);
         break;
     default:
         return PLCTAG_ERR_BAD_STATUS;
