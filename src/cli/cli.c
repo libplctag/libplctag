@@ -71,7 +71,7 @@ int parse_args(int argc, char *argv[])
             sscanf(val, "%d", &cli_request.offline);
         } else {
             fprintf(stderr, "ERROR: invalid PLC parameter: %s.\n", param);
-            fprintf(stderr, "INFO: Supported params -ip, -debug, -interval.\n");
+            fprintf(stderr, "INFO: Supported params -ip, -path, -plc, -debug, -interval, -offline.\n");
             return -1;
         } 
     }
@@ -346,6 +346,10 @@ int process_tags()
     while (getline(&line, &line_len, stdin) > 0) {
         if (is_comment(line)) {
             continue;
+        }
+
+        if (!strcmp(line, "break\n")) {
+            break;
         }
 
         fprintf(stdout, "%s", line);
@@ -781,6 +785,21 @@ int watch_tags(void) {
     return 0;
 }
 
+int destroy_tags(void) {
+    struct tags *t;
+    int rc = PLCTAG_STATUS_OK;
+
+    for(t = tags; t != NULL; t = t->hh.next) {
+        rc = plc_tag_destroy(t->tag_handle);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stdout, "Unable to destroy tag %s!\n", plc_tag_decode_error(rc));
+            return rc;
+        }
+    }
+
+    return rc;
+}
+
 int do_offline(void) {
     struct tags *t = tags;
     int val = 0;
@@ -863,7 +882,9 @@ int main(int argc, char *argv[])
         break;
     }
 
-    fprintf(stdout, "DONE.\n");
+    destroy_tags();
+    plc_tag_shutdown();
 
+    fprintf(stdout, "DONE.\n");
     return 0;
 }

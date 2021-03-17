@@ -85,4 +85,5 @@ int verify_write_tags(void);
 int write_tags(void);
 int watch_tags(void);
 void tag_callback(int32_t tag_handle, int event, int status);
+int destroy_tags(void);
 int do_offline(void);
