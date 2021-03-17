@@ -698,7 +698,7 @@ int verify_write_tags(void) {
         }
     }
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 int write_tags(void) {
