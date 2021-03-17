@@ -6,6 +6,7 @@
 #include <inttypes.h>
 #include "../lib/libplctag.h"
 #include "./cli.h"
+#include "./getline.h"
 #include "../examples/utils.h"
 
 /* globals here */

@@ -542,7 +542,7 @@ else()
     # build the cli.
     set(CLI_FILES       ${cli_SRC_PATH}/cli.c
                         ${cli_SRC_PATH}/cli.h
-                        ${cli_SRC_PATH}/getline.c
+                        ${cli_SRC_PATH}/getline.h
                         ${cli_SRC_PATH}/uthash.h
     )
 
