@@ -835,7 +835,7 @@ int main(int argc, char *argv[])
     if (parse_args(argc, argv) == -1) {
         fprintf(stderr, "ERROR: invalid arguments.\n");
         usage();
-        return -1;
+        exit(-1);
     }
 
     print_request();
