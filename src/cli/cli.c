@@ -842,16 +842,16 @@ int main(int argc, char *argv[])
 
     if(plc_tag_check_lib_version(LIBPLCTAG_REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "ERROR: Required compatible library version %d.%d.%d not available!\n", LIBPLCTAG_REQUIRED_VERSION);
-        return -1;
+        exit(1);
     }
 
     if (process_tags() != PLCTAG_STATUS_OK) {
         fprintf(stderr, "ERROR: Could not process tags.\n");
-        return -1;
+        exit(1);
     }
 
     if (cli_request.offline == 1) {
-        return do_offline();
+        exit(do_offline());
     }
 
     /* wait for all tags to be ready */
@@ -863,19 +863,19 @@ int main(int argc, char *argv[])
     case READ:
         if (read_tags() != PLCTAG_STATUS_OK) {
             fprintf(stderr, "ERROR: Tag read failed.\n");
-            return -1;
+            exit(1);
         }
         break;
     case WRITE:
         if (write_tags() != PLCTAG_STATUS_OK) {
             fprintf(stderr, "ERROR: Tag write failed.\n");
-            return -1;
+            exit(1);
         }
         break;
     case WATCH:
         if (read_tags() != PLCTAG_STATUS_OK) {
             fprintf(stderr, "ERROR: Tag read failed.\n");
-            return -1;
+            exit(1);
         }
         watch_tags();
         break;
@@ -887,5 +887,5 @@ int main(int argc, char *argv[])
     plc_tag_shutdown();
 
     fprintf(stdout, "DONE.\n");
-    return 0;
+    exit(0);
 }
