@@ -90,18 +90,19 @@ int is_comment(const char *line)
 
 char **split_string(const char *str, const char *sep)
 {
-    int sub_str_count=0;
-    int size = 0;
+    size_t sub_str_count=0;
+    size_t source_size = 0;
+    size_t result_size = 0;
     const char *sub;
     const char *tmp;
     char **res = NULL;
 
     /* first, count the sub strings */
     tmp = str;
-    sub = strstr(tmp,sep);
+    sub = strstr(tmp, sep);
 
     while(sub && *sub) {
-        /* separator could be at the front, ignore that. */
+        /* separator could be at the front. */
         if(sub != tmp) {
             sub_str_count++;
         }
@@ -115,10 +116,11 @@ char **split_string(const char *str, const char *sep)
     }
 
     /* calculate total size for string plus pointers */
-    size = (int)(sizeof(char *)*((size_t)sub_str_count+1))+(int)strlen(str)+1;
+    source_size = strlen(str) + 1;
+    result_size = (sizeof(char *)*(sub_str_count+1)) + source_size;
 
     /* allocate enough memory */
-    res = malloc((size_t)size);
+    res = malloc(result_size);
     if(!res) {
         return NULL;
     }
@@ -127,14 +129,14 @@ char **split_string(const char *str, const char *sep)
     tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count+1);
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
-    strncpy((char *)tmp, str, (size_t)(size - ((char*)tmp - (char*)res)));
+    strncpy((char *)tmp, str, source_size);
 
     /* set up the pointers */
     sub_str_count=0;
-    sub = strstr(tmp,sep);
+    sub = strstr(tmp, sep);
 
     while(sub && *sub) {
-        /* separator could be at the front, ignore that. */
+        /* separator could be at the front */
         if(sub != tmp) {
             /* store the pointer */
             res[sub_str_count] = (char *)tmp;

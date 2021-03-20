@@ -1278,7 +1278,7 @@ int sleep_ms(int ms)
     }
 
     wait_time.tv_sec = ms/1000;
-    wait_time.tv_nsec = ((int64_t)ms % 1000)*1000000; /* convert to nanoseconds */
+    wait_time.tv_nsec = ((long)ms % 1000)*1000000; /* convert to nanoseconds */
 
     do {
         int rc = nanosleep(&wait_time, &remainder);
