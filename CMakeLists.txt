@@ -234,8 +234,20 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 		MESSAGE(STATUS "Compiler does not support C99/C11 compatibility check." )
 	endif()
 
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    if(${COMPILER_VERSION} VERSION_GREATER 8.0 AND ${COMPILER_VERSION} VERSION_LESS 11.0)
+        # the compiler supports the -Wstringop-overflow flag.
+        # There is clearly a bug in the compiler that throws this warning inconsistently.
+        # Suppress it for RELEASE builds.
+        MESSAGE(STATUS "Compiler supports string op overflow checking.  Suppress for Release builds.")
+        SET(STR_OP_OVERFLOW_ON "-Wstringop-overflow")
+        SET(STR_OP_OVERFLOW_OFF "-Wno-stringop-overflow")
+    else()
+        SET(STR_OP_OVERFLOW_ON "")
+        SET(STR_OP_OVERFLOW_OFF "")
+    endif()
+
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 	set(C99_FLAGS "-std=c99" )
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
