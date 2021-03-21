@@ -186,8 +186,12 @@ SET(C99_FLAGS "")
 # C compiler specific settings
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
+
+    SET(STR_OP_OVERFLOW_ON "")
+    SET(STR_OP_OVERFLOW_OFF "")
+
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_OFF}")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
 
@@ -238,10 +242,11 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
         # the compiler supports the -Wstringop-overflow flag.
         # There is clearly a bug in the compiler that throws this warning inconsistently.
         # Suppress it for RELEASE builds.
-        MESSAGE(STATUS "Compiler supports string op overflow checking.  Suppress for Release builds.")
+        MESSAGE(STATUS "Compiler version ${COMPILER_VERSION} supports string op overflow checking.  Suppress for Release builds.")
         SET(STR_OP_OVERFLOW_ON "-Wstringop-overflow")
         SET(STR_OP_OVERFLOW_OFF "-Wno-stringop-overflow")
     else()
+        MESSAGE(STATUS "Compiler version ${COMPILER_VERSION} does not support string op overflow checking.")
         SET(STR_OP_OVERFLOW_ON "")
         SET(STR_OP_OVERFLOW_OFF "")
     endif()
@@ -306,6 +311,9 @@ else()
 endif()
 
 set(BASE_CXX_FLAGS "${BASE_FLAGS}")
+
+MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
+MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
 # generate version file from CMake info.
 CONFIGURE_FILE("${lib_SRC_PATH}/version.h.in" "${lib_SRC_PATH}/version.h" @ONLY)
@@ -485,7 +493,6 @@ else()
     endforeach(example)
 
     # simple.cpp is different because it is C++
-    message("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
     set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS "${BASE_CXX_FLAGS}")
     add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 
