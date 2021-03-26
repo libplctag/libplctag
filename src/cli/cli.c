@@ -534,20 +534,12 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         if (!tag->watch) {
             tag->last_val.BOOL_val = tag->val.BOOL_val;
-            if (tag->val.BOOL_val) {
-                fprintf(stdout, "{\"%d\":true}\n", tag->id);
-            } else {
-                fprintf(stdout, "{\"%d\":false}\n", tag->id);
-            }
+            fprintf(stdout, "{\"%d\":%s}\n", tag->id, btoa(tag->val.BOOL_val));
             break;
         }
         if (tag->val.BOOL_val != tag->last_val.BOOL_val) {
             tag->last_val.BOOL_val = tag->val.BOOL_val;
-            if (tag->val.BOOL_val) {
-                fprintf(stdout, "{\"%d\":true}\n", tag->id);
-            } else {
-                fprintf(stdout, "{\"%d\":false}\n", tag->id);
-            }
+            fprintf(stdout, "{\"%d\":%s}\n", tag->id, btoa(tag->val.BOOL_val));
         }
         break;
     default:
