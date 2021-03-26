@@ -45,9 +45,9 @@ typedef enum {
 
 /* tag definition */
 typedef struct {
-    int id;
+    const char *key;
     data_type_t type;
-    const char *name;
+    const char *path;
     union {
         uint64_t UINT64_val;
         int64_t INT64_val;
@@ -61,7 +61,8 @@ typedef struct {
         float FLOAT32_val;
         bool BOOL_val;
     } val, last_val, write_val;
-    int bit_offset;
+    int bit;
+    int offset;
     bool watch;
 } tag_t;
 
