@@ -333,6 +333,7 @@ int process_line(const char *line, tag_t *tag)
     while (parts[i] != NULL) {
         param = strtok(parts[i], "=");
         val = strtok(NULL, "");
+        fprintf(stdout, "[Param, Value]: [%s, %s]\n", param, val);
 
         if(!strcmp("key", param)) {
             tag->key = strdup(val);
@@ -354,6 +355,7 @@ int process_line(const char *line, tag_t *tag)
         ++i;
     }
 
+    fprintf(stdout, "Parsing tag type now...\n");
     if(!strcmp("uint64", type)) {
         tag->type = t_UINT64;
         if (cli_request.operation == WRITE) {
