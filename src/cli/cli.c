@@ -251,6 +251,53 @@ int validate_line(char **parts) {
     return 0;
 }
 
+void print_tag(tag_t *tag) {
+    fprintf(stdout, "Tag created:\n");
+    fprintf(stdout, "\tKey: %s\n", tag->key);
+    switch (tag->type) {
+    case t_UINT64:
+        fprintf(stdout, "\tType: uint64.\n");
+        break;
+    case t_INT64:
+        fprintf(stdout, "\tType: int64.\n");
+        break;
+    case t_UINT32:
+        fprintf(stdout, "\tType: uint32.\n");
+        break;
+    case t_INT32:
+        fprintf(stdout, "\tType: int32.\n");
+        break;
+    case t_UINT16:
+        fprintf(stdout, "\tType: uint16.\n");
+        break;
+    case t_INT16:
+        fprintf(stdout, "\tType: int16.\n");
+        break;
+    case t_UINT8:
+        fprintf(stdout, "\tType: uint8.\n");
+        break;
+    case t_INT8:
+        fprintf(stdout, "\tType: int8.\n");
+        break;
+    case t_FLOAT64:
+        fprintf(stdout, "\tType: float64.\n");
+        break;
+    case t_FLOAT32:
+        fprintf(stdout, "\tType: float32.\n");
+        break;
+    case t_BOOL:
+        fprintf(stdout, "\tType: bool.\n");
+        break;
+    default:
+        fprintf(stdout, "\tType: INVALID.\n");
+        break;
+    }
+    fprintf(stdout, "\tPath: %s\n", tag->path);
+    fprintf(stdout, "\tBit: %d\n", tag->bit);
+    fprintf(stdout, "\tOffset: %d\n", tag->offset);
+    fprintf(stdout, "\tWatch: %s\n", btoa(tag->watch));
+}
+
 int process_line(const char *line, tag_t *tag) 
 {
     char **parts = NULL;
@@ -372,6 +419,8 @@ int process_line(const char *line, tag_t *tag)
     }
 
     free(parts);
+    print_tag(tag);
+    fprintf(stdout, "Line processed!\n");
 
     return 0;
 }
