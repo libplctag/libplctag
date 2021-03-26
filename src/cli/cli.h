@@ -6,8 +6,8 @@
 #define LIBPLCTAG_REQUIRED_VERSION 2,1,4
 
 /* tag paths */
-#define TAG_PATH                  "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&name=%s"
-#define TAG_PATH_AUTO_READ_SYNC   "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&auto_sync_read_ms=%d&name=%s"
+#define TAG_PATH                  "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&name=%s%s"
+#define TAG_PATH_AUTO_READ_SYNC   "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&auto_sync_read_ms=%d&name=%s%s"
 #define DATA_TIMEOUT              5000
 
 /* cli operations */
@@ -26,6 +26,7 @@ typedef struct {
     cli_operation_t operation;
     int interval;
     int debug_level;
+    const char *attributes;
     int offline;
 } cli_request_t;
 

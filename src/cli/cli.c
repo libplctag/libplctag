@@ -19,6 +19,7 @@ cli_request_t cli_request = {
     READ,
     500,
     2,
+    "",
     0 // offline
 };
 
@@ -68,11 +69,13 @@ int parse_args(int argc, char *argv[])
             sscanf(val, "%d", &cli_request.debug_level);
         } else if (!strcmp(param, "-interval")) {
             sscanf(val, "%d", &cli_request.interval);
+        } else if (!strcmp(param, "-attributes")) {
+            cli_request.attributes = val;
         } else if (!strcmp(param, "-offline")) {
             sscanf(val, "%d", &cli_request.offline);
         } else {
             fprintf(stderr, "ERROR: invalid PLC parameter: %s.\n", param);
-            fprintf(stderr, "INFO: Supported params -ip, -path, -plc, -debug, -interval, -offline.\n");
+            fprintf(stderr, "INFO: Supported params -protocol, -ip, -path, -plc, -debug, -interval, -attributes, -offline.\n");
             return -1;
         } 
     }
@@ -103,6 +106,7 @@ void print_request()
     }
     fprintf(stdout, "\tInterval: %d\n", cli_request.interval);
     fprintf(stdout, "\tDebug Level: %d\n", cli_request.debug_level);
+    fprintf(stdout, "\tAdditional Attributes: %s\n", cli_request.attributes);
     fprintf(stdout, "\tOffline: %d\n", cli_request.offline);
 }
 
@@ -365,12 +369,13 @@ int process_tags()
         case WATCH:
             sprintf(tag_path, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol, 
                 cli_request.ip, cli_request.path, cli_request.plc, 
-                cli_request.debug_level, cli_request.interval, tag.name);
+                cli_request.debug_level, cli_request.interval, tag.name, 
+                cli_request.attributes);
             break;   
         default:
             sprintf(tag_path, TAG_PATH, cli_request.protocol, 
                 cli_request.ip, cli_request.path, cli_request.plc, 
-                cli_request.debug_level, tag.name);
+                cli_request.debug_level, tag.name, cli_request.attributes);
             break;
         }
 
