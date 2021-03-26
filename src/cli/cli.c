@@ -215,6 +215,39 @@ char **split_string(const char *str, const char *sep)
     return res;
 }
 
+int validate_line(char **parts) {
+    char req_params[4][10] = 
+    {
+        "key",
+        "type",
+        "path",
+        "value"
+    };
+
+    int required = 3;
+    if (cli_request.operation == WRITE) required = 4;
+    
+    bool found = false;
+    int j;
+    for(int i=0; i < required; i++) {
+        j = 0;
+        while(parts[j] != NULL) {
+            if (!strcmp(req_params[i], strtok(parts[j], "="))) {
+                found = true;
+                break;
+            }
+            ++j;
+        }
+        if (!found) {
+            fprintf(stderr, "Line missing: %s\n", req_params[i]);
+            return -1;
+        }
+        found = false;
+    }
+
+    return 0;
+}
+
 int process_line(const char *line, tag_t *tag) 
 {
     char **parts = NULL;
@@ -225,15 +258,10 @@ int process_line(const char *line, tag_t *tag)
         return -1;
     }
 
-    /* make sure we got enough pieces. */
-    /* TODO: actually check if the relevant pieces are there or not */
-    int required = 3;
-    if (cli_request.operation == WRITE) required = 4;
-    for(int i=0; i < required; i++) {
-        if(parts[i] == NULL) {
-            fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
-            return -1;
-        }
+    /* check if the relevant parameters are there or not */
+    if (validate_line(parts) != 0) {
+        fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
+        return -1;
     }
 
     /* setup all the associated tag values here. */
