@@ -55,7 +55,7 @@ int parse_args(int argc, char *argv[])
     char *val;
     while (++i < argc) {
         param = strtok(argv[i], "="); 
-        val = strtok(NULL, "=");
+        val = strtok(NULL, "");
 
         if (!strcmp(param, "-protocol")) {
             cli_request.protocol = val;
@@ -229,10 +229,12 @@ int validate_line(char **parts) {
     
     bool found = false;
     int j;
+    char *part;
     for(int i=0; i < required; i++) {
         j = 0;
         while(parts[j] != NULL) {
-            if (!strcmp(req_params[i], strtok(parts[j], "="))) {
+            part = strdup(parts[j]);
+            if (!strcmp(req_params[i], strtok(part, "="))) {
                 found = true;
                 break;
             }
@@ -245,6 +247,7 @@ int validate_line(char **parts) {
         found = false;
     }
 
+    free(part);
     return 0;
 }
 
@@ -264,6 +267,8 @@ int process_line(const char *line, tag_t *tag)
         return -1;
     }
 
+    fprintf(stdout, "Line validated!\n");
+
     /* setup all the associated tag values here. */
 
     /* set defaults here first */
@@ -280,7 +285,7 @@ int process_line(const char *line, tag_t *tag)
     char *val;
     while (parts[i] != NULL) {
         param = strtok(parts[i], "=");
-        val = strtok(NULL, "=");
+        val = strtok(NULL, "");
 
         if(!strcmp("key", param)) {
             tag->key = val;
