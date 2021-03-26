@@ -288,7 +288,7 @@ int process_line(const char *line, tag_t *tag)
         val = strtok(NULL, "");
 
         if(!strcmp("key", param)) {
-            tag->key = val;
+            tag->key = strdup(val);
         } else if (!strcmp("type", param)) {
             type = val;
         } else if (!strcmp("value", param)) {
@@ -298,7 +298,7 @@ int process_line(const char *line, tag_t *tag)
         } else if (!strcmp("offset", param)) {
             sscanf(val, "%d", &tag->offset);
         } else if (!strcmp("path", param)) {
-            tag->path = val;
+            tag->path = strdup(val);
         } else {
             fprintf(stderr, "Unknown param %s!\n", param);
             return -1;
