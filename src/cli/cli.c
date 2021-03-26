@@ -424,10 +424,10 @@ int process_tags()
     return 0;
 }
 
-int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
+int get_tag(int32_t tag_handle, tag_t *tag) {
     switch (tag->type) {
     case t_UINT64:
-        tag->val.UINT64_val = plc_tag_get_uint64(tag_handle, offset);
+        tag->val.UINT64_val = plc_tag_get_uint64(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.UINT64_val = tag->val.UINT64_val; 
             fprintf(stdout, "{\"%s\":%" PRIu64"}\n", tag->key, tag->val.UINT64_val);
@@ -439,7 +439,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_INT64:
-        tag->val.INT64_val = plc_tag_get_int64(tag_handle, offset);
+        tag->val.INT64_val = plc_tag_get_int64(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.INT64_val = tag->val.INT64_val;
             fprintf(stdout, "{\"%s\":%" PRIi64"}\n", tag->key, tag->val.INT64_val);
@@ -451,7 +451,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_UINT32:
-        tag->val.UINT32_val = plc_tag_get_uint32(tag_handle, offset);
+        tag->val.UINT32_val = plc_tag_get_uint32(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.UINT32_val = tag->val.UINT32_val;
             fprintf(stdout, "{\"%s\":%" PRIu32"}\n", tag->key, tag->val.UINT32_val);
@@ -463,7 +463,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_INT32:
-        tag->val.INT32_val = plc_tag_get_int32(tag_handle, offset);
+        tag->val.INT32_val = plc_tag_get_int32(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.INT32_val = tag->val.INT32_val;
             fprintf(stdout, "{\"%s\":%" PRIi32"}\n", tag->key, tag->val.INT32_val);
@@ -475,7 +475,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_UINT16:
-        tag->val.UINT16_val = plc_tag_get_uint16(tag_handle, offset);
+        tag->val.UINT16_val = plc_tag_get_uint16(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.UINT16_val = tag->val.UINT16_val;
             fprintf(stdout, "{\"%s\":%" PRIu16"}\n", tag->key, tag->val.UINT16_val);
@@ -487,7 +487,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_INT16:
-        tag->val.INT16_val = plc_tag_get_int16(tag_handle, offset);
+        tag->val.INT16_val = plc_tag_get_int16(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.INT16_val = tag->val.INT16_val;
             fprintf(stdout, "{\"%s\":%" PRIi16"}\n", tag->key, tag->val.INT16_val);
@@ -499,7 +499,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_UINT8:
-        tag->val.UINT8_val = plc_tag_get_uint8(tag_handle, offset);
+        tag->val.UINT8_val = plc_tag_get_uint8(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.UINT8_val = tag->val.UINT8_val;
             fprintf(stdout, "{\"%s\":%" PRIu8"}\n", tag->key, tag->val.UINT8_val);
@@ -511,7 +511,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_INT8:
-        tag->val.INT8_val = plc_tag_get_int8(tag_handle, offset);
+        tag->val.INT8_val = plc_tag_get_int8(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.INT8_val = tag->val.INT8_val;
             fprintf(stdout, "{\"%s\":%" PRIi8"}\n", tag->key, tag->val.INT8_val);
@@ -523,7 +523,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_FLOAT64:
-        tag->val.FLOAT64_val = plc_tag_get_float64(tag_handle, offset);
+        tag->val.FLOAT64_val = plc_tag_get_float64(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
             fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
@@ -535,7 +535,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         }
         break;
     case t_FLOAT32:
-        tag->val.FLOAT32_val = plc_tag_get_float32(tag_handle, offset);
+        tag->val.FLOAT32_val = plc_tag_get_float32(tag_handle, tag->offset);
         if (!tag->watch) {
             tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
             fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
@@ -548,7 +548,7 @@ int get_tag(int32_t tag_handle, tag_t *tag, int offset) {
         break;
     case t_BOOL:
         if (tag->bit == -1) {
-            tag->val.BOOL_val = plc_tag_get_uint8(tag_handle, offset);
+            tag->val.BOOL_val = plc_tag_get_uint8(tag_handle, tag->offset);
         } else {
             tag->val.BOOL_val = plc_tag_get_bit(tag_handle, tag->bit);
         }
@@ -588,7 +588,7 @@ int read_tags(void) {
     }
 
     for(t = tags; t != NULL; t = t->hh.next) {
-        rc = get_tag(t->tag_handle, &t->tag, 0);
+        rc = get_tag(t->tag_handle, &t->tag);
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr,"Unable to parse value of tag %s!\n", plc_tag_decode_error(rc));
             return rc;
@@ -598,41 +598,41 @@ int read_tags(void) {
     return 0;
 }
 
-int set_tag(int32_t tag_handle, tag_t *tag, int offset) {
+int set_tag(int32_t tag_handle, tag_t *tag) {
     switch (tag->type) {
     case t_UINT64:
-        plc_tag_set_uint64(tag_handle, offset, tag->write_val.UINT64_val);
+        plc_tag_set_uint64(tag_handle, tag->offset, tag->write_val.UINT64_val);
         break;
     case t_INT64:
-        plc_tag_set_int64(tag_handle, offset, tag->write_val.INT64_val);
+        plc_tag_set_int64(tag_handle, tag->offset, tag->write_val.INT64_val);
         break;
     case t_UINT32:
-        plc_tag_set_uint32(tag_handle, offset, tag->write_val.UINT32_val);
+        plc_tag_set_uint32(tag_handle, tag->offset, tag->write_val.UINT32_val);
         break;
     case t_INT32:
-        plc_tag_set_int32(tag_handle, offset, tag->write_val.INT32_val);
+        plc_tag_set_int32(tag_handle, tag->offset, tag->write_val.INT32_val);
         break;
     case t_UINT16:
-        plc_tag_set_uint16(tag_handle, offset, tag->write_val.UINT16_val);
+        plc_tag_set_uint16(tag_handle, tag->offset, tag->write_val.UINT16_val);
         break;
     case t_INT16:
-        plc_tag_set_int16(tag_handle, offset, tag->write_val.INT16_val);
+        plc_tag_set_int16(tag_handle, tag->offset, tag->write_val.INT16_val);
         break;
     case t_UINT8:
-        plc_tag_set_uint8(tag_handle, offset, tag->write_val.UINT8_val);
+        plc_tag_set_uint8(tag_handle, tag->offset, tag->write_val.UINT8_val);
         break;
     case t_INT8:
-        plc_tag_set_int8(tag_handle, offset, tag->write_val.INT8_val);
+        plc_tag_set_int8(tag_handle, tag->offset, tag->write_val.INT8_val);
         break;
     case t_FLOAT64:
-        plc_tag_set_float64(tag_handle, offset, tag->write_val.FLOAT64_val);
+        plc_tag_set_float64(tag_handle, tag->offset, tag->write_val.FLOAT64_val);
         break;
     case t_FLOAT32:
-        plc_tag_set_float32(tag_handle, offset, tag->write_val.FLOAT32_val);
+        plc_tag_set_float32(tag_handle, tag->offset, tag->write_val.FLOAT32_val);
         break;
     case t_BOOL:
         if (tag->bit == -1) {
-            plc_tag_set_uint8(tag_handle, offset, tag->write_val.BOOL_val);
+            plc_tag_set_uint8(tag_handle, tag->offset, tag->write_val.BOOL_val);
             break;
         }
         plc_tag_set_bit(tag_handle, tag->bit, tag->write_val.BOOL_val);
@@ -731,7 +731,7 @@ int write_tags(void) {
     struct tags *t;
 
     for(t = tags; t != NULL; t = t->hh.next) {
-        rc = set_tag(t->tag_handle, &t->tag, 0);
+        rc = set_tag(t->tag_handle, &t->tag);
         if(rc != PLCTAG_STATUS_OK) {
             fprintf(stderr,"Unable to set value of tag %s!\n", plc_tag_decode_error(rc));
             return rc;
@@ -773,7 +773,7 @@ void tag_callback(int32_t tag_handle, int event, int status) {
         fprintf(stdout, "tag(%s): Tag was destroyed.\n", t->tag.key);
         break;
     case PLCTAG_EVENT_READ_COMPLETED:
-        get_tag(tag_handle, &t->tag, 0);
+        get_tag(tag_handle, &t->tag);
         fprintf(stdout, "tag(%s): Tag read operation completed with status %s.\n", t->tag.key, plc_tag_decode_error(status));
         break;
     case PLCTAG_EVENT_READ_STARTED:
