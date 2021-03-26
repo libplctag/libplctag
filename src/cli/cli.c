@@ -20,7 +20,7 @@ cli_request_t cli_request = {
     500,
     2,
     "",
-    0 // offline
+    false // offline
 };
 
 void usage(void) 
@@ -72,7 +72,14 @@ int parse_args(int argc, char *argv[])
         } else if (!strcmp(param, "-attributes")) {
             cli_request.attributes = val;
         } else if (!strcmp(param, "-offline")) {
-            sscanf(val, "%d", &cli_request.offline);
+            if (!strcmp(val, "true")) {
+                cli_request.offline = true;
+            } else if (!strcmp(val, "false")) {
+                cli_request.offline = false;
+            } else {
+                fprintf(stderr, "ERROR: invalid parameter value for offline.");
+                fprintf(stderr, "INFO: Supported values 'true' or 'false'.");
+            }
         } else {
             fprintf(stderr, "ERROR: invalid PLC parameter: %s.\n", param);
             fprintf(stderr, "INFO: Supported params -protocol, -ip, -path, -plc, -debug, -interval, -attributes, -offline.\n");
@@ -107,7 +114,7 @@ void print_request()
     fprintf(stdout, "\tInterval: %d\n", cli_request.interval);
     fprintf(stdout, "\tDebug Level: %d\n", cli_request.debug_level);
     fprintf(stdout, "\tAdditional Attributes: %s\n", cli_request.attributes);
-    fprintf(stdout, "\tOffline: %d\n", cli_request.offline);
+    fprintf(stdout, "\tOffline: %s\n", btoa(cli_request.offline));
 }
 
 int is_comment(const char *line)
@@ -855,7 +862,7 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    if (cli_request.offline == 1) {
+    if (cli_request.offline) {
         exit(do_offline());
     }
 

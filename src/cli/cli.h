@@ -10,6 +10,9 @@
 #define TAG_PATH_AUTO_READ_SYNC   "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&auto_sync_read_ms=%d&name=%s%s"
 #define DATA_TIMEOUT              5000
 
+/* bool utils */
+#define btoa(x) ( (x) ? "true" : "false" )
+
 /* cli operations */
 typedef enum {
     READ,
@@ -27,7 +30,7 @@ typedef struct {
     int interval;
     int debug_level;
     const char *attributes;
-    int offline;
+    bool offline;
 } cli_request_t;
 
 /* data types */
