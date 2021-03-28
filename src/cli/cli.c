@@ -322,6 +322,7 @@ int process_line(const char *line, tag_t *tag)
     tag->bit = -1;
     tag->offset = 0;
     tag->watch = false;
+    fprintf(stdout, "Tag defaults set!\n");
 
     /* loop through all the val pairs now */
     char *type;
@@ -331,6 +332,7 @@ int process_line(const char *line, tag_t *tag)
     char *param;
     char *val;
     while (parts[i] != NULL) {
+        fprintf(stdout, "Part: %s\n", parts[i]);
         param = strtok(parts[i], "=");
         val = strtok(NULL, "");
         fprintf(stdout, "[Param, Value]: [%s, %s]\n", param, val);
