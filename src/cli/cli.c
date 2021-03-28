@@ -8,6 +8,7 @@
 #include "./cli.h"
 #include "./getline.h"
 #include "../examples/utils.h"
+#include "../util/debug.h"
 
 /* globals here */
 struct tags *tags = NULL;
@@ -18,7 +19,7 @@ cli_request_t cli_request = {
     "controllogix",
     READ,
     500,
-    2,
+    1, // DEBUG_ERROR
     "",
     false // offline
 };
@@ -92,29 +93,29 @@ int parse_args(int argc, char *argv[])
 
 void print_request() 
 {
-    fprintf(stdout, "Running with params:\n");
-    fprintf(stdout, "\tProtocol: %s\n", cli_request.protocol);
-    fprintf(stdout, "\tIP: %s\n", cli_request.ip);
-    fprintf(stdout, "\tPath: %s\n", cli_request.path);
-    fprintf(stdout, "\tPLC: %s\n", cli_request.plc);
+    pdebug(DEBUG_INFO, "Running with params:");
+    pdebug(DEBUG_INFO, "Protocol: %s", cli_request.protocol);
+    pdebug(DEBUG_INFO, "IP: %s", cli_request.ip);
+    pdebug(DEBUG_INFO, "Path: %s", cli_request.path);
+    pdebug(DEBUG_INFO, "PLC: %s", cli_request.plc);
     switch (cli_request.operation) {
     case READ:
-        fprintf(stdout, "\tOperation: READ.\n");
+        pdebug(DEBUG_INFO, "Operation: READ.");
         break;
     case WRITE:
-        fprintf(stdout, "\tOperation: WRITE.\n");
+        pdebug(DEBUG_INFO, "Operation: WRITE.");
         break;
     case WATCH:
-        fprintf(stdout, "\tOperation: WATCH.\n");
+        pdebug(DEBUG_INFO, "Operation: WATCH.");
         break;
     default:
-        fprintf(stdout, "\tOperation: INVALID.\n");
+        pdebug(DEBUG_INFO, "Operation: INVALID.");
         break;
     }
-    fprintf(stdout, "\tInterval: %d\n", cli_request.interval);
-    fprintf(stdout, "\tDebug Level: %d\n", cli_request.debug_level);
-    fprintf(stdout, "\tAdditional Attributes: %s\n", cli_request.attributes);
-    fprintf(stdout, "\tOffline: %s\n", btoa(cli_request.offline));
+    pdebug(DEBUG_INFO, "Interval: %d", cli_request.interval);
+    pdebug(DEBUG_INFO, "Debug Level: %d", cli_request.debug_level);
+    pdebug(DEBUG_INFO, "Additional Attributes: %s", cli_request.attributes);
+    pdebug(DEBUG_INFO, "Offline: %s", btoa(cli_request.offline));
 }
 
 int is_comment(const char *line)
@@ -246,7 +247,7 @@ int validate_line(tag_line_parts_t tag_line_parts) {
             ++j;
         }
         if (!found) {
-            fprintf(stderr, "Line missing: %s\n", req_params[i]);
+            pdebug(DEBUG_ERROR, "Line missing: %s", req_params[i]);
             return -1;
         }
         found = false;
@@ -257,50 +258,50 @@ int validate_line(tag_line_parts_t tag_line_parts) {
 }
 
 void print_tag(tag_t *tag) {
-    fprintf(stdout, "Tag created:\n");
-    fprintf(stdout, "\tKey: %s\n", tag->key);
+    pdebug(DEBUG_INFO, "Tag created:");
+    pdebug(DEBUG_INFO, "Key: %s", tag->key);
     switch (tag->type) {
     case t_UINT64:
-        fprintf(stdout, "\tType: uint64.\n");
+        pdebug(DEBUG_INFO, "Type: uint64.");
         break;
     case t_INT64:
-        fprintf(stdout, "\tType: int64.\n");
+        pdebug(DEBUG_INFO, "Type: int64.");
         break;
     case t_UINT32:
-        fprintf(stdout, "\tType: uint32.\n");
+        pdebug(DEBUG_INFO, "Type: uint32.");
         break;
     case t_INT32:
-        fprintf(stdout, "\tType: int32.\n");
+        pdebug(DEBUG_INFO, "Type: int32.");
         break;
     case t_UINT16:
-        fprintf(stdout, "\tType: uint16.\n");
+        pdebug(DEBUG_INFO, "Type: uint16.");
         break;
     case t_INT16:
-        fprintf(stdout, "\tType: int16.\n");
+        pdebug(DEBUG_INFO, "Type: int16.");
         break;
     case t_UINT8:
-        fprintf(stdout, "\tType: uint8.\n");
+        pdebug(DEBUG_INFO, "Type: uint8.");
         break;
     case t_INT8:
-        fprintf(stdout, "\tType: int8.\n");
+        pdebug(DEBUG_INFO, "Type: int8.");
         break;
     case t_FLOAT64:
-        fprintf(stdout, "\tType: float64.\n");
+        pdebug(DEBUG_INFO, "Type: float64.");
         break;
     case t_FLOAT32:
-        fprintf(stdout, "\tType: float32.\n");
+        pdebug(DEBUG_INFO, "Type: float32.");
         break;
     case t_BOOL:
-        fprintf(stdout, "\tType: bool.\n");
+        pdebug(DEBUG_INFO, "Type: bool.");
         break;
     default:
-        fprintf(stdout, "\tType: INVALID.\n");
+        pdebug(DEBUG_INFO, "Type: INVALID.");
         break;
     }
-    fprintf(stdout, "\tPath: %s\n", tag->path);
-    fprintf(stdout, "\tBit: %d\n", tag->bit);
-    fprintf(stdout, "\tOffset: %d\n", tag->offset);
-    fprintf(stdout, "\tWatch: %s\n", btoa(tag->watch));
+    pdebug(DEBUG_INFO, "Path: %s", tag->path);
+    pdebug(DEBUG_INFO, "Bit: %d", tag->bit);
+    pdebug(DEBUG_INFO, "Offset: %d", tag->offset);
+    pdebug(DEBUG_INFO, "Watch: %s", btoa(tag->watch));
 }
 
 int process_line(const char *line, tag_t *tag) 
@@ -309,17 +310,17 @@ int process_line(const char *line, tag_t *tag)
 
     tag_line_parts = split_string(line, ",");
     if(tag_line_parts.num_parts < 0) {
-        fprintf(stderr,"Splitting string failed for string %s!\n", line);
+        pdebug(DEBUG_ERROR, "Splitting string failed for string %s!", line);
         return -1;
     }
 
     /* check if the relevant parameters are there or not */
     if (validate_line(tag_line_parts) != 0) {
-        fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
+        pdebug(DEBUG_ERROR, "Line does not contain enough parts. Line: %s", line);
         return -1;
     }
 
-    fprintf(stdout, "Line validated!\n");
+    pdebug(DEBUG_INFO, "Line validated!");
 
     /* setup all the associated tag values here. */
 
@@ -327,7 +328,7 @@ int process_line(const char *line, tag_t *tag)
     tag->bit = -1;
     tag->offset = 0;
     tag->watch = false;
-    fprintf(stdout, "Tag defaults set!\n");
+    pdebug(DEBUG_INFO, "Tag defaults set!");
 
     /* loop through all the val pairs now */
     char *type;
@@ -339,10 +340,10 @@ int process_line(const char *line, tag_t *tag)
     char *val;
     while (i < tag_line_parts.num_parts) {
         part = strdup(tag_line_parts.parts[i]);
-        fprintf(stdout, "Part: %s\n", part);
+        pdebug(DEBUG_INFO, "Part: %s", part);
         param = strtok(part, "=");
         val = strtok(NULL, "");
-        fprintf(stdout, "[Param, Value]: [%s, %s]\n", param, val);
+        pdebug(DEBUG_INFO, "[Param, Value]: [%s, %s]", param, val);
 
         if(!strcmp("key", param)) {
             tag->key = strdup(val);
@@ -357,14 +358,14 @@ int process_line(const char *line, tag_t *tag)
         } else if (!strcmp("path", param)) {
             tag->path = strdup(val);
         } else {
-            fprintf(stderr, "Unknown param %s!\n", param);
+            pdebug(DEBUG_ERROR, "Unknown param %s!", param);
             return -1;
         }
 
         ++i;
     }
 
-    fprintf(stdout, "Parsing tag type now...\n");
+    pdebug(DEBUG_INFO, "Parsing tag type now...");
     if(!strcmp("uint64", type)) {
         tag->type = t_UINT64;
         if (cli_request.operation == WRITE) {
@@ -425,13 +426,13 @@ int process_line(const char *line, tag_t *tag)
             }
         }
     } else {
-        fprintf(stderr, "Unknown data type for %s!\n", type);
+        pdebug(DEBUG_ERROR, "Unknown data type for %s!", type);
         return -1;
     }
 
     free(tag_line_parts.parts);
     print_tag(tag);
-    fprintf(stdout, "Line processed!\n");
+    pdebug(DEBUG_INFO, "Line processed!");
 
     return 0;
 }
@@ -477,9 +478,9 @@ int process_tags()
             break;
         }
 
-        fprintf(stdout, "%s", line);
         tag_t tag;
         trim_line(line);
+        pdebug(DEBUG_INFO, "Trimmed Line: %s", line);
         /* ignore lines that can't be processed */
         if (process_line(line, &tag) == -1) {
             continue;
@@ -499,10 +500,10 @@ int process_tags()
             break;
         }
 
-        fprintf(stdout, "%s\n", tag_path);
+        pdebug(DEBUG_INFO, "%s", tag_path);
         int tag_handle = plc_tag_create(tag_path, 0);
         if (tag_handle < 0) {
-            fprintf(stderr, "Error, %s, creating tag %s with string %s!\n", plc_tag_decode_error(tag_handle), tag.key, tag_path);
+            pdebug(DEBUG_ERROR, "Error, %s, creating tag %s with string %s!", plc_tag_decode_error(tag_handle), tag.key, tag_path);
             free(tag_path);
             free(line);
             return -1;
@@ -513,7 +514,7 @@ int process_tags()
 
     free(tag_path);
     free(line);
-    fprintf(stdout, "DONE processing tags.\n");
+    pdebug(DEBUG_INFO, "DONE processing tags.");
     return 0;
 }
 
@@ -670,7 +671,7 @@ int read_tags(void) {
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = plc_tag_read(t->tag_handle, 0);
         if(rc != PLCTAG_STATUS_PENDING) {
-            fprintf(stderr,"Unable to read tag %s!\n", plc_tag_decode_error(rc));
+            pdebug(DEBUG_ERROR, "Unable to read tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -683,7 +684,7 @@ int read_tags(void) {
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = get_tag(t->tag_handle, &t->tag);
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Unable to parse value of tag %s!\n", plc_tag_decode_error(rc));
+            pdebug(DEBUG_ERROR, "Unable to parse value of tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -746,67 +747,67 @@ int verify_write_tags(void) {
         switch (t->tag.type) {
         case t_UINT64:
             if (t->tag.last_val.UINT64_val != t->tag.write_val.UINT64_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT64:
             if (t->tag.last_val.INT64_val != t->tag.write_val.INT64_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_UINT32:
             if (t->tag.last_val.UINT32_val != t->tag.write_val.UINT32_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT32:
             if (t->tag.last_val.INT32_val != t->tag.write_val.INT32_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_UINT16:
             if (t->tag.last_val.UINT16_val != t->tag.write_val.UINT16_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT16:
             if (t->tag.last_val.INT16_val != t->tag.write_val.INT16_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_UINT8:
             if (t->tag.last_val.UINT8_val != t->tag.write_val.UINT8_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_INT8:
             if (t->tag.last_val.INT8_val != t->tag.write_val.INT8_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_FLOAT64:
             if (t->tag.last_val.FLOAT64_val != t->tag.write_val.FLOAT64_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_FLOAT32:
             if (t->tag.last_val.FLOAT32_val != t->tag.write_val.FLOAT32_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
         case t_BOOL:
             if (t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
-                fprintf(stderr,"Unable to write value of tag %s!\n", t->tag.key);
+                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                 return PLCTAG_ERR_BAD_STATUS;
             }
             break;
@@ -826,12 +827,12 @@ int write_tags(void) {
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = set_tag(t->tag_handle, &t->tag);
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Unable to set value of tag %s!\n", plc_tag_decode_error(rc));
+            pdebug(DEBUG_ERROR, "Unable to set value of tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
         rc = plc_tag_write(t->tag_handle, 0);
         if(rc != PLCTAG_STATUS_PENDING) {
-            fprintf(stderr,"Unable to read tag %s!\n", plc_tag_decode_error(rc));
+            pdebug(DEBUG_ERROR, "Unable to read tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -845,7 +846,7 @@ int write_tags(void) {
 
     rc = verify_write_tags();
     if (rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Unable to write value to tags %s!\n", plc_tag_decode_error(rc));
+        pdebug(DEBUG_ERROR, "Unable to write value to tags %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -860,24 +861,24 @@ void tag_callback(int32_t tag_handle, int event, int status) {
     /* handle the events. */
     switch(event) {
     case PLCTAG_EVENT_ABORTED:
-        fprintf(stdout, "tag(%s): Tag operation was aborted!\n", t->tag.key);
+        pdebug(DEBUG_INFO, "tag(%s): Tag operation was aborted!", t->tag.key);
         break;
     case PLCTAG_EVENT_DESTROYED:
-        fprintf(stdout, "tag(%s): Tag was destroyed.\n", t->tag.key);
+        pdebug(DEBUG_INFO, "tag(%s): Tag was destroyed.", t->tag.key);
         break;
     case PLCTAG_EVENT_READ_COMPLETED:
         get_tag(tag_handle, &t->tag);
-        fprintf(stdout, "tag(%s): Tag read operation completed with status %s.\n", t->tag.key, plc_tag_decode_error(status));
+        pdebug(DEBUG_INFO, "tag(%s): Tag read operation completed with status %s.", t->tag.key, plc_tag_decode_error(status));
         break;
     case PLCTAG_EVENT_READ_STARTED:
-        fprintf(stdout, "tag(%s): Tag read operation started.\n", t->tag.key);
+        pdebug(DEBUG_INFO, "tag(%s): Tag read operation started.", t->tag.key);
         break;
     case PLCTAG_EVENT_WRITE_COMPLETED:
         break;
     case PLCTAG_EVENT_WRITE_STARTED:
         break;
     default:
-        fprintf(stdout, "tag(%s): Unexpected event %d!\n", t->tag.key, event);
+        pdebug(DEBUG_INFO, "tag(%s): Unexpected event %d!", t->tag.key, event);
         break;
     }
 }
@@ -891,7 +892,7 @@ int watch_tags(void) {
         t->tag.watch = true;
         rc = plc_tag_register_callback(t->tag_handle, tag_callback);
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stdout, "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
+            pdebug(DEBUG_ERROR, "Unable to register callback for tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -910,7 +911,7 @@ int destroy_tags(void) {
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = plc_tag_destroy(t->tag_handle);
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stdout, "Unable to destroy tag %s!\n", plc_tag_decode_error(rc));
+            pdebug(DEBUG_ERROR, "Unable to destroy tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -922,7 +923,7 @@ int do_offline(void) {
     struct tags *t = tags;
     int val = 0;
 
-    fprintf(stdout, "Running offline!\n");
+    pdebug(DEBUG_INFO, "Running offline!");
 
     switch (cli_request.operation) {
     case READ:
@@ -955,15 +956,17 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
+    plc_tag_set_debug_level(cli_request.debug_level);
+
     print_request();
 
     if(plc_tag_check_lib_version(LIBPLCTAG_REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "ERROR: Required compatible library version %d.%d.%d not available!\n", LIBPLCTAG_REQUIRED_VERSION);
+        pdebug(DEBUG_ERROR, "Required compatible library version %d.%d.%d not available!", LIBPLCTAG_REQUIRED_VERSION);
         exit(1);
     }
 
     if (process_tags() != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "ERROR: Could not process tags.\n");
+        pdebug(DEBUG_ERROR, "Could not process tags.");
         exit(1);
     }
 
@@ -979,19 +982,19 @@ int main(int argc, char *argv[])
     switch (cli_request.operation) {
     case READ:
         if (read_tags() != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "ERROR: Tag read failed.\n");
+            pdebug(DEBUG_ERROR, "Tag read failed.");
             exit(1);
         }
         break;
     case WRITE:
         if (write_tags() != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "ERROR: Tag write failed.\n");
+            pdebug(DEBUG_ERROR, "Tag write failed.");
             exit(1);
         }
         break;
     case WATCH:
         if (read_tags() != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "ERROR: Tag read failed.\n");
+            pdebug(DEBUG_ERROR, "Tag read failed.");
             exit(1);
         }
         watch_tags();
@@ -1003,6 +1006,6 @@ int main(int argc, char *argv[])
     destroy_tags();
     plc_tag_shutdown();
 
-    fprintf(stdout, "DONE.\n");
+    pdebug(DEBUG_INFO, "DONE.");
     exit(0);
 }
