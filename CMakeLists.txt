@@ -260,6 +260,7 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
     set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
     # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
 endif()
 
@@ -550,7 +551,7 @@ else()
         set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
     endforeach()
 
-    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
+    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" "${util_SRC_PATH}/debug.h" )
 
     target_link_libraries(cli ${example_LIBRARIES} )
 
