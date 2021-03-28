@@ -536,7 +536,6 @@ else()
 endif(ANDROID_BUILD)
 
 # add the cli
-# add the examples and tests
 if(ANDROID_BUILD)
     MESSAGE("Building for Android.")
 else()
@@ -545,9 +544,15 @@ else()
                         ${cli_SRC_PATH}/cli.h
                         ${cli_SRC_PATH}/getline.h
                         ${cli_SRC_PATH}/uthash.h
-                        ${util_SRC_PATH}/debug.c
-                        ${util_SRC_PATH}/debug.h
     )
+
+    if (UNIX)
+        set ( example_PROG_UTIL utils_posix.c )
+        set ( example_LIBRARIES ${tool_lib} pthread )
+    elseif(WIN32)
+        set ( example_PROG_UTIL utils_windows.c)
+        set ( example_LIBRARIES ${tool_lib} ws2_32 )
+    endif()
 
     foreach(CLI_FILES ${CLI_FILES})
         set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
