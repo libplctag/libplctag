@@ -143,13 +143,14 @@ void trim_line(char *line)
     }
 }
 
-char **split_string(const char *str, const char *sep)
+tag_line_parts_t split_string(const char *str, const char *sep)
 {
     int sub_str_count=0;
     int size = 0;
     const char *sub;
     const char *tmp;
     char **res = NULL;
+    tag_line_parts_t tag_line_parts_t = {NULL, -1};
 
     /* first, count the sub strings */
     tmp = str;
@@ -169,13 +170,15 @@ char **split_string(const char *str, const char *sep)
         sub_str_count++;
     }
 
+    tag_line_parts_t.num_parts = sub_str_count;
+
     /* calculate total size for string plus pointers */
     size = (int)(sizeof(char *)*((size_t)sub_str_count+1))+(int)strlen(str)+1;
 
     /* allocate enough memory */
     res = malloc((size_t)size);
     if(!res) {
-        return NULL;
+        return tag_line_parts_t;
     }
 
     /* calculate the beginning of the string */
@@ -212,10 +215,12 @@ char **split_string(const char *str, const char *sep)
         res[sub_str_count] = (char*)tmp;
     }
 
-    return res;
+    tag_line_parts_t.parts = res;
+
+    return tag_line_parts_t;
 }
 
-int validate_line(char **parts) {
+int validate_line(tag_line_parts_t tag_line_parts) {
     char req_params[4][10] = 
     {
         "key",
@@ -232,8 +237,8 @@ int validate_line(char **parts) {
     char *part;
     for(int i=0; i < required; i++) {
         j = 0;
-        while(parts[j] != NULL) {
-            part = strdup(parts[j]);
+        while(j < tag_line_parts.num_parts) {
+            part = strdup(tag_line_parts.parts[j]);
             if (!strcmp(req_params[i], strtok(part, "="))) {
                 found = true;
                 break;
@@ -300,16 +305,16 @@ void print_tag(tag_t *tag) {
 
 int process_line(const char *line, tag_t *tag) 
 {
-    char **parts = NULL;
+    tag_line_parts_t tag_line_parts;
 
-    parts = split_string(line, ",");
-    if(!parts) {
-        fprintf(stderr,"Splitting string failed for string %s!", line);
+    tag_line_parts = split_string(line, ",");
+    if(tag_line_parts.num_parts < 0) {
+        fprintf(stderr,"Splitting string failed for string %s!\n", line);
         return -1;
     }
 
     /* check if the relevant parameters are there or not */
-    if (validate_line(parts) != 0) {
+    if (validate_line(tag_line_parts) != 0) {
         fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
         return -1;
     }
@@ -329,11 +334,13 @@ int process_line(const char *line, tag_t *tag)
     char *write_val;
 
     int i = 0;
+    char *part;
     char *param;
     char *val;
-    while (parts[i] != NULL) {
-        fprintf(stdout, "Part: %s\n", parts[i]);
-        param = strtok(parts[i], "=");
+    while (i < tag_line_parts.num_parts) {
+        part = strdup(tag_line_parts.parts[i]);
+        fprintf(stdout, "Part: %s\n", part);
+        param = strtok(part, "=");
         val = strtok(NULL, "");
         fprintf(stdout, "[Param, Value]: [%s, %s]\n", param, val);
 
@@ -422,7 +429,7 @@ int process_line(const char *line, tag_t *tag)
         return -1;
     }
 
-    free(parts);
+    free(tag_line_parts.parts);
     print_tag(tag);
     fprintf(stdout, "Line processed!\n");
 

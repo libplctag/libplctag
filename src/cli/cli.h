@@ -33,6 +33,12 @@ typedef struct {
     bool offline;
 } cli_request_t;
 
+/* tag line parts definition */
+typedef struct {
+    char **parts;
+    int num_parts;
+} tag_line_parts_t;
+
 /* data types */
 typedef enum {
     t_UINT64, t_INT64,
@@ -79,9 +85,9 @@ void print_request();
 int process_tags();
 int is_comment(const char *line);
 void trim_line(char *line);
-char **split_string(const char *str, const char *sep);
+tag_line_parts_t split_string(const char *str, const char *sep);
 int process_line(const char *line, tag_t *tag);
-int validate_line(char **parts);
+int validate_line(tag_line_parts_t tag_line_parts);
 void print_tag(tag_t *tag);
 void add_tag(int32_t tag_handle, tag_t tag);
 int check_tags(void);
