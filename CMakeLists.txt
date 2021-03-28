@@ -545,13 +545,15 @@ else()
                         ${cli_SRC_PATH}/cli.h
                         ${cli_SRC_PATH}/getline.h
                         ${cli_SRC_PATH}/uthash.h
+                        ${util_SRC_PATH}/debug.c
+                        ${util_SRC_PATH}/debug.h
     )
 
     foreach(CLI_FILES ${CLI_FILES})
         set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
     endforeach()
 
-    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" "${util_SRC_PATH}/debug.h" )
+    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 
     target_link_libraries(cli ${example_LIBRARIES} )
 
