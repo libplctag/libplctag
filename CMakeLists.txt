@@ -544,6 +544,7 @@ else()
                         ${cli_SRC_PATH}/cli.h
                         ${cli_SRC_PATH}/getline.h
                         ${cli_SRC_PATH}/uthash.h
+                        ${libplctag_SRCS}
     )
 
     foreach(CLI_FILES ${CLI_FILES})
@@ -552,7 +553,7 @@ else()
 
     add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 
-    target_link_libraries(cli ${example_LIBRARIES} plctag_dyn )
+    target_link_libraries(cli ${example_LIBRARIES} )
 
     if(BASE_LINK_FLAGS)
         set_target_properties(cli PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
