@@ -26,9 +26,31 @@ cli_request_t cli_request = {
 
 void usage(void) 
 {
-    fprintf(stderr, "Usage:\n");
-    fprintf(stderr, "\tLIBPLCTAG CLI.\n");
-    fflush(stderr);
+    fprintf(stdout, "Usage:\n");
+    fprintf(stdout, "\tLIBPLCTAG CLI.\n");
+    fprintf(stdout, "\tThis is a command-line interface to access tags/registers, in PLCs supported by libplctag.\n");
+    fprintf(stdout, "\n\tcli {--read | --write | --watch} {-protocol} {-ip} {-path} {-plc}\n");
+    fprintf(stdout, "\t\t[-debug] [-interval] [-attributes] [-offline]\n");
+
+    fprintf(stdout, "\n\tCLI Action (Required):\n");
+    fprintf(stdout, "\n\t--read\t\t- Perform a one-shot READ operation.\n");
+    fprintf(stdout, "\t--write\t\t- Perform a one-shot WRITE operation.\n");
+    fprintf(stdout, "\t--watch\t\t- Perform a continuous WATCH operation at the specified interval.\n");
+    fprintf(stdout, "\t-h | --help\t- Prints the Usage details.\n");
+    
+    fprintf(stdout, "\n\tLIBPLCTAG Parameters (Required):\n");
+    fprintf(stdout, "\n\t-protocol\t- type of plc protocol. (default: ab_eip)\n");
+    fprintf(stdout, "\t-ip\t\t- network address for the host PLC. (default: 127.0.0.1)\n");
+    fprintf(stdout, "\t-path\t\t- routing path for the Tags. (default: 1,0)\n");
+    fprintf(stdout, "\t-plc\t\t- type of the PLC. (default: controllogix)\n");
+
+    fprintf(stdout, "\n\tLIBPLCTAG Parameters (Optional):\n");
+    fprintf(stdout, "\n\t-debug\t\t- logging output level. (default: 1)\n");
+    fprintf(stdout, "\t-interval\t- interval in ms for WATCH operation. (default: 500)\n");
+    fprintf(stdout, "\t-attributes\t- additional attributes. (default: '')\n");
+    fprintf(stdout, "\t-offline\t- operation mode. (default: false)\n");
+
+    fflush(stdout);
 }
 
 int parse_args(int argc, char *argv[]) 
@@ -48,6 +70,9 @@ int parse_args(int argc, char *argv[])
         cli_request.operation = WRITE;
     } else if (!strcmp(operation, "--watch")) {
          cli_request.operation = WATCH;
+    } else if (!strcmp(operation, "--help") || !strcmp(operation, "-h")) {
+        usage();
+        exit(0);
     } else {
         fprintf(stderr, "ERROR: invalid PLC operation.\n");
         fprintf(stderr, "INFO: Use one of --read, --write, --watch.\n");
