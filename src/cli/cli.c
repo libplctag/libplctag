@@ -1015,11 +1015,6 @@ int main(int argc, char *argv[])
 
     print_request();
 
-    if(plc_tag_check_lib_version(LIBPLCTAG_REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Required compatible library version %d.%d.%d not available!", LIBPLCTAG_REQUIRED_VERSION);
-        exit(1);
-    }
-
     if (process_tags() != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Could not process tags.");
         exit(1);
