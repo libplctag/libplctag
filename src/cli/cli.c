@@ -486,7 +486,7 @@ int check_tags()
         rc = plc_tag_status(t->tag_handle);
 
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_INFO, "(%d) TAG STATUS NOT OK! Tag Status: %s.", t->tag_handle, plc_tag_decode_error(t->tag_handle));
+            pdebug(DEBUG_INFO, "(%d) TAG STATUS NOT OK! Tag Status: %s.", t->tag_handle, plc_tag_decode_error(rc));
             return rc;
         }
     }
