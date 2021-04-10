@@ -731,7 +731,7 @@ int read_tags(void) {
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
         pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
-        util_sleep_ms(1);
+        util_sleep_ms(10);
     }
 
     for(t = tags; t != NULL; t = t->hh.next) {
@@ -893,7 +893,7 @@ int write_tags(void) {
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
         pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
-        util_sleep_ms(1);
+        util_sleep_ms(10);
     }
 
     read_tags();
@@ -1029,7 +1029,7 @@ int main(int argc, char *argv[])
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING){
         pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
-        util_sleep_ms(1);
+        util_sleep_ms(10);
     }
 
     switch (cli_request.operation) {
