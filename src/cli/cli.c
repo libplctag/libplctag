@@ -88,6 +88,10 @@ int parse_args(int argc, char *argv[])
 
         if (!strcmp(param, "-protocol")) {
             cli_request.protocol = val;
+            if (!strcmp(val, "modbus_tcp")) {
+                cli_request.plc = NULL;
+                cli_request.path = "0";
+            }
         } else if (!strcmp(param, "-ip")) {
             cli_request.ip = val;
         } else if (!strcmp(param, "-path")) {
