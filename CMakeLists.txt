@@ -135,9 +135,9 @@ endif()
 # set compiler and flags for 32-bit MinGW builds
 if (${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     SET(CMAKE_C_COMPILER gcc.exe)
-    SET(CMAKE_C_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
+    SET(CMAKE_C_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
     SET(CMAKE_CXX_COMPILER g++.exe)
-    SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
+    SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
 endif()
 
 # build examples flag
@@ -255,8 +255,8 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     RETURN()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /W3")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /W3")
     # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
 endif()
 
@@ -380,8 +380,12 @@ if(UNIX)
 
 	set(tool_lib "plctag_dyn")
 elseif(WIN32)
-    # skipping static lib on Windows
+    # static library
+	add_library(plctag_static STATIC ${libplctag_SRCS} )
+	set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+	set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
 
+    target_compile_definitions(plctag_dyn PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)
 	set(tool_lib "plctag_dyn")
 endif()
 
@@ -396,6 +400,7 @@ endif()
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
     target_link_libraries(plctag_dyn ws2_32)
+    target_link_libraries(plctag_static ws2_32)
 endif()
 
 # add the examples and tests
@@ -537,6 +542,7 @@ if(UNIX)
 	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
 elseif(WIN32)
 	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
+	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
 endif()
 
 if(ANDROID_BUILD)
