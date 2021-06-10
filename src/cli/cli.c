@@ -725,6 +725,12 @@ int read_tags(void) {
     int rc = PLCTAG_STATUS_OK;
     struct tags *t;
 
+    /* wait for all tags to be ready */
+    while(check_tags() == PLCTAG_STATUS_PENDING){
+        pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
+        util_sleep_ms(100);
+    }
+
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = plc_tag_read(t->tag_handle, 0);
         if(rc != PLCTAG_STATUS_PENDING) {
