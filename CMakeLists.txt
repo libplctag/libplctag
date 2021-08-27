@@ -140,6 +140,9 @@ if (${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
 endif()
 
+# build examples flag
+set(BUILD_EXAMPLES 1 CACHE BOOL "Build examples or not")
+
 # set flags for MacOSX
 if (APPLE)
     set(CMAKE_MACOSX_RPATH ON)
@@ -425,7 +428,7 @@ endif()
 # add the examples and tests
 if(ANDROID_BUILD)
     MESSAGE("Building for Android.")
-else()
+elseif (BUILD_EXAMPLES)
     if (UNIX)
         # example programs
         set ( example_PROGRAMS async
