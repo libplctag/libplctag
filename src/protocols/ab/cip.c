@@ -338,17 +338,12 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
     size_t conn_path_index = 0;
     size_t path_index = 0;
     int is_dhp = 0;
-    uint8_t dhp_port;
-    uint8_t dhp_src_node;
-    uint8_t dhp_dest_node;
+    uint8_t dhp_port = 0;
+    uint8_t dhp_src_node = 0;
+    uint8_t dhp_dest_node = 0;
     uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
 
     pdebug(DEBUG_DETAIL, "Starting");
-
-    // if(!path || str_length(path) == (size_t)0) {
-    //     pdebug(DEBUG_DETAIL, "Path is NULL or empty.");
-    //     return PLCTAG_ERR_NULL_PTR;
-    // }
 
     path_len = (size_t)(ssize_t)str_length(path);
 
