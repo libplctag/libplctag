@@ -126,10 +126,10 @@ char **split_string(const char *str, const char *sep)
     }
 
     /* calculate the beginning of the string */
-    tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count+1);
+    tmp = (char *)res + (sizeof(char *) * (size_t)(sub_str_count+1));
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
-    strncpy((char *)tmp, str, source_size);
+    strcpy((char *)tmp, str);
 
     /* set up the pointers */
     sub_str_count=0;

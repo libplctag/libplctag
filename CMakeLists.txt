@@ -33,12 +33,12 @@
 # the project is version 2.2
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 3)
-set (libplctag_VERSION_PATCH 6)
+set (libplctag_VERSION_PATCH 7)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 2.8...3.19)
 
 # prevent expansion of quoted things that could be variables in if()
 if(${CMAKE_VERSION} VERSION_GREATER 3.1)
@@ -135,11 +135,18 @@ endif()
 # set compiler and flags for 32-bit MinGW builds
 if (${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     SET(CMAKE_C_COMPILER gcc.exe)
-    SET(CMAKE_C_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
+    SET(CMAKE_C_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
     SET(CMAKE_CXX_COMPILER g++.exe)
-    SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600 -DLIBPLCTAGDLL_EXPORTS=1")
+    SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
 endif()
 
+# build examples flag
+set(BUILD_EXAMPLES 1 CACHE BOOL "Build examples or not")
+
+# set flags for MacOSX
+if (APPLE)
+    set(CMAKE_MACOSX_RPATH ON)
+endif (APPLE)
 
 # default setting for 32-bit builds
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
@@ -164,6 +171,7 @@ set ( mb_SRC_PATH "${protocol_SRC_PATH}/mb" )
 set ( util_SRC_PATH "${base_SRC_PATH}/util" )
 set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
 set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
+set ( cli_SRC_PATH "${base_SRC_PATH}/contrib/cli" )
 
 # OS-specific files for the platform code.
 # FIXME - does this work for macOS?
@@ -186,8 +194,12 @@ SET(C99_FLAGS "")
 # C compiler specific settings
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing")
+
+    SET(STR_OP_OVERFLOW_ON "")
+    SET(STR_OP_OVERFLOW_OFF "")
+
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_OFF}")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
 
@@ -234,8 +246,21 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 		MESSAGE(STATUS "Compiler does not support C99/C11 compatibility check." )
 	endif()
 
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS}  -g -Wall -pedantic -Wextra ${C11_CHECK} -Wconversion -fms-extensions -fno-strict-aliasing -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    if(${COMPILER_VERSION} VERSION_GREATER 8.0 AND ${COMPILER_VERSION} VERSION_LESS 11.0)
+        # the compiler supports the -Wstringop-overflow flag.
+        # There is clearly a bug in the compiler that throws this warning inconsistently.
+        # Suppress it for RELEASE builds.
+        MESSAGE(STATUS "Compiler version ${COMPILER_VERSION} supports string op overflow checking.  Suppress for Release builds.")
+        SET(STR_OP_OVERFLOW_ON "-Wstringop-overflow")
+        SET(STR_OP_OVERFLOW_OFF "-Wno-stringop-overflow")
+    else()
+        MESSAGE(STATUS "Compiler version ${COMPILER_VERSION} does not support string op overflow checking.")
+        SET(STR_OP_OVERFLOW_ON "")
+        SET(STR_OP_OVERFLOW_OFF "")
+    endif()
+
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 	set(C99_FLAGS "-std=c99" )
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
@@ -253,8 +278,9 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     RETURN()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /DLIBPLCTAGDLL_EXPORTS=1 /W3")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /W3")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /W3")
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
     # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
 endif()
 
@@ -294,6 +320,9 @@ else()
 endif()
 
 set(BASE_CXX_FLAGS "${BASE_FLAGS}")
+
+MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
+MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
 # generate version file from CMake info.
 CONFIGURE_FILE("${lib_SRC_PATH}/version.h.in" "${lib_SRC_PATH}/version.h" @ONLY)
@@ -357,7 +386,7 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
 
 # set the compiler flags
 FOREACH( lib_src ${libplctag_SRCS} )
-    set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}")
+    set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}")
 ENDFOREACH()
 
 # shared library
@@ -378,8 +407,12 @@ if(UNIX)
 
 	set(tool_lib "plctag_dyn")
 elseif(WIN32)
-    # skipping static lib on Windows
+    # static library
+	add_library(plctag_static STATIC ${libplctag_SRCS} )
+	set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+	set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
 
+    target_compile_definitions(plctag_dyn PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)
 	set(tool_lib "plctag_dyn")
 endif()
 
@@ -394,12 +427,13 @@ endif()
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
     target_link_libraries(plctag_dyn ws2_32)
+    target_link_libraries(plctag_static ws2_32)
 endif()
 
 # add the examples and tests
 if(ANDROID_BUILD)
     MESSAGE("Building for Android.")
-else()
+elseif (BUILD_EXAMPLES)
     if (UNIX)
         # example programs
         set ( example_PROGRAMS async
@@ -438,6 +472,7 @@ else()
         set ( example_PROGRAMS async
                             async_stress
                             list_tags
+                            multithread
                             plc5
                             simple
                             simple_dual
@@ -459,11 +494,11 @@ else()
     endif()
 
     # set the compile flags for the utilities file.
-    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
 
     # set the compile and link properties for all examples.
     foreach ( example ${example_PROGRAMS} )
-        set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+        set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
         add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
         target_link_libraries(${example} ${example_LIBRARIES} )
 
@@ -473,7 +508,6 @@ else()
     endforeach(example)
 
     # simple.cpp is different because it is C++
-    message("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
     set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS "${BASE_CXX_FLAGS}")
     add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 
@@ -513,7 +547,7 @@ else()
         )
 
         foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-            set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+            set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
         endforeach()
 
         add_executable(ab_server ${AB_SERVER_FILES})
@@ -525,8 +559,33 @@ else()
         endif()
     # endif()
 
+    # build the cli.
+    set(CLI_FILES ${cli_SRC_PATH}/cli.c
+        ${cli_SRC_PATH}/cli.h
+        ${cli_SRC_PATH}/getline.h
+        ${cli_SRC_PATH}/uthash.h
+        ${libplctag_SRCS}
+    )
+
+    foreach(CLI_FILES ${CLI_FILES})
+    set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+    endforeach()
+
+    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
+
+    target_link_libraries(cli ${example_LIBRARIES} )
+
+    if(BASE_LINK_FLAGS)
+    set_target_properties(cli PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+    endif()
+
     # make sure the .h file is in the output directory
     CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
+endif(ANDROID_BUILD)
+
+# add the cli
+if(ANDROID_BUILD)
+    MESSAGE("Building for Android.")
 endif(ANDROID_BUILD)
 
 # for installation
@@ -535,13 +594,16 @@ if(UNIX)
 	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
 elseif(WIN32)
 	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
+	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
 endif()
 
 if(ANDROID_BUILD)
     message("Skipping package config and header file copy for Android build.")
 else()
     install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
-    install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+    if(EXISTS "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc")
+        install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
+    endif()
 endif(ANDROID_BUILD)
 
 macro(print_all_variables)

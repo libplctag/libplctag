@@ -120,7 +120,7 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 #endif
 
 #define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
-#define mutex_try_lock(m) mutex_lock_impl(__func__, __LINE__, m)
+#define mutex_try_lock(m) mutex_try_lock_impl(__func__, __LINE__, m)
 #define mutex_unlock(m) mutex_unlock_impl(__func__, __LINE__, m)
 
 /* macros are evil */
@@ -183,14 +183,13 @@ extern int socket_close(sock_p s);
 extern int socket_destroy(sock_p *s);
 
 /* serial handling */
+/* FIXME - either implement this or remove it. */
 typedef struct serial_port_t *serial_port_p;
 #define PLC_SERIAL_PORT_NULL ((plc_serial_port)NULL)
 extern serial_port_p plc_lib_open_serial_port(const char *path, int baud_rate, int data_bits, int stop_bits, int parity_type);
 extern int plc_lib_close_serial_port(serial_port_p serial_port);
 extern int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size);
 extern int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size);
-
-
 
 /* misc functions */
 extern int sleep_ms(int ms);
