@@ -86,7 +86,7 @@ static int get_string_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
 
-#if defined(WIN32) || defined(_WIN32) || defined(_WIN64)
+#if (defined(WIN32) || defined(_WIN32) || defined(_WIN64)) && defined(LIBPLCTAGDLL_EXPORTS)
 #include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -978,8 +978,24 @@ LIB_EXPORT int plc_tag_lock(int32_t id)
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
-        rc = mutex_lock(tag->ext_mutex);
+    /* we cannot nest the mutexes otherwise we will deadlock. */
+    do {
+        critical_block(tag->api_mutex) {
+            rc = mutex_try_lock(tag->ext_mutex);
+        }
+
+        /* if the mutex is already locked then we get a mutex lock error. */
+        if (rc == PLCTAG_ERR_MUTEX_LOCK) {
+            pdebug(DEBUG_SPEW, "Mutex already locked, wait and retry.");
+            sleep_ms(10);
+        }
+    } while(rc == PLCTAG_ERR_MUTEX_LOCK);
+
+    if (rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_SPEW, "External mutex locked.");
+    }
+    else {
+        pdebug(DEBUG_WARN, "Error %s trying to lock external mutex!", plc_tag_decode_error(rc));
     }
 
     rc_dec(tag);
