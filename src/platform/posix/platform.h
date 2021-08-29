@@ -120,7 +120,7 @@ extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 #endif
 
 #define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
-#define mutex_try_lock(m) mutex_lock_impl(__func__, __LINE__, m)
+#define mutex_try_lock(m) mutex_try_lock_impl(__func__, __LINE__, m)
 #define mutex_unlock(m) mutex_unlock_impl(__func__, __LINE__, m)
 
 /* macros are evil */
