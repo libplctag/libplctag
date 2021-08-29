@@ -472,6 +472,7 @@ elseif (BUILD_EXAMPLES)
         set ( example_PROGRAMS async
                             async_stress
                             list_tags
+                            multithread
                             plc5
                             simple
                             simple_dual
