@@ -1711,6 +1711,48 @@ LIB_EXPORT int plc_tag_get_size(int32_t id)
 
 
 
+LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        uint8_t *new_data = mem_realloc(tag->data, new_size);
+
+        if(new_data) {
+            /* return the old size */
+            rc = tag->size;
+            tag->data = new_data;
+            tag->size = new_size;
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            rc = (int)PLCTAG_ERR_NO_MEM;
+            tag->status = (int8_t)rc;
+        }
+    }
+
+    rc_dec(tag);
+
+    if(rc >= 0) {
+        pdebug(DEBUG_DETAIL, "Done with old size %d.", rc);
+    } else {
+        pdebug(DEBUG_WARN, "Tag buffer resize failed with error %s!", plc_tag_decode_error(rc));
+    }
+
+    return rc;
+}
+
+
+
+
+
 LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit)
 {
     int res = PLCTAG_ERR_OUT_OF_BOUNDS;
