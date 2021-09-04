@@ -32,8 +32,8 @@
 
 # the project is version 2.2
 set (libplctag_VERSION_MAJOR 2)
-set (libplctag_VERSION_MINOR 3)
-set (libplctag_VERSION_PATCH 7)
+set (libplctag_VERSION_MINOR 4)
+set (libplctag_VERSION_PATCH 0)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -343,6 +343,8 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${ab_SRC_PATH}/defs.h"
                      "${ab_SRC_PATH}/eip_cip.c"
                      "${ab_SRC_PATH}/eip_cip.h"
+                     "${ab_SRC_PATH}/eip_cip_special.c"
+                     "${ab_SRC_PATH}/eip_cip_special.h"
                      "${ab_SRC_PATH}/eip_lgx_pccc.c"
                      "${ab_SRC_PATH}/eip_lgx_pccc.h"
                      "${ab_SRC_PATH}/eip_plc5_dhp.c"
@@ -455,6 +457,7 @@ elseif (BUILD_EXAMPLES)
                             string
                             test_auto_sync
                             test_callback
+                            test_raw_cip
                             test_reconnect
                             test_shutdown
                             test_special
@@ -479,6 +482,7 @@ elseif (BUILD_EXAMPLES)
                             slc500
                             string
                             test_callback
+                            test_raw_cip
                             test_shutdown
                             test_special
                             test_tag_attributes

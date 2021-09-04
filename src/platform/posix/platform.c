@@ -371,6 +371,34 @@ extern int str_cmp_i_n(const char *first, const char *second, int count)
 
 
 /*
+ * str_str_cmp_i
+ *
+ * Returns a pointer to the location of the needle string in the haystack string
+ * or NULL if there is no match.  The comparison is done case-insensitive.
+ *
+ * Handle the usual edge cases.
+ */
+extern char *str_str_cmp_i(const char *haystack, const char *needle)
+{
+    int haystack_zero = !str_length(haystack);
+    int needle_zero = !str_length(needle);
+
+    if(haystack_zero) {
+        pdebug(DEBUG_DETAIL, "Haystack string is NULL or zero length.");
+        return NULL;
+    }
+
+    if(needle_zero) {
+        pdebug(DEBUG_DETAIL, "Needle string is NULL or zero length.");
+        return NULL;
+    }
+
+    return strcasestr(haystack, needle);
+}
+
+
+
+/*
  * str_copy
  *
  * Returns

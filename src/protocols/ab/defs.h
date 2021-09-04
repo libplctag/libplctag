@@ -204,10 +204,10 @@
 //#define AB_PLC_PLC         (1)
 //#define AB_PLC_MLGX        (2)
 //#define AB_PLC_LGX         (3)
-//#define AB_PLC_MLGX800     (4)
+//#define AB_PLC_MICRO800     (4)
 //#define AB_PLC_LGX_PCCC    (5)
 
-typedef enum { AB_PLC_NONE = 0, AB_PLC_PLC5 = 1, AB_PLC_SLC, AB_PLC_MLGX, AB_PLC_LGX, AB_PLC_LGX_PCCC, AB_PLC_MLGX800, AB_PLC_OMRON_NJNX } plc_type_t;
+typedef enum { AB_PLC_NONE = 0, AB_PLC_PLC5 = 1, AB_PLC_SLC, AB_PLC_MLGX, AB_PLC_LGX, AB_PLC_LGX_PCCC, AB_PLC_MICRO800, AB_PLC_OMRON_NJNX } plc_type_t;
 
 
 /*********************************************************************
