@@ -262,6 +262,8 @@ int main(int argc, char **argv)
 
     /* get the controller tags first. */
 
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+
     fprintf(stderr, "Getting controller tags.\n");
 
     tag = setup_tag(host, path, NULL);

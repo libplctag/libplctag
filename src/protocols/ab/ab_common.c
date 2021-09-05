@@ -465,7 +465,7 @@ plc_tag_p ab_tag_create(attr attribs)
     }
 
     /* kick off a read to get the tag type and size. */
-    if(tag->vtable->read) {
+    if(!tag->special_tag && tag->vtable->read) {
         /* trigger the first read. */
         pdebug(DEBUG_DETAIL, "Kicking off initial read.");
 
@@ -651,7 +651,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                     /* check for special tags. */
                     if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
                         special_tag_rc = setup_raw_tag(tag);
-                    } else if(str_str_cmp_i(tmp_tag_name, "@tags") == 0) {
+                    } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
                         special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
                     } /* else not a special tag. */
 
