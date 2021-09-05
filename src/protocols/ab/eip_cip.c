@@ -129,14 +129,14 @@ START_PACK typedef struct {
 
 
 static int build_read_request_connected(ab_tag_p tag, int byte_offset);
-static int build_tag_list_request_connected(ab_tag_p tag);
+//static int build_tag_list_request_connected(ab_tag_p tag);
 static int build_read_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_request_connected(ab_tag_p tag, int byte_offset);
 static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_bit_request_connected(ab_tag_p tag);
 static int build_write_bit_request_unconnected(ab_tag_p tag);
 static int check_read_status_connected(ab_tag_p tag);
-static int check_read_tag_list_status_connected(ab_tag_p tag);
+//static int check_read_tag_list_status_connected(ab_tag_p tag);
 static int check_read_status_unconnected(ab_tag_p tag);
 static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
@@ -217,11 +217,11 @@ int tag_tickler(ab_tag_p tag)
 
     if (tag->read_in_progress) {
         if(tag->use_connected_msg) {
-            if(tag->tag_list) {
-                rc = check_read_tag_list_status_connected(tag);
-            } else {
+            // if(tag->tag_list) {
+            //     rc = check_read_tag_list_status_connected(tag);
+            // } else {
                 rc = check_read_status_connected(tag);
-            }
+            // }
         } else {
             rc = check_read_status_unconnected(tag);
         }
@@ -291,11 +291,11 @@ int tag_read_start(ab_tag_p tag)
 
     /* i is the index of the first new request */
     if(tag->use_connected_msg) {
-        if(tag->tag_list) {
-            rc = build_tag_list_request_connected(tag);
-        } else {
+        // if(tag->tag_list) {
+        //     rc = build_tag_list_request_connected(tag);
+        // } else {
             rc = build_read_request_connected(tag, tag->offset);
-        }
+        // }
     } else {
         rc = build_read_request_unconnected(tag, tag->offset);
     }
@@ -488,139 +488,139 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
 }
 
 
-int build_tag_list_request_connected(ab_tag_p tag)
-{
-    eip_cip_co_req* cip = NULL;
-    //tag_list_req *list_req = NULL;
-    ab_request_p req = NULL;
-    int rc = PLCTAG_STATUS_OK;
-    uint8_t *data_start = NULL;
-    uint8_t *data = NULL;
-    uint16_le tmp_u16 = UINT16_LE_INIT(0);
+// int build_tag_list_request_connected(ab_tag_p tag)
+// {
+//     eip_cip_co_req* cip = NULL;
+//     //tag_list_req *list_req = NULL;
+//     ab_request_p req = NULL;
+//     int rc = PLCTAG_STATUS_OK;
+//     uint8_t *data_start = NULL;
+//     uint8_t *data = NULL;
+//     uint16_le tmp_u16 = UINT16_LE_INIT(0);
 
-    pdebug(DEBUG_INFO, "Starting.");
+//     pdebug(DEBUG_INFO, "Starting.");
 
-    /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
-    if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
-        return rc;
-    }
+//     /* get a request buffer */
+//     rc = session_create_request(tag->session, tag->tag_id, &req);
+//     if (rc != PLCTAG_STATUS_OK) {
+//         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
+//         return rc;
+//     }
 
-    /* point the request struct at the buffer */
-    cip = (eip_cip_co_req*)(req->data);
+//     /* point the request struct at the buffer */
+//     cip = (eip_cip_co_req*)(req->data);
 
-    /* point to the end of the struct */
-    data_start = data = (uint8_t*)(cip + 1);
+//     /* point to the end of the struct */
+//     data_start = data = (uint8_t*)(cip + 1);
 
-    /*
-     * set up the embedded CIP tag list request packet
-        uint8_t request_service;    AB_EIP_CMD_CIP_LIST_TAGS=0x55
-        uint8_t request_path_size;  3 word = 6 bytes
-        uint8_t request_path[6];        0x20    get class
-                                        0x6B    tag info/symbol class
-                                        0x25    get instance (16-bit)
-                                        0x00    padding
-                                        0x00    instance byte 0
-                                        0x00    instance byte 1
-        uint16_le instance_id;      NOTE! this is the last two bytes above for convenience!
-        uint16_le num_attributes;   0x04    number of attributes to get
-        uint16_le requested_attributes[4];      0x02 attribute #2 - symbol type
-                                                0x07 attribute #7 - base type size (array element) in bytes
-                                                0x08    attribute #8 - array dimensions (3xu32)
-                                                0x01    attribute #1 - symbol name
-    */
+//     /*
+//      * set up the embedded CIP tag list request packet
+//         uint8_t request_service;    AB_EIP_CMD_CIP_LIST_TAGS=0x55
+//         uint8_t request_path_size;  3 word = 6 bytes
+//         uint8_t request_path[6];        0x20    get class
+//                                         0x6B    tag info/symbol class
+//                                         0x25    get instance (16-bit)
+//                                         0x00    padding
+//                                         0x00    instance byte 0
+//                                         0x00    instance byte 1
+//         uint16_le instance_id;      NOTE! this is the last two bytes above for convenience!
+//         uint16_le num_attributes;   0x04    number of attributes to get
+//         uint16_le requested_attributes[4];      0x02 attribute #2 - symbol type
+//                                                 0x07 attribute #7 - base type size (array element) in bytes
+//                                                 0x08    attribute #8 - array dimensions (3xu32)
+//                                                 0x01    attribute #1 - symbol name
+//     */
 
-    *data = AB_EIP_CMD_CIP_LIST_TAGS;
-    data++;
+//     *data = AB_EIP_CMD_CIP_LIST_TAGS;
+//     data++;
 
-    /* request path size, in 16-bit words */
-    *data = (uint8_t)(3 + ((tag->encoded_name_size-1)/2)); /* size in words of routing header + routing and instance ID. */
-    data++;
+//     /* request path size, in 16-bit words */
+//     *data = (uint8_t)(3 + ((tag->encoded_name_size-1)/2)); /* size in words of routing header + routing and instance ID. */
+//     data++;
 
-    /* add in the encoded name, but without the leading word count byte! */
-    if(tag->encoded_name_size > 1) {
-        mem_copy(data, &tag->encoded_name[1], (tag->encoded_name_size-1));
-        data += (tag->encoded_name_size-1);
-    }
+//     /* add in the encoded name, but without the leading word count byte! */
+//     if(tag->encoded_name_size > 1) {
+//         mem_copy(data, &tag->encoded_name[1], (tag->encoded_name_size-1));
+//         data += (tag->encoded_name_size-1);
+//     }
 
-    /* add in the routing header . */
+//     /* add in the routing header . */
 
-    /* first the fixed part. */
-    data[0] = 0x20; /* class type */
-    data[1] = 0x6B; /* tag info/symbol class */
-    data[2] = 0x25; /* 16-bit instance ID type */
-    data[3] = 0x00; /* padding */
-    data += 4;
+//     /* first the fixed part. */
+//     data[0] = 0x20; /* class type */
+//     data[1] = 0x6B; /* tag info/symbol class */
+//     data[2] = 0x25; /* 16-bit instance ID type */
+//     data[3] = 0x00; /* padding */
+//     data += 4;
 
-    /* now the instance ID */
-    tmp_u16 = h2le16((uint16_t)tag->next_id);
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
+//     /* now the instance ID */
+//     tmp_u16 = h2le16((uint16_t)tag->next_id);
+//     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
+//     data += (int)sizeof(tmp_u16);
 
-    /* set up the request itself.  We are asking for a number of attributes. */
+//     /* set up the request itself.  We are asking for a number of attributes. */
 
-    /* set up the request attributes, first the number of attributes. */
-    tmp_u16 = h2le16((uint16_t)4);  /* MAGIC, we have four attributes we want. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
+//     /* set up the request attributes, first the number of attributes. */
+//     tmp_u16 = h2le16((uint16_t)4);  /* MAGIC, we have four attributes we want. */
+//     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
+//     data += (int)sizeof(tmp_u16);
 
-    /* first attribute: symbol type */
-    tmp_u16 = h2le16((uint16_t)0x02);  /* MAGIC, symbol type. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
+//     /* first attribute: symbol type */
+//     tmp_u16 = h2le16((uint16_t)0x02);  /* MAGIC, symbol type. */
+//     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
+//     data += (int)sizeof(tmp_u16);
 
-    /* second attribute: base type size in bytes */
-    tmp_u16 = h2le16((uint16_t)0x07);  /* MAGIC, element size in bytes. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
+//     /* second attribute: base type size in bytes */
+//     tmp_u16 = h2le16((uint16_t)0x07);  /* MAGIC, element size in bytes. */
+//     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
+//     data += (int)sizeof(tmp_u16);
 
-    /* third attribute: tag array dimensions */
-    tmp_u16 = h2le16((uint16_t)0x08);  /* MAGIC, array dimensions. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
+//     /* third attribute: tag array dimensions */
+//     tmp_u16 = h2le16((uint16_t)0x08);  /* MAGIC, array dimensions. */
+//     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
+//     data += (int)sizeof(tmp_u16);
 
-    /* fourth attribute: symbol/tag name */
-    tmp_u16 = h2le16((uint16_t)0x01);  /* MAGIC, symbol name. */
-    mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
-    data += (int)sizeof(tmp_u16);
+//     /* fourth attribute: symbol/tag name */
+//     tmp_u16 = h2le16((uint16_t)0x01);  /* MAGIC, symbol name. */
+//     mem_copy(data, &tmp_u16, (int)sizeof(tmp_u16));
+//     data += (int)sizeof(tmp_u16);
 
-    /* now we go back and fill in the fields of the static part */
+//     /* now we go back and fill in the fields of the static part */
 
-    /* encap fields */
-    cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
+//     /* encap fields */
+//     cip->encap_command = h2le16(AB_EIP_CONNECTED_SEND); /* ALWAYS 0x0070 Connected Send*/
 
-    /* router timeout */
-    cip->router_timeout = h2le16(1); /* one second timeout, enough? */
+//     /* router timeout */
+//     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
-    /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
-    cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
-    cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
-    cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
+//     /* Common Packet Format fields for unconnected send. */
+//     cip->cpf_item_count = h2le16(2);                 /* ALWAYS 2 */
+//     cip->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
+//     cip->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4, size of connection ID*/
+//     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
+//     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
-    /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
+//     /* set the size of the request */
+//     req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
 
-    req->allow_packing = tag->allow_packing;
+//     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+//     /* add the request to the session's list. */
+//     rc = session_add_request(tag->session, req);
 
-    if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag->req = rc_dec(req);
-        return rc;
-    }
+//     if (rc != PLCTAG_STATUS_OK) {
+//         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+//         tag->req = rc_dec(req);
+//         return rc;
+//     }
 
-    /* save the request for later */
-    tag->req = req;
+//     /* save the request for later */
+//     tag->req = req;
 
-    pdebug(DEBUG_INFO, "Done");
+//     pdebug(DEBUG_INFO, "Done");
 
-    return PLCTAG_STATUS_OK;
-}
+//     return PLCTAG_STATUS_OK;
+// }
 
 
 
@@ -1683,213 +1683,213 @@ static int check_read_status_connected(ab_tag_p tag)
 
 
 
-/*
- * check_read_tag_list_status_connected
- *
- * This routine checks for any outstanding tag list requests.  It will
- * terminate when there is no data in the response and the error is not "more data".
- *
- * This is not thread-safe!  It should be called with the tag mutex
- * locked!
- */
+// /*
+//  * check_read_tag_list_status_connected
+//  *
+//  * This routine checks for any outstanding tag list requests.  It will
+//  * terminate when there is no data in the response and the error is not "more data".
+//  *
+//  * This is not thread-safe!  It should be called with the tag mutex
+//  * locked!
+//  */
 
-static int check_read_tag_list_status_connected(ab_tag_p tag)
-{
-    int rc = PLCTAG_STATUS_OK;
-    eip_cip_co_resp* cip_resp;
-    uint8_t* data;
-    uint8_t* data_end;
-    int partial_data = 0;
+// static int check_read_tag_list_status_connected(ab_tag_p tag)
+// {
+//     int rc = PLCTAG_STATUS_OK;
+//     eip_cip_co_resp* cip_resp;
+//     uint8_t* data;
+//     uint8_t* data_end;
+//     int partial_data = 0;
 
-    static int symbol_index=0;
+//     static int symbol_index=0;
 
 
-    pdebug(DEBUG_SPEW, "Starting.");
+//     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
+//     if(!tag) {
+//         pdebug(DEBUG_ERROR,"Null tag pointer passed!");
+//         return PLCTAG_ERR_NULL_PTR;
+//     }
 
-    if (!tag->req) {
-        tag->read_in_progress = 0;
-        tag->offset = 0;
+//     if (!tag->req) {
+//         tag->read_in_progress = 0;
+//         tag->offset = 0;
 
-        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
+//         pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
 
-        return PLCTAG_ERR_READ;
-    }
+//         return PLCTAG_ERR_READ;
+//     }
 
-    /* request can be used by two threads at once. */
-    spin_block(&tag->req->lock) {
-        if(!tag->req->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
+//     /* request can be used by two threads at once. */
+//     spin_block(&tag->req->lock) {
+//         if(!tag->req->resp_received) {
+//             rc = PLCTAG_STATUS_PENDING;
+//             break;
+//         }
 
-        /* check to see if it was an abort on the session side. */
-        if(tag->req->status != PLCTAG_STATUS_OK) {
-            rc = tag->req->status;
-            tag->req->abort_request = 1;
+//         /* check to see if it was an abort on the session side. */
+//         if(tag->req->status != PLCTAG_STATUS_OK) {
+//             rc = tag->req->status;
+//             tag->req->abort_request = 1;
 
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+//             pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-            tag->next_id = 0;
-            tag->size = tag->elem_count * tag->elem_size;
+//             tag->read_in_progress = 0;
+//             tag->offset = 0;
+//             tag->next_id = 0;
+//             tag->size = tag->elem_count * tag->elem_size;
 
-            break;
-        }
-    }
+//             break;
+//         }
+//     }
 
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->req = rc_dec(tag->req);
-        }
+//     if(rc != PLCTAG_STATUS_OK) {
+//         if(rc_is_error(rc)) {
+//             /* the request is dead, from session side. */
+//             tag->req = rc_dec(tag->req);
+//         }
 
-        return rc;
-    }
+//         return rc;
+//     }
 
-    /* the request is ours exclusively. */
+//     /* the request is ours exclusively. */
 
-    /* point to the data */
-    cip_resp = (eip_cip_co_resp*)(tag->req->data);
+//     /* point to the data */
+//     cip_resp = (eip_cip_co_resp*)(tag->req->data);
 
-    /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+//     /* point to the start of the data */
+//     data = (tag->req->data) + sizeof(eip_cip_co_resp);
 
-    /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+//     /* point the end of the data */
+//     data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
-    /* check the status */
-    do {
-        ptrdiff_t payload_size = (data_end - data);
+//     /* check the status */
+//     do {
+//         ptrdiff_t payload_size = (data_end - data);
 
-        if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
+//         if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
+//             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
+//             rc = PLCTAG_ERR_BAD_DATA;
+//             break;
+//         }
 
-        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
+//         if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
+//             pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
+//             rc = PLCTAG_ERR_REMOTE_ERR;
+//             break;
+//         }
 
-        if (cip_resp->reply_service != (AB_EIP_CMD_CIP_LIST_TAGS | AB_EIP_CMD_CIP_OK) ) {
-            pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
+//         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_LIST_TAGS | AB_EIP_CMD_CIP_OK) ) {
+//             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
+//             rc = PLCTAG_ERR_BAD_DATA;
+//             break;
+//         }
 
-        if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
-            break;
-        }
+//         if (cip_resp->status != AB_CIP_STATUS_OK && cip_resp->status != AB_CIP_STATUS_FRAG) {
+//             pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
+//             pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
+//             rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+//             break;
+//         }
 
-        /* check to see if this is a partial response. */
-        partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
+//         /* check to see if this is a partial response. */
+//         partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
 
-        /*
-         * check to see if there is any data to process.  If this is a packed
-         * response, there might not be.
-         */
-        if(payload_size > 0) {
-            uint8_t *current_entry_data = data;
+//         /*
+//          * check to see if there is any data to process.  If this is a packed
+//          * response, there might not be.
+//          */
+//         if(payload_size > 0) {
+//             uint8_t *current_entry_data = data;
 
-            /* copy the data into the tag and realloc if we need more space. */
+//             /* copy the data into the tag and realloc if we need more space. */
 
-            if(payload_size + tag->offset > tag->size) {
-                tag->elem_count = tag->size = (int)payload_size + tag->offset;
+//             if(payload_size + tag->offset > tag->size) {
+//                 tag->elem_count = tag->size = (int)payload_size + tag->offset;
 
-                pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
+//                 pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
 
-                tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
-                if(!tag->data) {
-                    pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                    break;
-                }
-            }
+//                 tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
+//                 if(!tag->data) {
+//                     pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
+//                     rc = PLCTAG_ERR_NO_MEM;
+//                     break;
+//                 }
+//             }
 
-            /* copy the data into the tag's data buffer. */
-            mem_copy(tag->data + tag->offset, data, (int)payload_size);
+//             /* copy the data into the tag's data buffer. */
+//             mem_copy(tag->data + tag->offset, data, (int)payload_size);
 
-            tag->offset += (int)payload_size;
+//             tag->offset += (int)payload_size;
 
-            pdebug(DEBUG_DETAIL, "current offset %d", tag->offset);
+//             pdebug(DEBUG_DETAIL, "current offset %d", tag->offset);
 
-            /* scan through the data to get the next ID to use. */
-            while((data_end - current_entry_data) > 0) {
-                tag_list_entry *current_entry = (tag_list_entry*)current_entry_data;
+//             /* scan through the data to get the next ID to use. */
+//             while((data_end - current_entry_data) > 0) {
+//                 tag_list_entry *current_entry = (tag_list_entry*)current_entry_data;
 
-                /* first element is the symbol instance ID */
-                tag->next_id = (uint16_t)(le2h32(current_entry->instance_id) + 1);
+//                 /* first element is the symbol instance ID */
+//                 tag->next_id = (uint16_t)(le2h32(current_entry->instance_id) + 1);
 
-                pdebug(DEBUG_DETAIL, "Next ID: %d", tag->next_id);
+//                 pdebug(DEBUG_DETAIL, "Next ID: %d", tag->next_id);
 
-                /* skip past to the next instance. */
-                current_entry_data += (sizeof(*current_entry) + le2h16(current_entry->string_len));
+//                 /* skip past to the next instance. */
+//                 current_entry_data += (sizeof(*current_entry) + le2h16(current_entry->string_len));
 
-                symbol_index++;
-            }
-        } else {
-            pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
-        }
+//                 symbol_index++;
+//             }
+//         } else {
+//             pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
+//         }
 
-        /* set the return code */
-        rc = PLCTAG_STATUS_OK;
-    } while(0);
+//         /* set the return code */
+//         rc = PLCTAG_STATUS_OK;
+//     } while(0);
 
-    /* clean up the request */
-    tag->req->abort_request = 1;
-    tag->req = rc_dec(tag->req);
+//     /* clean up the request */
+//     tag->req->abort_request = 1;
+//     tag->req = rc_dec(tag->req);
 
-    /* are we actually done? */
-    if (rc == PLCTAG_STATUS_OK) {
-        /* this read is done. */
-        tag->read_in_progress = 0;
+//     /* are we actually done? */
+//     if (rc == PLCTAG_STATUS_OK) {
+//         /* this read is done. */
+//         tag->read_in_progress = 0;
 
-        /* keep going if we are not done yet. */
-        if (partial_data) {
-            /* call read start again to get the next piece */
-            pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
-            rc = tag_read_start(tag);
-        } else {
-            /* done! */
-            pdebug(DEBUG_DETAIL, "Done reading tag list data!");
+//         /* keep going if we are not done yet. */
+//         if (partial_data) {
+//             /* call read start again to get the next piece */
+//             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
+//             rc = tag_read_start(tag);
+//         } else {
+//             /* done! */
+//             pdebug(DEBUG_DETAIL, "Done reading tag list data!");
 
-            pdebug(DEBUG_DETAIL, "total symbols: %d", symbol_index);
+//             pdebug(DEBUG_DETAIL, "total symbols: %d", symbol_index);
 
-            tag->elem_count = tag->offset;
+//             tag->elem_count = tag->offset;
 
-            tag->first_read = 0;
-            tag->offset = 0;
-            tag->next_id = 0;
-        }
-    }
+//             tag->first_read = 0;
+//             tag->offset = 0;
+//             tag->next_id = 0;
+//         }
+//     }
 
-    /* this is not an else clause because the above if could result in bad rc. */
-    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-        /* error ! */
-        pdebug(DEBUG_WARN, "Error received: %s!", plc_tag_decode_error(rc));
+//     /* this is not an else clause because the above if could result in bad rc. */
+//     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+//         /* error ! */
+//         pdebug(DEBUG_WARN, "Error received: %s!", plc_tag_decode_error(rc));
 
-        tag->offset = 0;
-        tag->next_id = 0;
+//         tag->offset = 0;
+//         tag->next_id = 0;
 
-        /* clean up everything. */
-        ab_tag_abort(tag);
-    }
+//         /* clean up everything. */
+//         ab_tag_abort(tag);
+//     }
 
-    pdebug(DEBUG_SPEW, "Done.");
+//     pdebug(DEBUG_SPEW, "Done.");
 
-    return rc;
-}
+//     return rc;
+// }
 
 
 
@@ -2425,118 +2425,118 @@ int calculate_write_data_per_packet(ab_tag_p tag)
 
 
 
-int setup_tag_listing(ab_tag_p tag, const char *name)
-{
-    char **tag_parts = NULL;
+// int setup_tag_listing(ab_tag_p tag, const char *name)
+// {
+//     char **tag_parts = NULL;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+//     pdebug(DEBUG_DETAIL, "Starting.");
 
-    /* Check for a match with just "@tags" for a controller tag listing. */
-    if(str_cmp_i(name, "@tags") == 0) {
-        /* controller tag listing. */
-        pdebug(DEBUG_DETAIL, "Tag is a controller tag listing request.");
+//     /* Check for a match with just "@tags" for a controller tag listing. */
+//     if(str_cmp_i(name, "@tags") == 0) {
+//         /* controller tag listing. */
+//         pdebug(DEBUG_DETAIL, "Tag is a controller tag listing request.");
 
-        /* fall through to the last part to set up the tag. */
-    } else if(str_length(name) >= str_length("PROGRAM:x.@tags")) {
-        tag_parts = str_split(name, ".");
+//         /* fall through to the last part to set up the tag. */
+//     } else if(str_length(name) >= str_length("PROGRAM:x.@tags")) {
+//         tag_parts = str_split(name, ".");
 
-        /* check to make sure that we have at least one part. */
-        if(!tag_parts) {
-            pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
+//         /* check to make sure that we have at least one part. */
+//         if(!tag_parts) {
+//             pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
+//             return PLCTAG_ERR_NOT_FOUND;
+//         }
 
-        /* check that we have exactly two parts. */
-        if(tag_parts[0] != NULL && tag_parts[1] != NULL && tag_parts[2] == NULL) {
-            /* we have exactly two parts. Make sure the last part is "@tags" */
-            if(str_cmp_i(tag_parts[1], "@tags") != 0) {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//         /* check that we have exactly two parts. */
+//         if(tag_parts[0] != NULL && tag_parts[1] != NULL && tag_parts[2] == NULL) {
+//             /* we have exactly two parts. Make sure the last part is "@tags" */
+//             if(str_cmp_i(tag_parts[1], "@tags") != 0) {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            if(str_length(tag_parts[0]) <= str_length("PROGRAM:x")) {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if(str_length(tag_parts[0]) <= str_length("PROGRAM:x")) {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            /* make sure the first part is "PROGRAM:" */
-            if((tag_parts[0][0]) != 'P' && (tag_parts[0][0]) != 'p') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
+//             /* make sure the first part is "PROGRAM:" */
+//             if((tag_parts[0][0]) != 'P' && (tag_parts[0][0]) != 'p') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
 
-            }
+//             }
 
-            if((tag_parts[0][1]) != 'R' && (tag_parts[0][1]) != 'r') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if((tag_parts[0][1]) != 'R' && (tag_parts[0][1]) != 'r') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            if((tag_parts[0][2]) != 'O' && (tag_parts[0][2]) != 'o') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if((tag_parts[0][2]) != 'O' && (tag_parts[0][2]) != 'o') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            if((tag_parts[0][3]) != 'G' && (tag_parts[0][3]) != 'g') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if((tag_parts[0][3]) != 'G' && (tag_parts[0][3]) != 'g') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            if((tag_parts[0][4]) != 'R' && (tag_parts[0][4]) != 'r') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if((tag_parts[0][4]) != 'R' && (tag_parts[0][4]) != 'r') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            if((tag_parts[0][5]) != 'A' && (tag_parts[0][5]) != 'a') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if((tag_parts[0][5]) != 'A' && (tag_parts[0][5]) != 'a') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            if((tag_parts[0][6]) != 'M' && (tag_parts[0][6]) != 'm') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if((tag_parts[0][6]) != 'M' && (tag_parts[0][6]) != 'm') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            if((tag_parts[0][7]) != ':') {
-                mem_free(tag_parts);
-                pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
-                return PLCTAG_ERR_NOT_FOUND;
-            }
+//             if((tag_parts[0][7]) != ':') {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_INFO, "Tag %s is not a tag listing request.", name);
+//                 return PLCTAG_ERR_NOT_FOUND;
+//             }
 
-            /* we have a program tag request! */
-            if(cip_encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
-                mem_free(tag_parts);
-                pdebug(DEBUG_WARN, "Tag program listing, %s, is not able to be encoded!", name);
-                return PLCTAG_ERR_BAD_PARAM;
-            }
-        } else {
-            mem_free(tag_parts);
-            pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
-            return PLCTAG_ERR_NOT_FOUND;
-        }
-    } else {
-        pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
-        return PLCTAG_ERR_NOT_FOUND;
-    }
+//             /* we have a program tag request! */
+//             if(cip_encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
+//                 mem_free(tag_parts);
+//                 pdebug(DEBUG_WARN, "Tag program listing, %s, is not able to be encoded!", name);
+//                 return PLCTAG_ERR_BAD_PARAM;
+//             }
+//         } else {
+//             mem_free(tag_parts);
+//             pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
+//             return PLCTAG_ERR_NOT_FOUND;
+//         }
+//     } else {
+//         pdebug(DEBUG_INFO, "Tag is not a tag listing request.");
+//         return PLCTAG_ERR_NOT_FOUND;
+//     }
 
-    if(tag_parts) {
-        mem_free(tag_parts);
-    }
+//     if(tag_parts) {
+//         mem_free(tag_parts);
+//     }
 
-    tag->tag_list = 1;
-    tag->elem_type = AB_TYPE_TAG_ENTRY;
-    tag->elem_count = 1;  /* place holder */
-    tag->elem_size = 1;
+//     tag->tag_list = 1;
+//     tag->elem_type = AB_TYPE_TAG_ENTRY;
+//     tag->elem_count = 1;  /* place holder */
+//     tag->elem_size = 1;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+//     pdebug(DEBUG_DETAIL, "Done.");
 
-    return PLCTAG_STATUS_OK;
-}
+//     return PLCTAG_STATUS_OK;
+// }
