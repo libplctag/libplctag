@@ -681,6 +681,9 @@ int raw_tag_build_write_request_connected(ab_tag_p tag)
     /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
 
+    /* reset the tag size so that incoming data overwrites the old. */
+    tag->size = 0;
+
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
 
@@ -797,6 +800,9 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag)
 
     /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
+
+    /* reset the tag size so that incoming data overwrites the old. */
+    tag->size = 0;
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
