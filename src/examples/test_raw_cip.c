@@ -40,7 +40,7 @@
 
 #define REQUIRED_VERSION 2,4,0
 
-#define TAG_STRING "protocol=ab-eip2&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@raw"
+#define TAG_STRING "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@raw"
 #define DATA_TIMEOUT 5000
 
 

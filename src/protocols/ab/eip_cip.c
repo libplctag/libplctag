@@ -332,11 +332,11 @@ int tag_write_start(ab_tag_p tag)
     pdebug(DEBUG_INFO, "Starting");
 
     /* check to make sure that this kind of tag can be written. */
-    if(tag->tag_list) {
-        pdebug(DEBUG_WARN, "A tag list cannot be written!");
+    // if(tag->special_tag) {
+    //     pdebug(DEBUG_WARN, "A tag list cannot be written!");
 
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
+    //     return PLCTAG_ERR_UNSUPPORTED;
+    // }
 
     if(tag->read_in_progress || tag->write_in_progress) {
         pdebug(DEBUG_WARN, "Read or write operation already in flight!");

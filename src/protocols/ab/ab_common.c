@@ -345,10 +345,14 @@ plc_tag_p ab_tag_create(attr attribs)
             return (plc_tag_p)tag;
         }
 
-        if(!tag->tag_list) {
-            tag->byte_order = &logix_tag_byte_order;
-        } else {
-            tag->byte_order = &logix_tag_listing_byte_order;
+        /* if we did not fill in the byte order elsewhere, fill it in now. */
+        if(!tag->byte_order) {
+            pdebug(DEBUG_DETAIL, "Using default Logix vtable.");
+            // if(!tag->tag_list) {
+                tag->byte_order = &logix_tag_byte_order;
+            // } else {
+            //     tag->byte_order = &logix_tag_listing_byte_order;
+            // }
         }
 
         if(!tag->tag_list) {
@@ -360,7 +364,12 @@ plc_tag_p ab_tag_create(attr attribs)
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
-        tag->vtable = &eip_cip_vtable;
+
+        /* if this was not filled in elsewhere default to Logix */
+        if(!tag->vtable) {
+            pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+            tag->vtable = &eip_cip_vtable;
+        }
 
         break;
 
@@ -455,17 +464,18 @@ plc_tag_p ab_tag_create(attr attribs)
      * check the tag name, this is protocol specific.
      */
 
-    if(!tag->tag_list && check_tag_name(tag, attr_get_str(attribs,"name",NULL)) != PLCTAG_STATUS_OK) {
+    if(!tag->special_tag && check_tag_name(tag, attr_get_str(attribs,"name",NULL)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO,"Bad tag name!");
         tag->status = PLCTAG_ERR_BAD_PARAM;
         return (plc_tag_p)tag;
     }
 
-    /* trigger the first read. */
-    tag->first_read = 1;
-
     /* kick off a read to get the tag type and size. */
     if(tag->vtable->read) {
+        /* trigger the first read. */
+        pdebug(DEBUG_DETAIL, "Kicking off initial read.");
+
+        tag->first_read = 1;
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
     }
