@@ -96,7 +96,7 @@ struct ab_tag_t {
     int elem_count;
     int elem_size;
 
-    int tag_list;
+    int special_tag;
     uint32_t next_id;
 
     //int is_bit;

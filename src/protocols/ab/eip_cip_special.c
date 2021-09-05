@@ -253,12 +253,14 @@ int setup_raw_tag(ab_tag_p tag)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* set up raw tag. */
-    tag->tag_list = 1;
+    tag->special_tag = 1;
     tag->elem_type = AB_TYPE_TAG_RAW;
     tag->elem_count = 1;
     tag->elem_size = 1;
 
     tag->byte_order = &logix_tag_byte_order;
+
+    tag->vtable = &raw_tag_vtable;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -903,12 +905,14 @@ int setup_tag_listing_tag(ab_tag_p tag, const char *name)
     /* did we find a listing tag? */
     if(rc == PLCTAG_STATUS_OK) {
         /* yes we did */
-        tag->tag_list = 1;
+        tag->special_tag = 1;
         tag->elem_type = AB_TYPE_TAG_ENTRY;
         tag->elem_count = 1;
         tag->elem_size = 1;
 
         tag->byte_order = &listing_tag_logix_byte_order;
+
+        tag->vtable = &listing_tag_vtable;
 
         pdebug(DEBUG_INFO, "Done. Found tag listing tag name %s.", name);
     } else {
