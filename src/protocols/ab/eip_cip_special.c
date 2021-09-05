@@ -984,14 +984,15 @@ int listing_tag_tickler(ab_tag_p tag)
         }
 
         rc = listing_tag_check_read_status_connected(tag);
-        if (rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN,"Error %s getting tag list read status!", plc_tag_decode_error(rc));
-        }
+        // if (rc != PLCTAG_STATUS_PENDING) {
+        //     pdebug(DEBUG_WARN,"Error %s getting tag list read status!", plc_tag_decode_error(rc));
+        // }
 
         tag->status = (int8_t)rc;
 
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->read_in_progress) {
+            pdebug(DEBUG_DETAIL, "Read complete.");
             tag->read_complete = 1;
         }
 
@@ -1182,13 +1183,10 @@ static int listing_tag_check_read_status_connected(ab_tag_p tag)
 
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
-        /* this read is done. */
-        tag->read_in_progress = 0;
-
         /* keep going if we are not done yet. */
         if (partial_data) {
             /* call read start again to get the next piece */
-            pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
+            pdebug(DEBUG_DETAIL, "calling listing_tag_build_read_request_connected() to get the next chunk.");
             rc = listing_tag_build_read_request_connected(tag);
         } else {
             /* done! */
@@ -1201,6 +1199,9 @@ static int listing_tag_check_read_status_connected(ab_tag_p tag)
             tag->first_read = 0;
             tag->offset = 0;
             tag->next_id = 0;
+
+            /* this read is done. */
+            tag->read_in_progress = 0;
         }
     }
 
