@@ -444,6 +444,7 @@ elseif (BUILD_EXAMPLES)
                             busy_test
                             data_dumper
                             list_tags
+                            list_tags_new
                             multithread
                             multithread_cached_read
                             multithread_plc5
