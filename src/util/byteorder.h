@@ -52,7 +52,7 @@ START_PACK typedef struct {
     } val;
 } END_PACK uint32_le;
 
-#define UINT32LE_INIT(v) {.val = {.u_val = ((uint32_t)(v))}}
+#define UINT32_LE_INIT(v) {.val = {.u_val = ((uint32_t)(v))}}
 
 
 START_PACK typedef struct {
