@@ -428,8 +428,8 @@ endif()
 
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
-    target_link_libraries(plctag_dyn ws2_32)
-    target_link_libraries(plctag_static ws2_32)
+    target_link_libraries(plctag_dyn ws2_32 winmm)
+    target_link_libraries(plctag_static ws2_32 winmm)
 endif()
 
 # add the examples and tests
