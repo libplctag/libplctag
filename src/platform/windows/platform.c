@@ -44,6 +44,7 @@
 #include <io.h>
 #include <Winsock2.h>
 #include <Ws2tcpip.h>
+#include <timeapi.h>
 #include <string.h>
 #include <stdlib.h>
 #include <winnt.h>
