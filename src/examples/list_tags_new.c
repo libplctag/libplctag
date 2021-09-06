@@ -170,6 +170,8 @@ int main(int argc, char **argv)
         usage();
     }
 
+    if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr, "Controller tag listing tag ID: %d\n", controller_listing_tag);
+
     /*
      * now loop through the tags and get the list for the program tags.
      *
@@ -191,6 +193,8 @@ int main(int argc, char **argv)
                 usage();
             }
 
+            if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr, "Program tag listing tag ID: %d\n", program_listing_tag);
+
             rc = get_tag_list(program_listing_tag, &tag_list, entry);
             if(rc != PLCTAG_STATUS_OK) {
                 fprintf(stderr, "Unable to get program tag list or no tags visible in the target PLC, error %s!\n", plc_tag_decode_error(rc));
@@ -198,6 +202,7 @@ int main(int argc, char **argv)
             }
 
             plc_tag_destroy(program_listing_tag);
+            if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr, "Destroying program tag listing tag ID: %d\n", program_listing_tag);
         }
     }
 
@@ -338,6 +343,8 @@ int main(int argc, char **argv)
             udts[index] = NULL;
         }
     }
+
+    free(tag_string_base);
 
     /* Destroy this at the end to keep the session open. */
     plc_tag_destroy(controller_listing_tag);
@@ -637,6 +644,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     uint16_t num_members = 0;
     uint16_t struct_handle = 0;
     uint32_t udt_instance_size = 0;
+    uint32_t member_desc_size = 0;
     int name_len = 0;
     char *name_str = NULL;
     int name_index = 0;
@@ -656,6 +664,8 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
         usage();
     }
 
+    if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr, "UDT info tag ID: %d\n", udt_info_tag);
+
     rc = plc_tag_read(udt_info_tag, TIMEOUT_MS);
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Error %s while trying to read UDT info!\n", plc_tag_decode_error(rc));
@@ -666,12 +676,14 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     /* the format in the tag buffer is:
      *
-     * A new header:
+     * A new header of 14 bytes:
      *
-     * uint16_t - UDT ID
-     * uint16_t - number of members (including invisible ones)
-     * uint16_t - struct handle/CRC of field defs.
-     * uint32_t - instance size in bytes.
+     * Bytes   Meaning
+     * 0-1     16-bit UDT ID
+     * 2-5     32-bit UDT member description size, in 32-bit words.
+     * 6-9     32-bit UDT instance size, in bytes.
+     * 10-11   16-bit UDT number of members (fields).
+     * 12-13   16-bit UDT handle/type.
      *
      * Then the raw field info.
      *
@@ -687,15 +699,15 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
      *
      */
 
-
     /* get the ID, number of members and the instance size. */
     template_id = plc_tag_get_uint16(udt_info_tag, 0);
-    num_members = plc_tag_get_uint16(udt_info_tag, 2);
-    struct_handle = plc_tag_get_uint16(udt_info_tag, 4);
+    member_desc_size = plc_tag_get_uint32(udt_info_tag, 2);
     udt_instance_size = plc_tag_get_uint32(udt_info_tag, 6);
+    num_members = plc_tag_get_uint16(udt_info_tag, 10);
+    struct_handle = plc_tag_get_uint16(udt_info_tag, 12);
 
     /* skip past this header. */
-    offset = 10;
+    offset = 14;
 
     /* just a sanity check */
     if(template_id != udt_id) {
@@ -743,6 +755,10 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
                 last_udt++;
             }
         }
+    }
+
+    if(debug_level >= PLCTAG_DEBUG_DETAIL) {
+        fprintf(stderr, "Offset after reading field descriptors: %d.\n", offset);
     }
 
     /*
@@ -809,6 +825,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
         /* first get the zero-terminated string length */
         name_len = plc_tag_get_string_length(udt_info_tag, offset);
         if(name_len <=0 || name_len >= 256) {
+            plc_tag_destroy(udt_info_tag);
             fprintf(stderr, "Unexpected UDT field name length: %d!\n", name_len);
             usage();
         }
@@ -818,6 +835,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
         /* create a string for this. */
         name_str = calloc((size_t)(name_len + 1), (size_t)1);
         if(!name_str) {
+            plc_tag_destroy(udt_info_tag);
             fprintf(stderr, "Unable to allocate UDT field name string!\n");
             usage();
         }
@@ -827,6 +845,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
         /* copy the name */
         rc = plc_tag_get_string(udt_info_tag, offset, name_str, name_len + 1);
         if(rc != PLCTAG_STATUS_OK) {
+            plc_tag_destroy(udt_info_tag);
             fprintf(stderr, "Error %s retrieving UDT field name string from the tag!\n", plc_tag_decode_error(rc));
             free(name_str);
             usage();
@@ -843,6 +862,9 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     if(offset != tag_size - 1) {
         if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "Processed %d bytes out of %d bytes.\n", offset, tag_size);
     }
+
+    plc_tag_destroy(udt_info_tag);
+    if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr, "Destroying UDT info tag: %d\n", udt_info_tag);
 
     return PLCTAG_STATUS_OK;
 }
