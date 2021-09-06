@@ -39,10 +39,10 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,2,1
+#define REQUIRED_VERSION 2,4,0
 
 #define TAG_STRING_SIZE (200)
-#define TAG_STRING_TEMPLATE "protocol=ab-eip2&gateway=%s&path=%s&plc=ControlLogix&name="
+#define TAG_STRING_TEMPLATE "protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&name="
 #define TIMEOUT_MS 5000
 
 
@@ -170,9 +170,6 @@ int main(int argc, char **argv)
         usage();
     }
 
-    /* this is bad for performance. Should keep this one open to keep the PLC connection live. */
-    plc_tag_destroy(controller_listing_tag);
-
     /*
      * now loop through the tags and get the list for the program tags.
      *
@@ -217,6 +214,7 @@ int main(int argc, char **argv)
             last_udt++;
 
             if(last_udt >= MAX_UDTS) {
+                plc_tag_destroy(controller_listing_tag);
                 fprintf(stderr, "More than %d UDTs are requested!\n", MAX_UDTS);
                 usage();
             }
@@ -231,6 +229,7 @@ int main(int argc, char **argv)
         if(udts[udt_id] == NULL) {
             rc = get_udt_definition(tag_string_base, udt_id);
             if(rc != PLCTAG_STATUS_OK) {
+                plc_tag_destroy(controller_listing_tag);
                 fprintf(stderr, "Unable to get UDT template ID %u, error %s!\n", (unsigned int)(udt_id), plc_tag_decode_error(rc));
                 usage();
             }
@@ -340,7 +339,8 @@ int main(int argc, char **argv)
         }
     }
 
-    // plc_tag_destroy(tag);
+    /* Destroy this at the end to keep the session open. */
+    plc_tag_destroy(controller_listing_tag);
 
     printf("SUCCESS!\n");
 
@@ -643,7 +643,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
 
 
-    /* check to see if we have this type already. */
+    /* memoize, check to see if we have this type already. */
     if(udts[udt_id]) {
         return PLCTAG_STATUS_OK;
     }
