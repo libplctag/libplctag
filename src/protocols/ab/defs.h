@@ -78,6 +78,7 @@
 #define AB_EIP_CMD_FORWARD_OPEN_EX      ((uint8_t)0x5B)
 
 /* CIP embedded packet commands */
+#define AB_EIP_CMD_CIP_GET_ATTR_LIST    ((uint8_t)0x03)
 #define AB_EIP_CMD_CIP_MULTI            ((uint8_t)0x0A)
 #define AB_EIP_CMD_CIP_READ             ((uint8_t)0x4C)
 #define AB_EIP_CMD_CIP_WRITE            ((uint8_t)0x4D)

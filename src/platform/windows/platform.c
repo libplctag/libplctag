@@ -44,6 +44,7 @@
 #include <io.h>
 #include <Winsock2.h>
 #include <Ws2tcpip.h>
+#include <timeapi.h>
 #include <string.h>
 #include <stdlib.h>
 #include <winnt.h>
@@ -72,7 +73,7 @@ extern "C"
 
 
 
-
+#define WINDOWS_REQUESTED_TIMER_PERIOD_MS ((unsigned int)4)
 
 
 
@@ -1088,14 +1089,25 @@ struct sock_t {
 #define MAX_IPS (8)
 
 
-/* windows needs to have the Winsock library initialized
+/*
+ * Windows needs to have the Winsock library initialized
  * before use. Does it need to be static?
+ *
+ * Also set the timer period to handle the newer Windows 10 case
+ * where it gets set fairly large (>15ms).
  */
 
 static WSADATA wsaData;
 
 static int socket_lib_init(void)
 {
+    MMRESULT rc = 0;
+
+    rc = timeBeginPeriod(WINDOWS_REQUESTED_TIMER_PERIOD_MS);
+    if(rc != TIMERR_NOERROR) {
+        pdebug(DEBUG_WARN, "Unable to set timer period to %ums!", WINDOWS_REQUESTED_TIMER_PERIOD_MS);
+    }
+
     return WSAStartup(MAKEWORD(2,2), &wsaData) == NO_ERROR;
 }
 

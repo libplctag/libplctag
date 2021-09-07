@@ -42,5 +42,5 @@ extern tag_byte_order_t listing_tag_logix_byte_order;
 //extern int setup_special_cip_tag(ab_tag_p tag, const char *name);
 extern int setup_raw_tag(ab_tag_p tag);
 extern int setup_tag_listing_tag(ab_tag_p tag, const char *name);
-
+extern int setup_udt_tag(ab_tag_p tag, const char *name);
 

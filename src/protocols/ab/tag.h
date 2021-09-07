@@ -60,7 +60,8 @@ typedef enum {
     AB_TYPE_STRING,
     AB_TYPE_SHORT_STRING,
     AB_TYPE_TIMER,
-    AB_TYPE_TAG_ENTRY,  /* not a real AB type, but a pseudo UDT. */
+    AB_TYPE_TAG_ENTRY,  /* not a real AB type, but a pseudo type for AB's internal tag entry. */
+    AB_TYPE_TAG_UDT,    /* as above, but for UDTs. */
     AB_TYPE_TAG_RAW     /* raw CIP tag */
 } elem_type_t;
 
@@ -86,9 +87,6 @@ struct ab_tag_t {
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
     int encoded_type_info_size;
 
-    /* how much data can we send per packet? */
-    int write_data_per_packet;
-
     /* number of elements and size of each in the tag. */
     pccc_file_t file_type;
     elem_type_t elem_type;
@@ -97,10 +95,16 @@ struct ab_tag_t {
     int elem_size;
 
     int special_tag;
+
+    /* Used for standard tags. How much data can we send per packet? */
+    int write_data_per_packet;
+
+    /* used for listing tags. */
     uint32_t next_id;
 
-    //int is_bit;
-    //uint8_t bit;
+    /* used for UDT tags. */
+    uint8_t udt_get_fields;
+    uint16_t udt_id;
 
     /* requests */
     int pre_write_read;

@@ -349,7 +349,7 @@ plc_tag_p ab_tag_create(attr attribs)
         if(!tag->byte_order) {
             pdebug(DEBUG_DETAIL, "Using default Logix vtable.");
             // if(!tag->tag_list) {
-                tag->byte_order = &logix_tag_byte_order;
+            tag->byte_order = &logix_tag_byte_order;
             // } else {
             //     tag->byte_order = &logix_tag_listing_byte_order;
             // }
@@ -360,7 +360,7 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
 
         /* if this was not filled in elsewhere default to Logix */
-        if(!tag->vtable) {
+        if(tag->vtable == &default_vtable || !tag->vtable) {
             pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
             tag->vtable = &eip_cip_vtable;
         }
@@ -653,6 +653,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                         special_tag_rc = setup_raw_tag(tag);
                     } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
                         special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
+                    } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
+                        special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
                     } /* else not a special tag. */
 
                     if(special_tag_rc == PLCTAG_ERR_BAD_PARAM) {
