@@ -385,6 +385,98 @@ extern int str_cmp_i_n(const char *first, const char *second, int count)
 
 
 /*
+ * str_str_cmp_i
+ *
+ * Returns a pointer to the location of the needle string in the haystack string
+ * or NULL if there is no match.  The comparison is done case-insensitive.
+ *
+ * Handle the usual edge cases.
+ */
+
+
+/* 
+ * grabbed from Apple open source, 2021/09/06, KRH.  Note public domain license.  
+ *
+ * Modified to rename a few things and to add some checks and debugging output.
+ */
+
+/* +++Date last modified: 05-Jul-1997 */
+/* $Id: stristr.c,v 1.5 2005/03/05 00:37:19 dasenbro Exp $ */
+
+/*
+** Designation:  StriStr
+**
+** Call syntax:  char *stristr(char *String, char *Pattern)
+**
+** Description:  This function is an ANSI version of strstr() with
+**               case insensitivity.
+**
+** Return item:  char *pointer if Pattern is found in String, else
+**               pointer to 0
+**
+** Rev History:  07/04/95  Bob Stout  ANSI-fy
+**               02/03/94  Fred Cole  Original
+**
+** Hereby donated to public domain.
+**
+** Modified for use with libcyrus by Ken Murchison 06/01/00.
+*/
+
+
+char* str_str_cmp_i(const char* haystack, const char* needle)
+{
+    char* nptr, * hptr, * start;
+    int haystack_len = str_length(haystack);
+    int needle_len = str_length(needle);
+
+    if (!haystack_len) {
+        pdebug(DEBUG_DETAIL, "Haystack string is NULL or zero length.");
+        return NULL;
+    }
+
+    if (!needle_len) {
+        pdebug(DEBUG_DETAIL, "Needle string is NULL or zero length.");
+        return NULL;
+    }
+
+    if (haystack_len < needle_len) {
+        pdebug(DEBUG_DETAIL, "Needle string is longer than haystack string.");
+        return NULL;
+    }
+
+    /* while haystack length not shorter than needle length */
+    for (start = (char*)haystack, nptr = (char*)needle; haystack_len >= needle_len; start++, haystack_len--) {
+        /* find start of needle in haystack */
+        while (toupper(*start) != toupper(*needle)) {
+            start++;
+            haystack_len--;
+
+            /* if needle longer than haystack */
+
+            if (haystack_len < needle_len) {
+                return(NULL);
+            }
+        }
+
+        hptr = start;
+        nptr = (char*)needle;
+
+        while (toupper(*hptr) == toupper(*nptr)) {
+            hptr++;
+            nptr++;
+
+            /* if end of needle then needle was found */
+            if ('\0' == *nptr) {
+                return (start);
+            }
+        }
+    }
+
+    return(NULL);
+}
+
+
+/*
  * str_copy
  *
  * Returns
