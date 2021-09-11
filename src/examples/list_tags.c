@@ -644,12 +644,11 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     uint16_t num_members = 0;
     uint16_t struct_handle = 0;
     uint32_t udt_instance_size = 0;
-    uint32_t member_desc_size = 0;
+    //uint32_t member_desc_size = 0;
     int name_len = 0;
     char *name_str = NULL;
     int name_index = 0;
-
-
+    int field_index = 0;
 
     /* memoize, check to see if we have this type already. */
     if(udts[udt_id]) {
@@ -701,7 +700,7 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     /* get the ID, number of members and the instance size. */
     template_id = plc_tag_get_uint16(udt_info_tag, 0);
-    member_desc_size = plc_tag_get_uint32(udt_info_tag, 2);
+    //member_desc_size = plc_tag_get_uint32(udt_info_tag, 2);
     udt_instance_size = plc_tag_get_uint32(udt_info_tag, 6);
     num_members = plc_tag_get_uint16(udt_info_tag, 10);
     struct_handle = plc_tag_get_uint16(udt_info_tag, 12);
@@ -819,12 +818,12 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "offset=%u, tag_size=%u.\n", offset, tag_size);
 
     /* loop over all fields and get name strings.  They are zero terminated. */
-    for(int field_index=0; field_index < udts[udt_id]->num_fields && offset < tag_size; field_index++) {
+    for(field_index=0; field_index < udts[udt_id]->num_fields && offset < tag_size; field_index++) {
         if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "Getting name for field %u.\n", field_index);
 
         /* first get the zero-terminated string length */
         name_len = plc_tag_get_string_length(udt_info_tag, offset);
-        if(name_len <=0 || name_len >= 256) {
+        if(name_len <0 || name_len >= 256) {
             plc_tag_destroy(udt_info_tag);
             fprintf(stderr, "Unexpected UDT field name length: %d!\n", name_len);
             usage();
@@ -833,38 +832,59 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
         if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "The name for field %u is %u characters long.\n", field_index, name_len);
 
         /* create a string for this. */
-        name_str = calloc((size_t)(name_len + 1), (size_t)1);
-        if(!name_str) {
-            plc_tag_destroy(udt_info_tag);
-            fprintf(stderr, "Unable to allocate UDT field name string!\n");
-            usage();
+        if(name_len > 0) {
+            name_str = calloc((size_t)(name_len + 1), (size_t)1);
+            if(!name_str) {
+                plc_tag_destroy(udt_info_tag);
+                fprintf(stderr, "Unable to allocate UDT field name string!\n");
+                usage();
+            }
+
+            if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "The string for field %u is at %p.\n", field_index, (void *)name_str);
+
+            /* copy the name */
+            rc = plc_tag_get_string(udt_info_tag, offset, name_str, name_len + 1);
+            if(rc != PLCTAG_STATUS_OK) {
+                plc_tag_destroy(udt_info_tag);
+                fprintf(stderr, "Error %s retrieving UDT field name string from the tag!\n", plc_tag_decode_error(rc));
+                free(name_str);
+                usage();
+            }
+
+            udts[udt_id]->fields[field_index].name = name_str;
+
+            if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "UDT field %d is \"%s\".\n", field_index, udts[udt_id]->fields[field_index].name);
+
+            offset += plc_tag_get_string_total_length(udt_info_tag, offset);
+        } else {
+            /* field name was zero length. */
+            udts[udt_id]->fields[field_index].name = NULL;
+
+            if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "UDT field %d is not named.\n", field_index);
+
+            /*
+             * The string is either zero length in which case we need to bump past the null
+             * terminator or it is at the end of the tag and we need to step past the edge.
+             */
+            offset++;
         }
-
-        if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "The string for field %u is at %p.\n", field_index, (void *)name_str);
-
-        /* copy the name */
-        rc = plc_tag_get_string(udt_info_tag, offset, name_str, name_len + 1);
-        if(rc != PLCTAG_STATUS_OK) {
-            plc_tag_destroy(udt_info_tag);
-            fprintf(stderr, "Error %s retrieving UDT field name string from the tag!\n", plc_tag_decode_error(rc));
-            free(name_str);
-            usage();
-        }
-
-        udts[udt_id]->fields[field_index].name = name_str;
-
-        if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "UDT field %d is \"%s\".\n", field_index, udts[udt_id]->fields[field_index].name);
-
-        offset += plc_tag_get_string_total_length(udt_info_tag, offset);
     }
 
     /* sanity check */
-    if(offset != tag_size - 1) {
+    if(offset != tag_size) {
         if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "Processed %d bytes out of %d bytes.\n", offset, tag_size);
     }
 
-    plc_tag_destroy(udt_info_tag);
+    /* if we had a system tag, we might not have the full set of member/field names.  Fill in the gaps. */
+    for(; field_index < udts[udt_id]->num_fields; field_index++) {
+            /* field name was zero length. */
+            udts[udt_id]->fields[field_index].name = NULL;
+
+            if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "UDT field %d is not named.\n", field_index);
+    }
+
     if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr, "Destroying UDT info tag: %d\n", udt_info_tag);
+    plc_tag_destroy(udt_info_tag);
 
     return PLCTAG_STATUS_OK;
 }
