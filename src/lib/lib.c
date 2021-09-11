@@ -3969,6 +3969,11 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
     } else {
         if(tag->byte_order->str_is_zero_terminated) {
             /* slow, but hopefully correct. */
+
+            /*
+             * note that this will count the correct length of a string that runs up against
+             * the end of the tag buffer.
+             */
             for(int i = offset + (int)(tag->byte_order->str_count_word_bytes); i < tag->size; i++) {
                 size_t char_index = (((size_t)(unsigned int)string_length) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
                                 + (size_t)(unsigned int)offset
