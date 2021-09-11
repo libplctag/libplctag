@@ -282,10 +282,17 @@ int main(int argc, char **argv)
         struct udt_entry_s *udt = udts[index];
 
         if(udt) {
-            printf(" UDT %s (ID %x, %d bytes, struct handle %x):\n", udt->name, (unsigned int)(udt->id), (int)(unsigned int)udt->instance_size, (int)(unsigned int)udt->struct_handle);
-
+            if(udt->name) {
+                printf(" UDT %s (ID %x, %d bytes, struct handle %x):\n", udt->name, (unsigned int)(udt->id), (int)(unsigned int)udt->instance_size, (int)(unsigned int)udt->struct_handle);
+            } else {
+                printf(" UDT *UNNAMED* (ID %x, %d bytes, struct handle %x):\n", (unsigned int)(udt->id), (int)(unsigned int)udt->instance_size, (int)(unsigned int)udt->struct_handle);
+            }
             for(int field_index = 0; field_index < udt->num_fields; field_index++) {
-                printf("    Field %d: %s, offset %d", field_index, udt->fields[field_index].name, udt->fields[field_index].offset);
+                if(udt->fields[field_index].name) {
+                    printf("    Field %d: %s, offset %d", field_index, udt->fields[field_index].name, udt->fields[field_index].offset);
+                } else {
+                    printf("    Field %d: *UNNAMED*, offset %d", field_index, udt->fields[field_index].offset);
+                }
 
                 /* is it a bit? */
                 if(udt->fields[field_index].type == 0xC1) {
