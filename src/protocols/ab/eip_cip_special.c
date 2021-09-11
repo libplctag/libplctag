@@ -2084,6 +2084,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag)
     uint16_le tmp_u16 = UINT16_LE_INIT(0);
     uint32_le tmp_u32 = UINT32_LE_INIT(0);
     uint32_t total_size = 0;
+    uint32_t neg_4 = (~(uint32_t)4) + 1; /* twos-complement */
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -2097,6 +2098,11 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag)
     /* calculate the total size we need to get. */
     mem_copy(&tmp_u32, tag->data + 2, (int)(unsigned int)(sizeof(tmp_u32)));
     total_size = (4 * le2h32(tmp_u32)) - 23; /* formula according to the docs. */
+
+    pdebug(DEBUG_DETAIL, "Calculating total size of request, %d to %d.", (int)(unsigned int)total_size, (int)(unsigned int)((total_size + (uint32_t)3) & (uint32_t)neg_4));
+
+    /* make the total size a multiple of 4 bytes.  Round up. */
+    total_size = (total_size + 3) & (uint32_t)neg_4;
 
     /* point the request struct at the buffer */
     cip = (eip_cip_co_req*)(req->data);
