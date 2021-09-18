@@ -439,6 +439,8 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t tag, const char *attrib_name, i
 LIB_EXPORT int plc_tag_set_int_attribute(int32_t tag, const char *attrib_name, int new_value);
 
 LIB_EXPORT int plc_tag_get_size(int32_t tag);
+/* return the old size or negative for errors. */
+LIB_EXPORT int plc_tag_set_size(int32_t tag, int new_size);
 
 LIB_EXPORT int plc_tag_get_bit(int32_t tag, int offset_bit);
 LIB_EXPORT int plc_tag_set_bit(int32_t tag, int offset_bit, int val);
