@@ -13,7 +13,7 @@
     - [How to Get The Code](#how-to-get-the-code)
     - [Example Code](#example-code)
     - [API](#api)
-  - [Help Wanted!](#help-wanted)
+  - [Help Wanted](#help-wanted)
     - [How to Contribute](#how-to-contribute)
   - [History](#history)
   - [Contact and Support](#contact-and-support)
@@ -151,7 +151,7 @@ Most of the functions in the API are for data access.   Direct support for singl
 
 See the [API](https://github.com/libplctag/libplctag/wiki/API) for more information.
 
-## Help Wanted!
+## Help Wanted
 
 We need and welcome help with the following:
 

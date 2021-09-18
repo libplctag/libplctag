@@ -359,14 +359,12 @@ plc_tag_p ab_tag_create(attr attribs)
 
         if(!tag->tag_list) {
             tag->byte_order = &logix_tag_byte_order;
-        } else {
-            tag->byte_order = &logix_tag_listing_byte_order;
         }
 
-        if(!tag->tag_list) {
-            tag->byte_order = &logix_tag_byte_order;
-        } else {
-            tag->byte_order = &logix_tag_listing_byte_order;
+        /* if this was not filled in elsewhere default to Logix */
+        if(tag->vtable == &default_vtable || !tag->vtable) {
+            pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+            tag->vtable = &eip_cip_vtable;
         }
 
         /* default to requiring a connection. */
