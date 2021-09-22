@@ -519,7 +519,7 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         session->max_payload_size = MAX_CIP_MSG_SIZE;
         break;
 
-    case AB_PLC_MLGX800:
+    case AB_PLC_MICRO800:
         session->max_payload_size = MAX_CIP_MSG_SIZE;
         break;
 

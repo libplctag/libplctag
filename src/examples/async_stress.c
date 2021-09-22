@@ -52,9 +52,9 @@
 #include "utils.h"
 
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2,4,0
 
-#define DATA_TIMEOUT (1000)
+#define DATA_TIMEOUT (5000)
 
 
 
@@ -183,6 +183,8 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+
     /* check the command line arguments */
     if(argc != 3) {
         fprintf(stderr, "Must have number of tags and tag path!\n");
@@ -252,9 +254,22 @@ int main(int argc, char **argv)
 
         rc = read_tags(tags, statuses, num_tags, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
+            int need_sleep = 0;
+
             for(int i=0; i<num_tags; i++) {
-                fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
-                done = 1;
+                if(statuses[i] != PLCTAG_ERR_TIMEOUT) {
+                    fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
+                    done = 1;
+                } else {
+                    fprintf(stderr, "Tag %d read failed with a timeout, will retry.\n", i);
+                    plc_tag_abort(tags[i]);
+                    need_sleep = 1;
+                }
+            }
+
+            if(need_sleep) {
+                need_sleep = 0;
+                util_sleep_ms(10); /* give the backgroun thread time to process the abort. */
             }
         }
 
