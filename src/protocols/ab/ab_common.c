@@ -357,6 +357,12 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->vtable = &eip_cip_vtable;
         }
 
+        /* if this was not filled in elsewhere default to Logix */
+        if(tag->vtable == &default_vtable || !tag->vtable) {
+            pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+            tag->vtable = &eip_cip_vtable;
+        }
+
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
@@ -656,6 +662,23 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                     if(special_tag_rc == PLCTAG_ERR_BAD_PARAM) {
                         pdebug(DEBUG_WARN, "Error parsing tag listing name!");
                         return PLCTAG_ERR_BAD_PARAM;
+                    }
+                }
+
+                /* if we did not set an element size yet, set one. */
+                if(tag->elem_size == 0) {
+                    if(elem_size > 0) {
+                        pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
+                        tag->elem_size = elem_size;
+                    }
+
+                    // else {
+                    //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
+                    //     return PLCTAG_ERR_BAD_PARAM;
+                    // }
+                } else {
+                    if(elem_size > 0) {
+                        pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
                     }
                 }
 

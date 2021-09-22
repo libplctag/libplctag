@@ -395,8 +395,8 @@ extern int str_cmp_i_n(const char *first, const char *second, int count)
  */
 
 
-/* 
- * grabbed from Apple open source, 2021/09/06, KRH.  Note public domain license.  
+/*
+ * grabbed from Apple open source, 2021/09/06, KRH.  Note public domain license.
  *
  * Modified to rename a few things and to add some checks and debugging output.
  */
