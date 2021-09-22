@@ -1711,6 +1711,54 @@ LIB_EXPORT int plc_tag_get_size(int32_t id)
 
 
 
+LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(id);
+
+    pdebug(DEBUG_DETAIL, "Starting with new size %d.", new_size);
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    if(new_size < 0) {
+        pdebug(DEBUG_WARN, "Illegal new size %d bytes for tag is illegal.  Tag size must be positive.");
+        rc_dec(tag);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    critical_block(tag->api_mutex) {
+        uint8_t *new_data = mem_realloc(tag->data, new_size);
+
+        if(new_data) {
+            /* return the old size */
+            rc = tag->size;
+            tag->data = new_data;
+            tag->size = new_size;
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            rc = (int)PLCTAG_ERR_NO_MEM;
+            tag->status = (int8_t)rc;
+        }
+    }
+
+    rc_dec(tag);
+
+    if(rc >= 0) {
+        pdebug(DEBUG_DETAIL, "Done with old size %d.", rc);
+    } else {
+        pdebug(DEBUG_WARN, "Tag buffer resize failed with error %s!", plc_tag_decode_error(rc));
+    }
+
+    return rc;
+}
+
+
+
+
+
 LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit)
 {
     int res = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -3921,6 +3969,11 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
     } else {
         if(tag->byte_order->str_is_zero_terminated) {
             /* slow, but hopefully correct. */
+
+            /*
+             * note that this will count the correct length of a string that runs up against
+             * the end of the tag buffer.
+             */
             for(int i = offset + (int)(tag->byte_order->str_count_word_bytes); i < tag->size; i++) {
                 size_t char_index = (((size_t)(unsigned int)string_length) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
                                 + (size_t)(unsigned int)offset

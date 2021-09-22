@@ -195,7 +195,7 @@ static int tag_get_write_flag(modbus_tag_p tag);
 static int tag_set_write_flag(modbus_tag_p tag, int new_val);
 
 static int tag_get_busy_flag(modbus_tag_p tag);
-// static int tag_set_busy_flag(modbus_tag_p tag, int new_val);
+static int tag_set_busy_flag(modbus_tag_p tag, int new_val);
 
 /* tag vtable functions. */
 
@@ -578,8 +578,13 @@ THREAD_FUNC(modbus_plc_handler)
                 rc = read_packet(plc);
                 if(rc != PLCTAG_STATUS_OK) {
                     /* problem, punt! */
-                    err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
-                    break;
+                    //err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
+                    pdebug(DEBUG_WARN, "Closing socket due to read error %s.", plc_tag_decode_error(rc));
+                    socket_close(plc->sock);
+                    socket_destroy(&(plc->sock));
+                    plc->sock = NULL;
+                    keep_going = 1;
+                    plc->flags.response_ready = 0;
                 }
 
                 if(plc->flags.response_ready) {
@@ -590,8 +595,14 @@ THREAD_FUNC(modbus_plc_handler)
                 rc = write_packet(plc);
                 if(rc != PLCTAG_STATUS_OK) {
                     /* oops! */
-                    err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
-                    break;
+                    //err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
+                    pdebug(DEBUG_WARN, "Closing socket due to write error %s.", plc_tag_decode_error(rc));
+                    socket_close(plc->sock);
+                    socket_destroy(&(plc->sock));
+                    plc->sock = NULL;
+                    keep_going = 1;
+                    plc->flags.request_in_flight = 0;
+                    plc->flags.request_ready = 0;
                 }
 
                 /* check the inactivity timeout. */
@@ -602,20 +613,9 @@ THREAD_FUNC(modbus_plc_handler)
                     socket_destroy(&plc->sock);
                     plc->sock = NULL;
 
-                    /*
-                     * if we had a request that was sent, but there was no response yet,
-                     * then we need to clean up the state.   We are never going to get that
-                     * response.
-                     *
-                     * If there is a request ready to send, then keep it in the buffer until
-                     * we reconnect.
-                     */
-
-                    if(plc->flags.request_in_flight && !plc->flags.request_ready) {
-                        plc->flags.request_in_flight = 0;
-                    }
-
-                    /* we do not want to break here as the tags might have aborts to process. */
+                    plc->flags.request_in_flight = 0;
+                    plc->flags.request_ready = 0;
+                    plc->flags.response_ready = 0;
                 }
 
                 /* run all the tags. */
@@ -752,6 +752,14 @@ int connect_plc(modbus_plc_p plc)
     /* we just connected, keep the connection open for a few seconds. */
     plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
 
+    /* clear the state for reading and writing. */
+    plc->flags.request_in_flight = 0;
+    plc->flags.request_ready = 0;
+    plc->flags.response_ready = 0;
+    plc->read_data_len = 0;
+    plc->write_data_len = 0;
+    plc->write_data_offset = 0;
+
     pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
@@ -863,6 +871,7 @@ int write_packet(modbus_plc_p plc)
             data_left = plc->write_data_len - plc->write_data_offset;
         } else {
             pdebug(DEBUG_WARN, "Error, %s, writing to socket!", plc_tag_decode_error(rc));
+            break;
         }
     }
 
@@ -926,63 +935,73 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
         tag->seq_id = 0;
     }
 
-    if(tag_get_write_flag(tag)) {
-        if(tag_get_busy_flag(tag)) {
-            if(plc->flags.response_ready) {
-                /* we have an outstanding write request. */
-                rc = check_write_response(plc, tag);
-                if(rc == PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_SPEW, "Either not our response or we got a response!");
+    /* if there is not a socket, then we skip all this. */
+    if(plc->sock) {
+        if(tag_get_write_flag(tag)) {
+            if(tag_get_busy_flag(tag)) {
+                if(plc->flags.response_ready) {
+                    /* we have an outstanding write request. */
+                    rc = check_write_response(plc, tag);
+                    if(rc == PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_SPEW, "Either not our response or we got a response!");
+                    } else {
+                        pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
+                    }
+
+                    tag->status = (int8_t)rc;
                 } else {
-                    pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_SPEW, "No response yet.");
+                }
+            } else {
+                /* we have a write request to do and nothing is in flight. */
+                if(!plc->flags.request_ready && !plc->flags.request_in_flight) {
+                    rc = create_write_request(plc, tag);
+                } else {
+                    pdebug(DEBUG_SPEW, "No buffer space for a response.");
                 }
 
                 tag->status = (int8_t)rc;
-            } else {
-                pdebug(DEBUG_SPEW, "No response yet.");
             }
-        } else {
-            /* we have a write request to do and nothing is in flight. */
-            if(! plc->flags.request_ready && !plc->flags.request_in_flight) {
-                rc = create_write_request(plc, tag);
-            } else {
-                pdebug(DEBUG_SPEW, "No buffer space for a response.");
-            }
-
-            tag->status = (int8_t)rc;
         }
-    }
 
-    if(tag_get_read_flag(tag)) {
-        if(tag_get_busy_flag(tag)) {
-            if(plc->flags.response_ready) {
-                /* there is a request in flight, is there a response? */
-                rc = check_read_response(plc, tag);
-                if(rc == PLCTAG_STATUS_OK) {
-                    /* this is our response. */
-                    pdebug(DEBUG_SPEW, "Either not our response or we got a good response.");
+        if(tag_get_read_flag(tag)) {
+            if(tag_get_busy_flag(tag)) {
+                if(plc->flags.response_ready) {
+                    /* there is a request in flight, is there a response? */
+                    rc = check_read_response(plc, tag);
+                    if(rc == PLCTAG_STATUS_OK) {
+                        /* this is our response. */
+                        pdebug(DEBUG_SPEW, "Either not our response or we got a good response.");
+                    } else {
+                        pdebug(DEBUG_SPEW, "We got an error on our read response check, %s!", plc_tag_decode_error(rc));
+                    }
+
+                    tag->status = (int8_t)rc;
                 } else {
-                    pdebug(DEBUG_SPEW, "We got an error on our read response check, %s!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_SPEW, "No response yet.");
+                }
+            } else {
+                /* we have a write request to do an nothing is in flight. */
+                if(!plc->flags.request_ready && !plc->flags.request_in_flight) {
+                    rc = create_read_request(plc, tag);
+                } else {
+                    pdebug(DEBUG_SPEW, "No buffer space for a response.");
                 }
 
                 tag->status = (int8_t)rc;
-            } else {
-                pdebug(DEBUG_SPEW, "No response yet.");
             }
-        } else {
-            /* we have a write request to do an nothing is in flight. */
-            if(!plc->flags.request_ready && !plc->flags.request_in_flight) {
-                rc = create_read_request(plc, tag);
-            } else {
-                pdebug(DEBUG_SPEW, "No buffer space for a response.");
-            }
+        }
+    } else {
+        pdebug(DEBUG_SPEW, "Socket is closed, so clearing busy flag.");
+        tag_set_busy_flag(tag, 0);
 
-            tag->status = (int8_t)rc;
+        /* if the tag wants to do something, make sure we retry the connection. */
+        spin_block(&(tag->tag_lock)) {
+            if(tag->flags._read || tag->flags._write) {
+                plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+            }
         }
     }
-
-
-    /* does this tag need to do anything? */
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -1597,17 +1616,17 @@ int tag_get_busy_flag(modbus_tag_p tag)
     return res;
 }
 
-// int tag_set_busy_flag(modbus_tag_p tag, int new_val)
-// {
-//     int old_val = 0;
+int tag_set_busy_flag(modbus_tag_p tag, int new_val)
+{
+    int old_val = 0;
 
-//     spin_block(&tag->tag_lock) {
-//         old_val = tag->flags._busy;
-//         tag->flags._busy = ((new_val) ? 1 : 0);
-//     }
+    spin_block(&tag->tag_lock) {
+        old_val = tag->flags._busy;
+        tag->flags._busy = ((new_val) ? 1 : 0);
+    }
 
-//     return old_val;
-// }
+    return old_val;
+}
 
 
 

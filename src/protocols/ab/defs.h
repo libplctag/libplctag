@@ -78,6 +78,7 @@
 #define AB_EIP_CMD_FORWARD_OPEN_EX      ((uint8_t)0x5B)
 
 /* CIP embedded packet commands */
+#define AB_EIP_CMD_CIP_GET_ATTR_LIST    ((uint8_t)0x03)
 #define AB_EIP_CMD_CIP_MULTI            ((uint8_t)0x0A)
 #define AB_EIP_CMD_CIP_READ             ((uint8_t)0x4C)
 #define AB_EIP_CMD_CIP_WRITE            ((uint8_t)0x4D)
@@ -204,10 +205,10 @@
 //#define AB_PLC_PLC         (1)
 //#define AB_PLC_MLGX        (2)
 //#define AB_PLC_LGX         (3)
-//#define AB_PLC_MLGX800     (4)
+//#define AB_PLC_MICRO800     (4)
 //#define AB_PLC_LGX_PCCC    (5)
 
-typedef enum { AB_PLC_NONE = 0, AB_PLC_PLC5 = 1, AB_PLC_SLC, AB_PLC_MLGX, AB_PLC_LGX, AB_PLC_LGX_PCCC, AB_PLC_MLGX800, AB_PLC_OMRON_NJNX } plc_type_t;
+typedef enum { AB_PLC_NONE = 0, AB_PLC_PLC5 = 1, AB_PLC_SLC, AB_PLC_MLGX, AB_PLC_LGX, AB_PLC_LGX_PCCC, AB_PLC_MICRO800, AB_PLC_OMRON_NJNX } plc_type_t;
 
 
 /*********************************************************************

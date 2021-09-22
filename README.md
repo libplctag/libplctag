@@ -2,7 +2,7 @@
 
 - [libplctag - a C library for PLC communication](#libplctag---a-c-library-for-plc-communication)
   - [WARNING - DISCLAIMER](#warning---disclaimer)
-  - [Get It!](#get-it)
+  - [Get It](#get-it)
   - [Features](#features)
     - [High Level Features](#high-level-features)
     - [Detailed Features](#detailed-features)
@@ -13,7 +13,7 @@
     - [How to Get The Code](#how-to-get-the-code)
     - [Example Code](#example-code)
     - [API](#api)
-  - [Help Wanted!](#help-wanted)
+  - [Help Wanted](#help-wanted)
     - [How to Contribute](#how-to-contribute)
   - [History](#history)
   - [Contact and Support](#contact-and-support)
@@ -45,7 +45,7 @@ We make no claims or warrants about the suitability of this code for any purpose
 
 Be careful!
 
-## Get It!
+## Get It
 
 Do you know what you want already?  Download it from the [releases page](https://github.com/libplctag/libplctag/releases)!
 
@@ -151,7 +151,7 @@ Most of the functions in the API are for data access.   Direct support for singl
 
 See the [API](https://github.com/libplctag/libplctag/wiki/API) for more information.
 
-## Help Wanted!
+## Help Wanted
 
 We need and welcome help with the following:
 

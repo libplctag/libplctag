@@ -237,7 +237,7 @@ def plc_tag_check_lib_version(req_major, req_minor, req_patch):
 # 'size', 'read_cache_ms', 'auto_sync_read_ms', 'auto_sync_write_ms'
 #
 def plc_tag_get_int_attribute(id, attrib_name, default_value):
-    return plcTagGetIntAttribute(id, attrib_name, default_value)
+    return plcTagGetIntAttribute(id, attrib_name.encode('utf-8'), default_value)
 
 
 # plc_tag_set_int_attribute
@@ -249,7 +249,7 @@ def plc_tag_get_int_attribute(id, attrib_name, default_value):
 # 'read_cache_ms', 'auto_sync_read_ms', 'auto_sync_write_ms'
 #
 def plc_tag_set_int_attribute(id, attrib_name, new_value):
-    return plcTagSetIntAttribute(id, attrib_name, new_value)
+    return plcTagSetIntAttribute(id, attrib_name.encode('utf-8'), new_value)
 
 
 # plc_tag_decode_error
@@ -272,7 +272,7 @@ def plc_tag_decode_error(errCode):
 #
 def plc_tag_create(attributeString, timeout):
     #print ("Creating tag with attributes '%s' and timeout %d" % (attributeString, timeout))
-    return plcTagCreate(attributeString, timeout)
+    return plcTagCreate(attributeString.encode('utf-8'), timeout)
 
 
 # plc_tag_lock

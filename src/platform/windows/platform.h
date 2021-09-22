@@ -150,6 +150,7 @@ extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
 extern int str_cmp(const char *first, const char *second);
 extern int str_cmp_i(const char *first, const char *second);
 extern int str_cmp_i_n(const char *first, const char *second, int num_chars);
+extern char* str_str_cmp_i(const char* haystack, const char* needle);
 extern int str_copy(char *dst, int dst_size, const char *src);
 extern int str_length(const char *str);
 extern char *str_dup(const char *str);
