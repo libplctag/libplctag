@@ -964,6 +964,192 @@ extern void lock_release(lock_t *lock)
 
 
 /***************************************************************************
+ ************************* Condition Variables *****************************
+ ***************************************************************************/
+
+struct cond_t {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int flag;
+};
+
+int cond_create(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+    cond_p tmp_cond = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Null pointer to condition var pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(*c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?");
+    }
+
+    /* clear the output first. */
+    *c = NULL;
+
+    tmp_cond = mem_alloc((int)(unsigned int)sizeof(*tmp_cond));
+    if(!tmp_cond) {
+        pdebug(DEBUG_WARN, "Unable to allocate new condition var!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    if(pthread_mutex_init(&(tmp_cond->mutex), NULL)) {
+        pdebug(DEBUG_WARN, "Unable to initialize pthread mutex!");
+        mem_free(tmp_cond);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    if(pthread_cond_init(&(tmp_cond->cond), NULL)) {
+        pdebug(DEBUG_WARN, "Unable to initialize pthread condition var!");
+        pthread_mutex_destroy(&(tmp_cond->mutex));
+        mem_free(tmp_cond);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    tmp_cond->flag = 0;
+
+    *c = tmp_cond;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_wait(cond_p c, int timeout_ms)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int64_t start_time = time_ms();
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(timeout_ms <= 0) {
+        pdebug(DEBUG_WARN, "Timeout must be a positive value but was %d!", timeout_ms);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(pthread_mutex_lock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        return PLCTAG_ERR_MUTEX_LOCK;
+    }
+
+    while(!c->flag) {
+        int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
+
+        if(time_left > 0) {
+            int wait_rc = 0;
+            struct timespec timeout;
+
+            /* set up timeout. */
+            timeout.tv_sec = (time_t)(timeout_ms / 1000);
+            timeout.tv_nsec = (long)1000000 * ((long)timeout_ms % (long)1000);
+
+            wait_rc = pthread_cond_timedwait(&(c->cond), &(c->mutex), &timeout);
+            if(wait_rc == ETIMEDOUT) {
+                pdebug(DEBUG_DETAIL, "Timeout response from condition var wait.");
+                rc = PLCTAG_ERR_TIMEOUT;
+                break;
+            } else if(wait_rc != 0) {
+                pdebug(DEBUG_WARN, "Error %d waiting on condition variable!", errno);
+                rc = PLCTAG_ERR_BAD_STATUS;
+                break;
+            } else {
+                /* we might need to wait again. could be a spurious wake up. */
+                pdebug(DEBUG_DETAIL, "Condition var wait returned.");
+                rc = PLCTAG_STATUS_OK;
+            }
+        } else {
+            pdebug(DEBUG_DETAIL, "Timed out.");
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
+        }
+    }
+
+    if(c->flag) {
+        pdebug(DEBUG_DETAIL, "Condition var signaled.");
+    }
+
+    if(pthread_mutex_unlock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        return PLCTAG_ERR_MUTEX_UNLOCK;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_signal(cond_p c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(pthread_mutex_lock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        return PLCTAG_ERR_MUTEX_LOCK;
+    }
+
+    c->flag = 1;
+
+    if(pthread_cond_signal(&(c->cond))) {
+        pdebug(DEBUG_WARN, "Signal of condition var returned error %d!", errno);
+        rc = PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(pthread_mutex_unlock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        return PLCTAG_ERR_MUTEX_UNLOCK;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_destroy(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c || ! *c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pthread_cond_destroy(&((*c)->cond));
+    pthread_mutex_destroy(&((*c)->mutex));
+
+    mem_free(*c);
+
+    *c = NULL;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+/***************************************************************************
  ******************************* Sockets ***********************************
  **************************************************************************/
 
