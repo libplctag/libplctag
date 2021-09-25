@@ -1070,6 +1070,163 @@ extern void lock_release(lock_t *lock)
 
 
 
+/***************************************************************************
+ ************************* Condition Variables *****************************
+ ***************************************************************************/
+
+struct cond_t {
+    CRITICAL_SECTION cs;
+    CONDITION_VARIABLE cond;
+    int flag;
+};
+
+int cond_create(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+    cond_p tmp_cond = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Null pointer to condition var pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(*c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?");
+    }
+
+    /* clear the output first. */
+    *c = NULL;
+
+    tmp_cond = mem_alloc((int)(unsigned int)sizeof(*tmp_cond));
+    if(!tmp_cond) {
+        pdebug(DEBUG_WARN, "Unable to allocate new condition var!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    InitializeCriticalSection(&(tmp_cond->cs));
+    InitializeConditionVariable(&(tmp_cond->cond));
+
+    tmp_cond->flag = 0;
+
+    *c = tmp_cond;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_wait(cond_p c, int timeout_ms)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int64_t start_time = time_ms();
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(timeout_ms <= 0) {
+        pdebug(DEBUG_WARN, "Timeout must be a positive value but was %d!", timeout_ms);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    EnterCriticalSection(&(c->cs));
+
+    while(!c->flag) {
+        int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
+
+        if(time_left > 0) {
+            int wait_rc = 0;
+
+            if(SleepConditionVariableCS(&(c->cond), &(c->cs), (DWORD)time_left)) {
+                /* we might need to wait again. could be a spurious wake up. */
+                pdebug(DEBUG_DETAIL, "Condition var wait returned.");
+                rc = PLCTAG_STATUS_OK;
+            } else {
+                /* error or timeout. */
+                wait_rc = GetLastError();
+                if(wait_rc == ERROR_TIMEOUT) {
+                    pdebug(DEBUG_DETAIL, "Timeout response from condition var wait.");
+                    rc = PLCTAG_ERR_TIMEOUT;
+                    break;
+                } else {
+                    pdebug(DEBUG_WARN, "Error %d waiting on condition variable!", wait_rc);
+                    rc = PLCTAG_ERR_BAD_STATUS;
+                    break;
+                }
+            }
+        } else {
+            pdebug(DEBUG_DETAIL, "Timed out.");
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
+        }
+    }
+
+    if(c->flag) {
+        pdebug(DEBUG_DETAIL, "Condition var signaled.");
+    }
+
+    LeaveCriticalSection (&(c->cs));
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_signal(cond_p c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    EnterCriticalSection(&(c->cs));
+
+    c->flag = 1;
+
+    LeaveCriticalSection(&(c->cs));
+
+    /* Windows does this outside the critical section? */
+    WakeConditionVariable(&(c->cond));
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_destroy(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c || ! *c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    mem_free(*c);
+
+    *c = NULL;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
 
 
 

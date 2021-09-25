@@ -237,6 +237,15 @@ extern int lock_acquire_try(lock_t *lock);
 extern int lock_acquire(lock_t *lock);
 extern void lock_release(lock_t *lock);
 
+
+/* condition variables */
+typedef struct cond_t *cond_p;
+extern int cond_create(cond_p *c);
+extern int cond_wait(cond_p c, int timeout_ms);
+extern int cond_signal(cond_p c);
+extern int cond_destroy(cond_p *c);
+
+
 /* socket functions */
 typedef struct sock_t *sock_p;
 extern int socket_create(sock_p *s);
