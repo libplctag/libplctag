@@ -575,6 +575,9 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     tag_create_function tag_constructor;
 	int debug_level = -1;
 
+    /* we are creating a tag, there is no ID yet. */
+    debug_set_tag_id(0);
+
     pdebug(DEBUG_INFO,"Starting");
 
     if(timeout < 0) {
