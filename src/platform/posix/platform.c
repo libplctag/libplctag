@@ -53,6 +53,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <time.h>
+#include <inttypes.h>
 
 #include <lib/libplctag.h>
 #include <util/debug.h>
@@ -1025,6 +1026,8 @@ int cond_wait(cond_p c, int timeout_ms)
 {
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time = time_ms();
+    int64_t end_time = start_time + timeout_ms;
+    struct timespec timeout;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1043,16 +1046,21 @@ int cond_wait(cond_p c, int timeout_ms)
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
+    /*
+     * set up timeout.
+     *
+     * NOTE: the time is _ABSOLUTE_!  This is not a relative delay.
+     */
+    timeout.tv_sec = (time_t)(end_time / 1000);
+    timeout.tv_nsec = (long)1000000 * (long)(end_time % 1000);
+
     while(!c->flag) {
         int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
 
+        pdebug(DEBUG_DETAIL, "Waiting for %" PRId64 "ms.", time_left);
+
         if(time_left > 0) {
             int wait_rc = 0;
-            struct timespec timeout;
-
-            /* set up timeout. */
-            timeout.tv_sec = (time_t)(timeout_ms / 1000);
-            timeout.tv_nsec = (long)1000000 * ((long)timeout_ms % (long)1000);
 
             wait_rc = pthread_cond_timedwait(&(c->cond), &(c->mutex), &timeout);
             if(wait_rc == ETIMEDOUT) {
