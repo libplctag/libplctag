@@ -378,9 +378,10 @@ THREAD_FUNC(tag_tickler_func)
             }
 
             if(tag) {
-                debug_set_tag_id(0);
                 rc_dec(tag);
             }
+
+            debug_set_tag_id(0);
         }
 
         if(!library_terminating) {
