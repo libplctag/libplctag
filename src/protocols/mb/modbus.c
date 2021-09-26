@@ -826,7 +826,7 @@ int connect_plc(modbus_plc_p plc)
 int read_packet(modbus_plc_p plc)
 {
     int rc = 1;
-    int data_needed = PLC_READ_DATA_LEN - plc->read_data_len;
+    int data_needed = PLC_READ_DATA_LEN - plc->read_data_len; /* ask for all we can store. */
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -848,6 +848,9 @@ int read_packet(modbus_plc_p plc)
         rc = PLCTAG_STATUS_OK;
 
         pdebug_dump_bytes(DEBUG_SPEW, plc->read_data, plc->read_data_len);
+    } else if(rc == PLCTAG_ERR_TIMEOUT) {
+        pdebug(DEBUG_DETAIL, "Done. Socket read timed out.");
+        rc = PLCTAG_STATUS_OK;
     } else {
         pdebug(DEBUG_WARN, "Error, %s, reading socket!", plc_tag_decode_error(rc));
         return rc;
@@ -923,6 +926,9 @@ int write_packet(modbus_plc_p plc)
     if(rc >= 0) {
         plc->write_data_offset += rc;
         data_left = plc->write_data_len - plc->write_data_offset;
+    } else if(rc == PLCTAG_ERR_TIMEOUT) {
+        pdebug(DEBUG_DETAIL, "Done.  Timeout writing to socket.");
+        rc = PLCTAG_STATUS_OK;
     } else {
         pdebug(DEBUG_WARN, "Error, %s, writing to socket!", plc_tag_decode_error(rc));
         return rc;
