@@ -462,6 +462,7 @@ elseif (BUILD_EXAMPLES)
                             test_shutdown
                             test_special
                             test_tag_attributes
+                            thread_stress
                             toggle_bit
                             toggle_bool
                             write_string
