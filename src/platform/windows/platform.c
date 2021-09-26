@@ -1169,6 +1169,9 @@ int cond_wait(cond_p c, int timeout_ms)
 
     if(c->flag) {
         pdebug(DEBUG_DETAIL, "Condition var signaled.");
+
+        /* clear the flag now that we've responded. */
+        c->flag = 0;
     }
 
     LeaveCriticalSection (&(c->cs));
