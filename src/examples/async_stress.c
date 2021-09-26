@@ -269,13 +269,16 @@ int main(int argc, char **argv)
 
             if(need_sleep) {
                 need_sleep = 0;
-                util_sleep_ms(10); /* give the backgroun thread time to process the abort. */
+                util_sleep_ms(10); /* give the background thread time to process the abort. */
             }
         }
 
         end = util_time_ms();
 
         fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
+
+        /* test */
+        //util_sleep_ms(25);
     }
 
     fprintf(stderr, "Program terminated!\n");
