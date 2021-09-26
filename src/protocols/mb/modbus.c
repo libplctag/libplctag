@@ -61,7 +61,8 @@ struct modbus_plc_t {
     struct modbus_plc_t *next;
 
     /* keep a list of tags for this PLC. */
-    struct modbus_tag_t *tags;
+    struct modbus_tag_t *tags_head;
+    struct modbus_tag_t *tags_tail;
 
     /* hostname/ip and possibly port of the server. */
     char *server;
@@ -95,9 +96,12 @@ struct modbus_plc_t {
     /* data */
     int read_data_len;
     uint8_t read_data[PLC_READ_DATA_LEN];
+    int32_t response_tag_id;
+
     int write_data_len;
     int write_data_offset;
     uint8_t write_data[PLC_WRITE_DATA_LEN];
+    int32_t request_tag_id;
 };
 
 typedef struct modbus_plc_t *modbus_plc_p;
@@ -134,6 +138,7 @@ struct modbus_tag_t {
         unsigned int _read:1;
         unsigned int _write:1;
         unsigned int _busy:1;
+        unsigned int operation_complete:1;
     } flags;
     uint16_t request_num;
     uint16_t seq_id;
@@ -258,13 +263,25 @@ plc_tag_p mb_tag_create(attr attribs)
     if(rc == PLCTAG_STATUS_OK) {
         /* put the tag on the PLC's list. */
         critical_block(tag->plc->mutex) {
-            tag->next = tag->plc->tags;
-            tag->plc->tags = tag;
+            tag->next = NULL;
+
+            if(tag->plc->tags_head) {
+                pdebug(DEBUG_DETAIL, "Inserting tag %p at the end (%p) of the list (%p).", tag, tag->plc->tags_tail, tag->plc->tags_head);
+                tag->plc->tags_tail->next = tag;
+                tag->plc->tags_tail = tag;
+            } else {
+                pdebug(DEBUG_DETAIL, "Inserting tag %p in empty list.", tag);
+                tag->plc->tags_head = tag;
+                tag->plc->tags_tail = tag;
+            }
         }
 
         /* trigger a read to get the initial value of the tag. */
-        tag->read_in_flight = 1;
-        tag->flags._read = 1;
+        // FIXME - trigger read futher up the chain after plc_tag_create is mostly done.  This is unsafe because
+        //    there is setup such as mutex creation done after this routine.
+        //tag->read_in_flight = 1;
+        //tag->flags._read = 1;
+        //cond_signal(tag->plc->wait_cond);
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
@@ -368,21 +385,39 @@ void modbus_tag_destructor(void *tag_arg)
         return;
     }
 
-    if(tag->plc) {
-        pdebug(DEBUG_DETAIL, "Unlinking from the PLC.");
+    /* abort everything. */
+    mb_abort((plc_tag_p)tag);
 
+    if(tag->plc) {
         /* unlink the tag from the PLC. */
         critical_block(tag->plc->mutex) {
-            modbus_tag_p *tag_walker = &(tag->plc->tags);
+            modbus_tag_p current = tag->plc->tags_head;
+            modbus_tag_p prev = NULL;
 
-            while(*tag_walker && *tag_walker != tag) {
-                tag_walker = &((*tag_walker)->next);
+            pdebug(DEBUG_DETAIL, "Unlinking from the PLC.");
+
+            while(current && current != tag) {
+                prev = current;
+                current = current->next;
             }
 
-            if(*tag_walker) {
-                *tag_walker = tag->next;
+            /* if found */
+            if(current == tag) {
+                pdebug(DEBUG_DETAIL, "Found tag %d in PLC list.", tag->tag_id);
+
+                /* unlink the tag in the common case it isn't at the front of the list. */
+                if(prev) {
+                    prev->next = tag->next;
+                } else {
+                    tag->plc->tags_head = tag->next;
+                }
+
+                /* handle the case where the tag is at the end of the list. */
+                if(tag->plc->tags_tail == tag) {
+                    tag->plc->tags_tail = prev;
+                }
             } else {
-                pdebug(DEBUG_WARN, "Tag not found on PLC list!");
+                pdebug(DEBUG_DETAIL, "Tag %d not found on PLC list.", tag->tag_id);
             }
         }
 
@@ -572,7 +607,7 @@ void modbus_plc_destructor(void *plc_arg)
         plc->server = NULL;
     }
 
-    if(plc->tags) {
+    if(plc->tags_head) {
         pdebug(DEBUG_WARN, "There are tags still remaining, memory leak possible!");
     }
 
@@ -647,8 +682,19 @@ THREAD_FUNC(modbus_plc_handler)
         case PLC_SEND_REQUEST:
             pdebug(DEBUG_DETAIL, "in PLC_SEND_REQUEST state.");
 
+            debug_set_tag_id((int)plc->request_tag_id);
+
             rc = write_packet(plc);
-            if(rc != PLCTAG_STATUS_OK) {
+            if(rc == PLCTAG_STATUS_OK) {
+                /* if we sent a packet, we need to wait for a response. */
+                if(plc->flags.request_ready == 0) {
+                    pdebug(DEBUG_DETAIL, "Request sent, now wait for response.");
+
+                    plc->state = PLC_RECEIVE_RESPONSE;
+                }
+
+                /* else we stay in this state and keep trying to write. */
+            } else {
                 pdebug(DEBUG_WARN, "Closing socket due to write error %s.", plc_tag_decode_error(rc));
 
                 socket_close(plc->sock);
@@ -662,25 +708,21 @@ THREAD_FUNC(modbus_plc_handler)
 
                 /* try to reconnect immediately. */
                 plc->state = PLC_START;
-                cond_signal(plc->wait_cond);
-                break;
             }
 
-            /* if we sent a packet, we need to wait for a response. */
-            if(plc->flags.request_ready == 0) {
-                pdebug(DEBUG_DETAIL, "Request sent, now wait for response.");
-
-                plc->state = PLC_RECEIVE_RESPONSE;
-                cond_signal(plc->wait_cond);
-            }
 
             /* if we did not send all the packet, we stay in this state and keep trying. */
+            cond_signal(plc->wait_cond);
+
+            debug_set_tag_id(0);
 
             break;
 
 
         case PLC_RECEIVE_RESPONSE:
             pdebug(DEBUG_DETAIL, "in PLC_RECEIVE_RESPONSE state.");
+
+            debug_set_tag_id((int)plc->response_tag_id);
 
             /* get a packet */
             rc = read_packet(plc);
@@ -711,6 +753,9 @@ THREAD_FUNC(modbus_plc_handler)
 
             /* in all cases we want to cycle through the state machine immediately. */
             cond_signal(plc->wait_cond);
+
+            debug_set_tag_id(0);
+
             break;
 
         case PLC_ERR_WAIT:
@@ -943,6 +988,8 @@ int write_packet(modbus_plc_p plc)
             plc->flags.request_ready = 0;
             plc->write_data_len = 0;
             plc->write_data_offset = 0;
+            plc->response_tag_id = plc->request_tag_id;
+            plc->request_tag_id = 0;
         }
 
         rc = PLCTAG_STATUS_OK;
@@ -952,6 +999,7 @@ int write_packet(modbus_plc_p plc)
 
     return rc;
 }
+
 
 
 int run_tags(modbus_plc_p plc)
@@ -967,45 +1015,121 @@ int run_tags(modbus_plc_p plc)
      *
      * If we do not do that, then the PLC destructor could be called while we hold the
      * PLC's mutex here.   That results in deadlock.
+     *
+     * The basic loop is to go along all the tags taking each off the list.
+     *   - if the tag is still waiting after processing, then add it to the waiting list.
+     *   - if the tag is done, then add it to the completed list.
+     *
+     * Once all tags are processed, add the completed list to the end of the waiting list.
      */
 
     if(rc_inc(plc)) {
         critical_block(plc->mutex) {
-            modbus_tag_p *tag_walker = &(plc->tags);
+            modbus_tag_p waiting_tags_head = NULL;
+            modbus_tag_p waiting_tags_tail = NULL;
+            modbus_tag_p completed_tags_head = NULL;
+            modbus_tag_p completed_tags_tail = NULL;
 
-            while(*tag_walker) {
-                modbus_tag_p tag = rc_inc(*tag_walker);
+            while(plc->tags_head) {
+                modbus_tag_p tag = plc->tags_head;
+
+                debug_set_tag_id(plc->tags_head->tag_id);
+
+                /* remove the tag from the list. */
+                plc->tags_head = plc->tags_head->next;
+
+                if(!plc->tags_head) {
+                    plc->tags_tail = NULL;
+                }
 
                 /* the tag might be in the destructor. */
-                if(tag) {
-                    debug_set_tag_id(tag->tag_id);
+                // if(rc_inc(tag)) {
+                    pdebug(DEBUG_DETAIL, "Processing tag %d.", tag->tag_id);
 
-                    pdebug(DEBUG_SPEW, "Processing tag %d.", tag->tag_id);
+                    tag->flags.operation_complete = 0;
 
                     rc = process_tag(tag, plc);
                     if(rc != PLCTAG_STATUS_OK) {
                         pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
                     }
 
+                    /* to ensure fairness, we move tags that completed operations to the end of the list. */
+                    if(tag->flags.operation_complete) {
+                        pdebug(DEBUG_DETAIL, "Moving tag to the end of the completed list.");
+
+                        tag->flags.operation_complete = 0;
+
+                        /* clear the next pointer. */
+                        tag->next = NULL;
+
+                        if(completed_tags_head != NULL)  {
+                            completed_tags_tail->next = tag;
+                            completed_tags_tail = tag;
+                        } else {
+                            completed_tags_head = tag;
+                            completed_tags_tail = tag;
+                        }
+                    } else {
+                        if(waiting_tags_head != NULL) {
+                            waiting_tags_tail->next = tag;
+                            waiting_tags_tail = tag;
+                        } else {
+                            waiting_tags_head = tag;
+                            waiting_tags_tail = tag;
+                        }
+                    }
+
                     debug_set_tag_id(0);
 
                     /* release reference. */
-                    tag = rc_dec(tag);
-                }
+                //     tag = rc_dec(tag);
+                // } else {
+                //     pdebug(DEBUG_DETAIL, "Tag %d is being destroyed.  Temporarily putting it on the waiting list.", tag->tag_id);
 
-                tag_walker = &((*tag_walker)->next);
+                //     /* TODO - where should tags being destroyed go? */
+                //     if(waiting_tags_head != NULL) {
+                //         waiting_tags_tail->next = tag;
+                //         waiting_tags_tail = tag;
+                //     } else {
+                //         waiting_tags_head = tag;
+                //         waiting_tags_tail = tag;
+                //     }
+                // }
             }
+
+            /* rebuild the tag list in the correct order with waiting tags first. */
+            if(waiting_tags_head) {
+                pdebug(DEBUG_DETAIL, "Replacing PLC tag list with the waiting list.");
+                plc->tags_head = waiting_tags_head;
+                plc->tags_tail = waiting_tags_tail;
+            }
+
+            /* if there are any completed tags, add them to the end. */
+            if(completed_tags_head) {
+                if(plc->tags_head) {
+                    pdebug(DEBUG_DETAIL, "Adding the completed tags to the end of the PLC tag list.");
+                    plc->tags_tail->next = completed_tags_head;
+                    plc->tags_tail = completed_tags_tail;
+                } else {
+                    pdebug(DEBUG_DETAIL, "There were no waiting tags, so the completed tag list replaces the PLC tag list.");
+                    plc->tags_head = completed_tags_head;
+                    plc->tags_tail = completed_tags_tail;
+                }
+            }
+        }
+
+        if(plc->flags.response_ready) {
+            pdebug(DEBUG_WARN, "Response still pending after full tag pass.  Clearing buffer.");
+
+            plc->flags.response_ready = 0;
+            plc->read_data_len = 0;
+
+            /* trigger the loop to not wait. */
+            cond_signal(plc->wait_cond);
         }
 
         /* now drop the reference, which could cause the destructor to trigger. */
         rc_dec(plc);
-    }
-
-    if(plc->flags.response_ready) {
-        pdebug(DEBUG_WARN, "Response still pending after full tag pass.  Clearing buffer.");
-
-        plc->flags.response_ready = 0;
-        plc->read_data_len = 0;
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1050,6 +1174,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
             tag->flags._write = 0;
             tag->flags._busy = 0;
             tag->flags._abort = 0;
+            tag->flags.operation_complete = 0;
         }
 
         tag->seq_id = 0;
@@ -1104,7 +1229,7 @@ int process_tag(modbus_tag_p tag, modbus_plc_p plc)
                     pdebug(DEBUG_SPEW, "No response yet.");
                 }
             } else {
-                /* we have a write request to do an nothing is in flight. */
+                /* we have a write request to do and nothing is in flight. */
                 if(!plc->flags.request_ready && !plc->flags.request_in_flight) {
                     rc = create_read_request(plc, tag);
                 } else {
@@ -1157,6 +1282,9 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
 
     if(seq_id == tag->seq_id) {
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
+
+        /* the operation is complete regardless of the outcome. */
+        tag->flags.operation_complete = 1;
 
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);
@@ -1317,6 +1445,9 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 8) & 0xFF); plc->write_data_len++;
     plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 0) & 0xFF); plc->write_data_len++;
 
+    pdebug(DEBUG_DETAIL, "Created request:");
+    pdebug_dump_bytes(DEBUG_DETAIL, plc->write_data, plc->write_data_len);
+
     /* ready to go! */
     spin_block(&tag->tag_lock) {
         tag->flags._busy = 1;
@@ -1326,6 +1457,7 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     /* FIXME - could this ever be hoisted above the barrier above? */
     plc->flags.request_ready = 1;
     plc->flags.request_in_flight = 1;
+    plc->request_tag_id = tag->tag_id;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1361,6 +1493,9 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
 
     if(seq_id == tag->seq_id) {
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
+
+        /* this is our response, so the operation is complete regardless of the status. */
+        tag->flags.operation_complete = 1;
 
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);
@@ -1499,7 +1634,7 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
             break;
 
         case MB_REG_DISCRETE_INPUT:
-            pdebug(DEBUG_WARN, "You cannot write a discrete input!");
+            pdebug(DEBUG_WARN, "Done. You cannot write a discrete input!");
             return PLCTAG_ERR_UNSUPPORTED;
             break;
 
@@ -1508,12 +1643,12 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
             break;
 
         case MB_REG_INPUT_REGISTER:
-            pdebug(DEBUG_WARN, "You cannot write an analog input!");
+            pdebug(DEBUG_WARN, "Done. You cannot write an analog input!");
             return PLCTAG_ERR_UNSUPPORTED;
             break;
 
         default:
-            pdebug(DEBUG_WARN, "Unsupported register type %d!", tag->reg_type);
+            pdebug(DEBUG_WARN, "Done. Unsupported register type %d!", tag->reg_type);
             return PLCTAG_ERR_UNSUPPORTED;
             break;
     }
@@ -1533,6 +1668,9 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
     mem_copy(&plc->write_data[plc->write_data_len], &tag->data[byte_offset], request_payload_size);
     plc->write_data_len += request_payload_size;
 
+    pdebug(DEBUG_DETAIL, "Created request:");
+    pdebug_dump_bytes(DEBUG_DETAIL, plc->write_data, plc->write_data_len);
+
     /* ready to go. */
     spin_block(&tag->tag_lock) {
         tag->flags._busy = 1;
@@ -1542,8 +1680,11 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
 
     plc->flags.request_ready = 1;
     plc->flags.request_in_flight = 1;
+    plc->request_tag_id = tag->tag_id;
 
     pdebug(DEBUG_DETAIL, "Done.");
+
+    debug_set_tag_id(tag->tag_id);
 
     return rc;
 }
