@@ -796,7 +796,7 @@ int read_packet(modbus_plc_p plc)
             data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;
         }
 
-        rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, data_needed);
+        rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, data_needed, 0);
         if(rc >= 0) {
             /* got data! Or got nothing, but no error. */
             plc->read_data_len += rc;
@@ -865,7 +865,7 @@ int write_packet(modbus_plc_p plc)
 
     /* try to get some data. */
     while(rc > 0 && data_left > 0) {
-        rc = socket_write(plc->sock, plc->write_data + plc->write_data_offset, data_left);
+        rc = socket_write(plc->sock, plc->write_data + plc->write_data_offset, data_left, 0);
         if(rc >= 0) {
             plc->write_data_offset += rc;
             data_left = plc->write_data_len - plc->write_data_offset;

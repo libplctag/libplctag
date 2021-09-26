@@ -1781,7 +1781,7 @@ int send_eip_request(ab_session_p session, int timeout)
 
     /* send the packet */
     do {
-        rc = socket_write(session->sock, session->data + session->data_offset, (int)session->data_size - (int)session->data_offset);
+        rc = socket_write(session->sock, session->data + session->data_offset, (int)session->data_size - (int)session->data_offset, 0);
 
         if(rc >= 0) {
             session->data_offset += (uint32_t)rc;
@@ -1848,7 +1848,7 @@ int recv_eip_response(ab_session_p session, int timeout)
 
     do {
         rc = socket_read(session->sock, session->data + session->data_offset,
-                         (int)(data_needed - session->data_offset));
+                         (int)(data_needed - session->data_offset), 0);
 
         if (rc < 0) {
             /* error! */
