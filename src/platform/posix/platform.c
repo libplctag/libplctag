@@ -1361,17 +1361,85 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
 
 
-extern int socket_read(sock_p s, uint8_t *buf, int size)
+int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
-    if(!s || !buf) {
+    if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!buf) {
+        pdebug(DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_READ;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* only wait if we have a timeout. */
+    if(timeout_ms > 0) {
+        fd_set read_set;
+        struct timeval tv;
+        int select_rc = 0;
+
+        tv.tv_sec = (time_t)(timeout_ms / 1000);
+        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+
+        FD_ZERO(&read_set);
+
+        FD_SET(s->fd, &read_set);
+
+        select_rc = select(s->fd+1, &read_set, NULL, NULL, &tv);
+
+        if(select_rc == 1) {
+            if(FD_ISSET(s->fd, &read_set)) {
+                pdebug(DEBUG_DETAIL, "Socket can read data.");
+            } else {
+                pdebug(DEBUG_WARN, "select() returned but socket is not ready to read data!");
+                return PLCTAG_ERR_BAD_REPLY;
+            }
+        } else if(select_rc == 0) {
+            pdebug(DEBUG_DETAIL, "Socket read timed out.");
+            return PLCTAG_ERR_TIMEOUT;
+        } else {
+            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+
+            switch(errno) {
+                case EBADF: /* bad file descriptor */
+                    pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case EINTR: /* signal was caught, this should not happen! */
+                    pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
+                    pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case ENOMEM: /* No mem for internal tables. */
+                    pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                    return PLCTAG_ERR_NO_MEM;
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                    return PLCTAG_ERR_BAD_STATUS;
+                    break;
+            }
+        }
     }
 
     /* The socket is non-blocking. */
@@ -1390,17 +1458,85 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
 }
 
 
-extern int socket_write(sock_p s, uint8_t *buf, int size)
+int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
-    if(!s || !buf) {
+    if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!buf) {
+        pdebug(DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_WRITE;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* only wait if we have a timeout. */
+    if(timeout_ms > 0) {
+        fd_set write_set;
+        struct timeval tv;
+        int select_rc = 0;
+
+        tv.tv_sec = (time_t)(timeout_ms / 1000);
+        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+
+        FD_ZERO(&write_set);
+
+        FD_SET(s->fd, &write_set);
+
+        select_rc = select(s->fd+1, NULL, &write_set, NULL, &tv);
+
+        if(select_rc == 1) {
+            if(FD_ISSET(s->fd, &write_set)) {
+                pdebug(DEBUG_DETAIL, "Socket can write data.");
+            } else {
+                pdebug(DEBUG_WARN, "select() returned but socket is not ready to write data!");
+                return PLCTAG_ERR_BAD_REPLY;
+            }
+        } else if(select_rc == 0) {
+            pdebug(DEBUG_DETAIL, "Socket write timed out.");
+            return PLCTAG_ERR_TIMEOUT;
+        } else {
+            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+
+            switch(errno) {
+                case EBADF: /* bad file descriptor */
+                    pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case EINTR: /* signal was caught, this should not happen! */
+                    pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
+                    pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case ENOMEM: /* No mem for internal tables. */
+                    pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                    return PLCTAG_ERR_NO_MEM;
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                    return PLCTAG_ERR_BAD_STATUS;
+                    break;
+            }
+        }
     }
 
     /* The socket is non-blocking. */
