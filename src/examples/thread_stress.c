@@ -208,12 +208,7 @@ static void *test_runner(void *data)
         }
     }
 
-    if(tag > 0) {
-        plc_tag_destroy(tag);
-        tag = 0;
-    }
-
-    fprintf(stderr, "*** Test %d terminating after %d iterations and an average of %dms per iteration.\n", tid, *iteration, (int)(*total_io_time/(*iteration)));
+    fprintf(stderr, "*** Thread %d terminating after %d iterations and an average of %dms per iteration.\n", tid, *iteration, (int)(*total_io_time/(*iteration)));
 
     fflush(stderr);
 
@@ -266,9 +261,14 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "--- starting run with %d threads using tag string \"%s\".\n", num_threads, tag_string);
 
-    /* create the test threads */
+    /* create the test tags */
     for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
-        int32_t tag = plc_tag_create(tag_string, TAG_CREATE_TIMEOUT);
+        int32_t tag = 0;
+
+        fprintf(stderr, "--- Creating test tag %d.\n", tid);
+
+        tag = plc_tag_create(tag_string, TAG_CREATE_TIMEOUT);
+
         if(tag < 0) {
             fprintf(stderr, "!!! Failed to create tag for thread %d with error %s!\n", tid, plc_tag_decode_error(tag));
             usage();
@@ -281,8 +281,10 @@ int main(int argc, char **argv)
         args[tid].total_io_time = 0;
         args[tid].min_io_time = 0;
         args[tid].max_io_time = 0;
+    }
 
-        fprintf(stderr, "--- Creating serial test thread %d.\n", args[tid].tid);
+    for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
+        fprintf(stderr, "--- Creating test thread %d.\n", args[tid].tid);
 
         pthread_create(&threads[tid], NULL, &test_runner, &args[tid]);
     }
@@ -303,9 +305,20 @@ int main(int argc, char **argv)
 
     success = 1;
 
+    /* FIXME - wait for the threads to stop. */
+    util_sleep_ms(100);
+
     for(int tid=0; tid < num_threads && tid < MAX_THREADS; tid++) {
         pthread_join(threads[tid], NULL);
+    }
 
+    /* close the tags. */
+    for(int tid=0; tid < num_threads && tid < MAX_THREADS; tid++) {
+        plc_tag_destroy(args[tid].tag);
+    }
+
+    /* check the status */
+    for(int tid=0; tid < num_threads && tid < MAX_THREADS; tid++) {
         if(args[tid].status != PLCTAG_STATUS_OK) {
             success = 0;
         }
