@@ -196,7 +196,7 @@ static int connect_plc(modbus_plc_p plc);
 static int read_packet(modbus_plc_p plc);
 static int write_packet(modbus_plc_p plc);
 static int run_tags(modbus_plc_p plc);
-static int process_tag(modbus_tag_p tag, modbus_plc_p plc);
+static int process_tag_unsafe(modbus_tag_p tag, modbus_plc_p plc);
 static int check_read_response(modbus_plc_p plc, modbus_tag_p tag);
 static int create_read_request(modbus_plc_p plc, modbus_tag_p tag);
 static int check_write_response(modbus_plc_p plc, modbus_tag_p tag);
@@ -521,6 +521,8 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
                     break;
                 }
 
+                pdebug(DEBUG_DETAIL, "Created thread %p.", (*plc)->handler_thread);
+
                 rc = mutex_create(&((*plc)->mutex));
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
@@ -574,6 +576,8 @@ void modbus_plc_destructor(void *plc_arg)
 
     /* shut down the thread. */
     if(plc->handler_thread) {
+        pdebug(DEBUG_DETAIL, "Terminating Modbus handler thread %p.", plc->handler_thread);
+
         /* set the flag to cause the thread to terminate. */
         plc->flags.terminate = 1;
 
@@ -1025,97 +1029,63 @@ int run_tags(modbus_plc_p plc)
 
     if(rc_inc(plc)) {
         critical_block(plc->mutex) {
-            modbus_tag_p waiting_tags_head = NULL;
-            modbus_tag_p waiting_tags_tail = NULL;
-            modbus_tag_p completed_tags_head = NULL;
-            modbus_tag_p completed_tags_tail = NULL;
+            modbus_tag_p tail = plc->tags_tail;
+            modbus_tag_p current = plc->tags_head;
+            modbus_tag_p prev = NULL;
+            modbus_tag_p next = NULL;
 
-            while(plc->tags_head) {
-                modbus_tag_p tag = plc->tags_head;
+            pdebug(DEBUG_DETAIL, "Processing tag list.");
 
-                debug_set_tag_id(plc->tags_head->tag_id);
+            while(current) {
+                debug_set_tag_id(current->tag_id);
 
-                /* remove the tag from the list. */
-                plc->tags_head = plc->tags_head->next;
+                pdebug(DEBUG_DETAIL, "Processing tag %d.", current->tag_id);
 
-                if(!plc->tags_head) {
-                    plc->tags_tail = NULL;
+                next = current->next;
+
+                current->flags.operation_complete = 0;
+
+                rc = process_tag_unsafe(current, plc);
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), current->tag_id);
                 }
 
-                /* the tag might be in the destructor. */
-                // if(rc_inc(tag)) {
-                    pdebug(DEBUG_DETAIL, "Processing tag %d.", tag->tag_id);
+                /* to ensure fairness, we move tags that completed operations to the end of the list. */
+                if(current->flags.operation_complete) {
+                    pdebug(DEBUG_DETAIL, "Moving tag to the end of the completed list.");
 
-                    tag->flags.operation_complete = 0;
+                    current->flags.operation_complete = 0;
 
-                    rc = process_tag(tag, plc);
-                    if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), tag->tag_id);
-                    }
-
-                    /* to ensure fairness, we move tags that completed operations to the end of the list. */
-                    if(tag->flags.operation_complete) {
-                        pdebug(DEBUG_DETAIL, "Moving tag to the end of the completed list.");
-
-                        tag->flags.operation_complete = 0;
-
-                        /* clear the next pointer. */
-                        tag->next = NULL;
-
-                        if(completed_tags_head != NULL)  {
-                            completed_tags_tail->next = tag;
-                            completed_tags_tail = tag;
-                        } else {
-                            completed_tags_head = tag;
-                            completed_tags_tail = tag;
-                        }
+                    /* unlink tag from the early part of the list. */
+                    if(prev) {
+                        prev->next = next;
                     } else {
-                        if(waiting_tags_head != NULL) {
-                            waiting_tags_tail->next = tag;
-                            waiting_tags_tail = tag;
-                        } else {
-                            waiting_tags_head = tag;
-                            waiting_tags_tail = tag;
-                        }
+                        plc->tags_head = next;
                     }
 
-                    debug_set_tag_id(0);
-
-                    /* release reference. */
-                //     tag = rc_dec(tag);
-                // } else {
-                //     pdebug(DEBUG_DETAIL, "Tag %d is being destroyed.  Temporarily putting it on the waiting list.", tag->tag_id);
-
-                //     /* TODO - where should tags being destroyed go? */
-                //     if(waiting_tags_head != NULL) {
-                //         waiting_tags_tail->next = tag;
-                //         waiting_tags_tail = tag;
-                //     } else {
-                //         waiting_tags_head = tag;
-                //         waiting_tags_tail = tag;
-                //     }
-                // }
-            }
-
-            /* rebuild the tag list in the correct order with waiting tags first. */
-            if(waiting_tags_head) {
-                pdebug(DEBUG_DETAIL, "Replacing PLC tag list with the waiting list.");
-                plc->tags_head = waiting_tags_head;
-                plc->tags_tail = waiting_tags_tail;
-            }
-
-            /* if there are any completed tags, add them to the end. */
-            if(completed_tags_head) {
-                if(plc->tags_head) {
-                    pdebug(DEBUG_DETAIL, "Adding the completed tags to the end of the PLC tag list.");
-                    plc->tags_tail->next = completed_tags_head;
-                    plc->tags_tail = completed_tags_tail;
-                } else {
-                    pdebug(DEBUG_DETAIL, "There were no waiting tags, so the completed tag list replaces the PLC tag list.");
-                    plc->tags_head = completed_tags_head;
-                    plc->tags_tail = completed_tags_tail;
+                    tail->next = current;
+                    tail = current;
+                    current->next = NULL;
                 }
+
+                debug_set_tag_id(0);
+
+                /* terminate if we are at the end of the original list. */
+                if(current == plc->tags_tail) {
+                    pdebug(DEBUG_DETAIL, "Processed last tag.");
+                    break;
+                }
+
+                prev = current;
+                current = next;
             }
+
+            if(tail) {
+                pdebug(DEBUG_DETAIL, "Moving tail to end of processed tags.");
+                plc->tags_tail = tail;
+            }
+
+            pdebug(DEBUG_DETAIL, "Done processing tag list.");
         }
 
         if(plc->flags.response_ready) {
@@ -1159,7 +1129,7 @@ int run_tags(modbus_plc_p plc)
  * have the PLC's tag list mutated.
  */
 
-int process_tag(modbus_tag_p tag, modbus_plc_p plc)
+int process_tag_unsafe(modbus_tag_p tag, modbus_plc_p plc)
 {
     int rc = PLCTAG_STATUS_OK;
 
