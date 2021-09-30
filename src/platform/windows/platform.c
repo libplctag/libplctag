@@ -1118,22 +1118,25 @@ int cond_create(cond_p *c)
 }
 
 
-int cond_wait(cond_p c, int timeout_ms)
+int cond_wait_impl(const char* func, int line_num, cond_p c, int timeout_ms)
 {
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time = time_ms();
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(!c) {
-        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+
+    if (!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call from %s:%d!", func, line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(timeout_ms <= 0) {
-        pdebug(DEBUG_WARN, "Timeout must be a positive value but was %d!", timeout_ms);
+    if (timeout_ms <= 0) {
+        pdebug(DEBUG_WARN, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms, func, line_num);
         return PLCTAG_ERR_BAD_PARAM;
     }
+
 
     EnterCriticalSection(&(c->cs));
 
@@ -1167,29 +1170,32 @@ int cond_wait(cond_p c, int timeout_ms)
         }
     }
 
-    if(c->flag) {
-        pdebug(DEBUG_DETAIL, "Condition var signaled.");
+    if (c->flag) {
+        pdebug(DEBUG_DETAIL, "Condition var signaled for call at %s:%d.", func, line_num);
 
         /* clear the flag now that we've responded. */
         c->flag = 0;
     }
+    else {
+        pdebug(DEBUG_DETAIL, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
+    }
 
     LeaveCriticalSection (&(c->cs));
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
 
     return rc;
 }
 
 
-int cond_signal(cond_p c)
+int cond_signal_impl(const char* func, int line_num, cond_p c)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
 
-    if(!c) {
-        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+    if (!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -1202,7 +1208,7 @@ int cond_signal(cond_p c)
     /* Windows does this outside the critical section? */
     WakeConditionVariable(&(c->cond));
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1503,7 +1509,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
         FD_SET(s->fd, &read_set);
 
-        select_rc = select(s->fd+1, &read_set, NULL, NULL, &tv);
+        select_rc = select(1, &read_set, NULL, NULL, &tv);
 
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &read_set)) {
@@ -1621,7 +1627,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
         FD_SET(s->fd, &write_set);
 
-        select_rc = select(s->fd+1, NULL, &write_set, NULL, &tv);
+        select_rc = select(1, NULL, &write_set, NULL, &tv);
 
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &write_set)) {

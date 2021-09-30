@@ -239,12 +239,14 @@ extern void lock_release(lock_t *lock);
 
 
 /* condition variables */
-typedef struct cond_t *cond_p;
-extern int cond_create(cond_p *c);
-extern int cond_wait(cond_p c, int timeout_ms);
-extern int cond_signal(cond_p c);
-extern int cond_destroy(cond_p *c);
+typedef struct cond_t* cond_p;
+extern int cond_create(cond_p * c);
+extern int cond_wait_impl(const char* func, int line_num, cond_p c, int timeout_ms);
+extern int cond_signal_impl(const char* func, int line_num, cond_p c);
+extern int cond_destroy(cond_p * c);
 
+#define cond_wait(c, t) cond_wait_impl(__func__, __LINE__, c, t)
+#define cond_signal(c) cond_signal_impl(__func__, __LINE__, c)
 
 /* socket functions */
 typedef struct sock_t *sock_p;
