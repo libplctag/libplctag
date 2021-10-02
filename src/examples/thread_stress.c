@@ -31,18 +31,20 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-
 #include <stdio.h>
-#include <unistd.h>
+#include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
+#ifdef WIN32
+#include <Windows.h>
+#else
 #include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/time.h>
 #include <signal.h>
-#include <inttypes.h>
+#endif
 #include "../lib/libplctag.h"
-#include "../util/atomic_int.h"
 #include "utils.h"
 
 #define REQUIRED_VERSION 2,4,1
@@ -50,6 +52,23 @@
 #define DATA_TIMEOUT (2000)
 #define TAG_CREATE_TIMEOUT (5000)
 #define RETRY_TIMEOUT (10000)
+
+#define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=10.206.1.59&path=0&elem_count=2&name=hr10"
+#define DEFAULT_THREAD_COUNT (10)
+
+
+void usage(void)
+{
+    printf("Usage:\n "
+        "thread_stress <num tags> <path>\n"
+        "  <num_tags> - The number of threads to use in the test.\n"
+        "  <path> - The tag path to use.\n"
+        "\n"
+        "Example: thread_stress 14 'protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=test_tag'\n");
+
+    exit(PLCTAG_ERR_BAD_PARAM);
+}
+
 
 
 
@@ -143,21 +162,12 @@ typedef struct {
 
 
 
-void usage(void)
-{
-    printf("Usage:\n "
-        "thread_stress <num tags> <path>\n"
-        "  <num_tags> - The number of threads to use in the test.\n"
-        "  <path> - The tag path to use.\n"
-        "\n"
-        "Example: thread_stress 14 'protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=test_tag'\n");
 
-    exit(PLCTAG_ERR_BAD_PARAM);
-}
-
-
-
-static void *test_runner(void *data)
+#ifdef WIN32
+DWORD __stdcall test_runner(LPVOID data)
+#else
+void* test_runner(void* data)
+#endif
 {
     thread_args *args = (thread_args *)data;
     int tid = args->tid;
@@ -212,7 +222,11 @@ static void *test_runner(void *data)
 
     fflush(stderr);
 
+#ifdef WIN32
+    return (DWORD)0;
+#else
     return NULL;
+#endif
 }
 
 
@@ -220,7 +234,11 @@ static void *test_runner(void *data)
 
 int main(int argc, char **argv)
 {
-    pthread_t threads[MAX_THREADS];
+#ifdef WIN32
+    HANDLE thread[MAX_THREADS];
+#else
+    pthread_t thread[MAX_THREADS];
+#endif
     int num_threads = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
@@ -246,7 +264,9 @@ int main(int argc, char **argv)
         num_threads = atoi(argv[1]);
         tag_string = argv[2];
     } else {
-        usage();
+        //usage();
+        num_threads = DEFAULT_THREAD_COUNT;
+        tag_string = DEFAULT_TAG_PATH;
     }
 
     if(num_threads > MAX_THREADS) {
@@ -286,7 +306,17 @@ int main(int argc, char **argv)
     for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
         fprintf(stderr, "--- Creating test thread %d.\n", args[tid].tid);
 
-        pthread_create(&threads[tid], NULL, &test_runner, &args[tid]);
+#ifdef WIN32
+        thread[tid] = CreateThread( NULL,                       /* default security attributes */
+                                    0,                          /* use default stack size      */
+                                    test_runner,                /* thread function             */
+                                    (LPVOID)&args[tid],         /* argument to thread function */
+                                    (DWORD)0,                   /* use default creation flags  */
+                                    (LPDWORD)NULL               /* do not need thread ID       */
+                                  );    
+#else
+        pthread_create(&thread[tid], NULL, test_runner, (void*)&args[tid]);
+#endif
     }
 
     /* wait for threads to create and start. */
@@ -309,7 +339,11 @@ int main(int argc, char **argv)
     util_sleep_ms(100);
 
     for(int tid=0; tid < num_threads && tid < MAX_THREADS; tid++) {
-        pthread_join(threads[tid], NULL);
+#ifdef WIN32
+        WaitForSingleObject(thread[tid], (DWORD)INFINITE);
+#else
+        pthread_join(thread[tid], NULL);
+#endif
     }
 
     /* close the tags. */
