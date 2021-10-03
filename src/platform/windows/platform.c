@@ -1214,6 +1214,30 @@ int cond_signal_impl(const char* func, int line_num, cond_p c)
 }
 
 
+
+int cond_clear_impl(const char* func, int line_num, cond_p c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+
+    if (!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    EnterCriticalSection(&(c->cs));
+
+    c->flag = 0;
+
+    LeaveCriticalSection(&(c->cs));
+
+    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
 int cond_destroy(cond_p *c)
 {
     int rc = PLCTAG_STATUS_OK;

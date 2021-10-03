@@ -180,10 +180,12 @@ typedef struct cond_t *cond_p;
 extern int cond_create(cond_p *c);
 extern int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms);
 extern int cond_signal_impl(const char *func, int line_num, cond_p c);
+extern int cond_clear_impl(const char *func, int line_num, cond_p c);
 extern int cond_destroy(cond_p *c);
 
 #define cond_wait(c, t) cond_wait_impl(__func__, __LINE__, c, t)
 #define cond_signal(c) cond_signal_impl(__func__, __LINE__, c)
+#define cond_clear(c) cond_clear_impl(__func__, __LINE__, c)
 
 
 /* socket functions */
