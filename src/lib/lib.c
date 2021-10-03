@@ -66,6 +66,9 @@ static mutex_p tag_lookup_mutex = NULL;
 
 static volatile int library_terminating = 0;
 static thread_p tag_tickler_thread = NULL;
+static cond_p tag_tickler_wait = NULL;
+#define TAG_TICKLER_TIMEOUT_MS  (100)
+static int64_t tag_tickler_wait_timeout_end = 0;
 
 //static mutex_p global_library_mutex = NULL;
 
@@ -141,6 +144,12 @@ int lib_init(void)
         pdebug(DEBUG_ERROR, "Unable to create tag hashtable mutex!");
     }
 
+    pdebug(DEBUG_INFO,"Creating tag condition variable.");
+    rc = cond_create((cond_p *)&tag_tickler_wait);
+    if (rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to create tag condition var!");
+    }
+
     pdebug(DEBUG_INFO,"Creating tag tickler thread.");
     rc = thread_create(&tag_tickler_thread, tag_tickler_func, 32*1024, NULL);
     if (rc != PLCTAG_STATUS_OK) {
@@ -161,11 +170,22 @@ void lib_teardown(void)
 
     library_terminating = 1;
 
+    if(tag_tickler_wait) {
+        pdebug(DEBUG_INFO, "Signaling tag tickler condition var.");
+        cond_signal(tag_tickler_wait);
+    }
+
     if(tag_tickler_thread) {
         pdebug(DEBUG_INFO,"Tearing down tag tickler thread.");
         thread_join(tag_tickler_thread);
         thread_destroy(&tag_tickler_thread);
         tag_tickler_thread = NULL;
+    }
+
+    if(tag_tickler_wait) {
+        pdebug(DEBUG_INFO, "Tearing down tag tickler condition var.");
+        cond_destroy(&tag_tickler_wait);
+        tag_tickler_wait = NULL;
     }
 
     if(tag_lookup_mutex) {
@@ -186,6 +206,65 @@ void lib_teardown(void)
 }
 
 
+int plc_tag_tickler_wake_impl(const char *func, int line_num)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+
+    if(!tag_tickler_wait) {
+        pdebug(DEBUG_WARN, "Called from %s:%d when tag tickler condition var is NULL!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    rc = cond_signal(tag_tickler_wait);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error %s trying to signal condition variable in call from %s:%d", plc_tag_decode_error(rc), func, line_num);
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done. Called from %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+
+
+int init_generic_tag(plc_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    rc = mutex_create(&(tag->ext_mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
+        rc_dec(tag);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    rc = mutex_create(&(tag->api_mutex));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Unable to create tag API mutex!");
+        rc_dec(tag);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    rc = cond_create(&(tag->tag_cond_wait));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN,"Unable to create tag condition variable!");
+        rc_dec(tag);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+
+
 
 
 THREAD_FUNC(tag_tickler_func)
@@ -198,6 +277,10 @@ THREAD_FUNC(tag_tickler_func)
 
     while(!library_terminating) {
         int max_index = 0;
+        int64_t timeout_wait_ms = TAG_TICKLER_TIMEOUT_MS;
+
+        /* what is the maximum time we will wait until */
+        tag_tickler_wait_timeout_end = time_ms() + timeout_wait_ms;
 
         critical_block(tag_lookup_mutex) {
             max_index = hashtable_capacity(tags);
@@ -224,9 +307,11 @@ THREAD_FUNC(tag_tickler_func)
             }
 
             if(tag) {
-                int events[PLCTAG_EVENT_DESTROYED+1] =  {0};
+                int events[PLCTAG_EVENT_MAX] =  {0};
 
                 debug_set_tag_id(tag->tag_id);
+
+                pdebug(DEBUG_DETAIL, "Tickling tag %d.", tag->tag_id);
 
                 /* try to hold the tag API mutex while all this goes on. */
                 if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
@@ -249,7 +334,7 @@ THREAD_FUNC(tag_tickler_func)
                                 events[PLCTAG_EVENT_ABORTED] = 1;
                             }
 
-                            /* have we already done something about it? */
+                            /* have we already done something about automatic reads? */
                             if(!tag->auto_sync_next_write) {
                                 /* we need to queue up a new write. */
                                 tag->auto_sync_next_write = time_ms() + tag->auto_sync_write_ms;
@@ -274,6 +359,11 @@ THREAD_FUNC(tag_tickler_func)
 
                                 events[PLCTAG_EVENT_WRITE_STARTED] = 1;
                             }
+                        }
+
+                        /* wake up earlier if the time until the next wake up is sooner. */
+                        if(tag->auto_sync_next_write && tag->auto_sync_next_write < tag_tickler_wait_timeout_end) {
+                            tag_tickler_wait_timeout_end = tag->auto_sync_next_write;
                         }
                     }
 
@@ -316,6 +406,12 @@ THREAD_FUNC(tag_tickler_func)
                                 events[PLCTAG_EVENT_READ_STARTED] = 1;
                             }
                         }
+
+
+                        /* wake up earlier if the time until the next wake up is sooner. */
+                        if(tag->auto_sync_next_read && tag->auto_sync_next_read < tag_tickler_wait_timeout_end) {
+                            tag_tickler_wait_timeout_end = tag->auto_sync_next_read;
+                        }
                     }
 
                     /* call the tickler function if we can. */
@@ -328,6 +424,10 @@ THREAD_FUNC(tag_tickler_func)
                             tag->read_in_flight = 0;
 
                             events[PLCTAG_EVENT_READ_COMPLETED] = 1;
+
+                            /* wake immediately */
+                            plc_tag_tickler_wake();
+                            cond_signal(tag->tag_cond_wait);
                         }
 
                         if(tag->write_complete) {
@@ -336,6 +436,10 @@ THREAD_FUNC(tag_tickler_func)
                             tag->auto_sync_next_write = 0;
 
                             events[PLCTAG_EVENT_WRITE_COMPLETED] = 1;
+
+                            /* wake immediately */
+                            plc_tag_tickler_wake();
+                            cond_signal(tag->tag_cond_wait);
                         }
                     }
 
@@ -384,8 +488,18 @@ THREAD_FUNC(tag_tickler_func)
             debug_set_tag_id(0);
         }
 
-        if(!library_terminating) {
-            sleep_ms(1);
+        if(tag_tickler_wait) {
+            int64_t time_to_wait = tag_tickler_wait_timeout_end - time_ms();
+            int wait_rc = PLCTAG_STATUS_OK;
+
+            if(time_to_wait > 0) {
+                wait_rc = cond_wait(tag_tickler_wait, (int)time_to_wait);
+                if(wait_rc == PLCTAG_ERR_TIMEOUT) {
+                    pdebug(DEBUG_DETAIL, "Tag tickler thread timed out waiting for something to do.");
+                }
+            } else {
+                pdebug(DEBUG_DETAIL, "Not waiting as time to wake is in the past.");
+            }
         }
     }
 
@@ -630,24 +744,6 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         return PLCTAG_ERR_CREATE;
     }
 
-    /*
-     * FIXME - this really should be here???  Maybe not?  But, this is
-     * the only place it can be without making every protocol type do this automatically.
-     */
-    rc = mutex_create(&(tag->ext_mutex));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
-        rc_dec(tag);
-        return PLCTAG_ERR_CREATE;
-    }
-
-    rc = mutex_create(&(tag->api_mutex));
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN,"Unable to create tag API mutex!");
-        rc_dec(tag);
-        return PLCTAG_ERR_CREATE;
-    }
-
     /* set up the read cache config. */
     read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
     if(read_cache_ms < 0) {
@@ -692,62 +788,6 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
      */
     attr_destroy(attribs);
 
-    /*
-    * if there is a timeout, then loop until we get
-    * an error or we timeout.
-    */
-    if(timeout) {
-        int64_t timeout_time = timeout + time_ms();
-        int64_t start_time = time_ms();
-
-        /* get the tag status. */
-        rc = tag->vtable->status(tag);
-
-        while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
-            /* give some time to the tickler function. */
-            if(tag->vtable->tickler) {
-                tag->vtable->tickler(tag);
-            }
-
-            rc = tag->vtable->status(tag);
-
-            /*
-             * terminate early and do not wait again if the
-             * IO is done.
-             */
-            if(rc != PLCTAG_STATUS_PENDING) {
-                break;
-            }
-
-            sleep_ms(1); /* MAGIC */
-        }
-
-        /*
-         * if we dropped out of the while loop but the status is
-         * still pending, then we timed out.
-         *
-         * Abort the operation and set the status to show the timeout.
-         */
-        if(rc == PLCTAG_STATUS_PENDING) {
-            pdebug(DEBUG_WARN,"Timeout waiting for tag to be ready!");
-            tag->vtable->abort(tag);
-            rc = PLCTAG_ERR_TIMEOUT;
-        }
-
-        /* check to see if there was an error during tag creation. */
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-            rc_dec(tag);
-            return rc;
-        }
-
-        /* clear up any remaining flags.  This should be refactored. */
-        tag->read_in_flight = 0;
-        tag->write_in_flight = 0;
-
-        pdebug(DEBUG_INFO,"tag set up elapsed time %" PRId64 "ms",(time_ms()-start_time));
-    }
-
     /* map the tag to a tag ID */
     id = add_tag_lookup(tag);
 
@@ -764,6 +804,48 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     debug_set_tag_id(id);
 
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
+
+    /*
+    * if there is a timeout, then wait until we get
+    * an error or we timeout.
+    */
+    if(timeout) {
+        int64_t start_time = time_ms();
+
+        /* wake up the tickler in case it is needed to create the tag. */
+        plc_tag_tickler_wake();
+
+        /* wait for something to happen */
+        rc = cond_wait(tag->tag_cond_wait, timeout);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s while waiting for tag creation to complete!", plc_tag_decode_error(rc));
+            if(tag->vtable->abort) {
+                tag->vtable->abort(tag);
+            }
+            rc_dec(tag);
+            return rc;
+        }
+
+        /* get the tag status. */
+        rc = tag->vtable->status(tag);
+
+        /* check to see if there was an error during tag creation. */
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
+            if(tag->vtable->abort) {
+                tag->vtable->abort(tag);
+            }
+            rc_dec(tag);
+            return rc;
+        }
+
+        /* clear up any remaining flags.  This should be refactored. */
+        tag->read_in_flight = 0;
+        tag->write_in_flight = 0;
+
+        pdebug(DEBUG_INFO,"tag set up elapsed time %" PRId64 "ms",(time_ms()-start_time));
+    }
+
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -1086,7 +1168,11 @@ LIB_EXPORT int plc_tag_abort(int32_t id)
         tag->read_complete = 0;
         tag->write_in_flight = 0;
         tag->write_complete = 0;
+
     }
+
+    /* release the kraken... or tickler */
+    plc_tag_tickler_wake();
 
     if(tag->callback) {
         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_ABORTED.");
@@ -1143,6 +1229,9 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
         tag->vtable->abort(tag);
     }
 
+    /* wake the tickler */
+    plc_tag_tickler_wake();
+
     if(tag->callback) {
         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_DESTROYED.");
         tag->callback(tag_id, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
@@ -1181,15 +1270,15 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
     if(timeout < 0) {
         pdebug(DEBUG_WARN, "Timeout must not be negative!");
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    if(!tag) {
-        pdebug(DEBUG_WARN,"Tag not found.");
-        return PLCTAG_ERR_NOT_FOUND;
     }
 
     if(tag->callback) {
@@ -1223,6 +1312,9 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         tag->read_in_flight = 1;
         tag->status = PLCTAG_STATUS_PENDING;
 
+        /* clear the condition var */
+        cond_clear(tag->tag_cond_wait);
+
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->read(tag);
 
@@ -1242,61 +1334,49 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             is_done = 1;
             break;
         }
+    }
 
-        /*
-         * if there is a timeout, then loop until we get
-         * an error or we timeout.
-         */
-        if(timeout) {
-            int64_t timeout_time = timeout + time_ms();
-            int64_t start_time = time_ms();
+    /*
+     * if there is a timeout, then wait until we get
+     * an error or we timeout.
+     */
+    if(!is_done && timeout > 0) {
+        int64_t start_time = time_ms();
 
-            while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
-                /* give some time to the tickler function. */
-                if(tag->vtable->tickler) {
-                    tag->vtable->tickler(tag);
-                }
+        /* wake up the tickler in case it is needed to read the tag. */
+        plc_tag_tickler_wake();
 
-                rc = tag->vtable->status(tag);
-
-                /*
-                 * terminate early and do not wait again if the
-                 * IO is done.
-                 */
-                if(rc != PLCTAG_STATUS_PENDING) {
-                    break;
-                }
-
-                sleep_ms(1); /* MAGIC */
-            }
-
-            /*
-             * if we dropped out of the while loop but the status is
-             * still pending, then we timed out.
-             *
-             * Abort the operation and set the status to show the timeout.
-             */
+        do {
+            /* wait for something to happen */
+            rc = cond_wait(tag->tag_cond_wait, timeout);
             if(rc != PLCTAG_STATUS_OK) {
-                /* abort the request. */
-                if(tag->vtable->abort) {
-                    tag->vtable->abort(tag);
-                }
+                pdebug(DEBUG_WARN, "Error %s while waiting for tag read to complete!", plc_tag_decode_error(rc));
+                plc_tag_abort(id);
 
-                /* translate error if we are still pending. */
-                if(rc == PLCTAG_STATUS_PENDING) {
-                    pdebug(DEBUG_WARN, "Read operation timed out.");
-                    rc = PLCTAG_ERR_TIMEOUT;
-                }
+                break;
             }
 
-            /* we are done. */
-            tag->read_complete = 0;
-            tag->read_in_flight = 0;
-            is_done = 1;
+            /* get the tag status. */
+            rc = plc_tag_status(id);
 
-            pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms",(time_ms()-start_time));
+            /* check to see if there was an error during tag read. */
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
+                plc_tag_abort(id);
+
+                break;
+            }
+        } while(0);
+
+        /* the write is not in flight anymore. */
+        critical_block(tag->api_mutex) {
+            tag->read_in_flight = 0;
+            tag->read_complete = 0;
+            is_done = 1;
         }
-    } /* end of api mutex block */
+
+        pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms", (time_ms()-start_time));
+    }
 
     if(rc == PLCTAG_STATUS_OK) {
         /* set up the cache time.  This works when read_cache_ms is zero as it is already expired. */
@@ -1321,7 +1401,6 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
 
 
-
 /*
  * plc_tag_status
  *
@@ -1331,7 +1410,6 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
  *
  * This is a function provided by the underlying protocol implementation.
  */
-
 
 LIB_EXPORT int plc_tag_status(int32_t id)
 {
@@ -1395,15 +1473,15 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
     if(timeout < 0) {
         pdebug(DEBUG_WARN, "Timeout must not be negative!");
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
-    }
-
-    if(!tag) {
-        pdebug(DEBUG_WARN,"Tag not found.");
-        return PLCTAG_ERR_NOT_FOUND;
     }
 
     if(tag->callback) {
@@ -1422,6 +1500,9 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         /* a write is now in flight. */
         tag->write_in_flight = 1;
         tag->status = PLCTAG_STATUS_OK;
+
+        /* clear the condition var */
+        cond_clear(tag->tag_cond_wait);
 
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->write(tag);
@@ -1442,61 +1523,49 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
             is_done = 1;
             break;
         }
+    } /* end of api mutex block */
 
-        /*
-         * if there is a timeout, then loop until we get
-         * an error or we timeout.
-         */
-        if(timeout) {
-            int64_t start_time = time_ms();
-            int64_t timeout_time = timeout + start_time;
+    /*
+     * if there is a timeout, then wait until we get
+     * an error or we timeout.
+     */
+    if(!is_done && timeout > 0) {
+        int64_t start_time = time_ms();
 
-            while(rc == PLCTAG_STATUS_PENDING && timeout_time > time_ms()) {
-                /* give some time to the tickler function. */
-                if(tag->vtable->tickler) {
-                    tag->vtable->tickler(tag);
-                }
+        /* wake up the tickler in case it is needed to write the tag. */
+        plc_tag_tickler_wake();
 
-                rc = tag->vtable->status(tag);
-
-                /*
-                 * terminate early and do not wait again if the
-                 * IO is done.
-                 */
-                if(rc != PLCTAG_STATUS_PENDING) {
-                    break;
-                }
-
-                sleep_ms(1); /* MAGIC */
-            }
-
-            /*
-             * if we dropped out of the while loop but the status is
-             * still pending, then we timed out.
-             *
-             * Abort the operation and set the status to show the timeout.
-             */
+        do {
+            /* wait for something to happen */
+            rc = cond_wait(tag->tag_cond_wait, timeout);
             if(rc != PLCTAG_STATUS_OK) {
-                /* abort the request. */
-                if(tag->vtable->abort) {
-                    tag->vtable->abort(tag);
-                }
+                pdebug(DEBUG_WARN, "Error %s while waiting for tag write to complete!", plc_tag_decode_error(rc));
+                plc_tag_abort(id);
 
-                /* translate error if we are still pending. */
-                if(rc == PLCTAG_STATUS_PENDING) {
-                    pdebug(DEBUG_WARN, "Write operation timed out.");
-                    rc = PLCTAG_ERR_TIMEOUT;
-                }
+                break;
             }
 
-            /* the write is not in flight anymore. */
+            /* get the tag status. */
+            rc = plc_tag_status(id);
+
+            /* check to see if there was an error during tag creation. */
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
+                plc_tag_abort(id);
+
+                break;
+            }
+        } while(0);
+
+        /* the write is not in flight anymore. */
+        critical_block(tag->api_mutex) {
             tag->write_in_flight = 0;
             tag->write_complete = 0;
             is_done = 1;
-
-            pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms",(time_ms()-start_time));
         }
-    } /* end of api mutex block */
+
+        pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms", (time_ms()-start_time));
+    }
 
     if(tag->callback) {
         if(is_done) {

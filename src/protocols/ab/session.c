@@ -67,6 +67,9 @@
 
 #define SESSION_DISCONNECT_TIMEOUT (5000)
 
+#define SOCKET_WAIT_TIMEOUT_MS (20)
+#define SESSION_IDLE_WAIT_TIME (100)
+
 
 
 static ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg);
@@ -575,6 +578,13 @@ int session_init(ab_session_p session)
         return rc;
     }
 
+    /* create the session condition variable. */
+    if((rc = cond_create(&(session->wait_cond))) != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create session condition var!");
+        session->failed = 1;
+        return rc;
+    }
+
     if((rc = thread_create((thread_p *)&(session->handler_thread), session_handler, 32*1024, session)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create session thread!");
         session->failed = 1;
@@ -786,6 +796,11 @@ void session_destroy(void *session_arg)
     /* terminate the session thread first. */
     session->terminating = 1;
 
+    /* signal the condition variable in case it is waiting */
+    if(session->wait_cond) {
+        cond_signal(session->wait_cond);
+    }
+
     /* get rid of the handler thread. */
     pdebug(DEBUG_DETAIL, "Destroying session thread.");
     if (session->handler_thread) {
@@ -832,6 +847,13 @@ void session_destroy(void *session_arg)
             vector_destroy(session->requests);
             session->requests = NULL;
         }
+    }
+
+    /* we are done with the condition variable, finally destroy it. */
+    pdebug(DEBUG_DETAIL, "Destroying session condition variable.");
+    if(session->wait_cond) {
+        cond_destroy(&(session->wait_cond));
+        session->wait_cond = NULL;
     }
 
     /* we are done with the mutex, finally destroy it. */
@@ -915,6 +937,8 @@ int session_add_request(ab_session_p sess, ab_request_p req)
         rc = session_add_request_unsafe(sess, req);
     }
 
+    cond_signal(sess->wait_cond);
+
     pdebug(DEBUG_INFO, "Done.");
 
     return rc;
@@ -947,6 +971,8 @@ int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
     /* release the request refcount */
     rc_dec(req);
 
+    cond_signal(session->wait_cond);
+
     pdebug(DEBUG_INFO, "Done.");
 
     return rc;
@@ -972,6 +998,7 @@ THREAD_FUNC(session_handler)
     int rc = PLCTAG_STATUS_OK;
     session_state_t state = SESSION_OPEN_SOCKET;
     int64_t timeout_time = 0;
+    int64_t wait_until_time = 0;
     int64_t auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
     int auto_disconnect = 0;
 
@@ -979,7 +1006,8 @@ THREAD_FUNC(session_handler)
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
     while(!session->terminating) {
-        int idle = 0;
+        /* how long should we wait if nothing wakes us? */
+        wait_until_time = time_ms() + SESSION_IDLE_WAIT_TIME;
 
         /*
          * Do this on every cycle.   This keeps the queue clean(ish).
@@ -1009,6 +1037,7 @@ THREAD_FUNC(session_handler)
 
                 state = SESSION_REGISTER;
             }
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_REGISTER:
@@ -1024,6 +1053,7 @@ THREAD_FUNC(session_handler)
                     state = SESSION_IDLE;
                 }
             }
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_SEND_FORWARD_OPEN:
@@ -1036,6 +1066,7 @@ THREAD_FUNC(session_handler)
                 pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
                 state = SESSION_RECEIVE_FORWARD_OPEN;
             }
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_RECEIVE_FORWARD_OPEN:
@@ -1061,15 +1092,14 @@ THREAD_FUNC(session_handler)
                 pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                 state = SESSION_IDLE;
             }
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_IDLE:
-            pdebug(DEBUG_SPEW, "in SESSION_IDLE state.");
-
-            idle = 1;
+            pdebug(DEBUG_DETAIL, "in SESSION_IDLE state.");
 
             /* if there is work to do, make sure we do not disconnect. */
-            pdebug(DEBUG_SPEW,"Critical block.");
+            pdebug(DEBUG_DETAIL,"Critical block.");
             critical_block(session->mutex) {
                 if(vector_length(session->requests) > 0) {
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
@@ -1078,29 +1108,27 @@ THREAD_FUNC(session_handler)
 
             if((rc = process_requests(session)) != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error while processing requests %s!", plc_tag_decode_error(rc));
-                idle = 0;
                 if(session->use_connected_msg) {
                     state = SESSION_DISCONNECT;
                 } else {
                     state = SESSION_UNREGISTER;
                 }
+                cond_signal(session->wait_cond);
             }
 
             /* check if we should disconnect */
-            //if(session->auto_disconnect_enabled) {
             if(auto_disconnect_time < time_ms()) {
                 pdebug(DEBUG_DETAIL, "Disconnecting due to inactivity.");
 
                 auto_disconnect = 1;
-                idle = 0;
 
                 if(session->use_connected_msg) {
                     state = SESSION_DISCONNECT;
                 } else {
                     state = SESSION_UNREGISTER;
                 }
+                cond_signal(session->wait_cond);
             }
-            //}
 
             break;
 
@@ -1112,6 +1140,7 @@ THREAD_FUNC(session_handler)
             }
 
             state = SESSION_UNREGISTER;
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_UNREGISTER:
@@ -1122,6 +1151,7 @@ THREAD_FUNC(session_handler)
             }
 
             state = SESSION_CLOSE_SOCKET;
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_CLOSE_SOCKET:
@@ -1136,14 +1166,11 @@ THREAD_FUNC(session_handler)
             } else {
                 state = SESSION_START_RETRY;
             }
-
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_START_RETRY:
             pdebug(DEBUG_DETAIL, "in SESSION_START_RETRY state.");
-
-            /* set up timer for retry. */
-            idle = 0;
 
             /* FIXME - make this a tag attribute. */
             timeout_time = time_ms() + RETRY_WAIT_MS;
@@ -1151,26 +1178,24 @@ THREAD_FUNC(session_handler)
             /* start waiting. */
             state = SESSION_WAIT_RETRY;
 
+            cond_signal(session->wait_cond);
             break;
 
         case SESSION_WAIT_RETRY:
-            pdebug(DEBUG_SPEW, "in SESSION_WAIT_RETRY state.");
-
-            /* make us sleep on each iteration. */
-            idle = 1;
+            pdebug(DEBUG_DETAIL, "in SESSION_WAIT_RETRY state.");
 
             if(timeout_time < time_ms()) {
                 pdebug(DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET.");
                 state = SESSION_OPEN_SOCKET;
+                cond_signal(session->wait_cond);
             }
 
             break;
 
         case SESSION_WAIT_RECONNECT:
             /* wait for at least one request to queue before reconnecting. */
-            pdebug(DEBUG_SPEW, "in SESSION_WAIT_RECONNECT state.");
+            pdebug(DEBUG_DETAIL, "in SESSION_WAIT_RECONNECT state.");
 
-            idle = 1;
             auto_disconnect = 0;
 
             /* if there is work to do, reconnect.. */
@@ -1179,8 +1204,8 @@ THREAD_FUNC(session_handler)
                 if(vector_length(session->requests) > 0) {
                     pdebug(DEBUG_DETAIL, "There are requests waiting, reopening connection to PLC.");
 
-                    idle = 0;
                     state = SESSION_OPEN_SOCKET;
+                    cond_signal(session->wait_cond);
                 }
             }
 
@@ -1198,6 +1223,7 @@ THREAD_FUNC(session_handler)
                 state = SESSION_UNREGISTER;
             }
 
+            cond_signal(session->wait_cond);
             break;
         }
 
@@ -1205,15 +1231,19 @@ THREAD_FUNC(session_handler)
          * give up the CPU a bit, but only if we are not
          * doing some linked states.
          */
-        if(idle && !session->terminating) {
-            sleep_ms(1);
+        if(wait_until_time > 0) {
+            int64_t time_left = wait_until_time - time_ms();
+
+            if(time_left > 0) {
+                cond_wait(session->wait_cond, (int)time_left);
+            }
         }
     }
 
     /*
      * One last time before we exit.
      */
-    pdebug(DEBUG_SPEW,"Critical block.");
+    pdebug(DEBUG_DETAIL,"Critical block.");
     critical_block(session->mutex) {
         purge_aborted_requests_unsafe(session);
     }
@@ -1419,10 +1449,14 @@ int process_requests(ab_session_p session)
                     bundled_requests[i]->status = rc;
                     bundled_requests[i]->request_size = 0;
                     bundled_requests[i]->resp_received = 1;
+
                     bundled_requests[i] = rc_dec(bundled_requests[i]);
                 }
             }
         }
+
+        /* tickle the main tickler thread to note that we have responses. */
+        plc_tag_tickler_wake();
     }
 
     debug_set_tag_id(0);
@@ -1530,7 +1564,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
 
         /* size of the new packet */
         new_eip_len = (uint16_t)(((uint8_t *)(&unpacked_resp->reply_service) + pkt_len) /* end of the packet */
-                                 - (uint8_t *)(request->data));                                      /* start of the packet */
+                                 - (uint8_t *)(request->data));                         /* start of the packet */
 
         /* now copy the packet over that. */
         mem_copy(&unpacked_resp->reply_service, pkt_start, pkt_len);
@@ -1781,16 +1815,24 @@ int send_eip_request(ab_session_p session, int timeout)
 
     /* send the packet */
     do {
-        rc = socket_write(session->sock, session->data + session->data_offset, (int)session->data_size - (int)session->data_offset, 0);
+        rc = socket_write(session->sock,
+                          session->data + session->data_offset,
+                          (int)session->data_size - (int)session->data_offset,
+                          SOCKET_WAIT_TIMEOUT_MS);
 
         if(rc >= 0) {
             session->data_offset += (uint32_t)rc;
+        } else {
+            if(rc == PLCTAG_ERR_TIMEOUT) {
+                pdebug(DEBUG_DETAIL, "Socket not yet ready to write.");
+                rc = 0;
+            }
         }
 
         /* give up the CPU if we still are looping */
-        if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
-            sleep_ms(1);
-        }
+        // if(!session->terminating && rc >= 0 && session->data_offset < session->data_size) {
+        //     sleep_ms(1);
+        // }
     } while(!session->terminating && rc >= 0 && session->data_offset < session->data_size && timeout_time > time_ms());
 
     if(session->terminating) {
@@ -1847,14 +1889,12 @@ int recv_eip_response(ab_session_p session, int timeout)
     data_needed = sizeof(eip_encap);
 
     do {
-        rc = socket_read(session->sock, session->data + session->data_offset,
-                         (int)(data_needed - session->data_offset), 0);
+        rc = socket_read(session->sock,
+                         session->data + session->data_offset,
+                         (int)(data_needed - session->data_offset),
+                         SOCKET_WAIT_TIMEOUT_MS);
 
-        if (rc < 0) {
-            /* error! */
-            pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
-            return rc;
-        } else {
+        if(rc >= 0) {
             session->data_offset += (uint32_t)rc;
 
             /*pdebug_dump_bytes(session->debug, session->data, session->data_offset);*/
@@ -1868,13 +1908,22 @@ int recv_eip_response(ab_session_p session, int timeout)
                     return PLCTAG_ERR_TOO_LARGE;
                 }
             }
+        } else {
+            if(rc == PLCTAG_ERR_TIMEOUT) {
+                pdebug(DEBUG_DETAIL, "Socket not yet ready to read.");
+                rc = 0;
+            } else {
+                /* error! */
+                pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
+                return rc;
+            }
         }
 
-        /* did we get all the data? */
-        if(!session->terminating && session->data_offset < data_needed) {
-            /* do not hog the CPU */
-            sleep_ms(1);
-        }
+        // /* did we get all the data? */
+        // if(!session->terminating && session->data_offset < data_needed) {
+        //     /* do not hog the CPU */
+        //     sleep_ms(1);
+        // }
     } while(!session->terminating && session->data_offset < data_needed && timeout_time > time_ms());
 
     if(session->terminating) {
