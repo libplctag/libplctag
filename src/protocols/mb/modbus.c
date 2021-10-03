@@ -258,6 +258,14 @@ plc_tag_p mb_tag_create(attr attribs)
         return NULL;
     }
 
+    /* set up the generic parts. */
+    rc = init_generic_tag((plc_tag_p)tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return (plc_tag_p)NULL;
+    }
+
     /* find the PLC object. */
     rc = find_or_create_plc(attribs, &(tag->plc));
     if(rc == PLCTAG_STATUS_OK) {
@@ -433,6 +441,11 @@ void modbus_tag_destructor(void *tag_arg)
     if(tag->ext_mutex) {
         mutex_destroy(&(tag->ext_mutex));
         tag->ext_mutex = NULL;
+    }
+
+    if(tag->tag_cond_wait) {
+        cond_destroy(&(tag->tag_cond_wait));
+        tag->tag_cond_wait = NULL;
     }
 
     if(tag->byte_order && tag->byte_order->is_allocated) {

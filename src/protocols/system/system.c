@@ -90,6 +90,7 @@ tag_byte_order_t system_tag_byte_order = {
 
 plc_tag_p system_tag_create(attr attribs)
 {
+    int rc = PLCTAG_STATUS_OK;
     system_tag_p tag = NULL;
     const char *name = attr_get_str(attribs, "name", NULL);
 
@@ -120,6 +121,14 @@ plc_tag_p system_tag_create(attr attribs)
      * in case we need to abort later.
      */
     tag->vtable = &system_tag_vtable;
+
+    /* set up the generic parts. */
+    rc = init_generic_tag((plc_tag_p)tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return (plc_tag_p)NULL;
+    }
 
     /* set the byte order. */
     tag->byte_order = &system_tag_byte_order;
@@ -160,6 +169,10 @@ static void system_tag_destroy(plc_tag_p ptag)
 
     if(ptag->api_mutex) {
         mutex_destroy(&ptag->api_mutex);
+    }
+
+    if(ptag->tag_cond_wait) {
+        cond_destroy(&ptag->tag_cond_wait);
     }
 
     if(tag->byte_order && tag->byte_order->is_allocated) {
