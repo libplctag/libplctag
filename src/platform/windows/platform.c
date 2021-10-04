@@ -1293,10 +1293,12 @@ static int socket_lib_init(void)
 {
     MMRESULT rc = 0;
 
+    /*
     rc = timeBeginPeriod(WINDOWS_REQUESTED_TIMER_PERIOD_MS);
     if(rc != TIMERR_NOERROR) {
         pdebug(DEBUG_WARN, "Unable to set timer period to %ums!", WINDOWS_REQUESTED_TIMER_PERIOD_MS);
     }
+    */
 
     return WSAStartup(MAKEWORD(2,2), &wsaData) == NO_ERROR;
 }
