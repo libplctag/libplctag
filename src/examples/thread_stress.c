@@ -201,7 +201,7 @@ void* test_runner(void* data)
 
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr, "!!! Thread %d, iteration %d, read failed with error %s\n", tid, *iteration, plc_tag_decode_error(rc));
+            fprintf(stderr, "!!! Thread %d, iteration %d, read failed after %" PRId64 "ms  with error %s\n", tid, *iteration, (int64_t)(util_time_ms() - start), plc_tag_decode_error(rc));
             break;
         }
 
@@ -313,7 +313,7 @@ int main(int argc, char **argv)
                                     (LPVOID)&args[tid],         /* argument to thread function */
                                     (DWORD)0,                   /* use default creation flags  */
                                     (LPDWORD)NULL               /* do not need thread ID       */
-                                  );    
+                                  );
 #else
         pthread_create(&thread[tid], NULL, test_runner, (void*)&args[tid]);
 #endif
