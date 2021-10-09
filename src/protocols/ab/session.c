@@ -676,7 +676,7 @@ int session_register(ab_session_p session)
     /* fill in the fields of the request */
     req->encap_command = h2le16(AB_EIP_REGISTER_SESSION);
     req->encap_length = h2le16(sizeof(eip_session_reg_req) - sizeof(eip_encap));
-    req->encap_session_handle = h2le32(session->session_handle);
+    req->encap_session_handle = h2le32(/*session->session_handle*/ 0);
     req->encap_status = h2le32(0);
     req->encap_sender_context = h2le64((uint64_t)0);
     req->encap_options = h2le32(0);
