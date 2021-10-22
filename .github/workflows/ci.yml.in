@@ -37,7 +37,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=5 &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=20 &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -149,7 +149,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=5 &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=20 &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -256,7 +256,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=5 &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=20 &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -363,7 +363,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=5
+        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=20
         timeout /T 5
         echo "test simple get/set tag."
         .\simple
@@ -478,7 +478,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=5
+        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=20
         timeout /T 5
         echo "test simple get/set tag."
         .\simple
