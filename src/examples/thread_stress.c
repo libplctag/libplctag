@@ -31,6 +31,15 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+
+/*
+ * This example reads a small set of tags repeatedly as fast as possible.  It does not destroy the tags on errors, but simply calls
+ * plc_tag_abort() and retries.
+ *
+ * Use ^C to terminate.
+ */
+
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -247,7 +256,7 @@ int main(int argc, char **argv)
     int64_t total_run_time = 0;
 
     /* set up logging */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {

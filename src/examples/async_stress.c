@@ -43,6 +43,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #ifdef WIN32
     #include <Windows.h>
 #else
@@ -54,8 +55,12 @@
 
 #define REQUIRED_VERSION 2,4,0
 
-#define DATA_TIMEOUT (5000)
+#define DATA_TIMEOUT (2000)
+#define TAG_CREATE_TIMEOUT (5000)
+#define RETRY_TIMEOUT (10000)
 
+#define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=10.206.1.59:5020&path=0&elem_count=2&name=hr10"
+#define DEFAULT_THREAD_COUNT (10)
 
 
 void usage(void)
@@ -69,7 +74,6 @@ void usage(void)
 
     exit(PLCTAG_ERR_BAD_PARAM);
 }
-
 
 
 
@@ -143,28 +147,8 @@ void setup_break_handler(void)
 
 
 
-
-// int check_tag_status(int32_t tag, int64_t timeout)
-// {
-//     int rc = PLCTAG_STATUS_OK;
-
-//     rc = plc_tag_status(tag);
-
-//     if(rc == PLCTAG_STATUS_OK) {
-//         return rc;
-//     } else if(rc != PLCTAG_STATUS_PENDING) {
-//         return rc;
-//     } else if(timeout <= util_time_ms()) {
-//         return PLCTAG_ERR_TIMEOUT;
-//     }
-
-//     return PLCTAG_STATUS_PENDING;
-// }
-
-
 static int read_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
 static int wait_for_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
-
 
 
 int main(int argc, char **argv)
@@ -176,6 +160,10 @@ int main(int argc, char **argv)
     int i = 0;
     int64_t start = 0;
     int64_t end = 0;
+    int64_t total_ms = 0;
+    int64_t min_ms = INT64_MAX;
+    int64_t max_ms = 0;
+    int64_t iteration = 1;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -183,7 +171,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
 
     /* check the command line arguments */
     if(argc != 3) {
@@ -230,7 +218,7 @@ int main(int argc, char **argv)
     }
 
     if(!done) {
-        rc = wait_for_tags(tags, statuses, num_tags, DATA_TIMEOUT);
+        rc = wait_for_tags(tags, statuses, num_tags, TAG_CREATE_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
             for(int i=0; i<num_tags; i++) {
                 if(statuses[i] != PLCTAG_STATUS_OK) {
@@ -275,10 +263,24 @@ int main(int argc, char **argv)
 
         end = util_time_ms();
 
-        fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
+        /* count up the total ms */
+        total_ms += (end - start);
+
+        /* calculate the min and max time */
+        if(max_ms < (end - start)) {
+            max_ms = end - start;
+        }
+
+        if(min_ms > (end - start)) {
+            min_ms = end - start;
+        }
+
+        //fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
 
         /* test */
-        //util_sleep_ms(25);
+        //util_sleep_ms(5);
+
+        iteration++;
     }
 
     fprintf(stderr, "Program terminated!\n");
@@ -290,6 +292,8 @@ int main(int argc, char **argv)
 
     free(tags);
     free(statuses);
+
+    fprintf(stderr,"--- Ran %" PRId64 " iterations with a total io time of %" PRId64 "ms and min/avg/max of %" PRId64 "ms/%" PRId64 "ms/%" PRId64 "ms.\n", iteration, total_ms, min_ms, total_ms/iteration, max_ms);
 
     return 0;
 }
