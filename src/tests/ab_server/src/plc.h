@@ -109,6 +109,9 @@ typedef struct {
     /* debugging. */
     int reject_fo_count;
 
+    /* response delay */
+    int response_delay;
+
     /* list of tags served by this "PLC" */
     struct tag_def_s *tags;
 } plc_s;

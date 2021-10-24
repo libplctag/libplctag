@@ -53,6 +53,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <time.h>
+#include <inttypes.h>
 
 #include <lib/libplctag.h>
 #include <util/debug.h>
@@ -964,6 +965,233 @@ extern void lock_release(lock_t *lock)
 
 
 /***************************************************************************
+ ************************* Condition Variables *****************************
+ ***************************************************************************/
+
+struct cond_t {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int flag;
+};
+
+int cond_create(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+    cond_p tmp_cond = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Null pointer to condition var pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(*c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?");
+    }
+
+    /* clear the output first. */
+    *c = NULL;
+
+    tmp_cond = mem_alloc((int)(unsigned int)sizeof(*tmp_cond));
+    if(!tmp_cond) {
+        pdebug(DEBUG_WARN, "Unable to allocate new condition var!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    if(pthread_mutex_init(&(tmp_cond->mutex), NULL)) {
+        pdebug(DEBUG_WARN, "Unable to initialize pthread mutex!");
+        mem_free(tmp_cond);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    if(pthread_cond_init(&(tmp_cond->cond), NULL)) {
+        pdebug(DEBUG_WARN, "Unable to initialize pthread condition var!");
+        pthread_mutex_destroy(&(tmp_cond->mutex));
+        mem_free(tmp_cond);
+        return PLCTAG_ERR_CREATE;
+    }
+
+    tmp_cond->flag = 0;
+
+    *c = tmp_cond;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int64_t start_time = time_ms();
+    int64_t end_time = start_time + timeout_ms;
+    struct timespec timeout;
+
+    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call from %s:%d!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(timeout_ms <= 0) {
+        pdebug(DEBUG_WARN, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms, func, line_num);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(pthread_mutex_lock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        return PLCTAG_ERR_MUTEX_LOCK;
+    }
+
+    /*
+     * set up timeout.
+     *
+     * NOTE: the time is _ABSOLUTE_!  This is not a relative delay.
+     */
+    timeout.tv_sec = (time_t)(end_time / 1000);
+    timeout.tv_nsec = (long)1000000 * (long)(end_time % 1000);
+
+    while(!c->flag) {
+        int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
+
+        pdebug(DEBUG_DETAIL, "Waiting for %" PRId64 "ms.", time_left);
+
+        if(time_left > 0) {
+            int wait_rc = 0;
+
+            wait_rc = pthread_cond_timedwait(&(c->cond), &(c->mutex), &timeout);
+            if(wait_rc == ETIMEDOUT) {
+                pdebug(DEBUG_DETAIL, "Timeout response from condition var wait.");
+                rc = PLCTAG_ERR_TIMEOUT;
+                break;
+            } else if(wait_rc != 0) {
+                pdebug(DEBUG_WARN, "Error %d waiting on condition variable!", errno);
+                rc = PLCTAG_ERR_BAD_STATUS;
+                break;
+            } else {
+                /* we might need to wait again. could be a spurious wake up. */
+                pdebug(DEBUG_DETAIL, "Condition var wait returned.");
+                rc = PLCTAG_STATUS_OK;
+            }
+        } else {
+            pdebug(DEBUG_DETAIL, "Timed out.");
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
+        }
+    }
+
+    if(c->flag) {
+        pdebug(DEBUG_DETAIL, "Condition var signaled for call at %s:%d.", func, line_num);
+
+        /* clear the flag now that we've responded. */
+        c->flag = 0;
+    } else {
+        pdebug(DEBUG_DETAIL, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
+    }
+
+    if(pthread_mutex_unlock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        return PLCTAG_ERR_MUTEX_UNLOCK;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+int cond_signal_impl(const char *func, int line_num, cond_p c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(pthread_mutex_lock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        return PLCTAG_ERR_MUTEX_LOCK;
+    }
+
+    c->flag = 1;
+
+    if(pthread_cond_signal(&(c->cond))) {
+        pdebug(DEBUG_WARN, "Signal of condition var returned error %d in call at %s:%d!", errno, func, line_num);
+        rc = PLCTAG_ERR_BAD_STATUS;
+    }
+
+    if(pthread_mutex_unlock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        return PLCTAG_ERR_MUTEX_UNLOCK;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done. Called from %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+int cond_clear_impl(const char *func, int line_num, cond_p c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(pthread_mutex_lock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to lock mutex!");
+        return PLCTAG_ERR_MUTEX_LOCK;
+    }
+
+    c->flag = 0;
+
+    if(pthread_mutex_unlock(& (c->mutex))) {
+        pdebug(DEBUG_WARN, "Unable to unlock mutex!");
+        return PLCTAG_ERR_MUTEX_UNLOCK;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done. Called from %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+int cond_destroy(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c || ! *c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pthread_cond_destroy(&((*c)->cond));
+    pthread_mutex_destroy(&((*c)->mutex));
+
+    mem_free(*c);
+
+    *c = NULL;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+/***************************************************************************
  ******************************* Sockets ***********************************
  **************************************************************************/
 
@@ -1172,17 +1400,85 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
 
 
-extern int socket_read(sock_p s, uint8_t *buf, int size)
+int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
-    if(!s || !buf) {
+    if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!buf) {
+        pdebug(DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_READ;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* only wait if we have a timeout. */
+    if(timeout_ms > 0) {
+        fd_set read_set;
+        struct timeval tv;
+        int select_rc = 0;
+
+        tv.tv_sec = (time_t)(timeout_ms / 1000);
+        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+
+        FD_ZERO(&read_set);
+
+        FD_SET(s->fd, &read_set);
+
+        select_rc = select(s->fd+1, &read_set, NULL, NULL, &tv);
+
+        if(select_rc == 1) {
+            if(FD_ISSET(s->fd, &read_set)) {
+                pdebug(DEBUG_DETAIL, "Socket can read data.");
+            } else {
+                pdebug(DEBUG_WARN, "select() returned but socket is not ready to read data!");
+                return PLCTAG_ERR_BAD_REPLY;
+            }
+        } else if(select_rc == 0) {
+            pdebug(DEBUG_DETAIL, "Socket read timed out.");
+            return PLCTAG_ERR_TIMEOUT;
+        } else {
+            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+
+            switch(errno) {
+                case EBADF: /* bad file descriptor */
+                    pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case EINTR: /* signal was caught, this should not happen! */
+                    pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
+                    pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case ENOMEM: /* No mem for internal tables. */
+                    pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                    return PLCTAG_ERR_NO_MEM;
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                    return PLCTAG_ERR_BAD_STATUS;
+                    break;
+            }
+        }
     }
 
     /* The socket is non-blocking. */
@@ -1201,17 +1497,85 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
 }
 
 
-extern int socket_write(sock_p s, uint8_t *buf, int size)
+int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
-    if(!s || !buf) {
+    if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!buf) {
+        pdebug(DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_WRITE;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* only wait if we have a timeout. */
+    if(timeout_ms > 0) {
+        fd_set write_set;
+        struct timeval tv;
+        int select_rc = 0;
+
+        tv.tv_sec = (time_t)(timeout_ms / 1000);
+        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+
+        FD_ZERO(&write_set);
+
+        FD_SET(s->fd, &write_set);
+
+        select_rc = select(s->fd+1, NULL, &write_set, NULL, &tv);
+
+        if(select_rc == 1) {
+            if(FD_ISSET(s->fd, &write_set)) {
+                pdebug(DEBUG_DETAIL, "Socket can write data.");
+            } else {
+                pdebug(DEBUG_WARN, "select() returned but socket is not ready to write data!");
+                return PLCTAG_ERR_BAD_REPLY;
+            }
+        } else if(select_rc == 0) {
+            pdebug(DEBUG_DETAIL, "Socket write timed out.");
+            return PLCTAG_ERR_TIMEOUT;
+        } else {
+            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+
+            switch(errno) {
+                case EBADF: /* bad file descriptor */
+                    pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case EINTR: /* signal was caught, this should not happen! */
+                    pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
+                    pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case ENOMEM: /* No mem for internal tables. */
+                    pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                    return PLCTAG_ERR_NO_MEM;
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                    return PLCTAG_ERR_BAD_STATUS;
+                    break;
+            }
+        }
     }
 
     /* The socket is non-blocking. */

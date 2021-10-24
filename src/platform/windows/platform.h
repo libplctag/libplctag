@@ -237,12 +237,25 @@ extern int lock_acquire_try(lock_t *lock);
 extern int lock_acquire(lock_t *lock);
 extern void lock_release(lock_t *lock);
 
+
+/* condition variables */
+typedef struct cond_t* cond_p;
+extern int cond_create(cond_p * c);
+extern int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms);
+extern int cond_signal_impl(const char *func, int line_num, cond_p c);
+extern int cond_clear_impl(const char *func, int line_num, cond_p c);
+extern int cond_destroy(cond_p *c);
+
+#define cond_wait(c, t) cond_wait_impl(__func__, __LINE__, c, t)
+#define cond_signal(c) cond_signal_impl(__func__, __LINE__, c)
+#define cond_clear(c) cond_clear_impl(__func__, __LINE__, c)
+
 /* socket functions */
 typedef struct sock_t *sock_p;
 extern int socket_create(sock_p *s);
 extern int socket_connect_tcp(sock_p s, const char *host, int port);
-extern int socket_read(sock_p s, uint8_t *buf, int size);
-extern int socket_write(sock_p s, uint8_t *buf, int size);
+extern int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms);
+extern int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_close(sock_p s);
 extern int socket_destroy(sock_p *s);
 
