@@ -123,6 +123,8 @@ int main()
     int i;
     int elem_count = 0;
     int elem_size = 0;
+    int64_t start = 0;
+    int64_t end = 0;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
@@ -289,9 +291,12 @@ int main()
 
     /* test a timeout. */
     printf("Testing timeout behavior.\n");
+    start = util_time_ms();
     rc = plc_tag_read(tag, 1);
+    end = util_time_ms();
+
     if(rc != PLCTAG_ERR_TIMEOUT) {
-        printf("Expected PLCTAG_ERR_TIMEOOUT, got %s!\n", plc_tag_decode_error(rc));
+        printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end- start));
 
         /*
          * we do not need to free the array TestDINTArray because the callback will do

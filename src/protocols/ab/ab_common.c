@@ -191,6 +191,14 @@ plc_tag_p ab_tag_create(attr attribs)
 
     tag->vtable = &default_vtable;
 
+    /* set up the generic parts. */
+    rc = init_generic_tag((plc_tag_p)tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
+        rc_dec(tag);
+        return (plc_tag_p)NULL;
+    }
+
     /*
      * check the CPU type.
      *
@@ -892,6 +900,11 @@ void ab_tag_destroy(ab_tag_p tag)
     if(tag->api_mutex) {
         mutex_destroy(&(tag->api_mutex));
         tag->api_mutex = NULL;
+    }
+
+    if(tag->tag_cond_wait) {
+        cond_destroy(&(tag->tag_cond_wait));
+        tag->tag_cond_wait = NULL;
     }
 
     if(tag->byte_order && tag->byte_order->is_allocated) {

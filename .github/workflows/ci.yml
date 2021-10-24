@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_ubuntu_x64"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -37,7 +37,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -124,8 +124,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_ubuntu_x86"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -149,7 +149,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -235,8 +235,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_macos_x64"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -256,7 +256,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
         sleep 2
         echo "test simple get/set tag."
         ${{ env.DIST }}/simple
@@ -342,8 +342,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_windows_x64"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
 
@@ -363,7 +363,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
+        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
         timeout /T 5
         echo "test simple get/set tag."
         .\simple
@@ -457,8 +457,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_windows_x86"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -478,7 +478,7 @@ jobs:
       run: |
         cd ${{ env.DIST }}\Release
         echo "start up simulator..."
-        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
+        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
         timeout /T 5
         echo "test simple get/set tag."
         .\simple
@@ -572,8 +572,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_windows_Arm"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_windows_Arm"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -601,8 +601,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_windows_Arm64_EXPERIMENTAL"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_windows_Arm64_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -630,8 +630,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_linux_arm6hf_EXPERIMENTAL"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_linux_arm6hf_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -663,8 +663,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_linux_arm7l_EXPERIMENTAL"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_linux_arm7l_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
@@ -696,8 +696,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.4.0"
-      ARTIFACT: "libplctag_2.4.0_linux_aarch64_EXPERIMENTAL"
+      VERSION: "2.4.1"
+      ARTIFACT: "libplctag_2.4.1_linux_aarch64_EXPERIMENTAL"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 

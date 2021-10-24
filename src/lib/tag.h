@@ -121,6 +121,7 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         tag_byte_order_t *byte_order; \
                         mutex_p ext_mutex; \
                         mutex_p api_mutex; \
+                        cond_p tag_cond_wait; \
                         tag_vtable_p vtable; \
                         void (*callback)(int32_t tag_id, int event, int status); \
                         int64_t read_cache_expire; \
@@ -140,6 +141,9 @@ struct plc_tag_t {
 /* the following may need to be used where the tag is already mapped or is not yet mapped */
 extern int lib_init(void);
 extern void lib_teardown(void);
-extern int plc_tag_abort_mapped(plc_tag_p tag);
-extern int plc_tag_destroy_mapped(plc_tag_p tag);
-extern int plc_tag_status_mapped(plc_tag_p tag);
+// extern int plc_tag_abort_mapped(plc_tag_p tag);
+// extern int plc_tag_destroy_mapped(plc_tag_p tag);
+// extern int plc_tag_status_mapped(plc_tag_p tag);
+extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
+#define plc_tag_tickler_wake()  plc_tag_tickler_wake_impl(__func__, __LINE__)
+extern int init_generic_tag(plc_tag_p tag);

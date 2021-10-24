@@ -97,11 +97,13 @@ struct ab_session_t {
     thread_p handler_thread;
     volatile int terminating;
     mutex_p mutex;
+    cond_p wait_cond;
 
     /* disconnect handling */
     int auto_disconnect_enabled;
     int auto_disconnect_timeout_ms;
 };
+
 
 struct ab_request_t {
     /* used to force interlocks with other threads. */

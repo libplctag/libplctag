@@ -24,7 +24,7 @@ cli_request_t cli_request = {
     false // offline
 };
 
-void usage(void) 
+void usage(void)
 {
     fprintf(stdout, "Usage:\n");
     fprintf(stdout, "\tLIBPLCTAG CLI.\n");
@@ -37,7 +37,7 @@ void usage(void)
     fprintf(stdout, "\t--write\t\t- Perform a one-shot WRITE operation.\n");
     fprintf(stdout, "\t--watch\t\t- Perform a continuous WATCH operation at the specified interval.\n");
     fprintf(stdout, "\t-h | --help\t- Prints the Usage details.\n");
-    
+
     fprintf(stdout, "\n\tLIBPLCTAG Parameters (Required):\n");
     fprintf(stdout, "\n\t-protocol\t- type of plc protocol. (default: ab_eip)\n");
     fprintf(stdout, "\t-ip\t\t- network address for the host PLC. (default: 127.0.0.1)\n");
@@ -53,7 +53,7 @@ void usage(void)
     fflush(stdout);
 }
 
-int parse_args(int argc, char *argv[]) 
+int parse_args(int argc, char *argv[])
 {
     if (argc < 2) {
         fprintf(stderr, "ERROR: invalid number of arguments.\n");
@@ -78,12 +78,12 @@ int parse_args(int argc, char *argv[])
         fprintf(stderr, "INFO: Use one of --read, --write, --watch.\n");
         fflush(stderr);
         return -1;
-    }       
- 
+    }
+
     char *param;
     char *val;
     while (++i < argc) {
-        param = strtok(argv[i], "="); 
+        param = strtok(argv[i], "=");
         val = strtok(NULL, "");
 
         if (!strcmp(param, "-protocol")) {
@@ -95,7 +95,7 @@ int parse_args(int argc, char *argv[])
         } else if (!strcmp(param, "-ip")) {
             cli_request.ip = val;
         } else if (!strcmp(param, "-path")) {
-            cli_request.path = val; 
+            cli_request.path = val;
         } else if (!strcmp(param, "-plc")) {
             cli_request.plc = val;
         } else if (!strcmp(param, "-debug")) {
@@ -119,13 +119,13 @@ int parse_args(int argc, char *argv[])
             fprintf(stderr, "INFO: Supported params -protocol, -ip, -path, -plc, -debug, -interval, -attributes, -offline.\n");
             fflush(stderr);
             return -1;
-        } 
+        }
     }
 
     return 0;
 }
 
-void print_request() 
+void print_request()
 {
     pdebug(DEBUG_INFO, "Running with params:");
     pdebug(DEBUG_INFO, "Protocol: %s", cli_request.protocol);
@@ -256,7 +256,7 @@ tag_line_parts_t split_string(const char *str, const char *sep)
 }
 
 int validate_line(tag_line_parts_t tag_line_parts) {
-    char req_params[4][10] = 
+    char req_params[4][10] =
     {
         "key",
         "type",
@@ -266,7 +266,7 @@ int validate_line(tag_line_parts_t tag_line_parts) {
 
     int required = 3;
     if (cli_request.operation == WRITE) required = 4;
-    
+
     bool found = false;
     int j;
     char *part;
@@ -338,7 +338,7 @@ void print_tag(tag_t *tag) {
     pdebug(DEBUG_INFO, "Watch: %s", btoa(tag->watch));
 }
 
-int process_line(const char *line, tag_t *tag) 
+int process_line(const char *line, tag_t *tag)
 {
     tag_line_parts_t tag_line_parts;
 
@@ -365,13 +365,13 @@ int process_line(const char *line, tag_t *tag)
     pdebug(DEBUG_INFO, "Tag defaults set!");
 
     /* loop through all the val pairs now */
-    char *type;
-    char *write_val;
+    char *type = NULL;
+    char *write_val = NULL;
 
     int i = 0;
-    char *part;
-    char *param;
-    char *val;
+    char *part = NULL;
+    char *param = NULL;
+    char *val = NULL;
     while (i < tag_line_parts.num_parts) {
         part = strdup(tag_line_parts.parts[i]);
         pdebug(DEBUG_INFO, "Part: %s", part);
@@ -408,7 +408,7 @@ int process_line(const char *line, tag_t *tag)
     } else if(!strcmp("int64", type)) {
         tag->type = t_INT64;
         if (cli_request.operation == WRITE) {
-            sscanf(write_val, "%" SCNi64, &tag->write_val.INT64_val); 
+            sscanf(write_val, "%" SCNi64, &tag->write_val.INT64_val);
         }
     } else if(!strcmp("uint32", type)) {
         tag->type = t_UINT32;
@@ -428,7 +428,7 @@ int process_line(const char *line, tag_t *tag)
     } else if(!strcmp("int16", type)) {
         tag->type = t_INT16;
         if (cli_request.operation == WRITE) {
-            sscanf(write_val, "%" SCNi16, &tag->write_val.INT16_val); 
+            sscanf(write_val, "%" SCNi16, &tag->write_val.INT16_val);
         }
     } else if(!strcmp("uint8", type)) {
         tag->type = t_UINT8;
@@ -438,12 +438,12 @@ int process_line(const char *line, tag_t *tag)
     } else if(!strcmp("int8", type)) {
         tag->type = t_INT8;
         if (cli_request.operation == WRITE) {
-            sscanf(write_val, "%" SCNi8, &tag->write_val.INT8_val); 
+            sscanf(write_val, "%" SCNi8, &tag->write_val.INT8_val);
         }
     } else if(!strcmp("float64", type)) {
         tag->type = t_FLOAT64;
         if (cli_request.operation == WRITE) {
-            sscanf(write_val, "%lf", &tag->write_val.FLOAT64_val); 
+            sscanf(write_val, "%lf", &tag->write_val.FLOAT64_val);
         }
     } else if(!strcmp("float32", type)) {
         tag->type = t_FLOAT32;
@@ -523,14 +523,14 @@ int process_tags()
 
         switch (cli_request.operation) {
         case WATCH:
-            sprintf(tag_path, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol, 
-                cli_request.ip, cli_request.path, cli_request.plc, 
-                cli_request.debug_level, cli_request.interval, tag.path, 
+            sprintf(tag_path, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol,
+                cli_request.ip, cli_request.path, cli_request.plc,
+                cli_request.debug_level, cli_request.interval, tag.path,
                 cli_request.attributes);
-            break;   
+            break;
         default:
-            sprintf(tag_path, TAG_PATH, cli_request.protocol, 
-                cli_request.ip, cli_request.path, cli_request.plc, 
+            sprintf(tag_path, TAG_PATH, cli_request.protocol,
+                cli_request.ip, cli_request.path, cli_request.plc,
                 cli_request.debug_level, tag.path, cli_request.attributes);
             break;
         }
@@ -558,13 +558,13 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
     case t_UINT64:
         tag->val.UINT64_val = plc_tag_get_uint64(tag_handle, tag->offset);
         if (!tag->watch) {
-            tag->last_val.UINT64_val = tag->val.UINT64_val; 
+            tag->last_val.UINT64_val = tag->val.UINT64_val;
             fprintf(stdout, "{\"%s\":%" PRIu64"}\n", tag->key, tag->val.UINT64_val);
             fflush(stdout);
             break;
         }
         if (tag->val.UINT64_val != tag->last_val.UINT64_val) {
-            tag->last_val.UINT64_val = tag->val.UINT64_val; 
+            tag->last_val.UINT64_val = tag->val.UINT64_val;
             fprintf(stdout, "{\"%s\":%" PRIu64"}\n", tag->key, tag->val.UINT64_val);
             fflush(stdout);
         }
@@ -578,7 +578,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.INT64_val != tag->last_val.INT64_val) {
-            tag->last_val.INT64_val = tag->val.INT64_val; 
+            tag->last_val.INT64_val = tag->val.INT64_val;
             fprintf(stdout, "{\"%s\":%" PRIi64"}\n", tag->key, tag->val.INT64_val);
             fflush(stdout);
         }
@@ -592,7 +592,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.UINT32_val != tag->last_val.UINT32_val) {
-            tag->last_val.UINT32_val = tag->val.UINT32_val; 
+            tag->last_val.UINT32_val = tag->val.UINT32_val;
             fprintf(stdout, "{\"%s\":%" PRIu32"}\n", tag->key, tag->val.UINT32_val);
             fflush(stdout);
         }
@@ -606,7 +606,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.INT32_val != tag->last_val.INT32_val) {
-            tag->last_val.INT32_val = tag->val.INT32_val; 
+            tag->last_val.INT32_val = tag->val.INT32_val;
             fprintf(stdout, "{\"%s\":%" PRIi32"}\n", tag->key, tag->val.INT32_val);
             fflush(stdout);
         }
@@ -620,7 +620,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.UINT16_val != tag->last_val.UINT16_val) {
-            tag->last_val.UINT16_val = tag->val.UINT16_val; 
+            tag->last_val.UINT16_val = tag->val.UINT16_val;
             fprintf(stdout, "{\"%s\":%" PRIu16"}\n", tag->key, tag->val.UINT16_val);
             fflush(stdout);
         }
@@ -634,7 +634,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.INT16_val != tag->last_val.INT16_val) {
-            tag->last_val.INT16_val = tag->val.INT16_val; 
+            tag->last_val.INT16_val = tag->val.INT16_val;
             fprintf(stdout, "{\"%s\":%" PRIi16"}\n", tag->key, tag->val.UINT16_val);
             fflush(stdout);
         }
@@ -648,7 +648,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.UINT8_val != tag->last_val.UINT8_val) {
-            tag->last_val.UINT8_val = tag->val.UINT8_val; 
+            tag->last_val.UINT8_val = tag->val.UINT8_val;
             fprintf(stdout, "{\"%s\":%" PRIu8"}\n", tag->key, tag->val.UINT8_val);
             fflush(stdout);
         }
@@ -662,7 +662,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.INT8_val != tag->last_val.INT8_val) {
-            tag->last_val.INT8_val = tag->val.INT8_val; 
+            tag->last_val.INT8_val = tag->val.INT8_val;
             fprintf(stdout, "{\"%s\":%" PRIi8"}\n", tag->key, tag->val.INT8_val);
             fflush(stdout);
         }
@@ -676,7 +676,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.FLOAT64_val != tag->last_val.FLOAT64_val) {
-            tag->last_val.FLOAT64_val = tag->val.FLOAT64_val; 
+            tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
             fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
             fflush(stdout);
         }
@@ -690,7 +690,7 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             break;
         }
         if (tag->val.FLOAT32_val != tag->last_val.FLOAT32_val) {
-            tag->last_val.FLOAT32_val = tag->val.FLOAT32_val; 
+            tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
             fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
             fflush(stdout);
         }

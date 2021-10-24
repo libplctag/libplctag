@@ -1070,6 +1070,196 @@ extern void lock_release(lock_t *lock)
 
 
 
+/***************************************************************************
+ ************************* Condition Variables *****************************
+ ***************************************************************************/
+
+struct cond_t {
+    CRITICAL_SECTION cs;
+    CONDITION_VARIABLE cond;
+    int flag;
+};
+
+int cond_create(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+    cond_p tmp_cond = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c) {
+        pdebug(DEBUG_WARN, "Null pointer to condition var pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(*c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?");
+    }
+
+    /* clear the output first. */
+    *c = NULL;
+
+    tmp_cond = mem_alloc((int)(unsigned int)sizeof(*tmp_cond));
+    if(!tmp_cond) {
+        pdebug(DEBUG_WARN, "Unable to allocate new condition var!");
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    InitializeCriticalSection(&(tmp_cond->cs));
+    InitializeConditionVariable(&(tmp_cond->cond));
+
+    tmp_cond->flag = 0;
+
+    *c = tmp_cond;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int cond_wait_impl(const char* func, int line_num, cond_p c, int timeout_ms)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int64_t start_time = time_ms();
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+
+    if (!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call from %s:%d!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if (timeout_ms <= 0) {
+        pdebug(DEBUG_WARN, "Timeout must be a positive value but was %d in call from %s:%d!", timeout_ms, func, line_num);
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+
+    EnterCriticalSection(&(c->cs));
+
+    while(!c->flag) {
+        int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
+
+        if(time_left > 0) {
+            int wait_rc = 0;
+
+            if(SleepConditionVariableCS(&(c->cond), &(c->cs), (DWORD)time_left)) {
+                /* we might need to wait again. could be a spurious wake up. */
+                pdebug(DEBUG_DETAIL, "Condition var wait returned.");
+                rc = PLCTAG_STATUS_OK;
+            } else {
+                /* error or timeout. */
+                wait_rc = GetLastError();
+                if(wait_rc == ERROR_TIMEOUT) {
+                    pdebug(DEBUG_DETAIL, "Timeout response from condition var wait.");
+                    rc = PLCTAG_ERR_TIMEOUT;
+                    break;
+                } else {
+                    pdebug(DEBUG_WARN, "Error %d waiting on condition variable!", wait_rc);
+                    rc = PLCTAG_ERR_BAD_STATUS;
+                    break;
+                }
+            }
+        } else {
+            pdebug(DEBUG_DETAIL, "Timed out.");
+            rc = PLCTAG_ERR_TIMEOUT;
+            break;
+        }
+    }
+
+    if (c->flag) {
+        pdebug(DEBUG_DETAIL, "Condition var signaled for call at %s:%d.", func, line_num);
+
+        /* clear the flag now that we've responded. */
+        c->flag = 0;
+    }
+    else {
+        pdebug(DEBUG_DETAIL, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
+    }
+
+    LeaveCriticalSection (&(c->cs));
+
+    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+int cond_signal_impl(const char* func, int line_num, cond_p c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+
+    if (!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    EnterCriticalSection(&(c->cs));
+
+    c->flag = 1;
+
+    LeaveCriticalSection(&(c->cs));
+
+    /* Windows does this outside the critical section? */
+    WakeConditionVariable(&(c->cond));
+
+    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+
+int cond_clear_impl(const char* func, int line_num, cond_p c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+
+    if (!c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    EnterCriticalSection(&(c->cs));
+
+    c->flag = 0;
+
+    LeaveCriticalSection(&(c->cs));
+
+    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+int cond_destroy(cond_p *c)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!c || ! *c) {
+        pdebug(DEBUG_WARN, "Condition var pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    mem_free(*c);
+
+    *c = NULL;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
 
 
 
@@ -1103,10 +1293,12 @@ static int socket_lib_init(void)
 {
     MMRESULT rc = 0;
 
+    /*
     rc = timeBeginPeriod(WINDOWS_REQUESTED_TIMER_PERIOD_MS);
     if(rc != TIMERR_NOERROR) {
         pdebug(DEBUG_WARN, "Unable to set timer period to %ums!", WINDOWS_REQUESTED_TIMER_PERIOD_MS);
     }
+    */
 
     return WSAStartup(MAKEWORD(2,2), &wsaData) == NO_ERROR;
 }
@@ -1306,20 +1498,102 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
 
 
-
-
-
-extern int socket_read(sock_p s, uint8_t *buf, int size)
+int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
-    if(!s || !buf) {
+    if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!buf) {
+        pdebug(DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_READ;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* only wait if we have a timeout. */
+    if(timeout_ms > 0) {
+        fd_set read_set;
+        TIMEVAL tv;
+        int select_rc = 0;
+
+        tv.tv_sec = (long)(timeout_ms / 1000);
+        tv.tv_usec = (long)(timeout_ms % 1000) * (long)(1000);
+
+        FD_ZERO(&read_set);
+
+        FD_SET(s->fd, &read_set);
+
+        select_rc = select(1, &read_set, NULL, NULL, &tv);
+
+        if(select_rc == 1) {
+            if(FD_ISSET(s->fd, &read_set)) {
+                pdebug(DEBUG_DETAIL, "Socket can read data.");
+            } else {
+                pdebug(DEBUG_WARN, "select() returned but socket is not ready to read data!");
+                return PLCTAG_ERR_BAD_REPLY;
+            }
+        } else if(select_rc == 0) {
+            pdebug(DEBUG_DETAIL, "Socket read timed out.");
+            return PLCTAG_ERR_TIMEOUT;
+        } else {
+            int err = WSAGetLastError();
+
+            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+
+            switch(err) {
+                case WSANOTINITIALISED: /* WSAStartup() not called first. */
+                    pdebug(DEBUG_WARN, "WSAStartUp() not called before calling Winsock functions!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case WSAEFAULT: /* No mem for internal tables. */
+                    pdebug(DEBUG_WARN, "Insufficient resources for select() to run!");
+                    return PLCTAG_ERR_NO_MEM;
+                    break;
+
+                case WSAENETDOWN: /* network subsystem is down. */
+                    pdebug(DEBUG_WARN, "The network subsystem is down!");
+                    return PLCTAG_ERR_BAD_DEVICE;
+                    break;
+
+                case WSAEINVAL: /* timeout is invalid. */
+                    pdebug(DEBUG_WARN, "The timeout is invalid!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case WSAEINTR: /* A blocking call wss cancelled. */
+                    pdebug(DEBUG_WARN, "A blocking call was cancelled!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case WSAEINPROGRESS: /* A blocking call is already in progress. */
+                    pdebug(DEBUG_WARN, "A blocking call is already in progress!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case WSAENOTSOCK: /* The descriptor set contains something other than a socket. */
+                    pdebug(DEBUG_WARN, "The fd set contains something other than a socket!");
+                    return PLCTAG_ERR_BAD_DATA;
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", err);
+                    return PLCTAG_ERR_BAD_STATUS;
+                    break;
+            }
+        }
     }
 
     /* The socket is non-blocking. */
@@ -1340,17 +1614,104 @@ extern int socket_read(sock_p s, uint8_t *buf, int size)
 }
 
 
-extern int socket_write(sock_p s, uint8_t *buf, int size)
+
+
+int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
-    if(!s || !buf) {
+    if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!buf) {
+        pdebug(DEBUG_WARN, "Buffer pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_WRITE;
+        return PLCTAG_ERR_READ;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* only wait if we have a timeout. */
+    if(timeout_ms > 0) {
+        fd_set write_set;
+        TIMEVAL tv;
+        int select_rc = 0;
+
+        tv.tv_sec = (long)(timeout_ms / 1000);
+        tv.tv_usec = (long)(timeout_ms % 1000) * (long)(1000);
+
+        FD_ZERO(&write_set);
+
+        FD_SET(s->fd, &write_set);
+
+        select_rc = select(1, NULL, &write_set, NULL, &tv);
+
+        if(select_rc == 1) {
+            if(FD_ISSET(s->fd, &write_set)) {
+                pdebug(DEBUG_DETAIL, "Socket can write data.");
+            } else {
+                pdebug(DEBUG_WARN, "select() returned but socket is not ready to write data!");
+                return PLCTAG_ERR_BAD_REPLY;
+            }
+        } else if(select_rc == 0) {
+            pdebug(DEBUG_DETAIL, "Socket write timed out.");
+            return PLCTAG_ERR_TIMEOUT;
+        } else {
+            int err = WSAGetLastError();
+
+            pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+
+            switch(err) {
+                case WSANOTINITIALISED: /* WSAStartup() not called first. */
+                    pdebug(DEBUG_WARN, "WSAStartUp() not called before calling Winsock functions!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case WSAEFAULT: /* No mem for internal tables. */
+                    pdebug(DEBUG_WARN, "Insufficient resources for select() to run!");
+                    return PLCTAG_ERR_NO_MEM;
+                    break;
+
+                case WSAENETDOWN: /* network subsystem is down. */
+                    pdebug(DEBUG_WARN, "The network subsystem is down!");
+                    return PLCTAG_ERR_BAD_DEVICE;
+                    break;
+
+                case WSAEINVAL: /* timeout is invalid. */
+                    pdebug(DEBUG_WARN, "The timeout is invalid!");
+                    return PLCTAG_ERR_BAD_PARAM;
+                    break;
+
+                case WSAEINTR: /* A blocking call wss cancelled. */
+                    pdebug(DEBUG_WARN, "A blocking call was cancelled!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case WSAEINPROGRESS: /* A blocking call is already in progress. */
+                    pdebug(DEBUG_WARN, "A blocking call is already in progress!");
+                    return PLCTAG_ERR_BAD_CONFIG;
+                    break;
+
+                case WSAENOTSOCK: /* The descriptor set contains something other than a socket. */
+                    pdebug(DEBUG_WARN, "The fd set contains something other than a socket!");
+                    return PLCTAG_ERR_BAD_DATA;
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected socket err %d!", err);
+                    return PLCTAG_ERR_BAD_STATUS;
+                    break;
+            }
+        }
     }
 
     /* The socket is non-blocking. */
