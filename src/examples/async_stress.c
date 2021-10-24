@@ -171,7 +171,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     /* check the command line arguments */
     if(argc != 3) {
@@ -364,7 +364,7 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms)
         for(int i=0; i<num_tags; i++) {
             if(statuses[i] == PLCTAG_STATUS_PENDING) {
                 /* we timed out, so abort and mark the status. */
-                fprintf(stderr, "3 Calling plc_tag_abort() on tag %d!\n", i);
+                fprintf(stderr, "Timed out, calling plc_tag_abort() on tag %d!\n", i);
                 plc_tag_abort(tags[i]);
 
                 statuses[i] = PLCTAG_ERR_TIMEOUT;
