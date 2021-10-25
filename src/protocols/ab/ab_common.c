@@ -1034,9 +1034,9 @@ int check_tag_name(ab_tag_p tag, const char* name)
         }
 
         if(pccc_address.bit >= 0) {
-            pdebug(DEBUG_DETAIL, "PCCC address is a bit.");
             tag->is_bit = 1;
             tag->bit = (uint8_t)(unsigned int)pccc_address.bit;
+            pdebug(DEBUG_DETAIL, "PLC/5 address references bit %d.", tag->bit);
         }
 
         if((rc = plc5_encode_address(tag->encoded_name, &(tag->encoded_name_size), MAX_TAG_NAME, &pccc_address)) != PLCTAG_STATUS_OK) {
@@ -1054,9 +1054,9 @@ int check_tag_name(ab_tag_p tag, const char* name)
         }
 
         if(pccc_address.bit >= 0) {
-            pdebug(DEBUG_DETAIL, "PCCC address is a bit.");
             tag->is_bit = 1;
             tag->bit = (uint8_t)(unsigned int)pccc_address.bit;
+            pdebug(DEBUG_DETAIL, "SLC/Micrologix address references bit %d.", tag->bit);
         }
 
         if ((rc = slc_encode_address(tag->encoded_name, &(tag->encoded_name_size), MAX_TAG_NAME, &pccc_address)) != PLCTAG_STATUS_OK) {
