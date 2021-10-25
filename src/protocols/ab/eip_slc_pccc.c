@@ -258,8 +258,30 @@ int tag_read_start(ab_tag_p tag)
     /* point the struct pointers to the buffer*/
     pccc = (pccc_req*)(req->data);
 
+    /* point to the end of the struct */
+    data = ((uint8_t *)pccc) + sizeof(pccc_req);
+
     /* set up the embedded PCCC packet */
     embed_start = (uint8_t*)(&pccc->service_code);
+
+    /* copy encoded tag name into the request */
+    mem_copy(data,tag->encoded_name,tag->encoded_name_size);
+    data += tag->encoded_name_size;
+
+    /* fill in the fixed fields. */
+
+    /* encap fields */
+    pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);    /* set up for unconnected sending */
+
+    /* router timeout */
+    pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
+
+    /* Common Packet Format fields for unconnected send. */
+    pccc->cpf_item_count        = h2le16(2);                /* ALWAYS 2 */
+    pccc->cpf_nai_item_type     = h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
+    pccc->cpf_nai_item_length   = h2le16(0);                /* ALWAYS 0 */
+    pccc->cpf_udi_item_type     = h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
+    pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - embed_start));  /* REQ: fill in with length of remaining data. */
 
     /* Command Routing */
     pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
@@ -281,30 +303,10 @@ int tag_read_start(ab_tag_p tag)
     pccc->pccc_function = AB_EIP_SLC_RANGE_READ_FUNC;
     pccc->pccc_transfer_size = (uint8_t)(tag->elem_size * tag->elem_count); /* size to read/write in bytes. */
 
-    /* point to the end of the struct */
-    data = ((uint8_t *)pccc) + sizeof(pccc_req);
-
-    /* copy encoded tag name into the request */
-    mem_copy(data,tag->encoded_name,tag->encoded_name_size);
-    data += tag->encoded_name_size;
-
     /*
      * after the embedded packet, we need to tell the message router
      * how to get to the target device.
      */
-
-    /* encap fields */
-    pccc->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);    /* set up for unconnected sending */
-
-    /* router timeout */
-    pccc->router_timeout = h2le16(1);                 /* one second timeout, enough? */
-
-    /* Common Packet Format fields for unconnected send. */
-    pccc->cpf_item_count        = h2le16(2);                /* ALWAYS 2 */
-    pccc->cpf_nai_item_type     = h2le16(AB_EIP_ITEM_NAI);  /* ALWAYS 0 */
-    pccc->cpf_nai_item_length   = h2le16(0);                /* ALWAYS 0 */
-    pccc->cpf_udi_item_type     = h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
-    pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - embed_start));  /* REQ: fill in with length of remaining data. */
 
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
@@ -563,6 +565,9 @@ int tag_write_start(ab_tag_p tag)
     pccc->cpf_nai_item_length   = h2le16(0);                /* ALWAYS 0 */
     pccc->cpf_udi_item_type     = h2le16(AB_EIP_ITEM_UDI);  /* ALWAYS 0x00B2 - Unconnected Data Item */
     pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - embed_start));  /* REQ: fill in with length of remaining data. */
+
+    pdebug(DEBUG_DETAIL, "Total data length %d.", (int)(unsigned int)(data - (uint8_t*)(pccc)));
+    pdebug(DEBUG_DETAIL, "Total payload length %d.", (int)(unsigned int)(data - embed_start));
 
     /* Command Routing */
     pccc->service_code = AB_EIP_CMD_PCCC_EXECUTE;  /* ALWAYS 0x4B, Execute PCCC */
