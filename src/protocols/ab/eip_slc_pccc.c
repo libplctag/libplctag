@@ -525,6 +525,26 @@ int tag_write_start(ab_tag_p tag)
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
     data += tag->encoded_name_size;
 
+    /* write the mask if this is a bit tag */
+    if(tag->is_bit) {
+        for(int i=0; i < tag->elem_size; i++) {
+            if((tag->bit / 8) == i) {
+                *data = (uint8_t)(1 << (tag->bit % 8));
+
+                pdebug(DEBUG_DETAIL, "adding mask byte %d: %x", i, *data);
+
+                data++;
+            } else {
+                /* this is not the data we care about. */
+                *data = (uint8_t)0x00;
+
+                pdebug(DEBUG_DETAIL, "adding mask byte %d: %x", i, *data);
+
+                data++;
+            }
+        }
+    }
+
     /* now copy the data to write */
     mem_copy(data,tag->data,tag->size);
     data += tag->size;
@@ -561,7 +581,7 @@ int tag_write_start(ab_tag_p tag)
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
-    pccc->pccc_function = AB_EIP_SLC_RANGE_WRITE_FUNC;
+    pccc->pccc_function = (tag->is_bit ? AB_EIP_SLC_RANGE_BIT_WRITE_FUNC : AB_EIP_SLC_RANGE_WRITE_FUNC);
     pccc->pccc_transfer_size = (uint8_t)(tag->size);
 
     /* get ready to add the request to the queue for this session */
