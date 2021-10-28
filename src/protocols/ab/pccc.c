@@ -974,16 +974,22 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_BLOCK_TRANSFER:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"rlen") == 0) {
             address->sub_element = 1;
+            (*str) += 4;
         } else if(str_cmp_i(*str,"dlen") == 0) {
             address->sub_element = 2;
+            (*str) += 4;
         } else if(str_cmp_i(*str,"df") == 0) {
             address->sub_element = 3;
+            (*str) += 2;
         } else if(str_cmp_i(*str,"elem") == 0) {
             address->sub_element = 4;
+            (*str) += 4;
         } else if(str_cmp_i(*str,"rgs") == 0) {
             address->sub_element = 5;
+            (*str) += 3;
         } else {
             pdebug(DEBUG_WARN,"Unsupported block transfer mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
@@ -995,10 +1001,13 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_TIMER:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"pre") == 0) {
             address->sub_element = 1;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"acc") == 0) {
             address->sub_element = 2;
+            (*str) += 3;
         } else {
             pdebug(DEBUG_WARN,"Unsupported %s mnemonic %s!", (address->file_type == PCCC_FILE_COUNTER ? "counter" : "timer"), *str);
             return PLCTAG_ERR_BAD_PARAM;
@@ -1009,10 +1018,13 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_CONTROL:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"len") == 0) {
             address->sub_element = 1;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"pos") == 0) {
             address->sub_element = 2;
+            (*str) += 3;
         } else {
             pdebug(DEBUG_WARN,"Unsupported control mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
@@ -1023,16 +1035,22 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_PID:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"sp") == 0) {
             address->sub_element = 2;
+            (*str) += 2;
         } else if(str_cmp_i(*str,"kp") == 0) {
             address->sub_element = 4;
+            (*str) += 2;
         } else if(str_cmp_i(*str,"ki") == 0) {
             address->sub_element = 6;
+            (*str) += 2;
         } else if(str_cmp_i(*str,"kd") == 0) {
             address->sub_element = 8;
+            (*str) += 2;
         } else if(str_cmp_i(*str,"pv") == 0) {
             address->sub_element = 26;
+            (*str) += 2;
         } else {
             pdebug(DEBUG_WARN,"Unsupported PID mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
@@ -1043,12 +1061,16 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_MESSAGE:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"err") == 0) {
             address->sub_element = 1;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"rlen") == 0) {
             address->sub_element = 2;
+            (*str) += 4;
         } else if(str_cmp_i(*str,"dlen") == 0) {
             address->sub_element = 3;
+            (*str) += 4;
         } else {
             pdebug(DEBUG_WARN,"Unsupported message mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
@@ -1059,8 +1081,10 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_STRING:
         if(str_cmp_i(*str,"len") == 0) {
             address->sub_element = 0;
+            (*str) += 3;
         } else if(str_cmp_i(*str,"data") == 0) {
             address->sub_element = 1;
+            (*str) += 4;
         } else {
             pdebug(DEBUG_WARN,"Unsupported string mnemonic %s!", *str);
             return PLCTAG_ERR_BAD_PARAM;
@@ -1106,6 +1130,12 @@ int parse_pccc_bit_num(const char **str, pccc_addr_t *address)
     /* make sure the next character is /. */
     if((**str) != '/') {
         pdebug(DEBUG_WARN, "Bad bit number in logical address.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* make sure that the data file type is B or N. */
+    if(address->file_type != PCCC_FILE_BIT && address->file_type != PCCC_FILE_INT) {
+        pdebug(DEBUG_WARN, "Single bits only work on B or N data files.");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
