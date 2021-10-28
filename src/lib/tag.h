@@ -111,8 +111,8 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         uint8_t read_complete:1; \
                         uint8_t write_in_flight:1; \
                         uint8_t write_complete:1; \
-                        uint8_t bit; \
                         int8_t status; \
+                        int bit; \
                         int32_t size; \
                         int32_t tag_id; \
                         int32_t auto_sync_read_ms; \
