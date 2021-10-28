@@ -549,7 +549,7 @@ int tag_write_start(ab_tag_p tag)
     data += tag->encoded_name_size;
 
     /* now copy the data to write */
-    if(!tag->bit) {
+    if(!tag->is_bit) {
         mem_copy(data, tag->data, tag->size);
         data += tag->size;
     } else {
