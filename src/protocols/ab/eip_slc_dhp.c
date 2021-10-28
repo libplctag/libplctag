@@ -232,6 +232,7 @@ int tag_read_start(ab_tag_p tag)
 {
     pccc_dhp_co_req *pccc;
     uint8_t *data = NULL;
+    uint8_t *embed_start = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
     int data_per_packet = 0;
     int overhead = 0;
@@ -279,14 +280,12 @@ int tag_read_start(ab_tag_p tag)
     /* point to the end of the struct */
     data = (req->data) + sizeof(pccc_dhp_co_req);
 
+    /* set up the embedded PCCC packet */
+    embed_start = (uint8_t*)(&pccc->cpf_conn_seq_num);
+
     /* copy encoded tag name into the request */
     mem_copy(data, tag->encoded_name, tag->encoded_name_size);
     data += tag->encoded_name_size;
-
-    // Old PLC5 command.
-    // /* amount of data to get this time */
-    // *data = (uint8_t)(tag->size); /* bytes for this transfer */
-    // data++;
 
     /* encap fields */
     pccc->encap_command = h2le16(AB_EIP_CONNECTED_SEND);    /* ALWAYS 0x006F Unconnected Send*/
@@ -299,8 +298,11 @@ int tag_read_start(ab_tag_p tag)
     pccc->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);/* ALWAYS 0x00A1 connected address item */
     pccc->cpf_cai_item_length = h2le16(4);            /* ALWAYS 4 ? */
     pccc->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);/* ALWAYS 0x00B1 - connected Data Item */
-    pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&(pccc->cpf_conn_seq_num)))); /* REQ: fill in with length of remaining data. */
+    pccc->cpf_cdi_item_length = h2le16((uint16_t)(data - embed_start)); /* REQ: fill in with length of remaining data. */
     pccc->cpf_conn_seq_num = h2le16(conn_seq_id);
+
+    pdebug(DEBUG_DETAIL, "Total data length %d.", (int)(unsigned int)(data - (uint8_t*)(pccc)));
+    pdebug(DEBUG_DETAIL, "Total payload length %d.", (int)(unsigned int)(data - embed_start));
 
     /* DH+ Routing */
     pccc->dest_link = h2le16(0);
@@ -308,15 +310,7 @@ int tag_read_start(ab_tag_p tag)
     pccc->src_link = h2le16(0);
     pccc->src_node = h2le16(0) /*h2le16(tag->dhp_src)*/;
 
-    // /* PCCC Command */
-    // pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-    // pccc->pccc_status = 0;  /* STS 0 in request */
-    // pccc->pccc_seq_num = /*h2le16(conn_seq_id)*/ h2le16((uint16_t)(intptr_t)(tag->session));
-    // pccc->pccc_function = AB_EIP_PLC5_RANGE_READ_FUNC;
-    // pccc->pccc_transfer_offset = h2le16((uint16_t)0);
-    // pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
-
-        /* fill in the PCCC command */
+    /* fill in the PCCC command */
     pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     pccc->pccc_status = 0;  /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id);
