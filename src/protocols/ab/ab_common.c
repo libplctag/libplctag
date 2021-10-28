@@ -1015,19 +1015,32 @@ int check_cpu(ab_tag_p tag, attr attribs)
 int check_tag_name(ab_tag_p tag, const char* name)
 {
     int rc = PLCTAG_STATUS_OK;
+    pccc_addr_t pccc_address;
 
     if (!name) {
         pdebug(DEBUG_WARN,"No tag name parameter found!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    mem_set(&pccc_address, 0, sizeof(pccc_address));
+
     /* attempt to parse the tag name */
     switch (tag->plc_type) {
     case AB_PLC_PLC5:
     case AB_PLC_LGX_PCCC:
-        if ((rc = plc5_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "parse of PLC/5-style tag name %s failed!", name);
+        if((rc = parse_pccc_logical_address(name, &pccc_address))) {
+            pdebug(DEBUG_WARN, "Parse of PCCC-style tag name %s failed!", name);
+            return rc;
+        }
 
+        if(pccc_address.bit >= 0) {
+            tag->is_bit = 1;
+            tag->bit = (uint8_t)(unsigned int)pccc_address.bit;
+            pdebug(DEBUG_DETAIL, "PLC/5 address references bit %d.", tag->bit);
+        }
+
+        if((rc = plc5_encode_address(tag->encoded_name, &(tag->encoded_name_size), MAX_TAG_NAME, &pccc_address)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Encoding of PLC/5-style tag name %s failed!", name);
             return rc;
         }
 
@@ -1035,9 +1048,19 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
     case AB_PLC_SLC:
     case AB_PLC_MLGX:
-        if ((rc = slc_encode_tag_name(tag->encoded_name, &(tag->encoded_name_size), &(tag->file_type), name, MAX_TAG_NAME)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "parse of SLC-style tag name %s failed!", name);
+        if((rc = parse_pccc_logical_address(name, &pccc_address))) {
+            pdebug(DEBUG_WARN, "Parse of PCCC-style tag name %s failed!", name);
+            return rc;
+        }
 
+        if(pccc_address.bit >= 0) {
+            tag->is_bit = 1;
+            tag->bit = (uint8_t)(unsigned int)pccc_address.bit;
+            pdebug(DEBUG_DETAIL, "SLC/Micrologix address references bit %d.", tag->bit);
+        }
+
+        if ((rc = slc_encode_address(tag->encoded_name, &(tag->encoded_name_size), MAX_TAG_NAME, &pccc_address)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Encoding of SLC-style tag name %s failed!", name);
             return rc;
         }
 

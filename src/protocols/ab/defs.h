@@ -100,10 +100,12 @@
 #define AB_EIP_PCCC_TYPED_CMD ((uint8_t)0x0F)
 #define AB_EIP_PLC5_RANGE_READ_FUNC ((uint8_t)0x01)
 #define AB_EIP_PLC5_RANGE_WRITE_FUNC ((uint8_t)0x00)
+#define AB_EIP_PLC5_RMW_FUNC ((uint8_t)0x26)
 #define AB_EIP_PCCCLGX_TYPED_READ_FUNC ((uint8_t)0x68)
 #define AB_EIP_PCCCLGX_TYPED_WRITE_FUNC ((uint8_t)0x67)
 #define AB_EIP_SLC_RANGE_READ_FUNC ((uint8_t)0xA2)
 #define AB_EIP_SLC_RANGE_WRITE_FUNC ((uint8_t)0xAA)
+#define AB_EIP_SLC_RANGE_BIT_WRITE_FUNC ((uint8_t)0xAB)
 
 
 /* PCCC defs */

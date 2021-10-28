@@ -805,11 +805,26 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
 
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
 
+    /* get the tag status. */
+    rc = tag->vtable->status(tag);
+
+    /* check to see if there was an error during tag creation. */
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
+        if(tag->vtable->abort) {
+            tag->vtable->abort(tag);
+        }
+        rc_dec(tag);
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Tag status after creation is %s.", plc_tag_decode_error(rc));
+
     /*
     * if there is a timeout, then wait until we get
     * an error or we timeout.
     */
-    if(timeout) {
+    if(timeout && rc == PLCTAG_STATUS_PENDING) {
         int64_t start_time = time_ms();
 
         /* wake up the tickler in case it is needed to create the tag. */
