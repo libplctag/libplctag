@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2021 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -146,6 +146,11 @@ static int encode_file_type(pccc_file_t file_type);
  * 1        err - error
  * 2        rlen - RLEN
  * 3        dlen - DLEN
+ *
+ * ST
+ * Offset   Field
+ * 0        LEN - length
+ * 2-84     DATA - characters of string
  */
 
 
@@ -215,7 +220,7 @@ int plc5_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *add
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(!data || !size ) {
+    if(!data || !size || !address) {
         pdebug(DEBUG_WARN, "Called with null data, or name or zero sized data!");
         return PLCTAG_ERR_NULL_PTR;
     }

@@ -52,6 +52,7 @@ typedef struct {
     int element;
     int sub_element;
     int bit;
+    int element_size_bytes;
 } pccc_addr_t;
 
 extern int parse_pccc_logical_address(const char *file_address, pccc_addr_t *address);
