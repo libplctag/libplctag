@@ -52,17 +52,13 @@ static int parse_pccc_elem_num(const char **str, pccc_addr_t *address);
 static int parse_pccc_subelem_num(const char **str, pccc_addr_t *address);
 static int parse_pccc_bit_num(const char **str, pccc_addr_t *address);
 static void encode_data(uint8_t *data, int *index, int val);
-static int encode_file_type(pccc_file_t file_type);
-
+// static int encode_file_type(pccc_file_t file_type);
 
 
 
 /*
  * Public functions
  */
-
-
-
 
 
 
@@ -279,8 +275,6 @@ int plc5_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *add
 
 int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *address)
 {
-    int encoded_file_type = 0;
-
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!data || !size) {
@@ -297,8 +291,7 @@ int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *addr
     /* zero out the size */
     *size = 0;
 
-    encoded_file_type = encode_file_type(address->file_type);
-    if(encoded_file_type == 0) {
+    if(address->file_type == 0) {
         pdebug(DEBUG_WARN,"SLC file type %d cannot be decoded!", address->file_type);
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -307,7 +300,7 @@ int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *addr
     encode_data(data, size, address->file);
 
     /* encode the data file type. */
-    encode_data(data, size, encoded_file_type);
+    encode_data(data, size, address->file_type);
 
     /* add in the element number */
     encode_data(data, size, address->element);
@@ -708,6 +701,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'a': /* ASCII */
         pdebug(DEBUG_DETAIL, "Found ASCII file.");
         address->file_type = PCCC_FILE_ASCII;
+        address->element_size_bytes = 1;
         (*str)++;
         break;
 
@@ -715,8 +709,9 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'b': /* Bit or block transfer */
         if(isdigit((*str)[1])) {
             /* Bit */
-            pdebug(DEBUG_DETAIL, "Found Binary file.");
+            pdebug(DEBUG_DETAIL, "Found Bit file.");
             address->file_type = PCCC_FILE_BIT;
+            address->element_size_bytes = 2;
             (*str)++;
             break;
         } else {
@@ -724,10 +719,12 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
                 /* block transfer */
                 pdebug(DEBUG_DETAIL, "Found Block Transfer file.");
                 address->file_type = PCCC_FILE_BLOCK_TRANSFER;
-                (*str) += 2;  /* skip past both characters */
+                address->element_size_bytes = 12;
+                (*str) += 2;
             } else {
                 pdebug(DEBUG_WARN, "Unknown file %s found!", *str);
                 address->file_type = PCCC_FILE_UNKNOWN;
+                address->element_size_bytes = 0;
                 rc = PLCTAG_ERR_BAD_PARAM;
             }
         }
@@ -738,6 +735,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'c': /* Counter */
         pdebug(DEBUG_DETAIL, "Found Counter file.");
         address->file_type = PCCC_FILE_COUNTER;
+        address->element_size_bytes = 6;
         (*str)++;
         break;
 
@@ -745,6 +743,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'd': /* BCD number */
         pdebug(DEBUG_DETAIL, "Found BCD file.");
         address->file_type = PCCC_FILE_BCD;
+        address->element_size_bytes = 2;
         (*str)++;
         break;
 
@@ -752,6 +751,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'f': /* Floating point Number */
         pdebug(DEBUG_DETAIL, "Found Float/REAL file.");
         address->file_type = PCCC_FILE_FLOAT;
+        address->element_size_bytes = 4;
         (*str)++;
         break;
 
@@ -759,6 +759,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'i': /* Input */
         pdebug(DEBUG_DETAIL, "Found Input file.");
         address->file_type = PCCC_FILE_INPUT;
+        address->element_size_bytes = 2;
         (*str)++;
         break;
 
@@ -766,6 +767,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'l':
         pdebug(DEBUG_DETAIL, "Found Long Int file.");
         address->file_type = PCCC_FILE_LONG_INT;
+        address->element_size_bytes = 4;
         (*str)++;
         break;
 
@@ -774,19 +776,20 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
         if((*str)[1] == 'G' || (*str)[1] == 'g') {
             pdebug(DEBUG_DETAIL, "Found Message file.");
             address->file_type = PCCC_FILE_MESSAGE;
+            address->element_size_bytes = 112;
             (*str) += 2;  /* skip past both characters */
         } else {
             address->file_type = PCCC_FILE_UNKNOWN;
             pdebug(DEBUG_WARN, "Unknown file %s found!", *str);
             rc = PLCTAG_ERR_BAD_PARAM;
         }
-
         break;
 
     case 'N':
     case 'n': /* INT */
         pdebug(DEBUG_DETAIL, "Found Integer file.");
         address->file_type = PCCC_FILE_INT;
+        address->element_size_bytes = 2;
         (*str)++;
         break;
 
@@ -794,6 +797,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
     case 'o': /* Output */
         pdebug(DEBUG_DETAIL, "Found Output file.");
         address->file_type = PCCC_FILE_OUTPUT;
+        address->element_size_bytes = 2;
         (*str)++;
         break;
 
@@ -802,19 +806,20 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
         if((*str)[1] == 'D' || (*str)[1] == 'd') {
             pdebug(DEBUG_DETAIL, "Found PID file.");
             address->file_type = PCCC_FILE_PID;
+            address->element_size_bytes = 164;
             (*str) += 2;  /* skip past both characters */
         } else {
             address->file_type = PCCC_FILE_UNKNOWN;
             pdebug(DEBUG_WARN, "Unknown file %s found!", *str);
             rc = PLCTAG_ERR_BAD_PARAM;
         }
-
         break;
 
     case 'R':
     case 'r': /* Control */
         pdebug(DEBUG_DETAIL, "Found Control file.");
         address->file_type = PCCC_FILE_CONTROL;
+        address->element_size_bytes = 6;
         (*str)++;
         break;
 
@@ -824,6 +829,7 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
             /* Status */
             pdebug(DEBUG_DETAIL, "Found Status file.");
             address->file_type = PCCC_FILE_STATUS;
+            address->element_size_bytes = 2;
             (*str)++;
             break;
         } else {
@@ -831,11 +837,13 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
                 /* SFC */
                 pdebug(DEBUG_DETAIL, "Found SFC file.");
                 address->file_type = PCCC_FILE_SFC;
+                address->element_size_bytes = 6;
                 (*str) += 2;  /* skip past both characters */
             } else if((*str)[1] == 'T' || (*str)[1] == 't') {
                 /* String */
                 pdebug(DEBUG_DETAIL, "Found String file.");
                 address->file_type = PCCC_FILE_STRING;
+                address->element_size_bytes = 84;
                 (*str) += 2;  /* skip past both characters */
             } else {
                 address->file_type = PCCC_FILE_UNKNOWN;
@@ -843,19 +851,20 @@ int parse_pccc_file_type(const char **str, pccc_addr_t *address)
                 rc = PLCTAG_ERR_BAD_PARAM;
             }
         }
-
         break;
 
     case 'T':
     case 't': /* Timer */
         pdebug(DEBUG_DETAIL, "Found Timer file.");
         address->file_type = PCCC_FILE_TIMER;
+        address->element_size_bytes = 6;
         (*str)++;
         break;
 
     default:
         pdebug(DEBUG_WARN, "Bad format or unsupported logical address %s!", *str);
         address->file_type = PCCC_FILE_UNKNOWN;
+        address->element_size_bytes = 0;
         rc = PLCTAG_ERR_BAD_PARAM;
         break;
     }
@@ -974,21 +983,27 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_BLOCK_TRANSFER:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"rlen") == 0) {
             address->sub_element = 1;
+            address->element_size_bytes = 2;
             (*str) += 4;
         } else if(str_cmp_i(*str,"dlen") == 0) {
             address->sub_element = 2;
+            address->element_size_bytes = 2;
             (*str) += 4;
         } else if(str_cmp_i(*str,"df") == 0) {
             address->sub_element = 3;
+            address->element_size_bytes = 2;
             (*str) += 2;
         } else if(str_cmp_i(*str,"elem") == 0) {
             address->sub_element = 4;
+            address->element_size_bytes = 2;
             (*str) += 4;
         } else if(str_cmp_i(*str,"rgs") == 0) {
             address->sub_element = 5;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else {
             pdebug(DEBUG_WARN,"Unsupported block transfer mnemonic %s!", *str);
@@ -1001,12 +1016,15 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_TIMER:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"pre") == 0) {
             address->sub_element = 1;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"acc") == 0) {
             address->sub_element = 2;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else {
             pdebug(DEBUG_WARN,"Unsupported %s mnemonic %s!", (address->file_type == PCCC_FILE_COUNTER ? "counter" : "timer"), *str);
@@ -1018,12 +1036,15 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_CONTROL:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"len") == 0) {
             address->sub_element = 1;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"pos") == 0) {
             address->sub_element = 2;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else {
             pdebug(DEBUG_WARN,"Unsupported control mnemonic %s!", *str);
@@ -1035,21 +1056,27 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_PID:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"sp") == 0) {
             address->sub_element = 2;
+            address->element_size_bytes = 4;
             (*str) += 2;
         } else if(str_cmp_i(*str,"kp") == 0) {
             address->sub_element = 4;
+            address->element_size_bytes = 4;
             (*str) += 2;
         } else if(str_cmp_i(*str,"ki") == 0) {
             address->sub_element = 6;
+            address->element_size_bytes = 4;
             (*str) += 2;
         } else if(str_cmp_i(*str,"kd") == 0) {
             address->sub_element = 8;
+            address->element_size_bytes = 4;
             (*str) += 2;
         } else if(str_cmp_i(*str,"pv") == 0) {
             address->sub_element = 26;
+            address->element_size_bytes = 4;
             (*str) += 2;
         } else {
             pdebug(DEBUG_WARN,"Unsupported PID mnemonic %s!", *str);
@@ -1061,15 +1088,19 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_MESSAGE:
         if(str_cmp_i(*str,"con") == 0) {
             address->sub_element = 0;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"err") == 0) {
             address->sub_element = 1;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"rlen") == 0) {
             address->sub_element = 2;
+            address->element_size_bytes = 2;
             (*str) += 4;
         } else if(str_cmp_i(*str,"dlen") == 0) {
             address->sub_element = 3;
+            address->element_size_bytes = 2;
             (*str) += 4;
         } else {
             pdebug(DEBUG_WARN,"Unsupported message mnemonic %s!", *str);
@@ -1081,9 +1112,11 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
     case PCCC_FILE_STRING:
         if(str_cmp_i(*str,"len") == 0) {
             address->sub_element = 0;
+            address->element_size_bytes = 2;
             (*str) += 3;
         } else if(str_cmp_i(*str,"data") == 0) {
             address->sub_element = 1;
+            address->element_size_bytes = 82;
             (*str) += 4;
         } else {
             pdebug(DEBUG_WARN,"Unsupported string mnemonic %s!", *str);
@@ -1176,33 +1209,37 @@ void encode_data(uint8_t *data, int *index, int val)
 }
 
 
-int encode_file_type(pccc_file_t file_type)
-{
-    switch(file_type) {
-        case PCCC_FILE_ASCII: return 0x8e; break;
-        case PCCC_FILE_BIT: return 0x85; break;
-        case PCCC_FILE_BLOCK_TRANSFER: break;
-        case PCCC_FILE_COUNTER: return 0x87; break;
-        case PCCC_FILE_BCD: return 0x8f; break;
-        case PCCC_FILE_FLOAT: return 0x8a; break;
-        case PCCC_FILE_INPUT: return 0x8c; break;
-        case PCCC_FILE_LONG_INT: return 0x91; break;
-        case PCCC_FILE_MESSAGE: return 0x92; break;
-        case PCCC_FILE_INT: return 0x89; break;
-        case PCCC_FILE_OUTPUT: return 0x8b; break;
-        case PCCC_FILE_PID: return 0x93; break;
-        case PCCC_FILE_CONTROL: return 0x88; break;
-        case PCCC_FILE_STATUS: return 0x84; break;
-        case PCCC_FILE_SFC: break; /* what is this? */
-        case PCCC_FILE_STRING: return 0x8d; break;
-        case PCCC_FILE_TIMER: return 0x86; break;
-        default:
-            pdebug(DEBUG_WARN, "Unknown file type %d!", (int)file_type);
-            return 0x00;
-            break;
-    }
+// int encode_file_type(pccc_file_t file_type)
+// {
+//     switch(file_type) {
+//         case PCCC_FILE_ASCII: return 0x8e; break;
+//         case PCCC_FILE_BIT: return 0x85; break;
+//         case PCCC_FILE_BLOCK_TRANSFER: break;
+//         case PCCC_FILE_COUNTER: return 0x87; break;
+//         case PCCC_FILE_BCD: return 0x8f; break;
+//         case PCCC_FILE_FLOAT: return 0x8a; break;
+//         case PCCC_FILE_INPUT: return 0x8c; break;
+//         case PCCC_FILE_LONG_INT: return 0x91; break;
+//         case PCCC_FILE_MESSAGE: return 0x92; break;
+//         case PCCC_FILE_INT: return 0x89; break;
+//         case PCCC_FILE_OUTPUT: return 0x8b; break;
+//         case PCCC_FILE_PID: return 0x93; break;
+//         case PCCC_FILE_CONTROL: return 0x88; break;
+//         case PCCC_FILE_STATUS: return 0x84; break;
+//         case PCCC_FILE_SFC: break; /* what is this? */
+//         case PCCC_FILE_STRING: return 0x8d; break;
+//         case PCCC_FILE_TIMER: return 0x86; break;
 
-    pdebug(DEBUG_WARN, "Unknown file type %d!", (int)file_type);
-    return 0x00;
-}
+
+
+
+//         default:
+//             pdebug(DEBUG_WARN, "Unknown file type %d!", (int)file_type);
+//             return 0x00;
+//             break;
+//     }
+
+//     pdebug(DEBUG_WARN, "Unknown file type %d!", (int)file_type);
+//     return 0x00;
+// }
 

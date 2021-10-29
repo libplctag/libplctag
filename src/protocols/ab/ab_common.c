@@ -496,8 +496,10 @@ plc_tag_p ab_tag_create(attr attribs)
 
 int get_tag_data_type(ab_tag_p tag, attr attribs)
 {
+    int rc = PLCTAG_STATUS_OK;
     const char *elem_type = NULL;
     const char *tag_name = NULL;
+    pccc_addr_t file_addr =  {0};
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -508,89 +510,13 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
     case AB_PLC_MLGX:
         tag_name = attr_get_str(attribs,"name", NULL);
 
-        /* FIXME - rewrite this into a function depending on the PLC type. */
-
-        /* the first two characters are the important ones. */
-        if(tag_name && str_length(tag_name) >= 2) {
-            switch(tag_name[0]) {
-            case 'b':
-            case 'B':
-                /*bit*/
-                pdebug(DEBUG_DETAIL,"Found tag element type of bit.");
-                tag->elem_size=2;
-                tag->elem_type = AB_TYPE_BOOL;
-                break;
-
-            case 'c':
-            case 'C':
-                /* counter */
-                pdebug(DEBUG_DETAIL,"Found tag element type of counter.");
-                tag->elem_size=6;
-                tag->elem_type = AB_TYPE_COUNTER;
-                break;
-
-            case 'f':
-            case 'F':
-                /* 32-bit float */
-                pdebug(DEBUG_DETAIL,"Found tag element type of float.");
-                tag->elem_size=4;
-                tag->elem_type = AB_TYPE_FLOAT32;
-                break;
-
-            case 'l':
-            case 'L':
-                /* 32-bit integer */
-                pdebug(DEBUG_DETAIL,"Found tag element type of long int.");
-                tag->elem_size=4;
-                tag->elem_type = AB_TYPE_INT32;
-                break;
-
-            case 'n':
-            case 'N':
-                /* 16-bit integer */
-                pdebug(DEBUG_DETAIL,"Found tag element type of 16-bit integer.");
-                tag->elem_size=2;
-                tag->elem_type = AB_TYPE_INT16;
-                break;
-
-            case 'r':
-            case 'R':
-                /* control */
-                pdebug(DEBUG_DETAIL,"Found tag element type of control.");
-                tag->elem_size=6;
-                tag->elem_type = AB_TYPE_CONTROL;
-                break;
-
-            case 's':
-            case 'S':
-                /* Status or String */
-                if(tag_name[1] == 't' || tag_name[1] == 'T') {
-                    /* string */
-                    pdebug(DEBUG_DETAIL,"Found tag element type of string.");
-                    tag->elem_size = 84;
-                    tag->elem_type = AB_TYPE_STRING;
-                } else {
-                    /* status */
-                    pdebug(DEBUG_DETAIL,"Found tag element type of status word.");
-                    tag->elem_size = 2;
-                    tag->elem_type = AB_TYPE_INT16;
-                }
-                break;
-
-            case 't':
-            case 'T':
-                /* timer */
-                pdebug(DEBUG_DETAIL,"Found tag element type of timer.");
-                tag->elem_size=6;
-                tag->elem_type = AB_TYPE_TIMER;
-                break;
-
-            default:
-                pdebug(DEBUG_DETAIL,"Unknown tag type for tag %s", tag_name);
-                return PLCTAG_ERR_UNSUPPORTED;
-                break;
-            }
+        rc = parse_pccc_logical_address(tag_name, &file_addr);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to parse data file %s!", tag_name);
+            return rc;
         }
+
+        tag->elem_size = file_addr.element_size_bytes;
 
         break;
 
