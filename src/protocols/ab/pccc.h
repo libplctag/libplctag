@@ -59,7 +59,7 @@ typedef enum {
                PCCC_FILE_STATUS         = 0x84,
                PCCC_FILE_STRING         = 0x8d,
                PCCC_FILE_TIMER          = 0x86
-            } pccc_file_t;
+             } pccc_file_t;
 
 
 typedef struct {
@@ -67,7 +67,8 @@ typedef struct {
     int file;
     int element;
     int sub_element;
-    int bit;
+    uint8_t is_bit;
+    uint8_t bit;
     int element_size_bytes;
 } pccc_addr_t;
 
