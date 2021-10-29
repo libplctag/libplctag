@@ -959,9 +959,9 @@ int check_tag_name(ab_tag_p tag, const char* name)
             return rc;
         }
 
-        if(pccc_address.bit >= 0) {
+        if(pccc_address.is_bit) {
             tag->is_bit = 1;
-            tag->bit = (uint8_t)(unsigned int)pccc_address.bit;
+            tag->bit = (int)(unsigned int)pccc_address.bit;
             pdebug(DEBUG_DETAIL, "PLC/5 address references bit %d.", tag->bit);
         }
 
@@ -979,9 +979,9 @@ int check_tag_name(ab_tag_p tag, const char* name)
             return rc;
         }
 
-        if(pccc_address.bit >= 0) {
+        if(pccc_address.is_bit) {
             tag->is_bit = 1;
-            tag->bit = (uint8_t)(unsigned int)pccc_address.bit;
+            tag->bit = (int)(unsigned int)pccc_address.bit;
             pdebug(DEBUG_DETAIL, "SLC/Micrologix address references bit %d.", tag->bit);
         }
 
