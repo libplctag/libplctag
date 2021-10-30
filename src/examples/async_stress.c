@@ -55,7 +55,7 @@
 
 #define REQUIRED_VERSION 2,4,0
 
-#define DATA_TIMEOUT (2000)
+#define DATA_TIMEOUT (5000)
 #define TAG_CREATE_TIMEOUT (5000)
 #define RETRY_TIMEOUT (10000)
 
@@ -245,13 +245,15 @@ int main(int argc, char **argv)
             int need_sleep = 0;
 
             for(int i=0; i<num_tags; i++) {
-                if(statuses[i] != PLCTAG_ERR_TIMEOUT) {
-                    fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
-                    done = 1;
-                } else {
-                    fprintf(stderr, "Tag %d read failed with a timeout, will retry.\n", i);
-                    plc_tag_abort(tags[i]);
-                    need_sleep = 1;
+                if(statuses[i] != PLCTAG_STATUS_OK) {
+                    if (statuses[i] != PLCTAG_ERR_TIMEOUT) {
+                        fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
+                        done = 1;
+                    } else {
+                        fprintf(stderr, "Tag %d read failed with a timeout, will retry.\n", i);
+                        plc_tag_abort(tags[i]);
+                        need_sleep = 1;
+                    }
                 }
             }
 
@@ -275,7 +277,7 @@ int main(int argc, char **argv)
             min_ms = end - start;
         }
 
-        //fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
+        fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
 
         /* test */
         //util_sleep_ms(5);
