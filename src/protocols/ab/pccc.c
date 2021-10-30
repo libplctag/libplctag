@@ -1107,8 +1107,8 @@ int parse_pccc_subelem_mnemonic(const char **str, pccc_addr_t *address)
 
     /* search for a match. */
     for(size_t i=0; i < (sizeof(sub_element_lookup)/sizeof(sub_element_lookup[0])); i++) {
-        if(sub_element_lookup[i].file_type == address->file_type && str_cmp_i(*str, sub_element_lookup[i].field_name) == 0) {
-            pdebug(DEBUG_DETAIL, "Matched file type %x and field mnemonic \"%s\".", address->file_type, *str);
+        if(sub_element_lookup[i].file_type == address->file_type && str_cmp_i_n(*str, sub_element_lookup[i].field_name, str_length(sub_element_lookup[i].field_name)) == 0) {
+            pdebug(DEBUG_DETAIL, "Matched file type %x and field mnemonic \"%.*s\".", address->file_type, str_length(sub_element_lookup[i].field_name), *str);
 
             address->is_bit = sub_element_lookup[i].is_bit;
             address->bit = sub_element_lookup[i].bit;
@@ -1156,9 +1156,9 @@ int parse_pccc_bit_num(const char **str, pccc_addr_t *address)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* make sure that the data file type is B or N. */
-    if(address->file_type != PCCC_FILE_BIT && address->file_type != PCCC_FILE_INT) {
-        pdebug(DEBUG_WARN, "Single bits only work on B or N data files.");
+    /* make sure that the data size is two bytes only. */
+    if(address->element_size_bytes != 2) {
+        pdebug(DEBUG_WARN, "Single bit selection only works on word-sized data.");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
