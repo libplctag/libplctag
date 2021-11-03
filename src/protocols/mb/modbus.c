@@ -83,7 +83,8 @@ struct modbus_plc_t {
     mutex_p mutex;
     cond_p wait_cond;
     enum {
-        PLC_START = 0,
+        PLC_CONNECT_START = 0,
+        PLC_CONNECT_WAIT,
         PLC_IDLE,
         PLC_SEND_REQUEST,
         PLC_RECEIVE_RESPONSE,
@@ -519,7 +520,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
                 (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
 
                 /* set up the PLC state */
-                (*plc)->state = PLC_START;
+                (*plc)->state = PLC_CONNECT_START;
 
                 /* make the wait condition variable. */
                 rc = cond_create(&(*plc)->wait_cond);
@@ -648,19 +649,50 @@ THREAD_FUNC(modbus_plc_handler)
 
     while(! plc->flags.terminate) {
         switch(plc->state) {
-        case PLC_START:
-            pdebug(DEBUG_DETAIL, "in PLC_START state.");
+        case PLC_CONNECT_START:
+            pdebug(DEBUG_DETAIL, "in PLC_CONNECT_START state.");
 
             /* connect to the PLC */
             rc = connect_plc(plc);
-            if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL," Successfully connected to the PLC!");
+            if(rc == PLCTAG_STATUS_PENDING) {
+                pdebug(DEBUG_DETAIL, "Socket connection process started.  Going to PLC_CONNECT_WAIT state.");
+                plc->state = PLC_CONNECT_WAIT;
+
+                cond_signal(plc->wait_cond);
+            } else if(rc == PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_DETAIL, "Successfully connected to the PLC.  Going to PLC_IDLE state.");
                 plc->state = PLC_IDLE;
 
                 /* immediately check if there is something to do. */
                 cond_signal(plc->wait_cond);
             } else {
-                pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later!");
+                pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state.");
+                err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
+                plc->state = PLC_ERR_WAIT;
+            }
+            break;
+
+        case PLC_CONNECT_WAIT:
+            rc = socket_connect_tcp_check(plc->sock, 20); /* MAGIC */
+            if(rc == PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_DETAIL, "Socket connected, going to state PLC_IDLE.");
+
+                /* we just connected, keep the connection open for a few seconds. */
+                plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+
+                plc->state = PLC_IDLE;
+
+                /* immediately check if there is something to do. */
+                cond_signal(plc->wait_cond);
+            } else if(rc == PLCTAG_ERR_TIMEOUT) {
+                pdebug(DEBUG_DETAIL, "Still waiting for socket to connect.");
+
+                /* do no wait more.   The TCP connection check will wait in select(). */
+                cond_signal(plc->wait_cond);
+            } else {
+                pdebug(DEBUG_WARN, "Error %s received while waiting for socket connection.", plc_tag_decode_error(rc));
+
+                pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state.");
                 err_delay = time_ms() + PLC_SOCKET_ERR_DELAY;
                 plc->state = PLC_ERR_WAIT;
             }
@@ -724,7 +756,7 @@ THREAD_FUNC(modbus_plc_handler)
                 plc->write_data_offset = 0;
 
                 /* try to reconnect immediately. */
-                plc->state = PLC_START;
+                plc->state = PLC_CONNECT_START;
             }
 
 
@@ -764,7 +796,7 @@ THREAD_FUNC(modbus_plc_handler)
                 plc->flags.response_ready = 0;
 
                 /* try to reconnect immediately. */
-                plc->state = PLC_START;
+                plc->state = PLC_CONNECT_START;
             }
 
 
@@ -780,14 +812,14 @@ THREAD_FUNC(modbus_plc_handler)
 
             /* are we done waiting? */
             if(err_delay < time_ms()) {
-                plc->state = PLC_START;
+                plc->state = PLC_CONNECT_START;
                 cond_signal(plc->wait_cond);
             }
             break;
 
         default:
             pdebug(DEBUG_WARN, "Unknown state %d!", plc->state);
-            plc->state = PLC_START;
+            plc->state = PLC_CONNECT_START;
             break;
         }
 
@@ -851,8 +883,8 @@ int connect_plc(modbus_plc_p plc)
 
     /* connect to the socket */
     pdebug(DEBUG_DETAIL, "Connecting to %s on port %d...", server, port);
-    rc = socket_connect_tcp(plc->sock, server, port);
-    if(rc != PLCTAG_STATUS_OK) {
+    rc = socket_connect_tcp_start(plc->sock, server, port);
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         /* done with the split string. */
         mem_free(server_port);
 
@@ -866,9 +898,6 @@ int connect_plc(modbus_plc_p plc)
         mem_free(server_port);
         server_port = NULL;
     }
-
-    /* we just connected, keep the connection open for a few seconds. */
-    plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
 
     /* clear the state for reading and writing. */
     plc->flags.request_in_flight = 0;

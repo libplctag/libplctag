@@ -1226,8 +1226,9 @@ extern int socket_create(sock_p *s)
 }
 
 
-extern int socket_connect_tcp(sock_p s, const char *host, int port)
+extern int socket_connect_tcp_start(sock_p s, const char *host, int port)
 {
+    int rc = PLCTAG_STATUS_OK;
     struct in_addr ips[MAX_IPS];
     int num_ips = 0;
     struct sockaddr_in gw_addr;
@@ -1293,6 +1294,23 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         return PLCTAG_ERR_OPEN;
     }
 
+    /* make the socket non-blocking. */
+    flags=fcntl(fd,F_GETFL,0);
+    if(flags<0) {
+        pdebug(DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    /* set the non-blocking flag. */
+    flags |= O_NONBLOCK;
+
+    if(fcntl(fd,F_SETFL,flags)<0) {
+        pdebug(DEBUG_ERROR, "Error setting socket to non-blocking, errno: %d", errno);
+        close(fd);
+        return PLCTAG_ERR_OPEN;
+    }
+
     /* figure out what address we are connecting to. */
 
     /* try a numeric IP address conversion first. */
@@ -1345,18 +1363,28 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     do {
         int rc;
-        /* try each IP until we run out or get a connection. */
+        /* try each IP until we run out or get a connection started. */
         gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
-        pdebug(DEBUG_DETAIL, "Attempting to connect to %s",inet_ntoa(*((struct in_addr *)&ips[i])));
+        pdebug(DEBUG_DETAIL, "Attempting to connect to %s", inet_ntoa(*((struct in_addr *)&ips[i])));
 
-        rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
+        /* this is done non-blocking. Could be interrupted, so restart if needed.*/
+        do {
+            rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
+        } while(rc < 0 && errno == EINTR);
 
-        if( rc == 0) {
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s succeeded.",inet_ntoa(*((struct in_addr *)&ips[i])));
+        if(rc < 0 && (errno == EINPROGRESS)) {
+            /* the connection has started. */
+            pdebug(DEBUG_DETAIL, "Started connecting to %s successfully.", inet_ntoa(*((struct in_addr *)&ips[i])));
             done = 1;
-        } else {
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d",inet_ntoa(*((struct in_addr *)&ips[i])),errno);
+            rc = PLCTAG_STATUS_PENDING;
+        } else if(rc == 0) {
+            /* instantly connected. */
+            pdebug(DEBUG_DETAIL, "Connected instantly to %s.", inet_ntoa(*((struct in_addr *)&ips[i])));
+            done = 1;
+            rc = PLCTAG_STATUS_OK;
+        } else{
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])),errno);
             i++;
         }
     } while(!done && i < num_ips);
@@ -1367,26 +1395,6 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
         return PLCTAG_ERR_OPEN;
     }
 
-
-    /* FIXME
-     * connect() is a little easier to handle in blocking mode, for now
-     * we make the socket non-blocking here, after connect(). */
-    flags=fcntl(fd,F_GETFL,0);
-
-    if(flags<0) {
-        pdebug(DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
-        close(fd);
-        return PLCTAG_ERR_OPEN;
-    }
-
-    flags |= O_NONBLOCK;
-
-    if(fcntl(fd,F_SETFL,flags)<0) {
-        pdebug(DEBUG_ERROR, "Error setting socket to non-blocking, errno: %d", errno);
-        close(fd);
-        return PLCTAG_ERR_OPEN;
-    }
-
     /* save the values */
     s->fd = fd;
     s->port = port;
@@ -1394,9 +1402,128 @@ extern int socket_connect_tcp(sock_p s, const char *host, int port)
 
     pdebug(DEBUG_DETAIL, "Done.");
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
+
+
+int socket_connect_tcp_check(sock_p sock, int timeout_ms)
+{
+    int rc = PLCTAG_STATUS_OK;
+    fd_set write_set;
+    struct timeval tv;
+    int select_rc = 0;
+    int sock_err = 0;
+    socklen_t sock_err_len = (socklen_t)(sizeof(sock_err));
+
+
+    pdebug(DEBUG_DETAIL,"Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* wait for the socket to be ready. */
+    tv.tv_sec = (time_t)(timeout_ms / 1000);
+    tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+
+    FD_ZERO(&write_set);
+
+    FD_SET(sock->fd, &write_set);
+
+    select_rc = select(sock->fd+1, NULL, &write_set, NULL, &tv);
+
+    if(select_rc == 1) {
+        if(FD_ISSET(sock->fd, &write_set)) {
+            pdebug(DEBUG_DETAIL, "Socket is probably connected.");
+        } else {
+            pdebug(DEBUG_WARN, "select() returned but socket is not connected!");
+            return PLCTAG_ERR_BAD_REPLY;
+        }
+    } else if(select_rc == 0) {
+        pdebug(DEBUG_DETAIL, "Socket connection not done yet.");
+        return PLCTAG_ERR_TIMEOUT;
+    } else {
+        pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
+
+        switch(errno) {
+            case EBADF: /* bad file descriptor */
+                pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case EINTR: /* signal was caught, this should not happen! */
+                pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
+                pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case ENOMEM: /* No mem for internal tables. */
+                pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                return PLCTAG_ERR_NO_MEM;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                return PLCTAG_ERR_OPEN;
+                break;
+        }
+    }
+
+    /* now make absolutely sure that the connection is ready. */
+    rc = getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_err, &sock_err_len);
+    if(rc == 0) {
+        /* sock_err has the error. */
+        switch(sock_err) {
+            case 0:
+                pdebug(DEBUG_DETAIL, "No error, socket is connected.");
+                rc = PLCTAG_STATUS_OK;
+                break;
+
+            case EBADF:
+                pdebug(DEBUG_WARN, "Socket fd is not valid!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case EFAULT:
+                pdebug(DEBUG_WARN, "The address passed to getsockopt() is not a valid user address!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case EINVAL:
+                pdebug(DEBUG_WARN, "The size of the socket error result is invalid!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case ENOPROTOOPT:
+                pdebug(DEBUG_WARN, "The option SO_ERROR is not understood at the SOL_SOCKET level!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case ENOTSOCK:
+                pdebug(DEBUG_WARN, "The FD is not a socket!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unexpected error %d returned!", sock_err);
+                return PLCTAG_ERR_OPEN;
+                break;
+        }
+    } else {
+        pdebug(DEBUG_WARN, "Error %d getting socket connection status!", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
 
 
 

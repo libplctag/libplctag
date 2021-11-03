@@ -646,9 +646,9 @@ int session_open_socket(ab_session_p session)
         pdebug(DEBUG_DETAIL, "Using default port %d.", port);
     }
 
-    rc = socket_connect_tcp(session->sock, server_port[0], port);
+    rc = socket_connect_tcp_start(session->sock, server_port[0], port);
 
-    if (rc != PLCTAG_STATUS_OK) {
+    if (rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_WARN, "Unable to connect socket for session!");
         mem_free(server_port);
         return rc;
@@ -985,10 +985,10 @@ int session_remove_request_unsafe(ab_session_p session, ab_request_p req)
  ****************************************************************/
 
 
-typedef enum { SESSION_OPEN_SOCKET, SESSION_REGISTER, SESSION_SEND_FORWARD_OPEN,
-               SESSION_RECEIVE_FORWARD_OPEN, SESSION_IDLE, SESSION_DISCONNECT,
-               SESSION_UNREGISTER, SESSION_CLOSE_SOCKET, SESSION_START_RETRY,
-               SESSION_WAIT_RETRY, SESSION_WAIT_RECONNECT
+typedef enum { SESSION_OPEN_SOCKET_START, SESSION_OPEN_SOCKET_WAIT, SESSION_REGISTER,
+               SESSION_SEND_FORWARD_OPEN, SESSION_RECEIVE_FORWARD_OPEN, SESSION_IDLE,
+               SESSION_DISCONNECT, SESSION_UNREGISTER, SESSION_CLOSE_SOCKET,
+               SESSION_START_RETRY, SESSION_WAIT_RETRY, SESSION_WAIT_RECONNECT
              } session_state_t;
 
 
@@ -996,7 +996,7 @@ THREAD_FUNC(session_handler)
 {
     ab_session_p session = arg;
     int rc = PLCTAG_STATUS_OK;
-    session_state_t state = SESSION_OPEN_SOCKET;
+    session_state_t state = SESSION_OPEN_SOCKET_START;
     int64_t timeout_time = 0;
     int64_t wait_until_time = 0;
     int64_t auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
@@ -1022,22 +1022,56 @@ THREAD_FUNC(session_handler)
         }
 
         switch(state) {
-        case SESSION_OPEN_SOCKET:
-            pdebug(DEBUG_DETAIL, "in SESSION_OPEN_SOCKET state.");
+        case SESSION_OPEN_SOCKET_START:
+            pdebug(DEBUG_DETAIL, "in SESSION_OPEN_SOCKET_START state.");
 
             /* we must connect to the gateway*/
-            if ((rc = session_open_socket(session)) != PLCTAG_STATUS_OK) {
+            rc = session_open_socket(session);
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "session connect failed %s!", plc_tag_decode_error(rc));
                 state = SESSION_CLOSE_SOCKET;
             } else {
-                /* set the timeout for disconnect. */
-                //if(session->auto_disconnect_enabled) {
+                if(rc == PLCTAG_STATUS_PENDING) {
+                    auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
+
+                    cond_signal(session->wait_cond);
+
+                    pdebug(DEBUG_DETAIL, "Connect complete immediately, going to state SESSION_REGISTER.");
+
+                    state = SESSION_REGISTER;
+                } else {
+                    pdebug(DEBUG_DETAIL, "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
+
+                    state = SESSION_OPEN_SOCKET_WAIT;
+                }
+            }
+            break;
+
+        case SESSION_OPEN_SOCKET_WAIT:
+            pdebug(DEBUG_DETAIL, "in SESSION_OPEN_SOCKET_WAIT state.");
+
+            /* we must connect to the gateway*/
+            rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
+            if(rc == PLCTAG_STATUS_OK) {
+                /* connected! */
+                pdebug(DEBUG_INFO, "Socket connection succeeded.");
+
+                /* calculate the disconnect time. */
                 auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
-                //}
+
+                /* don't wait. */
+                cond_signal(session->wait_cond);
 
                 state = SESSION_REGISTER;
+            } else if(rc == PLCTAG_ERR_TIMEOUT) {
+                pdebug(DEBUG_DETAIL, "Still waiting for connection to succeed.");
+
+                /* don't wait more.  The TCP connect check will wait in select(). */
+                cond_signal(session->wait_cond);
+            } else {
+                pdebug(DEBUG_WARN, "Session connect failed %s!", plc_tag_decode_error(rc));
+                state = SESSION_CLOSE_SOCKET;
             }
-            cond_signal(session->wait_cond);
             break;
 
         case SESSION_REGISTER:
@@ -1185,8 +1219,8 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL, "in SESSION_WAIT_RETRY state.");
 
             if(timeout_time < time_ms()) {
-                pdebug(DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET.");
-                state = SESSION_OPEN_SOCKET;
+                pdebug(DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET_START.");
+                state = SESSION_OPEN_SOCKET_START;
                 cond_signal(session->wait_cond);
             }
 
@@ -1204,7 +1238,7 @@ THREAD_FUNC(session_handler)
                 if(vector_length(session->requests) > 0) {
                     pdebug(DEBUG_DETAIL, "There are requests waiting, reopening connection to PLC.");
 
-                    state = SESSION_OPEN_SOCKET;
+                    state = SESSION_OPEN_SOCKET_START;
                     cond_signal(session->wait_cond);
                 }
             }
