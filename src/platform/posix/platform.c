@@ -1437,6 +1437,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
             pdebug(DEBUG_DETAIL, "Socket is probably connected.");
+            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "select() returned but socket is not connected!");
             return PLCTAG_ERR_BAD_REPLY;
