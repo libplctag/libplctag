@@ -932,7 +932,7 @@ int connect_plc(modbus_plc_p plc)
     plc->write_data_len = 0;
     plc->write_data_offset = 0;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
 }

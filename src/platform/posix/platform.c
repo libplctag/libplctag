@@ -1226,7 +1226,7 @@ extern int socket_create(sock_p *s)
 }
 
 
-extern int socket_connect_tcp_start(sock_p s, const char *host, int port)
+int socket_connect_tcp_start(sock_p s, const char *host, int port)
 {
     int rc = PLCTAG_STATUS_OK;
     struct in_addr ips[MAX_IPS];
@@ -1362,7 +1362,6 @@ extern int socket_connect_tcp_start(sock_p s, const char *host, int port)
     gw_addr.sin_port = htons((uint16_t)port);
 
     do {
-        int rc;
         /* try each IP until we run out or get a connection started. */
         gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
@@ -1373,17 +1372,17 @@ extern int socket_connect_tcp_start(sock_p s, const char *host, int port)
             rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
         } while(rc < 0 && errno == EINTR);
 
-        if(rc < 0 && (errno == EINPROGRESS)) {
-            /* the connection has started. */
-            pdebug(DEBUG_DETAIL, "Started connecting to %s successfully.", inet_ntoa(*((struct in_addr *)&ips[i])));
-            done = 1;
-            rc = PLCTAG_STATUS_PENDING;
-        } else if(rc == 0) {
+        if(rc == 0) {
             /* instantly connected. */
             pdebug(DEBUG_DETAIL, "Connected instantly to %s.", inet_ntoa(*((struct in_addr *)&ips[i])));
             done = 1;
             rc = PLCTAG_STATUS_OK;
-        } else{
+        } else if(rc < 0 && (errno == EINPROGRESS)) {
+            /* the connection has started. */
+            pdebug(DEBUG_DETAIL, "Started connecting to %s successfully.", inet_ntoa(*((struct in_addr *)&ips[i])));
+            done = 1;
+            rc = PLCTAG_STATUS_PENDING;
+        } else  {
             pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])),errno);
             i++;
         }
@@ -1400,7 +1399,7 @@ extern int socket_connect_tcp_start(sock_p s, const char *host, int port)
     s->port = port;
     s->is_open = 1;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
 }
