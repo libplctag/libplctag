@@ -57,12 +57,23 @@
 #define MODBUS_IDLE_WAIT_TIMEOUT (100) /* idle wait timeout in milliseconds */
 
 
+typedef struct modbus_tag_t *modbus_tag_p;
+typedef struct modbus_tag_list_t *modbus_tag_list_p;
+
+struct modbus_tag_list_t {
+    struct modbus_tag_t *head;
+    struct modbus_tag_t *tail;
+};
+
+
+
 struct modbus_plc_t {
     struct modbus_plc_t *next;
 
     /* keep a list of tags for this PLC. */
-    struct modbus_tag_t *tags_head;
-    struct modbus_tag_t *tags_tail;
+    struct modbus_tag_list_t tag_list;
+    // struct modbus_tag_t *tags_head;
+    // struct modbus_tag_t *tags_tail;
 
     /* hostname/ip and possibly port of the server. */
     char *server;
@@ -148,11 +159,7 @@ struct modbus_tag_t {
     /* data for the tag. */
     int elem_count;
     int elem_size;
-
-    /* data for outstanding requests. */
 };
-
-typedef struct modbus_tag_t *modbus_tag_p;
 
 
 /* default string types used for Modbus PLCs. */
@@ -216,6 +223,13 @@ static int tag_set_write_flag(modbus_tag_p tag, int new_val);
 static int tag_get_busy_flag(modbus_tag_p tag);
 static int tag_set_busy_flag(modbus_tag_p tag, int new_val);
 
+/* tag list functions */
+static modbus_tag_p pop_tag(modbus_tag_list_p list);
+static void push_tag(modbus_tag_list_p list, modbus_tag_p tag);
+static struct modbus_tag_list_t merge_lists(modbus_tag_list_p first, modbus_tag_list_p last);
+static int remove_tag(modbus_tag_list_p list, modbus_tag_p tag);
+
+
 /* tag vtable functions. */
 
 /* control functions. */
@@ -272,17 +286,19 @@ plc_tag_p mb_tag_create(attr attribs)
     if(rc == PLCTAG_STATUS_OK) {
         /* put the tag on the PLC's list. */
         critical_block(tag->plc->mutex) {
-            tag->next = NULL;
+            // tag->next = NULL;
 
-            if(tag->plc->tags_head) {
-                pdebug(DEBUG_DETAIL, "Inserting tag %p at the end (%p) of the list (%p).", tag, tag->plc->tags_tail, tag->plc->tags_head);
-                tag->plc->tags_tail->next = tag;
-                tag->plc->tags_tail = tag;
-            } else {
-                pdebug(DEBUG_DETAIL, "Inserting tag %p in empty list.", tag);
-                tag->plc->tags_head = tag;
-                tag->plc->tags_tail = tag;
-            }
+            push_tag(&(tag->plc->tag_list), tag);
+
+            // if(tag->plc->tags_head) {
+            //     pdebug(DEBUG_DETAIL, "Inserting tag %p at the end (%p) of the list (%p).", tag, tag->plc->tags_tail, tag->plc->tags_head);
+            //     tag->plc->tags_tail->next = tag;
+            //     tag->plc->tags_tail = tag;
+            // } else {
+            //     pdebug(DEBUG_DETAIL, "Inserting tag %p in empty list.", tag);
+            //     tag->plc->tags_head = tag;
+            //     tag->plc->tags_tail = tag;
+            // }
         }
 
         /* trigger a read to get the initial value of the tag. */
@@ -400,34 +416,43 @@ void modbus_tag_destructor(void *tag_arg)
     if(tag->plc) {
         /* unlink the tag from the PLC. */
         critical_block(tag->plc->mutex) {
-            modbus_tag_p current = tag->plc->tags_head;
-            modbus_tag_p prev = NULL;
+            int rc = remove_tag(&(tag->plc->tag_list), tag);
 
-            pdebug(DEBUG_DETAIL, "Unlinking from the PLC.");
-
-            while(current && current != tag) {
-                prev = current;
-                current = current->next;
-            }
-
-            /* if found */
-            if(current == tag) {
-                pdebug(DEBUG_DETAIL, "Found tag %d in PLC list.", tag->tag_id);
-
-                /* unlink the tag in the common case it isn't at the front of the list. */
-                if(prev) {
-                    prev->next = tag->next;
-                } else {
-                    tag->plc->tags_head = tag->next;
-                }
-
-                /* handle the case where the tag is at the end of the list. */
-                if(tag->plc->tags_tail == tag) {
-                    tag->plc->tags_tail = prev;
-                }
+            if(rc == PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_DETAIL, "Tag removed from the PLC successfully.");
+            } else if(rc == PLCTAG_ERR_NOT_FOUND) {
+                pdebug(DEBUG_DETAIL, "Tag not found in the PLC's list.");
             } else {
-                pdebug(DEBUG_DETAIL, "Tag %d not found on PLC list.", tag->tag_id);
+                pdebug(DEBUG_WARN, "Error %s while trying to remove the tag from the PLC's list!", plc_tag_decode_error(rc));
             }
+            // modbus_tag_p current = tag->plc->tag_list.head;
+            // modbus_tag_p prev = NULL;
+
+            // pdebug(DEBUG_DETAIL, "Unlinking from the PLC.");
+
+            // while(current && current != tag) {
+            //     prev = current;tags_head
+            //     current = current->next;
+            // }
+
+            // /* if found */
+            // if(current == tag) {
+            //     pdebug(DEBUG_DETAIL, "Found tag %d in PLC list.", tag->tag_id);
+
+            //     /* unlink the tag in the common case it isn't at the front of the list. */
+            //     if(prev) {
+            //         prev->next = tag->next;
+            //     } else {
+            //         tag->plc->tags_head = tag->next;
+            //     }
+
+            //     /* handle the case where the tag is at the end of the list. */
+            //     if(tag->plc->tags_tail == tag) {
+            //         tag->plc->tags_tail = prev;
+            //     }
+            // } else {
+            //     pdebug(DEBUG_DETAIL, "Tag %d not found on PLC list.", tag->tag_id);
+            // }
         }
 
         pdebug(DEBUG_DETAIL, "Releasing the reference to the PLC.");
@@ -625,7 +650,7 @@ void modbus_plc_destructor(void *plc_arg)
         plc->server = NULL;
     }
 
-    if(plc->tags_head) {
+    if(plc->tag_list.head) {
         pdebug(DEBUG_WARN, "There are tags still remaining, memory leak possible!");
     }
 
@@ -1070,64 +1095,99 @@ int run_tags(modbus_plc_p plc)
      */
 
     if(rc_inc(plc)) {
+        int wake_tag_tickler = 0;
+
         critical_block(plc->mutex) {
-            modbus_tag_p tail = plc->tags_tail;
-            modbus_tag_p current = plc->tags_head;
-            modbus_tag_p prev = NULL;
-            modbus_tag_p next = NULL;
+            // modbus_tag_p tail = plc->tags_tail;
+            // modbus_tag_p current = plc->tags_head;
+            // modbus_tag_p prev = NULL;
+            // modbus_tag_p next = NULL;
+            struct modbus_tag_list_t pending_tags = { .head = NULL, .tail = NULL };
+            struct modbus_tag_list_t completed_tags = { .head = NULL, .tail = NULL };
+
+            modbus_tag_p current_tag = NULL;
 
             pdebug(DEBUG_DETAIL, "Processing tag list.");
 
-            while(current) {
-                debug_set_tag_id(current->tag_id);
+            while((current_tag = pop_tag(&(plc->tag_list)))) {
+                debug_set_tag_id(current_tag->tag_id);
 
-                pdebug(DEBUG_DETAIL, "Processing tag %d.", current->tag_id);
+                pdebug(DEBUG_DETAIL, "Processing tag %d.", current_tag->tag_id);
 
-                next = current->next;
+                //current_tag->flags.operation_complete = 0;
 
-                current->flags.operation_complete = 0;
+                rc = process_tag_unsafe(current_tag, plc);
+                if(rc == PLCTAG_STATUS_PENDING) {
+                    pdebug(DEBUG_DETAIL, "Tag %d goes onto the pending list.", current_tag->tag_id);
+                    push_tag(&pending_tags, current_tag);
+                } else if (rc == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_DETAIL, "Tag %d has completed its outstanding operation and goes onto the completed list.", current_tag->tag_id);
+                    push_tag(&completed_tags, current_tag);
 
-                rc = process_tag_unsafe(current, plc);
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), current->tag_id);
+                    /* it is likely that the top half will need to process this result. */
+                    wake_tag_tickler = 1;
+                } else {
+                    pdebug(DEBUG_WARN, "Tag processing returned error %s!  Pushing tag to the pending list.", plc_tag_decode_error(rc));
+
+                    /* it is likely that this will result in an abort and/or destruction of the tag so put it early in the list. */
+                    push_tag(&pending_tags, current_tag);
+
+                    /* it is likely that the top half will need to process this result. */
+                    wake_tag_tickler = 1;
                 }
+                // if(rc != PLCTAG_STATUS_OK) {
+                //     pdebug(DEBUG_WARN,  "Error, %s, processing tag %d!", plc_tag_decode_error(rc), current->tag_id);
+                // }
 
-                /* to ensure fairness, we move tags that completed operations to the end of the list. */
-                if(current->flags.operation_complete) {
-                    pdebug(DEBUG_DETAIL, "Moving tag to the end of the completed list.");
+                // /* to ensure fairness, we move tags that completed operations to the end of the list. */
+                // if(current->flags.operation_complete) {
+                //     pdebug(DEBUG_DETAIL, "Moving tag to the end of the completed list.");
 
-                    current->flags.operation_complete = 0;
+                //     current->flags.operation_complete = 0;
 
-                    /* unlink tag from the early part of the list. */
-                    if(prev) {
-                        prev->next = next;
-                    } else {
-                        plc->tags_head = next;
-                    }
+                //     /* unlink tag from the early part of the list. */
+                //     pdebug(DEBUG_DETAIL, "tail=%p", tail);
+                //     pdebug(DEBUG_DETAIL, "current=%p", current);
+                //     pdebug(DEBUG_DETAIL, "prev=%p", prev);
+                //     pdebug(DEBUG_DETAIL, "next=%p", next);
+                //     if(prev) {
+                //         prev->next = next;
+                //     } else {
+                //         plc->tags_head = next;
+                //     }
 
-                    tail->next = current;
-                    tail = current;
-                    current->next = NULL;
-                }
+                //     tail->next = current;
+                //     tail = current;
+                //     current->next = NULL;
+                // }
 
                 debug_set_tag_id(0);
 
-                /* terminate if we are at the end of the original list. */
-                if(current == plc->tags_tail) {
-                    pdebug(DEBUG_DETAIL, "Processed last tag.");
-                    break;
-                }
+                // /* terminate if we are at the end of the original list. */
+                // if(current == plc->tags_tail) {
+                //     pdebug(DEBUG_DETAIL, "Processed last tag.");
+                //     break;
+                // }
 
-                prev = current;
-                current = next;
+                // prev = current;
+                // current = next;
             }
 
-            if(tail) {
-                pdebug(DEBUG_DETAIL, "Moving tail to end of processed tags.");
-                plc->tags_tail = tail;
-            }
+            // if(tail) {
+            //     pdebug(DEBUG_DETAIL, "Moving tail to end of processed tags.");
+            //     plc->tags_tail = tail;
+            // }
+
+            /* rebuild the tag list from the two sub-lists */
+            plc->tag_list = merge_lists(&pending_tags, &completed_tags);
 
             pdebug(DEBUG_DETAIL, "Done processing tag list.");
+        }
+
+        /* if we have something for the top half to process, signal the main tag tickler thread. */
+        if(wake_tag_tickler) {
+            plc_tag_tickler_wake();
+            wake_tag_tickler = 0;
         }
 
         if(plc->flags.response_ready) {
@@ -1191,8 +1251,8 @@ int process_tag_unsafe(modbus_tag_p tag, modbus_plc_p plc)
 
         tag->seq_id = 0;
 
-        pdebug(DEBUG_DETAIL, "Done.  Tag aborted operation.");
-        return rc;
+        pdebug(DEBUG_DETAIL, "Done. Tag aborted operation.");
+        return PLCTAG_STATUS_PENDING;
     }
 
     /* if there is not a socket, then we skip all this. */
@@ -1202,7 +1262,7 @@ int process_tag_unsafe(modbus_tag_p tag, modbus_plc_p plc)
                 if(plc->flags.response_ready) {
                     /* we have an outstanding write request. */
                     rc = check_write_response(plc, tag);
-                    if(rc == PLCTAG_STATUS_OK) {
+                    if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_STATUS_PENDING) {
                         pdebug(DEBUG_SPEW, "Either not our response or we got a response!");
                     } else {
                         pdebug(DEBUG_SPEW, "We got an error on our write response check, %s!", plc_tag_decode_error(rc));
@@ -1229,7 +1289,7 @@ int process_tag_unsafe(modbus_tag_p tag, modbus_plc_p plc)
                 if(plc->flags.response_ready) {
                     /* there is a request in flight, is there a response? */
                     rc = check_read_response(plc, tag);
-                    if(rc == PLCTAG_STATUS_OK) {
+                    if(rc == PLCTAG_STATUS_OK || rc == PLCTAG_STATUS_PENDING) {
                         /* this is our response. */
                         pdebug(DEBUG_SPEW, "Either not our response or we got a good response.");
                     } else {
@@ -1361,7 +1421,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
     } else {
         pdebug(DEBUG_DETAIL, "Not our response.");
 
-        rc = PLCTAG_STATUS_OK;
+        rc = PLCTAG_STATUS_PENDING;
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1540,6 +1600,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         /* either way, clean up the PLC buffer. */
         plc->read_data_len = 0;
         plc->flags.response_ready = 0;
+
         /* clean up tag*/
         if(!partial_write) {
             spin_block(&tag->tag_lock) {
@@ -1564,7 +1625,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
     } else {
         pdebug(DEBUG_SPEW, "Not our response.");
 
-        rc = PLCTAG_STATUS_OK;
+        rc = PLCTAG_STATUS_PENDING;
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -1906,6 +1967,116 @@ int tag_set_busy_flag(modbus_tag_p tag, int new_val)
 
 
 
+modbus_tag_p pop_tag(modbus_tag_list_p list)
+{
+    modbus_tag_p tmp = NULL;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    tmp = list->head;
+
+    /* unlink */
+    if(tmp) {
+        list->head = tmp->next;
+        tmp->next = NULL;
+    }
+
+    /* if we removed the last element, then set the tail to NULL. */
+    if(!list->head) {
+        list->tail = NULL;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return tmp;
+}
+
+
+
+void push_tag(modbus_tag_list_p list, modbus_tag_p tag)
+{
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    tag->next = NULL;
+
+    if(list->tail) {
+        list->tail->next = tag;
+    } else {
+        /* nothing in the list. */
+        list->head = tag;
+        list->tail = tag;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+}
+
+
+
+struct modbus_tag_list_t merge_lists(modbus_tag_list_p first, modbus_tag_list_p last)
+{
+    struct modbus_tag_list_t result;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* set up the head of the new list. */
+    result.head = (first->head ? first->head : last->head);
+
+    /* stitch up the tail of the first list. */
+    if(first->tail) {
+        first->tail->next = last->head;
+    }
+
+    /* set up the tail of the new list */
+    result.tail = (last->tail ? last->tail : first->tail);
+
+    /* make sure the old lists do not reference the tags. */
+    first->head = NULL;
+    first->tail = NULL;
+    last->head = NULL;
+    last->tail = NULL;
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return result;
+}
+
+
+
+int remove_tag(modbus_tag_list_p list, modbus_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+    modbus_tag_p cur = list->head;
+    modbus_tag_p prev = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    while(cur && cur != tag) {
+        prev = cur;
+        cur = cur->next;
+    }
+
+    if(cur == tag) {
+        /* found it. */
+        if(prev) {
+            prev->next = tag->next;
+        } else {
+            /* at the head of the list. */
+            list->head = tag->next;
+        }
+
+        if(list->tail == tag) {
+            list->tail = prev;
+        }
+
+        rc = PLCTAG_STATUS_OK;
+    } else {
+        rc = PLCTAG_STATUS_PENDING;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
 
 
 /****** Tag Control Functions ******/
