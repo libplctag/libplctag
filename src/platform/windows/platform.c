@@ -1402,7 +1402,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
         struct addrinfo hints;
         struct addrinfo* res_head = NULL;
         struct addrinfo *res = NULL;
-        int rc = 0;
 
         mem_set(&ips, 0, sizeof(ips));
         mem_set(&hints, 0, sizeof(hints));
