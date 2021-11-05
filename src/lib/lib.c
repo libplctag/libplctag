@@ -814,6 +814,12 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         if(tag->vtable->abort) {
             tag->vtable->abort(tag);
         }
+
+        /* remove the tag from the hashtable. */
+        critical_block(tag_lookup_mutex) {
+            hashtable_remove(tags, (int64_t)tag->tag_id);
+        }
+
         rc_dec(tag);
         return rc;
     }
@@ -837,6 +843,12 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
             if(tag->vtable->abort) {
                 tag->vtable->abort(tag);
             }
+
+            /* remove the tag from the hashtable. */
+            critical_block(tag_lookup_mutex) {
+                hashtable_remove(tags, (int64_t)tag->tag_id);
+            }
+
             rc_dec(tag);
             return rc;
         }
@@ -850,6 +862,12 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
             if(tag->vtable->abort) {
                 tag->vtable->abort(tag);
             }
+
+            /* remove the tag from the hashtable. */
+            critical_block(tag_lookup_mutex) {
+                hashtable_remove(tags, (int64_t)tag->tag_id);
+            }
+
             rc_dec(tag);
             return rc;
         }
