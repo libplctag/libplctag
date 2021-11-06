@@ -61,7 +61,6 @@ typedef enum {
                PCCC_FILE_TIMER          = 0x86
              } pccc_file_t;
 
-
 typedef struct {
     pccc_file_t file_type;
     int file;

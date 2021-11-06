@@ -688,7 +688,9 @@ int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t
  */
 
 
-
+/*
+ * FIXME TODO - refactor this into a table-driven function.
+ */
 
 int parse_pccc_file_type(const char **str, pccc_addr_t *address)
 {
