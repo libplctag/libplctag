@@ -1100,7 +1100,9 @@ THREAD_FUNC(session_handler)
 
             /* if there is work to do, make sure we do not disconnect. */
             critical_block(session->mutex) {
-                if(vector_length(session->requests) > 0) {
+                int num_reqs = vector_length(session->requests);
+                if(num_reqs > 0) {
+                    pdebug(DEBUG_DETAIL, "There are %d requests pending before cleanup and sending.", num_reqs);
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
                 }
             }
@@ -1131,8 +1133,9 @@ THREAD_FUNC(session_handler)
 
             /* if there is work to do, make sure we signal the condition var. */
             critical_block(session->mutex) {
-                if(vector_length(session->requests) > 0) {
-                    pdebug(DEBUG_DETAIL, "There are still requests in the queue, skipping conditional wait.");
+                int num_reqs = vector_length(session->requests);
+                if(num_reqs > 0) {
+                    pdebug(DEBUG_DETAIL, "There are %d requests still pending after abort purge and sending.", num_reqs);
                     cond_signal(session->wait_cond);
                 }
             }
