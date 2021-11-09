@@ -245,13 +245,15 @@ int main(int argc, char **argv)
             int need_sleep = 0;
 
             for(int i=0; i<num_tags; i++) {
-                if(statuses[i] != PLCTAG_ERR_TIMEOUT) {
-                    fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
-                    done = 1;
-                } else {
-                    fprintf(stderr, "Tag %d read failed with a timeout, will retry.\n", i);
-                    plc_tag_abort(tags[i]);
-                    need_sleep = 1;
+                if(statuses[i] != PLCTAG_STATUS_OK) {
+                    if(statuses[i] != PLCTAG_ERR_TIMEOUT) {
+                        fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
+                        done = 1;
+                    } else {
+                        fprintf(stderr, "Tag %d read failed with a timeout, will retry.\n", i);
+                        plc_tag_abort(tags[i]);
+                        need_sleep = 1;
+                    }
                 }
             }
 

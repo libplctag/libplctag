@@ -1099,7 +1099,6 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL, "in SESSION_IDLE state.");
 
             /* if there is work to do, make sure we do not disconnect. */
-            pdebug(DEBUG_DETAIL,"Critical block.");
             critical_block(session->mutex) {
                 if(vector_length(session->requests) > 0) {
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
@@ -1128,6 +1127,14 @@ THREAD_FUNC(session_handler)
                     state = SESSION_UNREGISTER;
                 }
                 cond_signal(session->wait_cond);
+            }
+
+            /* if there is work to do, make sure we signal the condition var. */
+            critical_block(session->mutex) {
+                if(vector_length(session->requests) > 0) {
+                    pdebug(DEBUG_DETAIL, "There are still requests in the queue, skipping conditional wait.");
+                    cond_signal(session->wait_cond);
+                }
             }
 
             break;
