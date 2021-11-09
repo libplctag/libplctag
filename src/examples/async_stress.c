@@ -171,7 +171,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* check the command line arguments */
     if(argc != 3) {
