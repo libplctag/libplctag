@@ -38,9 +38,23 @@ def main():
                                                            'For floating point, use \"' + PLC_TYPE_REAL32 + '\".')
     parser.add_argument('-p','--path', required=True, help='The path to the device containing the named data.', type=str)
     parser.add_argument('-w','--val', required=False, help='The value to write.  Must be formatted appropriately\n' +
-                                                           'for the data type.',
-                                                      type=str)
+                                                           'for the data type.', type=str)
+    parser.add_argument('-d','--debug', required=False, help='Set the debug level.   Output is cumulative.  Level is one of:\n' +
+                                                             '  0 - No debugging. \n' +
+                                                             '  1 - Only output fatal errors. \n' +
+                                                             '  2 - Warnings only.  Default. \n' +
+                                                             '  3 - Informational output. \n' +
+                                                             '  4 - Detailed output. \n' +
+                                                             '  5 - Everything (this will be really big!). \n', type=str)
     args = parser.parse_args()
+
+    if args.debug is not None:
+        try:
+            debug_level = int(args.debug)
+        except:
+            print ('ERROR: cannot convert incoming debug level value %s' % (args.debug))
+            exit(-1)
+        libplctag.plc_tag_set_debug_level(debug_level)
 
     is_write = False
     if args.val is not None:

@@ -33,7 +33,7 @@
 # the project is version 2.4
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 4)
-set (libplctag_VERSION_PATCH 3)
+set (libplctag_VERSION_PATCH 4)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -198,8 +198,8 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     SET(STR_OP_OVERFLOW_ON "")
     SET(STR_OP_OVERFLOW_OFF "")
 
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_ON}")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
 
@@ -259,8 +259,8 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
         SET(STR_OP_OVERFLOW_OFF "")
     endif()
 
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 	set(C99_FLAGS "-std=c99" )
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")

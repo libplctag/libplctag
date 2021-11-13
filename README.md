@@ -27,15 +27,15 @@
 |   --:  |         :-:      |   :-:   |    :-:    |    :-:    |
 |Ubuntu  |   x86, Arm       | 18.04   | Supported | Supported |
 |Windows |   x86, Arm       |10 (Server 19) | Supported | Supported |
-|macOS   |       x86        |  10.15  | Supported | Not Supported |
+|macOS   |       x86        |  11  | Supported | Not Supported |
 
 ![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=release)
 
-**libplctag** is an open source C library for Linux, Windows and macOS uses **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
+**libplctag** is an open source C library for Linux, Windows and macOS using **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
 
-Current Stable Version: 2.3
+Current Stable Version: 2.4
 
-Old Stable Version: 2.2
+Old Stable Version: 2.3
 
 ## WARNING - DISCLAIMER
 

@@ -1133,9 +1133,10 @@ THREAD_FUNC(session_handler)
             pdebug(DEBUG_DETAIL, "in SESSION_IDLE state.");
 
             /* if there is work to do, make sure we do not disconnect. */
-            pdebug(DEBUG_DETAIL,"Critical block.");
             critical_block(session->mutex) {
-                if(vector_length(session->requests) > 0) {
+                int num_reqs = vector_length(session->requests);
+                if(num_reqs > 0) {
+                    pdebug(DEBUG_DETAIL, "There are %d requests pending before cleanup and sending.", num_reqs);
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
                 }
             }
@@ -1162,6 +1163,15 @@ THREAD_FUNC(session_handler)
                     state = SESSION_UNREGISTER;
                 }
                 cond_signal(session->wait_cond);
+            }
+
+            /* if there is work to do, make sure we signal the condition var. */
+            critical_block(session->mutex) {
+                int num_reqs = vector_length(session->requests);
+                if(num_reqs > 0) {
+                    pdebug(DEBUG_DETAIL, "There are %d requests still pending after abort purge and sending.", num_reqs);
+                    cond_signal(session->wait_cond);
+                }
             }
 
             break;
