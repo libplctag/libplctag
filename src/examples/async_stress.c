@@ -171,7 +171,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* check the command line arguments */
     if(argc != 3) {
@@ -246,7 +246,7 @@ int main(int argc, char **argv)
 
             for(int i=0; i<num_tags; i++) {
                 if(statuses[i] != PLCTAG_STATUS_OK) {
-                    if (statuses[i] != PLCTAG_ERR_TIMEOUT) {
+                    if(statuses[i] != PLCTAG_ERR_TIMEOUT) {
                         fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
                         done = 1;
                     } else {
