@@ -647,7 +647,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     pdebug(DEBUG_DETAIL, "Fourth IP segment: %d.", val);
 
     /* We need to zero pad if the length is not a multiple of two. */
-    if((*addr_seg_len) && (uint8_t)0x01) {
+    if((*addr_seg_len) & (uint8_t)0x01) {
         conn_path[c_index] = (uint8_t)0;
         c_index++;
     }
