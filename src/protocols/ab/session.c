@@ -1031,7 +1031,7 @@ THREAD_FUNC(session_handler)
                 pdebug(DEBUG_WARN, "session connect failed %s!", plc_tag_decode_error(rc));
                 state = SESSION_CLOSE_SOCKET;
             } else {
-                if(rc == PLCTAG_STATUS_PENDING) {
+                if(rc == PLCTAG_STATUS_OK) {
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
 
                     cond_signal(session->wait_cond);
