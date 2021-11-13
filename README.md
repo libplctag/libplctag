@@ -27,7 +27,7 @@
 |   --:  |         :-:      |   :-:   |    :-:    |    :-:    |
 |Ubuntu  |   x86, Arm       | 18.04   | Supported | Supported |
 |Windows |   x86, Arm       |10 (Server 19) | Supported | Supported |
-|macOS   |       x86        |  10.15  | Supported | Not Supported |
+|macOS   |       x86        |  11  | Supported | Not Supported |
 
 ![libplctag CI](https://github.com/libplctag/libplctag/workflows/libplctag%20CI/badge.svg?branch=release)
 
