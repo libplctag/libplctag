@@ -257,7 +257,7 @@ int main(int argc, char **argv)
     int count_down = 50;
 
     /* set up logging */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
