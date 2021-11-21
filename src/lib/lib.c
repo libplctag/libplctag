@@ -1421,7 +1421,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             rc = plc_tag_status(id);
 
             /* check to see if there was an error during tag read. */
-            if(rc != PLCTAG_STATUS_OK) {
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
             }
@@ -1621,7 +1621,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
             rc = plc_tag_status(id);
 
             /* check to see if there was an error during tag creation. */
-            if(rc != PLCTAG_STATUS_OK) {
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
             }
