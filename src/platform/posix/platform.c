@@ -1531,6 +1531,8 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
@@ -1551,8 +1553,30 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* only wait if we have a timeout. */
-    if(timeout_ms > 0) {
+    /*
+     * Try to read immediately.   If we get data, we skip any other
+     * delays.   If we do not, then see if we have a timeout.
+     */
+
+    /* The socket is non-blocking. */
+    rc = (int)read(s->fd,buf,(size_t)size);
+    if(rc < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            if(timeout_ms > 0) {
+                pdebug(DEBUG_DETAIL, "Immediate read attempt did not succeed, now wait for select().");
+            } else {
+                pdebug(DEBUG_DETAIL, "Read resulted in no data.");
+            }
+
+            rc = 0;
+        } else {
+            pdebug(DEBUG_WARN,"Socket read error: rc=%d, errno=%d", rc, errno);
+            return PLCTAG_ERR_READ;
+        }
+    }
+
+    /* only wait if we have a timeout and no error and no data. */
+    if(rc == 0 && timeout_ms > 0) {
         fd_set read_set;
         struct timeval tv;
         int select_rc = 0;
@@ -1565,7 +1589,6 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
         FD_SET(s->fd, &read_set);
 
         select_rc = select(s->fd+1, &read_set, NULL, NULL, &tv);
-
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &read_set)) {
                 pdebug(DEBUG_DETAIL, "Socket can read data.");
@@ -1606,27 +1629,32 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
                     break;
             }
         }
-    }
 
-    /* The socket is non-blocking. */
-    rc = (int)read(s->fd,buf,(size_t)size);
-
-    if(rc < 0) {
-        if(errno == EAGAIN || errno == EWOULDBLOCK) {
-            return 0;
-        } else {
-            pdebug(DEBUG_WARN,"Socket read error: rc=%d, errno=%d", rc, errno);
-            return PLCTAG_ERR_READ;
+        /* try to read again. */
+        rc = (int)read(s->fd,buf,(size_t)size);
+        if(rc < 0) {
+            if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                pdebug(DEBUG_DETAIL, "No data read.");
+                rc = 0;
+            } else {
+                pdebug(DEBUG_WARN,"Socket read error: rc=%d, errno=%d", rc, errno);
+                return PLCTAG_ERR_READ;
+            }
         }
     }
+
+    pdebug(DEBUG_DETAIL, "Done: result %d.", rc);
 
     return rc;
 }
 
 
+
 int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
@@ -1648,8 +1676,33 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* only wait if we have a timeout. */
-    if(timeout_ms > 0) {
+    /*
+     * Try to write without waiting.
+     *
+     * In the case that we can immediately write, then we skip a
+     * system call to select().   If we cannot, then we will
+     * call select().
+     */
+
+#ifdef BSD_OS_TYPE
+    /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
+    rc = (int)write(s->fd, buf, (size_t)size);
+#else
+    /* on Linux, we use MSG_NOSIGNAL */
+    rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
+#endif
+
+    if(rc < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            rc = 0;
+        } else {
+            pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+            return PLCTAG_ERR_WRITE;
+        }
+    }
+
+    /* only wait if we have a timeout and no error and wrote no data. */
+    if(rc == 0 && timeout_ms > 0) {
         fd_set write_set;
         struct timeval tv;
         int select_rc = 0;
@@ -1662,7 +1715,6 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
         FD_SET(s->fd, &write_set);
 
         select_rc = select(s->fd+1, NULL, &write_set, NULL, &tv);
-
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &write_set)) {
                 pdebug(DEBUG_DETAIL, "Socket can write data.");
@@ -1703,25 +1755,28 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
                     break;
             }
         }
-    }
 
-    /* The socket is non-blocking. */
-#ifdef BSD_OS_TYPE
-    /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
-    rc = (int)write(s->fd, buf, (size_t)size);
-#else
-    /* on Linux, we use MSG_NOSIGNAL */
-    rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
-#endif
+        /* select() passed and said we can write, so try. */
+    #ifdef BSD_OS_TYPE
+        /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
+        rc = (int)write(s->fd, buf, (size_t)size);
+    #else
+        /* on Linux, we use MSG_NOSIGNAL */
+        rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
+    #endif
 
-    if(rc < 0) {
-        if(errno == EAGAIN || errno == EWOULDBLOCK) {
-            return PLCTAG_ERR_NO_DATA;
-        } else {
-            pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
-            return PLCTAG_ERR_WRITE;
+        if(rc < 0) {
+            if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                pdebug(DEBUG_DETAIL, "No data written.");
+                rc = 0;
+            } else {
+                pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+                return PLCTAG_ERR_WRITE;
+            }
         }
     }
+
+    pdebug(DEBUG_DETAIL, "Done: result = %d.", rc);
 
     return rc;
 }

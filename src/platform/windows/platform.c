@@ -1594,6 +1594,8 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
 
+    pdebug(DEBUG_DETAIL, "Starting.");
+
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
@@ -1614,8 +1616,27 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* only wait if we have a timeout. */
-    if(timeout_ms > 0) {
+    /* try to read without waiting.   Saves a system call if it works. */
+    rc = recv(s->fd, (char *)buf, size, 0);
+    if(rc < 0) {
+        int err = WSAGetLastError();
+
+        if(err == WSAEWOULDBLOCK) {
+            if(timeout_ms > 0) {
+                pdebug(DEBUG_DETAIL, "Immediate read attempt did not succeed, now wait for select().");
+            } else {
+                pdebug(DEBUG_DETAIL, "Read resulted in no data.");
+            }
+
+            rc = 0;
+        } else {
+            pdebug(DEBUG_WARN,"socket read error rc=%d, errno=%d", rc, err);
+            return PLCTAG_ERR_READ;
+        }
+    }
+
+    /* only wait if we have a timeout and no data and no error. */
+    if(rc == 0 && timeout_ms > 0) {
         fd_set read_set;
         TIMEVAL tv;
         int select_rc = 0;
@@ -1628,7 +1649,6 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
         FD_SET(s->fd, &read_set);
 
         select_rc = select(1, &read_set, NULL, NULL, &tv);
-
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &read_set)) {
                 pdebug(DEBUG_DETAIL, "Socket can read data.");
@@ -1686,21 +1706,22 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
                     break;
             }
         }
-    }
 
-    /* The socket is non-blocking. */
-    rc = recv(s->fd, (char *)buf, size, 0);
+        /* select() returned saying we can read, so read. */
+        rc = recv(s->fd, (char *)buf, size, 0);
+        if(rc < 0) {
+            int err = WSAGetLastError();
 
-    if(rc < 0) {
-        int err = WSAGetLastError();
-
-        if(err == WSAEWOULDBLOCK) {
-            return 0;
-        } else {
-            pdebug(DEBUG_WARN,"socket read error rc=%d, errno=%d", rc, err);
-            return PLCTAG_ERR_READ;
+            if(err == WSAEWOULDBLOCK) {
+                rc = 0;
+            } else {
+                pdebug(DEBUG_WARN,"socket read error rc=%d, errno=%d", rc, err);
+                return PLCTAG_ERR_READ;
+            }
         }
     }
+
+    pdebug(DEBUG_DETAIL, "Done: result = %d.", rc);
 
     return rc;
 }
@@ -1711,6 +1732,8 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
@@ -1732,8 +1755,26 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* only wait if we have a timeout. */
-    if(timeout_ms > 0) {
+    rc = send(s->fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+    if(rc < 0) {
+        int err = WSAGetLastError();
+
+        if(err == WSAEWOULDBLOCK) {
+            if(timeout_ms > 0) {
+                pdebug(DEBUG_DETAIL, "Immediate write attempt did not succeed, now wait for select().");
+            } else {
+                pdebug(DEBUG_DETAIL, "Write wrote no data.");
+            }
+
+            rc = 0;
+        } else {
+            pdebug(DEBUG_WARN,"socket write error rc=%d, errno=%d", rc, err);
+            return PLCTAG_ERR_WRITE;
+        }
+    }
+
+    /* only wait if we have a timeout and no data. */
+    if(rc == 0 && timeout_ms > 0) {
         fd_set write_set;
         TIMEVAL tv;
         int select_rc = 0;
@@ -1746,7 +1787,6 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
         FD_SET(s->fd, &write_set);
 
         select_rc = select(1, NULL, &write_set, NULL, &tv);
-
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &write_set)) {
                 pdebug(DEBUG_DETAIL, "Socket can write data.");
@@ -1804,21 +1844,23 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
                     break;
             }
         }
-    }
 
-    /* The socket is non-blocking. */
-    rc = send(s->fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+        /* try to write since select() said we could. */
+        rc = send(s->fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+        if(rc < 0) {
+            int err = WSAGetLastError();
 
-    if(rc < 0) {
-        int err = WSAGetLastError();
-
-        if(err == WSAEWOULDBLOCK) {
-            return PLCTAG_ERR_NO_DATA;
-        } else {
-            pdebug(DEBUG_WARN,"socket write error rc=%d, errno=%d", rc, err);
-            return PLCTAG_ERR_WRITE;
+            if(err == WSAEWOULDBLOCK) {
+                pdebug(DEBUG_DETAIL, "No data written.");
+                rc = 0;
+            } else {
+                pdebug(DEBUG_WARN,"socket write error rc=%d, errno=%d", rc, err);
+                return PLCTAG_ERR_WRITE;
+            }
         }
     }
+
+    pdebug(DEBUG_DETAIL, "Done: result = %d.", rc);
 
     return rc;
 }
