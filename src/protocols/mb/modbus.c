@@ -1362,7 +1362,7 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     int base_register = tag->reg_base + (tag->request_num * registers_per_request);
     int register_count = tag->elem_count - (tag->request_num * registers_per_request);
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     pdebug(DEBUG_DETAIL, "seq_id=%d", seq_id);
     pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
@@ -1477,7 +1477,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
     uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] +(uint16_t)(plc->read_data[0] << 8));
     int partial_read = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(seq_id == tag->seq_id) {
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
@@ -1497,7 +1497,7 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
             int copy_size = ((tag->size - byte_offset) < payload_size ? (tag->size - byte_offset) : payload_size);
 
             /* no error. So copy the data. */
-            pdebug(DEBUG_INFO, "Got read response %u of length %d with payload of size %d.", (int)(unsigned int)seq_id, plc->read_data_len, payload_size);
+            pdebug(DEBUG_DETAIL, "Got read response %u of length %d with payload of size %d.", (int)(unsigned int)seq_id, plc->read_data_len, payload_size);
             pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
             pdebug(DEBUG_DETAIL, "register_offset = %d", register_offset);
             pdebug(DEBUG_DETAIL, "byte_offset = %d", byte_offset);
@@ -1579,7 +1579,7 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
     int byte_offset = (register_offset * tag->elem_size) / 8;
     int request_payload_size = 0;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     pdebug(DEBUG_DETAIL, "seq_id=%d", seq_id);
     pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
@@ -1695,7 +1695,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
     uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
     int partial_write = 0;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(seq_id == tag->seq_id) {
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
@@ -1720,11 +1720,11 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
             /* are we done? */
             if(tag->size > byte_offset) {
                 /* Not yet. */
-                pdebug(DEBUG_INFO, "Not done writing entire tag.");
+                pdebug(DEBUG_DETAIL, "Not done writing entire tag.");
                 partial_write = 1;
             } else {
                 /* read is done. */
-                pdebug(DEBUG_INFO, "Write is complete.");
+                pdebug(DEBUG_DETAIL, "Write is complete.");
                 partial_write = 0;
             }
 
@@ -1754,7 +1754,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         rc = PLCTAG_STATUS_PENDING;
     }
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
 }
