@@ -830,47 +830,62 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     * if there is a timeout, then wait until we get
     * an error or we timeout.
     */
-    if(timeout && rc == PLCTAG_STATUS_PENDING) {
+    if(timeout > 0 && rc == PLCTAG_STATUS_PENDING) {
         int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
 
         /* wake up the tickler in case it is needed to create the tag. */
         plc_tag_tickler_wake();
 
-        /* wait for something to happen */
-        rc = cond_wait(tag->tag_cond_wait, timeout);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while waiting for tag creation to complete!", plc_tag_decode_error(rc));
-            if(tag->vtable->abort) {
-                tag->vtable->abort(tag);
+        /* we loop as long as we have time left to wait. */
+        do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /* clamp the timeout left to non-negative int range. */
+            if(timeout_left < 0) {
+                timeout_left = 0;
             }
 
-            /* remove the tag from the hashtable. */
-            critical_block(tag_lookup_mutex) {
-                hashtable_remove(tags, (int64_t)tag->tag_id);
+            if(timeout_left > INT_MAX) {
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
             }
 
-            rc_dec(tag);
-            return rc;
-        }
+            /* wait for something to happen */
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error %s while waiting for tag creation to complete!", plc_tag_decode_error(rc));
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
 
-        /* get the tag status. */
-        rc = tag->vtable->status(tag);
+                /* remove the tag from the hashtable. */
+                critical_block(tag_lookup_mutex) {
+                    hashtable_remove(tags, (int64_t)tag->tag_id);
+                }
 
-        /* check to see if there was an error during tag creation. */
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-            if(tag->vtable->abort) {
-                tag->vtable->abort(tag);
+                rc_dec(tag);
+                return rc;
             }
 
-            /* remove the tag from the hashtable. */
-            critical_block(tag_lookup_mutex) {
-                hashtable_remove(tags, (int64_t)tag->tag_id);
-            }
+            /* get the tag status. */
+            rc = tag->vtable->status(tag);
 
-            rc_dec(tag);
-            return rc;
-        }
+            /* check to see if there was an error during tag creation. */
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+                pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
+
+                /* remove the tag from the hashtable. */
+                critical_block(tag_lookup_mutex) {
+                    hashtable_remove(tags, (int64_t)tag->tag_id);
+                }
+
+                rc_dec(tag);
+                return rc;
+            }
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* clear up any remaining flags.  This should be refactored. */
         tag->read_in_flight = 0;
@@ -1375,13 +1390,26 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
      */
     if(!is_done && timeout > 0) {
         int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
 
         /* wake up the tickler in case it is needed to read the tag. */
         plc_tag_tickler_wake();
 
+        /* we loop as long as we have time left to wait. */
         do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /* clamp the timeout left to non-negative int range. */
+            if(timeout_left < 0) {
+                timeout_left = 0;
+            }
+
+            if(timeout_left > INT_MAX) {
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
+            }
+
             /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, timeout);
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while waiting for tag read to complete!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
@@ -1396,10 +1424,8 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
-
-                break;
             }
-        } while(0);
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* the write is not in flight anymore. */
         critical_block(tag->api_mutex) {
@@ -1564,13 +1590,26 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
      */
     if(!is_done && timeout > 0) {
         int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
 
         /* wake up the tickler in case it is needed to write the tag. */
         plc_tag_tickler_wake();
 
+        /* we loop as long as we have time left to wait. */
         do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /* clamp the timeout left to non-negative int range. */
+            if(timeout_left < 0) {
+                timeout_left = 0;
+            }
+
+            if(timeout_left > INT_MAX) {
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
+            }
+
             /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, timeout);
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while waiting for tag write to complete!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
@@ -1585,10 +1624,8 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
-
-                break;
             }
-        } while(0);
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* the write is not in flight anymore. */
         critical_block(tag->api_mutex) {
