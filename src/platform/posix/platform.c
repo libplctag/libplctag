@@ -1029,7 +1029,7 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
     int64_t end_time = start_time + timeout_ms;
     struct timespec timeout;
 
-    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Starting. Called from %s:%d.", func, line_num);
 
     if(!c) {
         pdebug(DEBUG_WARN, "Condition var pointer is null in call from %s:%d!", func, line_num);
@@ -1057,14 +1057,14 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
     while(!c->flag) {
         int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
 
-        pdebug(DEBUG_DETAIL, "Waiting for %" PRId64 "ms.", time_left);
+        pdebug(DEBUG_SPEW, "Waiting for %" PRId64 "ms.", time_left);
 
         if(time_left > 0) {
             int wait_rc = 0;
 
             wait_rc = pthread_cond_timedwait(&(c->cond), &(c->mutex), &timeout);
             if(wait_rc == ETIMEDOUT) {
-                pdebug(DEBUG_DETAIL, "Timeout response from condition var wait.");
+                pdebug(DEBUG_SPEW, "Timeout response from condition var wait.");
                 rc = PLCTAG_ERR_TIMEOUT;
                 break;
             } else if(wait_rc != 0) {
@@ -1073,7 +1073,7 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
                 break;
             } else {
                 /* we might need to wait again. could be a spurious wake up. */
-                pdebug(DEBUG_DETAIL, "Condition var wait returned.");
+                pdebug(DEBUG_SPEW, "Condition var wait returned.");
                 rc = PLCTAG_STATUS_OK;
             }
         } else {
@@ -1084,12 +1084,12 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
     }
 
     if(c->flag) {
-        pdebug(DEBUG_DETAIL, "Condition var signaled for call at %s:%d.", func, line_num);
+        pdebug(DEBUG_SPEW, "Condition var signaled for call at %s:%d.", func, line_num);
 
         /* clear the flag now that we've responded. */
         c->flag = 0;
     } else {
-        pdebug(DEBUG_DETAIL, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
+        pdebug(DEBUG_SPEW, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
     }
 
     if(pthread_mutex_unlock(& (c->mutex))) {
@@ -1097,7 +1097,7 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Done for call at %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1107,7 +1107,7 @@ int cond_signal_impl(const char *func, int line_num, cond_p c)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
 
     if(!c) {
         pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
@@ -1131,7 +1131,7 @@ int cond_signal_impl(const char *func, int line_num, cond_p c)
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    pdebug(DEBUG_DETAIL, "Done. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Done. Called from %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1141,7 +1141,7 @@ int cond_clear_impl(const char *func, int line_num, cond_p c)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
 
     if(!c) {
         pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
@@ -1160,7 +1160,7 @@ int cond_clear_impl(const char *func, int line_num, cond_p c)
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    pdebug(DEBUG_DETAIL, "Done. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Done. Called from %s:%d.", func, line_num);
 
     return rc;
 }

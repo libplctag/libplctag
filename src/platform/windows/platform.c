@@ -1123,9 +1123,7 @@ int cond_wait_impl(const char* func, int line_num, cond_p c, int timeout_ms)
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time = time_ms();
 
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Starting. Called from %s:%d.", func, line_num);
 
     if (!c) {
         pdebug(DEBUG_WARN, "Condition var pointer is null in call from %s:%d!", func, line_num);
@@ -1148,13 +1146,13 @@ int cond_wait_impl(const char* func, int line_num, cond_p c, int timeout_ms)
 
             if(SleepConditionVariableCS(&(c->cond), &(c->cs), (DWORD)time_left)) {
                 /* we might need to wait again. could be a spurious wake up. */
-                pdebug(DEBUG_DETAIL, "Condition var wait returned.");
+                pdebug(DEBUG_SPEW, "Condition var wait returned.");
                 rc = PLCTAG_STATUS_OK;
             } else {
                 /* error or timeout. */
                 wait_rc = GetLastError();
                 if(wait_rc == ERROR_TIMEOUT) {
-                    pdebug(DEBUG_DETAIL, "Timeout response from condition var wait.");
+                    pdebug(DEBUG_SPEW, "Timeout response from condition var wait.");
                     rc = PLCTAG_ERR_TIMEOUT;
                     break;
                 } else {
@@ -1164,25 +1162,25 @@ int cond_wait_impl(const char* func, int line_num, cond_p c, int timeout_ms)
                 }
             }
         } else {
-            pdebug(DEBUG_DETAIL, "Timed out.");
+            pdebug(DEBUG_SPEW, "Timed out.");
             rc = PLCTAG_ERR_TIMEOUT;
             break;
         }
     }
 
     if (c->flag) {
-        pdebug(DEBUG_DETAIL, "Condition var signaled for call at %s:%d.", func, line_num);
+        pdebug(DEBUG_SPEW, "Condition var signaled for call at %s:%d.", func, line_num);
 
         /* clear the flag now that we've responded. */
         c->flag = 0;
     }
     else {
-        pdebug(DEBUG_DETAIL, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
+        pdebug(DEBUG_SPEW, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
     }
 
     LeaveCriticalSection (&(c->cs));
 
-    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Done for call at %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1192,7 +1190,7 @@ int cond_signal_impl(const char* func, int line_num, cond_p c)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
 
     if (!c) {
         pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
@@ -1208,7 +1206,7 @@ int cond_signal_impl(const char* func, int line_num, cond_p c)
     /* Windows does this outside the critical section? */
     WakeConditionVariable(&(c->cond));
 
-    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Done for call at %s:%d.", func, line_num);
 
     return rc;
 }
@@ -1219,7 +1217,7 @@ int cond_clear_impl(const char* func, int line_num, cond_p c)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.  Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
 
     if (!c) {
         pdebug(DEBUG_WARN, "Condition var pointer is null in call at %s:%d!", func, line_num);
@@ -1232,7 +1230,7 @@ int cond_clear_impl(const char* func, int line_num, cond_p c)
 
     LeaveCriticalSection(&(c->cs));
 
-    pdebug(DEBUG_DETAIL, "Done for call at %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Done for call at %s:%d.", func, line_num);
 
     return rc;
 }
