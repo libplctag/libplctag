@@ -346,6 +346,8 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 {
     /* call the callbacks outside the API mutex. */
     if(tag && tag->callback) {
+        debug_set_tag_id(tag->tag_id);
+
         /* was there a read start? */
         if(tag->event_read_started) {
             pdebug(DEBUG_DETAIL, "Tag read started.");
@@ -388,6 +390,8 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
             //tag->callback(tag->tag_id, PLCTAG_EVENT_CREATE_COMPLETE, plc_tag_status(tag->tag_id));
             tag->event_creation_complete = 0;
         }
+
+        debug_set_tag_id(0);
     }
 }
 
@@ -1527,7 +1531,7 @@ LIB_EXPORT int plc_tag_status(int32_t id)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* check the ID.  It might be an error status from creating the tag. */
     if(!tag) {
@@ -1556,7 +1560,7 @@ LIB_EXPORT int plc_tag_status(int32_t id)
 
     rc_dec(tag);
 
-    pdebug(DEBUG_SPEW, "Done with rc=%s.", plc_tag_decode_error(rc));
+    pdebug(DEBUG_DETAIL, "Done with rc=%s.", plc_tag_decode_error(rc));
 
     return rc;
 }
