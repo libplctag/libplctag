@@ -41,3 +41,4 @@ extern void atomic_init(atomic_int *a, int new_val);
 extern int atomic_get(atomic_int *a);
 extern int atomic_set(atomic_int *a, int new_val);
 extern int atomic_add(atomic_int *a, int other);
+extern int atomic_compare_and_set(atomic_int *a, int old_val, int new_val);

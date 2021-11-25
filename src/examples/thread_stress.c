@@ -254,9 +254,10 @@ int main(int argc, char **argv)
     char *tag_string = NULL;
     int64_t start = 0;
     int64_t total_run_time = 0;
+    int count_down = 50;
 
     /* set up logging */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -336,9 +337,11 @@ int main(int argc, char **argv)
 
     start = util_time_ms();
 
-    while(go) {
-        util_sleep_ms(10);
+    while(go && (--count_down) > 0) {
+        util_sleep_ms(100);
     }
+
+    go = 0;
 
     total_run_time = util_time_ms() - start;
 
