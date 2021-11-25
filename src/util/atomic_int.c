@@ -93,3 +93,25 @@ int atomic_add(atomic_int *a, int other)
 
     return old_val;
 }
+
+
+int atomic_compare_and_set(atomic_int *a, int old_val, int new_val)
+{
+    int ret_val = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    spin_block(&a->lock) {
+        ret_val = a->val;
+
+        if(ret_val == old_val) {
+            a->val = new_val;
+        }
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return ret_val;
+}
+
+

@@ -108,25 +108,6 @@
 #define AB_EIP_SLC_RANGE_BIT_WRITE_FUNC ((uint8_t)0xAB)
 
 
-/* PCCC defs */
-/*
-#define AB_PCCC_DATA_OUTPUT         (0x82)
-#define AB_PCCC_DATA_INPUT          (0x83)
-#define AB_PCCC_DATA_STATUS         (0x84)
-#define AB_PCCC_DATA_BIT            (0x85)
-#define AB_PCCC_DATA_TIMER          (0x86)
-#define AB_PCCC_DATA_COUNTER        (0x87)
-#define AB_PCCC_DATA_CONTROL        (0x88)
-#define AB_PCCC_DATA_INT            (0x89)
-#define AB_PCCC_DATA_FLOAT          (0x8A)
-#define AB_PCCC_DATA_STRING         (0x8D)
-#define AB_PCCC_DATA_ASCII          (0x8E)
-#define AB_PCCC_DATA_LONG           (0x91)
-#define AB_PCCC_DATA_MSG            (0x92)
-#define AB_PCCC_DATA_PID            (0x93)
-#define AB_PCCC_DATA_PLS            (0x94)
-*/
-
 
 #define AB_PCCC_DATA_BIT            1
 #define AB_PCCC_DATA_BIT_STRING     2

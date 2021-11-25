@@ -111,6 +111,13 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         uint8_t read_complete:1; \
                         uint8_t write_in_flight:1; \
                         uint8_t write_complete:1; \
+                        uint8_t skip_tickler:1; \
+                        uint8_t event_creation_complete:1; \
+                        uint8_t event_operation_aborted:1; \
+                        uint8_t event_read_started: 1; \
+                        uint8_t event_read_complete: 1; \
+                        uint8_t event_write_started: 1; \
+                        uint8_t event_write_complete: 1; \
                         int8_t status; \
                         int bit; \
                         int32_t size; \
@@ -145,5 +152,7 @@ extern void lib_teardown(void);
 // extern int plc_tag_destroy_mapped(plc_tag_p tag);
 // extern int plc_tag_status_mapped(plc_tag_p tag);
 extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
+extern void plc_tag_generic_tickler(plc_tag_p tag);
+extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 #define plc_tag_tickler_wake()  plc_tag_tickler_wake_impl(__func__, __LINE__)
 extern int init_generic_tag(plc_tag_p tag);
