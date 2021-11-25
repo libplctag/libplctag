@@ -344,6 +344,7 @@ void plc_tag_generic_tickler(plc_tag_p tag)
 
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 {
+
     /* call the callbacks outside the API mutex. */
     if(tag && tag->callback) {
         debug_set_tag_id(tag->tag_id);
@@ -393,6 +394,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
         debug_set_tag_id(0);
     }
+
 }
 
 
@@ -1498,12 +1500,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         tag->read_cache_expire = time_ms() + tag->read_cache_ms;
     }
 
-    if(tag->callback) {
-        if(is_done) {
-            pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
-            tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
-        }
-    }
+    // if(tag->callback) {
+    //     if(is_done) {
+    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
+    //         tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
+    //     }
+    // }
 
     rc_dec(tag);
 
@@ -1693,12 +1695,12 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         pdebug(DEBUG_INFO,"Write finshed with elapsed time %" PRId64 "ms", (time_ms()-start_time));
     }
 
-    if(tag->callback) {
-        if(is_done) {
-            pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
-            tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
-        }
-    }
+    // if(tag->callback) {
+    //     if(is_done) {
+    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
+    //         tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
+    //     }
+    // }
 
     rc_dec(tag);
 
