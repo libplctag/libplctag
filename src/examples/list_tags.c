@@ -135,7 +135,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_ERROR);
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
@@ -248,7 +248,12 @@ int main(int argc, char **argv)
 
     /* output all the tags. */
     for(struct tag_entry_s *tag = tag_list; tag; tag = tag->next) {
-        printf("Tag \"%s", tag->name);
+        if(!tag->parent) {
+            printf("Tag \"%s", tag->name);
+        } else {
+            printf("Tag \"%s.%s", tag->parent->name, tag->name);
+        }
+
         switch(tag->num_dimensions) {
             case 1:
                 printf("[%d]", tag->dimensions[0]);
@@ -272,7 +277,11 @@ int main(int argc, char **argv)
         printf(".  ");
 
         /* print the tag string */
-        printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\"\n", host, path, tag->elem_size, tag->elem_count, tag->name);
+        if(!tag->parent) {
+            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s\"\n", host, path, tag->elem_size, tag->elem_count, tag->name);
+        } else {
+            printf("tag string = \"protocol=ab-eip&gateway=%s&path=%s&plc=ControlLogix&elem_size=%u&elem_count=%u&name=%s.%s\"\n", host, path, tag->elem_size, tag->elem_count, tag->parent->name, tag->name);
+        }
     }
 
     printf("UDTs:\n");
@@ -578,8 +587,8 @@ void print_element_type(uint16_t element_type)
             case 0xC7: type = "UINT: Unsigned 16-bit integer value"; break;
             case 0xC8: type = "UDINT: Unsigned 32-bit integer value"; break;
             case 0xC9: type = "ULINT: Unsigned 64-bit integer value"; break;
-            case 0xCA: type = "32-bit floating point value, IEEE format"; break;
-            case 0xCB: type = "64-bit floating point value, IEEE format"; break;
+            case 0xCA: type = "REAL: 32-bit floating point value, IEEE format"; break;
+            case 0xCB: type = "LREAL: 64-bit floating point value, IEEE format"; break;
             case 0xCC: type = "Synchronous time value"; break;
             case 0xCD: type = "Date value"; break;
             case 0xCE: type = "Time of day value"; break;

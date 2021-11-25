@@ -230,6 +230,174 @@ int plc_tag_tickler_wake_impl(const char *func, int line_num)
 
 
 
+/*
+ * plc_tag_generic_tickler
+ *
+ * This implements the protocol-independent tickling functions such as handling
+ * automatic tag operations and callbacks.
+ */
+
+void plc_tag_generic_tickler(plc_tag_p tag)
+{
+    if(tag) {
+        debug_set_tag_id(tag->tag_id);
+
+        pdebug(DEBUG_DETAIL, "Tickling tag %d.", tag->tag_id);
+
+        /* if this tag has automatic writes, then there are many things we should check */
+        if(tag->auto_sync_write_ms > 0) {
+            /* has the tag been written to? */
+            if(tag->tag_is_dirty) {
+                /* abort any in flight read if the tag is dirty. */
+                if(tag->read_in_flight) {
+                    if(tag->vtable->abort) {
+                        tag->vtable->abort(tag);
+                    }
+
+                    pdebug(DEBUG_DETAIL, "Aborting in-flight automatic read!");
+
+                    tag->read_complete = 0;
+                    tag->read_in_flight = 0;
+
+                    /* FIXME - should we report an ABORT event here? */
+                    tag->event_operation_aborted = 1;
+                }
+
+                /* have we already done something about automatic reads? */
+                if(!tag->auto_sync_next_write) {
+                    /* we need to queue up a new write. */
+                    tag->auto_sync_next_write = time_ms() + tag->auto_sync_write_ms;
+
+                    pdebug(DEBUG_DETAIL, "Queueing up automatic write in %dms.", tag->auto_sync_write_ms);
+                } else if(!tag->write_in_flight && tag->auto_sync_next_write <= time_ms()) {
+                    pdebug(DEBUG_DETAIL, "Triggering automatic write start.");
+
+                    /* clear out any outstanding reads. */
+                    if(tag->read_in_flight && tag->vtable->abort) {
+                        tag->vtable->abort(tag);
+                        tag->read_in_flight = 0;
+                    }
+
+                    tag->tag_is_dirty = 0;
+                    tag->write_in_flight = 1;
+                    tag->auto_sync_next_write = 0;
+
+                    if(tag->vtable->write) {
+                        tag->status = (int8_t)tag->vtable->write(tag);
+                    }
+
+                    tag->event_write_started = 1;
+                }
+            }
+        }
+
+        /* if this tag has automatic reads, we need to check that state too. */
+        if(tag->auto_sync_read_ms > 0) {
+            int64_t current_time = time_ms();
+
+            /* do we need to read? */
+            if(tag->auto_sync_next_read <= current_time) {
+                /* make sure that we do not have an outstanding read or write. */
+                if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
+                    int64_t periods = 0;
+
+                    pdebug(DEBUG_DETAIL, "Triggering automatic read start.");
+
+                    tag->read_in_flight = 1;
+
+                    if(tag->vtable->read) {
+                        tag->status = (int8_t)tag->vtable->read(tag);
+                    }
+
+                    /*
+                     * schedule the next read.
+                     *
+                     * Note that there will be some jitter.  In that case we want to skip
+                     * to the next read time that is a whole multiple of the read period.
+                     *
+                     * This keeps the jitter from slowly moving the polling cycle.
+                     */
+                    periods = (current_time - tag->auto_sync_next_read)/tag->auto_sync_read_ms;
+
+                    /* warn if we need to skip more than one period. */
+                    if(tag->auto_sync_next_read && periods > 0) {
+                        pdebug(DEBUG_WARN, "Skipping multiple read periods due to long delay!");
+                    }
+
+                    tag->auto_sync_next_read += (periods + 1) * tag->auto_sync_read_ms;
+                    pdebug(DEBUG_WARN, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
+
+                    tag->event_read_started = 1;
+                }
+            }
+        }
+    } else {
+        pdebug(DEBUG_WARN, "Called with null tag pointer!");
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    debug_set_tag_id(0);
+}
+
+
+
+void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
+{
+
+    /* call the callbacks outside the API mutex. */
+    if(tag && tag->callback) {
+        debug_set_tag_id(tag->tag_id);
+
+        /* was there a read start? */
+        if(tag->event_read_started) {
+            pdebug(DEBUG_DETAIL, "Tag read started.");
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, plc_tag_status(tag->tag_id));
+            tag->event_read_started = 0;
+        }
+
+        /* was there a write start? */
+        if(tag->event_write_started) {
+            pdebug(DEBUG_DETAIL, "Tag write started.");
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, plc_tag_status(tag->tag_id));
+            tag->event_write_started = 0;
+        }
+
+        /* was there an abort? */
+        if(tag->event_operation_aborted) {
+            pdebug(DEBUG_DETAIL, "Tag operation aborted.");
+            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, plc_tag_status(tag->tag_id));
+            tag->event_operation_aborted = 0;
+        }
+
+        /* was there a read completion? */
+        if(tag->event_read_complete) {
+            pdebug(DEBUG_DETAIL, "Tag read completed.");
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, plc_tag_status(tag->tag_id));
+            tag->event_read_complete = 0;
+        }
+
+        /* was there a write completion? */
+        if(tag->event_write_complete) {
+            pdebug(DEBUG_DETAIL, "Tag write completed.");
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, plc_tag_status(tag->tag_id));
+            tag->event_write_complete = 0;
+        }
+
+        /* was there a write completion? */
+        if(tag->event_creation_complete) {
+            pdebug(DEBUG_DETAIL, "Tag creation completed.");
+            /* TODO - when API changes, add this. */
+            //tag->callback(tag->tag_id, PLCTAG_EVENT_CREATE_COMPLETE, plc_tag_status(tag->tag_id));
+            tag->event_creation_complete = 0;
+        }
+
+        debug_set_tag_id(0);
+    }
+
+}
+
+
 
 int init_generic_tag(plc_tag_p tag)
 {
@@ -307,178 +475,68 @@ THREAD_FUNC(tag_tickler_func)
             }
 
             if(tag) {
-                int events[PLCTAG_EVENT_MAX] =  {0};
-
                 debug_set_tag_id(tag->tag_id);
 
-                pdebug(DEBUG_DETAIL, "Tickling tag %d.", tag->tag_id);
+                if(!tag->skip_tickler) {
+                    pdebug(DEBUG_DETAIL, "Tickling tag %d.", tag->tag_id);
 
-                /* try to hold the tag API mutex while all this goes on. */
-                if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
-                    /* if this tag has automatic writes, then there are many things we should check */
-                    if(tag->auto_sync_write_ms > 0) {
-                        /* has the tag been written to? */
-                        if(tag->tag_is_dirty) {
-                            /* abort any in flight read if the tag is dirty. */
-                            if(tag->read_in_flight) {
-                                if(tag->vtable->abort) {
-                                    tag->vtable->abort(tag);
-                                }
+                    /* try to hold the tag API mutex while all this goes on. */
+                    if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+                        plc_tag_generic_tickler(tag);
 
-                                pdebug(DEBUG_DETAIL, "Aborting in-flight automatic read!");
+                        /* call the tickler function if we can. */
+                        if(tag->vtable->tickler) {
+                            /* call the tickler on the tag. */
+                            tag->vtable->tickler(tag);
 
+                            if(tag->read_complete) {
                                 tag->read_complete = 0;
                                 tag->read_in_flight = 0;
 
-                                /* FIXME - should we report an ABORT event here? */
-                                events[PLCTAG_EVENT_ABORTED] = 1;
+                                tag->event_read_complete = 1;
+
+                                /* wake immediately */
+                                plc_tag_tickler_wake();
+                                cond_signal(tag->tag_cond_wait);
                             }
 
-                            /* have we already done something about automatic reads? */
-                            if(!tag->auto_sync_next_write) {
-                                /* we need to queue up a new write. */
-                                tag->auto_sync_next_write = time_ms() + tag->auto_sync_write_ms;
-
-                                pdebug(DEBUG_DETAIL, "Queueing up automatic write in %dms.", tag->auto_sync_write_ms);
-                            } else if(!tag->write_in_flight && tag->auto_sync_next_write <= time_ms()) {
-                                pdebug(DEBUG_DETAIL, "Triggering automatic write start.");
-
-                                /* clear out any outstanding reads. */
-                                if(tag->read_in_flight && tag->vtable->abort) {
-                                    tag->vtable->abort(tag);
-                                    tag->read_in_flight = 0;
-                                }
-
-                                tag->tag_is_dirty = 0;
-                                tag->write_in_flight = 1;
+                            if(tag->write_complete) {
+                                tag->write_complete = 0;
+                                tag->write_in_flight = 0;
                                 tag->auto_sync_next_write = 0;
 
-                                if(tag->vtable->write) {
-                                    tag->status = (int8_t)tag->vtable->write(tag);
-                                }
+                                tag->event_write_complete = 1;
 
-                                events[PLCTAG_EVENT_WRITE_STARTED] = 1;
+                                /* wake immediately */
+                                plc_tag_tickler_wake();
+                                cond_signal(tag->tag_cond_wait);
                             }
                         }
 
-                        /* wake up earlier if the time until the next wake up is sooner. */
+                        /* wake up earlier if the time until the next write wake up is sooner. */
                         if(tag->auto_sync_next_write && tag->auto_sync_next_write < tag_tickler_wait_timeout_end) {
                             tag_tickler_wait_timeout_end = tag->auto_sync_next_write;
                         }
-                    }
 
-                    /* if this tag has automatic reads, we need to check that state too. */
-                    if(tag->auto_sync_read_ms > 0) {
-                        int64_t current_time = time_ms();
-
-                        /* do we need to read? */
-                        if(tag->auto_sync_next_read <= current_time) {
-                            /* make sure that we do not have an outstanding read or write. */
-                            if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
-                                int64_t periods = 0;
-
-                                pdebug(DEBUG_DETAIL, "Triggering automatic read start.");
-
-                                tag->read_in_flight = 1;
-
-                                if(tag->vtable->read) {
-                                    tag->status = (int8_t)tag->vtable->read(tag);
-                                }
-
-                                /*
-                                 * schedule the next read.
-                                 *
-                                 * Note that there will be some jitter.  In that case we want to skip
-                                 * to the next read time that is a whole multiple of the read period.
-                                 *
-                                 * This keeps the jitter from slowly moving the polling cycle.
-                                 */
-                                periods = (current_time - tag->auto_sync_next_read)/tag->auto_sync_read_ms;
-
-                                /* warn if we need to skip more than one period. */
-                                if(tag->auto_sync_next_read && periods > 0) {
-                                    pdebug(DEBUG_WARN, "Skipping multiple read periods due to long delay!");
-                                }
-
-                                tag->auto_sync_next_read += (periods + 1) * tag->auto_sync_read_ms;
-                                pdebug(DEBUG_WARN, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
-
-                                events[PLCTAG_EVENT_READ_STARTED] = 1;
-                            }
-                        }
-
-
-                        /* wake up earlier if the time until the next wake up is sooner. */
+                        /* wake up earlier if the time until the next read wake up is sooner. */
                         if(tag->auto_sync_next_read && tag->auto_sync_next_read < tag_tickler_wait_timeout_end) {
                             tag_tickler_wait_timeout_end = tag->auto_sync_next_read;
                         }
+
+                        /* we are done with the tag API mutex now. */
+                        mutex_unlock(tag->api_mutex);
+
+                        /* call callbacks */
+                        plc_tag_generic_handle_event_callbacks(tag);
+                    } else {
+                        pdebug(DEBUG_DETAIL, "Skipping tag as it is already locked.");
                     }
 
-                    /* call the tickler function if we can. */
-                    if(tag->vtable->tickler) {
-                        /* call the tickler on the tag. */
-                        tag->vtable->tickler(tag);
-
-                        if(tag->read_complete) {
-                            tag->read_complete = 0;
-                            tag->read_in_flight = 0;
-
-                            events[PLCTAG_EVENT_READ_COMPLETED] = 1;
-
-                            /* wake immediately */
-                            plc_tag_tickler_wake();
-                            cond_signal(tag->tag_cond_wait);
-                        }
-
-                        if(tag->write_complete) {
-                            tag->write_complete = 0;
-                            tag->write_in_flight = 0;
-                            tag->auto_sync_next_write = 0;
-
-                            events[PLCTAG_EVENT_WRITE_COMPLETED] = 1;
-
-                            /* wake immediately */
-                            plc_tag_tickler_wake();
-                            cond_signal(tag->tag_cond_wait);
-                        }
-                    }
-
-                    /* we are done with the tag API mutex now. */
-                    mutex_unlock(tag->api_mutex);
-
-                    /* call the callback outside the API mutex. */
-                    if(tag->callback) {
-                        /* was there a read start? */
-                        if(events[PLCTAG_EVENT_READ_STARTED]) {
-                            pdebug(DEBUG_DETAIL, "Tag read started.");
-                            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, plc_tag_status(tag->tag_id));
-                        }
-
-                        /* was there a write start? */
-                        if(events[PLCTAG_EVENT_WRITE_STARTED]) {
-                            pdebug(DEBUG_DETAIL, "Tag write started.");
-                            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, plc_tag_status(tag->tag_id));
-                        }
-
-                        /* was there an abort? */
-                        if(events[PLCTAG_EVENT_ABORTED]) {
-                            pdebug(DEBUG_DETAIL, "Tag operation aborted.");
-                            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, plc_tag_status(tag->tag_id));
-                        }
-
-                        /* was there a read completion? */
-                        if(events[PLCTAG_EVENT_READ_COMPLETED]) {
-                            pdebug(DEBUG_DETAIL, "Tag read completed.");
-                            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, plc_tag_status(tag->tag_id));
-                        }
-
-                        /* was there a write completion? */
-                        if(events[PLCTAG_EVENT_WRITE_COMPLETED]) {
-                            pdebug(DEBUG_DETAIL, "Tag write completed.");
-                            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, plc_tag_status(tag->tag_id));
-                        }
-                    }
+                } else {
+                    pdebug(DEBUG_DETAIL, "Tag does has its own tickler.");
                 }
+
+                debug_set_tag_id(0);
             }
 
             if(tag) {
@@ -830,47 +888,62 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     * if there is a timeout, then wait until we get
     * an error or we timeout.
     */
-    if(timeout && rc == PLCTAG_STATUS_PENDING) {
+    if(timeout > 0 && rc == PLCTAG_STATUS_PENDING) {
         int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
 
         /* wake up the tickler in case it is needed to create the tag. */
         plc_tag_tickler_wake();
 
-        /* wait for something to happen */
-        rc = cond_wait(tag->tag_cond_wait, timeout);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while waiting for tag creation to complete!", plc_tag_decode_error(rc));
-            if(tag->vtable->abort) {
-                tag->vtable->abort(tag);
+        /* we loop as long as we have time left to wait. */
+        do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /* clamp the timeout left to non-negative int range. */
+            if(timeout_left < 0) {
+                timeout_left = 0;
             }
 
-            /* remove the tag from the hashtable. */
-            critical_block(tag_lookup_mutex) {
-                hashtable_remove(tags, (int64_t)tag->tag_id);
+            if(timeout_left > INT_MAX) {
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
             }
 
-            rc_dec(tag);
-            return rc;
-        }
+            /* wait for something to happen */
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Error %s while waiting for tag creation to complete!", plc_tag_decode_error(rc));
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
 
-        /* get the tag status. */
-        rc = tag->vtable->status(tag);
+                /* remove the tag from the hashtable. */
+                critical_block(tag_lookup_mutex) {
+                    hashtable_remove(tags, (int64_t)tag->tag_id);
+                }
 
-        /* check to see if there was an error during tag creation. */
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-            if(tag->vtable->abort) {
-                tag->vtable->abort(tag);
+                rc_dec(tag);
+                return rc;
             }
 
-            /* remove the tag from the hashtable. */
-            critical_block(tag_lookup_mutex) {
-                hashtable_remove(tags, (int64_t)tag->tag_id);
-            }
+            /* get the tag status. */
+            rc = tag->vtable->status(tag);
 
-            rc_dec(tag);
-            return rc;
-        }
+            /* check to see if there was an error during tag creation. */
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+                pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
+                if(tag->vtable->abort) {
+                    tag->vtable->abort(tag);
+                }
+
+                /* remove the tag from the hashtable. */
+                critical_block(tag_lookup_mutex) {
+                    hashtable_remove(tags, (int64_t)tag->tag_id);
+                }
+
+                rc_dec(tag);
+                return rc;
+            }
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* clear up any remaining flags.  This should be refactored. */
         tag->read_in_flight = 0;
@@ -1375,13 +1448,26 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
      */
     if(!is_done && timeout > 0) {
         int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
 
         /* wake up the tickler in case it is needed to read the tag. */
         plc_tag_tickler_wake();
 
+        /* we loop as long as we have time left to wait. */
         do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /* clamp the timeout left to non-negative int range. */
+            if(timeout_left < 0) {
+                timeout_left = 0;
+            }
+
+            if(timeout_left > INT_MAX) {
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
+            }
+
             /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, timeout);
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while waiting for tag read to complete!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
@@ -1393,13 +1479,11 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             rc = plc_tag_status(id);
 
             /* check to see if there was an error during tag read. */
-            if(rc != PLCTAG_STATUS_OK) {
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
-
-                break;
             }
-        } while(0);
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* the write is not in flight anymore. */
         critical_block(tag->api_mutex) {
@@ -1416,12 +1500,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         tag->read_cache_expire = time_ms() + tag->read_cache_ms;
     }
 
-    if(tag->callback) {
-        if(is_done) {
-            pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
-            tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
-        }
-    }
+    // if(tag->callback) {
+    //     if(is_done) {
+    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
+    //         tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
+    //     }
+    // }
 
     rc_dec(tag);
 
@@ -1449,7 +1533,7 @@ LIB_EXPORT int plc_tag_status(int32_t id)
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* check the ID.  It might be an error status from creating the tag. */
     if(!tag) {
@@ -1478,7 +1562,7 @@ LIB_EXPORT int plc_tag_status(int32_t id)
 
     rc_dec(tag);
 
-    pdebug(DEBUG_SPEW, "Done with rc=%s.", plc_tag_decode_error(rc));
+    pdebug(DEBUG_DETAIL, "Done with rc=%s.", plc_tag_decode_error(rc));
 
     return rc;
 }
@@ -1504,7 +1588,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
     plc_tag_p tag = lookup_tag(id);
     int is_done = 0;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
@@ -1564,13 +1648,26 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
      */
     if(!is_done && timeout > 0) {
         int64_t start_time = time_ms();
+        int64_t end_time = start_time + timeout;
 
         /* wake up the tickler in case it is needed to write the tag. */
         plc_tag_tickler_wake();
 
+        /* we loop as long as we have time left to wait. */
         do {
+            int64_t timeout_left = end_time - time_ms();
+
+            /* clamp the timeout left to non-negative int range. */
+            if(timeout_left < 0) {
+                timeout_left = 0;
+            }
+
+            if(timeout_left > INT_MAX) {
+                timeout_left = 100; /* MAGIC, only wait 100ms in this weird case. */
+            }
+
             /* wait for something to happen */
-            rc = cond_wait(tag->tag_cond_wait, timeout);
+            rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while waiting for tag write to complete!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
@@ -1582,13 +1679,11 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
             rc = plc_tag_status(id);
 
             /* check to see if there was an error during tag creation. */
-            if(rc != PLCTAG_STATUS_OK) {
+            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
-
-                break;
             }
-        } while(0);
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
         /* the write is not in flight anymore. */
         critical_block(tag->api_mutex) {
@@ -1597,19 +1692,19 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
             is_done = 1;
         }
 
-        pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms", (time_ms()-start_time));
+        pdebug(DEBUG_INFO,"Write finshed with elapsed time %" PRId64 "ms", (time_ms()-start_time));
     }
 
-    if(tag->callback) {
-        if(is_done) {
-            pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
-            tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
-        }
-    }
+    // if(tag->callback) {
+    //     if(is_done) {
+    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
+    //         tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
+    //     }
+    // }
 
     rc_dec(tag);
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_INFO, "Done: status = %s.", plc_tag_decode_error(rc));
 
     return rc;
 }

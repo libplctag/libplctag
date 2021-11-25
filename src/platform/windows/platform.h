@@ -253,7 +253,8 @@ extern int cond_destroy(cond_p *c);
 /* socket functions */
 typedef struct sock_t *sock_p;
 extern int socket_create(sock_p *s);
-extern int socket_connect_tcp(sock_p s, const char *host, int port);
+extern int socket_connect_tcp_start(sock_p s, const char* host, int port);
+extern int socket_connect_tcp_check(sock_p s, int timeout_ms);
 extern int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_close(sock_p s);
