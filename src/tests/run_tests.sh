@@ -60,7 +60,7 @@ fi
 
 echo "Doing tests that need the local emulator."
 
-echo -n "Starting AB emulator... "
+echo -n "Starting AB emulator for ControlLogix tests... "
 $TEST_DIR/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=5  > ab_emulator.log 2>&1 &
 EMULATOR_PID=$!
 if [ $? != 0 ]; then
@@ -85,6 +85,34 @@ fi
 
 echo "Killing AB emulator."
 killall -TERM ab_server
+
+
+echo -n "Starting AB emulator for Omron tests... "
+$TEST_DIR/ab_server --debug --plc=Omron --tag=TestDINTArray:DINT[10] > omron_emulator.log 2>&1 &
+EMULATOR_PID=$!
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    echo "Unable to start AB emulator."
+    exit 1
+else
+    echo "OK"
+fi
+
+
+echo -n "Test basic Omron read/write... "
+$TEST_DIR/./tag_rw2 --type=sint32  '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --write=42 --debug=4 > omron_tag_test.log 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+echo "Killing Omron emulator."
+killall -TERM ab_server
+
 
 
 echo -n "Starting Modbus emulator... "

@@ -181,6 +181,29 @@ tag_byte_order_t logix_tag_byte_order = {
     .str_pad_bytes = 2
 };
 
+
+/* default string types used for Omron-NJ/NX PLCs. */
+tag_byte_order_t omron_njnx_tag_byte_order = {
+    .is_allocated = 0,
+
+    .int16_order = {0,1},
+    .int32_order = {0,1,2,3},
+    .int64_order = {0,1,2,3,4,5,6,7},
+    .float32_order = {0,1,2,3},
+    .float64_order = {0,1,2,3,4,5,6,7},
+
+    .str_is_defined = 1,
+    .str_is_counted = 1,
+    .str_is_fixed_length = 0,
+    .str_is_zero_terminated = 1,
+    .str_is_byte_swapped = 0,
+
+    .str_count_word_bytes = 2,
+    .str_max_capacity = 0,
+    .str_total_length = 0,
+    .str_pad_bytes = 0
+};
+
 tag_byte_order_t logix_tag_listing_byte_order = {
     .is_allocated = 0,
 

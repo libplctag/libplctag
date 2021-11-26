@@ -38,6 +38,7 @@
 
 extern struct tag_vtable_t eip_cip_vtable;
 extern tag_byte_order_t logix_tag_byte_order;
+extern tag_byte_order_t omron_njnx_tag_byte_order;
 extern tag_byte_order_t logix_tag_listing_byte_order;
 
 /* tag listing helpers */
