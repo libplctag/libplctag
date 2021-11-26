@@ -76,6 +76,8 @@ struct ab_session_t {
     uint8_t conn_path_size;
     uint16_t dhp_dest;
 
+    int connection_group_id;
+
     /* registration info */
     uint32_t session_handle;
 

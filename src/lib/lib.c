@@ -399,30 +399,34 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
 
 
-int init_generic_tag(plc_tag_p tag)
+int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs)
 {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    /* get the connection group ID here rather than in each PLC specific tag type. */
+    tag->connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
+    if(tag->connection_group_id < 0 || tag->connection_group_id > 32767) {
+        pdebug(DEBUG_WARN, "Connection group ID must be between 0 and 32767, inclusive, but was %d!", tag->connection_group_id);
+        return PLCTAG_ERR_OUT_OF_BOUNDS;
+    }
+
     rc = mutex_create(&(tag->ext_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to create tag external mutex!");
-        rc_dec(tag);
         return PLCTAG_ERR_CREATE;
     }
 
     rc = mutex_create(&(tag->api_mutex));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to create tag API mutex!");
-        rc_dec(tag);
         return PLCTAG_ERR_CREATE;
     }
 
     rc = cond_create(&(tag->tag_cond_wait));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN,"Unable to create tag condition variable!");
-        rc_dec(tag);
         return PLCTAG_ERR_CREATE;
     }
 
@@ -1776,7 +1780,11 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
             } else if(str_cmp_i(attrib_name, "bit_num") == 0) {
                 tag->status = PLCTAG_STATUS_OK;
                 res = (int)(unsigned int)(tag->bit);
-            } else  {
+            } else if(str_cmp_i(attrib_name, "connection_group_id") == 0) {
+                pdebug(DEBUG_DETAIL, "Getting the connection_group_id for tag %" PRId32 ".", id);
+                tag->status = PLCTAG_STATUS_OK;
+                res = tag->connection_group_id;
+            } else {
                 if(tag->vtable->get_int_attrib) {
                     res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
                 }

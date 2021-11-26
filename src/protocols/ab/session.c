@@ -73,12 +73,12 @@
 
 
 
-static ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg);
+static ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
 static int session_init(ab_session_p session);
 //static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
-static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path);
+static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
 static int session_match_valid(const char *host, const char *path, ab_session_p session);
 static int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
 static int session_open_socket(ab_session_p session);
@@ -230,6 +230,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     int rc = PLCTAG_STATUS_OK;
     int auto_disconnect_enabled = 0;
     int auto_disconnect_timeout_ms = INT_MAX;
+    int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
 
     pdebug(DEBUG_DETAIL, "Starting");
 
@@ -248,7 +249,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     critical_block(session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
         if (shared_session) {
-            session = find_session_by_host_unsafe(session_gw, session_path);
+            session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id);
         } else {
             /* no sharing, create a new one */
             session = AB_SESSION_NULL;
@@ -256,7 +257,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
 
         if (session == AB_SESSION_NULL) {
             pdebug(DEBUG_DETAIL, "Creating new session.");
-            session = session_create_unsafe(session_gw, session_path, plc_type, &use_connected_msg);
+            session = session_create_unsafe(session_gw, session_path, plc_type, &use_connected_msg, connection_group_id);
 
             if (session == AB_SESSION_NULL) {
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
@@ -419,7 +420,7 @@ int session_match_valid(const char *host, const char *path, ab_session_p session
 }
 
 
-ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
+ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id)
 {
     for(int i=0; i < vector_length(sessions); i++) {
         ab_session_p session = vector_get(sessions, i);
@@ -427,7 +428,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
         /* is this session in the process of destruction? */
         session = rc_inc(session);
         if(session) {
-            if(session_match_valid(host, path, session)) {
+            if(session->connection_group_id == connection_group_id && session_match_valid(host, path, session)) {
                 return session;
             }
 
@@ -440,7 +441,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
 
 
 
-ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg)
+ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id)
 {
     static volatile uint32_t connection_id = 0;
 
@@ -501,8 +502,10 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
     session->use_connected_msg = *use_connected_msg;
     session->failed = 0;
     session->conn_serial_number = (uint16_t)(uintptr_t)(intptr_t)rand();
-
     session->session_seq_id = (uint64_t)rand();
+
+    pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
+    session->connection_group_id = connection_group_id;
 
     /* guess the max CIP payload size. */
     switch(plc_type) {
