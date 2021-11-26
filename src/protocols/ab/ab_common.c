@@ -365,12 +365,6 @@ plc_tag_p ab_tag_create(attr attribs)
             tag->vtable = &eip_cip_vtable;
         }
 
-        /* if this was not filled in elsewhere default to Logix */
-        if(tag->vtable == &default_vtable || !tag->vtable) {
-            pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
-            tag->vtable = &eip_cip_vtable;
-        }
-
         /* default to requiring a connection. */
         tag->use_connected_msg = attr_get_int(attribs,"use_connected_msg", 1);
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
@@ -385,7 +379,6 @@ plc_tag_p ab_tag_create(attr attribs)
         }
 
         tag->byte_order = &logix_tag_byte_order;
-
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
         tag->vtable = &eip_cip_vtable;
@@ -400,10 +393,9 @@ plc_tag_p ab_tag_create(attr attribs)
             return (plc_tag_p)tag;
         }
 
-        tag->byte_order = &logix_tag_byte_order;
-
+        tag->byte_order = &omron_njnx_tag_byte_order;
         tag->use_connected_msg = 1;
-        tag->allow_packing = 0;
+        tag->allow_packing = 1;
         tag->vtable = &eip_cip_vtable;
         break;
 

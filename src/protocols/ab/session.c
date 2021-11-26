@@ -58,6 +58,7 @@
 // #define MAX_CIP_SLC_MSG_SIZE (222)
 #define MAX_CIP_SLC_MSG_SIZE (244)
 #define MAX_CIP_MLGX_MSG_SIZE (244)
+#define MAX_CIP_OMRON_MSG_SIZE (1996)
 
 /*
  * Number of milliseconds to wait to try to set up the session again
@@ -527,7 +528,7 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         break;
 
     case AB_PLC_OMRON_NJNX:
-        session->max_payload_size = MAX_CIP_MSG_SIZE;
+        session->max_payload_size = MAX_CIP_OMRON_MSG_SIZE;
         break;
 
     default:
@@ -537,6 +538,7 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         break;
     }
 
+    pdebug(DEBUG_DETAIL, "Set maximum payload size to %u bytes.", (unsigned int)(session->max_payload_size));
 
     /*
      * Why is connection_id global?  Because it looks like the PLC might
@@ -2054,8 +2056,69 @@ int send_forward_open_request(ab_session_p session)
     }
 
     if(session->only_use_old_forward_open) {
+        uint16_t max_payload = 0;
+
+        switch(session->plc_type) {
+            case AB_PLC_PLC5:
+            case AB_PLC_LGX_PCCC:
+                max_payload = (uint16_t)MAX_CIP_PLC5_MSG_SIZE;
+                break;
+
+            case AB_PLC_SLC:
+            case AB_PLC_MLGX:
+                max_payload = (uint16_t)MAX_CIP_SLC_MSG_SIZE;
+                break;
+
+            case AB_PLC_MICRO800:
+            case AB_PLC_LGX:
+            case AB_PLC_OMRON_NJNX:
+                max_payload = (uint16_t)MAX_CIP_MSG_SIZE;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unsupported PLC type %d!", session->plc_type);
+                return PLCTAG_ERR_UNSUPPORTED;
+                break;
+        }
+
+        /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
+        session->max_payload_guess = ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload : session->max_payload_guess);
+
+        pdebug(DEBUG_DETAIL, "Set maximum payload size guess to %d bytes.", session->max_payload_guess);
+
         rc = send_old_forward_open_request(session);
     } else {
+        uint16_t max_payload = 0;
+
+        switch(session->plc_type) {
+            case AB_PLC_PLC5:
+            case AB_PLC_LGX_PCCC:
+            case AB_PLC_SLC:
+            case AB_PLC_MLGX:
+                pdebug(DEBUG_WARN, "PCCC PLCs do not support extended Forward Open!");
+                return PLCTAG_ERR_UNSUPPORTED;
+                break;
+
+            case AB_PLC_LGX:
+            case AB_PLC_MICRO800:
+                max_payload = (uint16_t)MAX_CIP_MSG_SIZE_EX;
+                break;
+
+            case AB_PLC_OMRON_NJNX:
+                max_payload = (uint16_t)MAX_CIP_OMRON_MSG_SIZE;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unsupported PLC type %d!", session->plc_type);
+                return PLCTAG_ERR_UNSUPPORTED;
+                break;
+        }
+
+        /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
+        session->max_payload_guess = ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload : session->max_payload_guess);
+
+        pdebug(DEBUG_DETAIL, "Set maximum payload size guess to %d bytes.", session->max_payload_guess);
+
         rc = send_extended_forward_open_request(session);
     }
 
