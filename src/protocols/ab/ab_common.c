@@ -192,7 +192,7 @@ plc_tag_p ab_tag_create(attr attribs)
     tag->vtable = &default_vtable;
 
     /* set up the generic parts. */
-    rc = init_generic_tag((plc_tag_p)tag);
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
         rc_dec(tag);

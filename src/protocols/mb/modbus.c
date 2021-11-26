@@ -81,6 +81,7 @@ struct modbus_plc_t {
     char *server;
     sock_p sock;
     uint8_t server_id;
+    int connection_group_id;
 
     /* State */
     struct {
@@ -297,7 +298,7 @@ plc_tag_p mb_tag_create(attr attribs)
     }
 
     /* set up the generic parts. */
-    rc = init_generic_tag((plc_tag_p)tag);
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
         rc_dec(tag);
@@ -473,6 +474,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 {
     const char *server = attr_get_str(attribs, "gateway", NULL);
     int server_id = attr_get_int(attribs, "path", -1);
+    int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
     int is_new = 0;
     int rc = PLCTAG_STATUS_OK;
 
@@ -487,7 +489,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
     critical_block(mb_mutex) {
         modbus_plc_p *walker = &plcs;
 
-        while(*walker && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
+        while(*walker && (*walker)->connection_group_id == connection_group_id && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
             walker = &((*walker)->next);
         }
 
@@ -501,6 +503,9 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 
             *plc = (modbus_plc_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_plc_t), modbus_plc_destructor);
             if(*plc) {
+                pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
+                (*plc)->connection_group_id = connection_group_id;
+
                 /* copy the server string so that we can find this again. */
                 (*plc)->server = str_dup(server);
                 if(! ((*plc)->server)) {

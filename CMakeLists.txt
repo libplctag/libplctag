@@ -457,6 +457,7 @@ elseif (BUILD_EXAMPLES)
                             string
                             test_auto_sync
                             test_callback
+                            test_connection_group
                             test_raw_cip
                             test_reconnect
                             test_shutdown
@@ -483,6 +484,7 @@ elseif (BUILD_EXAMPLES)
                             slc500
                             string
                             test_callback
+                            test_connection_group
                             test_raw_cip
                             test_shutdown
                             test_special
