@@ -489,16 +489,20 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
     critical_block(mb_mutex) {
         modbus_plc_p *walker = &plcs;
 
-        while(*walker && (*walker)->connection_group_id == connection_group_id && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
+        while(*walker && (*walker)->connection_group_id != connection_group_id && (*walker)->server_id != (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
             walker = &((*walker)->next);
         }
 
         /* did we find one. */
-        if(*walker) {
+        if(*walker && (*walker)->connection_group_id == connection_group_id && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
+            pdebug(DEBUG_DETAIL, "Using existing PLC connection.");
             *plc = rc_inc(*walker);
             is_new = 0;
         } else {
             /* nope, make a new one.  Do as little as possible in the mutex. */
+
+            pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
+
             is_new = 1;
 
             *plc = (modbus_plc_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_plc_t), modbus_plc_destructor);
