@@ -1197,11 +1197,14 @@ int cond_destroy(cond_p *c)
 
 struct sock_t {
     int fd;
-    int wake_fd;
+    int wake_read_fd;
+    int wake_write_fd;
     int port;
     int is_open;
 };
 
+
+static int sock_create_event_wakeup_channel(sock_p sock);
 
 #define MAX_IPS (8)
 
@@ -1549,6 +1552,18 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
         return PLCTAG_ERR_READ;
     }
 
+    /* defer creation of the wake pipe until we actually need it. */
+    if(sock->wake_read_fd == 0 && sock->wake_write_fd == 0) {
+        int rc = PLCTAG_STATUS_OK;
+
+        pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+        rc = sock_create_event_wakeup_channel(sock);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
+            return rc;
+        }
+    }
+
     if(timeout_ms < 0) {
         pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
         return PLCTAG_ERR_BAD_PARAM;
@@ -1566,10 +1581,10 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
     FD_ZERO(&err_set);
 
     /* calculate the maximum fd */
-    max_fd = (sock->fd > sock->wake_fd ? sock->fd : sock->wake_fd);
+    max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
 
     /* add the wake fd */
-    FD_SET(sock->wake_fd, &read_set);
+    FD_SET(sock->wake_read_fd, &read_set);
 
     /* we always want to know about errors. */
     FD_SET(sock->fd, &err_set);
@@ -1599,12 +1614,12 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
         result |= (events & SOCK_EVENT_TIMEOUT);
     } else if(num_sockets > 0) {
         /* was there a wake up? */
-        if(FD_ISSET(sock->wake_fd, &read_set)) {
+        if(FD_ISSET(sock->wake_read_fd, &read_set)) {
             int bytes_read = 0;
             char buf[32];
 
             /* empty the socket. */
-            while((bytes_read = (int)read(sock->wake_fd, &buf[0], sizeof(buf))) > 0) { }
+            while((bytes_read = (int)read(sock->wake_read_fd, &buf[0], sizeof(buf))) > 0) { }
 
             pdebug(DEBUG_DETAIL, "Socket woken up.");
             result |= (events & SOCK_EVENT_WAKE_UP);
@@ -1694,10 +1709,10 @@ int socket_wake(sock_p sock)
 
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
-    rc = (int)write(sock->wake_fd, &dummy_data[0], sizeof(dummy_data));
+    rc = (int)write(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data));
 #else
     /* on Linux, we use MSG_NOSIGNAL */
-    rc = (int)send(sock->wake_fd, &dummy_data[0], sizeof(dummy_data), MSG_NOSIGNAL);
+    rc = (int)send(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data), MSG_NOSIGNAL);
 #endif
     if(rc >= 0) {
         rc = PLCTAG_STATUS_OK;
@@ -1973,6 +1988,8 @@ extern int socket_close(sock_p s)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_INFO, "Starting.");
+
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
@@ -1990,22 +2007,38 @@ extern int socket_close(sock_p s)
         rc = PLCTAG_ERR_CLOSE;
     }
 
-    if(s->wake_fd != 0) {
-        if(close(s->wake_fd)) {
-            pdebug(DEBUG_WARN, "Error closing wake socket!");
+    s->fd = 0;
+
+    if(s->wake_read_fd != 0) {
+        if(close(s->wake_read_fd)) {
+            pdebug(DEBUG_WARN, "Error closing read wake socket!");
             rc = PLCTAG_ERR_CLOSE;
         }
+
+        s->wake_read_fd = 0;
     }
 
-    s->fd = 0;
-    s->wake_fd = 0;
+    if(s->wake_write_fd != 0) {
+        if(close(s->wake_write_fd)) {
+            pdebug(DEBUG_WARN, "Error closing write wake socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
+
+        s->wake_write_fd = 0;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
 
 
+
+
 extern int socket_destroy(sock_p *s)
 {
+    pdebug(DEBUG_INFO, "Starting.");
+
     if(!s || !*s) {
         pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
@@ -2015,12 +2048,102 @@ extern int socket_destroy(sock_p *s)
 
     mem_free(*s);
 
-    *s = 0;
+    *s = NULL;
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
+
+
+
+int sock_create_event_wakeup_channel(sock_p sock)
+{
+    int rc = PLCTAG_STATUS_OK;
+    int flags = 0;
+    int wake_fds[2] = { 0 };
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    do {
+        /* open the pipe for waking the select wait. */
+        if(pipe(wake_fds)) {
+            pdebug(DEBUG_WARN, "Unable to open waker pipe!");
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+#ifdef BSD_OS_TYPE
+    /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
+    if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
+        close(fd);
+        pdebug(DEBUG_ERROR, "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
+    if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
+        close(fd);
+        pdebug(DEBUG_ERROR, "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+#endif
+
+        /* make the read pipe fd non-blocking. */
+        if((flags = fcntl(wake_fds[0], F_GETFL)) < 0) {
+            pdebug(DEBUG_WARN, "Unable to get flags of read pipe fd!");
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        /* set read fd non-blocking */
+        flags |= O_NONBLOCK;
+
+        if(fcntl(wake_fds[0], F_SETFL, flags) < 0) {
+            pdebug(DEBUG_WARN, "Unable to set flags of read pipe fd!");
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        /* make the write pipe fd non-blocking. */
+        if((flags = fcntl(wake_fds[1], F_GETFL)) < 0) {
+            pdebug(DEBUG_WARN, "Unable to get flags of write pipe fd!");
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        /* set write fd non-blocking */
+        flags |= O_NONBLOCK;
+
+        if(fcntl(wake_fds[1], F_SETFL, flags) < 0) {
+            pdebug(DEBUG_WARN, "Unable to set flags of write pipe fd!");
+            rc = PLCTAG_ERR_BAD_REPLY;
+            break;
+        }
+
+        sock->wake_read_fd = wake_fds[0];
+        sock->wake_write_fd = wake_fds[1];
+    } while(0);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to open waker pipe!");
+
+        if(wake_fds[0] != 0) {
+            close(wake_fds[0]);
+            wake_fds[0] = 0;
+        }
+
+        if(wake_fds[1] != 0) {
+            close(wake_fds[1]);
+            wake_fds[1] = 0;
+        }
+    } else {
+        pdebug(DEBUG_INFO, "Done.");
+    }
+
+    return rc;
+}
 
 
 
