@@ -1197,6 +1197,7 @@ int cond_destroy(cond_p *c)
 
 struct sock_t {
     int fd;
+    int wake_fd;
     int port;
     int is_open;
 };
@@ -1527,6 +1528,191 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
 
 
 
+int socket_wait_event(sock_p sock, int events, int timeout_ms)
+{
+    int result = SOCK_EVENT_NONE;
+    fd_set read_set;
+    fd_set write_set;
+    fd_set err_set;
+    int max_fd = 0;
+    int num_sockets = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!sock->is_open) {
+        pdebug(DEBUG_WARN, "Socket is not open!");
+        return PLCTAG_ERR_READ;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* check if the mask is empty */
+    if(events == 0) {
+        pdebug(DEBUG_WARN, "Passed event mask is empty!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* set up fd sets */
+    FD_ZERO(&read_set);
+    FD_ZERO(&write_set);
+    FD_ZERO(&err_set);
+
+    /* calculate the maximum fd */
+    max_fd = (sock->fd > sock->wake_fd ? sock->fd : sock->wake_fd);
+
+    /* add the wake fd */
+    FD_SET(sock->wake_fd, &read_set);
+
+    /* we always want to know about errors. */
+    FD_SET(sock->fd, &err_set);
+
+    /* add more depending on the mask. */
+    if(events & SOCK_EVENT_CAN_READ) {
+        FD_SET(sock->fd, &read_set);
+    }
+
+    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
+        FD_SET(sock->fd, &write_set);
+    }
+
+    /* calculate the timeout. */
+    if(timeout_ms > 0) {
+        struct timeval tv;
+
+        tv.tv_sec = (time_t)(timeout_ms / 1000);
+        tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
+
+        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
+    } else {
+        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
+    }
+
+    if(num_sockets == 0) {
+        result |= (events & SOCK_EVENT_TIMEOUT);
+    } else if(num_sockets > 0) {
+        /* was there a wake up? */
+        if(FD_ISSET(sock->wake_fd, &read_set)) {
+            int bytes_read = 0;
+            char buf[32];
+
+            /* empty the socket. */
+            while((bytes_read = (int)read(sock->wake_fd, &buf[0], sizeof(buf))) > 0) { }
+
+            pdebug(DEBUG_DETAIL, "Socket woken up.");
+            result |= (events & SOCK_EVENT_WAKE_UP);
+        }
+
+        /* is read ready for the main fd? */
+        if(FD_ISSET(sock->fd, &read_set)) {
+            char buf;
+            int byte_read = 0;
+
+            byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
+
+            if(byte_read) {
+                pdebug(DEBUG_DETAIL, "Socket can read.");
+                result |= (events & SOCK_EVENT_CAN_READ);
+            } else {
+                pdebug(DEBUG_DETAIL, "Socket disconnected.");
+                result |= (events & SOCK_EVENT_DISCONNECT);
+            }
+        }
+
+        /* is write ready for the main fd? */
+        if(FD_ISSET(sock->fd, &write_set)) {
+            pdebug(DEBUG_DETAIL, "Socket can write or just connected.");
+            result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
+        }
+
+        /* is there an error? */
+        if(FD_ISSET(sock->fd, &err_set)) {
+            pdebug(DEBUG_DETAIL, "Socket has error!");
+            result |= (events & SOCK_EVENT_ERROR);
+        }
+    } else {
+        /* error */
+        pdebug(DEBUG_WARN, "select() returned status %d!", num_sockets);
+
+        switch(errno) {
+            case EBADF: /* bad file descriptor */
+                pdebug(DEBUG_WARN, "Bad file descriptor used in select()!");
+                return PLCTAG_ERR_BAD_PARAM;
+                break;
+
+            case EINTR: /* signal was caught, this should not happen! */
+                pdebug(DEBUG_WARN, "A signal was caught in select() and this should not happen!");
+                return PLCTAG_ERR_BAD_CONFIG;
+                break;
+
+            case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
+                pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                return PLCTAG_ERR_BAD_PARAM;
+                break;
+
+            case ENOMEM: /* No mem for internal tables. */
+                pdebug(DEBUG_WARN, "Insufficient memory for select() to run!");
+                return PLCTAG_ERR_NO_MEM;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unexpected socket err %d!", errno);
+                return PLCTAG_ERR_BAD_STATUS;
+                break;
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return result;
+}
+
+
+int socket_wake(sock_p sock)
+{
+    int rc = PLCTAG_STATUS_OK;
+    const char dummy_data[] = "Dummy data.";
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!sock->is_open) {
+        pdebug(DEBUG_WARN, "Socket is not open!");
+        return PLCTAG_ERR_READ;
+    }
+
+#ifdef BSD_OS_TYPE
+    /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
+    rc = (int)write(sock->wake_fd, &dummy_data[0], sizeof(dummy_data));
+#else
+    /* on Linux, we use MSG_NOSIGNAL */
+    rc = (int)send(sock->wake_fd, &dummy_data[0], sizeof(dummy_data), MSG_NOSIGNAL);
+#endif
+    if(rc >= 0) {
+        rc = PLCTAG_STATUS_OK;
+    } else {
+        pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+        return PLCTAG_ERR_WRITE;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
 int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
@@ -1785,30 +1971,45 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
 extern int socket_close(sock_p s)
 {
+    int rc = PLCTAG_STATUS_OK;
+
     if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
+        pdebug(DEBUG_DETAIL, "Socket is already closed.");
         return PLCTAG_STATUS_OK;
     }
 
     s->is_open = 0;
 
     if(close(s->fd)) {
-        return PLCTAG_ERR_CLOSE;
+        pdebug(DEBUG_WARN, "Error closing socket!");
+        rc = PLCTAG_ERR_CLOSE;
+    }
+
+    if(s->wake_fd != 0) {
+        if(close(s->wake_fd)) {
+            pdebug(DEBUG_WARN, "Error closing wake socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
     }
 
     s->fd = 0;
+    s->wake_fd = 0;
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
 extern int socket_destroy(sock_p *s)
 {
-    if(!s || !*s)
+    if(!s || !*s) {
+        pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
+    }
 
     socket_close(*s);
 
