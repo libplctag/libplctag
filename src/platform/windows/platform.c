@@ -1276,6 +1276,8 @@ struct sock_t {
 
 #define MAX_IPS (8)
 
+static int sock_create_wake_event(sock_p sock);
+
 
 /*
  * Windows needs to have the Winsock library initialized
@@ -1578,6 +1580,57 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
             return PLCTAG_ERR_OPEN;
             break;
         }
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+int socket_wait_event(sock_p sock, int events, int timeout_ms)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!sock->is_open) {
+        pdebug(DEBUG_WARN, "Socket is not open!");
+        return PLCTAG_ERR_READ;
+    }
+
+    if(timeout_ms < 0) {
+        pdebug(DEBUG_WARN, "Timeout must be zero or positive!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* check if the mask is empty */
+    if(events == 0) {
+        pdebug(DEBUG_WARN, "Passed event mask is empty!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return result;
+}
+
+
+int socket_wake(sock_p sock)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!sock) {
+        pdebug(DEBUG_WARN, "Null socket pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!sock->is_open) {
+        pdebug(DEBUG_WARN, "Socket is not open!");
+        return PLCTAG_ERR_READ;
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
