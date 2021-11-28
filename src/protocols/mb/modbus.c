@@ -246,6 +246,7 @@ static int mb_read_start(plc_tag_p p_tag);
 static int mb_tag_status(plc_tag_p p_tag);
 static int mb_tickler(plc_tag_p p_tag);
 static int mb_write_start(plc_tag_p p_tag);
+static int mb_wake_plc(plc_tag_p p_tag);
 
 
 /* data accessors */
@@ -255,9 +256,10 @@ static int mb_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_val
 struct tag_vtable_t modbus_vtable = {
     (tag_vtable_func)mb_abort,
     (tag_vtable_func)mb_read_start,
-    (tag_vtable_func)mb_tag_status, /* shared */
+    (tag_vtable_func)mb_tag_status,
     (tag_vtable_func)mb_tickler,
     (tag_vtable_func)mb_write_start,
+    (tag_vtable_func)mb_wake_plc,
 
     /* data accessors */
     mb_get_int_attrib,
@@ -1316,6 +1318,11 @@ int find_request_slot(modbus_plc_p plc, modbus_tag_p tag)
         return PLCTAG_ERR_BUSY;
     }
 
+    if(tag->tag_id == 0) {
+        pdebug(DEBUG_DETAIL, "Tag not ready.");
+        return PLCTAG_ERR_BUSY;
+    }
+
     /* search for a slot. */
     for(int slot=0; slot < plc->max_requests_in_flight; slot++) {
         if(plc->tags_with_requests[slot] == 0) {
@@ -2303,6 +2310,27 @@ int mb_write_start(plc_tag_p p_tag)
     }
 
     /* wake the PLC loop if we need to. */
+    wake_plc_thread(tag->plc);
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_PENDING;
+}
+
+
+
+int mb_wake_plc(plc_tag_p p_tag)
+{
+    modbus_tag_p tag = (modbus_tag_p)p_tag;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Null tag pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* wake the PLC thread. */
     wake_plc_thread(tag->plc);
 
     pdebug(DEBUG_DETAIL, "Done.");
