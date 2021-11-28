@@ -1779,7 +1779,7 @@ int socket_wake(sock_p sock)
         return PLCTAG_ERR_READ;
     }
 
-    rc = send(s->wake_write_fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+    rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), (int)MSG_NOSIGNAL);
     if(rc < 0) {
         int err = WSAGetLastError();
 
