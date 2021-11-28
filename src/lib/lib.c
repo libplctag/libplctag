@@ -566,7 +566,7 @@ THREAD_FUNC(tag_tickler_func)
                     }
 
                 } else {
-                    pdebug(DEBUG_DETAIL, "Tag does has its own tickler.");
+                    pdebug(DEBUG_DETAIL, "Tag has its own tickler.");
                 }
 
                 debug_set_tag_id(0);
