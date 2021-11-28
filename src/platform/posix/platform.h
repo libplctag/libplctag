@@ -193,15 +193,14 @@ typedef struct sock_t *sock_p;
 typedef enum {
     SOCK_EVENT_NONE         = 0,
     SOCK_EVENT_TIMEOUT      = (1 << 0),
-    SOCK_EVENT_CLOSE        = (1 << 1),
+    SOCK_EVENT_DISCONNECT   = (1 << 1),
     SOCK_EVENT_ERROR        = (1 << 2),
     SOCK_EVENT_CAN_READ     = (1 << 3),
     SOCK_EVENT_CAN_WRITE    = (1 << 4),
     SOCK_EVENT_WAKE_UP      = (1 << 5),
     SOCK_EVENT_CONNECT      = (1 << 6),
-    SOCK_EVENT_DISCONNECT   = (1 << 7),
 
-    SOCK_EVENT_DEFAULT_MASK = (SOCK_EVENT_TIMEOUT | SOCK_EVENT_CLOSE | SOCK_EVENT_ERROR | SOCK_EVENT_WAKE_UP | SOCK_EVENT_DISCONNECT)
+    SOCK_EVENT_DEFAULT_MASK = (SOCK_EVENT_TIMEOUT | SOCK_EVENT_DISCONNECT | SOCK_EVENT_ERROR | SOCK_EVENT_WAKE_UP )
 } sock_event_t;
 extern int socket_create(sock_p *s);
 extern int socket_connect_tcp_start(sock_p s, const char *host, int port);
