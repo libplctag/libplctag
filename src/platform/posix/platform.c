@@ -1353,6 +1353,12 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
         freeaddrinfo(res_head);
     }
 
+    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    rc = sock_create_event_wakeup_channel(s);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
 
     /* now try to connect to the remote gateway.  We may need to
      * try several of the IPs we have.
@@ -1401,13 +1407,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     /* save the values */
     s->fd = fd;
     s->port = port;
-
-    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
-    rc = sock_create_event_wakeup_channel(s);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
 
     s->is_open = 1;
 
@@ -1703,13 +1702,7 @@ int socket_wake(sock_p sock)
         return PLCTAG_ERR_READ;
     }
 
-#ifdef BSD_OS_TYPE
-    /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
     rc = (int)write(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data));
-#else
-    /* on Linux, we use MSG_NOSIGNAL */
-    rc = (int)send(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data), MSG_NOSIGNAL);
-#endif
     if(rc >= 0) {
         rc = PLCTAG_STATUS_OK;
     } else {
