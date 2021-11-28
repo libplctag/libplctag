@@ -174,7 +174,6 @@ set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
 set ( cli_SRC_PATH "${base_SRC_PATH}/contrib/cli" )
 
 # OS-specific files for the platform code.
-# FIXME - does this work for macOS?
 if (UNIX)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/posix" )
 elseif (WIN32)

@@ -788,7 +788,7 @@ struct thread_t {
  * Start up a new thread.  This allocates the thread_t structure and starts
  * the passed function.  The arg argument is passed to the function.
  *
- * FIXME - use the stacksize!
+ * TODO - use the stacksize!
  */
 
 extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg)
@@ -2163,7 +2163,7 @@ int sock_create_event_wakeup_channel(sock_p sock)
  * Sleep the passed number of milliseconds.  This handles the case of being
  * interrupted by a signal.
  *
- * FIXME - should the signal interrupt handling be done here or in app code?
+ * TODO - should the signal interrupt handling be done here or in app code?
  */
 int sleep_ms(int ms)
 {
