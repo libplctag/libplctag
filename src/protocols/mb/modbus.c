@@ -709,6 +709,10 @@ THREAD_FUNC(modbus_plc_handler)
 
                 plc->state = PLC_READY;
             } else {
+                pdebug(DEBUG_WARN, "Error %s received while starting socket connection.", plc_tag_decode_error(rc));
+
+                socket_destroy(&(plc->sock));
+
                 /* exponential increase with jitter. */
                 UPDATE_ERR_DELAY();
 
@@ -736,6 +740,8 @@ THREAD_FUNC(modbus_plc_handler)
                 /* do not wait more.   The TCP connection check will wait in select(). */
             } else {
                 pdebug(DEBUG_WARN, "Error %s received while waiting for socket connection.", plc_tag_decode_error(rc));
+
+                socket_destroy(&(plc->sock));
 
                 /* exponential increase with jitter. */
                 UPDATE_ERR_DELAY();
@@ -878,11 +884,17 @@ THREAD_FUNC(modbus_plc_handler)
         case PLC_ERR_WAIT:
             pdebug(DEBUG_DETAIL, "in PLC_ERR_WAIT state.");
 
+            /* clean up the socket in case we did not earlier */
+            if(plc->sock) {
+                socket_destroy(&(plc->sock));
+            }
+
             /* wait until done. */
             if(err_delay_until > time_ms()) {
+                pdebug(DEBUG_DETAIL, "Waiting for at least %"PRId64"ms.", (err_delay_until - time_ms()));
                 sleep_ms(PLC_SOCKET_ERR_DELAY_WAIT_INCREMENT);
             } else {
-                pdebug(DEBUG_DETAIL, "Error wait is over, restarting connection process.");
+                pdebug(DEBUG_DETAIL, "Error wait is over, going to state PLC_CONNECT_START.");
                 plc->state = PLC_CONNECT_START;
             }
             break;
@@ -1345,7 +1357,7 @@ void clear_request_slot(modbus_plc_p plc, modbus_tag_p tag)
 
 int receive_response(modbus_plc_p plc)
 {
-    int rc = 1;
+    int rc = 0;
     int data_needed = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1356,62 +1368,49 @@ int receive_response(modbus_plc_p plc)
         return PLCTAG_STATUS_OK;
     }
 
-    /* how much data do we need initially? */
-    if(plc->read_data_len >= MODBUS_MBAP_SIZE) {
-        int packet_size = plc->read_data[5] + (plc->read_data[4] << 8);
-        data_needed = (MODBUS_MBAP_SIZE + packet_size) - plc->read_data_len;
+    do {
+        /* how much data do we need? */
+        if(plc->read_data_len >= MODBUS_MBAP_SIZE) {
+            int packet_size = plc->read_data[5] + (plc->read_data[4] << 8);
+            data_needed = (MODBUS_MBAP_SIZE + packet_size) - plc->read_data_len;
 
-        pdebug(DEBUG_DETAIL, "Packet header read, data_needed=%d, packet_size=%d, read_data_len=%d", data_needed, packet_size, plc->read_data_len);
+            pdebug(DEBUG_DETAIL, "Packet header read, data_needed=%d, packet_size=%d, read_data_len=%d", data_needed, packet_size, plc->read_data_len);
 
-        if(data_needed > PLC_READ_DATA_LEN) {
-            pdebug(DEBUG_WARN, "Error, packet size, %d, greater than buffer size, %d!", data_needed, PLC_READ_DATA_LEN);
-            rc = PLCTAG_ERR_TOO_LARGE;
-            return rc;
-        } else if(data_needed < 0) {
-            pdebug(DEBUG_WARN, "Read more than a packet!  Expected %d bytes, but got %d bytes!", (MODBUS_MBAP_SIZE + packet_size), plc->read_data_len);
-            rc = PLCTAG_ERR_TOO_LARGE;
+            if(data_needed > PLC_READ_DATA_LEN) {
+                pdebug(DEBUG_WARN, "Error, packet size, %d, greater than buffer size, %d!", data_needed, PLC_READ_DATA_LEN);
+                return PLCTAG_ERR_TOO_LARGE;
+            } else if(data_needed < 0) {
+                pdebug(DEBUG_WARN, "Read more than a packet!  Expected %d bytes, but got %d bytes!", (MODBUS_MBAP_SIZE + packet_size), plc->read_data_len);
+                return PLCTAG_ERR_TOO_LARGE;
+            }
+        } else {
+            data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;
+            pdebug(DEBUG_DETAIL, "Still reading packet header, data_needed=%d, read_data_len=%d", data_needed, plc->read_data_len);
+        }
+
+        if(data_needed == 0) {
+            pdebug(DEBUG_DETAIL, "Got all data needed.");
+            break;
+        }
+
+        /* read the socket. */
+        rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, data_needed, SOCKET_READ_TIMEOUT);
+        if(rc >= 0) {
+            /* got data! Or got nothing, but no error. */
+            plc->read_data_len += rc;
+
+            pdebug_dump_bytes(DEBUG_SPEW, plc->read_data, plc->read_data_len);
+        } else if(rc == PLCTAG_ERR_TIMEOUT) {
+            pdebug(DEBUG_DETAIL, "Done. Socket read timed out.");
+            return PLCTAG_STATUS_PENDING;
+        } else {
+            pdebug(DEBUG_WARN, "Error, %s, reading socket!", plc_tag_decode_error(rc));
             return rc;
         }
-    } else {
-        data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;
-        pdebug(DEBUG_DETAIL, "Still reading packet header, data_needed=%d, read_data_len=%d", data_needed, plc->read_data_len);
-    }
 
-    /* read as much as we can. */
-    rc = socket_read(plc->sock, plc->read_data + plc->read_data_len, data_needed, SOCKET_READ_TIMEOUT);
-    if(rc >= 0) {
-        /* got data! Or got nothing, but no error. */
-        plc->read_data_len += rc;
+        pdebug(DEBUG_DETAIL, "After reading the socket, total read=%d and data needed=%d.", plc->read_data_len, data_needed);
+    } while(rc > 0);
 
-        /* calculate how much we still need. */
-        data_needed = data_needed - plc->read_data_len;
-
-        pdebug_dump_bytes(DEBUG_SPEW, plc->read_data, plc->read_data_len);
-    } else if(rc == PLCTAG_ERR_TIMEOUT) {
-        pdebug(DEBUG_DETAIL, "Done. Socket read timed out.");
-        rc = PLCTAG_STATUS_PENDING;
-    } else {
-        pdebug(DEBUG_WARN, "Error, %s, reading socket!", plc_tag_decode_error(rc));
-        return rc;
-    }
-
-    /* If we have enough data, calculate the actual amount we need. */
-    if(plc->read_data_len >= MODBUS_MBAP_SIZE) {
-        int packet_size = plc->read_data[5] + (plc->read_data[4] << 8);
-        data_needed = (MODBUS_MBAP_SIZE + packet_size) - plc->read_data_len;
-
-        pdebug(DEBUG_DETAIL, "data_needed=%d, packet_size=%d, read_data_len=%d", data_needed, packet_size, plc->read_data_len);
-
-        if(data_needed > PLC_READ_DATA_LEN) {
-            pdebug(DEBUG_WARN, "Error, packet size, %d, greater than buffer size, %d!", data_needed, PLC_READ_DATA_LEN);
-            rc = PLCTAG_ERR_TOO_LARGE;
-            return rc;
-        } else if(data_needed < 0) {
-            pdebug(DEBUG_WARN, "Read more than a packet!  Expected %d bytes, but got %d bytes!", (MODBUS_MBAP_SIZE + packet_size), plc->read_data_len);
-            rc = PLCTAG_ERR_TOO_LARGE;
-            return rc;
-        }
-    }
 
     if(data_needed == 0) {
         /* we got our packet. */
@@ -1424,11 +1423,6 @@ int receive_response(modbus_plc_p plc)
         /* data_needed is greater than zero. */
         pdebug(DEBUG_DETAIL, "Received partial packet of %d bytes of %d.", plc->read_data_len, (data_needed + plc->read_data_len));
         rc = PLCTAG_STATUS_PENDING;
-    }
-
-    /* if we have some data in the buffer, keep the connection open. */
-    if(plc->read_data_len > 0) {
-        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
     }
 
     /* if we have some data in the buffer, keep the connection open. */
@@ -1450,15 +1444,15 @@ int send_request(modbus_plc_p plc)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    /* if we have some data in the buffer, keep the connection open. */
-    if(plc->write_data_len > 0) {
-        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
-    }
-
     /* check socket, could be closed due to inactivity. */
     if(!plc->sock) {
         pdebug(DEBUG_DETAIL, "No socket or socket is closed.");
         return PLCTAG_ERR_BAD_CONNECTION;
+    }
+
+    /* if we have some data in the buffer, keep the connection open. */
+    if(plc->write_data_len > 0) {
+        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
     }
 
     /* is there anything to do? */
@@ -1467,7 +1461,7 @@ int send_request(modbus_plc_p plc)
         return PLCTAG_ERR_NO_DATA;
     }
 
-    /* try to get some data. */
+    /* try to send some data. */
     rc = socket_write(plc->sock, plc->write_data + plc->write_data_offset, data_left, SOCKET_WRITE_TIMEOUT);
     if(rc >= 0) {
         plc->write_data_offset += rc;
