@@ -230,6 +230,35 @@ int plc_tag_tickler_wake_impl(const char *func, int line_num)
 
 
 
+int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+
+    if(!tag) {
+        pdebug(DEBUG_WARN, "Called from %s:%d when tag is NULL!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!tag->tag_cond_wait) {
+        pdebug(DEBUG_WARN, "Called from %s:%d when tag condition var is NULL!", func, line_num);
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    rc = cond_signal(tag->tag_cond_wait);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Error %s trying to signal condition variable in call from %s:%d", plc_tag_decode_error(rc), func, line_num);
+        return rc;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done. Called from %s:%d.", func, line_num);
+
+    return rc;
+}
+
+
+
 /*
  * plc_tag_generic_tickler
  *
