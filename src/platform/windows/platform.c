@@ -2480,7 +2480,7 @@ serial_port_p plc_lib_open_serial_port(/*plc_lib lib,*/ const char *path, int ba
     dcbSerialParams.dcb.fOutxCtsFlow    = FALSE;
     dcbSerialParams.dcb.fOutxDsrFlow    = FALSE;
     dcbSerialParams.dcb.fDsrSensitivity = FALSE;
-    dcbSerialParams.dcb.fAbortOnError   = TRUE; /* FIXME - should this be false? */
+    dcbSerialParams.dcb.fAbortOnError   = TRUE; /* TODO - should this be false? */
 
     /* attempt to set the serial params */
     if(!SetCommState(hSerialPort, &dcbSerialParams.dcb)) {
