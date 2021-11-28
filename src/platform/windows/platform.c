@@ -876,7 +876,7 @@ struct thread_t {
  * Start up a new thread.  This allocates the thread_t structure and starts
  * the passed function.  The arg argument is passed to the function.
  *
- * FIXME - use the stacksize!
+ * TODO - use the stacksize!
  */
 
 extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg)
@@ -890,7 +890,6 @@ extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize
 
     *t = (thread_p)mem_alloc(sizeof(struct thread_t));
     if(! *t) {
-        /* FIXME - should not be the same error as above. */
         pdebug(DEBUG_WARN, "Unable to create new thread struct!");
         return PLCTAG_ERR_NO_MEM;
     }

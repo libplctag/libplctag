@@ -372,7 +372,7 @@ int main(int argc, char **argv)
 
     success = 1;
 
-    /* FIXME - wait for the threads to stop. */
+    /* wait for the threads to stop. */
     util_sleep_ms(100);
 
     for(int tid=0; tid < num_threads && tid < MAX_THREADS; tid++) {
