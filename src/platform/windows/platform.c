@@ -1328,6 +1328,10 @@ extern int socket_create(sock_p *s)
         return PLCTAG_ERR_NO_MEM;
     }
 
+    (*s)->fd = INVALID_SOCKET;
+    (*s)->wake_read_fd = INVALID_SOCKET;
+    (*s)->wake_write_fd = INVALID_SOCKET;
+
     pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
@@ -1800,7 +1804,6 @@ int socket_wake(sock_p sock)
 
 
 
-
 int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 {
     int rc;
@@ -1936,7 +1939,6 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
     return rc;
 }
-
 
 
 
@@ -2089,33 +2091,34 @@ int socket_close(sock_p s)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
-        pdebug(DEBUG_DETAIL, "Socket is already closed.");
-        return PLCTAG_STATUS_OK;
+    if(s->wake_read_fd != INVALID_SOCKET) {
+        if(closesocket(s->wake_read_fd)) {
+            pdebug(DEBUG_WARN, "Error closing wake read socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
+
+        s->wake_read_fd = INVALID_SOCKET;
+    }
+
+    if(s->wake_write_fd != INVALID_SOCKET) {
+        if(closesocket(s->wake_write_fd)) {
+            pdebug(DEBUG_WARN, "Error closing wake write socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
+
+        s->wake_write_fd = INVALID_SOCKET;
+    }
+
+    if(s->fd != INVALID_SOCKET) {
+        if(closesocket(s->fd)) {
+            pdebug(DEBUG_WARN, "Error closing socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
+
+        s->fd = INVALID_SOCKET;
     }
 
     s->is_open = 0;
-
-    if(closesocket(s->fd)) {
-        pdebug(DEBUG_WARN, "Error closing socket!");
-        rc = PLCTAG_ERR_CLOSE;
-    }
-
-    s->fd = 0;
-
-    if(s->wake_read_fd != 0 && closesocket(s->wake_read_fd)) {
-        pdebug(DEBUG_WARN, "Error closing wake read socket!");
-        rc = PLCTAG_ERR_CLOSE;
-    }
-
-    s->wake_read_fd = 0;
-
-    if(s->wake_write_fd != 0 && closesocket(s->wake_write_fd)) {
-        pdebug(DEBUG_WARN, "Error closing wake write socket!");
-        rc = PLCTAG_ERR_CLOSE;
-    }
-
-    s->wake_write_fd = 0;
 
     pdebug(DEBUG_INFO, "Done.");
 

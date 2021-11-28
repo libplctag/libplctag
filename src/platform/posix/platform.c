@@ -1195,6 +1195,11 @@ int cond_destroy(cond_p *c)
  ******************************* Sockets ***********************************
  **************************************************************************/
 
+
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET (-1)
+#endif
+
 struct sock_t {
     int fd;
     int wake_read_fd;
@@ -1223,6 +1228,10 @@ extern int socket_create(sock_p *s)
         pdebug(DEBUG_ERROR, "Failed to allocate memory for socket.");
         return PLCTAG_ERR_NO_MEM;
     }
+
+    (*s)->fd = INVALID_SOCKET;
+    (*s)->wake_read_fd = INVALID_SOCKET;
+    (*s)->wake_write_fd = INVALID_SOCKET;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1518,6 +1527,11 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
 
             case ENOTSOCK:
                 pdebug(DEBUG_WARN, "The FD is not a socket!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
+            case ECONNREFUSED:
+                pdebug(DEBUG_WARN, "Connection refused!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
@@ -1984,37 +1998,34 @@ int socket_close(sock_p s)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
-        pdebug(DEBUG_DETAIL, "Socket is already closed.");
-        return PLCTAG_STATUS_OK;
-    }
-
-    s->is_open = 0;
-
-    if(close(s->fd)) {
-        pdebug(DEBUG_WARN, "Error closing socket!");
-        rc = PLCTAG_ERR_CLOSE;
-    }
-
-    s->fd = 0;
-
-    if(s->wake_read_fd != 0) {
+    if(s->wake_read_fd != INVALID_SOCKET) {
         if(close(s->wake_read_fd)) {
             pdebug(DEBUG_WARN, "Error closing read wake socket!");
             rc = PLCTAG_ERR_CLOSE;
         }
 
-        s->wake_read_fd = 0;
+        s->wake_read_fd = INVALID_SOCKET;
     }
 
-    if(s->wake_write_fd != 0) {
+    if(s->wake_write_fd != INVALID_SOCKET) {
         if(close(s->wake_write_fd)) {
             pdebug(DEBUG_WARN, "Error closing write wake socket!");
             rc = PLCTAG_ERR_CLOSE;
         }
 
-        s->wake_write_fd = 0;
+        s->wake_write_fd = INVALID_SOCKET;
     }
+
+    if(s->fd != INVALID_SOCKET) {
+        if(close(s->fd)) {
+            pdebug(DEBUG_WARN, "Error closing socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
+
+        s->fd = INVALID_SOCKET;
+    }
+
+    s->is_open = 0;
 
     pdebug(DEBUG_INFO, "Done.");
 
