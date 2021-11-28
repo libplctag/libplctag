@@ -1401,6 +1401,14 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     /* save the values */
     s->fd = fd;
     s->port = port;
+
+    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    rc = sock_create_event_wakeup_channel(s);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
     s->is_open = 1;
 
     pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
@@ -1550,18 +1558,6 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
     if(!sock->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_READ;
-    }
-
-    /* defer creation of the wake pipe until we actually need it. */
-    if(sock->wake_read_fd == 0 && sock->wake_write_fd == 0) {
-        int rc = PLCTAG_STATUS_OK;
-
-        pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
-        rc = sock_create_event_wakeup_channel(sock);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
-            return rc;
-        }
     }
 
     if(timeout_ms < 0) {
@@ -1984,7 +1980,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
 
 
-extern int socket_close(sock_p s)
+int socket_close(sock_p s)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -2035,7 +2031,7 @@ extern int socket_close(sock_p s)
 
 
 
-extern int socket_destroy(sock_p *s)
+int socket_destroy(sock_p *s)
 {
     pdebug(DEBUG_INFO, "Starting.");
 
