@@ -57,6 +57,7 @@ struct tag_vtable_t system_tag_vtable = {
     /* status */    system_tag_status,
     /* tickler */   NULL,
     /* write */     system_tag_write,
+    /* wake_plc */  (tag_vtable_func)NULL,
 
     /* data accessors */
 

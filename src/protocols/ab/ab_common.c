@@ -103,6 +103,7 @@ struct tag_vtable_t default_vtable = {
     default_status,
     default_tickler,
     default_write,
+    (tag_vtable_func)NULL, /* this is not portable! */
 
     /* attribute accessors */
     ab_get_int_attrib,
@@ -556,7 +557,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 tag->elem_type = AB_TYPE_STRING;
             } else if(str_cmp_i(elem_type,"short string") == 0) {
                 pdebug(DEBUG_DETAIL,"Found tag element type of short string.");
-                tag->elem_size = 256; /* FIXME */
+                tag->elem_size = 256; /* TODO - find the real length */
                 tag->elem_type = AB_TYPE_SHORT_STRING;
             } else {
                 pdebug(DEBUG_DETAIL, "Unknown tag type %s", elem_type);

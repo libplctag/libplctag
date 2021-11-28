@@ -58,6 +58,8 @@ struct tag_vtable_t {
     tag_vtable_func tickler;
     tag_vtable_func write;
 
+    tag_vtable_func wake_plc;
+
     /* attribute accessors. */
     int (*get_int_attrib)(plc_tag_p tag, const char *attrib_name, int default_value);
     int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
