@@ -1269,6 +1269,8 @@ int cond_destroy(cond_p *c)
 
 struct sock_t {
     SOCKET fd;
+    SOCKET wake_read_fd;
+    SOCKET wake_write_fd;
     int port;
     int is_open;
 };
@@ -1483,6 +1485,14 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     /* save the values */
     s->fd = fd;
     s->port = port;
+
+    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    rc = sock_create_event_wakeup_channel(s);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create wake channel, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
     s->is_open = 1;
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1590,6 +1600,13 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
 
 int socket_wait_event(sock_p sock, int events, int timeout_ms)
 {
+    int result = SOCK_EVENT_NONE;
+    fd_set read_set;
+    fd_set write_set;
+    fd_set err_set;
+    int max_fd = 0;
+    int num_sockets = 0;
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!sock) {
@@ -1613,14 +1630,143 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    /* set up fd sets */
+    FD_ZERO(&read_set);
+    FD_ZERO(&write_set);
+    FD_ZERO(&err_set);
+
+    /* calculate the maximum fd */
+    max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
+
+    /* add the wake fd */
+    FD_SET(sock->wake_read_fd, &read_set);
+
+    /* we always want to know about errors. */
+    FD_SET(sock->fd, &err_set);
+
+    /* add more depending on the mask. */
+    if(events & SOCK_EVENT_CAN_READ) {
+        FD_SET(sock->fd, &read_set);
+    }
+
+    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
+        FD_SET(sock->fd, &write_set);
+    }
+
+    /* calculate the timeout. */
+    if(timeout_ms > 0) {
+        struct timeval tv;
+
+        tv.tv_sec = (long)(timeout_ms / 1000);
+        tv.tv_usec = (long)(timeout_ms % 1000) * (long)(1000);
+
+        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
+    } else {
+        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
+    }
+
+    if(num_sockets == 0) {
+        result |= (events & SOCK_EVENT_TIMEOUT);
+    } else if(num_sockets > 0) {
+        /* was there a wake up? */
+        if(FD_ISSET(sock->wake_read_fd, &read_set)) {
+            int bytes_read = 0;
+            char buf[32];
+
+            /* empty the socket. */
+            while((bytes_read = (int)read(sock->wake_read_fd, &buf[0], sizeof(buf))) > 0) { }
+
+            pdebug(DEBUG_DETAIL, "Socket woken up.");
+            result |= (events & SOCK_EVENT_WAKE_UP);
+        }
+
+        /* is read ready for the main fd? */
+        if(FD_ISSET(sock->fd, &read_set)) {
+            char buf;
+            int byte_read = 0;
+
+            byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
+
+            if(byte_read) {
+                pdebug(DEBUG_DETAIL, "Socket can read.");
+                result |= (events & SOCK_EVENT_CAN_READ);
+            } else {
+                pdebug(DEBUG_DETAIL, "Socket disconnected.");
+                result |= (events & SOCK_EVENT_DISCONNECT);
+            }
+        }
+
+        /* is write ready for the main fd? */
+        if(FD_ISSET(sock->fd, &write_set)) {
+            pdebug(DEBUG_DETAIL, "Socket can write or just connected.");
+            result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
+        }
+
+        /* is there an error? */
+        if(FD_ISSET(sock->fd, &err_set)) {
+            pdebug(DEBUG_DETAIL, "Socket has error!");
+            result |= (events & SOCK_EVENT_ERROR);
+        }
+    } else {
+        int err = WSAGetLastError();
+
+        pdebug(DEBUG_WARN, "select() returned status %d!", num_sockets);
+
+        switch(err) {
+            case WSANOTINITIALISED: /* WSAStartup() not called first. */
+                pdebug(DEBUG_WARN, "WSAStartUp() not called before calling Winsock functions!");
+                return PLCTAG_ERR_BAD_CONFIG;
+                break;
+
+            case WSAEFAULT: /* No mem for internal tables. */
+                pdebug(DEBUG_WARN, "Insufficient resources for select() to run!");
+                return PLCTAG_ERR_NO_MEM;
+                break;
+
+            case WSAENETDOWN: /* network subsystem is down. */
+                pdebug(DEBUG_WARN, "The network subsystem is down!");
+                return PLCTAG_ERR_BAD_DEVICE;
+                break;
+
+            case WSAEINVAL: /* timeout is invalid. */
+                pdebug(DEBUG_WARN, "The timeout is invalid!");
+                return PLCTAG_ERR_BAD_PARAM;
+                break;
+
+            case WSAEINTR: /* A blocking call wss cancelled. */
+                pdebug(DEBUG_WARN, "A blocking call was cancelled!");
+                return PLCTAG_ERR_BAD_CONFIG;
+                break;
+
+            case WSAEINPROGRESS: /* A blocking call is already in progress. */
+                pdebug(DEBUG_WARN, "A blocking call is already in progress!");
+                return PLCTAG_ERR_BAD_CONFIG;
+                break;
+
+            case WSAENOTSOCK: /* The descriptor set contains something other than a socket. */
+                pdebug(DEBUG_WARN, "The fd set contains something other than a socket!");
+                return PLCTAG_ERR_BAD_DATA;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unexpected socket err %d!", err);
+                return PLCTAG_ERR_BAD_STATUS;
+                break;
+        }
+    }
+
     pdebug(DEBUG_DETAIL, "Done.");
 
     return result;
 }
 
 
+
 int socket_wake(sock_p sock)
 {
+    int rc = PLCTAG_STATUS_OK;
+    const char dummy_data[] = "Dummy data.";
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!sock) {
@@ -1631,6 +1777,20 @@ int socket_wake(sock_p sock)
     if(!sock->is_open) {
         pdebug(DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_READ;
+    }
+
+    rc = send(s->wake_write_fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+    if(rc < 0) {
+        int err = WSAGetLastError();
+
+        if(err == WSAEWOULDBLOCK) {
+            pdebug(DEBUG_DETAIL, "Write wrote no data.");
+
+            rc = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_WARN,"socket write error rc=%d, errno=%d", rc, err);
+            return PLCTAG_ERR_WRITE;
+        }
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1918,32 +2078,60 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
 
 
-extern int socket_close(sock_p s)
+int socket_close(sock_p s)
 {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
     if(!s) {
+        pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!s->is_open) {
+        pdebug(DEBUG_DETAIL, "Socket is already closed.");
         return PLCTAG_STATUS_OK;
     }
 
     s->is_open = 0;
 
     if(closesocket(s->fd)) {
-        return PLCTAG_ERR_CLOSE;
+        pdebug(DEBUG_WARN, "Error closing socket!");
+        rc = PLCTAG_ERR_CLOSE;
     }
 
     s->fd = 0;
 
-    return PLCTAG_STATUS_OK;
+    if(s->wake_read_fd != 0 && closesocket(s->wake_read_fd)) {
+        pdebug(DEBUG_WARN, "Error closing wake read socket!");
+        rc = PLCTAG_ERR_CLOSE;
+    }
+
+    s->wake_read_fd = 0;
+
+    if(s->wake_write_fd != 0 && closesocket(s->wake_write_fd)) {
+        pdebug(DEBUG_WARN, "Error closing wake write socket!");
+        rc = PLCTAG_ERR_CLOSE;
+    }
+
+    s->wake_write_fd = 0;
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
 }
 
 
-extern int socket_destroy(sock_p *s)
+
+int socket_destroy(sock_p *s)
 {
-    if(!s || !*s)
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!s || !*s) {
+        pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
+    }
 
     socket_close(*s);
 
@@ -1951,14 +2139,178 @@ extern int socket_destroy(sock_p *s)
 
     *s = 0;
 
-    if(WSACleanup() != NO_ERROR)
+    if(WSACleanup() != NO_ERROR) {
         return PLCTAG_ERR_WINSOCK;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
 
+int sock_create_event_wakeup_channel(sock_p sock)
+{
+    int rc = PLCTAG_STATUS_OK;
+    SOCKET listener = INVALID_SOCKET;
+    struct sockaddr_in listener_addr_info;
+    socklen_t addr_info_size = sizeof(struct sockaddr_in);
+    int non_blocking = 1;
+    SOCKET wake_fds[2];
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    wake_fds[0] = INVALID_SOCKET;
+    wake_fds[1] = INVALID_SOCKET;
+
+    /*
+     * This is a bit convoluted.
+     *
+     * First we open a listening socket on the loopback interface.
+     * We do not care what port so we let the OS decide.
+     *
+     * Then we connect to that socket.   The connection becomes
+     * the reader side of the wake up fds.
+     *
+     * Then we accept and that becomes the writer side of the
+     * wake up fds.
+     *
+     * Then we close the listener because we do not want to keep
+     * it open as it might be a problem.  Probably more for DOS
+     * purposes than any security, but you never know!
+     *
+     * And the reader and writer have to be set up as non-blocking!
+     *
+     * This was cobbled together from various sources including
+     * StackExchange and MSDN.   I did not take notes, so I am unable
+     * to properly credit the original sources :-(
+     */
+
+    do {
+        /*
+         * Set up our listening socket.
+         */
+
+        listener = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if(listener < 0) {
+            pdebug(DEBUG_WARN, "Error %d creating the listener socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /* clear the listener address info */
+        mem_set(&listener_addr_info, 0, addr_info_size);
+
+        /* standard IPv4 for the win! */
+        listener_addr_info.sin_family = AF_INET;
+
+        /* we do not care what port. */
+        listener_addr_info.sin_port = 0;
+
+        /* we want to connect on the loopback address. */
+        listener_addr_info.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+        /* now comes the part where we could fail. */
+
+        /* first we bind the listener to the loopback and let the OS choose the port. */
+        if(bind(listener, (struct sockaddr *)&listener_addr_info, addr_info_size)){
+            pdebug(DEBUG_WARN, "Error %d binding the listener socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /*
+         * we need to get the address and port of the listener for later steps.
+         * Notice that this _sets_ the address size!.
+         */
+        if(getsockname(listener, (struct sockaddr *)&listener_addr_info, &addr_info_size)) {
+            pdebug(DEBUG_WARN, "Error %d getting the listener socket address info!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /* Phwew.   We can actually listen now. Notice that this is blocking! */
+        if(listen(listener, 1)) { /* MAGIC constant - We do not want any real queue! */
+            pdebug(DEBUG_WARN, "Error %d listening on the listener socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /*
+         * Set up our wake read side socket.
+         */
+
+        wake_fds[0] = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (wake_fds[0] < 0) {
+            pdebug(DEBUG_WARN, "Error %d creating the wake channel read side socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /*
+         * now we start the next phase.   We need to connect to our own listener.
+         * This will be the reader side of the wake up socket.
+         */
+
+        if(connect(wake_fds[0], (struct sockaddr *)&listener_addr_info, addr_info_size)) {
+            pdebug(DEBUG_WARN, "Error %d connecting to the listener socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /* now we accept our own connection. This becomes the writer side. */
+        wake_fds[1] = accept(listener, 0, 0);
+        if (wake_fds[1] == INVALID_SOCKET) {
+            pdebug(DEBUG_WARN, "Error %d connecting to the listener socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /* now we need to set these to non-blocking. */
+
+        /* reader */
+        if(ioctlsocket(wake_fds[0], FIONBIO, &non_blocking)) {
+            pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /* writer */
+        if(ioctlsocket(wake_fds[1], FIONBIO, &non_blocking)) {
+            pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+    } while(0);
+
+    /* do some clean up */
+    if(listener != INVALID_SOCKET) {
+        closesocket(listener);
+    }
+
+    /* check the result */
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to set up wakeup socket!");
+
+        if(wake_fds[0] != INVALID_SOCKET) {
+            closesocket(wake_fds[0]);
+            wake_fds[0] = INVALID_SOCKET;
+        }
+
+        if(wake_fds[1] != INVALID_SOCKET) {
+            closesocket(wake_fds[1]);
+            wake_fds[1] = INVALID_SOCKET;
+        }
+    } else {
+        sock->wake_read_fd = wake_fds[0];
+        sock->wake_write_fd = wake_fds[1];
+
+        pdebug(DEBUG_INFO, "Done.");
+    }
+
+    return rc;
+}
 
 
 
