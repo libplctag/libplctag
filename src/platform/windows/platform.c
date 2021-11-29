@@ -1277,7 +1277,7 @@ struct sock_t {
 
 #define MAX_IPS (8)
 
-static int sock_create_wake_event(sock_p sock);
+static int sock_create_event_wakeup_channel(sock_p sock);
 
 
 /*
@@ -1607,7 +1607,6 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
     fd_set read_set;
     fd_set write_set;
     fd_set err_set;
-    int max_fd = 0;
     int num_sockets = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1638,9 +1637,6 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
     FD_ZERO(&write_set);
     FD_ZERO(&err_set);
 
-    /* calculate the maximum fd */
-    max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
-
     /* add the wake fd */
     FD_SET(sock->wake_read_fd, &read_set);
 
@@ -1663,9 +1659,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
         tv.tv_sec = (long)(timeout_ms / 1000);
         tv.tv_usec = (long)(timeout_ms % 1000) * (long)(1000);
 
-        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
+        num_sockets = select(2, &read_set, &write_set, &err_set, &tv);
     } else {
-        num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
+        num_sockets = select(2, &read_set, &write_set, &err_set, NULL);
     }
 
     if(num_sockets == 0) {
@@ -1677,9 +1673,10 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
             char buf[32];
 
             /* empty the socket. */
-            while((bytes_read = (int)read(sock->wake_read_fd, &buf[0], sizeof(buf))) > 0) { }
+            while((bytes_read = (int)recv(sock->wake_read_fd, (char*)&buf[0], sizeof(buf), 0)) > 0) { }
 
             pdebug(DEBUG_DETAIL, "Socket woken up.");
+
             result |= (events & SOCK_EVENT_WAKE_UP);
         }
 
