@@ -107,7 +107,6 @@ struct modbus_plc_t {
         PLC_BUILD_REQUEST,
         PLC_SEND_REQUEST,
         PLC_RECEIVE_RESPONSE,
-        PLC_PROCESS_RESPONSE,
         PLC_ERR_WAIT
     } state;
     int max_requests_in_flight;
