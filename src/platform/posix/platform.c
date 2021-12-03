@@ -2076,18 +2076,18 @@ int sock_create_event_wakeup_channel(sock_p sock)
         }
 
 #ifdef BSD_OS_TYPE
-    /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
-    if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
-        pdebug(DEBUG_ERROR, "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
+        /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
+        if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
+            pdebug(DEBUG_ERROR, "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
+            rc = PLCTAG_ERR_OPEN;
+            break;
+        }
 
-    if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
-        close(fd);
-        pdebug(DEBUG_ERROR, "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
+        if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
+            pdebug(DEBUG_ERROR, "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
+            rc = PLCTAG_ERR_OPEN;
+            break;
+        }
 #endif
 
         /* make the read pipe fd non-blocking. */
