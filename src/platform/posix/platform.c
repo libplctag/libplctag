@@ -1510,6 +1510,11 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
                 return PLCTAG_ERR_OPEN;
                 break;
 
+            case ECONNREFUSED:
+                pdebug(DEBUG_WARN, "Connection refused!");
+                return PLCTAG_ERR_OPEN;
+                break;
+
             default:
                 pdebug(DEBUG_WARN, "Unexpected error %d returned!", sock_err);
                 return PLCTAG_ERR_OPEN;
