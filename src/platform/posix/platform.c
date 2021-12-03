@@ -2064,6 +2064,9 @@ int sock_create_event_wakeup_channel(sock_p sock)
     int rc = PLCTAG_STATUS_OK;
     int flags = 0;
     int wake_fds[2] = { 0 };
+#ifdef BSD_OS_TYPE
+    int sock_opt=1;
+#endif
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -2129,14 +2132,14 @@ int sock_create_event_wakeup_channel(sock_p sock)
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to open waker pipe!");
 
-        if(wake_fds[0] != 0) {
+        if(wake_fds[0] != INVALID_SOCKET) {
             close(wake_fds[0]);
-            wake_fds[0] = 0;
+            wake_fds[0] = INVALID_SOCKET;
         }
 
-        if(wake_fds[1] != 0) {
+        if(wake_fds[1] != INVALID_SOCKET) {
             close(wake_fds[1]);
-            wake_fds[1] = 0;
+            wake_fds[1] = INVALID_SOCKET;
         }
     } else {
         pdebug(DEBUG_INFO, "Done.");
