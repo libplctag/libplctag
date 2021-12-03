@@ -37,7 +37,7 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,1,4
+#define REQUIRED_VERSION 2,4,0
 
 /* test against a DINT array. */
 #define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
@@ -56,6 +56,8 @@ int main()
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* create the tag */
     tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);

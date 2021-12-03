@@ -111,7 +111,7 @@ static int match_int(const char **p, int *val)
         digits--;
     }
 
-    /* FIXME - what is the maximum DH+ ID we can have? 255? */
+    /* TODO - what is the maximum DH+ ID we can have? 255? */
 
     *val = result;
 
@@ -178,157 +178,157 @@ int match_dhp_node(const char *dhp_str, int *dhp_channel, int *src_node, int *de
  * FIXME - This should be factored out into a separate functions.
  */
 
-int cip_encode_path_old(const char *path, int needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest)
-{
-    int ioi_size=0;
-    int last_is_dhp=0;
-    int has_dhp=0;
-    int dhp_channel=0;
-    int src_addr=0;
-    int dest_addr=0;
-    int tmp=0;
-    char **links=NULL;
-    char *link=NULL;
-    uint8_t tmp_path[MAX_CONN_PATH+16];
-    uint8_t *data = &tmp_path[0];
+// int cip_encode_path_old(const char *path, int needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest)
+// {
+//     int ioi_size=0;
+//     int last_is_dhp=0;
+//     int has_dhp=0;
+//     int dhp_channel=0;
+//     int src_addr=0;
+//     int dest_addr=0;
+//     int tmp=0;
+//     char **links=NULL;
+//     char *link=NULL;
+//     uint8_t tmp_path[MAX_CONN_PATH+16];
+//     uint8_t *data = &tmp_path[0];
 
-    /* split the path */
-    if(path) {
-        links = str_split(path,",");
-    }
+//     /* split the path */
+//     if(path) {
+//         links = str_split(path,",");
+//     }
 
-    if(links != NULL) {
-        int link_index=0;
+//     if(links != NULL) {
+//         int link_index=0;
 
-        /* work along each string. */
-        link = links[link_index];
+//         /* work along each string. */
+//         link = links[link_index];
 
-        while(link && ioi_size < MAX_CONN_PATH) {   /* MAGIC -2 to allow for padding */
-            int rc = match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr);
-            if(rc > 0) {
-                /* we matched a DH+ route node */
-                pdebug(DEBUG_DETAIL,"Found DH+ routing, need connection. Conn path length=%d",ioi_size);
-                last_is_dhp = 1;
-                has_dhp = 1;
-            } else if (rc < 0) {
-                /* matched part of a DH+ node, but then failed.  Syntax error. */
-                pdebug(DEBUG_WARN, "Syntax error in DH+ route path.");
-                if(links) mem_free(links);
-                return PLCTAG_ERR_BAD_PARAM;
-            } else {
-                /* did not match a DH+ route node, but no error. */
-                last_is_dhp = 0;
-                has_dhp = 0;
+//         while(link && ioi_size < MAX_CONN_PATH) {   /* MAGIC -2 to allow for padding */
+//             int rc = match_dhp_node(link,&dhp_channel,&src_addr,&dest_addr);
+//             if(rc > 0) {
+//                 /* we matched a DH+ route node */
+//                 pdebug(DEBUG_DETAIL,"Found DH+ routing, need connection. Conn path length=%d",ioi_size);
+//                 last_is_dhp = 1;
+//                 has_dhp = 1;
+//             } else if (rc < 0) {
+//                 /* matched part of a DH+ node, but then failed.  Syntax error. */
+//                 pdebug(DEBUG_WARN, "Syntax error in DH+ route path.");
+//                 if(links) mem_free(links);
+//                 return PLCTAG_ERR_BAD_PARAM;
+//             } else {
+//                 /* did not match a DH+ route node, but no error. */
+//                 last_is_dhp = 0;
+//                 has_dhp = 0;
 
-                if(str_to_int(link, &tmp) != 0) {
-                    /* syntax error */
-                    pdebug(DEBUG_WARN, "Syntax error in path, expected number!");
-                    if(links) mem_free(links);
-                    return PLCTAG_ERR_BAD_PARAM;
-                }
+//                 if(str_to_int(link, &tmp) != 0) {
+//                     /* syntax error */
+//                     pdebug(DEBUG_WARN, "Syntax error in path, expected number!");
+//                     if(links) mem_free(links);
+//                     return PLCTAG_ERR_BAD_PARAM;
+//                 }
 
-                *data = (uint8_t)tmp;
+//                 *data = (uint8_t)tmp;
 
-                /*printf("convert_links() link(%d)=%s (%d)\n",i,*links,tmp);*/
+//                 /*printf("convert_links() link(%d)=%s (%d)\n",i,*links,tmp);*/
 
-                data++;
-                ioi_size++;
-                pdebug(DEBUG_DETAIL,"Found regular routing. Conn path length=%d",ioi_size);
-            }
-            /* FIXME - handle case where IP address is in path */
+//                 data++;
+//                 ioi_size++;
+//                 pdebug(DEBUG_DETAIL,"Found regular routing. Conn path length=%d",ioi_size);
+//             }
+//             /* FIXME - handle case where IP address is in path */
 
-            link_index++;
-            link = links[link_index];
-        }
+//             link_index++;
+//             link = links[link_index];
+//         }
 
-        /* we do not need the split string anymore. */
-        if(links) {
-            mem_free(links);
-            links = NULL;
-        }
-    }
+//         /* we do not need the split string anymore. */
+//         if(links) {
+//             mem_free(links);
+//             links = NULL;
+//         }
+//     }
 
-    /* Add to the path based on the protocol type and
-      * whether the last part is DH+.  Only some combinations of
-      * DH+ and PLC type work.
-      */
-    if(last_is_dhp && (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX)) {
-        /* We have to make the difference from the more
-         * generic case.
-         */
+//     /* Add to the path based on the protocol type and
+//       * whether the last part is DH+.  Only some combinations of
+//       * DH+ and PLC type work.
+//       */
+//     if(last_is_dhp && (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX)) {
+//         /* We have to make the difference from the more
+//          * generic case.
+//          */
 
-        /* try adding this onto the end of the routing path */
-        *data = 0x20;
-        data++;
-        *data = 0xA6;
-        data++;
-        *data = 0x24;
-        data++;
-        *data = (uint8_t)dhp_channel;
-        data++;
-        *data = 0x2C;
-        data++;
-        *data = 0x01;
-        data++;
-        ioi_size += 6;
+//         /* try adding this onto the end of the routing path */
+//         *data = 0x20;
+//         data++;
+//         *data = 0xA6;
+//         data++;
+//         *data = 0x24;
+//         data++;
+//         *data = (uint8_t)dhp_channel;
+//         data++;
+//         *data = 0x2C;
+//         data++;
+//         *data = 0x01;
+//         data++;
+//         ioi_size += 6;
 
-        *dhp_dest = (uint16_t)dest_addr;
-    } else if(!has_dhp) {
-        if(needs_connection) {
-            /*
-             * we do a generic path to the router
-             * object in the PLC.  But only if the PLC is
-             * one that needs a connection.  For instance a
-             * Micro850 needs to work in connected mode.
-             */
-            *data = 0x20;   /* class */
-            data++;
-            *data = 0x02;   /* message router class */
-            data++;
-            *data = 0x24;   /* instance */
-            data++;
-            *data = 0x01;   /* message router class instance #1 */
-            ioi_size += 4;
-        }
+//         *dhp_dest = (uint16_t)dest_addr;
+//     } else if(!has_dhp) {
+//         if(needs_connection) {
+//             /*
+//              * we do a generic path to the router
+//              * object in the PLC.  But only if the PLC is
+//              * one that needs a connection.  For instance a
+//              * Micro850 needs to work in connected mode.
+//              */
+//             *data = 0x20;   /* class */
+//             data++;
+//             *data = 0x02;   /* message router class */
+//             data++;
+//             *data = 0x24;   /* instance */
+//             data++;
+//             *data = 0x01;   /* message router class instance #1 */
+//             ioi_size += 4;
+//         }
 
-        *dhp_dest = 0;
-    } else {
-        /* we had the special DH+ format and it was
-         * either not last or not a PLC5/SLC.  That
-         * is an error.
-         */
+//         *dhp_dest = 0;
+//     } else {
+//         /* we had the special DH+ format and it was
+//          * either not last or not a PLC5/SLC.  That
+//          * is an error.
+//          */
 
-        *dhp_dest = 0;
+//         *dhp_dest = 0;
 
-        return PLCTAG_ERR_BAD_PARAM;
-    }
+//         return PLCTAG_ERR_BAD_PARAM;
+//     }
 
-    /*
-     * zero out the last byte if we need to.
-     * This pads out the path to a multiple of 16-bit
-     * words.
-     */
-    pdebug(DEBUG_DETAIL,"ioi_size before %d", ioi_size);
-    if(ioi_size & 0x01) {
-        *data = 0;
-        ioi_size++;
-    }
+//     /*
+//      * zero out the last byte if we need to.
+//      * This pads out the path to a multiple of 16-bit
+//      * words.
+//      */
+//     pdebug(DEBUG_DETAIL,"ioi_size before %d", ioi_size);
+//     if(ioi_size & 0x01) {
+//         *data = 0;
+//         ioi_size++;
+//     }
 
-    /* allocate space for the connection path */
-    *conn_path = mem_alloc(ioi_size);
-    if(! *conn_path) {
-        pdebug(DEBUG_WARN, "Unable to allocate connection path!");
-        return PLCTAG_ERR_NO_MEM;
-    }
+//     /* allocate space for the connection path */
+//     *conn_path = mem_alloc(ioi_size);
+//     if(! *conn_path) {
+//         pdebug(DEBUG_WARN, "Unable to allocate connection path!");
+//         return PLCTAG_ERR_NO_MEM;
+//     }
 
-    mem_copy(*conn_path, &tmp_path[0], ioi_size);
+//     mem_copy(*conn_path, &tmp_path[0], ioi_size);
 
-    *conn_path_size = (uint8_t)ioi_size;
+//     *conn_path_size = (uint8_t)ioi_size;
 
-    pdebug(DEBUG_INFO, "Done.");
+//     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_STATUS_OK;
-}
+//     return PLCTAG_STATUS_OK;
+// }
 
 
 

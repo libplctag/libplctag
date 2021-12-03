@@ -58,6 +58,8 @@ struct tag_vtable_t {
     tag_vtable_func tickler;
     tag_vtable_func write;
 
+    tag_vtable_func wake_plc;
+
     /* attribute accessors. */
     int (*get_int_attrib)(plc_tag_p tag, const char *attrib_name, int default_value);
     int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
@@ -149,8 +151,10 @@ struct plc_tag_t {
 /* the following may need to be used where the tag is already mapped or is not yet mapped */
 extern int lib_init(void);
 extern void lib_teardown(void);
-extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
 extern void plc_tag_generic_tickler(plc_tag_p tag);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 #define plc_tag_tickler_wake()  plc_tag_tickler_wake_impl(__func__, __LINE__)
+extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
+#define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
+extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
 extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes);
