@@ -569,77 +569,36 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
              *      * no type, just elem_size.
              * Otherwise this is an error.
              */
-            {
-                int elem_size = attr_get_int(attribs, "elem_size", 0);
+            int elem_size = attr_get_int(attribs, "elem_size", 0);
 
-                if(tag->plc_type == AB_PLC_LGX) {
-                    const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
-                    int special_tag_rc = PLCTAG_STATUS_OK;
+            if(tag->plc_type == AB_PLC_LGX) {
+                const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
+                int special_tag_rc = PLCTAG_STATUS_OK;
 
-                    /* check for special tags. */
-                    if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
-                        special_tag_rc = setup_raw_tag(tag);
-                    } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
-                        special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
-                    } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
-                        special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
-                    } /* else not a special tag. */
+                /* check for special tags. */
+                if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
+                    special_tag_rc = setup_raw_tag(tag);
+                } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
+                    special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
+                } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
+                    special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
+                } /* else not a special tag. */
 
-                    if(special_tag_rc == PLCTAG_ERR_BAD_PARAM) {
-                        pdebug(DEBUG_WARN, "Error parsing tag listing name!");
-                        return PLCTAG_ERR_BAD_PARAM;
-                    }
+                if(special_tag_rc == PLCTAG_ERR_BAD_PARAM) {
+                    pdebug(DEBUG_WARN, "Error parsing tag listing name!");
+                    return PLCTAG_ERR_BAD_PARAM;
                 }
+            }
 
-                /* if we did not set an element size yet, set one. */
-                if(tag->elem_size == 0) {
-                    if(elem_size > 0) {
-                        pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
-                        tag->elem_size = elem_size;
-                    }
-
-                    // else {
-                    //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
-                    //     return PLCTAG_ERR_BAD_PARAM;
-                    // }
-                } else {
-                    if(elem_size > 0) {
-                        pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
-                    }
+            /* if we did not set an element size yet, set one. */
+            if(tag->elem_size == 0) {
+                if(elem_size > 0) {
+                    pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
+                    tag->elem_size = elem_size;
                 }
-
-                /* if we did not set an element size yet, set one. */
-                if(tag->elem_size == 0) {
-                    if(elem_size > 0) {
-                        pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
-                        tag->elem_size = elem_size;
-                    }
-
-                    // else {
-                    //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
-                    //     return PLCTAG_ERR_BAD_PARAM;
-                    // }
-                } else {
-                    if(elem_size > 0) {
-                        pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
-                    }
-                }
-
-                /* if we did not set an element size yet, set one. */
-                if(tag->elem_size == 0) {
-                    if(elem_size > 0) {
-                        pdebug(DEBUG_INFO, "Setting element size to %d.", elem_size);
-                        tag->elem_size = elem_size;
-                    }
-
-                    // else {
-                    //     pdebug(DEBUG_WARN, "You must set a element type or an element size!");
-                    //     return PLCTAG_ERR_BAD_PARAM;
-                    // }
-                } else {
-                    if(elem_size > 0) {
-                        pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
-                    }
+            } else {
+                if(elem_size > 0) {
+                    pdebug(DEBUG_WARN, "Tag has elem_size and either is a tag listing or has elem_type, only use one!");
                 }
             }
         }
