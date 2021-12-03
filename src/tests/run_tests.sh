@@ -126,6 +126,10 @@ else
     echo "OK"
 fi
 
+echo -n "Waiting for Modbus emulator to start up... "
+sleep 2
+echo "Done."
+
 echo -n "Testing Modbus... "
 $TEST_DIR/thread_stress 10 'protocol=modbus-tcp&gateway=127.0.0.1:5020&path=0&elem_count=2&name=hr10' > modbus_test.log 2>&1
 if [ $? != 0 ]; then
