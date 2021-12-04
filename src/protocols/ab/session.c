@@ -58,6 +58,7 @@
 // #define MAX_CIP_SLC_MSG_SIZE (222)
 #define MAX_CIP_SLC_MSG_SIZE (244)
 #define MAX_CIP_MLGX_MSG_SIZE (244)
+#define MAX_CIP_OMRON_MSG_SIZE (1996)
 
 /*
  * Number of milliseconds to wait to try to set up the session again
@@ -72,12 +73,12 @@
 
 
 
-static ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg);
+static ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
 static int session_init(ab_session_p session);
 //static int get_plc_type(attr attribs);
 static int add_session_unsafe(ab_session_p n);
 static int remove_session_unsafe(ab_session_p n);
-static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path);
+static ab_session_p find_session_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
 static int session_match_valid(const char *host, const char *path, ab_session_p session);
 static int session_add_request_unsafe(ab_session_p sess, ab_request_p req);
 static int session_open_socket(ab_session_p session);
@@ -229,6 +230,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     int rc = PLCTAG_STATUS_OK;
     int auto_disconnect_enabled = 0;
     int auto_disconnect_timeout_ms = INT_MAX;
+    int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
 
     pdebug(DEBUG_DETAIL, "Starting");
 
@@ -247,7 +249,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     critical_block(session_mutex) {
         /* if we are to share sessions, then look for an existing one. */
         if (shared_session) {
-            session = find_session_by_host_unsafe(session_gw, session_path);
+            session = find_session_by_host_unsafe(session_gw, session_path, connection_group_id);
         } else {
             /* no sharing, create a new one */
             session = AB_SESSION_NULL;
@@ -255,7 +257,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
 
         if (session == AB_SESSION_NULL) {
             pdebug(DEBUG_DETAIL, "Creating new session.");
-            session = session_create_unsafe(session_gw, session_path, plc_type, &use_connected_msg);
+            session = session_create_unsafe(session_gw, session_path, plc_type, &use_connected_msg, connection_group_id);
 
             if (session == AB_SESSION_NULL) {
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
@@ -418,7 +420,7 @@ int session_match_valid(const char *host, const char *path, ab_session_p session
 }
 
 
-ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
+ab_session_p find_session_by_host_unsafe(const char *host, const char *path, int connection_group_id)
 {
     for(int i=0; i < vector_length(sessions); i++) {
         ab_session_p session = vector_get(sessions, i);
@@ -426,7 +428,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
         /* is this session in the process of destruction? */
         session = rc_inc(session);
         if(session) {
-            if(session_match_valid(host, path, session)) {
+            if(session->connection_group_id == connection_group_id && session_match_valid(host, path, session)) {
                 return session;
             }
 
@@ -439,7 +441,7 @@ ab_session_p find_session_by_host_unsafe(const char *host, const char *path)
 
 
 
-ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg)
+ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id)
 {
     static volatile uint32_t connection_id = 0;
 
@@ -500,8 +502,10 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
     session->use_connected_msg = *use_connected_msg;
     session->failed = 0;
     session->conn_serial_number = (uint16_t)(uintptr_t)(intptr_t)rand();
-
     session->session_seq_id = (uint64_t)rand();
+
+    pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
+    session->connection_group_id = connection_group_id;
 
     /* guess the max CIP payload size. */
     switch(plc_type) {
@@ -527,7 +531,7 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         break;
 
     case AB_PLC_OMRON_NJNX:
-        session->max_payload_size = MAX_CIP_MSG_SIZE;
+        session->max_payload_size = MAX_CIP_OMRON_MSG_SIZE;
         break;
 
     default:
@@ -537,6 +541,7 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         break;
     }
 
+    pdebug(DEBUG_DETAIL, "Set maximum payload size to %u bytes.", (unsigned int)(session->max_payload_size));
 
     /*
      * Why is connection_id global?  Because it looks like the PLC might
@@ -2034,28 +2039,89 @@ int send_forward_open_request(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting");
 
-    /* if this is the first time we are called set up a default guess size. */
-    if(!session->max_payload_guess) {
-        if(session->plc_type == AB_PLC_LGX && session->use_connected_msg && !session->only_use_old_forward_open) {
-            session->max_payload_guess = MAX_CIP_MSG_SIZE_EX;
-        } else {
-            session->max_payload_guess = session->max_payload_size;
-        }
+    // /* if this is the first time we are called set up a default guess size. */
+    // if(!session->max_payload_guess) {
+    //     if(session->plc_type == AB_PLC_LGX && session->use_connected_msg && !session->only_use_old_forward_open) {
+    //         session->max_payload_guess = MAX_CIP_MSG_SIZE_EX;
+    //     } else {
+    //         session->max_payload_guess = session->max_payload_size;
+    //     }
 
-        pdebug(DEBUG_DETAIL, "Setting initial payload size guess to %u.", (unsigned int)session->max_payload_guess);
-    }
+    //     pdebug(DEBUG_DETAIL, "Setting initial payload size guess to %u.", (unsigned int)session->max_payload_guess);
+    // }
 
-    /*
-     * double check the message size.   If we just transitioned to using the old ForwardOpen command
-     * then the maximum payload guess might be too large.
-     */
-    if(session->plc_type == AB_PLC_LGX && session->only_use_old_forward_open && session->max_payload_guess > MAX_CIP_MSG_SIZE) {
-        session->max_payload_guess = MAX_CIP_MSG_SIZE;
-    }
+    // /*
+    //  * double check the message size.   If we just transitioned to using the old ForwardOpen command
+    //  * then the maximum payload guess might be too large.
+    //  */
+    // if((session->plc_type == AB_PLC_LGX || session->plc_type == AB_PLC_OMRON_NJNX) && session->only_use_old_forward_open && session->max_payload_guess > MAX_CIP_MSG_SIZE) {
+    //     session->max_payload_guess = MAX_CIP_MSG_SIZE;
+    // }
 
     if(session->only_use_old_forward_open) {
+        uint16_t max_payload = 0;
+
+        switch(session->plc_type) {
+            case AB_PLC_PLC5:
+            case AB_PLC_LGX_PCCC:
+                max_payload = (uint16_t)MAX_CIP_PLC5_MSG_SIZE;
+                break;
+
+            case AB_PLC_SLC:
+            case AB_PLC_MLGX:
+                max_payload = (uint16_t)MAX_CIP_SLC_MSG_SIZE;
+                break;
+
+            case AB_PLC_MICRO800:
+            case AB_PLC_LGX:
+            case AB_PLC_OMRON_NJNX:
+                max_payload = (uint16_t)MAX_CIP_MSG_SIZE;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unsupported PLC type %d!", session->plc_type);
+                return PLCTAG_ERR_UNSUPPORTED;
+                break;
+        }
+
+        /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
+        session->max_payload_guess = ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload : session->max_payload_guess);
+
+        pdebug(DEBUG_DETAIL, "Set maximum payload size guess to %d bytes.", session->max_payload_guess);
+
         rc = send_old_forward_open_request(session);
     } else {
+        uint16_t max_payload = 0;
+
+        switch(session->plc_type) {
+            case AB_PLC_PLC5:
+            case AB_PLC_LGX_PCCC:
+            case AB_PLC_SLC:
+            case AB_PLC_MLGX:
+                pdebug(DEBUG_WARN, "PCCC PLCs do not support extended Forward Open!");
+                return PLCTAG_ERR_UNSUPPORTED;
+                break;
+
+            case AB_PLC_LGX:
+            case AB_PLC_MICRO800:
+                max_payload = (uint16_t)MAX_CIP_MSG_SIZE_EX;
+                break;
+
+            case AB_PLC_OMRON_NJNX:
+                max_payload = (uint16_t)MAX_CIP_OMRON_MSG_SIZE;
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unsupported PLC type %d!", session->plc_type);
+                return PLCTAG_ERR_UNSUPPORTED;
+                break;
+        }
+
+        /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
+        session->max_payload_guess = ((session->max_payload_guess == 0) || (session->max_payload_guess > max_payload) ? max_payload : session->max_payload_guess);
+
+        pdebug(DEBUG_DETAIL, "Set maximum payload size guess to %d bytes.", session->max_payload_guess);
+
         rc = send_extended_forward_open_request(session);
     }
 
@@ -2165,7 +2231,7 @@ int send_extended_forward_open_request(ab_session_p session)
     fo = (eip_forward_open_request_ex_t *)(session->data);
 
     /* point to the end of the struct */
-    data = (session->data) + sizeof(eip_forward_open_request_ex_t);
+    data = (session->data) + sizeof(*fo);
 
     /* set up the path information. */
     mem_copy(data, session->conn_path, session->conn_path_size);

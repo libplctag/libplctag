@@ -53,6 +53,7 @@ struct tag_vtable_t slc_vtable = {
     (tag_vtable_func)tag_status,
     (tag_vtable_func)tag_tickler,
     (tag_vtable_func)tag_write_start,
+    (tag_vtable_func)NULL, /* wake_plc */
 
     /* data accessors */
     ab_get_int_attrib,

@@ -33,7 +33,7 @@
 # the project is version 2.4
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 4)
-set (libplctag_VERSION_PATCH 5)
+set (libplctag_VERSION_PATCH 6)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -174,7 +174,6 @@ set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
 set ( cli_SRC_PATH "${base_SRC_PATH}/contrib/cli" )
 
 # OS-specific files for the platform code.
-# FIXME - does this work for macOS?
 if (UNIX)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/posix" )
 elseif (WIN32)
@@ -457,6 +456,7 @@ elseif (BUILD_EXAMPLES)
                             string
                             test_auto_sync
                             test_callback
+                            test_connection_group
                             test_raw_cip
                             test_reconnect
                             test_shutdown
@@ -483,6 +483,7 @@ elseif (BUILD_EXAMPLES)
                             slc500
                             string
                             test_callback
+                            test_connection_group
                             test_raw_cip
                             test_shutdown
                             test_special

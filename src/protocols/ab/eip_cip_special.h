@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <lib/tag.h>
 #include <ab/ab_common.h>
 
 extern struct tag_vtable_t eip_cip_raw_tag_vtable;
