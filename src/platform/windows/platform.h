@@ -252,13 +252,28 @@ extern int cond_destroy(cond_p *c);
 
 /* socket functions */
 typedef struct sock_t *sock_p;
+typedef enum {
+    SOCK_EVENT_NONE         = 0,
+    SOCK_EVENT_TIMEOUT      = (1 << 0),
+    SOCK_EVENT_DISCONNECT   = (1 << 1),
+    SOCK_EVENT_ERROR        = (1 << 2),
+    SOCK_EVENT_CAN_READ     = (1 << 3),
+    SOCK_EVENT_CAN_WRITE    = (1 << 4),
+    SOCK_EVENT_WAKE_UP      = (1 << 5),
+    SOCK_EVENT_CONNECT      = (1 << 6),
+
+    SOCK_EVENT_DEFAULT_MASK = (SOCK_EVENT_TIMEOUT | SOCK_EVENT_DISCONNECT | SOCK_EVENT_ERROR | SOCK_EVENT_WAKE_UP)
+} sock_event_t;
 extern int socket_create(sock_p *s);
-extern int socket_connect_tcp_start(sock_p s, const char* host, int port);
+extern int socket_connect_tcp_start(sock_p s, const char *host, int port);
 extern int socket_connect_tcp_check(sock_p s, int timeout_ms);
+extern int socket_wait_event(sock_p sock, int events, int timeout_ms);
+extern int socket_wake(sock_p sock);
 extern int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms);
 extern int socket_close(sock_p s);
 extern int socket_destroy(sock_p *s);
+
 
 /* serial handling */
 typedef struct serial_port_t *serial_port_p;

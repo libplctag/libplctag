@@ -78,6 +78,7 @@ struct tag_vtable_t lgx_pccc_vtable = {
     (tag_vtable_func)tag_status,
     (tag_vtable_func)tag_tickler,
     (tag_vtable_func)tag_write_start,
+    (tag_vtable_func)NULL, /* wake_plc */
 
     /* data accessors */
     ab_get_int_attrib,
@@ -199,7 +200,7 @@ int tag_read_start(ab_tag_p tag)
                  +2      /* maximum extended type. */
                  +2;     /* maximum extended size. */
 
-    /* FIXME - this is not correct for this kind of transaction */
+    /* TODO - this is not correct for this kind of transaction */
 
     data_per_packet = session_get_max_payload(tag->session) - overhead;
 
@@ -247,7 +248,7 @@ int tag_read_start(ab_tag_p tag)
     /* fill in the PCCC command */
     embed_pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     embed_pccc->pccc_status = 0;  /* STS 0 in request */
-    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
+    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* TODO - get sequence ID from session? */
     embed_pccc->pccc_function = AB_EIP_PCCCLGX_TYPED_READ_FUNC;
     embed_pccc->pccc_offset = h2le16((uint16_t)0);
     embed_pccc->pccc_transfer_size = h2le16((uint16_t)tag->elem_count); /* This is the offset items */
@@ -259,7 +260,7 @@ int tag_read_start(ab_tag_p tag)
     mem_copy(data,tag->encoded_name,tag->encoded_name_size);
     data += tag->encoded_name_size;
 
-    /* FIXME - This is the total items */
+    /* FIXME - This is the total items, and this is unsafe on some processors */
     *((uint16_le *)data) = h2le16((uint16_t)tag->elem_count); /* elements */
     data += sizeof(uint16_le);
 
@@ -522,8 +523,6 @@ static int check_read_status(ab_tag_p tag)
 
 
 
-/* FIXME  convert to unconnected messages. */
-
 int tag_write_start(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
@@ -615,7 +614,7 @@ int tag_write_start(ab_tag_p tag)
     /* fill in the PCCC command */
     embed_pccc->pccc_command = AB_EIP_PCCC_TYPED_CMD;
     embed_pccc->pccc_status = 0;  /* STS 0 in request */
-    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
+    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* TODO - get sequence ID from session? */
     embed_pccc->pccc_function = AB_EIP_PCCCLGX_TYPED_WRITE_FUNC;
     embed_pccc->pccc_offset = h2le16(0);
     embed_pccc->pccc_transfer_size = h2le16((uint16_t)tag->elem_count); /* This is the offset items */

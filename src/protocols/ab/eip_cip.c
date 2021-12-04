@@ -153,6 +153,7 @@ struct tag_vtable_t eip_cip_vtable = {
     (tag_vtable_func)ab_tag_status, /* shared */
     (tag_vtable_func)tag_tickler,
     (tag_vtable_func)tag_write_start,
+    (tag_vtable_func)NULL, /* wake_plc */
 
     /* attribute accessors */
     ab_get_int_attrib,
@@ -179,6 +180,29 @@ tag_byte_order_t logix_tag_byte_order = {
     .str_max_capacity = 82,
     .str_total_length = 88,
     .str_pad_bytes = 2
+};
+
+
+/* default string types used for Omron-NJ/NX PLCs. */
+tag_byte_order_t omron_njnx_tag_byte_order = {
+    .is_allocated = 0,
+
+    .int16_order = {0,1},
+    .int32_order = {0,1,2,3},
+    .int64_order = {0,1,2,3,4,5,6,7},
+    .float32_order = {0,1,2,3},
+    .float64_order = {0,1,2,3,4,5,6,7},
+
+    .str_is_defined = 1,
+    .str_is_counted = 1,
+    .str_is_fixed_length = 0,
+    .str_is_zero_terminated = 1,
+    .str_is_byte_swapped = 0,
+
+    .str_count_word_bytes = 2,
+    .str_max_capacity = 0,
+    .str_total_length = 0,
+    .str_pad_bytes = 0
 };
 
 tag_byte_order_t logix_tag_listing_byte_order = {
@@ -491,6 +515,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
     uint8_t read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
+    uint16_le tmp_uint16_le;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -534,12 +559,13 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
     data += tag->encoded_name_size;
 
     /* add the count of elements to read. */
-    /* FIXME BUG - this may not work on some processors! */
-    *((uint16_le*)data) = h2le16((uint16_t)(tag->elem_count));
-    data += sizeof(uint16_le);
+    tmp_uint16_le = h2le16((uint16_t)(tag->elem_count));
+    mem_copy(data, &tmp_uint16_le, (int)(unsigned int)sizeof(tmp_uint16_le));
+    data += sizeof(tmp_uint16_le);
 
     /* add the byte offset for this request */
     if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
+        /* FIXME - this may not work on some proessors. */
         *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
         data += sizeof(uint32_le);
     }
@@ -1625,7 +1651,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
         }
 
         /*
-         * FIXME
+         * TODO
          *
          * It probably should not be necessary to check for both as setting the type to anything other
          * than fragmented is error-prone.

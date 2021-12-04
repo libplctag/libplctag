@@ -57,6 +57,7 @@ struct tag_vtable_t system_tag_vtable = {
     /* status */    system_tag_status,
     /* tickler */   NULL,
     /* write */     system_tag_write,
+    /* wake_plc */  (tag_vtable_func)NULL,
 
     /* data accessors */
 
@@ -123,7 +124,7 @@ plc_tag_p system_tag_create(attr attribs)
     tag->vtable = &system_tag_vtable;
 
     /* set up the generic parts. */
-    rc = init_generic_tag((plc_tag_p)tag);
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
         rc_dec(tag);
