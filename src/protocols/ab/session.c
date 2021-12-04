@@ -2039,24 +2039,24 @@ int send_forward_open_request(ab_session_p session)
 
     pdebug(DEBUG_INFO, "Starting");
 
-    /* if this is the first time we are called set up a default guess size. */
-    if(!session->max_payload_guess) {
-        if(session->plc_type == AB_PLC_LGX && session->use_connected_msg && !session->only_use_old_forward_open) {
-            session->max_payload_guess = MAX_CIP_MSG_SIZE_EX;
-        } else {
-            session->max_payload_guess = session->max_payload_size;
-        }
+    // /* if this is the first time we are called set up a default guess size. */
+    // if(!session->max_payload_guess) {
+    //     if(session->plc_type == AB_PLC_LGX && session->use_connected_msg && !session->only_use_old_forward_open) {
+    //         session->max_payload_guess = MAX_CIP_MSG_SIZE_EX;
+    //     } else {
+    //         session->max_payload_guess = session->max_payload_size;
+    //     }
 
-        pdebug(DEBUG_DETAIL, "Setting initial payload size guess to %u.", (unsigned int)session->max_payload_guess);
-    }
+    //     pdebug(DEBUG_DETAIL, "Setting initial payload size guess to %u.", (unsigned int)session->max_payload_guess);
+    // }
 
-    /*
-     * double check the message size.   If we just transitioned to using the old ForwardOpen command
-     * then the maximum payload guess might be too large.
-     */
-    if(session->plc_type == AB_PLC_LGX && session->only_use_old_forward_open && session->max_payload_guess > MAX_CIP_MSG_SIZE) {
-        session->max_payload_guess = MAX_CIP_MSG_SIZE;
-    }
+    // /*
+    //  * double check the message size.   If we just transitioned to using the old ForwardOpen command
+    //  * then the maximum payload guess might be too large.
+    //  */
+    // if((session->plc_type == AB_PLC_LGX || session->plc_type == AB_PLC_OMRON_NJNX) && session->only_use_old_forward_open && session->max_payload_guess > MAX_CIP_MSG_SIZE) {
+    //     session->max_payload_guess = MAX_CIP_MSG_SIZE;
+    // }
 
     if(session->only_use_old_forward_open) {
         uint16_t max_payload = 0;
@@ -2231,7 +2231,7 @@ int send_extended_forward_open_request(ab_session_p session)
     fo = (eip_forward_open_request_ex_t *)(session->data);
 
     /* point to the end of the struct */
-    data = (session->data) + sizeof(eip_forward_open_request_ex_t);
+    data = (session->data) + sizeof(*fo);
 
     /* set up the path information. */
     mem_copy(data, session->conn_path, session->conn_path_size);
