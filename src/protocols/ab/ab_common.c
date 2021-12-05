@@ -571,8 +571,9 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
              * Otherwise this is an error.
              */
             int elem_size = attr_get_int(attribs, "elem_size", 0);
+            int cip_plc = !!(tag->plc_type == AB_PLC_LGX || tag->plc_type == AB_PLC_MICRO800 || tag->plc_type == AB_PLC_OMRON_NJNX);
 
-            if(tag->plc_type == AB_PLC_LGX) {
+            if(cip_plc) {
                 const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
                 int special_tag_rc = PLCTAG_STATUS_OK;
 
@@ -581,7 +582,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                     special_tag_rc = setup_raw_tag(tag);
                 } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
                     special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
-                } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
+                } else if(tag->plc_type == AB_PLC_LGX && str_str_cmp_i(tmp_tag_name, "@udt/")) {
+                    /* only supported on *Logix */
                     special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
                 } /* else not a special tag. */
 
