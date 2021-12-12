@@ -583,8 +583,8 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
                     special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
                 } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
-                    if(tag->plc_type == AB_PLC_LGX) {
-                        /* only supported on *Logix */
+                    if(tag->plc_type != AB_PLC_OMRON_NJNX) {
+                        /* only supported on *Logix and Micro800 */
                         special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
                     } else {
                         pdebug(DEBUG_WARN, "UDT listing is not supported for non-Logix PLCs.");
