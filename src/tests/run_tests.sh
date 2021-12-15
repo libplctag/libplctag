@@ -36,6 +36,39 @@ else
     let SUCCESSES++
 fi
 
+
+echo -n "Test Micrologix... "
+$TEST_DIR/tag_rw2 --type=uint8 '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&elem_count=1&elem_size=2&name=N7:0/14' --write=0 --debug=4 > micrologix.log 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+echo -n "Test PLC-5... "
+$TEST_DIR/tag_rw2 --type=uint8 '--tag=protocol=ab-eip&gateway=10.206.1.38&plc=plc5&elem_count=1&elem_size=2&name=B3:0/10' --debug=4 --write=0 > plc5.log 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+echo -n "Test DH+ bridging... "
+$TEST_DIR/tag_rw2 --type=uint8 '--tag=protocol=ab_eip&gateway=10.206.1.40&path=1,2,A:27:1&cpu=plc5&elem_count=1&elem_size=2&name=B3:0/10' --debug=4 --write=0  > dhp_bridge.log 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
 echo -n "Test tag listing... "
 $TEST_DIR/list_tags "10.206.1.40" "1,4" > list_tags_test.log 2>&1
 if [ $? != 0 ]; then
