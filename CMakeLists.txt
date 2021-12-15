@@ -86,7 +86,7 @@ if(${CROSS_BUILD_TYPE} MATCHES "Linux-Arm6")
     set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 
     message("Building for Linux (Ubuntu/Debian) Arm v6")
-    elseif(${CROSS_BUILD_TYPE} MATCHES "Linux-Arm7")
+elseif(${CROSS_BUILD_TYPE} MATCHES "Linux-Arm7")
     # this also announces that we are cross compiling
     set(CMAKE_SYSTEM_NAME Linux)
 
