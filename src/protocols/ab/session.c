@@ -511,15 +511,18 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
     switch(plc_type) {
     case AB_PLC_SLC:
         session->max_payload_size = MAX_CIP_SLC_MSG_SIZE;
+        session->only_use_old_forward_open = 1;
         break;
 
     case AB_PLC_MLGX:
         session->max_payload_size = MAX_CIP_MLGX_MSG_SIZE;
+        session->only_use_old_forward_open = 1;
         break;
 
     case AB_PLC_PLC5:
     case AB_PLC_LGX_PCCC:
         session->max_payload_size = MAX_CIP_PLC5_MSG_SIZE;
+        session->only_use_old_forward_open = 1;
         break;
 
     case AB_PLC_LGX:
