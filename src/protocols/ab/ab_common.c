@@ -252,7 +252,12 @@ plc_tag_p ab_tag_create(attr attribs)
 
     case AB_PLC_OMRON_NJNX:
         tag->use_connected_msg = 1;
-        tag->allow_packing = 1;
+
+        /*
+         * Default packing to off.  Omron requires the client to do the calculation of
+         * whether the results will fit or not.
+         */
+        tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
         break;
 
     default:
@@ -396,7 +401,7 @@ plc_tag_p ab_tag_create(attr attribs)
 
         tag->byte_order = &omron_njnx_tag_byte_order;
         tag->use_connected_msg = 1;
-        tag->allow_packing = 1;
+        tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
         tag->vtable = &eip_cip_vtable;
         break;
 
@@ -540,7 +545,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 tag->elem_size = 1;
                 tag->elem_type = AB_TYPE_BOOL;
             } else if(str_cmp_i(elem_type,"bool array") == 0) {
-                pdebug(DEBUG_DETAIL,"Found tag element type of bit array.");
+                pdebug(DEBUG_DETAIL,"Found tag element type of bool array.");
                 tag->elem_size = 4;
                 tag->elem_type = AB_TYPE_BOOL_ARRAY;
             } else if(str_cmp_i(elem_type,"real") == 0) {
@@ -581,13 +586,18 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
                     special_tag_rc = setup_raw_tag(tag);
                 } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
-                    special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
+                    if(tag->plc_type != AB_PLC_OMRON_NJNX) {
+                        special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
+                    } else {
+                        pdebug(DEBUG_WARN, "Tag listing is not supported for Omron PLCs.");
+                        special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
+                    }
                 } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
-                    if(tag->plc_type == AB_PLC_LGX) {
+                    if(tag->plc_type != AB_PLC_OMRON_NJNX) {
                         /* only supported on *Logix */
                         special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
                     } else {
-                        pdebug(DEBUG_WARN, "UDT listing is not supported for non-Logix PLCs.");
+                        pdebug(DEBUG_WARN, "UDT listing is not supported for Omron PLCs.");
                         special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
                     }
                 } /* else not a special tag. */
