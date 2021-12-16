@@ -835,6 +835,17 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         return PLCTAG_ERR_CREATE;
     }
 
+    if(tag->status != PLCTAG_STATUS_OK && tag->status != PLCTAG_STATUS_PENDING) {
+        int tag_status = tag->status;
+
+        pdebug(DEBUG_WARN, "Warning, %s error found while creating tag!", plc_tag_decode_error(tag_status));
+
+        attr_destroy(attribs);
+        rc_dec(tag);
+
+        return tag_status;
+    }
+
     /* set up the read cache config. */
     read_cache_ms = attr_get_int(attribs,"read_cache_ms",0);
     if(read_cache_ms < 0) {

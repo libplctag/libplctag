@@ -233,7 +233,10 @@ int main(int argc, char **argv)
         /* see if we already have it. */
         if(udts[udt_id] == NULL) {
             rc = get_udt_definition(tag_string_base, udt_id);
-            if(rc != PLCTAG_STATUS_OK) {
+            if(rc == PLCTAG_ERR_UNSUPPORTED) {
+                fprintf(stderr, "This kind of PLC does not support UDT introspection.\n");
+                break;
+            } else if(rc != PLCTAG_STATUS_OK) {
                 plc_tag_destroy(controller_listing_tag);
                 fprintf(stderr, "Unable to get UDT template ID %u, error %s!\n", (unsigned int)(udt_id), plc_tag_decode_error(rc));
                 usage();
@@ -675,6 +678,11 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     udt_info_tag = open_tag(tag_string_base, buf);
     if(udt_info_tag < 0) {
+        if(udt_info_tag == PLCTAG_ERR_UNSUPPORTED) {
+            fprintf(stderr, "This PLC type does not support listing UDT definitions.\n");
+            return PLCTAG_ERR_UNSUPPORTED;
+        }
+
         fprintf(stderr, "Unable to open UDT info tag, error %s!\n", plc_tag_decode_error(udt_info_tag));
         usage();
     }
@@ -682,7 +690,11 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
     if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr, "UDT info tag ID: %d\n", udt_info_tag);
 
     rc = plc_tag_read(udt_info_tag, TIMEOUT_MS);
-    if(rc != PLCTAG_STATUS_OK) {
+    if(rc == PLCTAG_ERR_UNSUPPORTED) {
+        plc_tag_destroy(udt_info_tag);
+        fprintf(stderr, "UDT tag introspection is not supported on this PLC.\n");
+        return rc;
+    } else if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Error %s while trying to read UDT info!\n", plc_tag_decode_error(rc));
         usage();
     }

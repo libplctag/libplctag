@@ -33,7 +33,7 @@
 # the project is version 2.4
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 4)
-set (libplctag_VERSION_PATCH 6)
+set (libplctag_VERSION_PATCH 7)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -86,7 +86,7 @@ if(${CROSS_BUILD_TYPE} MATCHES "Linux-Arm6")
     set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 
     message("Building for Linux (Ubuntu/Debian) Arm v6")
-    elseif(${CROSS_BUILD_TYPE} MATCHES "Linux-Arm7")
+elseif(${CROSS_BUILD_TYPE} MATCHES "Linux-Arm7")
     # this also announces that we are cross compiling
     set(CMAKE_SYSTEM_NAME Linux)
 
