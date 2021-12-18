@@ -50,6 +50,11 @@
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
+#define READ_PERIOD_MS (200)
+
+static volatile int read_count = 0;
+static volatile int write_count = 0;
+
 
 void *reader_function(void *tag_arg)
 {
@@ -113,6 +118,7 @@ void tag_callback(int32_t tag_id, int event, int status)
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
+            read_count++;
             fprintf(stderr, "Tag %d automatic read operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
@@ -122,6 +128,7 @@ void tag_callback(int32_t tag_id, int event, int status)
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
+            write_count++;
             fprintf(stderr, "Tag %d automatic write operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
 
             break;
@@ -162,7 +169,7 @@ int main(int argc, char **argv)
     tag = plc_tag_create(TAG_ATTRIBS, DATA_TIMEOUT);
     if(tag < 0) {
         fprintf(stderr, "Error, %s, creating tag!\n", plc_tag_decode_error(tag));
-        return tag;
+        return 1;
     }
 
     fprintf(stderr, "Tag status %s.\n", plc_tag_decode_error(plc_tag_status(tag)));
@@ -172,7 +179,7 @@ int main(int argc, char **argv)
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return rc;
+        return 1;
     }
 
     fprintf(stderr, "Ready to start threads.\n");
@@ -190,6 +197,22 @@ int main(int argc, char **argv)
 
     plc_tag_destroy(tag);
 
-    return 0;
+    /* check the results. */
+    fprintf(stderr, "Total reads triggered %d and total expected %d.\n", read_count, RUN_PERIOD/READ_PERIOD_MS);
+    fprintf(stderr, "Total writes triggered %d and total expected %d.\n", write_count, RUN_PERIOD/WRITE_SLEEP_MS);
+
+    rc = 0;
+
+    if(abs((RUN_PERIOD/READ_PERIOD_MS) - read_count) > 3) {
+        fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_count, (RUN_PERIOD/READ_PERIOD_MS));
+        rc = 1;
+    }
+
+    if(abs((RUN_PERIOD/WRITE_SLEEP_MS) - write_count) > 3) {
+        fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_count, (RUN_PERIOD/WRITE_SLEEP_MS));
+        rc = 1;
+    }
+
+    return rc;
 }
 
