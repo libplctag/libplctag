@@ -37,6 +37,7 @@
 #include <float.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <stdlib.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <lib/init.h>
@@ -324,6 +325,11 @@ void plc_tag_generic_tickler(plc_tag_p tag)
         if(tag->auto_sync_read_ms > 0) {
             int64_t current_time = time_ms();
 
+            /* spread these out randomly to avoid too much clustering. */
+            if(tag->auto_sync_next_read == 0) {
+                tag->auto_sync_next_read = current_time - (rand() % tag->auto_sync_read_ms);
+            }
+
             /* do we need to read? */
             if(tag->auto_sync_next_read <= current_time) {
                 /* make sure that we do not have an outstanding read or write. */
@@ -337,6 +343,7 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     if(tag->vtable->read) {
                         tag->status = (int8_t)tag->vtable->read(tag);
                     }
+
 
                     /*
                      * schedule the next read.
@@ -354,7 +361,7 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     }
 
                     tag->auto_sync_next_read += (periods + 1) * tag->auto_sync_read_ms;
-                    pdebug(DEBUG_DETAIL, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
+                    pdebug(DEBUG_SPEW, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
 
                     tag->event_read_started = 1;
                 }
