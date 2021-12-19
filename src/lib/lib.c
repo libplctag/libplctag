@@ -354,7 +354,7 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     }
 
                     tag->auto_sync_next_read += (periods + 1) * tag->auto_sync_read_ms;
-                    pdebug(DEBUG_WARN, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
+                    pdebug(DEBUG_DETAIL, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
 
                     tag->event_read_started = 1;
                 }
