@@ -53,6 +53,8 @@
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
+#define CREATE_TIMEOUT_MS (1000 + ((NUM_TAGS/200) * 50))
+
 #define READ_PERIOD_MS (200)
 
 struct tag_entry {
@@ -213,6 +215,7 @@ int main(int argc, char **argv)
 {
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time = util_time_ms();
+    int64_t timeout_time = 0;
     // pthread_t read_thread;
     pthread_t write_thread;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
@@ -234,7 +237,7 @@ int main(int argc, char **argv)
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     for(int i=0; i < NUM_TAGS; i++) {
-        int32_t tag = plc_tag_create(TAG_ATTRIBS, DATA_TIMEOUT);
+        int32_t tag = plc_tag_create(TAG_ATTRIBS, 0);
         if(tag < 0) {
             fprintf(stderr, "Error, %s, creating tag!\n", plc_tag_decode_error(tag));
             rc = 1;
@@ -242,6 +245,7 @@ int main(int argc, char **argv)
         }
 
         tags[i].tag_id = tag;
+        tags[i].status = plc_tag_status(tag);
 
         fprintf(stderr, "%06" PRId64 " Tag[%d] %" PRId32 " status %s.\n", util_time_ms() - start_time, i, tag, plc_tag_decode_error(plc_tag_status(tag)));
     }
@@ -254,7 +258,7 @@ int main(int argc, char **argv)
      *
      * Do this after all the tags have been created and
      * the tag IDs are sorted. Otherwise the lookup loop
-     * in the callback function will fail by hitting zeroed
+     * in the callback function will fail by hitting out of order
      * tag IDs!
      */
     for(int i=0; i < NUM_TAGS; i++) {
@@ -265,6 +269,39 @@ int main(int argc, char **argv)
             rc = 1;
             goto done;
         }
+    }
+
+
+    /* wait for tag creation to complete. */
+
+    fprintf(stderr, "%06" PRId64 " Waiting for tag creation to complete.\n", util_time_ms() - start_time);
+
+    timeout_time = util_time_ms() + CREATE_TIMEOUT_MS;
+
+    while(timeout_time > util_time_ms()) {
+        int waiting_tag_count = 0;
+
+        for(int i=0; i < NUM_TAGS; i++) {
+            if(tags[i].status == PLCTAG_STATUS_PENDING) {
+                waiting_tag_count++;
+            } else if(tags[i].status != PLCTAG_STATUS_OK) {
+                fprintf(stderr, "Error %s creating tag[%d] %" PRId32 "!\n", plc_tag_decode_error(tags[i].status), i, tags[i].tag_id);
+                rc = 1;
+                goto done;
+            }
+        }
+
+        if(waiting_tag_count == 0) {
+            break;
+        } else {
+            util_sleep_ms(100);
+        }
+    }
+
+    if(timeout_time < util_time_ms()) {
+        fprintf(stderr, "!!! Timeout waiting %dms for tag creation!\n", CREATE_TIMEOUT_MS);
+        rc = 1;
+        goto done;
     }
 
     fprintf(stderr, "%06" PRId64 " Ready to start threads.\n", util_time_ms() - start_time);
