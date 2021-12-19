@@ -46,14 +46,14 @@
 #define REQUIRED_VERSION 2,4,7
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[1]&auto_sync_read_ms=200&auto_sync_write_ms=20"
-#define NUM_TAGS (3)
+#define NUM_TAGS (30)
 
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
-#define CREATE_TIMEOUT_MS (1000 + ((NUM_TAGS/200) * 50))
+#define CREATE_TIMEOUT_MS ((1000 + ((NUM_TAGS/200) * 50)))
 
 #define READ_PERIOD_MS (200)
 
@@ -274,7 +274,7 @@ int main(int argc, char **argv)
 
     /* wait for tag creation to complete. */
 
-    fprintf(stderr, "%06" PRId64 " Waiting for tag creation to complete.\n", util_time_ms() - start_time);
+    fprintf(stderr, "%06" PRId64 " Waiting up to %dms for tag creation to complete.\n", util_time_ms() - start_time, CREATE_TIMEOUT_MS);
 
     timeout_time = util_time_ms() + CREATE_TIMEOUT_MS;
 
