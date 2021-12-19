@@ -46,7 +46,7 @@
 #define REQUIRED_VERSION 2,4,7
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[1]&auto_sync_read_ms=200&auto_sync_write_ms=20"
-#define NUM_TAGS (30)
+#define NUM_TAGS (200)
 
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
@@ -60,6 +60,7 @@
 struct tag_entry {
     int32_t tag_id;
     int status;
+    int create_complete;
     int read_count;
     int write_count;
     int write_trigger_count;
@@ -167,6 +168,11 @@ void tag_callback(int32_t tag_id, int event, int status)
         case PLCTAG_EVENT_READ_COMPLETED:
             fprintf(stderr, "Tag %d automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             tags[mid].status = status;
+
+            if(status == PLCTAG_STATUS_OK && tags[mid].create_complete == 0) {
+                tags[mid].create_complete = 1;
+            }
+
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
@@ -282,12 +288,17 @@ int main(int argc, char **argv)
         int waiting_tag_count = 0;
 
         for(int i=0; i < NUM_TAGS; i++) {
-            if(tags[i].status == PLCTAG_STATUS_PENDING) {
-                waiting_tag_count++;
-            } else if(tags[i].status != PLCTAG_STATUS_OK) {
+            /* read once so it cannot change in the middle of the if statement */
+            int status = tags[i].status;
+
+            if(status != PLCTAG_STATUS_OK && status != PLCTAG_STATUS_PENDING) {
                 fprintf(stderr, "Error %s creating tag[%d] %" PRId32 "!\n", plc_tag_decode_error(tags[i].status), i, tags[i].tag_id);
                 rc = 1;
                 goto done;
+            }
+
+            if(tags[i].create_complete == 0) {
+                waiting_tag_count++;
             }
         }
 
