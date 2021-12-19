@@ -45,17 +45,17 @@
 
 #define REQUIRED_VERSION 2,4,7
 
-#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[1]&auto_sync_read_ms=200&auto_sync_write_ms=20"
-#define NUM_TAGS (200)
+#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[1]&auto_sync_read_ms=500&auto_sync_write_ms=20"
+#define NUM_TAGS (100000)
 
 #define DATA_TIMEOUT (5000)
-#define RUN_PERIOD (10000)
+#define RUN_PERIOD (30000)
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
-#define CREATE_TIMEOUT_MS ((1000 + ((NUM_TAGS/200) * 50)))
+#define CREATE_TIMEOUT_MS (1000 + NUM_TAGS)
 
-#define READ_PERIOD_MS (200)
+#define READ_PERIOD_MS (500)
 
 struct tag_entry {
     int32_t tag_id;
@@ -129,19 +129,19 @@ void tag_callback(int32_t tag_id, int event, int status)
     int low = 0;
     int high = NUM_TAGS-1;
     int mid = (high + low)/2;
-    int iteration = 0;
+    // int iteration = 0;
 
     /* find the tag entry */
     /* FIXME - WARNING - This only works if tag IDs are sequentially allocated!!!! */
     while(abs(high - low) > 0) {
-        fprintf(stderr, "tag_callback() iteration %d, high %d, mid %d, low %d.\n", ++iteration, high, mid, low);
+        // fprintf(stderr, "tag_callback() iteration %d, high %d, mid %d, low %d.\n", ++iteration, high, mid, low);
 
         if(tag_id < tags[mid].tag_id) {
             high = (mid > low ? mid-1 : low);
-            fprintf(stderr, "Search in lower half [%d, %d], looking for id %" PRId32 " is less than id %" PRId32 " at index %d.\n", low, high, tag_id, tags[mid].tag_id, mid);
+            // fprintf(stderr, "Search in lower half [%d, %d], looking for id %" PRId32 " is less than id %" PRId32 " at index %d.\n", low, high, tag_id, tags[mid].tag_id, mid);
         } else if(tag_id > tags[mid].tag_id) {
             low = (mid < high ? mid+1 : high);
-            fprintf(stderr, "Search in upper half [%d, %d], looking for id %" PRId32 " is more than id %" PRId32 " at index %d.\n", low, high, tag_id, tags[mid].tag_id, mid);
+            // fprintf(stderr, "Search in upper half [%d, %d], looking for id %" PRId32 " is more than id %" PRId32 " at index %d.\n", low, high, tag_id, tags[mid].tag_id, mid);
         } else {
             break;
         }
@@ -149,9 +149,9 @@ void tag_callback(int32_t tag_id, int event, int status)
         mid = (high + low)/2;
     }
 
-    if(tag_id == tags[mid].tag_id) {
-        fprintf(stderr, "found id %" PRId32 " at index %d.\n", tag_id, mid);
-    } else {
+    if(tag_id != tags[mid].tag_id) {
+    //     fprintf(stderr, "found id %" PRId32 " at index %d.\n", tag_id, mid);
+    // } else {
         fprintf(stderr, "!!! Lookup problem, tag %" PRId32 " not found!\n", tag_id);
         return;
     }
@@ -166,7 +166,7 @@ void tag_callback(int32_t tag_id, int event, int status)
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            fprintf(stderr, "Tag %d automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
+            // fprintf(stderr, "Tag %d automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             tags[mid].status = status;
 
             if(status == PLCTAG_STATUS_OK && tags[mid].create_complete == 0) {
@@ -178,7 +178,7 @@ void tag_callback(int32_t tag_id, int event, int status)
         case PLCTAG_EVENT_READ_STARTED:
             tags[mid].read_count++;
             tags[mid].status = status;
-            fprintf(stderr, "Tag %d automatic read operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
+            // fprintf(stderr, "Tag %d automatic read operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
@@ -315,7 +315,7 @@ int main(int argc, char **argv)
         goto done;
     }
 
-    fprintf(stderr, "%06" PRId64 " Ready to start threads.\n", util_time_ms() - start_time);
+    fprintf(stderr, "%06" PRId64 " Tag creation complete. Ready to start threads.\n", util_time_ms() - start_time);
 
     /* create the threads. */
     // pthread_create(&read_thread, NULL, reader_function, (void *)(intptr_t)tag);
