@@ -331,11 +331,33 @@ void plc_tag_generic_tickler(plc_tag_p tag)
             }
 
             /* do we need to read? */
-            if(tag->auto_sync_next_read <= current_time) {
+            if(tag->auto_sync_next_read < current_time) {
+                int64_t periods = 0;
+
+                /*
+                 * schedule the next read.
+                 *
+                 * Note that there will be some jitter.  In that case we want to skip
+                 * to the next read time that is a whole multiple of the read period.
+                 *
+                 * This keeps the jitter from slowly moving the polling cycle.
+                 *
+                 * Round up to the next period.
+                 */
+                periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1))/tag->auto_sync_read_ms;
+
+                /* warn if we need to skip more than one period. */
+                if(periods > 0) {
+                    if(periods > 1) {
+                        pdebug(DEBUG_DETAIL, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods, tag->auto_sync_read_ms);
+                    }
+
+                    tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
+                    pdebug(DEBUG_DETAIL, "Scheduling next read at time %" PRId64 ".", tag->auto_sync_next_read);
+                }
+
                 /* make sure that we do not have an outstanding read or write. */
                 if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
-                    int64_t periods = 0;
-
                     pdebug(DEBUG_DETAIL, "Triggering automatic read start.");
 
                     tag->read_in_flight = 1;
@@ -343,25 +365,6 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     if(tag->vtable->read) {
                         tag->status = (int8_t)tag->vtable->read(tag);
                     }
-
-
-                    /*
-                     * schedule the next read.
-                     *
-                     * Note that there will be some jitter.  In that case we want to skip
-                     * to the next read time that is a whole multiple of the read period.
-                     *
-                     * This keeps the jitter from slowly moving the polling cycle.
-                     */
-                    periods = (current_time - tag->auto_sync_next_read)/tag->auto_sync_read_ms;
-
-                    /* warn if we need to skip more than one period. */
-                    if(tag->auto_sync_next_read && periods > 0) {
-                        pdebug(DEBUG_WARN, "Skipping multiple read periods due to long delay!");
-                    }
-
-                    tag->auto_sync_next_read += (periods + 1) * tag->auto_sync_read_ms;
-                    pdebug(DEBUG_SPEW, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
 
                     tag->event_read_started = 1;
                 }
@@ -575,6 +578,11 @@ THREAD_FUNC(tag_tickler_func)
                 } else {
                     pdebug(DEBUG_DETAIL, "Tag has its own tickler.");
                 }
+
+                pdebug(DEBUG_DETAIL, "Current time %" PRId64 ".", time_ms());
+                pdebug(DEBUG_DETAIL, "Time to wake %" PRId64 ".", tag_tickler_wait_timeout_end);
+                pdebug(DEBUG_DETAIL, "Auto read time %" PRId64 ".", tag->auto_sync_next_read);
+                pdebug(DEBUG_DETAIL, "Auto write time %" PRId64 ".", tag->auto_sync_next_write);
 
                 debug_set_tag_id(0);
             }
@@ -867,17 +875,21 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     tag->auto_sync_read_ms = attr_get_int(attribs, "auto_sync_read_ms", 0);
     if(tag->auto_sync_read_ms < 0) {
         pdebug(DEBUG_WARN, "auto_sync_read_ms value must be positive!");
+        attr_destroy(attribs);
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
     } else if(tag->auto_sync_read_ms > 0) {
         /* how many periods did we already pass? */
-        int64_t periods = (time_ms() / tag->auto_sync_read_ms);
-        tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
+        // int64_t periods = (time_ms() / tag->auto_sync_read_ms);
+        // tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
+        /* start some time in the future, but with random jitter. */
+        tag->auto_sync_next_read = time_ms() + (rand() % tag->auto_sync_read_ms);
     }
 
     tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
     if(tag->auto_sync_write_ms < 0) {
         pdebug(DEBUG_WARN, "auto_sync_write_ms value must be positive!");
+        attr_destroy(attribs);
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
     } else {
@@ -888,6 +900,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     rc = set_tag_byte_order(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to correctly set tag data byte order: %s!", plc_tag_decode_error(rc));
+        attr_destroy(attribs);
         rc_dec(tag);
         return rc;
     }
