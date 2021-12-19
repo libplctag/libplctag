@@ -579,10 +579,10 @@ THREAD_FUNC(tag_tickler_func)
                     pdebug(DEBUG_DETAIL, "Tag has its own tickler.");
                 }
 
-                pdebug(DEBUG_DETAIL, "Current time %" PRId64 ".", time_ms());
-                pdebug(DEBUG_DETAIL, "Time to wake %" PRId64 ".", tag_tickler_wait_timeout_end);
-                pdebug(DEBUG_DETAIL, "Auto read time %" PRId64 ".", tag->auto_sync_next_read);
-                pdebug(DEBUG_DETAIL, "Auto write time %" PRId64 ".", tag->auto_sync_next_write);
+                // pdebug(DEBUG_DETAIL, "Current time %" PRId64 ".", time_ms());
+                // pdebug(DEBUG_DETAIL, "Time to wake %" PRId64 ".", tag_tickler_wait_timeout_end);
+                // pdebug(DEBUG_DETAIL, "Auto read time %" PRId64 ".", tag->auto_sync_next_read);
+                // pdebug(DEBUG_DETAIL, "Auto write time %" PRId64 ".", tag->auto_sync_next_write);
 
                 debug_set_tag_id(0);
             }
