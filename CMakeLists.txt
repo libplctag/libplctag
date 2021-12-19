@@ -457,6 +457,7 @@ elseif (BUILD_EXAMPLES)
                             test_auto_sync
                             test_callback
                             test_connection_group
+                            test_many_tag_perf
                             test_raw_cip
                             test_reconnect
                             test_shutdown
