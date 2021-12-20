@@ -325,39 +325,17 @@ void plc_tag_generic_tickler(plc_tag_p tag)
         if(tag->auto_sync_read_ms > 0) {
             int64_t current_time = time_ms();
 
-            /* spread these out randomly to avoid too much clustering. */
-            if(tag->auto_sync_next_read == 0) {
-                tag->auto_sync_next_read = current_time - (rand() % tag->auto_sync_read_ms);
-            }
+            // /* spread these out randomly to avoid too much clustering. */
+            // if(tag->auto_sync_next_read == 0) {
+            //     tag->auto_sync_next_read = current_time - (rand() % tag->auto_sync_read_ms);
+            // }
 
             /* do we need to read? */
             if(tag->auto_sync_next_read < current_time) {
-                int64_t periods = 0;
-
-                /*
-                 * schedule the next read.
-                 *
-                 * Note that there will be some jitter.  In that case we want to skip
-                 * to the next read time that is a whole multiple of the read period.
-                 *
-                 * This keeps the jitter from slowly moving the polling cycle.
-                 *
-                 * Round up to the next period.
-                 */
-                periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1))/tag->auto_sync_read_ms;
-
-                /* warn if we need to skip more than one period. */
-                if(periods > 0) {
-                    if(periods > 1) {
-                        pdebug(DEBUG_DETAIL, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods, tag->auto_sync_read_ms);
-                    }
-
-                    tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
-                    pdebug(DEBUG_DETAIL, "Scheduling next read at time %" PRId64 ".", tag->auto_sync_next_read);
-                }
-
                 /* make sure that we do not have an outstanding read or write. */
                 if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
+                    int64_t periods = 0;
+
                     pdebug(DEBUG_DETAIL, "Triggering automatic read start.");
 
                     tag->read_in_flight = 1;
@@ -367,6 +345,28 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     }
 
                     tag->event_read_started = 1;
+
+                    /*
+                    * schedule the next read.
+                    *
+                    * Note that there will be some jitter.  In that case we want to skip
+                    * to the next read time that is a whole multiple of the read period.
+                    *
+                    * This keeps the jitter from slowly moving the polling cycle.
+                    *
+                    * Round up to the next period.
+                    */
+                    periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1))/tag->auto_sync_read_ms;
+
+                    /* warn if we need to skip more than one period. */
+                    if(periods > 1) {
+                        pdebug(DEBUG_WARN, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods, tag->auto_sync_read_ms);
+                    }
+
+                    tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
+                    pdebug(DEBUG_DETAIL, "Scheduling next read at time %" PRId64 ".", tag->auto_sync_next_read);
+                } else {
+                    pdebug(DEBUG_SPEW, "Unable to start read tag->read_in_flight=%d, tag->tag_is_dirty=%d, tag->write_in_flight=%d!", tag->read_in_flight, tag->tag_is_dirty, tag->write_in_flight);
                 }
             }
         }

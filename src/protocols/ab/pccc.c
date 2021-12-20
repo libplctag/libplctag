@@ -300,7 +300,7 @@ int slc_encode_address(uint8_t *data, int *size, int buf_size, pccc_addr_t *addr
     encode_data(data, size, address->file);
 
     /* encode the data file type. */
-    encode_data(data, size, address->file_type);
+    encode_data(data, size, (int)address->file_type);
 
     /* add in the element number */
     encode_data(data, size, address->element);
