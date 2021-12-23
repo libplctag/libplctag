@@ -46,7 +46,7 @@
 #define REQUIRED_VERSION 2,4,7
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[1]&auto_sync_read_ms=500&auto_sync_write_ms=20"
-#define NUM_TAGS (100000)
+#define NUM_TAGS (100)
 
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (30000)
@@ -64,6 +64,9 @@ struct tag_entry {
     int read_count;
     int write_count;
     int write_trigger_count;
+    int64_t last_read;
+    int64_t total_read_time;
+    int64_t max_read_time;
 };
 
 static volatile struct tag_entry tags[NUM_TAGS] = {0};
@@ -72,7 +75,7 @@ static volatile struct tag_entry tags[NUM_TAGS] = {0};
 // static volatile int write_count = 0;
 
 
-// void *reader_function(void *tag_arg)
+// void *read_checker(void *tag_arg)
 // {
 //     int32_t tag = (int32_t)(intptr_t)tag_arg;
 //     int64_t start_time = util_time_ms();
@@ -80,6 +83,7 @@ static volatile struct tag_entry tags[NUM_TAGS] = {0};
 //     int iteration = 1;
 
 //     while(run_until > util_time_ms()) {
+//         for(int i=0; i < NUM_TAGS; i++) {}
 //         int32_t val = plc_tag_get_int32(tag, 0);
 
 //         fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val, util_time_ms()-start_time);
@@ -129,6 +133,7 @@ void tag_callback(int32_t tag_id, int event, int status)
     int low = 0;
     int high = NUM_TAGS-1;
     int mid = (high + low)/2;
+    int64_t now = util_time_ms();
     // int iteration = 0;
 
     /* find the tag entry */
@@ -172,6 +177,16 @@ void tag_callback(int32_t tag_id, int event, int status)
             if(status == PLCTAG_STATUS_OK && tags[mid].create_complete == 0) {
                 tags[mid].create_complete = 1;
             }
+
+            if(tags[mid].last_read != 0) {
+                tags[mid].total_read_time += now - tags[mid].last_read;
+
+                if((now - tags[mid].last_read) > tags[mid].max_read_time) {
+                    tags[mid].max_read_time = now - tags[mid].last_read;
+                }
+            }
+
+            tags[mid].last_read = now;
 
             break;
 
@@ -330,6 +345,8 @@ int main(int argc, char **argv)
 
 done:
     for(int i=0; i < NUM_TAGS; i++) {
+        fprintf(stderr, "Tag[%d] %" PRId32 " avg read time %" PRId64 "ms, max read time %" PRId64 "ms.\n",
+                        i, tags[i].tag_id, tags[i].total_read_time / tags[i].read_count, tags[i].max_read_time);
         plc_tag_destroy(tags[i].tag_id);
     }
 
