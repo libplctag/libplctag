@@ -123,6 +123,7 @@ else
     let SUCCESSES++
 fi
 
+
 let TEST++
 echo -n "Test $TEST: auto sync... "
 $TEST_DIR/test_auto_sync > "${TEST}_auto_sync_test.log" 2>&1
