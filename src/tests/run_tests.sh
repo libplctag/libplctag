@@ -137,7 +137,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: many auto tag test... "
+echo -n "Test $TEST: test huge number of tags... "
 $TEST_DIR/test_many_tag_perf > "${TEST}_many_tag_perf_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
