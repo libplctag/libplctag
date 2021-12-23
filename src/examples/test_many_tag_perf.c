@@ -46,7 +46,7 @@
 #define REQUIRED_VERSION 2,4,7
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[1]&auto_sync_read_ms=500&auto_sync_write_ms=20"
-#define NUM_TAGS (100000)
+#define NUM_TAGS (100)
 
 #define RUN_PERIOD (300000)
 
@@ -191,7 +191,6 @@ void tag_callback(int32_t tag_id, int event, int status)
                     tags[mid].min_read_time = read_diff;
                 }
             }
-
 
             tags[mid].last_read = now;
 
@@ -380,6 +379,8 @@ int main(int argc, char **argv)
 
 done:
     for(int i=0; i < NUM_TAGS; i++) {
+        fprintf(stderr, "Tag[%d] %" PRId32 " avg read time %" PRId64 "ms, max read time %" PRId64 "ms.\n",
+                        i, tags[i].tag_id, tags[i].total_read_time / tags[i].read_count, tags[i].max_read_time);
         plc_tag_destroy(tags[i].tag_id);
     }
 
