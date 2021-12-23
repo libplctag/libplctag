@@ -46,11 +46,13 @@
 #define REQUIRED_VERSION 2,4,7
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[1]&auto_sync_read_ms=500&auto_sync_write_ms=20"
-#define NUM_TAGS (100)
+#define NUM_TAGS (100000)
 
-#define DATA_TIMEOUT (5000)
-#define RUN_PERIOD (30000)
-#define READ_SLEEP_MS (100)
+#define RUN_PERIOD (300000)
+
+
+// #define DATA_TIMEOUT (5000)
+// #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
 #define CREATE_TIMEOUT_MS (1000 + NUM_TAGS)
@@ -66,13 +68,11 @@ struct tag_entry {
     int write_trigger_count;
     int64_t last_read;
     int64_t total_read_time;
+    int64_t min_read_time;
     int64_t max_read_time;
 };
 
 static volatile struct tag_entry tags[NUM_TAGS] = {0};
-
-// static volatile int read_count = 0;
-// static volatile int write_count = 0;
 
 
 // void *read_checker(void *tag_arg)
@@ -99,7 +99,7 @@ void *writer_function(void *unused)
 {
     int64_t start_time = util_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
-    int iteration = 1;
+    //int iteration = 1;
 
     (void)unused;
 
@@ -107,7 +107,7 @@ void *writer_function(void *unused)
 
     while(run_until > util_time_ms()) {
         int index = rand() % NUM_TAGS;
-        int tag_id = tags[index].tag_id;
+        int32_t tag_id = tags[index].tag_id;
         int32_t val = plc_tag_get_int32(tag_id, 0);
         int32_t new_val = ((val+1) > 499) ? 0 : (val+1);
 
@@ -117,7 +117,7 @@ void *writer_function(void *unused)
         /* mark the attempt. */
         tags[index].write_trigger_count++;
 
-        fprintf(stderr, "%06" PRId64 " WRITER: Iteration %d, wrote value: %d to tag %" PRId32 " at time %" PRId64 "\n", util_time_ms() - start_time,  iteration++, new_val, tag_id, util_time_ms()-start_time);
+        //fprintf(stderr, "%06" PRId64 " WRITER: Iteration %d, wrote value: %d to tag %" PRId32 " at time %" PRId64 "\n", util_time_ms() - start_time,  iteration++, new_val, tag_id, util_time_ms()-start_time);
 
         util_sleep_ms(WRITE_SLEEP_MS);
     }
@@ -167,7 +167,7 @@ void tag_callback(int32_t tag_id, int event, int status)
             break;
 
         case PLCTAG_EVENT_DESTROYED:
-            fprintf(stderr, "Tag[%d] %" PRId32 " was destroyed.\n", mid, tag_id);
+            //fprintf(stderr, "Tag[%d] %" PRId32 " was destroyed.\n", mid, tag_id);
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
@@ -179,12 +179,19 @@ void tag_callback(int32_t tag_id, int event, int status)
             }
 
             if(tags[mid].last_read != 0) {
-                tags[mid].total_read_time += now - tags[mid].last_read;
+                int64_t read_diff = now - tags[mid].last_read;
 
-                if((now - tags[mid].last_read) > tags[mid].max_read_time) {
-                    tags[mid].max_read_time = now - tags[mid].last_read;
+                tags[mid].total_read_time += read_diff;
+
+                if(read_diff > tags[mid].max_read_time) {
+                    tags[mid].max_read_time = read_diff;
+                }
+
+                if(read_diff < tags[mid].min_read_time) {
+                    tags[mid].min_read_time = read_diff;
                 }
             }
+
 
             tags[mid].last_read = now;
 
@@ -235,6 +242,8 @@ int compare_tag_entries(const void *tag_entry_1, const void *tag_entry_2)
 int main(int argc, char **argv)
 {
     int rc = PLCTAG_STATUS_OK;
+    char buf[250] = { 0 };
+    int read_period_ms = 0;
     int64_t start_time = util_time_ms();
     int64_t timeout_time = 0;
     // pthread_t read_thread;
@@ -255,10 +264,31 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+
+    /* create the tag string. */
+    read_period_ms = NUM_TAGS / 2;
+    /*
+    2000 tags per second
+    2000 -> 1000ms
+    1000 -> 500ms
+    500 -> 250ms
+    250 -> 125ms
+    100 -> 50ms
+    */
+
+    if(read_period_ms < 50) {
+        read_period_ms = 50;
+    }
+
+    snprintf(buf, sizeof(buf), "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[1]&auto_sync_read_ms=%d&auto_sync_write_ms=20", read_period_ms);
+
+    fprintf(stderr, "%06" PRId64 " Tag attribute string \"%s\".\n",  util_time_ms() - start_time, buf);
+
+    fprintf(stderr, "%06" PRId64 " Creating tags.\n",  util_time_ms() - start_time);
 
     for(int i=0; i < NUM_TAGS; i++) {
-        int32_t tag = plc_tag_create(TAG_ATTRIBS, 0);
+        int32_t tag = plc_tag_create(buf, 0);
         if(tag < 0) {
             fprintf(stderr, "Error, %s, creating tag!\n", plc_tag_decode_error(tag));
             rc = 1;
@@ -267,9 +297,12 @@ int main(int argc, char **argv)
 
         tags[i].tag_id = tag;
         tags[i].status = plc_tag_status(tag);
+        tags[i].min_read_time = INT64_MAX;
 
-        fprintf(stderr, "%06" PRId64 " Tag[%d] %" PRId32 " status %s.\n", util_time_ms() - start_time, i, tag, plc_tag_decode_error(plc_tag_status(tag)));
+        //fprintf(stderr, "%06" PRId64 " Tag[%d] %" PRId32 " status %s.\n", util_time_ms() - start_time, i, tag, plc_tag_decode_error(plc_tag_status(tag)));
     }
+
+    fprintf(stderr, "%06" PRId64 " Sorting tags.\n",  util_time_ms() - start_time);
 
     /* sort the tag IDs just in case */
     qsort((void *)tags, (size_t)NUM_TAGS, sizeof(struct tag_entry), compare_tag_entries);
@@ -282,6 +315,8 @@ int main(int argc, char **argv)
      * in the callback function will fail by hitting out of order
      * tag IDs!
      */
+    fprintf(stderr, "%06" PRId64 " Adding callbacks.\n",  util_time_ms() - start_time);
+
     for(int i=0; i < NUM_TAGS; i++) {
         /* register the callback */
         rc = plc_tag_register_callback(tags[i].tag_id, tag_callback);
@@ -345,8 +380,6 @@ int main(int argc, char **argv)
 
 done:
     for(int i=0; i < NUM_TAGS; i++) {
-        fprintf(stderr, "Tag[%d] %" PRId32 " avg read time %" PRId64 "ms, max read time %" PRId64 "ms.\n",
-                        i, tags[i].tag_id, tags[i].total_read_time / tags[i].read_count, tags[i].max_read_time);
         plc_tag_destroy(tags[i].tag_id);
     }
 
@@ -354,21 +387,31 @@ done:
     if(rc == 0) {
         for(int i=0; i < NUM_TAGS; i++) {
             /* allow for about 10% */
-            int read_epsilon = (RUN_PERIOD/READ_PERIOD_MS) / 10;
+            // int64_t read_time_epsilon = read_period_ms / 5;
+            int read_count_epsilon = (RUN_PERIOD/read_period_ms) / 5;
 
-            if(abs((RUN_PERIOD/READ_PERIOD_MS) - tags[i].read_count) > read_epsilon) {
-                fprintf(stderr, "Number of reads for tag[%d] %" PRId32 ", %d, is NOT close to the expected number, %d!\n", i, tags[i].tag_id, tags[i].read_count, (RUN_PERIOD/READ_PERIOD_MS));
+            fprintf(stderr, "Tag[%d] %" PRId32 " min/avg/max read time %" PRId64 "ms/%" PRId64 "ms/%" PRId64 "ms.\n",
+                            i, tags[i].tag_id, tags[i].min_read_time, tags[i].total_read_time / tags[i].read_count, tags[i].max_read_time);
+
+            // if(labs(tags[i].total_read_time / tags[i].read_count - read_period_ms) > read_time_epsilon) {
+            //     fprintf(stderr, "  Average read time %" PRId64 "ms is not close to expected read time %dms!\n", tags[i].total_read_time / tags[i].read_count, read_period_ms);
+            // }
+
+            if(abs((RUN_PERIOD/read_period_ms) - tags[i].read_count) > read_count_epsilon) {
+                fprintf(stderr, "  Number of reads for tag[%d] %" PRId32 ", %d, is NOT close to the expected number, %d!\n", i, tags[i].tag_id, tags[i].read_count, (RUN_PERIOD/read_period_ms));
                 rc = 1;
-            } else {
-                fprintf(stderr, "Number of reads for tag[%d] %" PRId32 ", %d, is close to the expected number, %d.\n", i, tags[i].tag_id, tags[i].read_count, (RUN_PERIOD/READ_PERIOD_MS));
             }
+            // else {
+            //     fprintf(stderr, "  Number of reads for tag[%d] %" PRId32 ", %d, is close to the expected number, %d.\n", i, tags[i].tag_id, tags[i].read_count, (RUN_PERIOD/read_period_ms));
+            // }
 
             if(abs(tags[i].write_trigger_count - tags[i].write_count) > 2) {
-                fprintf(stderr, "Number of writes for tag[%d] %" PRId32 ", %d, is NOT close to the expected number, %d!\n", i, tags[i].tag_id, tags[i].write_count, tags[i].write_trigger_count);
+                fprintf(stderr, "  Number of writes for tag[%d] %" PRId32 ", %d, is NOT close to the expected number, %d!\n", i, tags[i].tag_id, tags[i].write_count, tags[i].write_trigger_count);
                 rc = 1;
-            } else {
-                fprintf(stderr, "Number of writes for tag[%d] %" PRId32 ", %d, is close to the expected number, %d.\n", i, tags[i].tag_id, tags[i].write_count, tags[i].write_trigger_count);
             }
+            // else {
+            //     fprintf(stderr, "  Number of writes for tag[%d] %" PRId32 ", %d, is close to the expected number, %d.\n", i, tags[i].tag_id, tags[i].write_count, tags[i].write_trigger_count);
+            // }
         }
     }
 

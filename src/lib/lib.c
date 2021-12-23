@@ -69,6 +69,7 @@ static volatile int library_terminating = 0;
 static thread_p tag_tickler_thread = NULL;
 static cond_p tag_tickler_wait = NULL;
 #define TAG_TICKLER_TIMEOUT_MS  (100)
+#define TAG_TICKLER_TIMEOUT_MIN_MS (10)
 static int64_t tag_tickler_wait_timeout_end = 0;
 
 //static mutex_p global_library_mutex = NULL;
@@ -597,6 +598,10 @@ THREAD_FUNC(tag_tickler_func)
         if(tag_tickler_wait) {
             int64_t time_to_wait = tag_tickler_wait_timeout_end - time_ms();
             int wait_rc = PLCTAG_STATUS_OK;
+
+            if(time_to_wait < TAG_TICKLER_TIMEOUT_MIN_MS) {
+                time_to_wait = TAG_TICKLER_TIMEOUT_MIN_MS;
+            }
 
             if(time_to_wait > 0) {
                 wait_rc = cond_wait(tag_tickler_wait, (int)time_to_wait);

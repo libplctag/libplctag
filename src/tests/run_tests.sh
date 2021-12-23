@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server tag_rw2 list_tags test_auto_sync test_callback test_raw_cip test_reconnect thread_stress"
+EXECUTABLES="ab_server tag_rw2 list_tags test_auto_sync test_callback test_many_tag_perf test_raw_cip test_reconnect thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -123,9 +123,22 @@ else
     let SUCCESSES++
 fi
 
+
 let TEST++
 echo -n "Test $TEST: auto sync... "
 $TEST_DIR/test_auto_sync > "${TEST}_auto_sync_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "Test $TEST: many auto tag test... "
+$TEST_DIR/test_many_tag_perf > "${TEST}_many_tag_perf_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
