@@ -1384,7 +1384,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
         /* try each IP until we run out or get a connection started. */
         gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
-        pdebug(DEBUG_DETAIL, "Attempting to connect to %s", inet_ntoa(*((struct in_addr *)&ips[i])));
+        pdebug(DEBUG_DETAIL, "Attempting to connect to %s:%d", inet_ntoa(*((struct in_addr *)&ips[i])), port);
 
         /* this is done non-blocking. Could be interrupted, so restart if needed.*/
         do {
@@ -1393,16 +1393,16 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
 
         if(rc == 0) {
             /* instantly connected. */
-            pdebug(DEBUG_DETAIL, "Connected instantly to %s.", inet_ntoa(*((struct in_addr *)&ips[i])));
+            pdebug(DEBUG_DETAIL, "Connected instantly to %s:%d.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_OK;
         } else if(rc < 0 && (errno == EINPROGRESS)) {
             /* the connection has started. */
-            pdebug(DEBUG_DETAIL, "Started connecting to %s successfully.", inet_ntoa(*((struct in_addr *)&ips[i])));
+            pdebug(DEBUG_DETAIL, "Started connecting to %s:%d successfully.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_PENDING;
         } else  {
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])),errno);
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s:%d failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])),port, errno);
             i++;
         }
     } while(!done && i < num_ips);
