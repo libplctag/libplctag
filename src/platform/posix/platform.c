@@ -2080,8 +2080,50 @@ int sock_create_event_wakeup_channel(sock_p sock)
     do {
         /* open the pipe for waking the select wait. */
         // if(pipe(wake_fds)) {
-        if(socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds)) {
+        if((rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds))) {
             pdebug(DEBUG_WARN, "Unable to open waker pipe!");
+            switch(errno) {
+                case EAFNOSUPPORT:
+                    pdebug(DEBUG_WARN, "The specified addresss family is not supported on this machine!");
+                    break;
+
+                case EFAULT:
+                    pdebug(DEBUG_WARN, "The address socket_vector does not specify a valid part of the process address space.");
+                    break;
+
+                case EMFILE:
+                    pdebug(DEBUG_WARN, "No more file descriptors are available for this process.");
+                    break;
+
+                case ENFILE:
+                    pdebug(DEBUG_WARN, "No more file descriptors are available for the system.");
+                    break;
+
+                case ENOBUFS:
+                    pdebug(DEBUG_WARN, "Insufficient resources were available in the system to perform the operation.");
+                    break;
+
+                case ENOMEM:
+                    pdebug(DEBUG_WARN, "Insufficient memory was available to fulfill the request.");
+                    break;
+
+                case EOPNOTSUPP:
+                    pdebug(DEBUG_WARN, "The specified protocol does not support creation of socket pairs.");
+                    break;
+
+                case EPROTONOSUPPORT:
+                    pdebug(DEBUG_WARN, "The specified protocol is not supported on this machine.");
+                    break;
+
+                case EPROTOTYPE:
+                    pdebug(DEBUG_WARN, "The socket type is not supported by the protocol.");
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected error %d!", errno);
+                    break;
+            }
+
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
