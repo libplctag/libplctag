@@ -3322,33 +3322,33 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     /* are strings defined for this tag? */
     if(!tag->byte_order || !tag->byte_order->str_is_defined) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     if(!string_val) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "New string value pointer is null!");
         tag->status = PLCTAG_ERR_NULL_PTR;
+        rc_dec(tag);
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* note that passing a zero-length string is valid. */
 
     if(tag->is_bit) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "Setting a string value on a bit tag is not supported!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
