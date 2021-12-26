@@ -775,6 +775,9 @@ void ab_tag_destroy(ab_tag_p tag)
         return;
     }
 
+    /* abort anything in flight */
+    ab_tag_abort(tag);
+
     session = tag->session;
 
     /* tags should always have a session.  Release it. */

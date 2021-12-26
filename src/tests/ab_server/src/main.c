@@ -164,7 +164,7 @@ int main(int argc, const char **argv)
     process_args(argc, argv, &plc);
 
     /* open a server connection and listen on the right port. */
-    server = tcp_server_create("0.0.0.0", "44818", server_buf, request_handler, &plc);
+    server = tcp_server_create("0.0.0.0", (plc.port_str ? plc.port_str : "44818"), server_buf, request_handler, &plc);
 
     tcp_server_start(server, &done);
 
@@ -176,11 +176,14 @@ int main(int argc, const char **argv)
 
 void usage(void)
 {
-    fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] --tag=<tag>\n"
+    fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] [--port=<port>] --tag=<tag>\n"
                     "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
                     "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\" or \"Micrologix\".\n"
                     "\n"
                     "   <path> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
+                    "\n"
+                    "   <port> = (required for ControlLogix) internal path to CPU in PLC.  E.g. \"1,0\".\n"
+                    "            Defaults to 44818.\n"
                     "\n"
                     "    PCCC-based PLC tags are in the format: <file>[<size>] where:\n"
                     "        <file> is the data file, only the following are supported:\n"
@@ -321,6 +324,10 @@ void process_args(int argc, const char **argv, plc_s *plc)
         if(strncmp(argv[i],"--path=",7) == 0) {
             parse_path(&(argv[i][7]), plc);
             has_path = true;
+        }
+
+        if(strncmp(argv[i],"--port=",7) == 0) {
+            plc->port_str = &(argv[i][7]);
         }
 
         if(strncmp(argv[i],"--tag=",6) == 0) {

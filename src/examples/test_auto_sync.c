@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2021 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -43,12 +43,19 @@
 #include "utils.h"
 
 
-#define REQUIRED_VERSION 2,1,12
+#define REQUIRED_VERSION 2,4,7
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1%d&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
+
+#define READ_PERIOD_MS (200)
+
+static volatile int read_start_count = 0;
+static volatile int read_complete_count = 0;
+static volatile int write_start_count = 0;
+static volatile int write_complete_count = 0;
 
 
 void *reader_function(void *tag_arg)
@@ -108,20 +115,22 @@ void tag_callback(int32_t tag_id, int event, int status)
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
+            read_complete_count++;
             fprintf(stderr, "Tag %d automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
-
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
+            read_start_count++;
             fprintf(stderr, "Tag %d automatic read operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
+            write_complete_count++;
             fprintf(stderr, "Tag %d automatic write operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
-
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
+            write_start_count++;
             fprintf(stderr, "Tag %d automatic write operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
 
             break;
@@ -162,7 +171,7 @@ int main(int argc, char **argv)
     tag = plc_tag_create(TAG_ATTRIBS, DATA_TIMEOUT);
     if(tag < 0) {
         fprintf(stderr, "Error, %s, creating tag!\n", plc_tag_decode_error(tag));
-        return tag;
+        return 1;
     }
 
     fprintf(stderr, "Tag status %s.\n", plc_tag_decode_error(plc_tag_status(tag)));
@@ -172,7 +181,7 @@ int main(int argc, char **argv)
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return rc;
+        return 1;
     }
 
     fprintf(stderr, "Ready to start threads.\n");
@@ -190,6 +199,22 @@ int main(int argc, char **argv)
 
     plc_tag_destroy(tag);
 
-    return 0;
+    /* check the results. */
+    fprintf(stderr, "Total reads triggered %d, finished %d, and total expected %d.\n", read_start_count, read_complete_count, RUN_PERIOD/READ_PERIOD_MS);
+    fprintf(stderr, "Total writes triggered %d, finished %d, and total expected %d.\n", write_start_count, write_complete_count, RUN_PERIOD/WRITE_SLEEP_MS);
+
+    rc = 0;
+
+    if(abs((RUN_PERIOD/READ_PERIOD_MS) - read_start_count) > 3) {
+        fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_start_count, (RUN_PERIOD/READ_PERIOD_MS));
+        rc = 1;
+    }
+
+    if(abs((RUN_PERIOD/WRITE_SLEEP_MS) - write_start_count) > 3) {
+        fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_start_count, (RUN_PERIOD/WRITE_SLEEP_MS));
+        rc = 1;
+    }
+
+    return rc;
 }
 
