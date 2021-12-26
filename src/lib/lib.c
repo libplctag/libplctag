@@ -2053,9 +2053,9 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
-        pdebug(DEBUG_WARN, "Tag has no data!");
+        pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2100,9 +2100,9 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
-        pdebug(DEBUG_WARN, "Tag has no data!");
+        pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2156,9 +2156,9 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2210,9 +2210,9 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2269,9 +2269,9 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2324,9 +2324,9 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2380,9 +2380,9 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2430,9 +2430,9 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2485,9 +2485,9 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2536,9 +2536,9 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2594,9 +2594,9 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2643,9 +2643,9 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2686,7 +2686,6 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
 
 
 
-
 LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
 {
     int16_t res = INT16_MIN;
@@ -2701,9 +2700,9 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2750,9 +2749,9 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2807,9 +2806,9 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2854,9 +2853,9 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2907,9 +2906,9 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2955,9 +2954,9 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -3011,15 +3010,16 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Getting float64 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return res;
     }
 
@@ -3073,15 +3073,16 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Setting float64 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -3134,15 +3135,16 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Getting float32 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return res;
     }
 
@@ -3192,15 +3194,16 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Setting float32 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -3247,23 +3250,24 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
 
     /* are strings defined for this tag? */
     if(!tag->byte_order || !tag->byte_order->str_is_defined) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     if(tag->is_bit) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "Getting a string value from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -3322,33 +3326,33 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     /* are strings defined for this tag? */
     if(!tag->byte_order || !tag->byte_order->str_is_defined) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     if(!string_val) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "New string value pointer is null!");
         tag->status = PLCTAG_ERR_NULL_PTR;
+        rc_dec(tag);
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* note that passing a zero-length string is valid. */
 
     if(tag->is_bit) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "Setting a string value on a bit tag is not supported!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 

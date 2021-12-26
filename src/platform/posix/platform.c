@@ -1384,7 +1384,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
         /* try each IP until we run out or get a connection started. */
         gw_addr.sin_addr.s_addr = ips[i].s_addr;
 
-        pdebug(DEBUG_DETAIL, "Attempting to connect to %s", inet_ntoa(*((struct in_addr *)&ips[i])));
+        pdebug(DEBUG_DETAIL, "Attempting to connect to %s:%d", inet_ntoa(*((struct in_addr *)&ips[i])), port);
 
         /* this is done non-blocking. Could be interrupted, so restart if needed.*/
         do {
@@ -1393,16 +1393,16 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
 
         if(rc == 0) {
             /* instantly connected. */
-            pdebug(DEBUG_DETAIL, "Connected instantly to %s.", inet_ntoa(*((struct in_addr *)&ips[i])));
+            pdebug(DEBUG_DETAIL, "Connected instantly to %s:%d.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_OK;
         } else if(rc < 0 && (errno == EINPROGRESS)) {
             /* the connection has started. */
-            pdebug(DEBUG_DETAIL, "Started connecting to %s successfully.", inet_ntoa(*((struct in_addr *)&ips[i])));
+            pdebug(DEBUG_DETAIL, "Started connecting to %s:%d successfully.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_PENDING;
         } else  {
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])),errno);
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s:%d failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])),port, errno);
             i++;
         }
     } while(!done && i < num_ips);
@@ -2080,8 +2080,50 @@ int sock_create_event_wakeup_channel(sock_p sock)
     do {
         /* open the pipe for waking the select wait. */
         // if(pipe(wake_fds)) {
-        if(socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds)) {
+        if((rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds))) {
             pdebug(DEBUG_WARN, "Unable to open waker pipe!");
+            switch(errno) {
+                case EAFNOSUPPORT:
+                    pdebug(DEBUG_WARN, "The specified addresss family is not supported on this machine!");
+                    break;
+
+                case EFAULT:
+                    pdebug(DEBUG_WARN, "The address socket_vector does not specify a valid part of the process address space.");
+                    break;
+
+                case EMFILE:
+                    pdebug(DEBUG_WARN, "No more file descriptors are available for this process.");
+                    break;
+
+                case ENFILE:
+                    pdebug(DEBUG_WARN, "No more file descriptors are available for the system.");
+                    break;
+
+                case ENOBUFS:
+                    pdebug(DEBUG_WARN, "Insufficient resources were available in the system to perform the operation.");
+                    break;
+
+                case ENOMEM:
+                    pdebug(DEBUG_WARN, "Insufficient memory was available to fulfill the request.");
+                    break;
+
+                case EOPNOTSUPP:
+                    pdebug(DEBUG_WARN, "The specified protocol does not support creation of socket pairs.");
+                    break;
+
+                case EPROTONOSUPPORT:
+                    pdebug(DEBUG_WARN, "The specified protocol is not supported on this machine.");
+                    break;
+
+                case EPROTOTYPE:
+                    pdebug(DEBUG_WARN, "The socket type is not supported by the protocol.");
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected error %d!", errno);
+                    break;
+            }
+
             rc = PLCTAG_ERR_BAD_REPLY;
             break;
         }
