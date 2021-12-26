@@ -217,10 +217,8 @@ else
     let SUCCESSES++
 fi
 
-
 # echo "  Killing Omron emulator."
 killall -TERM ab_server > /dev/null 2>&1
-
 
 # echo -n "  Starting Modbus emulator... "
 $SCRIPT_DIR/modbus_server.py > modbus_emulator.log 2>&1 &
@@ -257,7 +255,6 @@ else
     echo "OK"
     let SUCCESSES++
 fi
-
 
 
 let TEST++
