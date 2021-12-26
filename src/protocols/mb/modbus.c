@@ -1079,7 +1079,7 @@ int tickle_all_tags(modbus_plc_p plc)
 int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-    int op = tag->op;
+    int op = (int)(tag->op);
 
     pdebug(DEBUG_SPEW, "Starting.");
 

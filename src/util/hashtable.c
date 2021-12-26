@@ -388,7 +388,7 @@ int expand_table(hashtable_p table)
                 index = find_empty(&new_table, table->entries[i].key);
                 if(index == PLCTAG_ERR_NOT_FOUND) {
                     /* oops, still cannot insert all the entries! Try again. */
-                    pdebug(DEBUG_WARN, "Unable to insert existing entry into expanded table!");
+                    pdebug(DEBUG_DETAIL, "Unable to insert existing entry into expanded table. Retrying.");
                     mem_free(new_table.entries);
                     break;
                 } else {

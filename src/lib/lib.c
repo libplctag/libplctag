@@ -37,6 +37,7 @@
 #include <float.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <stdlib.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <lib/init.h>
@@ -68,6 +69,7 @@ static volatile int library_terminating = 0;
 static thread_p tag_tickler_thread = NULL;
 static cond_p tag_tickler_wait = NULL;
 #define TAG_TICKLER_TIMEOUT_MS  (100)
+#define TAG_TICKLER_TIMEOUT_MIN_MS (10)
 static int64_t tag_tickler_wait_timeout_end = 0;
 
 //static mutex_p global_library_mutex = NULL;
@@ -324,8 +326,13 @@ void plc_tag_generic_tickler(plc_tag_p tag)
         if(tag->auto_sync_read_ms > 0) {
             int64_t current_time = time_ms();
 
+            // /* spread these out randomly to avoid too much clustering. */
+            // if(tag->auto_sync_next_read == 0) {
+            //     tag->auto_sync_next_read = current_time - (rand() % tag->auto_sync_read_ms);
+            // }
+
             /* do we need to read? */
-            if(tag->auto_sync_next_read <= current_time) {
+            if(tag->auto_sync_next_read < current_time) {
                 /* make sure that we do not have an outstanding read or write. */
                 if(!tag->read_in_flight && !tag->tag_is_dirty && !tag->write_in_flight) {
                     int64_t periods = 0;
@@ -338,25 +345,29 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                         tag->status = (int8_t)tag->vtable->read(tag);
                     }
 
+                    tag->event_read_started = 1;
+
                     /*
-                     * schedule the next read.
-                     *
-                     * Note that there will be some jitter.  In that case we want to skip
-                     * to the next read time that is a whole multiple of the read period.
-                     *
-                     * This keeps the jitter from slowly moving the polling cycle.
-                     */
-                    periods = (current_time - tag->auto_sync_next_read)/tag->auto_sync_read_ms;
+                    * schedule the next read.
+                    *
+                    * Note that there will be some jitter.  In that case we want to skip
+                    * to the next read time that is a whole multiple of the read period.
+                    *
+                    * This keeps the jitter from slowly moving the polling cycle.
+                    *
+                    * Round up to the next period.
+                    */
+                    periods = (current_time - tag->auto_sync_next_read + (tag->auto_sync_read_ms - 1))/tag->auto_sync_read_ms;
 
                     /* warn if we need to skip more than one period. */
-                    if(tag->auto_sync_next_read && periods > 0) {
-                        pdebug(DEBUG_WARN, "Skipping multiple read periods due to long delay!");
+                    if(periods > 1) {
+                        pdebug(DEBUG_WARN, "Skipping %" PRId64 " periods of %" PRId32 "ms.", periods, tag->auto_sync_read_ms);
                     }
 
-                    tag->auto_sync_next_read += (periods + 1) * tag->auto_sync_read_ms;
-                    pdebug(DEBUG_WARN, "Scheduling next read at time %"PRId64".", tag->auto_sync_next_read);
-
-                    tag->event_read_started = 1;
+                    tag->auto_sync_next_read += (periods * tag->auto_sync_read_ms);
+                    pdebug(DEBUG_DETAIL, "Scheduling next read at time %" PRId64 ".", tag->auto_sync_next_read);
+                } else {
+                    pdebug(DEBUG_SPEW, "Unable to start read tag->read_in_flight=%d, tag->tag_is_dirty=%d, tag->write_in_flight=%d!", tag->read_in_flight, tag->tag_is_dirty, tag->write_in_flight);
                 }
             }
         }
@@ -569,6 +580,11 @@ THREAD_FUNC(tag_tickler_func)
                     pdebug(DEBUG_DETAIL, "Tag has its own tickler.");
                 }
 
+                // pdebug(DEBUG_DETAIL, "Current time %" PRId64 ".", time_ms());
+                // pdebug(DEBUG_DETAIL, "Time to wake %" PRId64 ".", tag_tickler_wait_timeout_end);
+                // pdebug(DEBUG_DETAIL, "Auto read time %" PRId64 ".", tag->auto_sync_next_read);
+                // pdebug(DEBUG_DETAIL, "Auto write time %" PRId64 ".", tag->auto_sync_next_write);
+
                 debug_set_tag_id(0);
             }
 
@@ -582,6 +598,10 @@ THREAD_FUNC(tag_tickler_func)
         if(tag_tickler_wait) {
             int64_t time_to_wait = tag_tickler_wait_timeout_end - time_ms();
             int wait_rc = PLCTAG_STATUS_OK;
+
+            if(time_to_wait < TAG_TICKLER_TIMEOUT_MIN_MS) {
+                time_to_wait = TAG_TICKLER_TIMEOUT_MIN_MS;
+            }
 
             if(time_to_wait > 0) {
                 wait_rc = cond_wait(tag_tickler_wait, (int)time_to_wait);
@@ -860,17 +880,21 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     tag->auto_sync_read_ms = attr_get_int(attribs, "auto_sync_read_ms", 0);
     if(tag->auto_sync_read_ms < 0) {
         pdebug(DEBUG_WARN, "auto_sync_read_ms value must be positive!");
+        attr_destroy(attribs);
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
     } else if(tag->auto_sync_read_ms > 0) {
         /* how many periods did we already pass? */
-        int64_t periods = (time_ms() / tag->auto_sync_read_ms);
-        tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
+        // int64_t periods = (time_ms() / tag->auto_sync_read_ms);
+        // tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
+        /* start some time in the future, but with random jitter. */
+        tag->auto_sync_next_read = time_ms() + (rand() % tag->auto_sync_read_ms);
     }
 
     tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
     if(tag->auto_sync_write_ms < 0) {
         pdebug(DEBUG_WARN, "auto_sync_write_ms value must be positive!");
+        attr_destroy(attribs);
         rc_dec(tag);
         return PLCTAG_ERR_BAD_PARAM;
     } else {
@@ -881,6 +905,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
     rc = set_tag_byte_order(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to correctly set tag data byte order: %s!", plc_tag_decode_error(rc));
+        attr_destroy(attribs);
         rc_dec(tag);
         return rc;
     }
@@ -2028,9 +2053,9 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
-        pdebug(DEBUG_WARN, "Tag has no data!");
+        pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2075,9 +2100,9 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
-        pdebug(DEBUG_WARN, "Tag has no data!");
+        pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2131,9 +2156,9 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2185,9 +2210,9 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2244,9 +2269,9 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2299,9 +2324,9 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2355,9 +2380,9 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2405,9 +2430,9 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2460,9 +2485,9 @@ LIB_EXPORT int32_t  plc_tag_get_int32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2511,9 +2536,9 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2569,9 +2594,9 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2618,9 +2643,9 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2661,7 +2686,6 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val)
 
 
 
-
 LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
 {
     int16_t res = INT16_MIN;
@@ -2676,9 +2700,9 @@ LIB_EXPORT int16_t  plc_tag_get_int16(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2725,9 +2749,9 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2782,9 +2806,9 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2829,9 +2853,9 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2882,9 +2906,9 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
@@ -2930,9 +2954,9 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
@@ -2986,15 +3010,16 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Getting float64 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return res;
     }
 
@@ -3048,15 +3073,16 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Setting float64 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -3109,15 +3135,16 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return res;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Getting float32 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return res;
     }
 
@@ -3167,15 +3194,16 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval)
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     if(tag->is_bit) {
         pdebug(DEBUG_WARN, "Setting float32 value is unsupported on a bit tag!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -3222,23 +3250,24 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
 
     /* are strings defined for this tag? */
     if(!tag->byte_order || !tag->byte_order->str_is_defined) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     if(tag->is_bit) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "Getting a string value from a bit tag is not supported!");
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -3297,33 +3326,33 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
     /* is there data? */
     if(!tag->data) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no data!");
         tag->status = PLCTAG_ERR_NO_DATA;
+        rc_dec(tag);
         return PLCTAG_ERR_NO_DATA;
     }
 
     /* are strings defined for this tag? */
     if(!tag->byte_order || !tag->byte_order->str_is_defined) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN,"Tag has no definitions for strings!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
     if(!string_val) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "New string value pointer is null!");
         tag->status = PLCTAG_ERR_NULL_PTR;
+        rc_dec(tag);
         return PLCTAG_ERR_NULL_PTR;
     }
 
     /* note that passing a zero-length string is valid. */
 
     if(tag->is_bit) {
-        rc_dec(tag);
         pdebug(DEBUG_WARN, "Setting a string value on a bit tag is not supported!");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
+        rc_dec(tag);
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
