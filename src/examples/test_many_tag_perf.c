@@ -47,9 +47,9 @@
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=127.0.0.1:%d&path=1,0&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[0]&allow_packing=0&auto_sync_read_ms=%d&auto_sync_write_ms=20"
 
-#define NUM_TAGS (1000)
+#define NUM_TAGS (100000)
 
-#define RUN_PERIOD (30000)
+#define RUN_PERIOD (60000)
 
 
 // #define DATA_TIMEOUT (5000)
@@ -179,7 +179,7 @@ void tag_callback(int32_t tag_id, int event, int status)
 
             if(status == PLCTAG_STATUS_OK && tags[mid].create_complete == 0) {
                 tags[mid].create_complete = 1;
-                fprintf(stderr, "%06" PRId64 " Tag %d completed creation.\n", (util_time_ms() - start_time), mid);
+                //fprintf(stderr, "%06" PRId64 " Tag %d completed creation.\n", (util_time_ms() - start_time), mid);
             }
 
             if(tags[mid].last_read != 0) {
@@ -207,14 +207,14 @@ void tag_callback(int32_t tag_id, int event, int status)
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            fprintf(stderr, "Tag %d automatic write operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
+            //fprintf(stderr, "Tag %d automatic write operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             tags[mid].status = status;
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
             tags[mid].write_count++;
             tags[mid].status = status;
-            fprintf(stderr, "Tag %d automatic write operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
+            //fprintf(stderr, "Tag %d automatic write operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
 
             break;
 
@@ -294,7 +294,7 @@ int main(int argc, char **argv)
     fprintf(stderr, "PLCs running on %d ports.\n", num_ports);
 
     /* create the tag string. */
-    read_period_ms = (NUM_TAGS * 5) / num_ports;
+    read_period_ms = (NUM_TAGS * 2) / num_ports;
 
     /*
     2000 tags per second
@@ -390,7 +390,7 @@ int main(int argc, char **argv)
         if(waiting_tag_count == 0) {
             break;
         } else {
-            util_sleep_ms(100);
+            util_sleep_ms(20);
         }
     }
 
@@ -407,13 +407,13 @@ int main(int argc, char **argv)
         goto done;
     }
 
-    fprintf(stderr, "%06" PRId64 " Tag creation complete. Ready to start threads.\n", util_time_ms() - start_time);
+    fprintf(stderr, "%06" PRId64 " Tag creation complete. Ready to start write thread.\n", util_time_ms() - start_time);
 
     /* create the threads. */
     // pthread_create(&read_thread, NULL, reader_function, (void *)(intptr_t)tag);
     pthread_create(&write_thread, NULL, writer_function, (void *)NULL);
 
-    fprintf(stderr, "%06" PRId64 " Waiting for threads to quit.\n", util_time_ms() - start_time);
+    fprintf(stderr, "%06" PRId64 " Waiting for write thread to quit.\n", util_time_ms() - start_time);
 
     // pthread_join(read_thread, NULL);
     pthread_join(write_thread, NULL);
