@@ -384,10 +384,21 @@ plc_tag_p ab_tag_create(attr attribs)
             pdebug(DEBUG_WARN, "A path is not supported for this PLC type.");
         }
 
-        tag->byte_order = &logix_tag_byte_order;
+        /* if we did not fill in the byte order elsewhere, fill it in now. */
+        if(!tag->byte_order) {
+            pdebug(DEBUG_DETAIL, "Using default Micro8x0 byte order.");
+            tag->byte_order = &logix_tag_byte_order;
+        }
+
+        /* if this was not filled in elsewhere default to generic *Logix */
+        if(tag->vtable == &default_vtable || !tag->vtable) {
+            pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+            tag->vtable = &eip_cip_vtable;
+        }
+
         tag->use_connected_msg = 1;
         tag->allow_packing = 0;
-        tag->vtable = &eip_cip_vtable;
+
         break;
 
     case AB_PLC_OMRON_NJNX:
@@ -399,10 +410,21 @@ plc_tag_p ab_tag_create(attr attribs)
             return (plc_tag_p)tag;
         }
 
-        tag->byte_order = &omron_njnx_tag_byte_order;
+        /* if we did not fill in the byte order elsewhere, fill it in now. */
+        if(!tag->byte_order) {
+            pdebug(DEBUG_DETAIL, "Using default Omron byte order.");
+            tag->byte_order = &omron_njnx_tag_byte_order;
+        }
+
+        /* if this was not filled in elsewhere default to generic *Logix */
+        if(tag->vtable == &default_vtable || !tag->vtable) {
+            pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+            tag->vtable = &eip_cip_vtable;
+        }
+
         tag->use_connected_msg = 1;
         tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
-        tag->vtable = &eip_cip_vtable;
+
         break;
 
     default:
@@ -586,20 +608,20 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
                     special_tag_rc = setup_raw_tag(tag);
                 } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
-                    if(tag->plc_type != AB_PLC_OMRON_NJNX) {
+                    // if(tag->plc_type != AB_PLC_OMRON_NJNX) {
                         special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
-                    } else {
-                        pdebug(DEBUG_WARN, "Tag listing is not supported for Omron PLCs.");
-                        special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
-                    }
+                    // } else {
+                    //     pdebug(DEBUG_WARN, "Tag listing is not supported for Omron PLCs.");
+                    //     special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
+                    // }
                 } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
-                    if(tag->plc_type != AB_PLC_OMRON_NJNX) {
+                    // if(tag->plc_type != AB_PLC_OMRON_NJNX) {
                         /* only supported on *Logix */
                         special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
-                    } else {
-                        pdebug(DEBUG_WARN, "UDT listing is not supported for Omron PLCs.");
-                        special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
-                    }
+                    // } else {
+                    //     pdebug(DEBUG_WARN, "UDT listing is not supported for Omron PLCs.");
+                    //     special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
+                    // }
                 } /* else not a special tag. */
 
                 if(special_tag_rc != PLCTAG_STATUS_OK) {
