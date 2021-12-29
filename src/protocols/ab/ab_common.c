@@ -502,7 +502,11 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->first_read = 1;
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
+    } else {
+        pdebug(DEBUG_DETAIL, "Not kicking off initial read: tag is special or does not have read function.");
     }
+
+    pdebug(DEBUG_DETAIL, "Using vtable %p.", tag->vtable);
 
     pdebug(DEBUG_INFO,"Done.");
 
