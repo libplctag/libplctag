@@ -250,7 +250,7 @@ int main(int argc, char **argv)
     int num_ports = 0;
     int read_period_ms = 0;
     int64_t timeout_time = 0;
-    // pthread_t read_thread;
+    int waiting_tag_count = 0;
     pthread_t write_thread;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
@@ -279,7 +279,7 @@ int main(int argc, char **argv)
 
     num_ports = argc-1;
 
-    ports = (int *)calloc(sizeof(int), num_ports);
+    ports = (int *)calloc(sizeof(int), (unsigned int)num_ports);
     if(!ports) {
         fprintf(stderr, "Unable to allocate port array!\n");
         return 1;
@@ -316,7 +316,7 @@ int main(int argc, char **argv)
     for(int i=0; i < NUM_TAGS; i++) {
         int32_t tag = 0;
         int port = ports[rand() % num_ports];
-        
+
         snprintf(buf, sizeof(buf), TAG_ATTRIBS, port, read_period_ms);
         //fprintf(stderr, "Tag %d using tag string \"%s\".\n", i, buf);
 
@@ -366,8 +366,6 @@ int main(int argc, char **argv)
     fprintf(stderr, "%06" PRId64 " Waiting up to %dms for tag creation to complete.\n", util_time_ms() - start_time, CREATE_TIMEOUT_MS);
 
     timeout_time = util_time_ms() + CREATE_TIMEOUT_MS;
-
-    int waiting_tag_count = 0;
 
     while(timeout_time > util_time_ms()) {
         waiting_tag_count = 0;
@@ -432,7 +430,7 @@ done:
         for(int i=0; i < NUM_TAGS; i++) {
             /* allow for about 10% */
             // int64_t read_time_epsilon = read_period_ms / 5;
-            int read_count_epsilon = (RUN_PERIOD/read_period_ms) / 5;
+            //int read_count_epsilon = (RUN_PERIOD/read_period_ms) / 5;
 
             fprintf(stderr, "Tag[%d] %" PRId32 " %d reads, %d writes, min/avg/max read time %" PRId64 "ms/%" PRId64 "ms/%" PRId64 "ms.\n",
                             i, tags[i].tag_id, tags[i].read_count, tags[i].write_count, tags[i].min_read_time, tags[i].total_read_time / tags[i].read_count, tags[i].max_read_time);
