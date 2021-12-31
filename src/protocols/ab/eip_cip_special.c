@@ -271,6 +271,8 @@ int setup_raw_tag(ab_tag_p tag)
 
     tag->byte_order = &logix_tag_byte_order;
 
+    pdebug(DEBUG_DETAIL, "Setting vtable to %p.", &raw_tag_vtable);
+
     tag->vtable = &raw_tag_vtable;
 
     pdebug(DEBUG_DETAIL, "Done.");

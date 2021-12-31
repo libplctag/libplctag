@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2021 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -53,7 +53,7 @@ static void expect_match(int32_t tag, const char *attrib, int match_val);
 
 int main()
 {
-    int32_t tag; 
+    int32_t tag;
     int rc = PLCTAG_STATUS_OK;
 
     /* check the library version. */
@@ -83,11 +83,11 @@ int main()
     printf("Testing library attributes.\n");
 
     expect_match(0, "debug", PLCTAG_DEBUG_DETAIL);
-    
-    printf("\tLibrary version from attributes %d.%d.%d\n", 
+
+    printf("\tLibrary version from attributes %d.%d.%d\n",
                     plc_tag_get_int_attribute(0, "version_major", 0),
                     plc_tag_get_int_attribute(0, "version_minor", 0),
-                    plc_tag_get_int_attribute(0, "version_patch", 0)                    
+                    plc_tag_get_int_attribute(0, "version_patch", 0)
                     );
 
     printf("Testing generic tag attributes.\n");
@@ -99,7 +99,7 @@ int main()
     expect_match(tag, "elem_count", 1);
 
     printf("Testing unknown attribute.\n");
-    expect_match(tag, "boodleflokker", 42);
+    expect_match(tag, "boodleflokker", INT_MIN);
 
     /* we are done */
     plc_tag_destroy(tag);
@@ -116,8 +116,12 @@ void expect_match(int32_t tag, const char *attrib, int match_val)
         printf("\tOK: attribute \"%s\" = %d.\n", attrib, val);
     } else if(val == INT_MIN) {
         printf("\tError getting tag attribute \"%s\".\n", attrib);
+        plc_tag_destroy(tag);
+        exit(1);
     } else if(val != match_val) {
         printf("\tFAIL: attribute \"%s\" = %d, expected %d.\n", attrib, val, match_val);
+        plc_tag_destroy(tag);
+        exit(1);
     }
 }
 

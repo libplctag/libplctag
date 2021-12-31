@@ -7,8 +7,14 @@ async.c:  This example shows how to set up and fire many tag reads simultaneousl
 data_dumper.c: A simple data logger that outputs formatted text output with one row per sample.
           POSIX only.
 
-list_tags.c: an example using the build-in ability to list out the tags in some AB/Rockwell PLCs.
+list_tags_logix.c: an example using the build-in ability to list out the tags in some AB/Rockwell PLCs.
           Specifically it will list tags in ControlLogix and CompactLogix PLCs.   Both controller
+          and program tags are listed.   The output gives some information about the tag and a
+          string suitable for using with plc_tag_create() to create a handle to that tag in the
+          PLC.
+
+list_tags_micro8x0.c: an example using the build-in ability to list out the tags in some AB/Rockwell PLCs.
+          Specifically it will list tags in Micro800 series PLCs.   Both controller
           and program tags are listed.   The output gives some information about the tag and a
           string suitable for using with plc_tag_create() to create a handle to that tag in the
           PLC.
