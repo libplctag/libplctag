@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server tag_rw2 list_tags_logix test_auto_sync test_callback test_many_tag_perf test_raw_cip test_reconnect test_special thread_stress"
+EXECUTABLES="ab_server tag_rw2 list_tags_logix test_auto_sync test_callback test_many_tag_perf test_raw_cip test_reconnect test_special test_tag_attributes thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -33,6 +33,17 @@ done
 let TEST++
 echo -n "Test $TEST: special tags... "
 $TEST_DIR/test_special > "${TEST}_special_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: tag attributes... "
+$TEST_DIR/test_tag_attributes > "${TEST}_tag_attribute_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
