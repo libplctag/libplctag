@@ -33,7 +33,7 @@
 # the project is version 2.4
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 4)
-set (libplctag_VERSION_PATCH 8)
+set (libplctag_VERSION_PATCH 9)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -442,7 +442,8 @@ elseif (BUILD_EXAMPLES)
                             barcode_test
                             busy_test
                             data_dumper
-                            list_tags
+                            list_tags_logix
+                            list_tags_micro8x0
                             multithread
                             multithread_cached_read
                             multithread_plc5
@@ -476,7 +477,8 @@ elseif (BUILD_EXAMPLES)
     elseif(WIN32)
         set ( example_PROGRAMS async
                             async_stress
-                            list_tags
+                            list_tags_logix
+                            list_tags_micro8x0
                             multithread
                             plc5
                             simple

@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server tag_rw2 list_tags test_auto_sync test_callback test_many_tag_perf test_raw_cip test_reconnect thread_stress"
+EXECUTABLES="ab_server tag_rw2 list_tags_logix test_auto_sync test_callback test_many_tag_perf test_raw_cip test_reconnect test_special test_tag_attributes thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -29,6 +29,28 @@ do
     fi
 done
 # echo "...Done."
+
+let TEST++
+echo -n "Test $TEST: special tags... "
+$TEST_DIR/test_special > "${TEST}_special_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: tag attributes... "
+$TEST_DIR/test_tag_attributes > "${TEST}_tag_attribute_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
 echo -n "Test $TEST: basic large tag read/write... "
@@ -102,7 +124,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: tag listing... "
-$TEST_DIR/list_tags "10.206.1.40" "1,4" > "${TEST}_list_tags_test.log" 2>&1
+$TEST_DIR/list_tags_logix "10.206.1.40" "1,4" > "${TEST}_list_tags_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -136,10 +158,10 @@ else
 fi
 
 
-# start many copies of the emulator. 
+# start many copies of the emulator.
 PORT_LIST=""
-for i in {1..50}; do 
-    let PORT=44818+i 
+for i in {1..50}; do
+    let PORT=44818+i
 
     PORT_LIST+="${PORT} "
 
