@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2022 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,100 +31,123 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
-
-#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_count=10&name=TestDINTArray"
-#define ELEM_COUNT 10
-#define ELEM_SIZE 4
-#define DATA_TIMEOUT 5000
-
 /*
- * There really isn't much to this example other than it being compiled
- * by g++ instead of gcc.  This is just to test that the API functions are
- * correctly exported for C++ code.
+ * Read an array of 48 STRINGs.  Note that the actual data size of a string is 88 bytes, not 82+4.
+ *
+ * STRING types are a DINT (4 bytes) followed by 82 bytes of characters.  Then two bytes of padding.
  */
+
+#define REQUIRED_VERSION 2,4,10
+
+static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=88&elem_count=1&name=TestSSTRING";
+
+#define DATA_TIMEOUT 5000
 
 
 int main()
 {
     int32_t tag = 0;
     int rc;
-    int i;
+    int str_num = 1;
+    int offset = 0;
+    int str_cap = 0;
+    char *str = NULL;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
-        exit(1);
+        return 1;
     }
 
-    /* create the tag */
-    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
+    fprintf(stderr, "Using library version %d.%d.%d.\n",
+                                            plc_tag_get_int_attribute(0, "version_major", -1),
+                                            plc_tag_get_int_attribute(0, "version_minor", -1),
+                                            plc_tag_get_int_attribute(0, "version_patch", -1));
+
+    /* turn off debugging output. */
+    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
+
+    tag = plc_tag_create(tag_string, DATA_TIMEOUT);
 
     /* everything OK? */
-    if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        return 0;
-    }
-
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr,"Error %s creating tag!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return 0;
+        return rc;
     }
 
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "Error %s trying to read tag!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        return 0;
+        return rc;
     }
 
     /* print out the data */
-    for(i=0; i < ELEM_COUNT; i++) {
-        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+    str_cap = plc_tag_get_string_length(tag, offset) + 1; /* +1 for the zero termination. */
+    str = malloc((size_t)(unsigned int)str_cap);
+    if(!str) {
+        fprintf(stderr, "Unable to allocate memory for the string!\n");
+        plc_tag_destroy(tag);
+        return PLCTAG_ERR_NO_MEM;
     }
 
-    /* now test a write */
-    for(i=0; i < ELEM_COUNT; i++) {
-        int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-
-        val = val+1;
-
-        fprintf(stderr,"Setting element %d to %d\n",i,val);
-
-        plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
+    rc = plc_tag_get_string(tag, offset, str, str_cap);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Error %s getting string value!\n", plc_tag_decode_error(rc));
+        free(str);
+        plc_tag_destroy(tag);
+        return rc;
     }
 
+    fprintf(stderr, "tag string data = '%s'\n", str);
+
+    free(str);
+
+    /* now try to overwrite memory */
+    str_cap = plc_tag_get_string_capacity(tag, offset) * 2 + 1;
+    str = malloc((size_t)(unsigned int)str_cap);
+    if(!str) {
+        fprintf(stderr, "Unable to allocate memory for the string write test!\n");
+        plc_tag_destroy(tag);
+        return PLCTAG_ERR_NO_MEM;
+    }
+
+    /* clear out the string memory */
+    memset(str, 0, str_cap);
+
+    /* fill it in with garbage */
+    for(int i=0; i < (str_cap - 1); i++) {
+        str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
+    }
+
+    rc = plc_tag_set_string(tag, offset, str);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Error %s setting string!\n", plc_tag_decode_error(rc));
+        free(str);
+        plc_tag_destroy(tag);
+        return rc;
+    }
+
+    /* try to write it. */
     rc = plc_tag_write(tag, DATA_TIMEOUT);
-
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to write the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "Error %s writing string!\n", plc_tag_decode_error(rc));
+        free(str);
         plc_tag_destroy(tag);
-        return 0;
-    }
-
-
-    /* get the data again*/
-    rc = plc_tag_read(tag, DATA_TIMEOUT);
-
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
-        return 0;
-    }
-
-    /* print out the data */
-    for(i=0; i < ELEM_COUNT; i++) {
-        fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+        return rc;
     }
 
     /* we are done */
+    free(str);
     plc_tag_destroy(tag);
 
     return 0;
