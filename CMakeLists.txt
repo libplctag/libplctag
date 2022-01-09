@@ -491,6 +491,7 @@ elseif (BUILD_EXAMPLES)
                             test_raw_cip
                             test_shutdown
                             test_special
+                            test_string
                             test_tag_attributes
                             thread_stress
                             toggle_bit
