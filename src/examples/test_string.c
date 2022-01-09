@@ -46,8 +46,7 @@
 
 #define REQUIRED_VERSION 2,4,10
 
-// static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=88&elem_count=1&name=TestSSTRING";
-static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=lgx&name=CB_Txt[0,0]";
+static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]";
 
 #define DATA_TIMEOUT 5000
 
@@ -72,7 +71,7 @@ int main()
                                             plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* turn off debugging output. */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     tag = plc_tag_create(tag_string, DATA_TIMEOUT);
 
@@ -124,27 +123,49 @@ int main()
     /* clear out the string memory */
     memset(str, 0, (unsigned int)str_cap);
 
-    /* fill it in with garbage */
+    /* try to write a shorter string but with a long capacity. */
+
+    /* put in a tiny string */
+    for(int i=0; (i < 2) && i < (str_cap - 1); i++) {
+        str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
+    }
+
+    /* try to set the string. */
+    rc = plc_tag_set_string(tag, offset, str);
+    if(rc != PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Correctly got error %s setting string!\n", plc_tag_decode_error(rc));
+    } else {
+        fprintf(stderr, "Should have received an error trying to set string value with capacity longer than actual!\n");
+        free(str);
+        plc_tag_destroy(tag);
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    /* fill it completely with garbage */
     for(int i=0; i < (str_cap - 1); i++) {
         str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
     }
 
+    /* try to set the string. */
     rc = plc_tag_set_string(tag, offset, str);
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Error %s setting string!\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "Correctly got error %s setting string!\n", plc_tag_decode_error(rc));
+    } else {
+        fprintf(stderr, "Should have received an error trying to set string value with capacity longer than actual!\n");
         free(str);
         plc_tag_destroy(tag);
-        return rc;
+        return PLCTAG_ERR_BAD_STATUS;
     }
 
-    /* try to write it. */
-    rc = plc_tag_write(tag, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Error %s writing string!\n", plc_tag_decode_error(rc));
-        free(str);
-        plc_tag_destroy(tag);
-        return rc;
-    }
+    // /* try to write it. */
+    // rc = plc_tag_write(tag, DATA_TIMEOUT);
+    // if(rc != PLCTAG_STATUS_OK) {
+    //     fprintf(stderr, "Error %s writing string!\n", plc_tag_decode_error(rc));
+    //     free(str);
+    //     plc_tag_destroy(tag);
+    //     return rc;
+    // }
+
 
     /* we are done */
     free(str);
