@@ -91,7 +91,7 @@ static int get_string_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
 
-#if (defined(WIN32) || defined(_WIN32) || defined(_WIN64)) && defined(LIBPLCTAGDLL_EXPORTS)
+#if (defined(WIN32) || defined(_WIN32) || (defined(_WIN64)) && defined(LIBPLCTAGDLL_EXPORTS))
 #include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -3317,7 +3317,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
     plc_tag_p tag = lookup_tag(tag_id);
     int string_length = 0;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting with string %s.", string_val);
 
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
@@ -3360,76 +3360,124 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
     critical_block(tag->api_mutex) {
         int string_capacity = (tag->byte_order->str_max_capacity ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset));
+        int string_last_offset = string_start_offset + (int)(tag->byte_order->str_count_word_bytes) + string_capacity + (tag->byte_order->str_is_zero_terminated ? 1 : 0);
 
-        /* determine the maximum number of characters/bytes to copy. */
-        if(string_capacity >= string_length) {
-            /* is there sufficient room in the tag? */
-            if(string_start_offset + (int)(tag->byte_order->str_count_word_bytes) + string_length + (tag->byte_order->str_is_zero_terminated ? 1 : 0) <= tag->size) {
-                /* set the status, we might change it below. */
-                rc = PLCTAG_STATUS_OK;
-                tag->status = (int8_t)rc;
+        /* initial checks - these must be done in the critical block otherwise someone could change the tag buffer size etc. underneath us. */
+pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", string_capacity, string_last_offset, (int)tag->size);
 
-                /* copy the string data into the tag. */
-                for(int i = 0; i < string_length; i++) {
-                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
-                                    + (size_t)(unsigned int)string_start_offset
-                                    + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
-                    tag->data[char_index] = (uint8_t)string_val[i];
-                }
-
-                /* zero pad the rest. */
-                for(int i = string_length; i < string_capacity; i++) {
-                    size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
-                                    + (size_t)(unsigned int)string_start_offset
-                                    + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
-                    tag->data[char_index] = (uint8_t)0;
-                }
-
-                /* if the string is counted, set the length */
-                if(tag->byte_order->str_is_counted) {
-                    switch(tag->byte_order->str_count_word_bytes) {
-                        case 1:
-                            tag->data[string_start_offset] = (uint8_t)(unsigned int)string_length;
-                            break;
-
-                        case 2:
-                            tag->data[string_start_offset + tag->byte_order->int16_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
-                            tag->data[string_start_offset + tag->byte_order->int16_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
-                            break;
-
-                        case 4:
-                            tag->data[string_start_offset + tag->byte_order->int32_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
-                            tag->data[string_start_offset + tag->byte_order->int32_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
-                            tag->data[string_start_offset + tag->byte_order->int32_order[2]] = (uint8_t)((((unsigned int)string_length) >> 16) & 0xFF);
-                            tag->data[string_start_offset + tag->byte_order->int32_order[3]] = (uint8_t)((((unsigned int)string_length) >> 24) & 0xFF);
-                            break;
-
-                        default:
-                            pdebug(DEBUG_WARN, "Unsupported string count size, %d!", tag->byte_order->str_count_word_bytes);
-                            rc = PLCTAG_ERR_UNSUPPORTED;
-                            tag->status = (int8_t)rc;
-                            break;
-                    }
-                }
-
-                if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) {
-                    tag->tag_is_dirty = 1;
-                }
-            } else {
-                pdebug(DEBUG_WARN, "Writing the full string would go out of bounds in the tag buffer!");
-                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-                tag->status = (int8_t)rc;
-            }
-        } else {
-            pdebug(DEBUG_WARN, "String capacity, %d, is less than the string length, %d!", string_capacity, string_length);
+        /* will it fit at all? */
+        if(string_capacity < string_length) {
+            pdebug(DEBUG_WARN, "Passed string value is longer than allowed string capacity!");
             rc = PLCTAG_ERR_TOO_LARGE;
             tag->status = (int8_t)rc;
+            break;
         }
+
+        /* do we have a mismatch between what is in the tag buffer and the string or configuration? */
+        if(string_last_offset > tag->size) {
+            pdebug(DEBUG_WARN, "Bad configuration? String capacity/size is larger than the tag buffer!");
+            rc = PLCTAG_ERR_BAD_CONFIG;
+            tag->status = (int8_t)rc;
+            break;
+        }
+
+        /* copy the string data into the tag. */
+        rc = PLCTAG_STATUS_OK;
+        for(int i = 0; i < string_length; i++) {
+            size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                            + (size_t)(unsigned int)string_start_offset
+                            + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+
+            if(char_index < (size_t)(uint32_t)tag->size) {
+                tag->data[char_index] = (uint8_t)string_val[i];
+            } else {
+                pdebug(DEBUG_WARN, "Out of bounds index generated during string copy!");
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+
+                /* note: only breaks out of the for loop, we need another break. */
+                break;
+            }
+        }
+
+        /* break out of the critical block if bad status. */
+        if(rc != PLCTAG_STATUS_OK) {
+            tag->status = (int8_t)rc;
+            break;
+        }
+
+        /* if the string is counted, set the length */
+        if(tag->byte_order->str_is_counted) {
+            int last_count_word_index = string_start_offset + (int)(unsigned int)tag->byte_order->str_count_word_bytes;
+
+            if(last_count_word_index > (int)(tag->size)) {
+                pdebug(DEBUG_WARN, "Unable to write valid count word as count word would go past the end of the tag buffer!");
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                tag->status = (int8_t)rc;
+                break;
+            }
+
+            switch(tag->byte_order->str_count_word_bytes) {
+                case 1:
+                    tag->data[string_start_offset] = (uint8_t)(unsigned int)string_length;
+                    break;
+
+                case 2:
+                    tag->data[string_start_offset + tag->byte_order->int16_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int16_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
+                    break;
+
+                case 4:
+                    tag->data[string_start_offset + tag->byte_order->int32_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int32_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int32_order[2]] = (uint8_t)((((unsigned int)string_length) >> 16) & 0xFF);
+                    tag->data[string_start_offset + tag->byte_order->int32_order[3]] = (uint8_t)((((unsigned int)string_length) >> 24) & 0xFF);
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unsupported string count size, %d!", tag->byte_order->str_count_word_bytes);
+                    rc = PLCTAG_ERR_UNSUPPORTED;
+                    tag->status = (int8_t)rc;
+                    break;
+            }
+        }
+
+        /* zero pad the rest. */
+        rc = PLCTAG_STATUS_OK;
+        for(int i = string_length; i < string_capacity; i++) {
+            size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
+                            + (size_t)(unsigned int)string_start_offset
+                            + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+
+            if(char_index < (size_t)(uint32_t)tag->size) {
+                tag->data[char_index] = (uint8_t)0;
+            } else {
+                pdebug(DEBUG_WARN, "Out of bounds index generated during string zero padding!");
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+
+                /* note: only breaks out of the for loop, we need another break. */
+                break;
+            }
+        }
+
+        /* break out of the critical block if bad status. */
+        if(rc != PLCTAG_STATUS_OK) {
+            tag->status = (int8_t)rc;
+            break;
+        }
+
+        /* if this is an auto-write tag, set the dirty flag to eventually trigger a write */
+        if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) {
+            tag->tag_is_dirty = 1;
+        }
+
+        /* set the return and tag status. */
+        rc = PLCTAG_STATUS_OK;
+        tag->status = (int8_t)rc;
     }
 
     rc_dec(tag);
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_destroy(rc));
 
     return rc;
 }
