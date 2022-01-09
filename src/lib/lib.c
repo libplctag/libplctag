@@ -91,7 +91,7 @@ static int get_string_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
 
-#if (defined(WIN32) || defined(_WIN32) || defined(_WIN64)) && defined(LIBPLCTAGDLL_EXPORTS)
+#if (defined(WIN32) || defined(_WIN32) || (defined(_WIN64)) && defined(LIBPLCTAGDLL_EXPORTS))
 #include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -3407,6 +3407,15 @@ pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", st
 
         /* if the string is counted, set the length */
         if(tag->byte_order->str_is_counted) {
+            int last_count_word_index = string_start_offset + (int)(unsigned int)tag->byte_order->str_count_word_bytes;
+
+            if(last_count_word_index > (int)(tag->size)) {
+                pdebug(DEBUG_WARN, "Unable to write valid count word as count word would go past the end of the tag buffer!");
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                tag->status = (int8_t)rc;
+                break;
+            }
+
             switch(tag->byte_order->str_count_word_bytes) {
                 case 1:
                     tag->data[string_start_offset] = (uint8_t)(unsigned int)string_length;
