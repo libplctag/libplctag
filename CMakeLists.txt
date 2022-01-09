@@ -1,4 +1,4 @@
-#   Copyright (C) 2021 by Kyle Hayes
+#   Copyright (C) 2022 by Kyle Hayes
 #   Author Kyle Hayes  kyle.hayes@gmail.com
 #
 # This software is available under either the Mozilla Public license
@@ -33,7 +33,7 @@
 # the project is version 2.4
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 4)
-set (libplctag_VERSION_PATCH 9)
+set (libplctag_VERSION_PATCH 10)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -463,6 +463,7 @@ elseif (BUILD_EXAMPLES)
                             test_reconnect
                             test_shutdown
                             test_special
+                            test_string
                             test_tag_attributes
                             thread_stress
                             toggle_bit
