@@ -55,7 +55,6 @@ int main()
 {
     int32_t tag = 0;
     int rc;
-    int str_num = 1;
     int offset = 0;
     int str_cap = 0;
     char *str = NULL;
@@ -93,7 +92,7 @@ int main()
 
     /* print out the data */
     str_cap = plc_tag_get_string_length(tag, offset) + 1; /* +1 for the zero termination. */
-    str = malloc((size_t)(unsigned int)str_cap);
+    str = (char *)malloc((size_t)(unsigned int)str_cap);
     if(!str) {
         fprintf(stderr, "Unable to allocate memory for the string!\n");
         plc_tag_destroy(tag);
@@ -113,8 +112,8 @@ int main()
     free(str);
 
     /* now try to overwrite memory */
-    str_cap = plc_tag_get_string_capacity(tag, offset) * 2 + 1;
-    str = malloc((size_t)(unsigned int)str_cap);
+    str_cap = plc_tag_get_string_capacity(tag, offset) + 1;
+    str = (char *)malloc((size_t)(unsigned int)str_cap);
     if(!str) {
         fprintf(stderr, "Unable to allocate memory for the string write test!\n");
         plc_tag_destroy(tag);
@@ -122,7 +121,7 @@ int main()
     }
 
     /* clear out the string memory */
-    memset(str, 0, str_cap);
+    memset(str, 0, (unsigned int)str_cap);
 
     /* try to write a shorter string but with a long capacity. */
 
