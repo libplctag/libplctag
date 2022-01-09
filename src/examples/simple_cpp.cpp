@@ -38,7 +38,7 @@
 
 #define REQUIRED_VERSION 2,1,0
 
-#define TAG_PATH "protocol=ab_eip&gateway=192.168.1.42&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=myDINTArray"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_count=10&name=TestDINTArray"
 #define ELEM_COUNT 10
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 5000
