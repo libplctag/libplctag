@@ -46,7 +46,7 @@
 
 #define REQUIRED_VERSION 2,4,10
 
-static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&elem_size=88&elem_count=1&name=TestSSTRING";
+static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]";
 
 #define DATA_TIMEOUT 5000
 
