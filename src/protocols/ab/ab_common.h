@@ -102,6 +102,9 @@ extern vector_p find_read_group_tags(ab_tag_p tag);
 
 THREAD_FUNC(request_handler_func);
 
+/* helpers for checking request status. */
+extern int check_read_request_status(ab_tag_p tag, ab_request_p request);
+extern int check_write_request_status(ab_tag_p tag, ab_request_p request);
 
 #define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
 
