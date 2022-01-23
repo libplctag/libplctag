@@ -135,10 +135,8 @@ static int build_write_request_connected(ab_tag_p tag, int byte_offset);
 static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_bit_request_connected(ab_tag_p tag);
 static int build_write_bit_request_unconnected(ab_tag_p tag);
-static int check_read_request_status(ab_tag_p tag, ab_request_p request);
 static int check_read_status_connected(ab_tag_p tag);
 static int check_read_status_unconnected(ab_tag_p tag);
-static int check_write_request_status(ab_tag_p tag, ab_request_p request);
 static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
@@ -1313,85 +1311,6 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
 
 
 
-
-
-/**
- * @brief Check the status of the read request
- * 
- * This function checks the request itself and updates the
- * tag if there are any failures or changes that need to be
- * made due to the request status.
- * 
- * The tag and the request must not be deleted out from underneath
- * this function.   Ideally both are held with write mutexes.
- * 
- * @return status of the request.
- * 
- */
-
-
-static int check_read_request_status(ab_tag_p tag, ab_request_p request)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    if(!request) {
-        tag->read_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
-
-        return PLCTAG_ERR_READ;
-    } 
-
-    /* we now have a valid reference to the request. */
-
-    /* request can be used by more than one thread at once. */
-    spin_block(&request->lock) {
-        if(!request->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        /* check to see if it was an abort on the session side. */
-        if(request->status != PLCTAG_STATUS_OK) {
-            rc = request->status;
-            request->abort_request = 1;
-
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-
-            /* TODO - why is this here? */
-            tag->size = tag->elem_count * tag->elem_size;
-
-            break;
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-
-            tag->req = NULL; 
-        }
-
-        pdebug(DEBUG_DETAIL, "Read not ready with status %s.", plc_tag_decode_error(rc));
-
-        return rc;
-    }
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return rc;
-}
-
-
-
 /*
  * check_read_status_connected
  *
@@ -1839,80 +1758,6 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
     return rc;
 }
-
-
-/**
- * @brief Check the status of the write request
- * 
- * This function checks the request itself and updates the
- * tag if there are any failures or changes that need to be
- * made due to the request status.
- * 
- * The tag and the request must not be deleted out from underneath
- * this function.   Ideally both are held with write mutexes.
- * 
- * @return status of the request.
- * 
- */
-
-
-static int check_write_request_status(ab_tag_p tag, ab_request_p request)
-{
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    if(!request) {
-        tag->write_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
-
-        return PLCTAG_ERR_WRITE;
-    } 
-
-    /* we now have a valid reference to the request. */
-
-    /* request can be used by more than one thread at once. */
-    spin_block(&request->lock) {
-        if(!request->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        /* check to see if it was an abort on the session side. */
-        if(request->status != PLCTAG_STATUS_OK) {
-            rc = request->status;
-            request->abort_request = 1;
-
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->write_in_progress = 0;
-            tag->offset = 0;
-
-            break;
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-
-            tag->req = NULL; 
-        }
-
-        pdebug(DEBUG_DETAIL, "Write not ready with status %s.", plc_tag_decode_error(rc));
-
-        return rc;
-    }
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return rc;
-}
-
 
 
 
