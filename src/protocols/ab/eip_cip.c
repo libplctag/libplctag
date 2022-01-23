@@ -135,9 +135,10 @@ static int build_write_request_connected(ab_tag_p tag, int byte_offset);
 static int build_write_request_unconnected(ab_tag_p tag, int byte_offset);
 static int build_write_bit_request_connected(ab_tag_p tag);
 static int build_write_bit_request_unconnected(ab_tag_p tag);
+static int check_read_request_status(ab_tag_p tag, ab_request_p request);
 static int check_read_status_connected(ab_tag_p tag);
-//static int check_read_tag_list_status_connected(ab_tag_p tag);
 static int check_read_status_unconnected(ab_tag_p tag);
+static int check_write_request_status(ab_tag_p tag, ab_request_p request);
 static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
@@ -1314,6 +1315,83 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset)
 
 
 
+/**
+ * @brief Check the status of the read request
+ * 
+ * This function checks the request itself and updates the
+ * tag if there are any failures or changes that need to be
+ * made due to the request status.
+ * 
+ * The tag and the request must not be deleted out from underneath
+ * this function.   Ideally both are held with write mutexes.
+ * 
+ * @return status of the request.
+ * 
+ */
+
+
+static int check_read_request_status(ab_tag_p tag, ab_request_p request)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!request) {
+        tag->read_in_progress = 0;
+        tag->offset = 0;
+
+        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
+
+        return PLCTAG_ERR_READ;
+    } 
+
+    /* we now have a valid reference to the request. */
+
+    /* request can be used by more than one thread at once. */
+    spin_block(&request->lock) {
+        if(!request->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(request->status != PLCTAG_STATUS_OK) {
+            rc = request->status;
+            request->abort_request = 1;
+
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+            tag->read_in_progress = 0;
+            tag->offset = 0;
+
+            /* TODO - why is this here? */
+            tag->size = tag->elem_count * tag->elem_size;
+
+            break;
+        }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        if(rc_is_error(rc)) {
+            /* the request is dead, from session side. */
+            tag->read_in_progress = 0;
+            tag->offset = 0;
+
+            tag->req = NULL; 
+        }
+
+        pdebug(DEBUG_DETAIL, "Read not ready with status %s.", plc_tag_decode_error(rc));
+
+        return rc;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
+
 /*
  * check_read_status_connected
  *
@@ -1330,6 +1408,7 @@ static int check_read_status_connected(ab_tag_p tag)
     uint8_t* data;
     uint8_t* data_end;
     int partial_data = 0;
+    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1338,59 +1417,25 @@ static int check_read_status_connected(ab_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if (!tag->req) {
-        tag->read_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
-
-        return PLCTAG_ERR_READ;
-    }
-
-    /* request can be used by two threads at once. */
-    spin_block(&tag->req->lock) {
-        if(!tag->req->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        /* check to see if it was an abort on the session side. */
-        if(tag->req->status != PLCTAG_STATUS_OK) {
-            rc = tag->req->status;
-            tag->req->abort_request = 1;
-
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-            tag->size = tag->elem_count * tag->elem_size;
-
-            break;
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-
-            tag->req = rc_dec(tag->req);
-        }
-
+    /* guard against the request being deleted out from underneath us. */
+    request = rc_inc(tag->req);
+    rc = check_read_request_status(tag, request);
+    if(rc != PLCTAG_STATUS_OK)  {
+        pdebug(DEBUG_DETAIL, "Read request status is not OK.");
+        rc_dec(request);
         return rc;
     }
 
-    /* the request is ours exclusively. */
+    /* the request reference is still valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp*)(tag->req->data);
+    cip_resp = (eip_cip_co_resp*)(request->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_co_resp);
+    data = (request->data) + sizeof(eip_cip_co_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = (request->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
     /* check the status */
     do {
@@ -1525,8 +1570,17 @@ static int check_read_status_connected(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    tag->req->abort_request = 1;
-    tag->req = rc_dec(tag->req);
+    request->abort_request = 1;
+    tag->req = rc_dec(request);
+
+    /*
+     * huh?  Yes, we do it a second time because we already had
+     * a reference and got another at the top of this function.
+     * So we need to remove it twice.   Once for the capture above,
+     * and once for the original reference.
+     */
+
+    rc_dec(request);
 
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
@@ -1575,6 +1629,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
     uint8_t* data;
     uint8_t* data_end;
     int partial_data = 0;
+    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1583,56 +1638,25 @@ static int check_read_status_unconnected(ab_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if (!tag->req) {
-        tag->read_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
-
-        return PLCTAG_ERR_READ;
-    }
-
-    /* request can be used by two threads at once. */
-    spin_block(&tag->req->lock) {
-        if(!tag->req->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        /* check to see if it was an abort on the session side. */
-        if(tag->req->status != PLCTAG_STATUS_OK) {
-            rc = tag->req->status;
-            tag->req->abort_request = 1;
-
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-            tag->size = tag->elem_count * tag->elem_size;
-
-            break;
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->req = rc_dec(tag->req);
-        }
-
+    /* guard against the request being deleted out from underneath us. */
+    request = rc_inc(tag->req);
+    rc = check_read_request_status(tag, request);
+    if(rc != PLCTAG_STATUS_OK)  {
+        pdebug(DEBUG_DETAIL, "Read request status is not OK.");
+        rc_dec(request);
         return rc;
     }
 
-    /* the request is ours exclusively. */
+    /* the request reference is still valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_uc_resp*)(tag->req->data);
+    cip_resp = (eip_cip_uc_resp*)(request->data);
 
     /* point to the start of the data */
-    data = (tag->req->data) + sizeof(eip_cip_uc_resp);
+    data = (request->data) + sizeof(eip_cip_uc_resp);
 
     /* point the end of the data */
-    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = (request->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
     /* check the status */
     do {
@@ -1762,8 +1786,17 @@ static int check_read_status_unconnected(ab_tag_p tag)
 
 
     /* clean up the request */
-    tag->req->abort_request = 1;
-    tag->req = rc_dec(tag->req);
+    request->abort_request = 1;
+    tag->req = rc_dec(request);
+
+    /*
+     * huh?  Yes, we do it a second time because we already had
+     * a reference and got another at the top of this function.
+     * So we need to remove it twice.   Once for the capture above,
+     * and once for the original reference.
+     */
+
+    rc_dec(request);
 
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
@@ -1799,10 +1832,88 @@ static int check_read_status_unconnected(ab_tag_p tag)
         ab_tag_abort(tag);
     }
 
+    /* release the referene to the request. */
+    rc_dec(request);
+
     pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
+
+
+/**
+ * @brief Check the status of the write request
+ * 
+ * This function checks the request itself and updates the
+ * tag if there are any failures or changes that need to be
+ * made due to the request status.
+ * 
+ * The tag and the request must not be deleted out from underneath
+ * this function.   Ideally both are held with write mutexes.
+ * 
+ * @return status of the request.
+ * 
+ */
+
+
+static int check_write_request_status(ab_tag_p tag, ab_request_p request)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    if(!request) {
+        tag->write_in_progress = 0;
+        tag->offset = 0;
+
+        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
+
+        return PLCTAG_ERR_WRITE;
+    } 
+
+    /* we now have a valid reference to the request. */
+
+    /* request can be used by more than one thread at once. */
+    spin_block(&request->lock) {
+        if(!request->resp_received) {
+            rc = PLCTAG_STATUS_PENDING;
+            break;
+        }
+
+        /* check to see if it was an abort on the session side. */
+        if(request->status != PLCTAG_STATUS_OK) {
+            rc = request->status;
+            request->abort_request = 1;
+
+            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+            tag->write_in_progress = 0;
+            tag->offset = 0;
+
+            break;
+        }
+    }
+
+    if(rc != PLCTAG_STATUS_OK) {
+        if(rc_is_error(rc)) {
+            /* the request is dead, from session side. */
+            tag->read_in_progress = 0;
+            tag->offset = 0;
+
+            tag->req = NULL; 
+        }
+
+        pdebug(DEBUG_DETAIL, "Write not ready with status %s.", plc_tag_decode_error(rc));
+
+        return rc;
+    }
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
 
 
 
@@ -1817,6 +1928,7 @@ static int check_write_status_connected(ab_tag_p tag)
 {
     eip_cip_co_resp* cip_resp;
     int rc = PLCTAG_STATUS_OK;
+    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1825,49 +1937,19 @@ static int check_write_status_connected(ab_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if (!tag->req) {
-        tag->write_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
-
-        return PLCTAG_ERR_WRITE;
-    }
-
-    /* request can be used by two threads at once. */
-    spin_block(&tag->req->lock) {
-        if(!tag->req->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        /* check to see if it was an abort on the session side. */
-        if(tag->req->status != PLCTAG_STATUS_OK) {
-            rc = tag->req->status;
-            tag->req->abort_request = 1;
-
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->write_in_progress = 0;
-            tag->offset = 0;
-
-            break;
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->req = rc_dec(tag->req);
-        }
-
+    /* guard against the request being deleted out from underneath us. */
+    request = rc_inc(tag->req);
+    rc = check_write_request_status(tag, request);
+    if(rc != PLCTAG_STATUS_OK)  {
+        pdebug(DEBUG_DETAIL, "Write request status is not OK.");
+        rc_dec(request);
         return rc;
     }
 
-    /* the request is ours exclusively. */
+    /* the request reference is still valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp*)(tag->req->data);
+    cip_resp = (eip_cip_co_resp*)(request->data);
 
     do {
         if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
@@ -1899,8 +1981,17 @@ static int check_write_status_connected(ab_tag_p tag)
     } while(0);
 
     /* clean up the request. */
-    tag->req->abort_request = 1;
-    tag->req = rc_dec(tag->req);
+    request->abort_request = 1;
+    tag->req = rc_dec(request);
+
+    /*
+     * huh?  Yes, we do it a second time because we already had
+     * a reference and got another at the top of this function.
+     * So we need to remove it twice.   Once for the capture above,
+     * and once for the original reference.
+     */
+
+    rc_dec(request);
 
     /* write is done in one way or another. */
     tag->write_in_progress = 0;
@@ -1933,6 +2024,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
 {
     eip_cip_uc_resp* cip_resp;
     int rc = PLCTAG_STATUS_OK;
+    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1941,49 +2033,19 @@ static int check_write_status_unconnected(ab_tag_p tag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if (!tag->req) {
-        tag->write_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN,"Write in progress, but no request in flight!");
-
-        return PLCTAG_ERR_WRITE;
-    }
-
-    /* request can be used by two threads at once. */
-    spin_block(&tag->req->lock) {
-        if(!tag->req->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        /* check to see if it was an abort on the session side. */
-        if(tag->req->status != PLCTAG_STATUS_OK) {
-            rc = tag->req->status;
-            tag->req->abort_request = 1;
-
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->write_in_progress = 0;
-            tag->offset = 0;
-
-            break;
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->req = rc_dec(tag->req);
-        }
-
+    /* guard against the request being deleted out from underneath us. */
+    request = rc_inc(tag->req);
+    rc = check_write_request_status(tag, request);
+    if(rc != PLCTAG_STATUS_OK)  {
+        pdebug(DEBUG_DETAIL, "Write request status is not OK.");
+        rc_dec(request);
         return rc;
     }
 
-    /* request is exclusively ours. */
+    /* the request reference is still valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_uc_resp*)(tag->req->data);
+    cip_resp = (eip_cip_uc_resp*)(request->data);
 
     do {
         if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
@@ -2016,8 +2078,17 @@ static int check_write_status_unconnected(ab_tag_p tag)
     } while(0);
 
     /* clean up the request. */
-    tag->req->abort_request = 1;
-    tag->req = rc_dec(tag->req);
+    request->abort_request = 1;
+    tag->req = rc_dec(request);
+
+    /*
+     * huh?  Yes, we do it a second time because we already had
+     * a reference and got another at the top of this function.
+     * So we need to remove it twice.   Once for the capture above,
+     * and once for the original reference.
+     */
+
+    rc_dec(request);
 
     /* write is done in one way or another */
     tag->write_in_progress = 0;
