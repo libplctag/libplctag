@@ -637,11 +637,6 @@ int tag_write_start(ab_tag_p tag)
     /* save the request for later */
     tag->req = req;
 
-    /* save the request for later */
-    tag->req = req;
-
-//    tag->status = PLCTAG_STATUS_PENDING;
-
     pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_PENDING;
@@ -680,9 +675,6 @@ static int check_write_status(ab_tag_p tag)
 
     pccc = (pccc_resp *)(request->data);
 
-    /* point to the start of the data */
-//    data = (uint8_t *)pccc + sizeof(*pccc);
-
     /* fake exception */
     do {
         /* check the response status */
@@ -712,6 +704,10 @@ static int check_write_status(ab_tag_p tag)
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
+
+    /* clean up the request. */
+    request->abort_request = 1;
+    tag->req = rc_dec(request);
 
     /*
      * huh?  Yes, we do it a second time because we already had
