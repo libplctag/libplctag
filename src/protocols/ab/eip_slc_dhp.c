@@ -348,11 +348,6 @@ int tag_write_start(ab_tag_p tag)
 {
     pccc_dhp_co_req *pccc;
     uint8_t *data;
-//    uint8_t element_def[16];
-//    int element_def_size;
-//    uint8_t array_def[16];
-//    int array_def_size;
-//    int pccc_data_type;
     int data_per_packet = 0;
     int overhead = 0;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
@@ -468,7 +463,6 @@ int tag_write_start(ab_tag_p tag)
 
     /* save the request for later */
     tag->req = req;
-//    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -637,7 +631,7 @@ static int check_write_status(ab_tag_p tag)
      */
 
     rc_dec(request);
-    
+
     tag->write_in_progress = 0;
 
     pdebug(DEBUG_SPEW, "Done.");
