@@ -346,7 +346,6 @@ int tag_read_start(ab_tag_p tag)
 
 
 
-
 /*
  * check_read_status
  *
@@ -358,53 +357,25 @@ int tag_read_start(ab_tag_p tag)
 static int check_read_status(ab_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req;
+    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW,"Starting");
 
-    /* check for request in flight. */
-    if (!tag->req) {
-        tag->read_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN,"Read in progress, but no request in flight!");
-
-        return PLCTAG_ERR_READ;
+    if(!tag) {
+        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
     }
 
-    /* request can be used by two threads at once. */
-    spin_block(&tag->req->lock) {
-        if(!tag->req->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
-            break;
-        }
-
-        /* check to see if it was an abort on the session side. */
-        if(tag->req->status != PLCTAG_STATUS_OK) {
-            rc = tag->req->status;
-            tag->req->abort_request = 1;
-
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-
-            break;
-        }
-    }
-
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
-            tag->req = rc_dec(tag->req);
-        }
-
+    /* guard against the request being deleted out from underneath us. */
+    request = rc_inc(tag->req);
+    rc = check_read_request_status(tag, request);
+    if(rc != PLCTAG_STATUS_OK)  {
+        pdebug(DEBUG_DETAIL, "Read request status is not OK.");
+        rc_dec(request);
         return rc;
     }
 
-    /* the request is ours exclusively. */
-
-    req = tag->req;
+    /* the request reference is still valid. */
 
     /* fake exceptions */
     do {
@@ -416,12 +387,12 @@ static int check_read_status(ab_tag_p tag)
         int pccc_res_type;
         int pccc_res_length;
 
-        pccc = (pccc_resp *)(req->data);
+        pccc = (pccc_resp *)(request->data);
 
         /* point to the start of the data */
         data = (uint8_t *)pccc + sizeof(*pccc);
 
-        data_end = (req->data + le2h16(pccc->encap_length) + sizeof(eip_encap));
+        data_end = (request->data + le2h16(pccc->encap_length) + sizeof(eip_encap));
 
         if(le2h16(pccc->encap_command) != AB_EIP_UNCONNECTED_SEND) {
             pdebug(DEBUG_WARN,"Unexpected EIP packet type received: %d!",pccc->encap_command);
@@ -500,9 +471,17 @@ static int check_read_status(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    if(tag->req) {
-        tag->req = rc_dec(req);
-    }
+    request->abort_request = 1;
+    tag->req = rc_dec(request);
+
+    /*
+     * huh?  Yes, we do it a second time because we already had
+     * a reference and got another at the top of this function.
+     * So we need to remove it twice.   Once for the capture above,
+     * and once for the original reference.
+     */
+
+    rc_dec(request);
 
     tag->read_in_progress = 0;
 
