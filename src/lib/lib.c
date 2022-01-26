@@ -392,35 +392,35 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
         /* was there a read start? */
         if(tag->event_read_started) {
             pdebug(DEBUG_DETAIL, "Tag read started.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, plc_tag_status(tag->tag_id));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, plc_tag_status(tag->tag_id), tag->userdata);
             tag->event_read_started = 0;
         }
 
         /* was there a write start? */
         if(tag->event_write_started) {
             pdebug(DEBUG_DETAIL, "Tag write started.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, plc_tag_status(tag->tag_id));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, plc_tag_status(tag->tag_id), tag->userdata);
             tag->event_write_started = 0;
         }
 
         /* was there an abort? */
         if(tag->event_operation_aborted) {
             pdebug(DEBUG_DETAIL, "Tag operation aborted.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, plc_tag_status(tag->tag_id));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, plc_tag_status(tag->tag_id), tag->userdata);
             tag->event_operation_aborted = 0;
         }
 
         /* was there a read completion? */
         if(tag->event_read_complete) {
             pdebug(DEBUG_DETAIL, "Tag read completed.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, plc_tag_status(tag->tag_id));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, plc_tag_status(tag->tag_id), tag->userdata);
             tag->event_read_complete = 0;
         }
 
         /* was there a write completion? */
         if(tag->event_write_complete) {
             pdebug(DEBUG_DETAIL, "Tag write completed.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, plc_tag_status(tag->tag_id));
+            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, plc_tag_status(tag->tag_id), tag->userdata);
             tag->event_write_complete = 0;
         }
 
@@ -428,7 +428,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
         if(tag->event_creation_complete) {
             pdebug(DEBUG_DETAIL, "Tag creation completed.");
             /* TODO - when API changes, add this. */
-            //tag->callback(tag->tag_id, PLCTAG_EVENT_CREATE_COMPLETE, plc_tag_status(tag->tag_id));
+            //tag->callback(tag->tag_id, PLCTAG_EVENT_CREATE_COMPLETE, plc_tag_status(tag->tag_id), tag->userdata);
             tag->event_creation_complete = 0;
         }
 
@@ -1048,6 +1048,16 @@ LIB_EXPORT void plc_tag_shutdown(void)
     destroy_modules();
 }
 
+/**
+* handle callback without userdata
+*/
+void handle_callback(int32_t tag_id, int event, int status, void* userdata) {
+    void (*cb)(int32_t tag_id, int event, int status);
+    if (userdata) {
+        cb = userdata;
+        cb(tag_id, event, status);
+    }
+}
 
 /*
  * plc_tag_register_callback
@@ -1102,7 +1112,13 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
             rc = PLCTAG_ERR_DUPLICATE;
         } else {
             rc = PLCTAG_STATUS_OK;
-            tag->callback = tag_callback_func;
+            if (tag_callback_func) {
+                tag->callback = handle_callback;
+                tag->userdata = tag_callback_func;
+            } else {
+                tag->callback = NULL;
+                tag->userdata = NULL;
+            }
         }
     }
 
@@ -1113,8 +1129,76 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
     return rc;
 }
 
+/*
+ * plc_tag_register_callback2
+ *
+ * This function registers the passed callback function with the tag.  Only one callback function
+ * may be registered on a tag at a time!
+ *
+ * Once registered, any of the following operations on or in the tag will result in the callback
+ * being called:
+ *
+ *      * starting a tag read operation.
+ *      * a tag read operation ending.
+ *      * a tag read being aborted.
+ *      * starting a tag write operation.
+ *      * a tag write operation ending.
+ *      * a tag write being aborted.
+ *      * a tag being destroyed
+ *
+ * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
+ * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
+ * This means that YOU are responsible for making sure that all client application data structures the callback
+ * function touches are safe to access by the callback!
+ *
+ * Do not do any operations in the callback that block for any significant time.   This will cause library
+ * performance to be poor or even to start failing!
+ *
+ * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * not guaranteed that they will work and they will possibly hang or fail.
+ *
+ * Return values:
+ *void (*tag_callback_func)(int32_t tag_id, uint32_t event, int status, void* userdata)
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ */
 
+LIB_EXPORT int plc_tag_register_callback2(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = lookup_tag(tag_id);
 
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if (!tag) {
+        pdebug(DEBUG_WARN, "Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if (tag->callback) {
+            rc = PLCTAG_ERR_DUPLICATE;
+        }
+        else {
+            rc = PLCTAG_STATUS_OK;
+            if (tag_callback_func) {
+                tag->callback = tag_callback_func;
+                tag->userdata = userdata;
+            } else {
+                tag->callback = NULL;
+                tag->userdata = NULL;
+            }
+        }
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
 
 /*
  * plc_tag_unregister_callback
@@ -1143,6 +1227,7 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id)
         if(tag->callback) {
             rc = PLCTAG_STATUS_OK;
             tag->callback = NULL;
+            tag->userdata = NULL;
         } else {
             rc = PLCTAG_ERR_NOT_FOUND;
         }
@@ -1356,7 +1441,7 @@ LIB_EXPORT int plc_tag_abort(int32_t id)
 
     if(tag->callback) {
         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_ABORTED.");
-        tag->callback(id, PLCTAG_EVENT_ABORTED, PLCTAG_STATUS_OK);
+        tag->callback(id, PLCTAG_EVENT_ABORTED, PLCTAG_STATUS_OK, tag->userdata);
     }
 
     rc_dec(tag);
@@ -1414,7 +1499,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
 
     if(tag->callback) {
         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_DESTROYED.");
-        tag->callback(tag_id, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
+        tag->callback(tag_id, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK, tag->userdata);
     }
 
     /* release the reference outside the mutex. */
@@ -1463,7 +1548,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
     if(tag->callback) {
         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_STARTED.");
-        tag->callback(id, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+        tag->callback(id, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK, tag->userdata);
     }
 
     critical_block(tag->api_mutex) {
@@ -1677,7 +1762,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
     if(tag->callback) {
         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_STARTED.");
-        tag->callback(id, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK);
+        tag->callback(id, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK, tag->userdata);
     }
 
     critical_block(tag->api_mutex) {
