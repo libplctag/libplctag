@@ -34,7 +34,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
 #include <Windows.h>
 #else
 #include <pthread.h>
@@ -62,7 +62,7 @@
 
 
 
-#ifdef _WIN32
+#if defined(WIN32) || defined(_WIN32)
 volatile int done = 0;
 
 /* straight from MS' web site :-) */
@@ -143,7 +143,7 @@ volatile int32_t tag;
  * Thread function.  Just read until killed.
  */
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
 DWORD __stdcall thread_func(LPVOID data)
 #else
 void *thread_func(void *data)
@@ -202,7 +202,7 @@ void *thread_func(void *data)
         util_sleep_ms(1);
     }
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
     return (DWORD)0;
 #else
     return NULL;
@@ -213,7 +213,7 @@ void *thread_func(void *data)
 int main(int argc, char **argv)
 {
     int rc = PLCTAG_STATUS_OK;
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
     HANDLE thread[MAX_THREADS];
 #else
     pthread_t thread[MAX_THREADS];
@@ -265,7 +265,7 @@ int main(int argc, char **argv)
     fprintf(stderr,"Creating %d threads.\n",num_threads);
 
     for(thread_id=0; thread_id < num_threads; thread_id++) {
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
         thread[thread_id] = CreateThread(
                                         NULL,                       /* default security attributes */
                                         0,                          /* use default stack size      */
@@ -284,7 +284,7 @@ int main(int argc, char **argv)
     }
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
         WaitForSingleObject(thread[thread_id], (DWORD)INFINITE);
 #else
         pthread_join(thread[thread_id], NULL);
