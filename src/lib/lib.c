@@ -1403,10 +1403,10 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
     critical_block(tag->api_mutex) {
         if(!tag->vtable || !tag->vtable->abort) {
             pdebug(DEBUG_WARN,"Tag does not have a abort function!");
+        } else {
+            /* Force a clean up. */
+            tag->vtable->abort(tag);
         }
-
-        /* Force a clean up. */
-        tag->vtable->abort(tag);
     }
 
     /* wake the tickler */

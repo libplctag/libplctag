@@ -43,7 +43,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
 #include <Windows.h>
 #else
 #include <pthread.h>
@@ -172,7 +172,7 @@ typedef struct {
 
 
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
 DWORD __stdcall test_runner(LPVOID data)
 #else
 void* test_runner(void* data)
@@ -231,7 +231,7 @@ void* test_runner(void* data)
 
     fflush(stderr);
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
     return (DWORD)0;
 #else
     return NULL;
@@ -243,7 +243,7 @@ void* test_runner(void* data)
 
 int main(int argc, char **argv)
 {
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
     HANDLE thread[MAX_THREADS];
 #else
     pthread_t thread[MAX_THREADS];
@@ -341,7 +341,7 @@ int main(int argc, char **argv)
     for(int tid=0; tid < num_threads  && tid < MAX_THREADS; tid++) {
         fprintf(stderr, "--- Creating test thread %d.\n", args[tid].tid);
 
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
         thread[tid] = CreateThread( NULL,                       /* default security attributes */
                                     0,                          /* use default stack size      */
                                     test_runner,                /* thread function             */
@@ -376,7 +376,7 @@ int main(int argc, char **argv)
     util_sleep_ms(100);
 
     for(int tid=0; tid < num_threads && tid < MAX_THREADS; tid++) {
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
         WaitForSingleObject(thread[tid], (DWORD)INFINITE);
 #else
         pthread_join(thread[tid], NULL);

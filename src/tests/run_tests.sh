@@ -111,7 +111,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: basic CIP bridging... "
-$TEST_DIR//tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=10.206.1.39&path=1,6,18,10.206.1.40,1,4&plc=lgx&name=TestBigArray[0]' --debug=4 --write=5 > "${TEST}_cip_bridge.log" 2>&1
+$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=10.206.1.39&path=1,6,18,10.206.1.40,1,4&plc=lgx&name=TestBigArray[0]' --debug=4 --write=5 > "${TEST}_cip_bridge.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++

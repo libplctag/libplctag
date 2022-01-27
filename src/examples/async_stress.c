@@ -44,7 +44,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
-#ifdef WIN32
+#if defined(WIN32) || defined(_WIN32)
     #include <Windows.h>
 #else
     #include <signal.h>
