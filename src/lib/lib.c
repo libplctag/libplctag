@@ -1130,9 +1130,9 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
 }
 
 /*
- * plc_tag_register_callback2
+ * plc_tag_register_callback_ex
  *
- * This function registers the passed callback function with the tag.  Only one callback function
+ * This function registers the passed callback function and user data with the tag.  Only one callback function
  * may be registered on a tag at a time!
  *
  * Once registered, any of the following operations on or in the tag will result in the callback
@@ -1165,7 +1165,7 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * If all is successful, the function will return PLCTAG_STATUS_OK.
  */
 
-LIB_EXPORT int plc_tag_register_callback2(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(tag_id);

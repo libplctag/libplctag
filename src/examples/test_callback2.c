@@ -234,7 +234,7 @@ int main()
     }
 
     /* register the callback */
-    rc = plc_tag_register_callback2(tag, tag_callback, &user);
+    rc = plc_tag_register_callback_ex(tag, tag_callback, &user);
     if (rc != PLCTAG_STATUS_OK)
     {
         printf("Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
@@ -245,7 +245,7 @@ int main()
     }
 
     /* test registering the callback again, should be an error */
-    rc = plc_tag_register_callback2(tag, tag_callback, &user);
+    rc = plc_tag_register_callback_ex(tag, tag_callback, &user);
     if (rc != PLCTAG_ERR_DUPLICATE)
     {
         printf("Got incorrect status when registering callback twice %s!\n", plc_tag_decode_error(rc));
