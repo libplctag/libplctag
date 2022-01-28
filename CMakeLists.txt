@@ -487,7 +487,7 @@ elseif (BUILD_EXAMPLES)
                             slc500
                             string
                             test_callback
-                            test_callback2
+                            test_callback_ex
                             test_connection_group
                             test_raw_cip
                             test_shutdown
