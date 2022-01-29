@@ -90,8 +90,8 @@ static int get_string_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_total_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
-
-#if (defined(WIN32) || defined(_WIN32) || (defined(_WIN64)) && defined(LIBPLCTAGDLL_EXPORTS))
+#ifdef LIPLCTAGDLL_EXPORTS
+    #if defined(_WIN32) || (defined(_WIN64)
 #include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -120,7 +120,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
     return TRUE;
 }
-
+    #endif
 #endif
 
 /*
@@ -1093,7 +1093,7 @@ void handle_callback(int32_t tag_id, int event, int status, void* userdata) {
  * function may be registered at a time on each tag.
  *
  * If all is successful, the function will return PLCTAG_STATUS_OK.
- * 
+ *
  * Also see plc_tag_register_callback_ex.
  */
 
@@ -1165,7 +1165,7 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * function may be registered at a time on each tag.
  *
  * If all is successful, the function will return PLCTAG_STATUS_OK.
- * 
+ *
  * Also see plc_tag_register_callback.
  */
 
@@ -1184,9 +1184,7 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_
     critical_block(tag->api_mutex) {
         if (tag->callback) {
             rc = PLCTAG_ERR_DUPLICATE;
-        }
-        else {
-            rc = PLCTAG_STATUS_OK;
+        } else {
             if (tag_callback_func) {
                 tag->callback = tag_callback_func;
                 tag->userdata = userdata;
