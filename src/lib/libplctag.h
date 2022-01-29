@@ -268,7 +268,7 @@ LIB_EXPORT void plc_tag_shutdown(void);
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
 
 
-
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
 
 
 

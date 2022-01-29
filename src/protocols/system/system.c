@@ -214,7 +214,7 @@ static int system_tag_read(plc_tag_p ptag)
     }
 
     if(tag->callback) {
-        tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, rc);
+        tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, rc, tag->userdata);
     }
 
     pdebug(DEBUG_INFO,"Done.");
@@ -256,7 +256,7 @@ static int system_tag_write(plc_tag_p ptag)
     }
 
     if(tag->callback) {
-        tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
+        tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, rc, tag->userdata);
     }
 
     pdebug(DEBUG_INFO,"Done.");

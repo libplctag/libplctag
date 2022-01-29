@@ -133,7 +133,8 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         mutex_p api_mutex; \
                         cond_p tag_cond_wait; \
                         tag_vtable_p vtable; \
-                        void (*callback)(int32_t tag_id, int event, int status); \
+                        void (*callback)(int32_t tag_id, int event, int status, void *userdata); \
+                        void *userdata; \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \
                         int64_t auto_sync_next_read; \
