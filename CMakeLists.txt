@@ -454,7 +454,7 @@ elseif (BUILD_EXAMPLES)
                             slc500
                             stress_api_lock
                             stress_test
-                            string
+                            string_standard
                             test_auto_sync
                             test_callback
                             test_callback_ex
@@ -486,7 +486,7 @@ elseif (BUILD_EXAMPLES)
                             simple
                             simple_dual
                             slc500
-                            string
+                            string_standard
                             test_callback
                             test_callback_ex
                             test_connection_group
