@@ -98,6 +98,9 @@ struct tag_byte_order_s {
 typedef struct tag_byte_order_s tag_byte_order_t;
 
 
+typedef void (*tag_callback_func)(int32_t tag_id, int event, int status);
+typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status, void *user_data);
+
 
 
 /*
@@ -133,7 +136,7 @@ typedef struct tag_byte_order_s tag_byte_order_t;
                         mutex_p api_mutex; \
                         cond_p tag_cond_wait; \
                         tag_vtable_p vtable; \
-                        void (*callback)(int32_t tag_id, int event, int status, void *userdata); \
+                        tag_extended_callback_func callback; \
                         void *userdata; \
                         int64_t read_cache_expire; \
                         int64_t read_cache_ms; \

@@ -245,6 +245,18 @@ else
 fi
 
 
+let TEST++
+echo -n "Test $TEST: emulator test extended callbacks... "
+$TEST_DIR/test_callback_ex > "${TEST}_extended_callback_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
 # echo "  Killing AB emulator."
 killall -TERM ab_server > /dev/null 2>&1
 
