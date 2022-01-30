@@ -263,10 +263,11 @@ LIB_EXPORT void plc_tag_shutdown(void);
 
 #define PLCTAG_EVENT_DESTROYED          (6)
 
-#define PLCTAG_EVENT_MAX                (PLCTAG_EVENT_DESTROYED + 1)
+#define PLCTAG_EVENT_CREATED            (7)
+
+#define PLCTAG_EVENT_MAX                (PLCTAG_EVENT_CREATED + 1)
 
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
-
 
 LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
 

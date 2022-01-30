@@ -32,13 +32,13 @@
  ***************************************************************************/
 
 
+#include "../lib/libplctag.h"
+#include "utils.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
-#define REQUIRED_VERSION 2,1,4
+#define REQUIRED_VERSION 2, 1, 4
 
 #define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
 #define DATA_TIMEOUT 5000
@@ -51,62 +51,65 @@ void tag_callback(int32_t tag_id, int event, int status)
 {
     /* handle the events. */
     switch(event) {
-        case PLCTAG_EVENT_ABORTED:
-            printf("Tag operation was aborted!\n");
-            break;
+    case PLCTAG_EVENT_ABORTED:
+        printf("Tag operation was aborted!\n");
+        break;
 
-        case PLCTAG_EVENT_DESTROYED:
-            if(TestDINTArray) {
-                free((void *)TestDINTArray);
-                TestDINTArray = NULL;
+    case PLCTAG_EVENT_CREATED:
+        printf("Tag created with status %s.\n", plc_tag_decode_error(status));
+        break;
+
+    case PLCTAG_EVENT_DESTROYED:
+        if(TestDINTArray) {
+            free((void *)TestDINTArray);
+            TestDINTArray = NULL;
+        }
+        printf("Tag was destroyed.\n");
+        break;
+
+    case PLCTAG_EVENT_READ_COMPLETED:
+        if(status == PLCTAG_STATUS_OK && TestDINTArray) {
+            int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
+            int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
+
+            for(int i = 0; i < elem_count; i++) {
+                TestDINTArray[i] = plc_tag_get_int32(tag_id, (i * elem_size));
             }
-            printf( "Tag was destroyed.\n");
-            break;
+        }
 
-        case PLCTAG_EVENT_READ_COMPLETED:
-            if(status == PLCTAG_STATUS_OK && TestDINTArray) {
-                int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
-                int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
+        printf("Tag read operation completed with status %s.\n", plc_tag_decode_error(status));
 
-                for(int i = 0; i < elem_count; i++) {
-                    TestDINTArray[i] = plc_tag_get_int32(tag_id, (i * elem_size));
-                }
+        break;
+
+    case PLCTAG_EVENT_READ_STARTED:
+        printf("Tag read operation started.\n");
+        break;
+
+    case PLCTAG_EVENT_WRITE_COMPLETED:
+        if(status == PLCTAG_STATUS_OK) {
+            printf("Tag write operation completed.\n");
+        } else {
+            printf("Tag write operation failed with status %s!\n", plc_tag_decode_error(status));
+        }
+        break;
+
+    case PLCTAG_EVENT_WRITE_STARTED:
+        if(status == PLCTAG_STATUS_OK && TestDINTArray) {
+            int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
+            int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
+
+            for(int i = 0; i < elem_count; i++) {
+                plc_tag_set_int32(tag_id, (i * elem_size), TestDINTArray[i]);
             }
+        }
 
-            printf("Tag read operation completed with status %s.\n", plc_tag_decode_error(status));
+        printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
 
-            break;
+        break;
 
-        case PLCTAG_EVENT_READ_STARTED:
-            printf( "Tag read operation started.\n");
-            break;
-
-        case PLCTAG_EVENT_WRITE_COMPLETED:
-            if(status == PLCTAG_STATUS_OK) {
-                printf("Tag write operation completed.\n");
-            } else {
-                printf("Tag write operation failed with status %s!\n", plc_tag_decode_error(status));
-            }
-            break;
-
-        case PLCTAG_EVENT_WRITE_STARTED:
-            if(status == PLCTAG_STATUS_OK && TestDINTArray) {
-                int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
-                int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
-
-                for(int i = 0; i < elem_count; i++) {
-                    plc_tag_set_int32(tag_id, (i * elem_size), TestDINTArray[i]);
-                }
-            }
-
-            printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
-
-            break;
-
-        default:
-            printf("Unexpected event %d!\n", event);
-            break;
-
+    default:
+        printf("Unexpected event %d!\n", event);
+        break;
     }
 }
 
@@ -197,14 +200,14 @@ int main()
     elem_size = plc_tag_get_int_attribute(tag, "elem_size", -1);
 
     if(elem_size == -1 || elem_count == -1) {
-        printf( "Unable to get elem_count (%d) or elem_size (%d)!\n", elem_count, elem_size);
+        printf("Unable to get elem_count (%d) or elem_size (%d)!\n", elem_count, elem_size);
         plc_tag_destroy(tag);
         return 1;
     }
 
     TestDINTArray = calloc((size_t)elem_count, (size_t)elem_size);
     if(!TestDINTArray) {
-        printf( "Unable to allocate memory for tag array!\n");
+        printf("Unable to allocate memory for tag array!\n");
         plc_tag_destroy(tag);
         return 1;
     }
@@ -212,7 +215,7 @@ int main()
     /* register the callback */
     rc = plc_tag_register_callback(tag, tag_callback);
     if(rc != PLCTAG_STATUS_OK) {
-        printf( "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
+        printf("Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
         free((void *)TestDINTArray);
         TestDINTArray = NULL;
         plc_tag_destroy(tag);
@@ -222,7 +225,7 @@ int main()
     /* test registering the callback again, should be an error */
     rc = plc_tag_register_callback(tag, tag_callback);
     if(rc != PLCTAG_ERR_DUPLICATE) {
-        printf( "Got incorrect status when registering callback twice %s!\n", plc_tag_decode_error(rc));
+        printf("Got incorrect status when registering callback twice %s!\n", plc_tag_decode_error(rc));
         free((void *)TestDINTArray);
         TestDINTArray = NULL;
         plc_tag_destroy(tag);
@@ -233,7 +236,7 @@ int main()
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        printf("ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
 
         /*
          * we do not need to free the array TestDINTArray because the callback will do
@@ -245,12 +248,12 @@ int main()
     }
 
     /* print out the data */
-    for(i=0; i < elem_count; i++) {
-        printf("data[%d]=%d\n",i, TestDINTArray[i]);
+    for(i = 0; i < elem_count; i++) {
+        printf("data[%d]=%d\n", i, TestDINTArray[i]);
     }
 
     /* now test a write */
-    for(i=0; i < elem_count; i++) {
+    for(i = 0; i < elem_count; i++) {
         TestDINTArray[i]++;
     }
 
@@ -259,7 +262,7 @@ int main()
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        printf("ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
 
         /*
          * we do not need to free the array TestDINTArray because the callback will do
@@ -273,7 +276,7 @@ int main()
     /* get the data again*/
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        printf("ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
 
         /*
          * we do not need to free the array TestDINTArray because the callback will do
@@ -285,8 +288,8 @@ int main()
     }
 
     /* print out the data */
-    for(i=0; i < elem_count; i++) {
-        printf("data[%d]=%d\n",i,TestDINTArray[i]);
+    for(i = 0; i < elem_count; i++) {
+        printf("data[%d]=%d\n", i, TestDINTArray[i]);
     }
 
     /* test a timeout. */
@@ -296,7 +299,7 @@ int main()
     end = util_time_ms();
 
     if(rc != PLCTAG_ERR_TIMEOUT) {
-        printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end- start));
+        printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end - start));
 
         /*
          * we do not need to free the array TestDINTArray because the callback will do
@@ -311,7 +314,7 @@ int main()
     printf("Testing abort behavior.\n");
     rc = plc_tag_read(tag, 0);
     if(rc != PLCTAG_STATUS_PENDING) {
-        printf("ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
 
         /*
          * we do not need to free the array TestDINTArray because the callback will do
@@ -336,7 +339,6 @@ int main()
     }
 
 
-
     /*
      * we do not need to free the array TestDINTArray because the callback will do
      * it when the tag is destroyed.
@@ -347,5 +349,3 @@ int main()
 
     return 0;
 }
-
-

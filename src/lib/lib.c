@@ -389,6 +389,13 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
     if(tag && tag->callback) {
         debug_set_tag_id(tag->tag_id);
 
+        /* trigger this if there is any other event. Only once. */
+        if(!tag->event_creation_complete) {
+            pdebug(DEBUG_DETAIL, "Tag creation complete.");
+            tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, plc_tag_status(tag->tag_id), tag->userdata);
+            tag->event_creation_complete = 1;
+        }
+
         /* was there a read start? */
         if(tag->event_read_started) {
             pdebug(DEBUG_DETAIL, "Tag read started.");
@@ -1026,7 +1033,6 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         pdebug(DEBUG_INFO,"tag set up elapsed time %" PRId64 "ms",(time_ms()-start_time));
     }
 
-
     pdebug(DEBUG_INFO,"Done.");
 
     return id;
@@ -1048,16 +1054,6 @@ LIB_EXPORT void plc_tag_shutdown(void)
     destroy_modules();
 }
 
-/**
-* handle callback without userdata
-*/
-void handle_callback(int32_t tag_id, int event, int status, void* userdata) {
-    void (*cb)(int32_t tag_id, int event, int status);
-    if (userdata) {
-        cb = userdata;
-        cb(tag_id, event, status);
-    }
-}
 
 /*
  * plc_tag_register_callback
@@ -1097,7 +1093,7 @@ void handle_callback(int32_t tag_id, int event, int status, void* userdata) {
  * Also see plc_tag_register_callback_ex.
  */
 
-LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status))
+LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(tag_id);
@@ -1114,9 +1110,10 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
             rc = PLCTAG_ERR_DUPLICATE;
         } else {
             rc = PLCTAG_STATUS_OK;
-            if (tag_callback_func) {
-                tag->callback = handle_callback;
-                tag->userdata = tag_callback_func;
+            if(callback_func) {
+                /* may not need the cast, but cast to the extended function type. */
+                tag->callback = (tag_extended_callback_func)callback_func;
+                tag->userdata = NULL;
             } else {
                 tag->callback = NULL;
                 tag->userdata = NULL;
@@ -1130,6 +1127,8 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
 
     return rc;
 }
+
+
 
 /*
  * plc_tag_register_callback_ex
@@ -1160,7 +1159,7 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * not guaranteed that they will work and they will possibly hang or fail.
  *
  * Return values:
- *void (*tag_callback_func)(int32_t tag_id, uint32_t event, int status, void* userdata)
+ *
  * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
  * function may be registered at a time on each tag.
  *
@@ -1169,7 +1168,7 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
  * Also see plc_tag_register_callback.
  */
 
-LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callback_func callback_func, void *userdata)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(tag_id);
@@ -1182,11 +1181,11 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_
     }
 
     critical_block(tag->api_mutex) {
-        if (tag->callback) {
+        if(tag->callback) {
             rc = PLCTAG_ERR_DUPLICATE;
         } else {
-            if (tag_callback_func) {
-                tag->callback = tag_callback_func;
+            if(callback_func) {
+                tag->callback = callback_func;
                 tag->userdata = userdata;
             } else {
                 tag->callback = NULL;
@@ -1201,6 +1200,8 @@ LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_
 
     return rc;
 }
+
+
 
 /*
  * plc_tag_unregister_callback
