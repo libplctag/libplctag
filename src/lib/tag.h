@@ -101,8 +101,6 @@ typedef struct tag_byte_order_s tag_byte_order_t;
 typedef void (*tag_callback_func)(int32_t tag_id, int event, int status);
 typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status, void *user_data);
 
-
-
 /*
  * The base definition of the tag structure.  This is used
  * by the protocol-specific implementations.
@@ -117,6 +115,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
                         uint8_t write_in_flight:1; \
                         uint8_t write_complete:1; \
                         uint8_t skip_tickler:1; \
+                        uint8_t had_created_event:1; \
                         uint8_t event_creation_complete:1; \
                         uint8_t event_operation_aborted:1; \
                         uint8_t event_read_started: 1; \
@@ -156,6 +155,8 @@ struct plc_tag_t {
 extern int lib_init(void);
 extern void lib_teardown(void);
 extern void plc_tag_generic_tickler(plc_tag_p tag);
+#define plc_tag_generic_raise_event(t, e, s) plc_tag_generic_raise_event_impl(__func__, __LINE__, t, e, s)
+extern int plc_tag_generic_raise_event_impl(const char *func, int line_num, plc_tag_p tag, int8_t event_val, int8_t status);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 #define plc_tag_tickler_wake()  plc_tag_tickler_wake_impl(__func__, __LINE__)
 extern int plc_tag_tickler_wake_impl(const char *func, int line_num);

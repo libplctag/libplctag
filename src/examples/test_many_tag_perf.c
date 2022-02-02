@@ -43,7 +43,7 @@
 #include "utils.h"
 
 
-#define REQUIRED_VERSION 2,4,7
+#define REQUIRED_VERSION 2,5,0
 
 #define TAG_ATTRIBS "protocol=ab_eip&gateway=127.0.0.1:%d&path=1,0&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[0]&allow_packing=0&auto_sync_read_ms=%d&auto_sync_write_ms=20"
 
@@ -77,25 +77,6 @@ struct tag_entry {
 static volatile struct tag_entry tags[NUM_TAGS] = {0};
 
 static volatile int64_t start_time = 0;
-
-// void *read_checker(void *tag_arg)
-// {
-//     int32_t tag = (int32_t)(intptr_t)tag_arg;
-//     int64_t start_time = util_time_ms();
-//     int64_t run_until = start_time + RUN_PERIOD;
-//     int iteration = 1;
-
-//     while(run_until > util_time_ms()) {
-//         for(int i=0; i < NUM_TAGS; i++) {}
-//         int32_t val = plc_tag_get_int32(tag, 0);
-
-//         fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val, util_time_ms()-start_time);
-
-//         util_sleep_ms(READ_SLEEP_MS);
-//     }
-
-//     return NULL;
-// }
 
 
 void *writer_function(void *unused)
@@ -169,6 +150,14 @@ void tag_callback(int32_t tag_id, int event, int status)
             fprintf(stderr, "%06" PRId64 " Tag %d automatic operation was aborted!\n", (util_time_ms() - start_time), tag_id);
             break;
 
+        case PLCTAG_EVENT_CREATED:
+            fprintf(stderr, "%06" PRId64 " Tag %d creation finished with status %s.\n", (util_time_ms() - start_time), tag_id, plc_tag_decode_error(status));
+
+            tags[mid].status = status;
+            tags[mid].create_complete = 1;
+
+            break;
+
         case PLCTAG_EVENT_DESTROYED:
             //fprintf(stderr, "Tag[%d] %" PRId32 " was destroyed.\n", mid, tag_id);
             break;
@@ -176,11 +165,6 @@ void tag_callback(int32_t tag_id, int event, int status)
         case PLCTAG_EVENT_READ_COMPLETED:
             // fprintf(stderr, "Tag %d automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             tags[mid].status = status;
-
-            if(status == PLCTAG_STATUS_OK && tags[mid].create_complete == 0) {
-                tags[mid].create_complete = 1;
-                //fprintf(stderr, "%06" PRId64 " Tag %d completed creation.\n", (util_time_ms() - start_time), mid);
-            }
 
             if(tags[mid].last_read != 0) {
                 int64_t read_diff = now - tags[mid].last_read;
