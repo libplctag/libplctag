@@ -30,7 +30,7 @@
 #   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
-# the project is version 2.4
+# the project is version 2.5
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 5)
 set (libplctag_VERSION_PATCH 0)

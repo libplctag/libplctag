@@ -387,13 +387,22 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
     /* call the callbacks outside the API mutex. */
     if(tag && tag->callback) {
+        int has_event =  tag->event_read_started || tag->event_read_complete
+                      || tag->event_write_started || tag->event_write_complete;
+
         debug_set_tag_id(tag->tag_id);
 
+        /* synthesize create event if missing. */
+        if(has_event && !tag->had_created_event) {
+            tag->event_creation_complete = 1;
+            tag->had_created_event = 1;
+        }
+
         /* trigger this if there is any other event. Only once. */
-        if(!tag->event_creation_complete) {
+        if(tag->event_creation_complete) {
             pdebug(DEBUG_DETAIL, "Tag creation complete.");
             tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, plc_tag_status(tag->tag_id), tag->userdata);
-            tag->event_creation_complete = 1;
+            tag->event_creation_complete = 0;
         }
 
         /* was there a read start? */
