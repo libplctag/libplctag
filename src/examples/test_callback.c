@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2022 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -52,7 +52,7 @@ void tag_callback(int32_t tag_id, int event, int status)
     /* handle the events. */
     switch(event) {
     case PLCTAG_EVENT_ABORTED:
-        printf("Tag operation was aborted!\n");
+        printf("Tag operation was aborted with status %s!\n", plc_tag_decode_error(status));
         break;
 
     case PLCTAG_EVENT_CREATED:
@@ -64,7 +64,7 @@ void tag_callback(int32_t tag_id, int event, int status)
             free((void *)TestDINTArray);
             TestDINTArray = NULL;
         }
-        printf("Tag was destroyed.\n");
+        printf("Tag was destroyed with status %s.\n", plc_tag_decode_error(status));
         break;
 
     case PLCTAG_EVENT_READ_COMPLETED:
@@ -82,15 +82,11 @@ void tag_callback(int32_t tag_id, int event, int status)
         break;
 
     case PLCTAG_EVENT_READ_STARTED:
-        printf("Tag read operation started.\n");
+        printf("Tag read operation started with status %s.\n", plc_tag_decode_error(status));
         break;
 
     case PLCTAG_EVENT_WRITE_COMPLETED:
-        if(status == PLCTAG_STATUS_OK) {
-            printf("Tag write operation completed.\n");
-        } else {
-            printf("Tag write operation failed with status %s!\n", plc_tag_decode_error(status));
-        }
+        printf("Tag write operation completed with status %s!\n", plc_tag_decode_error(status));
         break;
 
     case PLCTAG_EVENT_WRITE_STARTED:
