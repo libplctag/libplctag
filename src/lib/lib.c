@@ -405,7 +405,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
         /* trigger this if there is any other event. Only once. */
         if(tag->event_creation_complete) {
-            pdebug(DEBUG_DETAIL, "Tag creation complete.");
+            pdebug(DEBUG_DETAIL, "Tag creation complete with status %s.", plc_tag_decode_error(tag->event_creation_complete_status));
             tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
             tag->event_creation_complete = 0;
             tag->event_creation_complete_status = PLCTAG_STATUS_OK;
@@ -413,7 +413,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
         /* was there a read start? */
         if(tag->event_read_started) {
-            pdebug(DEBUG_DETAIL, "Tag read started.");
+            pdebug(DEBUG_DETAIL, "Tag read started with status %s.", plc_tag_decode_error(tag->event_read_started_status));
             tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
             tag->event_read_started = 0;
             tag->event_read_started_status = PLCTAG_STATUS_OK;
@@ -421,7 +421,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
         /* was there a write start? */
         if(tag->event_write_started) {
-            pdebug(DEBUG_DETAIL, "Tag write started.");
+            pdebug(DEBUG_DETAIL, "Tag write started with status %s.", plc_tag_decode_error(tag->event_write_started_status));
             tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
             tag->event_write_started = 0;
             tag->event_write_started_status = PLCTAG_STATUS_OK;
@@ -429,7 +429,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
         /* was there an abort? */
         if(tag->event_operation_aborted) {
-            pdebug(DEBUG_DETAIL, "Tag operation aborted.");
+            pdebug(DEBUG_DETAIL, "Tag operation aborted with status %s.", plc_tag_decode_error(tag->event_operation_aborted_status));
             tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, tag->event_operation_aborted_status, tag->userdata);
             tag->event_operation_aborted = 0;
             tag->event_operation_aborted_status = PLCTAG_STATUS_OK;
@@ -437,7 +437,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
         /* was there a read completion? */
         if(tag->event_read_complete) {
-            pdebug(DEBUG_DETAIL, "Tag read completed.");
+            pdebug(DEBUG_DETAIL, "Tag read completed with status %s.", plc_tag_decode_error(tag->event_read_complete_status));
             tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
             tag->event_read_complete = 0;
             tag->event_read_complete_status = PLCTAG_STATUS_OK;
@@ -445,7 +445,7 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
         /* was there a write completion? */
         if(tag->event_write_complete) {
-            pdebug(DEBUG_DETAIL, "Tag write completed.");
+            pdebug(DEBUG_DETAIL, "Tag write completed with status %s.", plc_tag_decode_error(tag->event_write_complete_status));
             tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
             tag->event_write_complete = 0;
             tag->event_write_complete_status = PLCTAG_STATUS_OK;
@@ -1676,12 +1676,14 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         tag->read_cache_expire = time_ms() + tag->read_cache_ms;
     }
 
-    // if(tag->callback) {
-    //     if(is_done) {
-    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
-    //         tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
-    //     }
-    // }
+    if(is_done) {
+        critical_block(tag->api_mutex) {
+            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, rc);
+        }
+    }
+
+    /* fire any events that are pending. */
+    plc_tag_generic_handle_event_callbacks(tag);
 
     rc_dec(tag);
 
@@ -1871,12 +1873,14 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         pdebug(DEBUG_INFO,"Write finshed with elapsed time %" PRId64 "ms", (time_ms()-start_time));
     }
 
-    // if(tag->callback) {
-    //     if(is_done) {
-    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
-    //         tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
-    //     }
-    // }
+    if(is_done) {
+        critical_block(tag->api_mutex) {
+            tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, rc);
+        }
+    }
+
+    /* fire any events that are pending. */
+    plc_tag_generic_handle_event_callbacks(tag);
 
     rc_dec(tag);
 
