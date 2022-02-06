@@ -390,18 +390,18 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 
     /* call the callbacks outside the API mutex. */
     if(tag && tag->callback) {
-        int has_event =  tag->event_read_started || tag->event_read_complete
-                      || tag->event_write_started || tag->event_write_complete
-                      || tag->event_operation_aborted;
+        // int has_event =  tag->event_read_started || tag->event_read_complete
+        //               || tag->event_write_started || tag->event_write_complete
+        //               || tag->event_operation_aborted;
 
         debug_set_tag_id(tag->tag_id);
 
         /* synthesize create event if missing. */
-        if(has_event && !tag->had_created_event) {
-            tag->event_creation_complete = 1;
-            tag->event_creation_complete_status = plc_tag_status(tag->tag_id);
-            tag->had_created_event = 1;
-        }
+        // if(has_event && !tag->had_created_event) {
+        //     tag->event_creation_complete = 1;
+        //     tag->event_creation_complete_status = plc_tag_status(tag->tag_id);
+        //     tag->had_created_event = 1;
+        // }
 
         /* trigger this if there is any other event. Only once. */
         if(tag->event_creation_complete) {

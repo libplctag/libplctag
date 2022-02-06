@@ -506,7 +506,7 @@ plc_tag_p ab_tag_create(attr attribs)
         pdebug(DEBUG_DETAIL, "Not kicking off initial read: tag is special or does not have read function.");
 
         /* force the created event because we do not do an initial read here. */
-        tag->event_creation_complete = 1;
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);
     }
 
     pdebug(DEBUG_DETAIL, "Using vtable %p.", tag->vtable);

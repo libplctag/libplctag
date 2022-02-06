@@ -177,6 +177,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             tag->event_operation_aborted = 1;
             tag->event_operation_aborted_status = status;
             if(!tag->had_created_event) {
+                pdebug(DEBUG_DETAIL, "Raising synthesized created event on abort event.");
                 tag->had_created_event = 1;
                 tag->event_creation_complete = 1;
                 tag->event_creation_complete_status = status;
@@ -193,6 +194,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             tag->event_read_complete = 1;
             tag->event_read_complete_status = status;
             if(!tag->had_created_event) {
+                pdebug(DEBUG_DETAIL, "Raising synthesized created event on read completed event.");
                 tag->had_created_event = 1;
                 tag->event_creation_complete = 1;
                 tag->event_creation_complete_status = status;
@@ -202,17 +204,18 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
         case PLCTAG_EVENT_READ_STARTED:
             tag->event_read_started = 1;
             tag->event_read_started_status = status;
-            if(!tag->had_created_event) {
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
+            // if(!tag->had_created_event) {
+            //     tag->had_created_event = 1;
+            //     tag->event_creation_complete = 1;
+            //     tag->event_creation_complete_status = status;
+            // }
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
             tag->event_write_complete = 1;
             tag->event_write_complete_status = status;
             if(!tag->had_created_event) {
+                pdebug(DEBUG_DETAIL, "Raising synthesized created event on write completed event.");
                 tag->had_created_event = 1;
                 tag->event_creation_complete = 1;
                 tag->event_creation_complete_status = status;
@@ -222,11 +225,11 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
         case PLCTAG_EVENT_WRITE_STARTED:
             tag->event_write_started = 1;
             tag->event_write_started_status = status;
-            if(!tag->had_created_event) {
-                tag->had_created_event = 1;
-                tag->event_creation_complete = 1;
-                tag->event_creation_complete_status = status;
-            }
+            // if(!tag->had_created_event) {
+            //     tag->had_created_event = 1;
+            //     tag->event_creation_complete = 1;
+            //     tag->event_creation_complete_status = status;
+            // }
             break;
 
         default:
