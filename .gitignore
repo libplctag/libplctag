@@ -56,3 +56,4 @@ temp.c
 /out/build/ARM64
 /CMakeSettings.json
 build/*
+/.vs
