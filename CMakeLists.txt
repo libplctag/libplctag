@@ -492,6 +492,7 @@ elseif (BUILD_EXAMPLES)
                             test_callback
                             test_callback_ex
                             test_connection_group
+                            test_event_windows
                             test_raw_cip
                             test_shutdown
                             test_special
