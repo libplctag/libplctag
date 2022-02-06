@@ -1,6 +1,6 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
- *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *   Copyright (C) 2022 by Kyle Hayes  & @Joylei                           *
+ *   Author Kyle Hayes  kyle.hayes@gmail.com, @Joylei                      *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
  * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
@@ -34,7 +34,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #else
 #include <pthread.h>
@@ -43,9 +43,9 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 
-#define REQUIRED_VERSION 2, 1, 0
+#define REQUIRED_VERSION 2, 5, 0
 
-#define TAG_PATH "protocol=ab_eip&gateway=192.168.0.83&path=1,0&cpu=LGX&elem_count=1&name=Car_Pos[%d]&elem_count=1"
+#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=ControlLogix&elem_count=1&name=TestBigArray[%d]"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 4
 #define DATA_TIMEOUT 500
@@ -135,13 +135,23 @@ void setup_break_handler(void)
 static int num_threads = 0;
 static tag_state states[MAX_THREADS];
 
-void tag_callback(int32_t tag_id, int event, int status)
+void tag_callback(int32_t tag_id, int event, int status, void *arg)
 {
+    int tid = (int)(intptr_t)arg;
+
     if (event != PLCTAG_EVENT_READ_COMPLETED)
     {
         return;
     }
-    fprintf(stderr, "callback tag(%d), event(%d), status(%d)\n", tag_id, event, status);
+    fprintf(stderr, "callback tag(%d), tag id(%d), event(%d), status(%d)\n", tid, tag_id, event, status);
+
+    SetEvent(states[tid].hEvent);
+
+    /*
+    I think this logic is incorrect.  Not a Windows programmer, but I think this wakes all
+    waiting threads, including the one for which this callback was called.  Some of those other
+    threads may legitimately be waiting for a read to complete.
+
     for (int i = 0; i < num_threads; i++)
     {
         if (states[i].tag == tag_id)
@@ -149,13 +159,15 @@ void tag_callback(int32_t tag_id, int event, int status)
             SetEvent(states[i].hEvent);
         }
     }
+
+    */
 }
 
 /*
  * Thread function.  Just read until killed.
  */
 
-#ifdef WIN32
+#ifdef _WIN32
 DWORD __stdcall thread_func(LPVOID data)
 #else
 void *thread_func(void *data)
@@ -196,7 +208,8 @@ void *thread_func(void *data)
         return 0;
     }
 
-    plc_tag_register_callback(tag, tag_callback);
+    /* use extended callback to pass the thread index/id */
+    plc_tag_register_callback_ex(tag, tag_callback, (void *)(intptr_t)tid);
 
     while (!done)
     {
@@ -234,7 +247,7 @@ void *thread_func(void *data)
     }
     plc_tag_destroy(tag);
 
-#ifdef WIN32
+#ifdef _WIN32
     return (DWORD)0;
 #else
     return NULL;
@@ -244,7 +257,7 @@ void *thread_func(void *data)
 int main(int argc, char **argv)
 {
 
-#ifdef WIN32
+#ifdef _WIN32
     HANDLE thread[MAX_THREADS];
 #else
     pthread_t thread[MAX_THREADS];
@@ -285,7 +298,7 @@ int main(int argc, char **argv)
 
     for (thread_id = 0; thread_id < num_threads; thread_id++)
     {
-#ifdef WIN32
+#ifdef _WIN32
         thread[thread_id] = CreateThread(
             NULL,                        /* default security attributes */
             0,                           /* use default stack size      */
@@ -306,7 +319,7 @@ int main(int argc, char **argv)
 
     for (thread_id = 0; thread_id < num_threads; thread_id++)
     {
-#ifdef WIN32
+#ifdef _WIN32
         WaitForSingleObject(thread[thread_id], (DWORD)INFINITE);
 #else
         pthread_join(thread[thread_id], NULL);
