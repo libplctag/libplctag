@@ -38,7 +38,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define REQUIRED_VERSION 2, 1, 4
+#define REQUIRED_VERSION 2, 5, 0
 
 #define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
 #define DATA_TIMEOUT 5000
@@ -178,7 +178,7 @@ int main()
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* create the tag */
-    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
+    tag = plc_tag_create_ex(TAG_PATH, (void (*)(int32_t, int, int, void*))tag_callback, NULL, DATA_TIMEOUT);
     if(tag < 0) {
         printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 1;
@@ -204,16 +204,6 @@ int main()
     TestDINTArray = calloc((size_t)elem_count, (size_t)elem_size);
     if(!TestDINTArray) {
         printf("Unable to allocate memory for tag array!\n");
-        plc_tag_destroy(tag);
-        return 1;
-    }
-
-    /* register the callback */
-    rc = plc_tag_register_callback(tag, tag_callback);
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
-        free((void *)TestDINTArray);
-        TestDINTArray = NULL;
         plc_tag_destroy(tag);
         return 1;
     }
