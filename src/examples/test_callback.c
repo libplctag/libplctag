@@ -178,7 +178,7 @@ int main()
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* create the tag */
-    tag = plc_tag_create_ex(TAG_PATH, (void (*)(int32_t, int, int, void*))tag_callback, NULL, DATA_TIMEOUT);
+    tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT);
     if(tag < 0) {
         printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 1;
@@ -208,12 +208,26 @@ int main()
         return 1;
     }
 
+    /* test registering the callback  */
+    rc = plc_tag_register_callback(tag, tag_callback);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("Got incorrect status when registering callback %s!\n", plc_tag_decode_error(rc));
+        free((void *)TestDINTArray);
+        TestDINTArray = NULL;
+        plc_tag_destroy(tag);
+        return 1;
+    }
+
     /* test registering the callback again, should be an error */
     rc = plc_tag_register_callback(tag, tag_callback);
     if(rc != PLCTAG_ERR_DUPLICATE) {
         printf("Got incorrect status when registering callback twice %s!\n", plc_tag_decode_error(rc));
-        free((void *)TestDINTArray);
-        TestDINTArray = NULL;
+
+        /*
+         * we do not need to free the array TestDINTArray because the callback will do
+         * it when the tag is destroyed.
+         */
+
         plc_tag_destroy(tag);
         return 1;
     }
@@ -223,11 +237,6 @@ int main()
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
-
-        /*
-         * we do not need to free the array TestDINTArray because the callback will do
-         * it when the tag is destroyed.
-         */
         plc_tag_destroy(tag);
 
         return 1;
@@ -249,11 +258,6 @@ int main()
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
-
-        /*
-         * we do not need to free the array TestDINTArray because the callback will do
-         * it when the tag is destroyed.
-         */
         plc_tag_destroy(tag);
 
         return 1;
@@ -263,11 +267,6 @@ int main()
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
-
-        /*
-         * we do not need to free the array TestDINTArray because the callback will do
-         * it when the tag is destroyed.
-         */
         plc_tag_destroy(tag);
 
         return 1;
@@ -286,11 +285,6 @@ int main()
 
     if(rc != PLCTAG_ERR_TIMEOUT) {
         printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end - start));
-
-        /*
-         * we do not need to free the array TestDINTArray because the callback will do
-         * it when the tag is destroyed.
-         */
         plc_tag_destroy(tag);
 
         return 1;
@@ -301,11 +295,6 @@ int main()
     rc = plc_tag_read(tag, 0);
     if(rc != PLCTAG_STATUS_PENDING) {
         printf("ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
-
-        /*
-         * we do not need to free the array TestDINTArray because the callback will do
-         * it when the tag is destroyed.
-         */
         plc_tag_destroy(tag);
 
         return 1;
@@ -314,16 +303,10 @@ int main()
     rc = plc_tag_abort(tag);
     if(rc != PLCTAG_STATUS_OK) {
         printf("ERROR: Unable to abort the read, error %s\n", plc_tag_decode_error(rc));
-
-        /*
-         * we do not need to free the array TestDINTArray because the callback will do
-         * it when the tag is destroyed.
-         */
         plc_tag_destroy(tag);
 
         return 1;
     }
-
 
     /*
      * we do not need to free the array TestDINTArray because the callback will do
