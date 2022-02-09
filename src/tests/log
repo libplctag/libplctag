@@ -1,0 +1,464 @@
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.814 thread(1) tag(0) INFO plc_tag_create_ex:825 Starting
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.815 thread(1) tag(0) INFO initialize_modules:177 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.815 thread(1) tag(0) INFO initialize_modules:186 Creating library mutex.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.815 thread(1) tag(0) DETAIL mutex_create:648 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.815 thread(1) tag(0) DETAIL mutex_create:677 Done creating mutex 0x6000028ac000.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO initialize_modules:207 Initialized library modules.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO lib_init:135 Setting up global library data.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO lib_init:137 Creating tag hashtable.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO hashtable_create:75 Starting
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO hashtable_create:99 Done
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO lib_init:143 Creating tag hashtable mutex.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:648 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:677 Done creating mutex 0x6000028ac050.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO lib_init:149 Creating tag condition variable.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cond_create:991 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cond_create:1028 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO lib_init:155 Creating tag tickler thread.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL thread_create:805 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL thread_create:807 Warning: ignoring stacksize (32768) parameter.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL thread_create:827 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO lib_init:161 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO initialize_modules:210 Initializing AB module.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(2) tag(0) INFO tag_tickler_func:500 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO ab_init:123 Initializing AB protocol library.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:648 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:677 Done creating mutex 0x6000028ac0a0.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO ab_init:132 Finished initializing AB protocol library.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO initialize_modules:215 Initializing Modbus module.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO mb_init:2405 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mb_init:2407 Setting up mutex.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:648 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:677 Done creating mutex 0x6000028ac0f0.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO mb_init:2416 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO initialize_modules:226 Done initializing library modules.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO initialize_modules:231 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO find_tag_create_func:99 Matched protocol=ab-eip
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO ab_tag_create:173 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO rc_alloc_impl:111 Starting, called from ab_tag_create:180
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO rc_alloc_impl:130 Done
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL rc_alloc_impl:135 Returning memory pointer 0x1227040a0
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL ab_tag_create:186 tag=0x1227040a0
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO plc_tag_generic_init_tag:454 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:648 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:677 Done creating mutex 0x6000028ac140.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:648 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:677 Done creating mutex 0x6000028ac190.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cond_create:991 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cond_create:1028 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO plc_tag_generic_init_tag:485 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL get_plc_type:915 Found ControlLogix/CompactLogix PLC.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL get_plc_type:915 Found ControlLogix/CompactLogix PLC.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL session_find_or_create:235 Starting
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL session_find_or_create:259 Creating new session.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO session_create_unsafe:451 Starting
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL session_create_unsafe:454 Session should use connected messaging.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO rc_alloc_impl:111 Starting, called from session_create_unsafe:459
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO rc_alloc_impl:130 Done
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL rc_alloc_impl:135 Returning memory pointer 0x123009020
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cip_encode_path:72 Starting
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL match_numeric_segment:189 Starting at position 0 in string 1,0.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL match_numeric_segment:216 Done.   Found numeric segment 1.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cip_encode_path:83 Found numeric segment.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cip_encode_path:79 Skipping separator character ','.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL match_numeric_segment:189 Starting at position 2 in string 1,0.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL match_numeric_segment:216 Done.   Found numeric segment 0.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cip_encode_path:83 Found numeric segment.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cip_encode_path:124 PLC needs connection, adding path to the router object.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cip_encode_path:156 IOI size before 6
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL cip_encode_path:177 Done
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL session_create_unsafe:507 Setting connection_group_id to 0.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL session_create_unsafe:547 Set maximum payload size to 508 bytes.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL add_session_unsafe:315 Starting
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL add_session_unsafe:325 Done
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO session_create_unsafe:564 Done
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) INFO session_init:580 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:648 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.816 thread(1) tag(0) DETAIL mutex_create:677 Done creating mutex 0x6000028ac230.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL cond_create:991 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL cond_create:1028 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL thread_create:805 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL thread_create:807 Warning: ignoring stacksize (32768) parameter.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL thread_create:827 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO session_init:602 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL session_find_or_create:305 Done
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL ab_tag_create:287 using session=0x123009020
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL get_tag_data_type:532 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL get_tag_data_type:662 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL ab_tag_create:353 Setting up Logix tag.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL ab_tag_create:364 Using default Logix byte order.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL ab_tag_create:370 Setting default Logix vtable.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO session_handler:1014 Starting thread for session 0x123009020
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL session_handler:1034 in SESSION_OPEN_SOCKET_START state.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO session_open_socket:620 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_create:1227 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL parse_symbolic_segment:633 Starting with name index=0 and encoded name index=1.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_create:1245 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL parse_symbolic_segment:672 Parsed symbolic segment "TestBigArray" in tag name.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL ab_tag_create:500 Kicking off initial read.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO tag_read_start:305 Starting
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL session_open_socket:654 Using default port 44818.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_start:1265 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO build_read_request_connected:416 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL session_create_request:2496 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO rc_alloc_impl:111 Starting, called from session_create_request:2505
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO rc_alloc_impl:130 Done
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL rc_alloc_impl:135 Returning memory pointer 0x600002fac020
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL session_create_request:2519 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO session_add_request:942 Starting. sess=0x123009020, req=0x600002fac020
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL session_add_request_unsafe:907 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL session_add_request_unsafe:926 Total requests in the queue: 1
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL session_add_request_unsafe:928 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO session_add_request:950 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO build_read_request_connected:501 Done
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO tag_read_start:334 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL tag_raise_event:224 PLCTAG_EVENT_READ_STARTED raised.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL tag_raise_event:228 Enabled PLCTAG_EVENT_READ_COMPLETE.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL ab_tag_create:513 Using vtable 0x102944118.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO ab_tag_create:515 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO set_tag_byte_order:3874 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_start:1340 Found numeric IP address: 127.0.0.1
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_start:1374 Setting up wake pipe.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO sock_create_event_wakeup_channel:2087 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) INFO set_tag_byte_order:4175 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO sock_create_event_wakeup_channel:2204 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_start:1396 Attempting to connect to 127.0.0.1:44818
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL add_tag_lookup:4278 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL add_tag_lookup:4298 Found unused ID 11
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(1) tag(0) DETAIL add_tag_lookup:4318 Done.
+Log message of level 3 for tag 11: 2022-02-08 13:31:37.817 thread(1) tag(11) INFO plc_tag_create_ex:951 Returning mapped tag ID 11
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.817 thread(1) tag(11) DETAIL plc_tag_create_ex:977 Tag status after creation is PLCTAG_STATUS_PENDING.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.817 thread(1) tag(11) DETAIL plc_tag_tickler_wake_impl:215 Starting. Called from plc_tag_create_ex:988.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.817 thread(1) tag(11) DETAIL plc_tag_tickler_wake_impl:228 Done. Called from plc_tag_create_ex:988.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.817 thread(2) tag(11) DETAIL tag_tickler_func:537 Tickling tag 11.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.817 thread(2) tag(11) DETAIL plc_tag_generic_tickler:276 Tickling tag 11.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.817 thread(2) tag(11) DETAIL plc_tag_generic_tickler:381 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(2) tag(0) DETAIL check_read_request_status:1088 Read not ready with status PLCTAG_STATUS_PENDING.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(2) tag(0) DETAIL check_read_status_connected:1343 Read request status is not OK.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.817 thread(2) tag(11) DETAIL plc_tag_generic_handle_event_callbacks:405 Tag read started with status PLCTAG_STATUS_OK.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_start:1410 Started connecting to 127.0.0.1:44818 successfully.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_start:1431 Done with status PLCTAG_STATUS_PENDING.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO session_open_socket:669 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL session_handler:1051 Connect started, going to state SESSION_OPEN_SOCKET_WAIT.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL session_handler:1059 in SESSION_OPEN_SOCKET_WAIT state.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_check:1448 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_check:1467 Socket is probably connected.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_check:1513 No error, socket is connected.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL socket_connect_tcp_check:1557 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO session_handler:1065 Socket connection succeeded.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) DETAIL session_handler:1086 in SESSION_REGISTER state.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO session_register:682 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO send_eip_request:1849 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.817 thread(3) tag(0) INFO send_eip_request:1862 Sending packet of size 28
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) INFO send_eip_request:1863  65 00 04 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) INFO send_eip_request:1863  00 00 00 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) INFO send_eip_request:1863  00 00 00 00 01 00 00 00
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) DETAIL socket_write:1877 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) DETAIL socket_write:1999 Done: result = 28.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) INFO send_eip_request:1905 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) INFO recv_eip_response:1925 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.818 thread(3) tag(0) DETAIL socket_read:1786 Immediate read attempt did not succeed, now wait for select().
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) DETAIL socket_read:1814 Socket can read data.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) DETAIL socket_read:1866 Done: result 24.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) DETAIL socket_read:1866 Done: result 4.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO recv_eip_response:1996 request received all needed data (28 bytes of 28).
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO recv_eip_response:1998  65 00 04 00 41 75 81 70 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 01 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO recv_eip_response:2005 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO session_register:749 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) DETAIL session_handler:1102 in SESSION_SEND_FORWARD_OPEN state.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_forward_open_request:2043 Starting
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) DETAIL send_forward_open_request:2126 Set maximum payload size guess to 4002 bytes.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_extended_forward_open_request:2230 Starting
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1849 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1862 Sending packet of size 92
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  6f 00 44 00 41 75 81 70 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  00 00 c0 ac c1 23 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  00 00 00 00 00 00 00 00 01 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  02 00 00 00 00 00 b2 00 34 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  5b 02 20 06 24 01 0a 05 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  00 00 5d f4 dc 38 2f e1 3d f3
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  45 43 50 21 01 00 00 00 40 42
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  0f 00 a2 0f 00 42 40 42 0f 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  a2 0f 00 42 a3 03 01 00 20 02
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.823 thread(3) tag(0) INFO send_eip_request:1863  24 01
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) DETAIL socket_write:1877 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) DETAIL socket_write:1999 Done: result = 92.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) INFO send_eip_request:1905 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) INFO send_extended_forward_open_request:2289 Done
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) INFO send_forward_open_request:2131 Done
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) DETAIL session_handler:1108 Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) DETAIL session_handler:1115 in SESSION_RECEIVE_FORWARD_OPEN state.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) INFO receive_forward_open_response:2302 Starting
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) INFO recv_eip_response:1925 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.824 thread(3) tag(0) DETAIL socket_read:1786 Immediate read attempt did not succeed, now wait for select().
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL socket_read:1814 Socket can read data.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL socket_read:1866 Done: result 24.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL socket_read:1866 Done: result 46.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1996 request received all needed data (70 bytes of 70).
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1998  6f 00 2e 00 41 75 81 70 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 00 00 00 00 01 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1998  02 00 00 00 00 00 b2 00 1e 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1998  db 00 00 00 1b 38 39 43 5d f4
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1998  dc 38 2f e1 3d f3 45 43 50 21
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:1998  40 42 0f 00 40 42 0f 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO recv_eip_response:2005 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO receive_forward_open_response:2364 ForwardOpen succeeded with our connection ID 38dcf45d and the PLC connection ID 4339381b with packet size 4002.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO receive_forward_open_response:2369 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL session_handler:1134 Send Forward Open succeeded, going to SESSION_IDLE state.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL session_handler:1141 in SESSION_IDLE state.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL session_handler:1147 There are 1 requests pending before cleanup and sending.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL get_payload_size:1652 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL get_payload_size:1666 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO process_requests:1423 1 requests to process.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO pack_requests:1687 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO pack_requests:1697 Only one request, so done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1789 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) DETAIL prepare_request:1818 cpf_targ_conn_id=4339381b
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1826 Preparing connected packet with connection ID 38dcf45d and sequence ID 1(1)
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1833 Prepared packet of size 68
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1834  70 00 2c 00 41 75 81 70 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1834  00 00 00 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1834  00 00 00 00 00 00 00 00 01 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1834  02 00 a1 00 04 00 1b 38 39 43
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1834  b1 00 18 00 01 00 52 07 91 0c
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1834  54 65 73 74 42 69 67 41 72 72
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1834  61 79 0a 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO prepare_request:1836 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.829 thread(3) tag(0) INFO send_eip_request:1849 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1862 Sending packet of size 68
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1863  70 00 2c 00 41 75 81 70 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1863  00 00 00 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1863  00 00 00 00 00 00 00 00 01 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1863  02 00 a1 00 04 00 1b 38 39 43
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1863  b1 00 18 00 01 00 52 07 91 0c
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1863  54 65 73 74 42 69 67 41 72 72
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1863  61 79 0a 00 00 00 00 00
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) DETAIL socket_write:1877 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) DETAIL socket_write:1999 Done: result = 68.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO send_eip_request:1905 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) INFO recv_eip_response:1925 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.830 thread(3) tag(0) DETAIL socket_read:1786 Immediate read attempt did not succeed, now wait for select().
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) DETAIL socket_read:1814 Socket can read data.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) DETAIL socket_read:1866 Done: result 24.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) DETAIL socket_read:1866 Done: result 68.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1996 request received all needed data (92 bytes of 92).
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  70 00 44 00 41 75 81 70 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 02 00 a1 00 04 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  5d f4 dc 38 b1 00 30 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  b1 00 18 00 01 00 d2 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  c4 00 07 00 00 00 07 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  07 00 00 00 07 00 00 00 07 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  00 00 07 00 00 00 07 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  07 00 00 00 07 00 00 00 07 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:1998  00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO recv_eip_response:2005 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1531 Starting.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1540 Got single response packet.  Copying 92 bytes unchanged.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1629 Unpacked packet:
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1630  70 00 44 00 41 75 81 70 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1630  00 00 00 00 00 00 00 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1630  00 00 00 00 02 00 a1 00 04 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1630  5d f4 dc 38 b1 00 30 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1630  b1 00 18 00 01 00 d2 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1630  c4 00 07 00 00 00 07 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.836 thread(3) tag(0) INFO unpack_response:1630  07 00 00 00 07 00 00 00 07 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.837 thread(3) tag(0) INFO unpack_response:1630  00 00 07 00 00 00 07 00 00 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.837 thread(3) tag(0) INFO unpack_response:1630  07 00 00 00 07 00 00 00 07 00
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.837 thread(3) tag(0) INFO unpack_response:1630  00 00
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(3) tag(0) DETAIL unpack_response:1639 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(3) tag(0) DETAIL plc_tag_tickler_wake_impl:215 Starting. Called from process_requests:1511.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(3) tag(0) DETAIL plc_tag_tickler_wake_impl:228 Done. Called from process_requests:1511.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL tag_tickler_func:537 Tickling tag 11.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL plc_tag_generic_tickler:276 Tickling tag 11.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL plc_tag_generic_tickler:381 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL check_read_status_connected:1408 type byte = 196 (c4)
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL check_read_status_connected:1459 Increasing tag buffer size to 40 bytes.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) INFO check_read_status_connected:1469 Got 40 bytes of data
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL rc_dec_impl:242 Calling cleanup functions due to call at check_read_status_connected:1502 for 0x600002fac020.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) INFO refcount_cleanup:256 Starting
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL request_destroy:2538 Starting.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL request_destroy:2547 Done.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) INFO refcount_cleanup:268 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL tag_raise_event:207 PLCTAG_EVENT_READ_COMPLETED raised.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL tag_raise_event:209 Raising synthesized created event on read completed event.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL tag_raise_event:219 Disabled PLCTAG_EVENT_READ_COMPLETE.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL plc_tag_tickler_wake_impl:215 Starting. Called from tag_tickler_func:556.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(2) tag(0) DETAIL plc_tag_tickler_wake_impl:228 Done. Called from tag_tickler_func:556.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL plc_tag_generic_handle_event_callbacks:397 Tag creation complete with status PLCTAG_STATUS_OK.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(1) tag(11) DETAIL tag_raise_event:196 PLCTAG_EVENT_CREATED raised.
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(1) tag(11) DETAIL tag_raise_event:202 PLCTAG_EVENT_CREATED skipped due to duplication.
+Log message of level 3 for tag 11: 2022-02-08 13:31:37.837 thread(1) tag(11) INFO plc_tag_create_ex:1046 tag set up elapsed time 20ms
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL plc_tag_generic_handle_event_callbacks:429 Tag read completed with status PLCTAG_STATUS_OK.
+Log message of level 3 for tag 0: 2022-02-08 13:31:37.837 thread(1) tag(0) INFO plc_tag_create_ex:1052 Done.
+Log message of level 4 for tag 0: 2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL plc_tag_unregister_logger:1315 Starting
+Log message of level 4 for tag 11: 2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL tag_tickler_func:537 Tickling tag 11.
+2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL plc_tag_generic_tickler:276 Tickling tag 11.
+2022-02-08 13:31:37.837 thread(2) tag(11) DETAIL plc_tag_generic_tickler:381 Done.
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL plc_tag_unregister_logger:1319 Done.
+2022-02-08 13:31:37.837 thread(1) tag(11) INFO plc_tag_register_callback_ex:1192 Starting.
+2022-02-08 13:31:37.837 thread(1) tag(11) INFO plc_tag_register_callback_ex:1215 Done.
+2022-02-08 13:31:37.837 thread(1) tag(11) INFO plc_tag_read:1555 Starting.
+2022-02-08 13:31:37.837 thread(1) tag(11) DETAIL tag_raise_event:224 PLCTAG_EVENT_READ_STARTED raised.
+2022-02-08 13:31:37.837 thread(1) tag(11) DETAIL tag_raise_event:228 Enabled PLCTAG_EVENT_READ_COMPLETE.
+2022-02-08 13:31:37.837 thread(1) tag(11) DETAIL plc_tag_generic_handle_event_callbacks:405 Tag read started with status PLCTAG_STATUS_OK.
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO tag_read_start:305 Starting
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO build_read_request_connected:416 Starting.
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL session_create_request:2496 Starting.
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO rc_alloc_impl:111 Starting, called from session_create_request:2505
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO rc_alloc_impl:130 Done
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL rc_alloc_impl:135 Returning memory pointer 0x600002fa8140
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL session_create_request:2519 Done.
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO session_add_request:942 Starting. sess=0x123009020, req=0x600002fa8140
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL session_add_request_unsafe:907 Starting.
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL session_add_request_unsafe:926 Total requests in the queue: 1
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL session_add_request_unsafe:928 Done.
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO session_add_request:950 Done.
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO build_read_request_connected:501 Done
+2022-02-08 13:31:37.837 thread(1) tag(0) INFO tag_read_start:334 Done.
+2022-02-08 13:31:37.837 thread(3) tag(0) DETAIL session_handler:1141 in SESSION_IDLE state.
+2022-02-08 13:31:37.837 thread(3) tag(0) DETAIL session_handler:1147 There are 1 requests pending before cleanup and sending.
+2022-02-08 13:31:37.837 thread(3) tag(0) DETAIL get_payload_size:1652 Starting.
+2022-02-08 13:31:37.837 thread(3) tag(0) DETAIL get_payload_size:1666 Done.
+2022-02-08 13:31:37.837 thread(3) tag(0) INFO process_requests:1423 1 requests to process.
+2022-02-08 13:31:37.837 thread(3) tag(0) INFO pack_requests:1687 Starting.
+2022-02-08 13:31:37.837 thread(3) tag(11) INFO pack_requests:1697 Only one request, so done.
+2022-02-08 13:31:37.837 thread(1) tag(0) DETAIL plc_tag_tickler_wake_impl:215 Starting. Called from plc_tag_read:1635.
+2022-02-08 13:31:37.838 thread(1) tag(0) DETAIL plc_tag_tickler_wake_impl:228 Done. Called from plc_tag_read:1635.
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1789 Starting.
+2022-02-08 13:31:37.838 thread(2) tag(11) DETAIL tag_tickler_func:537 Tickling tag 11.
+2022-02-08 13:31:37.838 thread(2) tag(11) DETAIL plc_tag_generic_tickler:276 Tickling tag 11.
+2022-02-08 13:31:37.838 thread(2) tag(11) DETAIL plc_tag_generic_tickler:381 Done.
+2022-02-08 13:31:37.838 thread(3) tag(0) DETAIL prepare_request:1818 cpf_targ_conn_id=4339381b
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1826 Preparing connected packet with connection ID 38dcf45d and sequence ID 2(2)
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1833 Prepared packet of size 68
+2022-02-08 13:31:37.838 thread(2) tag(0) DETAIL check_read_request_status:1088 Read not ready with status PLCTAG_STATUS_PENDING.
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1834  70 00 2c 00 41 75 81 70 00 00
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1834  00 00 00 00 00 00 00 00 00 00
+2022-02-08 13:31:37.838 thread(2) tag(0) DETAIL check_read_status_connected:1343 Read request status is not OK.
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1834  00 00 00 00 00 00 00 00 01 00
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1834  02 00 a1 00 04 00 1b 38 39 43
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1834  b1 00 18 00 02 00 52 07 91 0c
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1834  54 65 73 74 42 69 67 41 72 72
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1834  61 79 0a 00 00 00 00 00
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO prepare_request:1836 Done.
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1849 Starting.
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1862 Sending packet of size 68
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1863  70 00 2c 00 41 75 81 70 00 00
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1863  00 00 00 00 00 00 00 00 00 00
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1863  00 00 00 00 00 00 00 00 01 00
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1863  02 00 a1 00 04 00 1b 38 39 43
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1863  b1 00 18 00 02 00 52 07 91 0c
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1863  54 65 73 74 42 69 67 41 72 72
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1863  61 79 0a 00 00 00 00 00
+2022-02-08 13:31:37.838 thread(3) tag(0) DETAIL socket_write:1877 Starting.
+2022-02-08 13:31:37.838 thread(3) tag(0) DETAIL socket_write:1999 Done: result = 68.
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO send_eip_request:1905 Done.
+2022-02-08 13:31:37.838 thread(3) tag(0) INFO recv_eip_response:1925 Starting.
+2022-02-08 13:31:37.838 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+2022-02-08 13:31:37.838 thread(3) tag(0) DETAIL socket_read:1786 Immediate read attempt did not succeed, now wait for select().
+2022-02-08 13:31:37.844 thread(3) tag(0) DETAIL socket_read:1814 Socket can read data.
+2022-02-08 13:31:37.845 thread(3) tag(0) DETAIL socket_read:1866 Done: result 24.
+2022-02-08 13:31:37.845 thread(3) tag(0) DETAIL socket_read:1754 Starting.
+2022-02-08 13:31:37.845 thread(3) tag(0) DETAIL socket_read:1866 Done: result 68.
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1996 request received all needed data (92 bytes of 92).
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  70 00 44 00 41 75 81 70 00 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 00 00 00 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  00 00 00 00 02 00 a1 00 04 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  5d f4 dc 38 b1 00 30 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  b1 00 18 00 02 00 d2 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  c4 00 07 00 00 00 07 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  07 00 00 00 07 00 00 00 07 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  00 00 07 00 00 00 07 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  07 00 00 00 07 00 00 00 07 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:1998  00 00
+2022-02-08 13:31:37.845 thread(3) tag(0) INFO recv_eip_response:2005 Done.
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1531 Starting.
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1540 Got single response packet.  Copying 92 bytes unchanged.
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1629 Unpacked packet:
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  70 00 44 00 41 75 81 70 00 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  00 00 00 00 00 00 00 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  00 00 00 00 02 00 a1 00 04 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  5d f4 dc 38 b1 00 30 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  b1 00 18 00 02 00 d2 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  c4 00 07 00 00 00 07 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  07 00 00 00 07 00 00 00 07 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  00 00 07 00 00 00 07 00 00 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  07 00 00 00 07 00 00 00 07 00
+2022-02-08 13:31:37.845 thread(3) tag(11) INFO unpack_response:1630  00 00
+2022-02-08 13:31:37.845 thread(3) tag(11) DETAIL unpack_response:1639 Done.
+2022-02-08 13:31:37.845 thread(3) tag(11) DETAIL plc_tag_tickler_wake_impl:215 Starting. Called from process_requests:1511.
+2022-02-08 13:31:37.845 thread(3) tag(11) DETAIL plc_tag_tickler_wake_impl:228 Done. Called from process_requests:1511.
+2022-02-08 13:31:37.845 thread(2) tag(11) DETAIL tag_tickler_func:537 Tickling tag 11.
+2022-02-08 13:31:37.845 thread(2) tag(11) DETAIL plc_tag_generic_tickler:276 Tickling tag 11.
+2022-02-08 13:31:37.845 thread(2) tag(11) DETAIL plc_tag_generic_tickler:381 Done.
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL check_read_status_connected:1408 type byte = 196 (c4)
+2022-02-08 13:31:37.845 thread(2) tag(0) INFO check_read_status_connected:1469 Got 40 bytes of data
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL rc_dec_impl:242 Calling cleanup functions due to call at check_read_status_connected:1502 for 0x600002fa8140.
+2022-02-08 13:31:37.845 thread(2) tag(0) INFO refcount_cleanup:256 Starting
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL request_destroy:2538 Starting.
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL request_destroy:2547 Done.
+2022-02-08 13:31:37.845 thread(2) tag(0) INFO refcount_cleanup:268 Done.
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL tag_raise_event:207 PLCTAG_EVENT_READ_COMPLETED raised.
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL tag_raise_event:219 Disabled PLCTAG_EVENT_READ_COMPLETE.
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL plc_tag_tickler_wake_impl:215 Starting. Called from tag_tickler_func:556.
+2022-02-08 13:31:37.845 thread(2) tag(0) DETAIL plc_tag_tickler_wake_impl:228 Done. Called from tag_tickler_func:556.
+2022-02-08 13:31:37.845 thread(2) tag(11) DETAIL plc_tag_generic_handle_event_callbacks:429 Tag read completed with status PLCTAG_STATUS_OK.
+2022-02-08 13:31:37.845 thread(1) tag(11) DETAIL tag_raise_event:207 PLCTAG_EVENT_READ_COMPLETED raised.
+2022-02-08 13:31:37.845 thread(1) tag(11) INFO plc_tag_read:1677 elapsed time 8ms
+2022-02-08 13:31:37.845 thread(1) tag(0) INFO plc_tag_read:1690 Done
+2022-02-08 13:31:37.845 thread(2) tag(11) DETAIL tag_tickler_func:537 Tickling tag 11.
+Starting with library version 2.5.0.
+Setting up logger callback.
+Testing duplicate logger callback registration.
+Testing logger callback unregister.
+Testing duplicate logger callback unregistration.
+Tag read operation started with status PLCTAG_STATUS_OK.
+Tag created with status PLCTAG_STATUS_OK.
+Tag read operation completed with status PLCTAG_STATUS_OK.
+Removing logger callback.  Should see regular logging output now.
+Tag read operation started with status PLCTAG_STATUS_OK.
+Tag read operation completed with status PLCTAG_STATUS_OK.
+data[0]=7
+data[1]=7
+data[2]=7
+data[3]=7
+data[4]=7
+data[5]=7
+data[6]=7
+data[7]=7
+data[8]=7
+data[9]=7
+Turn off logging.
+Tag write operation started with status PLCTAG_STATUS_OK.
+Tag write operation completed with status PLCTAG_STATUS_OK!
+Tag read operation started with status PLCTAG_STATUS_OK.
+Tag read operation completed with status PLCTAG_STATUS_OK.
+data[0]=8
+data[1]=8
+data[2]=8
+data[3]=8
+data[4]=8
+data[5]=8
+data[6]=8
+data[7]=8
+data[8]=8
+data[9]=8
+Testing timeout behavior.
+Tag read operation started with status PLCTAG_STATUS_OK.
+Tag operation was aborted with status PLCTAG_STATUS_OK!
+Tag read operation completed with status PLCTAG_ERR_TIMEOUT.
+Testing abort behavior.
+Tag read operation started with status PLCTAG_STATUS_OK.
+Tag operation was aborted with status PLCTAG_STATUS_OK!
+Tag was destroyed with status PLCTAG_STATUS_OK.
+SUCCESS!

@@ -164,7 +164,7 @@ void ab_teardown(void)
 
 
 
-plc_tag_p ab_tag_create(attr attribs)
+plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
 {
     ab_tag_p tag = AB_TAG_NULL;
     const char *path = NULL;
@@ -193,7 +193,7 @@ plc_tag_p ab_tag_create(attr attribs)
     tag->vtable = &default_vtable;
 
     /* set up the generic parts. */
-    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs);
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
         rc_dec(tag);
@@ -502,6 +502,7 @@ plc_tag_p ab_tag_create(attr attribs)
         tag->first_read = 1;
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, tag->status);
     } else {
         pdebug(DEBUG_DETAIL, "Not kicking off initial read: tag is special or does not have read function.");
 
