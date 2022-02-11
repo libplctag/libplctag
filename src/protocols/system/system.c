@@ -89,7 +89,7 @@ tag_byte_order_t system_tag_byte_order = {
 
 
 
-plc_tag_p system_tag_create(attr attribs)
+plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
 {
     int rc = PLCTAG_STATUS_OK;
     system_tag_p tag = NULL;
@@ -124,7 +124,7 @@ plc_tag_p system_tag_create(attr attribs)
     tag->vtable = &system_tag_vtable;
 
     /* set up the generic parts. */
-    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs);
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
         rc_dec(tag);
@@ -213,9 +213,10 @@ static int system_tag_read(plc_tag_p ptag)
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    if(tag->callback) {
-        tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, rc, tag->userdata);
-    }
+    /* safe here because we are still within the API mutex. */
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_STATUS_OK);
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -239,6 +240,10 @@ static int system_tag_write(plc_tag_p ptag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    /* raise this here so that the callback can update the tag buffer. */
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_PENDING);
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+
     /* the version is static */
     if(str_cmp_i(&tag->name[0],"debug") == 0) {
         int res = 0;
@@ -255,9 +260,8 @@ static int system_tag_write(plc_tag_p ptag)
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    if(tag->callback) {
-        tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, rc, tag->userdata);
-    }
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_STATUS_OK);
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_INFO,"Done.");
 
