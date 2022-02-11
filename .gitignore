@@ -57,3 +57,5 @@ temp.c
 /CMakeSettings.json
 build/*
 /.vs
+src/.DS_Store
+.DS_Store
