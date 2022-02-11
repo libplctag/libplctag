@@ -213,9 +213,10 @@ static int system_tag_read(plc_tag_p ptag)
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    if(tag->callback) {
-        tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, rc, tag->userdata);
-    }
+    /* safe here because we are still within the API mutex. */
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_STATUS_OK);
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -239,6 +240,10 @@ static int system_tag_write(plc_tag_p ptag)
         return PLCTAG_ERR_NULL_PTR;
     }
 
+    /* raise this here so that the callback can update the tag buffer. */
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_PENDING);
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+
     /* the version is static */
     if(str_cmp_i(&tag->name[0],"debug") == 0) {
         int res = 0;
@@ -255,9 +260,8 @@ static int system_tag_write(plc_tag_p ptag)
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
-    if(tag->callback) {
-        tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, rc, tag->userdata);
-    }
+    tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_STATUS_OK);
+    plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     pdebug(DEBUG_INFO,"Done.");
 
