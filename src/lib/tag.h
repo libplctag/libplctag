@@ -172,7 +172,7 @@ extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
 extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
 extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
 
-static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) 
+static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
 {
     /* do not stack up events if there is no callback. */
     if(!tag->callback) {
@@ -181,7 +181,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
 
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
-            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_ABORTED raised.");
+            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_ABORTED raised with status %s.", plc_tag_decode_error(status));
             tag->event_operation_aborted = 1;
             tag->event_operation_aborted_status = status;
             if(!tag->had_created_event) {
@@ -193,7 +193,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             break;
 
         case PLCTAG_EVENT_CREATED:
-            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_CREATED raised.");
+            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_CREATED raised with status %s.", plc_tag_decode_error(status));
             if(!tag->had_created_event) {
                 tag->event_creation_complete = 1;
                 tag->event_creation_complete_status = status;
@@ -204,7 +204,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
-            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_READ_COMPLETED raised.");
+            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_READ_COMPLETED raised with status %s.", plc_tag_decode_error(status));
             if(!tag->had_created_event) {
                 pdebug(DEBUG_DETAIL, "Raising synthesized created event on read completed event.");
                 tag->had_created_event = 1;
@@ -221,7 +221,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
-            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_READ_STARTED raised.");
+            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_READ_STARTED raised with status %s.", plc_tag_decode_error(status));
             tag->event_read_started = 1;
             tag->event_read_started_status = status;
             tag->event_read_complete_enable = 1;
@@ -229,7 +229,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
-            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_COMPLETED raised.");
+            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_COMPLETED raised with status %s.", plc_tag_decode_error(status));
             if(!tag->had_created_event) {
                 pdebug(DEBUG_DETAIL, "Raising synthesized created event on write completed event.");
                 tag->had_created_event = 1;
@@ -246,7 +246,7 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
-            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_STARTED raised.");
+            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_WRITE_STARTED raised with status %s.", plc_tag_decode_error(status));
             tag->event_write_started = 1;
             tag->event_write_started_status = status;
             tag->event_write_complete_enable = 1;
