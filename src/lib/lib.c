@@ -3563,7 +3563,7 @@ pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", st
 
     rc_dec(tag);
 
-    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_destroy(rc));
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
 }
