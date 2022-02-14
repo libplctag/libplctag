@@ -55,7 +55,12 @@ stress_test.c: Probably not the best code.  Written to stress test the library b
           LGX PLC with multiple threads while closing and openning tags constantly.  Do not code your
           apps like this!  POSIX only.
 
-string.c: This example shows how to read an array of STRINGs.  Cross platform, cross PLC.
+string_non_standard_udt.c: This example shows how to read an array of user-defined strings.  See the next example
+          for standard strings.  Only use this if you use a non-standard string-like UDT on a ControlLogix!
+          Cross platform.
+
+string_standard.c: This example shows how to read an array of standard STRINGs from ControlLogix and PLC/5.
+          Cross platform, cross PLC.
 
 test_callback.c: The library supports callbacks for internal events on tags and a callback for logging.  The
           latter is useful if you want to capture all logging output and direct it to your language/system

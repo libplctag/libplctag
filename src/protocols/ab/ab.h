@@ -41,7 +41,6 @@
 
 void ab_teardown(void);
 int ab_init();
-plc_tag_p ab_tag_create(attr attribs);
-
+plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
 
 #endif

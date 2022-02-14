@@ -39,15 +39,31 @@
 #include "utils.h"
 
 /*
- * Read an array of 48 STRINGs.  Note that the actual data size of a string is 88 bytes, not 82+4.
- *
- * STRING types are a DINT (4 bytes) followed by 82 bytes of characters.  Then two bytes of padding.
- */
+
+This example shows the use of standard strings for a ControlLogix and for a PLC-5.   The string definitions are
+the standard string types:
+
+- for ControlLogix, this is a 4-byte count word followed by 82 bytes of character data followed by 2 bytes of padding.
+- for PLC-5 this is a 2-byte count word followed by 82 bytes of character data and no padding.
+
+DO NOT USE THIS CODE FOR NON-STANDARD STRINGS!!!
+
+If you have a ControlLogix program that has some special UDT you use instead of the standard STRING type, this is NOT
+correct code and will be dangerous to use.   You can overwrite parts of larger UDTs or have other failures if you
+do so.   You MUST use the optional string definitions attributes to tell the library what your string definitions are.
+
+AGAIN: DO NOT USE THIS CODE FOR NON-STANDARD STRINGS!
+
+For PLC-5, SLC 500 and MicroLogix, the defaults here are fine.  For Control/CompactLogix, make sure that you are using
+the standard STRING type.   If you are not, this code WILL NOT WORK.
+
+*/
+
 
 #define REQUIRED_VERSION 2,2,0
 
 static const char *tag_strings[] = {
-    "protocol=ab_eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_count=48&name=Loc_Txt",
+    "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=88&elem_count=11&name=barcodes",
     "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_count=2&name=ST18:0"
 };
 

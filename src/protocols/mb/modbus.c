@@ -268,7 +268,7 @@ struct tag_vtable_t modbus_vtable = {
 
 /****** main entry point *******/
 
-plc_tag_p mb_tag_create(attr attribs)
+plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
 {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
@@ -283,7 +283,7 @@ plc_tag_p mb_tag_create(attr attribs)
     }
 
     /* set up the generic parts. */
-    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs);
+    rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
         rc_dec(tag);

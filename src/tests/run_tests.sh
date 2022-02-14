@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server tag_rw2 list_tags_logix test_auto_sync test_callback test_many_tag_perf test_raw_cip test_reconnect test_special test_string test_tag_attributes thread_stress"
+EXECUTABLES="ab_server string_non_standard_udt string_standard tag_rw2 list_tags_logix test_auto_sync test_callback test_callback_ex test_many_tag_perf test_raw_cip test_reconnect test_special test_string test_tag_attributes thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -55,6 +55,28 @@ fi
 let TEST++
 echo -n "Test $TEST: basic large tag read/write... "
 $TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1000&name=TestBigArray' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "${TEST}_big_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: test standard strings... "
+$TEST_DIR/string_standard > "${TEST}_standard_string_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: test non-standard UDT strings... "
+$TEST_DIR/string_standard > "${TEST}_non_standard_udt_string_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -214,6 +236,18 @@ fi
 let TEST++
 echo -n "Test $TEST: emulator test callbacks... "
 $TEST_DIR/test_callback > "${TEST}_callback_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "Test $TEST: emulator test extended callbacks... "
+$TEST_DIR/test_callback_ex > "${TEST}_extended_callback_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++

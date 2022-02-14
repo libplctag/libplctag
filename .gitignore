@@ -56,3 +56,6 @@ temp.c
 /out/build/ARM64
 /CMakeSettings.json
 build/*
+/.vs
+src/.DS_Store
+.DS_Store

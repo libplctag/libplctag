@@ -90,8 +90,8 @@ static int get_string_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_total_length_unsafe(plc_tag_p tag, int offset);
 // static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
 
-
-#if (defined(WIN32) || defined(_WIN32) || (defined(_WIN64)) && defined(LIBPLCTAGDLL_EXPORTS))
+#ifdef LIPLCTAGDLL_EXPORTS
+    #if defined(_WIN32) || (defined(_WIN64)
 #include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -120,7 +120,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
     return TRUE;
 }
-
+    #endif
 #endif
 
 /*
@@ -291,7 +291,8 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     tag->read_in_flight = 0;
 
                     /* TODO - should we report an ABORT event here? */
-                    tag->event_operation_aborted = 1;
+                    //tag->event_operation_aborted = 1;
+                    tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
                 }
 
                 /* have we already done something about automatic reads? */
@@ -317,7 +318,8 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                         tag->status = (int8_t)tag->vtable->write(tag);
                     }
 
-                    tag->event_write_started = 1;
+                    // tag->event_write_started = 1;
+                    tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
                 }
             }
         }
@@ -345,7 +347,8 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                         tag->status = (int8_t)tag->vtable->read(tag);
                     }
 
-                    tag->event_read_started = 1;
+                    // tag->event_read_started = 1;
+                    tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, tag->status);
 
                     /*
                     * schedule the next read.
@@ -384,62 +387,75 @@ void plc_tag_generic_tickler(plc_tag_p tag)
 
 void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
 {
+    critical_block(tag->api_mutex) {
+        /* call the callbacks outside the API mutex. */
+        if(tag && tag->callback) {
+            debug_set_tag_id(tag->tag_id);
 
-    /* call the callbacks outside the API mutex. */
-    if(tag && tag->callback) {
-        debug_set_tag_id(tag->tag_id);
+            /* trigger this if there is any other event. Only once. */
+            if(tag->event_creation_complete) {
+                pdebug(DEBUG_DETAIL, "Tag creation complete with status %s.", plc_tag_decode_error(tag->event_creation_complete_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_CREATED, tag->event_creation_complete_status, tag->userdata);
+                tag->event_creation_complete = 0;
+                tag->event_creation_complete_status = PLCTAG_STATUS_OK;
+            }
 
-        /* was there a read start? */
-        if(tag->event_read_started) {
-            pdebug(DEBUG_DETAIL, "Tag read started.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, plc_tag_status(tag->tag_id));
-            tag->event_read_started = 0;
+            /* was there a read start? */
+            if(tag->event_read_started) {
+                pdebug(DEBUG_DETAIL, "Tag read started with status %s.", plc_tag_decode_error(tag->event_read_started_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_READ_STARTED, tag->event_read_started_status, tag->userdata);
+                tag->event_read_started = 0;
+                tag->event_read_started_status = PLCTAG_STATUS_OK;
+            }
+
+            /* was there a write start? */
+            if(tag->event_write_started) {
+                pdebug(DEBUG_DETAIL, "Tag write started with status %s.", plc_tag_decode_error(tag->event_write_started_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, tag->event_write_started_status, tag->userdata);
+                tag->event_write_started = 0;
+                tag->event_write_started_status = PLCTAG_STATUS_OK;
+            }
+
+            /* was there an abort? */
+            if(tag->event_operation_aborted) {
+                pdebug(DEBUG_DETAIL, "Tag operation aborted with status %s.", plc_tag_decode_error(tag->event_operation_aborted_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, tag->event_operation_aborted_status, tag->userdata);
+                tag->event_operation_aborted = 0;
+                tag->event_operation_aborted_status = PLCTAG_STATUS_OK;
+            }
+
+            /* was there a read completion? */
+            if(tag->event_read_complete) {
+                pdebug(DEBUG_DETAIL, "Tag read completed with status %s.", plc_tag_decode_error(tag->event_read_complete_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, tag->event_read_complete_status, tag->userdata);
+                tag->event_read_complete = 0;
+                tag->event_read_complete_status = PLCTAG_STATUS_OK;
+            }
+
+            /* was there a write completion? */
+            if(tag->event_write_complete) {
+                pdebug(DEBUG_DETAIL, "Tag write completed with status %s.", plc_tag_decode_error(tag->event_write_complete_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, tag->event_write_complete_status, tag->userdata);
+                tag->event_write_complete = 0;
+                tag->event_write_complete_status = PLCTAG_STATUS_OK;
+            }
+
+            /* do this last so that we raise all other events first. we only start deletion events. */
+            if(tag->event_deletion_started) {
+                pdebug(DEBUG_DETAIL, "Tag deletion started with status %s.", plc_tag_decode_error(tag->event_creation_complete_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_DESTROYED, tag->event_deletion_started_status, tag->userdata);
+                tag->event_deletion_started = 0;
+                tag->event_deletion_started_status = PLCTAG_STATUS_OK;
+            }
+
+            debug_set_tag_id(0);
         }
-
-        /* was there a write start? */
-        if(tag->event_write_started) {
-            pdebug(DEBUG_DETAIL, "Tag write started.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_STARTED, plc_tag_status(tag->tag_id));
-            tag->event_write_started = 0;
-        }
-
-        /* was there an abort? */
-        if(tag->event_operation_aborted) {
-            pdebug(DEBUG_DETAIL, "Tag operation aborted.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_ABORTED, plc_tag_status(tag->tag_id));
-            tag->event_operation_aborted = 0;
-        }
-
-        /* was there a read completion? */
-        if(tag->event_read_complete) {
-            pdebug(DEBUG_DETAIL, "Tag read completed.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_READ_COMPLETED, plc_tag_status(tag->tag_id));
-            tag->event_read_complete = 0;
-        }
-
-        /* was there a write completion? */
-        if(tag->event_write_complete) {
-            pdebug(DEBUG_DETAIL, "Tag write completed.");
-            tag->callback(tag->tag_id, PLCTAG_EVENT_WRITE_COMPLETED, plc_tag_status(tag->tag_id));
-            tag->event_write_complete = 0;
-        }
-
-        /* was there a write completion? */
-        if(tag->event_creation_complete) {
-            pdebug(DEBUG_DETAIL, "Tag creation completed.");
-            /* TODO - when API changes, add this. */
-            //tag->callback(tag->tag_id, PLCTAG_EVENT_CREATE_COMPLETE, plc_tag_status(tag->tag_id));
-            tag->event_creation_complete = 0;
-        }
-
-        debug_set_tag_id(0);
-    }
-
+    } /* end of API mutex critical area. */
 }
 
 
 
-int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs)
+int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -469,6 +485,10 @@ int plc_tag_generic_init_tag(plc_tag_p tag, attr attribs)
         pdebug(DEBUG_WARN,"Unable to create tag condition variable!");
         return PLCTAG_ERR_CREATE;
     }
+
+    /* do this early so that events can be raised early. */
+    tag->callback = tag_callback_func;
+    tag->userdata = userdata;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -537,7 +557,8 @@ THREAD_FUNC(tag_tickler_func)
                                 tag->read_complete = 0;
                                 tag->read_in_flight = 0;
 
-                                tag->event_read_complete = 1;
+                                //tag->event_read_complete = 1;
+                                tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
 
                                 /* wake immediately */
                                 plc_tag_tickler_wake();
@@ -549,7 +570,8 @@ THREAD_FUNC(tag_tickler_func)
                                 tag->write_in_flight = 0;
                                 tag->auto_sync_next_write = 0;
 
-                                tag->event_write_complete = 1;
+                                // tag->event_write_complete = 1;
+                                tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
 
                                 /* wake immediately */
                                 plc_tag_tickler_wake();
@@ -786,12 +808,16 @@ LIB_EXPORT int plc_tag_check_lib_version(int req_major, int req_minor, int req_p
 /*
  * plc_tag_create()
  *
- * Just pass through to the plc_tag_create_sync() function.
- *
  * This is where the dispatch occurs to the protocol specific implementation.
  */
 
 LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
+{
+    return plc_tag_create_ex(attrib_str, NULL, NULL, timeout);
+}
+
+
+LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata, int timeout)
 {
     plc_tag_p tag = PLC_TAG_P_NULL;
     int id = PLCTAG_ERR_OUT_OF_BOUNDS;
@@ -847,7 +873,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    tag = tag_constructor(attribs);
+    tag = tag_constructor(attribs, tag_callback_func, userdata);
 
     if(!tag) {
         pdebug(DEBUG_WARN, "Tag creation failed, skipping mutex creation and other generic setup.");
@@ -1019,6 +1045,8 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
+        tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
+
         /* clear up any remaining flags.  This should be refactored. */
         tag->read_in_flight = 0;
         tag->write_in_flight = 0;
@@ -1026,6 +1054,8 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout)
         pdebug(DEBUG_INFO,"tag set up elapsed time %" PRId64 "ms",(time_ms()-start_time));
     }
 
+    /* dispatch any outstanding events. */
+    plc_tag_generic_handle_event_callbacks(tag);
 
     pdebug(DEBUG_INFO,"Done.");
 
@@ -1058,6 +1088,7 @@ LIB_EXPORT void plc_tag_shutdown(void)
  * Once registered, any of the following operations on or in the tag will result in the callback
  * being called:
  *
+ *      * a tag handle finishing creation.
  *      * starting a tag read operation.
  *      * a tag read operation ending.
  *      * a tag read being aborted.
@@ -1083,17 +1114,73 @@ LIB_EXPORT void plc_tag_shutdown(void)
  * function may be registered at a time on each tag.
  *
  * If all is successful, the function will return PLCTAG_STATUS_OK.
+ *
+ * Also see plc_tag_register_callback_ex.
  */
 
-LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status))
+LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    rc = plc_tag_register_callback_ex(tag_id, (tag_extended_callback_func)callback_func, NULL);
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return rc;
+}
+
+
+
+/*
+ * plc_tag_register_callback_ex
+ *
+ * This function registers the passed callback function and user data with the tag.  Only one callback function
+ * may be registered on a tag at a time!
+ *
+ * Once registered, any of the following operations on or in the tag will result in the callback
+ * being called:
+ *
+ *      * a tag handle finishing creation.
+ *      * starting a tag read operation.
+ *      * a tag read operation ending.
+ *      * a tag read being aborted.
+ *      * starting a tag write operation.
+ *      * a tag write operation ending.
+ *      * a tag write being aborted.
+ *      * a tag being destroyed
+ *
+ * The callback is called outside of the internal tag mutex so it can call any tag functions safely.   However,
+ * the callback is called in the context of the internal tag helper thread and not the client library thread(s).
+ * This means that YOU are responsible for making sure that all client application data structures the callback
+ * function touches are safe to access by the callback!
+ *
+ * Do not do any operations in the callback that block for any significant time.   This will cause library
+ * performance to be poor or even to start failing!
+ *
+ * When the callback is called with the PLCTAG_EVENT_DESTROY_STARTED, do not call any tag functions.  It is
+ * not guaranteed that they will work and they will possibly hang or fail.
+ *
+ * Return values:
+ *
+ * If there is already a callback registered, the function will return PLCTAG_ERR_DUPLICATE.   Only one callback
+ * function may be registered at a time on each tag.
+ *
+ * If all is successful, the function will return PLCTAG_STATUS_OK.
+ *
+ * Also see plc_tag_register_callback.
+ */
+
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, tag_extended_callback_func callback_func, void *userdata)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(tag_id);
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_WARN,"Tag not found.");
+    if (!tag) {
+        pdebug(DEBUG_WARN, "Tag not found.");
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -1101,8 +1188,13 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
         if(tag->callback) {
             rc = PLCTAG_ERR_DUPLICATE;
         } else {
-            rc = PLCTAG_STATUS_OK;
-            tag->callback = tag_callback_func;
+            if(callback_func) {
+                tag->callback = callback_func;
+                tag->userdata = userdata;
+            } else {
+                tag->callback = NULL;
+                tag->userdata = NULL;
+            }
         }
     }
 
@@ -1112,7 +1204,6 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_fun
 
     return rc;
 }
-
 
 
 
@@ -1143,6 +1234,7 @@ LIB_EXPORT int plc_tag_unregister_callback(int32_t tag_id)
         if(tag->callback) {
             rc = PLCTAG_STATUS_OK;
             tag->callback = NULL;
+            tag->userdata = NULL;
         } else {
             rc = PLCTAG_ERR_NOT_FOUND;
         }
@@ -1349,15 +1441,13 @@ LIB_EXPORT int plc_tag_abort(int32_t id)
         tag->write_in_flight = 0;
         tag->write_complete = 0;
 
+        tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
     }
 
     /* release the kraken... or tickler */
     plc_tag_tickler_wake();
 
-    if(tag->callback) {
-        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_ABORTED.");
-        tag->callback(id, PLCTAG_EVENT_ABORTED, PLCTAG_STATUS_OK);
-    }
+    plc_tag_generic_handle_event_callbacks(tag);
 
     rc_dec(tag);
 
@@ -1407,15 +1497,14 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
             /* Force a clean up. */
             tag->vtable->abort(tag);
         }
+
+        tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
     }
 
     /* wake the tickler */
     plc_tag_tickler_wake();
 
-    if(tag->callback) {
-        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_DESTROYED.");
-        tag->callback(tag_id, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
-    }
+    plc_tag_generic_handle_event_callbacks(tag);
 
     /* release the reference outside the mutex. */
     rc_dec(tag);
@@ -1461,12 +1550,10 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(tag->callback) {
-        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_STARTED.");
-        tag->callback(id, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
-    }
-
     critical_block(tag->api_mutex) {
+        tag_raise_event(tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
+        plc_tag_generic_handle_event_callbacks(tag);
+
         /* check read cache, if not expired, return existing data. */
         if(tag->read_cache_expire > time_ms()) {
             pdebug(DEBUG_INFO, "Returning cached data.");
@@ -1559,11 +1646,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
-        /* the write is not in flight anymore. */
+        /* the read is not in flight anymore. */
         critical_block(tag->api_mutex) {
             tag->read_in_flight = 0;
             tag->read_complete = 0;
             is_done = 1;
+            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
         }
 
         pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms", (time_ms()-start_time));
@@ -1574,12 +1662,8 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         tag->read_cache_expire = time_ms() + tag->read_cache_ms;
     }
 
-    // if(tag->callback) {
-    //     if(is_done) {
-    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_READ_COMPLETED.");
-    //         tag->callback(id, PLCTAG_EVENT_READ_COMPLETED, rc);
-    //     }
-    // }
+    /* fire any events that are pending. */
+    plc_tag_generic_handle_event_callbacks(tag);
 
     rc_dec(tag);
 
@@ -1675,11 +1759,6 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(tag->callback) {
-        pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_STARTED.");
-        tag->callback(id, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK);
-    }
-
     critical_block(tag->api_mutex) {
         if(tag->read_in_flight || tag->write_in_flight) {
             pdebug(DEBUG_WARN, "Tag already has an operation in flight!");
@@ -1692,8 +1771,21 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         tag->write_in_flight = 1;
         tag->status = PLCTAG_STATUS_OK;
 
-        /* clear the condition var */
+        /*
+         * This needs to be done before we raise the event below in case the user code
+         * tries to do something tricky like abort the write.   In that case, the condition
+         * variable will be set by the abort.   So we have to clear it here and then see
+         * if it gets raised afterward.
+         */
         cond_clear(tag->tag_cond_wait);
+
+        /*
+         * This must be raised _before_ we start the write to enable
+         * application code to fill in the tag data buffer right before
+         * we start the write process.
+         */
+        tag_raise_event(tag, PLCTAG_EVENT_WRITE_STARTED, tag->status);
+        plc_tag_generic_handle_event_callbacks(tag);
 
         /* the protocol implementation does not do the timeout. */
         rc = tag->vtable->write(tag);
@@ -1769,12 +1861,14 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         pdebug(DEBUG_INFO,"Write finshed with elapsed time %" PRId64 "ms", (time_ms()-start_time));
     }
 
-    // if(tag->callback) {
-    //     if(is_done) {
-    //         pdebug(DEBUG_DETAIL, "Calling callback with PLCTAG_EVENT_WRITE_COMPLETED.");
-    //         tag->callback(id, PLCTAG_EVENT_WRITE_COMPLETED, rc);
-    //     }
-    // }
+    if(is_done) {
+        critical_block(tag->api_mutex) {
+            tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc);
+        }
+    }
+
+    /* fire any events that are pending. */
+    plc_tag_generic_handle_event_callbacks(tag);
 
     rc_dec(tag);
 
@@ -3477,7 +3571,7 @@ pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", st
 
     rc_dec(tag);
 
-    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_destroy(rc));
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
 }

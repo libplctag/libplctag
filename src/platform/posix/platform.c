@@ -643,6 +643,8 @@ struct mutex_t {
 
 int mutex_create(mutex_p *m)
 {
+    pthread_mutexattr_t mutex_attribs;
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(*m) {
@@ -656,7 +658,12 @@ int mutex_create(mutex_p *m)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(pthread_mutex_init(&((*m)->p_mutex),NULL)) {
+    /* set up for recursive locking. */
+    pthread_mutexattr_init(&mutex_attribs);
+    pthread_mutexattr_settype(&mutex_attribs, PTHREAD_MUTEX_RECURSIVE);
+
+    if(pthread_mutex_init(&((*m)->p_mutex),&mutex_attribs)) {
+        pthread_mutexattr_destroy(&mutex_attribs);
         mem_free(*m);
         *m = NULL;
         pdebug(DEBUG_ERROR,"Error initializing mutex.");
@@ -664,6 +671,8 @@ int mutex_create(mutex_p *m)
     }
 
     (*m)->initialized = 1;
+
+    pthread_mutexattr_destroy(&mutex_attribs);
 
     pdebug(DEBUG_DETAIL, "Done creating mutex %p.", *m);
 

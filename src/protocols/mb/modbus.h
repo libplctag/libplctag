@@ -41,4 +41,4 @@
 
 extern void mb_teardown(void);
 extern int mb_init();
-extern plc_tag_p mb_tag_create(attr attribs);
+extern plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
