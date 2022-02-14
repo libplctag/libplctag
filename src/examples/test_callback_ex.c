@@ -60,10 +60,10 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
             break;
 
         case PLCTAG_EVENT_DESTROYED:
+            printf("Tag was destroyed with status %s.\n", plc_tag_decode_error(status));
             if(data) {
                 free((void *)data);
             }
-            printf("Tag was destroyed with status %s.\n", plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
