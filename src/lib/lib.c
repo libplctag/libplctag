@@ -1037,7 +1037,7 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
-        tag_raise_event(tag, PLCTAG_EVENT_CREATED, rc);
+        tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
 
         /* clear up any remaining flags.  This should be refactored. */
         tag->read_in_flight = 0;
@@ -1643,7 +1643,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
             tag->read_in_flight = 0;
             tag->read_complete = 0;
             is_done = 1;
-            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, rc);
+            tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
         }
 
         pdebug(DEBUG_INFO,"elapsed time %" PRId64 "ms", (time_ms()-start_time));
@@ -1771,7 +1771,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
          */
         cond_clear(tag->tag_cond_wait);
 
-        /* 
+        /*
          * This must be raised _before_ we start the write to enable
          * application code to fill in the tag data buffer right before
          * we start the write process.
@@ -1855,7 +1855,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
     if(is_done) {
         critical_block(tag->api_mutex) {
-            tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, rc);
+            tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc);
         }
     }
 
