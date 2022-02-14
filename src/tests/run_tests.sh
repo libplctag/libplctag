@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server string_non_standard_udt string_standard tag_rw2 list_tags_logix test_auto_sync test_callback test_many_tag_perf test_raw_cip test_reconnect test_special test_string test_tag_attributes thread_stress"
+EXECUTABLES="ab_server string_non_standard_udt string_standard tag_rw2 list_tags_logix test_auto_sync test_callback test_callback_ex test_many_tag_perf test_raw_cip test_reconnect test_special test_string test_tag_attributes thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
