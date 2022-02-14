@@ -440,6 +440,14 @@ void plc_tag_generic_handle_event_callbacks(plc_tag_p tag)
                 tag->event_write_complete_status = PLCTAG_STATUS_OK;
             }
 
+            /* do this last so that we raise all other events first. we only start deletion events. */
+            if(tag->event_deletion_started) {
+                pdebug(DEBUG_DETAIL, "Tag deletion started with status %s.", plc_tag_decode_error(tag->event_creation_complete_status));
+                tag->callback(tag->tag_id, PLCTAG_EVENT_DESTROYED, tag->event_deletion_started_status, tag->userdata);
+                tag->event_deletion_started = 0;
+                tag->event_deletion_started_status = PLCTAG_STATUS_OK;
+            }
+
             debug_set_tag_id(0);
         }
     } /* end of API mutex critical area. */

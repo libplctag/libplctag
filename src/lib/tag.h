@@ -117,6 +117,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
                         uint8_t skip_tickler:1; \
                         uint8_t had_created_event:1; \
                         uint8_t event_creation_complete:1; \
+                        uint8_t event_deletion_started:1; \
                         uint8_t event_operation_aborted:1; \
                         uint8_t event_read_started: 1; \
                         uint8_t event_read_complete_enable: 1; \
@@ -125,6 +126,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
                         uint8_t event_write_complete_enable: 1; \
                         uint8_t event_write_complete: 1; \
                         int8_t event_creation_complete_status; \
+                        int8_t event_deletion_started_status; \
                         int8_t event_operation_aborted_status; \
                         int8_t event_read_started_status; \
                         int8_t event_read_complete_status; \
@@ -201,6 +203,12 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             } else {
                 pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_CREATED skipped due to duplication.");
             }
+            break;
+
+        case PLCTAG_EVENT_DESTROYED:
+            pdebug(DEBUG_DETAIL, "PLCTAG_EVENT_DESTROYED raised with status %s.", plc_tag_decode_error(status));
+            tag->event_deletion_started = 1;
+            tag->event_deletion_started_status = status;
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
