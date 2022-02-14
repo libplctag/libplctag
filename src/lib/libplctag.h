@@ -198,6 +198,19 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
 
 
 /*
+ * plc_tag_create_ex
+ *
+ * As for plc_tag_create with the addition of a callback and user-supplied data pointer.
+ * 
+ * The callback will be set as early as possible in the callback process.  This allows sending
+ * of early creation time events to user code.
+ */
+
+LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata, int timeout);
+
+
+
+/*
  * plc_tag_shutdown
  *
  * Some systems may not call the atexit() handlers.  In those cases, wrappers should
@@ -263,12 +276,13 @@ LIB_EXPORT void plc_tag_shutdown(void);
 
 #define PLCTAG_EVENT_DESTROYED          (6)
 
-#define PLCTAG_EVENT_MAX                (PLCTAG_EVENT_DESTROYED + 1)
+#define PLCTAG_EVENT_CREATED            (7)
+
+#define PLCTAG_EVENT_MAX                (PLCTAG_EVENT_CREATED + 1)
 
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
 
-
-
+LIB_EXPORT int plc_tag_register_callback_ex(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
 
 
 
