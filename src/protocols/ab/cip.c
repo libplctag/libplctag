@@ -651,7 +651,7 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
     name_i++;
 
     /* get the rest of the name. */
-    while(isalnum(name[name_i]) || name[name_i] == ':' || name[name_i] == '_') {
+    while((isalnum(name[name_i]) || name[name_i] == ':' || name[name_i] == '_') && (encoded_i < (MAX_TAG_NAME - 1))) {
         tag->encoded_name[encoded_i] = (uint8_t)name[name_i];
         encoded_i++;
         tag->encoded_name[seg_len_index]++;
@@ -661,7 +661,7 @@ int parse_symbolic_segment(ab_tag_p tag, const char *name, int *encoded_index, i
     seg_len = tag->encoded_name[seg_len_index];
 
     /* finish up the encoded name.   Space for the name must be a multiple of two bytes long. */
-    if(tag->encoded_name[seg_len_index] & 0x01) {
+    if((tag->encoded_name[seg_len_index] & 0x01) && (encoded_i < MAX_TAG_NAME)) {
         tag->encoded_name[encoded_i] = 0;
         encoded_i++;
     }

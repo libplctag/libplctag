@@ -324,6 +324,11 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
     modbus_reg_type_t reg_type = MB_REG_UNKNOWN;
     int reg_base = 0;
 
+    if (elem_count < 0) {
+        pdebug(DEBUG_WARN, "Element count should not be a negative value!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
     pdebug(DEBUG_INFO, "Starting.");
 
     *tag = NULL;
