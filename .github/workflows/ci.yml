@@ -382,7 +382,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 17 2022" -A x64
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
@@ -497,7 +497,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 17 2022" -A Win32
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
@@ -612,7 +612,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 17 2022" -A ARM
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
@@ -641,7 +641,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 17 2022" -A ARM64
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
