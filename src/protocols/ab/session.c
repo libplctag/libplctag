@@ -1040,9 +1040,8 @@ THREAD_FUNC(session_handler)
                 state = SESSION_CLOSE_SOCKET;
             } else {
                 if(rc == PLCTAG_STATUS_OK) {
+                    /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
                     auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
-
-                    cond_signal(session->wait_cond);
 
                     pdebug(DEBUG_DETAIL, "Connect complete immediately, going to state SESSION_REGISTER.");
 
@@ -1053,12 +1052,16 @@ THREAD_FUNC(session_handler)
                     state = SESSION_OPEN_SOCKET_WAIT;
                 }
             }
+
+            /* in all cases, don't wait. */
+            cond_signal(session->wait_cond);
+
             break;
 
         case SESSION_OPEN_SOCKET_WAIT:
             pdebug(DEBUG_DETAIL, "in SESSION_OPEN_SOCKET_WAIT state.");
 
-            /* we must connect to the gateway*/
+            /* we must connect to the gateway */
             rc = socket_connect_tcp_check(session->sock, 20); /* MAGIC */
             if(rc == PLCTAG_STATUS_OK) {
                 /* connected! */
@@ -1067,19 +1070,19 @@ THREAD_FUNC(session_handler)
                 /* calculate the disconnect time. */
                 auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
 
-                /* don't wait. */
-                cond_signal(session->wait_cond);
-
                 state = SESSION_REGISTER;
             } else if(rc == PLCTAG_ERR_TIMEOUT) {
                 pdebug(DEBUG_DETAIL, "Still waiting for connection to succeed.");
 
                 /* don't wait more.  The TCP connect check will wait in select(). */
-                cond_signal(session->wait_cond);
             } else {
                 pdebug(DEBUG_WARN, "Session connect failed %s!", plc_tag_decode_error(rc));
                 state = SESSION_CLOSE_SOCKET;
             }
+
+            /* in all cases, don't wait. */
+            cond_signal(session->wait_cond);
+
             break;
 
         case SESSION_REGISTER:
