@@ -1644,7 +1644,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
                 pdebug(DEBUG_WARN, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
             }
-        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
 
         /* the read is not in flight anymore. */
         critical_block(tag->api_mutex) {
@@ -1849,7 +1849,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
                 pdebug(DEBUG_WARN, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
                 plc_tag_abort(id);
             }
-        } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
+        } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
 
         /* the write is not in flight anymore. */
         critical_block(tag->api_mutex) {
