@@ -135,7 +135,8 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     tag->byte_order = &system_tag_byte_order;
 
     /* get the name and copy it */
-    str_copy(tag->name, MAX_SYSTEM_TAG_NAME, name);
+    str_copy(tag->name, MAX_SYSTEM_TAG_NAME - 1, name);
+    tag->name[MAX_SYSTEM_TAG_NAME - 1] = '\0';
 
     /* point data at the backing store. */
     tag->data = &tag->backing_data[0];
