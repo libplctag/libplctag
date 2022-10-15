@@ -1,6 +1,6 @@
-#ifdef _MSC_VER
-    #define _CRT_SECURE_NO_WARNINGS 1
-    #define restrict __restrict
+#if defined(_MSC_VER) || defined (__MINGW64__)
+     #define _CRT_SECURE_NO_WARNINGS 1
+     #define restrict __restrict
  
     #include <stdio.h>
     #include <stdlib.h>
