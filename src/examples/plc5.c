@@ -49,6 +49,7 @@ int main(int argc, char **argv)
 {
     int32_t tag = 0;
     int rc;
+    int file_type = 0;
     int i;
 
     (void)argc;
@@ -127,6 +128,10 @@ int main(int argc, char **argv)
     for(i=0; i < ELEM_COUNT; i++) {
         fprintf(stderr,"data[%d]=%f\n",i,plc_tag_get_float32(tag,(i*ELEM_SIZE)));
     }
+
+    /* see what the data type is */
+    file_type = plc_tag_get_int_attribute(tag, "elem_type", -1);
+    fprintf(stderr, "Reported data file type is 0x%02x.\n", file_type);
 
     /* we are done */
     plc_tag_destroy(tag);
