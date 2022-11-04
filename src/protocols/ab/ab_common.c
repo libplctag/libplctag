@@ -545,6 +545,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
         }
 
         tag->elem_size = file_addr.element_size_bytes;
+        tag->file_type = (int)file_addr.file_type;
 
         break;
 
@@ -866,6 +867,23 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         res = tag->elem_size;
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
+    } else if(str_cmp_i(attrib_name, "elem_type") == 0) {
+        switch(tag->plc_type) {
+            case AB_PLC_PLC5: /* fall through */
+            case AB_PLC_MLGX: /* fall through */
+            case AB_PLC_SLC: /* fall through */
+            case AB_PLC_LGX_PCCC:
+                res = (int)(tag->file_type);
+                break;
+            case AB_PLC_LGX: /* fall through */
+            case AB_PLC_MICRO800: /* fall through */
+            case AB_PLC_OMRON_NJNX:
+                res = (int)(tag->elem_type);
+                break;
+            default: 
+                pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type);
+                break;
+        }
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
         tag->status = PLCTAG_ERR_UNSUPPORTED;
