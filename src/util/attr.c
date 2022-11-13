@@ -41,6 +41,7 @@
 #include <util/attr.h>
 #include <platform.h>
 #include <stdio.h>
+#include <string.h>
 #include <util/debug.h>
 
 
@@ -125,81 +126,96 @@ extern attr attr_create_from_str(const char *attr_str)
     char *tmp;
     char *cur;
     attr res = NULL;
+    char **kv_pairs = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!str_length(attr_str)) {
+        pdebug(DEBUG_WARN, "Attribute string needs to be longer than zero characters!");
         return NULL;
     }
 
-    /* make a copy for a destructive read. */
-    tmp = str_dup(attr_str);
-    if(!tmp) {
+    /* split the string on "&" */
+    kv_pairs = str_split(attr_str, "&");
+    if(!kv_pairs) {
+        pdebug(DEBUG_WARN, "No key-value pairs!");
         return NULL;
     }
 
+    /* set up the attribute list head */
     res = attr_create();
-
     if(!res) {
-        mem_free(tmp);
+        pdebug(DEBUG_ERROR, "Unable to allocate memory for attribute list!");
+        mem_free(kv_pairs);
         return NULL;
     }
 
-    /*
-     * walk the pointer along the input and copy the
-     * names and values along the way.
-     */
-    cur = tmp;
-    while(*cur) {
-        /* read the name */
-        char *name = cur;
-        char *val;
+    /* loop over each key-value pair */
+    for(char **kv_pair = kv_pairs; *kv_pair; kv_pair++) {
+        /* find the position of the '=' character */
+        char *separator = strchr(*kv_pair, '=');
+        char *key = *kv_pair;
+        char *value = separator;
 
-        while(*cur && *cur != '=')
-            cur++;
+        pdebug(DEBUG_DETAIL, "Key-value pair \"%s\".", *kv_pair);
 
-        /* 
-         * did we run off the end of the string?
-         * That is an error because we need to have a value.
-         * 
-         * FIXME - this is actually a bug.   We need to fail
-         * on all malformed attribute.  Not just at the end of a line.
-         *    "foo=&bar=blah"
-         * is malformed.   But the test below will not catch it.
-         */
-        if(*cur == 0) {
-            if(res) attr_destroy(res);
-            mem_free(tmp);
+        if(separator == NULL) {
+            pdebug(DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!", attr_str, *kv_pair);
+            mem_free(kv_pairs);
+            attr_destroy(res);
             return NULL;
         }
 
-        /* terminate the name string */
-        *cur = 0;
+        /* value points to the '=' character.  Step past that for the value. */
+        value++;
 
-        /* read the value */
-        cur++;
-        val = cur;
+        /* cut the string at the separator. */
+        *separator = (char)0;
 
-        while(*cur && *cur != '&')
-            cur++;
+        pdebug(DEBUG_DETAIL, "Key-value pair before trimming \"%s\":\"%s\".", key, value);
 
-        /* we do not care if we ran off the end, much. */
-        if(*cur) {
-            *cur = 0;
-            cur++;
+        /* skip leading spaces in the key */
+        while(*key == ' ') {
+            key++;
         }
 
-        /* only set the value if it is not a zero-length string. */
-        if(str_length(val)) {
-            if(attr_set_str(res, name, val)) {
-                if(res) attr_destroy(res);
-                mem_free(tmp);
-                return NULL;
-            }
-        } else {
-            pdebug(DEBUG_WARN, "Malformed attribute string, attribute \"%s\" has no value.", name);
+        /* zero out all trailing spaces in the key */
+        for(int i=str_length(key) - 1; i > 0 && key[i] == ' '; i--) {
+            key[i] = (char)0;
+        }
+
+        pdebug(DEBUG_DETAIL, "Key-value pair after trimming \"%s\":\"%s\".", key, value);
+
+        /* check the string lengths */
+
+        if(str_length(key) <= 0) {
+            pdebug(DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Key must not be zero length!", attr_str, *kv_pair);
+            mem_free(kv_pairs);
+            attr_destroy(res);
+            return NULL;
+        }
+
+        if(str_length(value) <= 0) {
+            pdebug(DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Value must not be zero length!", attr_str, *kv_pair);
+            mem_free(kv_pairs);
+            attr_destroy(res);
+            return NULL;
+        }
+
+        /* add the key-value pair to the attribute list */
+        if(attr_set_str(res, key, value)) {
+            pdebug(DEBUG_WARN, "Unable to add key-value pair \"%s\":\"%s\" to attribute list!", key, value);
+            mem_free(kv_pairs);
+            attr_destroy(res);
+            return NULL;
         }
     }
 
-    mem_free(tmp);
+    if(kv_pairs) {
+        mem_free(kv_pairs);
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
 
     return res;
 }

@@ -75,6 +75,11 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
     path_len = (size_t)(ssize_t)str_length(path);
 
     while(path_index < path_len && path[path_index] && conn_path_index < MAX_CONN_PATH) {
+        /* skip spaces before each segment */
+        while(path[path_index] == ' ') {
+            path_index++;
+        }
+
         if(path[path_index] == ',') {
             /* skip separators. */
             pdebug(DEBUG_DETAIL, "Skipping separator character '%c'.", (char)path[path_index]);
@@ -211,13 +216,21 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     c_index++;
     *conn_path_index = c_index;
 
+    /* skip trailing spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
+    pdebug(DEBUG_DETAIL, "Remaining path \"%s\".", &path[p_index]);
+
     /* bump past our last read character. */
     *path_index = p_index;
 
-    pdebug(DEBUG_DETAIL, "Done.   Found numeric segment %d.", val);
+    pdebug(DEBUG_DETAIL, "Done. Found numeric segment %d.", val);
 
     return PLCTAG_STATUS_OK;
 }
+
 
 /*
  * match symbolic IP address segments.
@@ -252,6 +265,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
         pdebug(DEBUG_DETAIL, "Extended address on port B.");
     }
 
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
     /* is the next character a comma? */
     if(path[p_index] != ',') {
         pdebug(DEBUG_DETAIL, "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".",(int)(ssize_t)p_index, &path[p_index]);
@@ -268,6 +286,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     addr_seg_len = &conn_path[c_index];
     *addr_seg_len = 0;
     c_index++;
+
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
 
     /* get the first IP address digit. */
     val = 0;
@@ -286,6 +309,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     pdebug(DEBUG_DETAIL, "First IP segment: %d.", val);
 
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
     /* is the next character a dot? */
     if(path[p_index] != '.') {
         pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in first IP address part.", path[p_index], p_index);
@@ -297,6 +325,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     c_index++;
     p_index++;
     (*addr_seg_len)++;
+
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
 
     /* get the second part. */
     val = 0;
@@ -315,6 +348,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     pdebug(DEBUG_DETAIL, "Second IP segment: %d.", val);
 
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
     /* is the next character a dot? */
     if(path[p_index] != '.') {
         pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in second IP address part.", path[p_index], p_index);
@@ -326,6 +364,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     c_index++;
     p_index++;
     (*addr_seg_len)++;
+
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
 
     /* get the third part. */
     val = 0;
@@ -344,6 +387,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     pdebug(DEBUG_DETAIL, "Third IP segment: %d.", val);
 
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
     /* is the next character a dot? */
     if(path[p_index] != '.') {
         pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in third IP address part.", path[p_index], p_index);
@@ -355,6 +403,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     c_index++;
     p_index++;
     (*addr_seg_len)++;
+
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
 
     /* get the fourth part. */
     val = 0;
@@ -377,6 +430,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     if((*addr_seg_len) & (uint8_t)0x01) {
         conn_path[c_index] = (uint8_t)0;
         c_index++;
+    }
+
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
     }
 
     /* set the return values. */
@@ -430,6 +488,11 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     p_index++;
 
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
     /* is the next character a colon? */
     if(path[p_index] != ':') {
         pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match first colon expected in DH+ segment.", path[p_index], (int)(ssize_t)p_index);
@@ -437,6 +500,11 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     }
 
     p_index++;
+
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
 
     /* get the source node */
     val = 0;
@@ -453,6 +521,11 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     *src_node = (uint8_t)(unsigned int)val;
 
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
     /* is the next character a colon? */
     if(path[p_index] != ':') {
         pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match the second colon expected in DH+ segment.", path[p_index], (int)(ssize_t)p_index);
@@ -460,6 +533,11 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     }
 
     p_index++;
+
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
 
     /* get the destination node */
     val = 0;
@@ -474,13 +552,21 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
         return PLCTAG_ERR_BAD_PARAM;
     }
 
+    /* skip spaces */
+    while(path[p_index] == ' ') {
+        p_index++;
+    }
+
     *dest_node = (uint8_t)(unsigned int)val;
     *path_index = p_index;
+
+    pdebug(DEBUG_DETAIL, "Found DH+ path port:%d, source node:%d, destination node:%d.", (int)(unsigned int)*port, (int)(unsigned int)*src_node, (int)(unsigned int)*dest_node);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
+
 
 /*
  * The EBNF is:
