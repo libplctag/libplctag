@@ -58,18 +58,19 @@ static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t 
 
 
 
-int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, uint16_t *dhp_dest)
+int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, int *is_dhp, uint16_t *dhp_dest)
 {
     size_t path_len = 0;
     size_t conn_path_index = 0;
     size_t path_index = 0;
-    int is_dhp = 0;
     uint8_t dhp_port = 0;
     uint8_t dhp_src_node = 0;
     uint8_t dhp_dest_node = 0;
     uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
 
     pdebug(DEBUG_DETAIL, "Starting");
+
+    *is_dhp = 0;
 
     path_len = (size_t)(ssize_t)str_length(path);
 
@@ -92,7 +93,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
                 return PLCTAG_ERR_BAD_PARAM;
             }
 
-            is_dhp = 1;
+            *is_dhp = 1;
         } else {
             /* unknown, cannot parse this! */
             pdebug(DEBUG_WARN, "Unable to parse remaining path string from position %d, \"%s\".", (int)(ssize_t)path_index, (char*)&path[path_index]);
@@ -105,7 +106,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if(is_dhp && (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX)) {
+    if(*is_dhp && (plc_type == AB_PLC_PLC5 || plc_type == AB_PLC_SLC || plc_type == AB_PLC_MLGX)) {
         /* DH+ bridging always needs a connection. */
         *needs_connection = 1;
 
@@ -119,7 +120,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
         conn_path_index += 6;
 
         *dhp_dest = (uint16_t)dhp_dest_node;
-    } else if(!is_dhp) {
+    } else if(!*is_dhp) {
         if(*needs_connection) {
             pdebug(DEBUG_DETAIL, "PLC needs connection, adding path to the router object.");
 
