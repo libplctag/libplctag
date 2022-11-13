@@ -297,7 +297,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     /* set up PLC-specific information. */
     switch(tag->plc_type) {
     case AB_PLC_PLC5:
-        if(!tag->session->dhp_dest) {
+        if(!tag->session->is_dhp) {
             pdebug(DEBUG_DETAIL, "Setting up PLC/5 tag.");
 
             if(str_length(path)) {
@@ -319,7 +319,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
     case AB_PLC_SLC:
     case AB_PLC_MLGX:
-        if(!tag->session->dhp_dest) {
+        if(!tag->session->is_dhp) {
 
             if(str_length(path)) {
                 pdebug(DEBUG_WARN, "A path is not supported for this PLC type if it is not for a DH+ bridge.");
