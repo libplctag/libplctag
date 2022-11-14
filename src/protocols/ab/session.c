@@ -469,7 +469,7 @@ ab_session_p session_create_unsafe(const char *host, const char *path, plc_type_
         return NULL;
     }
 
-    rc = cip_encode_path(path, use_connected_msg, plc_type, &session->conn_path, &session->conn_path_size, &session->dhp_dest);
+    rc = cip_encode_path(path, use_connected_msg, plc_type, &session->conn_path, &session->conn_path_size, &session->is_dhp, &session->dhp_dest);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO, "Unable to convert path links strings to binary path!");
         rc_dec(session);
@@ -2194,7 +2194,7 @@ int send_old_forward_open_request(ab_session_p session)
     fo->orig_to_targ_rpi = h2le32(AB_EIP_RPI); /* us to target RPI - Request Packet Interval in microseconds */
 
     /* screwy logic if this is a DH+ route! */
-    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX) && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX) && session->is_dhp) {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->orig_to_targ_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */
@@ -2203,7 +2203,7 @@ int send_old_forward_open_request(ab_session_p session)
     fo->targ_to_orig_rpi = h2le32(AB_EIP_RPI); /* target to us RPI - not really used for explicit messages? */
 
     /* screwy logic if this is a DH+ route! */
-    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX) && session->dhp_dest != 0) {
+    if((session->plc_type == AB_PLC_PLC5 || session->plc_type == AB_PLC_SLC || session->plc_type == AB_PLC_MLGX) && session->is_dhp) {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_PLC5_PARAM);
     } else {
         fo->targ_to_orig_conn_params = h2le16(AB_EIP_CONN_PARAM | session->max_payload_guess); /* packet size and some other things, based on protocol/cpu type */

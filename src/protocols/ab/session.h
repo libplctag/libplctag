@@ -75,6 +75,7 @@ struct ab_session_t {
     uint8_t *conn_path;
     uint8_t conn_path_size;
     uint16_t dhp_dest;
+    int is_dhp;
 
     int connection_group_id;
 
