@@ -218,19 +218,10 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
 #define COLUMNS (10)
 
-extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
 {
     int max_row, row, column;
-    // char prefix[48]; /* MAGIC */
-    // int prefix_size;
-    char row_buf[300]; /* MAGIC */
-
-    /* build the prefix */
-    // prefix_size = make_prefix(prefix,(int)sizeof(prefix));
-
-    // if(prefix_size <= 0) {
-    //     return;
-    // }
+    char row_buf[(COLUMNS * 3) + 5 + 1]; 
 
     /* determine the number of rows we will need to print. */
     max_row = (count  + (COLUMNS - 1))/COLUMNS;
@@ -239,8 +230,8 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
         int offset = (row * COLUMNS);
         int row_offset = 0;
 
-        /* print the prefix and address */
-        //row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s %s:%d %05d", prefix, debug_level_name[debug_level], func, line_num, offset);
+        /* print the offset in the packet */
+        row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%05d", offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
@@ -251,12 +242,8 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
         row_buf[sizeof(row_buf)-1] = 0; /* just in case */
 
         /* output it, finally */
-        //fprintf(stderr,"%s\n",row_buf);
         pdebug_impl(func, line_num, debug_level, row_buf);
     }
-
-
-    /*fflush(stderr);*/
 }
 
 
