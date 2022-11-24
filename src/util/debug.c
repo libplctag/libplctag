@@ -216,7 +216,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
 
 
-#define COLUMNS (10)
+#define COLUMNS (16)
 
 void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
 {
