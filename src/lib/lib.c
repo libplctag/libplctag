@@ -1471,6 +1471,8 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
 {
     plc_tag_p tag = NULL;
 
+    debug_set_tag_id((int)tag_id);
+
     pdebug(DEBUG_INFO, "Starting.");
 
     if(tag_id <= 0 || tag_id >= TAG_ID_MASK) {
