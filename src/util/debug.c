@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -61,7 +62,7 @@ static void (* volatile log_callback_func)(int32_t tag_id, int debug_level, cons
  */
 
 static THREAD_LOCAL uint32_t this_thread_num = 0;
-static THREAD_LOCAL int tag_id = 0;
+static THREAD_LOCAL int32_t tag_id = 0;
 
 
 // /* only output the version once */
@@ -86,7 +87,7 @@ int get_debug_level(void)
 
 
 
-void debug_set_tag_id(int t_id)
+void debug_set_tag_id(int32_t t_id)
 {
     tag_id = t_id;
 }
@@ -181,7 +182,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     // }
 
     /* build the output string template */
-    prefix_size += snprintf(prefix, sizeof(prefix),"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%d) %s %s:%d %s\n",
+    prefix_size += snprintf(prefix, sizeof(prefix),"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(" PRId32 ") %s %s:%d %s\n",
                                                     t.tm_year+1900,
                                                     t.tm_mon + 1, /* month is 0-11? */
                                                     t.tm_mday,
