@@ -204,7 +204,7 @@ int initialize_modules(void)
                 /* initialize a random seed value. */
                 srand((unsigned int)time_ms());
 
-                pdebug(DEBUG_INFO,"Initialized library modules.");
+                pdebug(DEBUG_INFO,"Initializing library modules.");
                 rc = lib_init();
 
                 pdebug(DEBUG_INFO,"Initializing AB module.");
