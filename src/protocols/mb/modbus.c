@@ -2392,11 +2392,32 @@ void mb_teardown(void)
 
     library_terminating = 1;
 
-    pdebug(DEBUG_DETAIL, "Destroying Modbus mutex.");
     if(mb_mutex) {
+        pdebug(DEBUG_DETAIL, "Waiting for all Modbus PLCs to terminate.");
+
+        while(1) {
+            int plcs_remain = 0;
+            
+            critical_block(mb_mutex) {
+                plcs_remain = plcs ? 1 : 0;
+            }
+
+            if(plcs_remain) {
+                sleep_ms(10); // MAGIC
+            } else {
+                break;
+            }
+        }
+
+        pdebug(DEBUG_DETAIL, "All Modbus PLCs terminated.");
+    }
+
+    if(mb_mutex) {
+        pdebug(DEBUG_DETAIL, "Destroying Modbus mutex.");
         mutex_destroy(&mb_mutex);
         mb_mutex = NULL;
     }
+    pdebug(DEBUG_DETAIL, "Modbus mutex destroyed.");
 
     pdebug(DEBUG_INFO, "Done.");
 }

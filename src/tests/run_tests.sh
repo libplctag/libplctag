@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server string_non_standard_udt string_standard tag_rw2 list_tags_logix test_auto_sync test_callback test_callback_ex test_many_tag_perf test_raw_cip test_reconnect test_special test_string test_tag_attributes thread_stress"
+EXECUTABLES="ab_server string_non_standard_udt string_standard tag_rw2 list_tags_logix test_auto_sync test_callback test_callback_ex test_many_tag_perf test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -255,6 +255,20 @@ else
     echo "OK"
     let SUCCESSES++
 fi
+
+
+let TEST++
+echo -n "Test $TEST: hard library shutdown... "
+$TEST_DIR/test_shutdown > "${TEST}_shutdown.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
 
 
 # echo "  Killing AB emulator."

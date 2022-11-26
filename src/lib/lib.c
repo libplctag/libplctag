@@ -43,6 +43,7 @@
 #include <lib/init.h>
 #include <lib/version.h>
 #include <platform.h>
+#include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/hash.h>
@@ -65,7 +66,7 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
 static volatile hashtable_p tags = NULL;
 static mutex_p tag_lookup_mutex = NULL;
 
-static volatile int library_terminating = 0;
+static atomic_int library_terminating = {0};
 static thread_p tag_tickler_thread = NULL;
 static cond_p tag_tickler_wait = NULL;
 #define TAG_TICKLER_TIMEOUT_MS  (100)
@@ -132,6 +133,10 @@ int lib_init(void)
 {
     int rc = PLCTAG_STATUS_OK;
 
+    pdebug(DEBUG_INFO, "Starting.");
+
+    atomic_set(&library_terminating, 0);
+
     pdebug(DEBUG_INFO,"Setting up global library data.");
 
     pdebug(DEBUG_INFO,"Creating tag hashtable.");
@@ -170,7 +175,7 @@ void lib_teardown(void)
 {
     pdebug(DEBUG_INFO,"Tearing down library.");
 
-    library_terminating = 1;
+    atomic_set(&library_terminating, 1);
 
     if(tag_tickler_wait) {
         pdebug(DEBUG_INFO, "Signaling tag tickler condition var.");
@@ -202,7 +207,7 @@ void lib_teardown(void)
         tags = NULL;
     }
 
-    library_terminating = 0;
+    atomic_set(&library_terminating, 0);
 
     pdebug(DEBUG_INFO,"Done.");
 }
@@ -507,7 +512,7 @@ THREAD_FUNC(tag_tickler_func)
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    while(!library_terminating) {
+    while(!atomic_get(&library_terminating)) {
         int max_index = 0;
         int64_t timeout_wait_ms = TAG_TICKLER_TIMEOUT_MS;
 
@@ -832,14 +837,23 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
 
     pdebug(DEBUG_INFO,"Starting");
 
-    if(timeout < 0) {
-        pdebug(DEBUG_WARN, "Timeout must not be negative!");
-        return PLCTAG_ERR_BAD_PARAM;
+    /* check to see if the library is terminating. */
+    if(atomic_get(&library_terminating)) {
+        pdebug(DEBUG_WARN, "The plctag library is in the process of shutting down!");
+        return PLCTAG_ERR_NOT_ALLOWED;
     }
 
+    /* make sure that all modules are initialized. */
     if((rc = initialize_modules()) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR,"Unable to initialize the internal library state!");
         return rc;
+    }
+
+    /* check the arguments */
+
+    if(timeout < 0) {
+        pdebug(DEBUG_WARN, "Timeout must not be negative!");
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     if(!attrib_str || str_length(attrib_str) == 0) {
@@ -1075,8 +1089,55 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
 
 LIB_EXPORT void plc_tag_shutdown(void)
 {
+    int tag_table_entries = 0;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    /* terminate anything waiting on the library and prevent any tags from being created. */
+    atomic_set(&library_terminating, 1);
+
+    /* close all tags. */
+    pdebug(DEBUG_DETAIL, "Closing all tags.");
+
+    critical_block(tag_lookup_mutex) {
+        tag_table_entries = hashtable_capacity(tags);
+    }
+
+    for(int i=0; i<tag_table_entries; i++) {
+        plc_tag_p tag = NULL;
+
+        critical_block(tag_lookup_mutex) {
+            tag_table_entries = hashtable_capacity(tags);
+
+            if(i<tag_table_entries && tag_table_entries >= 0) {
+                tag = hashtable_get_index(tags, i);
+
+                /* make sure the tag does not go away while we are using the pointer. */
+                if(tag) {
+                    /* this returns NULL if the existing ref-count is zero. */
+                    tag = rc_inc(tag);
+                }
+            }
+        }
+
+        /* do this outside the mutex. */
+        if(tag) {
+            debug_set_tag_id(tag->tag_id);
+            pdebug(DEBUG_DETAIL, "Destroying tag %" PRId32 ".", tag->tag_id);
+            plc_tag_destroy(tag->tag_id);
+            rc_dec(tag);
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "All tags closed.");
+
+    pdebug(DEBUG_DETAIL, "Cleaning up library resources.");
+
     destroy_modules();
+
+    pdebug(DEBUG_INFO, "Done.");
 }
+
 
 
 /*
@@ -1470,6 +1531,8 @@ LIB_EXPORT int plc_tag_abort(int32_t id)
 LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
 {
     plc_tag_p tag = NULL;
+
+    debug_set_tag_id((int)tag_id);
 
     pdebug(DEBUG_INFO, "Starting.");
 

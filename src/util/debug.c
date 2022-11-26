@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -61,7 +62,7 @@ static void (* volatile log_callback_func)(int32_t tag_id, int debug_level, cons
  */
 
 static THREAD_LOCAL uint32_t this_thread_num = 0;
-static THREAD_LOCAL int tag_id = 0;
+static THREAD_LOCAL int32_t tag_id = 0;
 
 
 // /* only output the version once */
@@ -86,7 +87,7 @@ int get_debug_level(void)
 
 
 
-void debug_set_tag_id(int t_id)
+void debug_set_tag_id(int32_t t_id)
 {
     tag_id = t_id;
 }
@@ -181,7 +182,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     // }
 
     /* build the output string template */
-    prefix_size += snprintf(prefix, sizeof(prefix),"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%d) %s %s:%d %s\n",
+    prefix_size += snprintf(prefix, sizeof(prefix),"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") %s %s:%d %s\n",
                                                     t.tm_year+1900,
                                                     t.tm_mon + 1, /* month is 0-11? */
                                                     t.tm_mday,
@@ -216,21 +217,12 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
 
 
-#define COLUMNS (10)
+#define COLUMNS (16)
 
-extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
 {
     int max_row, row, column;
-    // char prefix[48]; /* MAGIC */
-    // int prefix_size;
-    char row_buf[300]; /* MAGIC */
-
-    /* build the prefix */
-    // prefix_size = make_prefix(prefix,(int)sizeof(prefix));
-
-    // if(prefix_size <= 0) {
-    //     return;
-    // }
+    char row_buf[(COLUMNS * 3) + 5 + 1]; 
 
     /* determine the number of rows we will need to print. */
     max_row = (count  + (COLUMNS - 1))/COLUMNS;
@@ -239,8 +231,8 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
         int offset = (row * COLUMNS);
         int row_offset = 0;
 
-        /* print the prefix and address */
-        //row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%s %s %s:%d %05d", prefix, debug_level_name[debug_level], func, line_num, offset);
+        /* print the offset in the packet */
+        row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%05d", offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
@@ -251,12 +243,8 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
         row_buf[sizeof(row_buf)-1] = 0; /* just in case */
 
         /* output it, finally */
-        //fprintf(stderr,"%s\n",row_buf);
         pdebug_impl(func, line_num, debug_level, row_buf);
     }
-
-
-    /*fflush(stderr);*/
 }
 
 
