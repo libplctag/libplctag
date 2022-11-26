@@ -33,14 +33,21 @@
 
 
 #include <stdio.h>
-#include <unistd.h>
+#include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
+#if defined(WIN32) || defined(_WIN32)
+#include <Windows.h>
+#else
 #include <pthread.h>
 #include <stdint.h>
-#include <inttypes.h>
+#include <string.h>
 #include <sys/time.h>
+#include <signal.h>
+#endif
 #include "../lib/libplctag.h"
 #include "utils.h"
+
 
 
 #define REQUIRED_VERSION 2,5,5
@@ -58,7 +65,11 @@ static volatile int write_start_count = 0;
 static volatile int write_complete_count = 0;
 
 
-void *reader_function(void *tag_arg)
+#if defined(WIN32) || defined(_WIN32)
+DWORD __stdcall reader_function(void* tag_arg)
+#else
+void* reader_function(void* tag_arg)
+#endif
 {
     int32_t tag_id = (int32_t)(intptr_t)tag_arg;
     int64_t start_time = util_time_ms();
@@ -79,11 +90,19 @@ void *reader_function(void *tag_arg)
         util_sleep_ms(READ_SLEEP_MS);
     }
 
+#if defined(WIN32) || defined(_WIN32)
+    return (DWORD)0;
+#else
     return NULL;
+#endif
 }
 
 
-void *writer_function(void *tag_arg)
+#if defined(WIN32) || defined(_WIN32)
+DWORD __stdcall writer_function(void* tag_arg)
+#else
+void* writer_function(void* tag_arg)
+#endif
 {
     int32_t tag_id = (int32_t)(intptr_t)tag_arg;
     int64_t start_time = util_time_ms();
@@ -110,7 +129,11 @@ void *writer_function(void *tag_arg)
         util_sleep_ms(WRITE_SLEEP_MS);
     }
 
+#if defined(WIN32) || defined(_WIN32)
+    return (DWORD)0;
+#else
     return NULL;
+#endif
 }
 
 
@@ -170,8 +193,13 @@ int main(int argc, char **argv)
     int rc = PLCTAG_STATUS_OK;
     char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL)+10] = {0};
     int32_t tags[NUM_TAGS] = {0};
+#if defined(WIN32) || defined(_WIN32)
+    HANDLE read_threads[NUM_TAGS];
+    HANDLE write_threads[NUM_TAGS];
+#else
     pthread_t read_threads[NUM_TAGS];
     pthread_t write_threads[NUM_TAGS];
+#endif
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
@@ -205,8 +233,29 @@ int main(int argc, char **argv)
 
         /* create read and write thread for this tag. */
         /* FIXME - check error returns! */
-        pthread_create(&read_threads[i], NULL, reader_function, (void *)(intptr_t)tag_id);
-        pthread_create(&write_threads[i], NULL, writer_function, (void *)(intptr_t)tag_id);
+#if defined(WIN32) || defined(_WIN32)
+        read_threads[i] = CreateThread(NULL,                       /* default security attributes */
+            0,                          /* use default stack size      */
+            reader_function,            /* thread function             */
+            (LPVOID)(intptr_t)tag_id,   /* argument to thread function */
+            (DWORD)0,                   /* use default creation flags  */
+            (LPDWORD)NULL               /* do not need thread ID       */
+        );
+#else
+        pthread_create(&read_threads[i], NULL, reader_function, (void*)(intptr_t)tag_id);
+#endif
+
+#if defined(WIN32) || defined(_WIN32)
+        write_threads[i] = CreateThread(NULL,                       /* default security attributes */
+            0,                          /* use default stack size      */
+            writer_function,            /* thread function             */
+            (LPVOID)(intptr_t)tag_id,   /* argument to thread function */
+            (DWORD)0,                   /* use default creation flags  */
+            (LPDWORD)NULL               /* do not need thread ID       */
+        );
+#else
+        pthread_create(&write_threads[i], NULL, writer_function, (void*)(intptr_t)tag_id);
+#endif
 
         tags[i] = tag_id;
     }
@@ -221,8 +270,21 @@ int main(int argc, char **argv)
     fprintf(stderr, "Waiting for threads to quit.\n");
 
     for(int i=0; i<NUM_TAGS; i++) {
+#if defined(WIN32) || defined(_WIN32)
+        if (read_threads[i] != 0) {
+            WaitForSingleObject(read_threads[i], (DWORD)INFINITE);
+        }
+#else
         pthread_join(read_threads[i], NULL);
+#endif
+
+#if defined(WIN32) || defined(_WIN32)
+        if (write_threads[i] != 0) {
+            WaitForSingleObject(write_threads[i], (DWORD)INFINITE);
+        }
+#else
         pthread_join(write_threads[i], NULL);
+#endif
     }
 
     fprintf(stderr, "Done.\n");
