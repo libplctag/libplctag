@@ -1112,8 +1112,10 @@ LIB_EXPORT void plc_tag_shutdown(void)
             if(i<tag_table_entries && tag_table_entries >= 0) {
                 tag = hashtable_get_index(tags, i);
 
+                /* make sure the tag does not go away while we are using the pointer. */
                 if(tag) {
-                    rc_inc(tag);
+                    /* this returns NULL if the existing ref-count is zero. */
+                    tag = rc_inc(tag);
                 }
             }
         }
@@ -1121,7 +1123,7 @@ LIB_EXPORT void plc_tag_shutdown(void)
         /* do this outside the mutex. */
         if(tag) {
             debug_set_tag_id(tag->tag_id);
-            pdebug(DEBUG_DETAIL, "Destroying tag.");
+            pdebug(DEBUG_DETAIL, "Destroying tag %" PRId32 ".", tag->tag_id);
             plc_tag_destroy(tag->tag_id);
             rc_dec(tag);
         }
