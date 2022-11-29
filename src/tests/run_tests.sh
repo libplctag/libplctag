@@ -259,7 +259,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: emulator test extended callbacks async... "
-$TEST_DIR/test_callback_ex > "${TEST}_extended_callback_async_test.log" 2>&1
+$TEST_DIR/test_callback_ex_logix > "${TEST}_extended_callback_async_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -364,7 +364,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: callback events Modbus... "
-$TEST_DIR/test_callback_ex_modbus > "${TEST}_callback_events_modbus.log" 2>&1
+$TEST_DIR/test_callback_ex_modbus > "${TEST}_test_callback_ex_modbus.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
