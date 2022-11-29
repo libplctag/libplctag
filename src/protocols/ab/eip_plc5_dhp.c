@@ -191,6 +191,12 @@ int tag_tickler(ab_tag_p tag)
 
         /* check to see if the read finished. */
         if(!tag->read_in_progress) {
+            /* read done so create done. */
+            if(tag->first_read) {
+                tag->first_read = 0;
+                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, rc);
+            }
+
             tag->read_complete = 1;
         }
 

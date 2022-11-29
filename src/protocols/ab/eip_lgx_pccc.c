@@ -127,6 +127,12 @@ int tag_tickler(ab_tag_p tag)
 
         /* check to see if the read finished. */
         if(!tag->read_in_progress) {
+            /* read done */
+            if(tag->first_read) {
+                tag->first_read = 0;
+                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
+            }
+
             tag->read_complete = 1;
         }
 
@@ -460,9 +466,6 @@ static int check_read_status(ab_tag_p tag)
         /* copy type data into tag. */
         tag->encoded_type_info_size = (int)(type_end - type_start);
         mem_copy(tag->encoded_type_info, type_start, tag->encoded_type_info_size);
-
-        /* done! */
-        tag->first_read = 0;
 
         /* have the IO thread take care of the request buffers */
         ab_tag_abort(tag);

@@ -240,11 +240,7 @@ int tag_tickler(ab_tag_p tag)
 
     if (tag->read_in_progress) {
         if(tag->use_connected_msg) {
-            // if(tag->tag_list) {
-            //     rc = check_read_tag_list_status_connected(tag);
-            // } else {
-                rc = check_read_status_connected(tag);
-            // }
+            rc = check_read_status_connected(tag);
         } else {
             rc = check_read_status_unconnected(tag);
         }
@@ -253,6 +249,12 @@ int tag_tickler(ab_tag_p tag)
 
         /* if the operation completed, make a note so that the callback will be called. */
         if(!tag->read_in_progress) {
+            /* done! */
+            if(tag->first_read) {
+                tag->first_read = 0;
+                tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, rc);
+            }
+
             tag->read_complete = 1;
         }
 
@@ -1512,8 +1514,6 @@ static int check_read_status_connected(ab_tag_p tag)
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
         } else {
-            /* done! */
-            tag->first_read = 0;
             tag->offset = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
@@ -1728,8 +1728,6 @@ static int check_read_status_unconnected(ab_tag_p tag)
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
         } else {
-            /* done! */
-            tag->first_read = 0;
             tag->offset = 0;
 
             /* if this is a pre-read for a write, then pass off to the write routine */
