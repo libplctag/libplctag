@@ -1085,6 +1085,9 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     int op = (int)(tag->op);
+    int raise_event = 0;
+    int event;
+    int event_status;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1116,7 +1119,11 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                     tag->read_in_flight = 0;
                     tag->status = (int8_t)rc;
 
-                    plc_tag_tickler_wake();
+                    raise_event = 1;
+                    event = PLCTAG_EVENT_READ_COMPLETED;
+                    event_status = rc;
+
+                    //plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
                     rc = PLCTAG_STATUS_OK;
                 }
@@ -1138,49 +1145,57 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
 
             if(plc->flags.response_ready) {
                 rc = check_read_response(plc, tag);
-                if(rc == PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_DETAIL, "Found our response.");
+                switch(rc) {
+                    case PLCTAG_ERR_PARTIAL:
+                        /* partial response, keep going */
+                        pdebug(DEBUG_DETAIL, "Found our response, but we are not done.");
 
-                    plc->flags.response_ready = 0;
-                    tag->op = TAG_OP_IDLE;
+                        /* remove the tag from the request slot. */
+                        clear_request_slot(plc, tag);
 
-                    /* remove the tag from the request slot. */
-                    clear_request_slot(plc, tag);
+                        plc->flags.response_ready = 0;
+                        tag->op = TAG_OP_READ_REQUEST;
 
-                    /* tell the world we are done. */
-                    plc_tag_tickler_wake();
-                    plc_tag_generic_wake_tag((plc_tag_p)tag);
+                        rc = PLCTAG_STATUS_OK;
+                        break;
 
-                    rc = PLCTAG_STATUS_OK;
-                } else if(rc == PLCTAG_ERR_PARTIAL) {
-                    pdebug(DEBUG_DETAIL, "Found our response, but we are not done.");
+                    case PLCTAG_ERR_NO_MATCH:
+                        pdebug(DEBUG_SPEW, "Not our response.");
+                        rc = PLCTAG_STATUS_PENDING;
+                        break;
 
-                    plc->flags.response_ready = 0;
-                    tag->op = TAG_OP_READ_REQUEST;
+                    case PLCTAG_STATUS_OK:
+                        /* fall through */
+                    default:
+                        /* set the status before we might change it. */
+                        tag->status = (int8_t)rc;
 
-                    /* remove the tag from the request slot. */
-                    clear_request_slot(plc, tag);
+                        if(rc == PLCTAG_STATUS_OK) {
+                            pdebug(DEBUG_DETAIL, "Found our response.");
+                            plc->flags.response_ready = 0;
+                        } else {
+                            pdebug(DEBUG_WARN, "Error %s checking read response!", plc_tag_decode_error(rc));
+                            rc = PLCTAG_STATUS_OK;
+                        }
 
-                    rc = PLCTAG_STATUS_OK;
-                } else if(rc == PLCTAG_ERR_NO_MATCH) {
-                    pdebug(DEBUG_SPEW, "Not our response.");
-                    rc = PLCTAG_STATUS_PENDING;
-                } else {
-                    pdebug(DEBUG_WARN, "Error %s checking read response!", plc_tag_decode_error(rc));
+                        /* remove the tag from the request slot. */
+                        clear_request_slot(plc, tag);
 
-                    tag->op = TAG_OP_IDLE;
-                    tag->read_complete = 1;
-                    tag->read_in_flight = 0;
-                    tag->status = (int8_t)rc;
+                        plc->flags.response_ready = 0;
+                        tag->op = TAG_OP_IDLE;
+                        tag->read_in_flight = 0;
+                        tag->read_complete = 1;
+                        tag->status = (int8_t)rc;
 
-                    /* remove the tag from the request slot. */
-                    clear_request_slot(plc, tag);
+                        raise_event = 1;
+                        event = PLCTAG_EVENT_READ_COMPLETED;
+                        event_status = rc;
 
-                    /* tell the world we are done. */
-                    plc_tag_tickler_wake();
-                    plc_tag_generic_wake_tag((plc_tag_p)tag);
+                        /* tell the world we are done. */
+                        //plc_tag_tickler_wake();
+                        plc_tag_generic_wake_tag((plc_tag_p)tag);
 
-                    rc = PLCTAG_STATUS_OK;
+                        break;
                 }
             } else {
                 pdebug(DEBUG_SPEW, "No response yet, Continue waiting.");
@@ -1210,7 +1225,11 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                     tag->write_in_flight = 0;
                     tag->status = (int8_t)rc;
 
-                    plc_tag_tickler_wake();
+                    raise_event = 1;
+                    event = PLCTAG_EVENT_WRITE_COMPLETED;
+                    event_status = rc;
+
+                    //plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
 
                     rc = PLCTAG_STATUS_OK;
@@ -1236,14 +1255,21 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_DETAIL, "Found our response.");
 
-                    plc->flags.response_ready = 0;
-                    tag->op = TAG_OP_IDLE;
-
                     /* remove the tag from the request slot. */
                     clear_request_slot(plc, tag);
 
+                    plc->flags.response_ready = 0;
+                    tag->op = TAG_OP_IDLE;
+                    tag->write_complete = 1;
+                    tag->write_in_flight = 0;
+                    tag->status = (int8_t)rc;
+
+                    raise_event = 1;
+                    event = PLCTAG_EVENT_WRITE_COMPLETED;
+                    event_status = rc;
+
                     /* tell the world we are done. */
-                    plc_tag_tickler_wake();
+                    //plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
 
                     rc = PLCTAG_STATUS_OK;
@@ -1260,16 +1286,21 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                 } else {
                     pdebug(DEBUG_WARN, "Error %s checking write response!", plc_tag_decode_error(rc));
 
+                    /* remove the tag from the request slot. */
+                    clear_request_slot(plc, tag);
+
+                    plc->flags.response_ready = 0;
                     tag->op = TAG_OP_IDLE;
                     tag->write_complete = 1;
                     tag->write_in_flight = 0;
                     tag->status = (int8_t)rc;
 
-                    /* remove the tag from the request slot. */
-                    clear_request_slot(plc, tag);
+                    raise_event = 1;
+                    event = PLCTAG_EVENT_WRITE_COMPLETED;
+                    event_status = rc;
 
                     /* tell the world we are done. */
-                    plc_tag_tickler_wake();
+                    //plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
 
                     rc = PLCTAG_STATUS_OK;
@@ -1287,13 +1318,18 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
             tag->status = (int8_t)PLCTAG_ERR_NOT_IMPLEMENTED;
 
             /* tell the world we are done. */
-            plc_tag_tickler_wake();
+            //plc_tag_tickler_wake();
             plc_tag_generic_wake_tag((plc_tag_p)tag);
 
             rc = PLCTAG_STATUS_OK;
             break;
     }
 
+    if(raise_event) {
+        tag_raise_event((plc_tag_p)tag, event, event_status);
+        plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
+    }
+    
     /*
      * Call the generic tag tickler function to handle auto read/write and set
      * up events.
