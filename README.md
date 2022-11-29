@@ -107,16 +107,17 @@ Do you know what you want already?  Download it from the [releases page](https:/
 
 ### Alternate Programming Languages
 
-The C library is designed for easy wrapping.  Wrappers for many other languages exist:
+The C library is designed for easy wrapping.  Wrappers for many other languages include the following:
 
-- C++ (included)
-- Java (included)
-- Python (included)
-- Go (included)
-- Pascal (included)
-- Part of the libplctag GitHub organization:
-  - .Net Core, .Net Framework, [libplctag.NET](https://github.com/libplctag/libplctag.NET).
+- wrappers that are part of the GitHub libplctag organization:
+  - **.Net Core, .Net Framework, [libplctag.NET](https://github.com/libplctag/libplctag.NET).** Very popular!
+  - Go [goplctag](https://github.com/libplctag/goplctag)
+  - Java [libplctag4j](https://github.com/libplctag/libplctag4j)
   - Julia, [PLCTag.jl](https://github.com/libplctag/PLCTag.jl).
+- Minimal wrappers included with the C source:
+  -  C++
+  -  Python
+  -  Pascal
 - Other wrappers on GitHub:
   - C#, [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet).
   - C#, [Mesta Automation](https://github.com/mesta1/libplctag-csharp).
