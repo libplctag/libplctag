@@ -218,7 +218,7 @@ int initialize_modules(void)
                 }
 
                 /* hook the destructor */
-                atexit(destroy_modules);
+                atexit(plc_tag_shutdown);
 
                 /* do this last */
                 library_initialized = 1;

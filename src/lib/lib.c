@@ -1136,6 +1136,9 @@ LIB_EXPORT void plc_tag_shutdown(void)
 
     destroy_modules();
 
+    /* Clear the termination flag in case we want to start up again. */
+    atomic_set(&library_terminating, 0);
+
     pdebug(DEBUG_INFO, "Done.");
 }
 
