@@ -48,6 +48,7 @@ typedef int32_t TAG_ELEMENT;
 
 void tag_callback(int32_t tag_id, int event, int status, void *userdata)
 {
+    static int create_seen = 0; /* this is HORRIBLY unsafe for threading! */
     TAG_ELEMENT *data = (TAG_ELEMENT *)userdata;
 
     /* handle the events. */
@@ -58,6 +59,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
 
         case PLCTAG_EVENT_CREATED:
             printf("Tag created with status %s.\n", plc_tag_decode_error(status));
+            create_seen = 1;
             break;
 
         case PLCTAG_EVENT_DESTROYED:
@@ -68,6 +70,12 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
+            if(!create_seen) {
+                fprintf(stderr, "Tag read operation completed before create was complete!\n");
+                plc_tag_destroy(tag_id);
+                exit(1);
+            }
+            
             if(status == PLCTAG_STATUS_OK && data) {
                 int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
                 int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
@@ -82,6 +90,12 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
+            if(!create_seen) {
+                fprintf(stderr, "Tag read operation started before create was complete!\n");
+                plc_tag_destroy(tag_id);
+                exit(1);
+            }
+            
             printf("Tag read operation started with status %s.\n", plc_tag_decode_error(status));
             break;
 
