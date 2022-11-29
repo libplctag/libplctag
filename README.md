@@ -110,17 +110,17 @@ Do you know what you want already?  Download it from the [releases page](https:/
 The C library is designed for easy wrapping.  Wrappers for many other languages include the following:
 
 - wrappers that are part of the GitHub libplctag organization:
-  - **.Net Core, .Net Framework, [libplctag.NET](https://github.com/libplctag/libplctag.NET).** Very popular!
+  - **.Net Core, .Net Framework, [libplctag.NET](https://github.com/libplctag/libplctag.NET). Very popular! **
   - Go [goplctag](https://github.com/libplctag/goplctag)
   - Java [libplctag4j](https://github.com/libplctag/libplctag4j)
-  - Julia, [PLCTag.jl](https://github.com/libplctag/PLCTag.jl).
+  - Julia, [PLCTag.jl](https://github.com/libplctag/PLCTag.jl)
 - Minimal wrappers included with the C source:
   -  C++
   -  Python
   -  Pascal
 - Other wrappers on GitHub:
-  - C#, [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet).
-  - C#, [Mesta Automation](https://github.com/mesta1/libplctag-csharp).
+  - C#, [Corsinvest](https://github.com/Corsinvest/cv4ab-api-dotnet)
+  - C#, [Mesta Automation](https://github.com/mesta1/libplctag-csharp)
   - Labview, (see [libplctag-labview](https://github.com/dirtyb15/libplctag-labview))
 
 ## Code
