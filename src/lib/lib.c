@@ -1059,14 +1059,15 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() > end_time);
 
-        tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
-
         /* clear up any remaining flags.  This should be refactored. */
         tag->read_in_flight = 0;
         tag->write_in_flight = 0;
 
         pdebug(DEBUG_INFO,"tag set up elapsed time %" PRId64 "ms",(time_ms()-start_time));
     }
+
+    /* raise create event. */
+    tag_raise_event(tag, PLCTAG_EVENT_CREATED, (int8_t)rc);
 
     /* dispatch any outstanding events. */
     plc_tag_generic_handle_event_callbacks(tag);

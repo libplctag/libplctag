@@ -459,6 +459,8 @@ elseif (BUILD_EXAMPLES)
                             test_auto_sync
                             test_callback
                             test_callback_ex
+                            test_callback_ex_logix
+                            test_callback_ex_modbus
                             test_connection_group
                             test_many_tag_perf
                             test_raw_cip
