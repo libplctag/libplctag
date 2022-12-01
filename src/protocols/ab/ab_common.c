@@ -502,7 +502,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         tag->first_read = 1;
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
-        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, tag->status);
+        //tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, tag->status);
     } else {
         pdebug(DEBUG_DETAIL, "Not kicking off initial read: tag is special or does not have read function.");
 

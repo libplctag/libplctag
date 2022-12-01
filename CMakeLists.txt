@@ -33,7 +33,7 @@
 # the project is version 2.5
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 5)
-set (libplctag_VERSION_PATCH 4)
+set (libplctag_VERSION_PATCH 5)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -198,9 +198,9 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     SET(STR_OP_OVERFLOW_OFF "")
 
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON}")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fsanitize=undefined -fsanitize=address -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
-    set(BASE_DEBUG_LINK_FLAGS "")
+    set(BASE_DEBUG_LINK_FLAGS "-fsanitize=undefined -fsanitize=address")
 
     if(APPLE)
         set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D_DARWIN_C_SOURCE")
@@ -259,10 +259,10 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     endif()
 
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fsanitize=address -fsanitize=leak -fsanitize=undefined ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
 	set(C99_FLAGS "-std=c99" )
     set(BASE_RELEASE_LINK_FLAGS "")
-    set(BASE_DEBUG_LINK_FLAGS "")
+    set(BASE_DEBUG_LINK_FLAGS "-fsanitize=address -fsanitize=leak -fsanitize=undefined")
 
     # check to see if we are building 32-bit or 64-bit
     if(BUILD_32_BIT)
@@ -459,6 +459,8 @@ elseif (BUILD_EXAMPLES)
                             test_auto_sync
                             test_callback
                             test_callback_ex
+                            test_callback_ex_logix
+                            test_callback_ex_modbus
                             test_connection_group
                             test_many_tag_perf
                             test_raw_cip

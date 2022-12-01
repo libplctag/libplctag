@@ -50,7 +50,7 @@
 
 extern int set_debug_level(int debug_level);
 extern int get_debug_level(void);
-extern void debug_set_tag_id(int tag_id);
+extern void debug_set_tag_id(int32_t tag_id);
 
 extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...);
 
