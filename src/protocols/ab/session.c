@@ -139,23 +139,41 @@ int session_startup()
 
 void session_teardown()
 {
-    if(sessions) {
-        for(int i=0; i < vector_length(sessions); i++) {
-            ab_session_p session = vector_get(sessions, i);
-            if(session) {
-                rc_dec(session);
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(sessions && session_mutex) {
+        pdebug(DEBUG_DETAIL, "Waiting for sessions to terminate.");
+
+        while(1) {
+            int remaining_sessions = 0;
+
+            critical_block(session_mutex) {
+                remaining_sessions = vector_length(sessions);
+            }
+
+            /* wait for things to terminate. */
+            if(remaining_sessions > 0) {
+                sleep_ms(10); // MAGIC
+            } else {
+                break;
             }
         }
 
+        pdebug(DEBUG_DETAIL, "Sessions all terminated.");
+
         vector_destroy(sessions);
+
         sessions = NULL;
     }
 
+    pdebug(DEBUG_DETAIL, "Destroying session mutex.");
 
     if(session_mutex) {
         mutex_destroy((mutex_p *)&session_mutex);
         session_mutex = NULL;
     }
+
+    pdebug(DEBUG_INFO, "Done.");
 }
 
 

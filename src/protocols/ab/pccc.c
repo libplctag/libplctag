@@ -563,7 +563,7 @@ uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, in
     }
 
     /* get the type and data size parts */
-    d_type = (((*data) & 0xF0)>>4);
+    d_type = (((uint32_t)(*data) & (uint32_t)0xF0)>>(uint32_t)4);
     d_size = (*data) & 0x0F;
 
     /* check the type.  If it is too large to hold in

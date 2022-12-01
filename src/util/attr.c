@@ -123,8 +123,6 @@ extern attr attr_create()
  */
 extern attr attr_create_from_str(const char *attr_str)
 {
-    char *tmp;
-    char *cur;
     attr res = NULL;
     char **kv_pairs = NULL;
 
