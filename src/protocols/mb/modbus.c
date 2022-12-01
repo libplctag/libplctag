@@ -1326,7 +1326,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
     }
 
     if(raise_event) {
-        tag_raise_event((plc_tag_p)tag, event, event_status);
+        tag_raise_event((plc_tag_p)tag, event, (int8_t)event_status);
         plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
     }
     
