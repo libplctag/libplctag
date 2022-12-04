@@ -327,7 +327,9 @@ MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 CONFIGURE_FILE("${lib_SRC_PATH}/version.h.in" "${lib_SRC_PATH}/version.h" @ONLY)
 
 # set up the library sources
-set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
+set ( libplctag_SRCS "${lib_SRC_PATH}/device.c" 
+                     "${lib_SRC_PATH}/device.h"
+                     "${lib_SRC_PATH}/init.c"
                      "${lib_SRC_PATH}/init.h"
                      "${lib_SRC_PATH}/libplctag.h"
                      "${lib_SRC_PATH}/lib.c"
