@@ -31,20 +31,35 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include <inttypes.h>
+#include <stdlib.h>
 #include <platform.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <common_protocol/common_protocol.h>
 #include <util/atomic_int.h>
+#include <util/rc.h>
+
+
+#define COMMON_DEVICE_SOCKET_ERR_DELAY_MS (20)
+#define COMMON_DEVICE_INACTIVITY_TIMEOUT (5000)
+#define COMMON_DEVICE_MAX_ERR_DELAY_MS (5000)
+#define SOCKET_READ_TIMEOUT_MS (20) /* read timeout in milliseconds */
+#define SOCKET_WRITE_TIMEOUT_MS (20) /* write timeout in milliseconds */
+#define SOCKET_CONNECT_TIMEOUT_MS (20) /* connect timeout step in milliseconds */
+#define COMMON_DEVICE_IDLE_WAIT_TIMEOUT_MS (100) /* idle wait timeout in milliseconds */
 
 
 typedef enum {
-    COMMON_DEVICE_STATE_CONNECT = 0,
+    COMMON_DEVICE_STATE_OPEN_SOCKET_START,
+    COMMON_DEVICE_STATE_OPEN_SOCKET_WAIT,
+    COMMON_DEVICE_STATE_CONNECT,
     COMMON_DEVICE_STATE_READY,
     COMMON_DEVICE_STATE_BUILD_REQUEST,
-    COMMON_DEVICE_STATE_SEND_REQUEST,
-    COMMON_DEVICE_STATE_RECEIVE_RESPONSE,
+    COMMON_DEVICE_STATE_WRITE_PDU,
+    COMMON_DEVICE_STATE_RECEIVE_PDU,
     COMMON_DEVICE_STATE_DISCONNECT,
+    COMMON_DEVICE_STATE_CLOSE_SOCKET,
     COMMON_DEVICE_STATE_ERR_WAIT
 } common_plc_state_t;
 
@@ -52,11 +67,16 @@ typedef enum {
 /* module-level data */
 atomic_int library_terminating = {0};
 mutex_p common_protocol_mutex = NULL;
-common_protocol_device_p devices = NULL;
+common_device_p devices = NULL;
 
 
 /* local functions */
 static THREAD_FUNC(common_device_handler);
+static int start_open_socket(common_device_p device);
+static int send_pdu(common_device_p device);
+static int receive_pdu(common_device_p device);
+static void device_wait(common_device_p device, int event_mask, int timeout_ms);
+static void device_wake(common_device_p device);
 static int tickle_tag_unsafe(common_device_p device, common_tag_p tag);
 static int tickle_all_tags(common_device_p device);
 static int remove_tag(common_tag_list_p list, common_tag_p tag);
@@ -115,10 +135,10 @@ void common_protocol_teardown(void)
     }
 
 
-    if(common_device_mutex) {
+    if(common_protocol_mutex) {
         pdebug(DEBUG_DETAIL, "Destroying common device module mutex.");
-        mutex_destroy(&common_device_mutex);
-        common_device_mutex = NULL;
+        mutex_destroy(&common_protocol_mutex);
+        common_protocol_mutex = NULL;
     }
     pdebug(DEBUG_DETAIL, "Common device module mutex destroyed.");
 
@@ -130,10 +150,10 @@ void common_protocol_teardown(void)
 
 
 
-
-int common_protocol_get_device(const char *server_name, int connection_group_id, common_device_p **device, common_device_p (*create_device)(void *arg), void *create_arg)
+int common_protocol_get_device(const char *server_name, int default_port, int connection_group_id, common_device_p *device, common_device_p (*create_device)(void *arg), void *create_arg)
 {
     int rc = PLCTAG_STATUS_OK;
+    int is_new = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -172,7 +192,7 @@ int common_protocol_get_device(const char *server_name, int connection_group_id,
                 pdebug(DEBUG_DETAIL, "Setting server name to %s.", server_name);
                 (*device)->server_name = str_dup(server_name);
                 if(! ((*device)->server_name)) {
-                    pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC server string!");
+                    pdebug(DEBUG_WARN, "Unable to allocate device server string!");
                     rc = PLCTAG_ERR_NO_MEM;
                 } else {
                     (*device)->tag_list.head = NULL;
@@ -185,14 +205,21 @@ int common_protocol_get_device(const char *server_name, int connection_group_id,
                         break;
                     }
 
+                    /* create the condition variable to wait on. */
+                    rc = cond_create(&((*device)->cond_var));
+                    if(rc != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_WARN, "Unable to create new cond var, error %s!", plc_tag_decode_error(rc));
+                        break;
+                    }
+
                     /* link up the the PLC into the global list. */
-                    (*device)->next = plcs;
-                    plcs = *device;
+                    (*device)->next = devices;
+                    devices = *device;
 
                     /* now the PLC can be found and the tag list is ready for use. */
                 }
             } else {
-                pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC object!");
+                pdebug(DEBUG_WARN, "Unable to allocate device object!");
                 rc = PLCTAG_ERR_NO_MEM;
             }
         }
@@ -267,13 +294,21 @@ void common_device_destroy(common_device_p device)
         atomic_set(&(device->terminate), 1);
 
         /* signal the device to wake the thread. */
-        device->vtable->wake_device(device);
+        device_wake(device);
 
         /* wait for the thread to terminate and destroy it. */
         thread_join(device->handler_thread);
         thread_destroy(&device->handler_thread);
 
         device->handler_thread = NULL;
+    }
+
+    if(device->sock) {
+        socket_destroy(&(device->sock));
+    }
+
+    if(device->cond_var) {
+        cond_destroy(&(device->cond_var));
     }
 
     if(device->mutex) {
@@ -283,7 +318,7 @@ void common_device_destroy(common_device_p device)
 
     if(device->server_name) {
         mem_free(device->server_name);
-        device->server = NULL;
+        device->server_name = NULL;
     }
 
     /* check to make sure we have no tags left. */
@@ -307,7 +342,7 @@ int common_tag_init(common_tag_p tag, attr attribs, void (*tag_callback_func)(in
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
         rc_dec(tag);
-        return (plc_tag_p)NULL;
+        return rc;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -376,12 +411,29 @@ void common_tag_destructor(common_tag_p tag)
 /*************************************/
 
 
+
+#define UPDATE_ERR_DELAY() \
+            do { \
+                err_delay = err_delay*2; \
+                if(err_delay > COMMON_DEVICE_MAX_ERR_DELAY_MS) { \
+                    err_delay = COMMON_DEVICE_MAX_ERR_DELAY_MS; \
+                } \
+                err_delay_until = (int64_t)((double)err_delay*((double)rand()/(double)(RAND_MAX))) + time_ms(); \
+            } while(0)
+
+/* try #2 */
 THREAD_FUNC(common_device_handler)
 {
     int rc = PLCTAG_STATUS_OK;
     common_device_p device = (common_device_p)arg;
     int error_retries = 0;
     int failed_attempts = 0;
+    int64_t err_delay = COMMON_DEVICE_SOCKET_ERR_DELAY_MS;
+    int64_t err_delay_until = 0;
+    int64_t idle_timeout = time_ms() + COMMON_DEVICE_INACTIVITY_TIMEOUT;
+    int sock_events = SOCK_EVENT_NONE;
+    int waitable_events = SOCK_EVENT_NONE;
+    int no_wait = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -390,36 +442,36 @@ THREAD_FUNC(common_device_handler)
         THREAD_RETURN(0);
     }
 
+    /* start connecting right away */
+    device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
+
     while(! atomic_get(&(device->terminate))) {
+        waitable_events = SOCK_EVENT_ERROR | SOCK_EVENT_TIMEOUT | SOCK_EVENT_WAKE_UP;
+        no_wait = 0;
+
         rc = tickle_all_tags(device);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error %s tickling tags!", plc_tag_decode_error(rc));
             /* FIXME - what should we do here? */
         }
 
-        // /* if there is still a response marked ready, clean it up. */
-        // if(device->flags.response_ready) {
-        //     pdebug(DEBUG_DETAIL, "Orphan response found.");
-        //     device->flags.response_ready = 0;
-        //     device->read_data_len = 0;
-        // }
-
         switch(device->state) {
-        case COMMON_DEVICE_STATE_CONNECT:
-            pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_CONNECT state.");
+        case COMMON_DEVICE_STATE_OPEN_SOCKET_START:
+            pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_OPEN_SOCKET_START state.");
 
-            /* connect to the device.  Will likely block for a while. */
-            rc = device->vtable->connect_to_device(device);
+            /* either way we do not want to wait. */
+            no_wait = 1;
+
+            /* connect to the PLC */
+            rc = start_open_socket(device);
             if(rc == PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_DETAIL, "Staying in state COMMON_DEVICE_STATE_CONNECT to finish connection process.");
-                device->state = COMMON_DEVICE_STATE_CONNECT;
+                pdebug(DEBUG_DETAIL, "Socket connection process started.  Going to COMMON_DEVICE_STATE_OPEN_SOCKET_WAIT state.");
+                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_WAIT;
             } else if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Successfully connected to the device.  Going to COMMON_DEVICE_STATE_READY state.");
+                pdebug(DEBUG_DETAIL, "Successfully connected to the PLC.  Going to COMMON_DEVICE_STATE_READY state.");
 
                 /* reset err_delay */
-                err_delay = PLC_SOCKET_ERR_START_DELAY;
-
-                failed_attempts = 0;
+                err_delay = COMMON_DEVICE_SOCKET_ERR_DELAY_MS;
 
                 device->state = COMMON_DEVICE_STATE_READY;
             } else {
@@ -432,12 +484,42 @@ THREAD_FUNC(common_device_handler)
 
                 pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to COMMON_DEVICE_STATE_ERR_WAIT state to wait %"PRId64"ms.", err_delay);
 
-                error_retries = failed_attempts;
-                if(++failed_attempts > 10) {
-                    failed_attempts = 10;
-                }
+                device->state = COMMON_DEVICE_STATE_ERR_WAIT;
+            }
+            break;
 
-                pdebug(DEBUG_DETAIL, "Current failed attempt count: %d.", failed_attempts);
+        case COMMON_DEVICE_STATE_OPEN_SOCKET_WAIT:
+            /* we want to wait for a connect complete event */
+            waitable_events |= SOCK_EVENT_CONNECT;
+
+            no_wait = 1;
+
+            sock_events = socket_wait_event(device->sock, waitable_events, SOCKET_CONNECT_TIMEOUT_MS);
+            if(sock_events & SOCK_EVENT_CONNECT) {
+                pdebug(DEBUG_DETAIL, "Socket connected, going to state COMMON_DEVICE_STATE_READY.");
+
+                /* we just connected, keep the connection open for a few seconds. */
+                idle_timeout = time_ms() + COMMON_DEVICE_INACTIVITY_TIMEOUT;
+
+                /* reset err_delay */
+                err_delay = COMMON_DEVICE_SOCKET_ERR_DELAY_MS;
+
+                /* kick off the protocol-specific connection */
+                device->protocol->connect(device);
+
+                device->state = COMMON_DEVICE_STATE_READY;
+            } else if(sock_events & (SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT)) {
+                pdebug(DEBUG_DETAIL, "Still waiting for socket to connect.");
+                /* will return back to this state */
+            } else {
+                pdebug(DEBUG_WARN, "Error %s received while waiting for socket connection.", plc_tag_decode_error(rc));
+
+                socket_destroy(&(device->sock));
+
+                /* exponential increase with jitter. */
+                UPDATE_ERR_DELAY();
+
+                pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to COMMON_DEVICE_STATE_ERR_WAIT state to wait %"PRId64"ms.", err_delay);
 
                 device->state = COMMON_DEVICE_STATE_ERR_WAIT;
             }
@@ -446,144 +528,280 @@ THREAD_FUNC(common_device_handler)
         case COMMON_DEVICE_STATE_READY:
             pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_READY state.");
 
-            // /* calculate what events we should be waiting for. */
-            // waitable_events = SOCK_EVENT_DEFAULT_MASK | COMMON_DEVICE_EVENT_READ_READY;
+            /* check for PDU to send. */
+            if(device->pdu_ready_to_send) {
+                pdebug(DEBUG_DETAIL, "going to state COMMON_DEVICE_STATE_WRITE_PDU.");
+                no_wait = 1;
+                device->state = COMMON_DEVICE_STATE_WRITE_PDU;
+                break;
+            }
 
-            // /* if there is a request queued for sending, send it. */
-            // if(device->flags.request_ready) {
-            //     waitable_events |= COMMON_DEVICE_EVENT_WRITE_READY;
-            // }
-
-            /* this will wait if nothing wakes it up or until it times out. */
-            device_events = device->vtable->wait_for_events(device, COMMON_DEVICE_IDLE_WAIT_TIMEOUT);
-
-            /* check for socket errors or disconnects. */
-            if((device_events & COMMON_DEVICE_EVENT_ERROR) || (device_events & COMMON_DEVICE_EVENT_DISCONNECT)) {
-                if(device_events & COMMON_DEVICE_EVENT_DISCONNECT) {
-                    pdebug(DEBUG_WARN, "Unexepected device disconnect!");
-                } else {
-                    pdebug(DEBUG_WARN, "Unexpected device error!");
-                }
-
-                pdebug(DEBUG_WARN, "Going to state COMMON_DEVICE_STATE_DISCONNECT");
-
+            if(idle_timeout < time_ms()) {
+                pdebug(DEBUG_DETAIL, "idle timeout hit, going to COMMON_DEVICE_STATE_DISCONNECT.");
+                no_wait = 1;
                 device->state = COMMON_DEVICE_STATE_DISCONNECT;
                 break;
             }
 
-            /* preference pushing requests to the PLC */
-            if(device_events & COMMON_DEVICE_EVENT_WRITE_READY) {
-                pdebug(DEBUG_DETAIL, "There is a request ready to send and we can send, going to state COMMON_DEVICE_STATE_SEND_REQUEST.");
-                device->state = COMMON_DEVICE_STATE_SEND_REQUEST;
-                break;
-            }
-
-            if(device_events & COMMON_DEVICE_EVENT_READ_READY) {
-                pdebug(DEBUG_DETAIL, "We can receive a response going to state COMMON_DEVICE_STATE_RECEIVE_RESPONSE.");
-                device->state = COMMON_DEVICE_STATE_RECEIVE_RESPONSE;
-                break;
-            }
-
-            if(device_events & COMMON_DEVICE_EVENT_TIMEOUT) {
-                pdebug(DEBUG_DETAIL, "Timed out waiting for something to happen.");
-                /* just stay here in this state */
-            }
-
-            if(device_events & COMMON_DEVICE_EVENT_WAKEUP) {
-                pdebug(DEBUG_DETAIL, "Someone woke us up.");
-                /* stay in this state. */
-            }
-
             break;
 
-        case COMMON_DEVICE_STATE_SEND_REQUEST:
-            pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_SEND_REQUEST state.");
+        case COMMON_DEVICE_STATE_WRITE_PDU:
+            pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_WRITE_PDU state.");
 
-            /* send a PDU, this may block */
-            rc = device->vtable->send_request(device);
+            rc = send_pdu(device);
             if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Request sent, going to back to state COMMON_DEVICE_STATE_READY.");
+                pdebug(DEBUG_DETAIL, "Request sent, going to state COMMON_DEVICE_STATE_RECEIVE_PDU.");
 
-                device->state = COMMON_DEVICE_STATE_READY;
+                device->pdu_ready_to_send = 0;
+                device->write_data_len = 0;
+                device->write_data_offset = 0;
+
+                /* update idle_timeout */
+                idle_timeout = time_ms() + COMMON_DEVICE_INACTIVITY_TIMEOUT;
+
+                device->state = COMMON_DEVICE_STATE_RECEIVE_PDU;
             } else if(rc == PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_DETAIL, "Not all data written, will try again.");
-                /* if we did not send all the packet, we stay in this state and keep trying. */
             } else {
-                pdebug(DEBUG_WARN, "Closing device connection due to write error %s.", plc_tag_decode_error(rc));
+                pdebug(DEBUG_WARN, "Closing socket due to write error %s.", plc_tag_decode_error(rc));
 
-                /* try to disconnect. */
-                device->state = COMMON_DEVICE_STATE_DISCONNECT;
+                socket_destroy(&(device->sock));
+
+                /* set up the state. */
+                device->pdu_ready_to_send = 0;
+                device->read_data_len = 0;
+                device->write_data_len = 0;
+                device->write_data_offset = 0;
+
+                /* try to reconnect immediately. */
+                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
             }
+
+            /* if we did not send all the packet, we stay in this state and keep trying. */
+
+            debug_set_tag_id(0);
 
             break;
 
 
-        case COMMON_DEVICE_STATE_RECEIVE_RESPONSE:
-            pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_RECEIVE_RESPONSE state.");
+        case COMMON_DEVICE_STATE_RECEIVE_PDU:
+            pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_RECEIVE_PDU state.");
 
-            /* get a PDU, this may block */
-            rc = device->vtable->receive_response(device);
+            /* get a packet */
+            rc = receive_pdu(device);
             if(rc == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_DETAIL, "Response ready, going back to COMMON_DEVICE_STATE_READY state.");
                 device->state = COMMON_DEVICE_STATE_READY;
             } else if(rc == PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_DETAIL, "Response not complete, continue reading data.");
             } else {
-                pdebug(DEBUG_WARN, "Closing device due to read error %s.", plc_tag_decode_error(rc));
+                pdebug(DEBUG_WARN, "Closing socket due to read error %s.", plc_tag_decode_error(rc));
 
-                /* try to disconnect. */
-                device->state = COMMON_DEVICE_STATE_DISCONNECT;
+                if(device->sock) {
+                    socket_destroy(&(device->sock));
+                }
+
+                /* set up the state. */
+                device->pdu_ready_to_send = 0;
+                device->read_data_len = 0;
+                device->write_data_len = 0;
+                device->write_data_offset = 0;
+
+                /* try to reconnect immediately. */
+                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
             }
 
-            break;
-
-
-        case COMMON_DEVICE_STATE_DISCONNECT:
-            pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_DISCONNECT state.");
-
-            rc = device->vtable->disconnect_from_device(device);
-            if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Disconnect complete, going to COMMON_DEVICE_STATE_CONNECT state.");
-                device->state = COMMON_DEVICE_STATE_CONNECT;
-            } else if(rc == PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_DETAIL, "Disconnect not complete, continue trying.");
-            } else {
-                pdebug(DEBUG_WARN, "Disconnect failed due to error %s.", plc_tag_decode_error(rc));
-
-                /* try to disconnect. */
-                device->state = COMMON_DEVICE_STATE_ERR_WAIT;
-            }
+            /* in all cases we want to cycle through the state machine immediately. */
 
             break;
 
         case COMMON_DEVICE_STATE_ERR_WAIT:
             pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_ERR_WAIT state.");
 
-            if(err_retries > 0) {
-                pdebug(DEBUG_DETAIL, "Error wait retry %d.", err_retries);
-                sleep_ms(COMMON_DEVICE_ERR_WAIT_INCREMENT_MS);  
-                error_retries--;           
-            } else {
-                pdebug(DEBUG_DETAIL, "Done with error wait, retrying device connection.");
-                device->state = COMMON_DEVICE_STATE_CONNECT;
+            /* clean up the socket in case we did not earlier */
+            if(device->sock) {
+                socket_destroy(&(device->sock));
             }
 
+            /* wait until done. */
+            if(err_delay_until > time_ms()) {
+                pdebug(DEBUG_DETAIL, "Waiting for at least %"PRId64"ms more.", (err_delay_until - time_ms()));
+            } else {
+                pdebug(DEBUG_DETAIL, "Error wait is over, going to state PLC_CONNECT_START.");
+                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
+            }
             break;
 
         default:
-            pdebug(DEBUG_WARN, "Unknown state %d!", device->state);
-            device->state = COMMON_DEVICE_STATE_DISCONNECT;
+            pdebug(DEBUG_DETAIL, "Unknown state %d!", device->state);
+            device->state = COMMON_DEVICE_STATE_ERR_WAIT;
             break;
         }
 
-        /* wait if needed, could be signalled already. */
-        //cond_wait(device->wait_cond, COMMON_DEVICE_IDLE_WAIT_TIMEOUT);
+        if(! no_wait) {
+            device_wait(device, (SOCK_EVENT_TIMEOUT | SOCK_EVENT_WAKE_UP), COMMON_DEVICE_IDLE_WAIT_TIMEOUT_MS);
+        }
     }
 
     pdebug(DEBUG_INFO, "Done.");
 
     THREAD_RETURN(0);
 }
+
+
+
+void device_wait(common_device_p device, int event_mask, int timeout_ms)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!device) {
+        pdebug(DEBUG_WARN, "Device is null!");
+        sleep_ms(10);
+        return;
+    }
+
+    /* we might not have a socket, so wait on the condition var if needed */
+    if(device->sock) {
+        int events = socket_wait_event(device->sock, event_mask, timeout_ms);
+    } else {
+        int rc = cond_wait(device->cond_var, timeout_ms);
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+}
+
+
+
+void device_wake(common_device_p device)
+{
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!device) {
+        pdebug(DEBUG_WARN, "Device is null!");
+        return;
+    }
+
+    /* we might not have a socket */
+    if(device->sock) {
+        socket_wake(device->sock);
+    } 
+        
+    cond_signal(device->cond_var);
+    
+
+    pdebug(DEBUG_DETAIL, "Done.");
+}
+
+
+
+int send_pdu(common_device_p device)
+{
+    int rc = 1;
+    int data_left = device->write_data_len - device->write_data_offset;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* check socket, could be closed due to inactivity. */
+    if(!device->sock) {
+        pdebug(DEBUG_DETAIL, "No socket or socket is closed.");
+        return PLCTAG_ERR_BAD_CONNECTION;
+    }
+
+    /* is there anything to do? */
+    if(! device->pdu_ready_to_send) {
+        pdebug(DEBUG_WARN, "No packet to send!");
+        return PLCTAG_ERR_NO_DATA;
+    }
+
+    /* try to send some data. */
+    rc = socket_write(device->sock, device->data + device->write_data_offset, data_left, 0);
+    if(rc >= 0) {
+        device->write_data_offset += rc;
+        data_left = device->write_data_len - device->write_data_offset;
+    } else if(rc == PLCTAG_ERR_TIMEOUT) {
+        pdebug(DEBUG_DETAIL, "Done.  Timeout writing to socket.");
+        rc = PLCTAG_STATUS_OK;
+    } else {
+        pdebug(DEBUG_WARN, "Error, %s, writing to socket!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* clean up if full write was done. */
+    if(data_left == 0) {
+        pdebug(DEBUG_DETAIL, "Full packet written.");
+        pdebug_dump_bytes(DEBUG_DETAIL, device->data, device->write_data_len);
+
+        device->pdu_ready_to_send = 0;
+        device->write_data_len = 0;
+        device->write_data_offset = 0;
+
+        rc = PLCTAG_STATUS_OK;
+    } else {
+        pdebug(DEBUG_DETAIL, "Partial packet written.");
+        rc = PLCTAG_STATUS_PENDING;
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+int receive_pdu(common_device_p device)
+{
+    int rc = 0;
+    int data_needed = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    /* socket could be closed due to inactivity. */
+    if(!device->sock) {
+        pdebug(DEBUG_SPEW, "Socket is closed or missing.");
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* do a loop here in case the OS has data but it takes us a few tries to get it all. */
+    do {
+        data_needed = device->buffer_size - device->read_data_len;
+
+        /* read the socket. */
+        rc = socket_read(device->sock, device->data + device->read_data_len, data_needed, 0);
+        if(rc >= 0) {
+            /* got data! Or got nothing, but no error. */
+            device->read_data_len += rc;
+
+            pdebug(DEBUG_SPEW, "Incoming PDU data:");
+            pdebug_dump_bytes(DEBUG_SPEW, device->data, device->read_data_len);
+
+            rc = device->protocol->process_pdu(device);
+            break;
+        } else {
+            pdebug(DEBUG_WARN, "Error, %s, reading socket!", plc_tag_decode_error(rc));
+            return rc;
+        }
+
+        pdebug(DEBUG_DETAIL, "After reading the socket, total read=%d and data needed=%d.", device->read_data_len, data_needed);
+    } while(rc > 0);
+
+    if(rc == PLCTAG_STATUS_OK) {
+        /* we got our packet. */
+        pdebug(DEBUG_DETAIL, "Received full packet.");
+        pdebug_dump_bytes(DEBUG_DETAIL, device->data, device->read_data_len);
+
+        rc = PLCTAG_STATUS_OK;
+    } else if(rc == PLCTAG_STATUS_PENDING) {
+        /* data_needed is greater than zero. */
+        pdebug(DEBUG_DETAIL, "Received partial packet of %d bytes.", device->read_data_len);
+    } else {
+        pdebug(DEBUG_WARN, "Problem processing incoming PDU.  Got error %s!", plc_tag_decode_error(rc));
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
 
 
 int tickle_all_tags(common_device_p device)
@@ -665,7 +883,7 @@ int tickle_tag_unsafe(common_device_p device, common_tag_p tag)
             break;
 
         case TAG_OP_READ_REQUEST:
-            rc = tag->common_vtable->create_read_request(tag);
+            rc = tag->pdu_vtable->create_read_request(tag);
             if(rc == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_DETAIL, "Read request created.");
 
@@ -696,13 +914,13 @@ int tickle_tag_unsafe(common_device_p device, common_tag_p tag)
 
         case TAG_OP_READ_RESPONSE:
             /* cross check the state. */
-            if(device->state != COMMON_DEVICE_STATE_RECEIVE_RESPONSE) {
+            if(device->state != COMMON_DEVICE_STATE_RECEIVE_PDU) {
                 pdebug(DEBUG_WARN, "Device changed state, restarting request.");
                 tag->op = TAG_OP_READ_REQUEST;
                 break;
             }
 
-            rc = tag->common_vtable->check_read_response(tag);
+            rc = tag->pdu_vtable->check_read_response(tag);
             switch(rc) {
                 case PLCTAG_ERR_PARTIAL:
                     /* partial response, keep going */
@@ -749,7 +967,7 @@ int tickle_tag_unsafe(common_device_p device, common_tag_p tag)
             break;
 
         case TAG_OP_WRITE_REQUEST:
-            rc = tag->common_vtable->create_write_request(tag);
+            rc = tag->pdu_vtable->create_write_request(tag);
             if(rc == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_DETAIL, "Write request created.");
 
@@ -757,7 +975,7 @@ int tickle_tag_unsafe(common_device_p device, common_tag_p tag)
 
                 rc = PLCTAG_STATUS_PENDING;
             } else if(rc == PLCTAG_ERR_NO_RESOURCES) {
-                pdebug(DEBUG_SPEW, "Insufficient resources for new request.")
+                pdebug(DEBUG_SPEW, "Insufficient resources for new request.");
                 rc = PLCTAG_STATUS_PENDING;
             } else {
                 pdebug(DEBUG_WARN, "Error %s creating write request!", plc_tag_decode_error(rc));
@@ -781,13 +999,13 @@ int tickle_tag_unsafe(common_device_p device, common_tag_p tag)
 
         case TAG_OP_WRITE_RESPONSE:
             /* check the state. */
-            if(device->state != COMMON_DEVICE_STATE_RECEIVE_RESPONSE) {
+            if(device->state != COMMON_DEVICE_STATE_RECEIVE_PDU) {
                 pdebug(DEBUG_WARN, "Device changed state, restarting request.");
                 tag->op = TAG_OP_WRITE_REQUEST;
                 break;
             }
 
-            rc = tag->common_vtable->check_write_response(device, tag);
+            rc = tag->pdu_vtable->check_write_response(tag);
             if(rc == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_DETAIL, "Found our response.");
 
@@ -1011,6 +1229,86 @@ int remove_tag(common_tag_list_p list, common_tag_p tag)
 }
 
 
+
+int start_open_socket(common_device_p device)
+{
+    int rc = PLCTAG_STATUS_OK;
+    char **server_port = NULL;
+    char *server = NULL;
+    int port = device->default_port;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    server_port = str_split(device->server_name, ":");
+    if(!server_port) {
+        pdebug(DEBUG_WARN, "Unable to split server and port string!");
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
+
+    if(server_port[0] == NULL) {
+        pdebug(DEBUG_WARN, "Server string is malformed or empty!");
+        mem_free(server_port);
+        return PLCTAG_ERR_BAD_CONFIG;
+    } else {
+        server = server_port[0];
+    }
+
+    if(server_port[1] != NULL) {
+        rc = str_to_int(server_port[1], &port);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to extract port number from server string \"%s\"!", device->server_name);
+            mem_free(server_port);
+            server_port = NULL;
+            return PLCTAG_ERR_BAD_CONFIG;
+        }
+    } else {
+        port = device->default_port;
+    }
+
+    pdebug(DEBUG_DETAIL, "Using server \"%s\" and port %d.", server, port);
+
+    rc = socket_create(&(device->sock));
+    if(rc != PLCTAG_STATUS_OK) {
+        /* done with the split string. */
+        mem_free(server_port);
+        server_port = NULL;
+
+        pdebug(DEBUG_WARN, "Unable to create socket object, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
+
+    /* connect to the socket */
+    pdebug(DEBUG_DETAIL, "Connecting to %s on port %d...", server, port);
+    rc = socket_connect_tcp_start(device->sock, server, port);
+    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+        /* done with the split string. */
+        mem_free(server_port);
+
+        pdebug(DEBUG_WARN, "Unable to connect to the server \"%s\", got error %s!", device->server_name, plc_tag_decode_error(rc));
+        socket_destroy(&(device->sock));
+        return rc;
+    }
+
+    /* done with the split string. */
+    if(server_port) {
+        mem_free(server_port);
+        server_port = NULL;
+    }
+
+    /* clear the state for reading and writing. */
+    device->pdu_ready_to_send = 0;
+    device->read_data_len = 0;
+    device->write_data_len = 0;
+    device->write_data_offset = 0;
+
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
+
+    return rc;
+}
+
+
+
+
 /****** Tag Control Functions ******/
 
 /* These must all be called with the API mutex on the tag held. */
@@ -1029,7 +1327,7 @@ int common_tag_abort(plc_tag_p p_tag)
     tag->op = TAG_OP_IDLE;
 
     /* wake the device. */
-    tag->device->vtable->wake(device);
+    device_wake(tag->device);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1057,7 +1355,7 @@ int common_tag_read_start(plc_tag_p p_tag)
     }
 
     /* wake the PLC loop if we need to. */
-    tag->device->vtable->wake(device);
+    device_wake(tag->device);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1124,7 +1422,7 @@ int common_tag_write_start(plc_tag_p p_tag)
     }
 
     /* wake the device thread. */
-    tag->device->vtable->wake(device);
+    device_wake(tag->device);
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1145,7 +1443,7 @@ int common_tag_wake_device(plc_tag_p p_tag)
     }
 
     /* wake the device thread. */
-    tag->device->vtable->wake(device);
+    device_wake(tag->device);
 
     pdebug(DEBUG_DETAIL, "Done.");
 

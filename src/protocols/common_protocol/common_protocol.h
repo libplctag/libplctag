@@ -49,6 +49,8 @@ typedef enum {
     TAG_OP_WRITE_RESPONSE
 } tag_op_type_t;
 
+typedef struct common_tag_t *common_tag_p;
+
 
 struct common_tag_pdu_vtable_t {
     /* tag-specific behavior/functions */
@@ -71,13 +73,14 @@ struct common_tag_t {
     COMMON_TAG_FIELDS;
 };
 
-typedef struct common_tag_t *common_tag_p;
 
 
 struct common_tag_list_t {
     struct common_tag_t *head;
     struct common_tag_t *tail;
 };
+
+typedef struct common_tag_list_t *common_tag_list_p;
 
 /* event return from wait_for_events() */
 typedef enum {
@@ -90,40 +93,49 @@ typedef enum {
     COMMON_DEVICE_EVENT_INACTIVE = (1 << 6)
 };
 
-struct common_device_vtable_t {
-    /* device-specific behavior/functions */
-    void (*wake)(common_device_p device);
-    int (*wait)(common_device_p device, int event_mask, int timeout_ms);
+
+typedef struct common_device_t *common_device_p;
+
+
+struct common_protocol_vtable_t {
+    int (*tickle)(common_device_p device);
     int (*connect)(common_device_p device);
     int (*disconnect)(common_device_p device);
-    int (*send_request)(common_device_p device);
-    int (*receive_response)(common_device_p device);
+    int (*process_pdu)(common_device_p device);
 };
 
-#define COMMON_DEVICE_FIELDS                \
-    struct common_device_t *next;           \
-    char *server_name;                      \
-    int connection_group_id;                \
-    thread_p handler_thread;                \
-    mutex_p mutex;                          \
-    int state;                              \
-    atomic_int terminate;                   \
-    struct common_device_vtable_t *vtable;  \
-    struct common_tag_list_t tag_list; 
+#define COMMON_DEVICE_FIELDS                    \
+    struct common_device_t *next;               \
+    char *server_name;                          \
+    int connection_group_id;                    \
+    sock_p sock;                                \
+    int default_port;                           \
+    cond_p cond_var;                            \
+    thread_p handler_thread;                    \
+    mutex_p mutex;                              \
+    int state;                                  \
+    atomic_int terminate;                       \
+    struct common_protocol_vtable_t *protocol;  \
+    struct common_tag_list_t tag_list;          \
+    int pdu_ready_to_send;                      \
+    int buffer_size;                            \
+    int read_data_len;                          \
+    int write_data_len;                         \
+    int write_data_offset;                      \
+    uint8_t *data
 
 
 struct common_device_t {
     COMMON_DEVICE_FIELDS;
 };
 
-typedef struct common_device_t *common_device_p;
 
 /* module functions */
 extern int common_protocol_init(void);
 extern void common_protocol_teardown(void);
 
 /* device functions */
-extern int common_protocol_get_device(const char *server_name, int connection_group_id, common_device_p **device, int (*create_device)(void *arg), void *create_arg);
+extern int common_protocol_get_device(const char *server_name, int default_port, int connection_group_id, common_device_p *device, common_device_p (*create_device)(void *arg), void *create_arg);
 extern void common_device_destroy(common_device_p device);
 
 /* tag functions. */
