@@ -1702,6 +1702,60 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
         }
     }
 
+    /* handle connection case, need to dive deeper to see if we really connected */
+    if(result & SOCK_EVENT_CONNECT) {
+        int sock_err = 0;
+        socklen_t sock_err_len = (socklen_t)sizeof(sock_err);
+        int rc = getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_err, &sock_err_len);
+        if(rc == 0) {
+            /* sock_err has the error. */
+            switch(sock_err) {
+                case 0:
+                    pdebug(DEBUG_DETAIL, "No error, socket is connected.");
+                    rc = PLCTAG_STATUS_OK;
+                    break;
+
+                case EBADF:
+                    pdebug(DEBUG_WARN, "Socket fd is not valid!");
+                    return PLCTAG_ERR_OPEN;
+                    break;
+
+                case EFAULT:
+                    pdebug(DEBUG_WARN, "The address passed to getsockopt() is not a valid user address!");
+                    return PLCTAG_ERR_OPEN;
+                    break;
+
+                case EINVAL:
+                    pdebug(DEBUG_WARN, "The size of the socket error result is invalid!");
+                    return PLCTAG_ERR_OPEN;
+                    break;
+
+                case ENOPROTOOPT:
+                    pdebug(DEBUG_WARN, "The option SO_ERROR is not understood at the SOL_SOCKET level!");
+                    return PLCTAG_ERR_OPEN;
+                    break;
+
+                case ENOTSOCK:
+                    pdebug(DEBUG_WARN, "The FD is not a socket!");
+                    return PLCTAG_ERR_OPEN;
+                    break;
+
+                case ECONNREFUSED:
+                    pdebug(DEBUG_WARN, "Connection refused!");
+                    return PLCTAG_ERR_OPEN;
+                    break;
+
+                default:
+                    pdebug(DEBUG_WARN, "Unexpected error %d returned!", sock_err);
+                    return PLCTAG_ERR_OPEN;
+                    break;
+            }
+        } else {
+            pdebug(DEBUG_WARN, "Error %d getting socket connection status!", errno);
+            return PLCTAG_ERR_OPEN;
+        }
+    }
+
     pdebug(DEBUG_DETAIL, "Done.");
 
     return result;
