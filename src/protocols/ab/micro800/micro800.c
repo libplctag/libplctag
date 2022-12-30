@@ -39,8 +39,9 @@
 #include <platform.h>
 #include <lib/libplctag.h>
 #include <common_protocol/common_protocol.h>
-#include <ab/micro800/micro800.h>
+#include <ab/cip.h>
 #include <ab/defs.h>
+#include <ab/micro800/micro800.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -50,9 +51,10 @@
 #define MAX_MICRO800_REQUESTS (100)
 #define MICRO800_CONNECT_TIMEOUT_MS (100)
 #define MICRO800_INACTIVITY_TIMEOUT_MS (5000)
+#define MICRO800_INITIAL_DATA_SIZE (600)
 
 typedef enum {
-    MICRO800_STATE_START_OPEN_SOCKET = 0,
+    MICRO800_STATE_SEND_EIP_SESSION_PDU = 0,
     MICRO800_STATE_OPEN_SOCKET_STARTED,
     MICRO800_STATE_CONNECT_COMPLETE
 } connect_state_t;
@@ -63,24 +65,13 @@ typedef struct micro800_tag_t *micro800_tag_p;
 struct micro800_plc_t {
     COMMON_DEVICE_FIELDS;
 
-    /* socket connecting to the PLC */
-    sock_p sock;
-
     /* connection state for connecting state machine */
     int connect_state;
 
-    /* track inactivity */
-    int64_t inactivity_timeout_ms;          \
-    
-    /* requests */
-    micro800_tag_p requesting_tag;
-    uint16_t request_seq_id;
+    /* connection info, if used. */
+    uint8_t *connection_path;
+    uint8_t connection_path_size;
 
-    /* data */
-    int read_data_len;
-    int write_data_len;
-    int write_data_offset;
-    uint8_t *data;
 };
 
 typedef struct micro800_plc_t *micro800_plc_p;
@@ -94,8 +85,6 @@ struct micro800_tag_t {
     int elem_count;
     int elem_size;
 };
-
-typedef struct micro800_tag_t *micro800_tag_p;
 
 
 /* default string types used for Modbus PLCs. */
@@ -121,43 +110,23 @@ tag_byte_order_t micro800_tag_byte_order = {
 };
 
 
-
 /* helper functions */
 static int create_tag_object(attr attribs, micro800_tag_p *tag);
-static common_device_p micro800_create_device_unsafe(attr attribs);
+static common_device_p create_device_unsafe(void *arg);
 static void tag_destructor(void *tag_arg);
 static void device_destructor(void *plc_arg);
 
-static void wake_device(common_device_p plc);
-static int wait_for_events(common_device_p device, int event_mask, int timeout_ms);
+static int tickle_device(common_device_p device);
 static int connect_device(common_device_p device);
 static int disconnect_device(common_device_p device);
-static int send_request(common_device_p device);
-static int receive_response(common_device_p device);
+static int process_pdu(common_device_p device);
 
-struct common_device_vtable_t micro800_device_vtable = {
-    .wake = wake_device,
-    .wait = wait_for_events,
+struct common_protocol_vtable_t micro800_device_vtable = {
+    .tickle = tickle_device,
     .connect = connect_device,
     .disconnect = disconnect_device,
-    .send_request = send_request,
-    .receive_response = receive_response
+    .process_pdu = process_pdu
 };
-
-
-static int open_socket(micro800_plc_p plc);
-
-
-
-/* tag vtable functions. */
-
-/* control functions. */
-static int micro800_abort(plc_tag_p p_tag);
-static int micro800_read_start(plc_tag_p p_tag);
-static int micro800_tag_status(plc_tag_p p_tag);
-static int micro800_tickler(plc_tag_p p_tag);
-static int micro800_write_start(plc_tag_p p_tag);
-static int micro800_wake_plc(plc_tag_p p_tag);
 
 
 /* data accessors */
@@ -199,7 +168,7 @@ plc_tag_p micro800_tag_create(attr attribs, void (*tag_callback_func)(int32_t ta
     micro800_tag_p tag = NULL;
     micro800_plc_p device = NULL;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
-    char *server_name = attr_get_str(attribs, "gateway", NULL);
+    const char *server_name = attr_get_str(attribs, "gateway", NULL);
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -224,20 +193,14 @@ plc_tag_p micro800_tag_create(attr attribs, void (*tag_callback_func)(int32_t ta
     }
 
     /* find the PLC object. */
-    rc = common_protocol_get_device(server_name, connection_group_id, &device, micro800_create_device_unsafe, attribs);
-    rc = micro800_create_device_unsafe(attribs, &(tag->plc));
-    if(rc == PLCTAG_STATUS_OK) {
-        /* put the tag on the PLC's list. */
-        critical_block(tag->plc->mutex) {
-            push_tag(&(tag->plc->tag_list), tag);
-        }
-    } else {
+    rc = common_protocol_get_device(server_name, AB_EIP_DEFAULT_PORT, connection_group_id, &device, create_device_unsafe, (void *)attribs);
+    if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
     }
 
     /* kick off a read. */
-    micro800_read_start((plc_tag_p)tag);
+    common_tag_read_start((plc_tag_p)tag);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -255,8 +218,8 @@ int create_tag_object(attr attribs, micro800_tag_p *tag)
     int data_size = 0;
     int reg_size = 0;
     int elem_count = attr_get_int(attribs, "elem_count", 1);
-    modbus_reg_type_t reg_type = MB_REG_UNKNOWN;
-    int reg_base = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if (elem_count < 0) {
         pdebug(DEBUG_WARN, "Element count should not be a negative value!");
@@ -267,39 +230,6 @@ int create_tag_object(attr attribs, micro800_tag_p *tag)
 
     *tag = NULL;
 
-    /* get register type. */
-    rc = remove_parse_register_name(attribs, &reg_type, &reg_base);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Error parsing base register name!");
-        return rc;
-    }
-
-    /* determine register type. */
-    switch(reg_type) {
-        case MB_REG_COIL:
-            /* fall through */
-        case MB_REG_DISCRETE_INPUT:
-            reg_size = 1;
-            break;
-
-        case MB_REG_HOLDING_REGISTER:
-            /* fall through */
-        case MB_REG_INPUT_REGISTER:
-            reg_size = 16;
-            break;
-
-        default:
-            pdebug(DEBUG_WARN, "Unsupported register type!");
-            reg_size = 0;
-            return PLCTAG_ERR_BAD_PARAM;
-            break;
-    }
-
-    /* calculate the data size in bytes. */
-    data_size = ((elem_count * reg_size) + 7) / 8;
-
-    pdebug(DEBUG_DETAIL, "Tag data size is %d bytes.", data_size);
-
     /* allocate the tag */
     *tag = (micro800_tag_p)rc_alloc((int)(unsigned int)sizeof(struct micro800_tag_t)+data_size, tag_destructor);
     if(! *tag) {
@@ -307,27 +237,16 @@ int create_tag_object(attr attribs, micro800_tag_p *tag)
         return PLCTAG_ERR_NO_MEM;
     }
 
-    /* point the data just after the tag struct. */
-    (*tag)->data = (uint8_t *)((*tag) + 1);
-
-    /* set the various size/element fields. */
-    (*tag)->reg_base = (uint16_t)(unsigned int)reg_base;
-    (*tag)->reg_type = reg_type;
     (*tag)->elem_count = elem_count;
-    (*tag)->elem_size = reg_size;
-    (*tag)->size = data_size;
+    (*tag)->elem_size = 0;
+    (*tag)->size = 0;
+    (*tag)->data = NULL;
 
     /* set up the vtable */
-    (*tag)->vtable = &modbus_vtable;
+    (*tag)->vtable = &micro800_tag_vtable;
 
     /* set the default byte order */
     (*tag)->byte_order = &micro800_tag_byte_order;
-
-    /* set initial tag operation state. */
-    (*tag)->op = TAG_OP_IDLE;
-
-    /* initialize the current request slot */
-    (*tag)->request_slot = -1;
 
     /* make sure the generic tag tickler thread does not call the generic tickler. */
     (*tag)->skip_tickler = 1;
@@ -352,43 +271,14 @@ void tag_destructor(void *tag_arg)
     }
 
     /* abort everything. */
-    micro800_abort((plc_tag_p)tag);
+    common_tag_abort((plc_tag_p)tag);
 
-    if(tag->plc) {
-        /* unlink the tag from the PLC. */
-        critical_block(tag->plc->mutex) {
-            int rc = remove_tag(&(tag->plc->tag_list), tag);
-            if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Tag removed from the PLC successfully.");
-            } else if(rc == PLCTAG_ERR_NOT_FOUND) {
-                pdebug(DEBUG_WARN, "Tag not found in the PLC's list for the tag's operation %d.", tag->op);
-            } else {
-                pdebug(DEBUG_WARN, "Error %s while trying to remove the tag from the PLC's list!", plc_tag_decode_error(rc));
-            }
-        }
+    /* clean up common elements */
+    common_tag_destroy((common_tag_p)tag);
 
-        pdebug(DEBUG_DETAIL, "Releasing the reference to the PLC.");
-        tag->plc = rc_dec(tag->plc);
-    }
-
-    if(tag->api_mutex) {
-        mutex_destroy(&(tag->api_mutex));
-        tag->api_mutex = NULL;
-    }
-
-    if(tag->ext_mutex) {
-        mutex_destroy(&(tag->ext_mutex));
-        tag->ext_mutex = NULL;
-    }
-
-    if(tag->tag_cond_wait) {
-        cond_destroy(&(tag->tag_cond_wait));
-        tag->tag_cond_wait = NULL;
-    }
-
-    if(tag->byte_order && tag->byte_order->is_allocated) {
-        mem_free(tag->byte_order);
-        tag->byte_order = NULL;
+    if(tag->data) {
+        mem_free(tag->data);
+        tag->data = NULL;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -397,10 +287,16 @@ void tag_destructor(void *tag_arg)
 
 
 /* must be called with device module mutex held */
-common_device_p micro800_create_device_unsafe(attr attribs)
+common_device_p create_device_unsafe(void *arg)
 {
+    int rc = PLCTAG_STATUS_OK;
+    attr attribs = (attr)arg;
     micro800_plc_p result = NULL;
     const char *path = attr_get_str(attribs, "path", NULL);
+    int needs_connection = 0;
+    plc_type_t plc_type = AB_PLC_MICRO800;
+    int is_dhp = 0;
+    uint16_t dhp_dest = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -409,13 +305,30 @@ common_device_p micro800_create_device_unsafe(attr attribs)
     if(!result) {
         pdebug(DEBUG_WARN, "Unable to allocate Micro800 PLC device object!");
         return NULL;
-        
     } 
 
-    /* TODO encode path */
-
     /* set up device vtable.  Thread won't start until after this function is called. */
-    result->vtable = &micro800_device_vtable;
+    result->protocol = &micro800_device_vtable;
+
+    /* set up initial data buffer. */
+    result->data = mem_alloc(MICRO800_INITIAL_DATA_SIZE);
+    if(!result->data) {
+        pdebug(DEBUG_WARN, "Unable to allocate Micro800 initial data buffer!");
+        rc_dec(result);
+        return NULL;
+    }
+
+    result->buffer_size = MICRO800_INITIAL_DATA_SIZE;
+
+    /* encode path */
+    if(path && str_length(path) > 0) {
+        rc = cip_encode_path(path, &needs_connection, plc_type, &result->connection_path, &result->connection_path_size, &is_dhp, &dhp_dest);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_DETAIL, "Error %s parsing path for Micro800!", plc_tag_decode_error(rc));
+            rc_dec(result);
+            return NULL;
+        }
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -438,9 +351,14 @@ void device_destructor(void *device_arg)
     /* call common destructor */
     common_device_destroy((common_device_p)device);
 
-    if(device->sock) {
-        socket_destroy(&device->sock);
-        device->sock = NULL;
+    if(device->connection_path) {
+        mem_free(device->connection_path);
+        device->connection_path = NULL;
+    }
+
+    if(device->data) {
+        mem_free(device->data);
+        device->data = NULL;
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -470,37 +388,31 @@ void wake_device(common_device_p device_arg)
 int connect_device(common_device_p device_arg)
 {
     int rc = PLCTAG_STATUS_OK;
-    micro800_plc_p plc = (micro800_plc_p)device_arg;
+    micro800_plc_p device = (micro800_plc_p)device_arg;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    switch(plc->connect_state) {
-        case MICRO800_STATE_START_OPEN_SOCKET:
-            pdebug(DEBUG_DETAIL, "In state MICRO800_STATE_START_OPEN_SOCKET.");
-            rc = open_socket(plc);
-            if(rc == PLCTAG_STATUS_OK) {
-                plc->connect_state = MICRO800_STATE_CONNECT_COMPLETE;
-            } else if(rc == PLCTAG_STATUS_PENDING) {
-                plc->connect_state = MICRO800_STATE_OPEN_SOCKET_STARTED;
-            }
-            break;
+    /* set the state to start connecting. */
+    device->state = MICRO800_STATE_SEND_EIP_SESSION_PDU;
 
-        case MICRO800_STATE_OPEN_SOCKET_STARTED:
-            pdebug(DEBUG_DETAIL, "In state MICRO800_STATE_OPEN_SOCKET_STARTED.");
-            /* wait for connection to complete. */
-            rc = socket_connect_tcp_check(plc->sock, MICRO800_CONNECT_TIMEOUT_MS);
-            if(rc == PLCTAG_STATUS_OK) {
-                plc->connect_state = MICRO800_STATE_CONNECT_COMPLETE;
-            } else if(rc == PLCTAG_STATUS_PENDING) {
-                plc->connect_state = MICRO800_STATE_OPEN_SOCKET_STARTED;
-            }
-            break;
+    pdebug(DEBUG_DETAIL, "Done.");
 
-        case MICRO800_STATE_CONNECT_COMPLETE:
-            pdebug(DEBUG_DETAIL, "In state MICRO800_STATE_CONNECT_COMPLETE.");
-            // TODO - complete this.  Add EIP session set up.  Add CIP connection set up.
-            rc = PLCTAG_STATUS_OK;
-            break;
+    return rc;
+}
+
+
+
+int tickle_device(common_device_p device)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    switch(device->) {
+        case MICRO800_STATE_SEND_EIP_SESSION_PDU:
+            pdebug(DEBUG_DETAIL, "In state MICRO800_STATE_SEND_EIP_SESSION_PDU.");
+
+            rc = eip_build_
 
         default:
             pdebug(DEBUG_WARN, "Unknown connection state %d!", plc->connect_state);

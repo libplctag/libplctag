@@ -232,7 +232,7 @@ int common_protocol_get_device(const char *server_name, int default_port, int co
 
             do {
                 /* set up the PLC state */
-                (*device)->state = COMMON_DEVICE_STATE_CONNECT;
+                (*device)->common_device_state = COMMON_DEVICE_STATE_CONNECT;
 
                 rc = thread_create(&((*device)->handler_thread), common_device_handler, 32768, (void *)(*device));
                 if(rc != PLCTAG_STATUS_OK) {
@@ -319,6 +319,11 @@ void common_device_destroy(common_device_p device)
     if(device->server_name) {
         mem_free(device->server_name);
         device->server_name = NULL;
+    }
+
+    if(device->data) {
+        mem_free(device->data);
+        device->data = NULL;
     }
 
     /* check to make sure we have no tags left. */
@@ -443,7 +448,7 @@ THREAD_FUNC(common_device_handler)
     }
 
     /* start connecting right away */
-    device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
+    device->common_device_state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
 
     while(! atomic_get(&(device->terminate))) {
         waitable_events = SOCK_EVENT_ERROR | SOCK_EVENT_TIMEOUT | SOCK_EVENT_WAKE_UP;
@@ -455,7 +460,7 @@ THREAD_FUNC(common_device_handler)
             /* FIXME - what should we do here? */
         }
 
-        switch(device->state) {
+        switch(device->common_device_state) {
         case COMMON_DEVICE_STATE_OPEN_SOCKET_START:
             pdebug(DEBUG_DETAIL, "in COMMON_DEVICE_STATE_OPEN_SOCKET_START state.");
 
@@ -466,14 +471,14 @@ THREAD_FUNC(common_device_handler)
             rc = start_open_socket(device);
             if(rc == PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_DETAIL, "Socket connection process started.  Going to COMMON_DEVICE_STATE_OPEN_SOCKET_WAIT state.");
-                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_WAIT;
+                device->common_device_state = COMMON_DEVICE_STATE_OPEN_SOCKET_WAIT;
             } else if(rc == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_DETAIL, "Successfully connected to the PLC.  Going to COMMON_DEVICE_STATE_READY state.");
 
                 /* reset err_delay */
                 err_delay = COMMON_DEVICE_SOCKET_ERR_DELAY_MS;
 
-                device->state = COMMON_DEVICE_STATE_READY;
+                device->common_device_state = COMMON_DEVICE_STATE_READY;
             } else {
                 pdebug(DEBUG_WARN, "Error %s received while starting socket connection.", plc_tag_decode_error(rc));
 
@@ -484,7 +489,7 @@ THREAD_FUNC(common_device_handler)
 
                 pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to COMMON_DEVICE_STATE_ERR_WAIT state to wait %"PRId64"ms.", err_delay);
 
-                device->state = COMMON_DEVICE_STATE_ERR_WAIT;
+                device->common_device_state = COMMON_DEVICE_STATE_ERR_WAIT;
             }
             break;
 
@@ -507,7 +512,7 @@ THREAD_FUNC(common_device_handler)
                 /* kick off the protocol-specific connection */
                 device->protocol->connect(device);
 
-                device->state = COMMON_DEVICE_STATE_READY;
+                device->common_device_state = COMMON_DEVICE_STATE_READY;
             } else if(sock_events & (SOCK_EVENT_WAKE_UP | SOCK_EVENT_TIMEOUT)) {
                 pdebug(DEBUG_DETAIL, "Still waiting for socket to connect.");
                 /* will return back to this state */
@@ -521,7 +526,7 @@ THREAD_FUNC(common_device_handler)
 
                 pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to COMMON_DEVICE_STATE_ERR_WAIT state to wait %"PRId64"ms.", err_delay);
 
-                device->state = COMMON_DEVICE_STATE_ERR_WAIT;
+                device->common_device_state = COMMON_DEVICE_STATE_ERR_WAIT;
             }
             break;
 
@@ -532,14 +537,14 @@ THREAD_FUNC(common_device_handler)
             if(device->pdu_ready_to_send) {
                 pdebug(DEBUG_DETAIL, "going to state COMMON_DEVICE_STATE_WRITE_PDU.");
                 no_wait = 1;
-                device->state = COMMON_DEVICE_STATE_WRITE_PDU;
+                device->common_device_state = COMMON_DEVICE_STATE_WRITE_PDU;
                 break;
             }
 
             if(idle_timeout < time_ms()) {
                 pdebug(DEBUG_DETAIL, "idle timeout hit, going to COMMON_DEVICE_STATE_DISCONNECT.");
                 no_wait = 1;
-                device->state = COMMON_DEVICE_STATE_DISCONNECT;
+                device->common_device_state = COMMON_DEVICE_STATE_DISCONNECT;
                 break;
             }
 
@@ -559,7 +564,7 @@ THREAD_FUNC(common_device_handler)
                 /* update idle_timeout */
                 idle_timeout = time_ms() + COMMON_DEVICE_INACTIVITY_TIMEOUT;
 
-                device->state = COMMON_DEVICE_STATE_RECEIVE_PDU;
+                device->common_device_state = COMMON_DEVICE_STATE_RECEIVE_PDU;
             } else if(rc == PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_DETAIL, "Not all data written, will try again.");
             } else {
@@ -574,7 +579,7 @@ THREAD_FUNC(common_device_handler)
                 device->write_data_offset = 0;
 
                 /* try to reconnect immediately. */
-                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
+                device->common_device_state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
             }
 
             /* if we did not send all the packet, we stay in this state and keep trying. */
@@ -591,7 +596,7 @@ THREAD_FUNC(common_device_handler)
             rc = receive_pdu(device);
             if(rc == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_DETAIL, "Response ready, going back to COMMON_DEVICE_STATE_READY state.");
-                device->state = COMMON_DEVICE_STATE_READY;
+                device->common_device_state = COMMON_DEVICE_STATE_READY;
             } else if(rc == PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_DETAIL, "Response not complete, continue reading data.");
             } else {
@@ -608,7 +613,7 @@ THREAD_FUNC(common_device_handler)
                 device->write_data_offset = 0;
 
                 /* try to reconnect immediately. */
-                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
+                device->common_device_state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
             }
 
             /* in all cases we want to cycle through the state machine immediately. */
@@ -628,13 +633,13 @@ THREAD_FUNC(common_device_handler)
                 pdebug(DEBUG_DETAIL, "Waiting for at least %"PRId64"ms more.", (err_delay_until - time_ms()));
             } else {
                 pdebug(DEBUG_DETAIL, "Error wait is over, going to state PLC_CONNECT_START.");
-                device->state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
+                device->common_device_state = COMMON_DEVICE_STATE_OPEN_SOCKET_START;
             }
             break;
 
         default:
-            pdebug(DEBUG_DETAIL, "Unknown state %d!", device->state);
-            device->state = COMMON_DEVICE_STATE_ERR_WAIT;
+            pdebug(DEBUG_DETAIL, "Unknown state %d!", device->common_device_state);
+            device->common_device_state = COMMON_DEVICE_STATE_ERR_WAIT;
             break;
         }
 
@@ -914,7 +919,7 @@ int tickle_tag_unsafe(common_device_p device, common_tag_p tag)
 
         case TAG_OP_READ_RESPONSE:
             /* cross check the state. */
-            if(device->state != COMMON_DEVICE_STATE_RECEIVE_PDU) {
+            if(device->common_device_state != COMMON_DEVICE_STATE_RECEIVE_PDU) {
                 pdebug(DEBUG_WARN, "Device changed state, restarting request.");
                 tag->op = TAG_OP_READ_REQUEST;
                 break;
@@ -999,7 +1004,7 @@ int tickle_tag_unsafe(common_device_p device, common_tag_p tag)
 
         case TAG_OP_WRITE_RESPONSE:
             /* check the state. */
-            if(device->state != COMMON_DEVICE_STATE_RECEIVE_PDU) {
+            if(device->common_device_state != COMMON_DEVICE_STATE_RECEIVE_PDU) {
                 pdebug(DEBUG_WARN, "Device changed state, restarting request.");
                 tag->op = TAG_OP_WRITE_REQUEST;
                 break;

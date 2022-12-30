@@ -91,7 +91,7 @@ typedef enum {
     COMMON_DEVICE_EVENT_WAKEUP = (1 << 4),
     COMMON_DEVICE_EVENT_WRITE_READY = (1 << 5),
     COMMON_DEVICE_EVENT_INACTIVE = (1 << 6)
-};
+} common_device_event_t;
 
 
 typedef struct common_device_t *common_device_p;
@@ -113,7 +113,7 @@ struct common_protocol_vtable_t {
     cond_p cond_var;                            \
     thread_p handler_thread;                    \
     mutex_p mutex;                              \
-    int state;                                  \
+    int common_device_state;                    \
     atomic_int terminate;                       \
     struct common_protocol_vtable_t *protocol;  \
     struct common_tag_list_t tag_list;          \
@@ -128,6 +128,7 @@ struct common_protocol_vtable_t {
 struct common_device_t {
     COMMON_DEVICE_FIELDS;
 };
+
 
 
 /* module functions */
