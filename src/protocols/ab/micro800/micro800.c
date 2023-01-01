@@ -194,7 +194,7 @@ plc_tag_p micro800_tag_create(attr attribs, void (*tag_callback_func)(int32_t ta
     }
 
     /* find the PLC object. */
-    rc = common_protocol_get_device(server_name, AB_EIP_DEFAULT_PORT, connection_group_id, &device, create_device_unsafe, (void *)attribs);
+    rc = common_protocol_get_device(server_name, AB_EIP_DEFAULT_PORT, connection_group_id, (common_device_p)&device, create_device_unsafe, (void *)attribs);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
