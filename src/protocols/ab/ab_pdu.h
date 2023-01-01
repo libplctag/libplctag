@@ -35,57 +35,7 @@
 
 #include <stdint.h>
 #include <lib/libplctag.h>
-
-
-
-typedef struct {
-    int start;
-    int length;
-    uint8_t *buffer;
-} slice_t;
-
-static inline slice_t slice_init(uint8_t *buffer, int start, int length)
-{
-    slice_t result;
-
-    result.start = start;
-    result.length = length;
-    result.buffer = buffer;
-
-    return result;
-}
-
-static inline int slice_get_u8(uint8_t *val, slice_t source_slice, slice_t *result_slice)
-{
-    int index = source_slice.start;
-    
-    if(source_slice.length <= 0) {
-        *result_slice = source_slice;
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    *val = source_slice.buffer[index];
-    *result_slice = slice_init(source_slice.buffer, source_slice.start + 1, source_slice.length - 1);
-
-    return PLCTAG_STATUS_OK;
-}
-
-
-static inline int slice_put_u8(uint8_t val, slice_t source_slice, slice_t *result_slice)
-{
-    int index = source_slice.start;
-    
-    if(source_slice.length <= 0) {
-        *result_slice = source_slice;
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    source_slice.buffer[index] = val;
-    *result_slice = slice_init(source_slice.buffer, source_slice.start + 1, source_slice.length - 1);
-
-    return PLCTAG_STATUS_OK;
-}
-
+#include <common_protocol/slice.h>
 
 
 
