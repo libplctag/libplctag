@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <platform.h>
 #include <lib/libplctag.h>
+#include <ab/ab_pdu.h>
 #include <ab/cip.h>
 #include <ab/micro800.h>
 #include <util/atomic_int.h>
@@ -98,10 +99,17 @@ struct device_t {
     enum {
         PLC_CONNECT_START = 0,
         PLC_CONNECT_WAIT,
+        PLC_EIP_SESSION_REQUEST,
+        PLC_EIP_SESSION_RESPONSE,
+        PLC_SEND_FORWARD_OPEN_EX_REQUEST,
+        PLC_RECEIVE_FORWARD_OPEN_EX_RESPONSE,
         PLC_READY,
         PLC_BUILD_REQUEST,
         PLC_SEND_REQUEST,
         PLC_RECEIVE_RESPONSE,
+        PLC_SEND_FORWARD_CLOSE_REQUEST,
+        PLC_RECEIVE_FORWARD_CLOSE_RESPONSE,
+        PLC_EIP_CLOSE,
         PLC_ERR_WAIT
     } state;
 
@@ -212,9 +220,10 @@ static void wake_device_thread(device_p device);
 static int device_connect_tcp(device_p device);
 static int tickle_all_tags(device_p device);
 static int tickle_tag(device_p device, device_tag_p tag);
+static int build_session_request(device_p device);
 static int find_request_slot(device_p device, device_tag_p tag);
 static void clear_request_slot(device_p device, device_tag_p tag);
-static int receive_response(device_p device);
+static int receive_eip_response(device_p device);
 static int send_request(device_p device);
 static int check_read_response(device_p device, device_tag_p tag);
 static int create_read_request(device_p device, device_tag_p tag);
@@ -998,6 +1007,35 @@ THREAD_FUNC(device_handler)
             }
             break;
 
+        case PLC_EIP_SESSION_REQUEST:
+            pdebug(DEBUG_DETAIL, "In state PLC_EIP_SESSION_REQUEST.");
+
+            /* build a session request */
+            rc = build_session_request(device);
+            if(rc == PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_DETAIL, "Session request built.  Send it.");
+
+                /* keep the connection open for a few seconds. */
+                device->inactivity_timeout_ms = DEVICE_INACTIVITY_TIMEOUT_MS + time_ms();
+
+                /* reset err_delay */
+                err_delay = SOCKET_ERR_START_DELAY_MS;
+
+                device->state = PLC_EIP_SESSION_RESPONSE;
+            } else {
+                pdebug(DEBUG_WARN, "Error %s, unable to build session request!", plc_tag_decode_error(rc));
+
+                socket_destroy(&(device->sock));
+
+                /* exponential increase with jitter. */
+                UPDATE_ERR_DELAY();
+
+                pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %"PRId64"ms.", err_delay);
+
+                device->state = PLC_ERR_WAIT;
+            }
+        
+
         case PLC_READY:
             pdebug(DEBUG_DETAIL, "in PLC_READY state.");
 
@@ -1100,7 +1138,7 @@ THREAD_FUNC(device_handler)
             pdebug(DEBUG_DETAIL, "in PLC_RECEIVE_RESPONSE state.");
 
             /* get a packet */
-            rc = receive_response(device);
+            rc = receive_eip_response(device);
             if(rc == PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_DETAIL, "Response ready, going back to PLC_READY state.");
                 device->response_ready = 1;
@@ -1584,65 +1622,65 @@ int tickle_tag(device_p device, device_tag_p tag)
 
 
 
-int find_request_slot(device_p device, device_tag_p tag)
-{
-    pdebug(DEBUG_SPEW, "Starting.");
+// int find_request_slot(device_p device, device_tag_p tag)
+// {
+//     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(device->request_ready) {
-        pdebug(DEBUG_DETAIL, "There is a request already queued for sending.");
-        return PLCTAG_ERR_BUSY;
-    }
+//     if(device->request_ready) {
+//         pdebug(DEBUG_DETAIL, "There is a request already queued for sending.");
+//         return PLCTAG_ERR_BUSY;
+//     }
 
-    if(device->state != PLC_READY) {
-        pdebug(DEBUG_DETAIL, "PLC not ready.");
-        return PLCTAG_ERR_BUSY;
-    }
+//     if(device->state != PLC_READY) {
+//         pdebug(DEBUG_DETAIL, "PLC not ready.");
+//         return PLCTAG_ERR_BUSY;
+//     }
 
-    if(tag->tag_id == 0) {
-        pdebug(DEBUG_DETAIL, "Tag not ready.");
-        return PLCTAG_ERR_BUSY;
-    }
+//     if(tag->tag_id == 0) {
+//         pdebug(DEBUG_DETAIL, "Tag not ready.");
+//         return PLCTAG_ERR_BUSY;
+//     }
 
-    /* search for a slot. */
-    for(int slot=0; slot < device->max_requests_in_flight; slot++) {
-        if(device->tags_with_requests[slot] == 0) {
-            pdebug(DEBUG_DETAIL, "Found request slot %d for tag %"PRId32".", slot, tag->tag_id);
-            device->tags_with_requests[slot] = tag->tag_id;
-            tag->request_slot = slot;
-            return PLCTAG_STATUS_OK;
-        }
-    }
+//     /* search for a slot. */
+//     for(int slot=0; slot < device->max_requests_in_flight; slot++) {
+//         if(device->tags_with_requests[slot] == 0) {
+//             pdebug(DEBUG_DETAIL, "Found request slot %d for tag %"PRId32".", slot, tag->tag_id);
+//             device->tags_with_requests[slot] = tag->tag_id;
+//             tag->request_slot = slot;
+//             return PLCTAG_STATUS_OK;
+//         }
+//     }
 
-    pdebug(DEBUG_SPEW, "Done.");
+//     pdebug(DEBUG_SPEW, "Done.");
 
-    return PLCTAG_ERR_NO_RESOURCES;
-}
-
-
-void clear_request_slot(device_p device, device_tag_p tag)
-{
-    pdebug(DEBUG_DETAIL, "Starting for tag %"PRId32".", tag->tag_id);
-
-    /* find the tag in the slots. */
-    for(int slot=0; slot < device->max_requests_in_flight; slot++) {
-        if(device->tags_with_requests[slot] == tag->tag_id) {
-            pdebug(DEBUG_DETAIL, "Found tag %"PRId32" in slot %d.", tag->tag_id, slot);
-
-            if(slot != tag->request_slot) {
-                pdebug(DEBUG_DETAIL, "Tag was not in expected slot %d!", tag->request_slot);
-            }
-
-            device->tags_with_requests[slot] = 0;
-            tag->request_slot = -1;
-        }
-    }
-
-    pdebug(DEBUG_DETAIL, "Done for tag %"PRId32".", tag->tag_id);
-}
+//     return PLCTAG_ERR_NO_RESOURCES;
+// }
 
 
+// void clear_request_slot(device_p device, device_tag_p tag)
+// {
+//     pdebug(DEBUG_DETAIL, "Starting for tag %"PRId32".", tag->tag_id);
 
-int receive_response(device_p device)
+//     /* find the tag in the slots. */
+//     for(int slot=0; slot < device->max_requests_in_flight; slot++) {
+//         if(device->tags_with_requests[slot] == tag->tag_id) {
+//             pdebug(DEBUG_DETAIL, "Found tag %"PRId32" in slot %d.", tag->tag_id, slot);
+
+//             if(slot != tag->request_slot) {
+//                 pdebug(DEBUG_DETAIL, "Tag was not in expected slot %d!", tag->request_slot);
+//             }
+
+//             device->tags_with_requests[slot] = 0;
+//             tag->request_slot = -1;
+//         }
+//     }
+
+//     pdebug(DEBUG_DETAIL, "Done for tag %"PRId32".", tag->tag_id);
+// }
+
+
+
+int receive_eip_response(device_p device)
 {
     int rc = 0;
     int data_needed = 0;
@@ -1656,7 +1694,19 @@ int receive_response(device_p device)
     }
 
     do {
-        /* how much data do we need? */
+        /* create a slice of the data we have. */
+        slice_t packet = slice_init(device->read_data, 0, device->read_data_len);
+        slice_t remainder;
+        eip_encap_t eip_packet;
+
+        rc = eip_encap_deserialize(&eip_packet, packet, &remainder);
+        if(rc == PLCTAG_STATUS_OK) {
+            /* we got a packet */
+            
+        }
+
+
+
         if(device->read_data_len >= MODBUS_MBAP_SIZE) {
             int packet_size = device->read_data[5] + (device->read_data[4] << 8);
             data_needed = (MODBUS_MBAP_SIZE + packet_size) - device->read_data_len;

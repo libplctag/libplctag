@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2022 by Kyle Hayes                                      *
+ *   Copyright (C) 2023 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,11 +32,13 @@
  ***************************************************************************/
 
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <lib/libplctag.h>
-#include <common_protocol/slice.h>
 #include <ab/ab_pdu.h>
+#include <ab/defs.h>
 #include <util/debug.h>
+#include <util/slice.h>
 
 
 #define EIP_ENCAP_T_SIZE (24)
@@ -189,6 +191,32 @@ int eip_encap_serialize(eip_encap_t *eip_encap, slice_t dest, slice_t *result)
 }
 
 
+void eip_encap_print(eip_encap_t *eip_encap)
+{
+    if(!eip_encap) {
+        pdebug(DEBUG_WARN, "pointer to EIP encap header is null!");
+        return;
+    }
+
+    switch(eip_encap->command) {
+        case eip_encap_command_REGISTER_SESSION: pdebug(DEBUG_DETAIL, "EIP header command: eip_encap_command_REGISTER_SESSION"); break;
+        case eip_encap_command_UNREGISTER_SESSION: pdebug(DEBUG_DETAIL, "EIP header command: eip_encap_command_UNREGISTER_SESSION"); break;
+        case eip_encap_command_UNCONNECTED_PDU: pdebug(DEBUG_DETAIL, "EIP header command: eip_encap_command_UNCONNECTED_PDU"); break;
+        case eip_encap_command_CONNECTED_PDU: pdebug(DEBUG_DETAIL, "EIP header command: eip_encap_command_CONNECTED_PDU"); break;
+        default: pdebug(DEBUG_DETAIL, "EIP header command: %" PRIx16, eip_encap->command);
+    }
+
+    pdebug(DEBUG_DETAIL, "EIP header length: %" PRIu16 " bytes", eip_encap->length);
+    pdebug(DEBUG_DETAIL, "EIP header session handle %" PRIx32, eip_encap->session_handle);
+    pdebug(DEBUG_DETAIL, "EIP header status %" PRIx32, eip_encap->status);
+    pdebug(DEBUG_DETAIL, "EIP header sender context %" PRIx64, eip_encap->sender_context);
+    pdebug(DEBUG_DETAIL, "EIP header options %" PRIx32, eip_encap->options);
+    pdebug(DEBUG_DETAIL, "EIP header payload:");
+    slice_dump_bytes(DEBUG_DETAIL, eip_encap->payload);
+}
+
+
+
 
 
 #define EIP_SESSION_REGISTRATION_T_SIZE (4)
@@ -225,7 +253,7 @@ int eip_session_registration_deserialize(eip_session_registration_t *eip_reg, sl
 
     *result = source;
 
-    rc = slice_get_u16le(&(eip_reg->eip_version), *result, result);
+    rc = slice_get_u16le(&(eip_reg->version), *result, result);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_DETAIL, "Error %s getting version data from source slice!", plc_tag_decode_error(rc));
         return rc;
@@ -260,7 +288,7 @@ int eip_session_registration_serialize(eip_session_registration_t *eip_reg, slic
 
     *result = dest;
 
-    rc = slice_put_u16le(&(eip_reg->eip_version), *result, result);
+    rc = slice_put_u16le(&(eip_reg->version), *result, result);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_DETAIL, "Error %s putting version data into destination slice!", plc_tag_decode_error(rc));
         return rc;
@@ -282,4 +310,14 @@ int eip_session_registration_serialize(eip_session_registration_t *eip_reg, slic
 }
 
 
+void eip_session_registration_print(eip_session_registration_t *eip_reg)
+{
+    if(!eip_reg) {
+        pdebug(DEBUG_WARN, "EIP registration PDE pointer is null!");
+        return;
+    }
+
+    pdebug(DEBUG_DETAIL, "EIP registration version %" PRIx16, eip_reg->version);
+    pdebug(DEBUG_DETAIL, "EIP registration option flags %" PRIx16, eip_reg->option_flags);
+}
 

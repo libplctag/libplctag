@@ -35,10 +35,14 @@
 
 #include <stdint.h>
 #include <lib/libplctag.h>
-#include <common_protocol/slice.h>
+#include <ab/defs.h>
+#include <util/slice.h>
 
 
-
+#define eip_encap_command_REGISTER_SESSION      ((uint16_t)0x0065)
+#define eip_encap_command_UNREGISTER_SESSION    ((uint16_t)0x0066)
+#define eip_encap_command_UNCONNECTED_PDU       ((uint16_t)0x006F)
+#define eip_encap_command_CONNECTED_PDU         ((uint16_t)0x0070)
 
 typedef struct {
     uint16_t command;
@@ -53,14 +57,16 @@ typedef struct {
 extern int eip_encap_reserve(slice_t src, slice_t *result);
 extern int eip_encap_deserialize(eip_encap_t *eip_encap, slice_t src, slice_t *result);
 extern int eip_encap_serialize(eip_encap_t *eip_encap, slice_t dest, slice_t *result);
+extern void eip_encap_print(eip_encap_t *eip_encap);
 
 /* Session Registration Request and Response */
 typedef struct {
-    uint16_t eip_version;
+    uint16_t version;
     uint16_t option_flags;
 } eip_session_registration_t;
 
 extern int eip_session_registration_reserve(slice_t source, slice_t *result);
 extern int eip_session_registration_deserialize(eip_session_registration_t *eip_reg, slice_t source, slice_t *result);
 extern int eip_session_registration_serialize(eip_session_registration_t *eip_reg, slice_t dest, slice_t *result);
+extern void eip_session_registration_print(eip_session_registration_t *eip_reg);
 

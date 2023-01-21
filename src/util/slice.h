@@ -35,6 +35,7 @@
 
 #include <stdint.h>
 #include <lib/libplctag.h>
+#include <util/debug.h>
 
 
 typedef struct {
@@ -53,6 +54,10 @@ static inline slice_t slice_init(uint8_t *buffer, int start, int length)
 
     return result;
 }
+
+/* use a define so that we get the correct containing function and line number */
+#define slice_dump_bytes(debug_level, slice) pdebug_dump_bytes(debug_level, slice.buffer + slice.start, slice.length)
+
 
 static inline int slice_get_u8(uint8_t *val, slice_t source_slice, slice_t *result_slice)
 {
