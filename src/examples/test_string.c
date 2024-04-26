@@ -71,7 +71,7 @@ int main()
                                             plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* turn off debugging output. */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
 
     tag = plc_tag_create(tag_string, DATA_TIMEOUT);
 
