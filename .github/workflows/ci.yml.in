@@ -343,7 +343,7 @@ jobs:
 
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_macos_aarch64_EXPERIMENTAL"
+      ARTIFACT: "libplctag_@VERSION@_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
 
