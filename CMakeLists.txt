@@ -464,6 +464,7 @@ elseif (BUILD_EXAMPLES)
                             stress_test
                             string_non_standard_udt
                             string_standard
+                            test_alternate_tag_listing
                             test_auto_sync
                             test_callback
                             test_callback_ex
@@ -476,7 +477,6 @@ elseif (BUILD_EXAMPLES)
                             test_shutdown
                             test_special
                             test_string
-                            test_symbol_translation
                             test_tag_attributes
                             thread_stress
                             toggle_bit

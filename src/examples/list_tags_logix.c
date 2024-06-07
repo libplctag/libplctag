@@ -68,6 +68,7 @@ struct tag_entry_s {
     struct tag_entry_s *next;
     char *name;
     struct tag_entry_s *parent;
+    uint16_t instance_id;
     uint16_t type;
     uint16_t elem_size;
     uint16_t elem_count;
@@ -276,6 +277,7 @@ int main(int argc, char **argv)
 
         /* handle the type. */
         printf("\" ");
+        printf("Instance 0x%04x ", tag->instance_id);
         print_element_type(tag->type);
         printf(".  ");
 
@@ -546,6 +548,7 @@ int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct ta
     if(debug_level >= PLCTAG_DEBUG_INFO) fprintf(stderr,  "Found tag name=%s, tag instance ID=%x, tag type=%x, element length (in bytes) = %d, array dimensions = (%d, %d, %d)\n", tag_name, *last_tag_id, tag_type, (int)element_length, (int)array_dims[0], (int)array_dims[1], (int)array_dims[2]);
 
     /* fill in the fields. */
+    tag_entry->instance_id = *last_tag_id;
     tag_entry->name = tag_name;
     tag_entry->parent = parent;
     tag_entry->type = tag_type;
@@ -573,7 +576,7 @@ int process_tag_entry(int32_t tag, int *offset, uint16_t *last_tag_id, struct ta
 void print_element_type(uint16_t element_type)
 {
     if(element_type & TYPE_IS_SYSTEM) {
-        printf("element type SYSTEM %04x", (unsigned int)(element_type));
+        printf("element type SYSTEM (0x%04x)", (unsigned int)(element_type));
     } else if(element_type & TYPE_IS_STRUCT) {
         printf("element type UDT (0x%04x) %s", (unsigned int)(element_type), udts[(size_t)(unsigned int)(element_type & TYPE_UDT_ID_MASK)]->name);
     } else {
@@ -614,9 +617,9 @@ void print_element_type(uint16_t element_type)
         }
 
         if(type) {
-            printf("(%04x) %s", (unsigned int)element_type, type);
+            printf("Type ID 0x%04x %s", (unsigned int)element_type, type);
         } else {
-            printf("UNKNOWN TYPE %04x", (unsigned int)element_type);
+            printf("UNKNOWN TYPE 0x%04x", (unsigned int)element_type);
         }
     }
 }
