@@ -19,7 +19,7 @@ jobs:
 
     steps:
     - name: "Checkout library source."
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up build environment
       run: sudo apt update; sudo apt install build-essential cmake
@@ -131,7 +131,7 @@ jobs:
 
     steps:
     - name: Checkout library source
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up build environment
       run: sudo apt update; sudo apt-get -y --force-yes install gcc-multilib g++-multilib
@@ -241,7 +241,7 @@ jobs:
       DIST: "${{ github.workspace }}/build/bin_dist"
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -348,7 +348,7 @@ jobs:
       DIST: "${{ github.workspace }}/build/bin_dist"
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -376,7 +376,7 @@ jobs:
       DIST: "${{ github.workspace }}\\build\\bin_dist"
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -491,7 +491,7 @@ jobs:
       DIST: "${{ github.workspace }}/build/bin_dist"
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -606,7 +606,7 @@ jobs:
       DIST: "${{ github.workspace }}/build/bin_dist"
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -635,7 +635,7 @@ jobs:
       DIST: "${{ github.workspace }}/build/bin_dist"
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -665,7 +665,7 @@ jobs:
 
     steps:
     - name: "Checkout library source."
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up build environment
       run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
@@ -698,7 +698,7 @@ jobs:
 
     steps:
     - name: "Checkout library source."
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up build environment
       run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
@@ -731,7 +731,7 @@ jobs:
 
     steps:
     - name: "Checkout library source."
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up build environment
       run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-arm64
