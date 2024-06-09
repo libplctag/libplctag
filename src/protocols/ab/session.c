@@ -249,6 +249,7 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
     int auto_disconnect_enabled = 0;
     int auto_disconnect_timeout_ms = INT_MAX;
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
+    int only_use_old_forward_open = attr_get_int(attribs, "conn_only_use_old_forward_open", 0);
 
     pdebug(DEBUG_DETAIL, "Starting");
 
@@ -283,6 +284,11 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
             } else {
                 session->auto_disconnect_enabled = auto_disconnect_enabled;
                 session->auto_disconnect_timeout_ms = auto_disconnect_timeout_ms;
+
+                /* see if we have an attribute set for forcing the use of the older ForwardOpen */
+                pdebug(DEBUG_DETAIL, "Passed attribute to prohibit use of extended ForwardOpen is %d.", only_use_old_forward_open);
+                pdebug(DEBUG_DETAIL, "Existing attribute to prohibit use of extended ForwardOpen is %d.", session->only_use_old_forward_open);
+                session->only_use_old_forward_open = (session->only_use_old_forward_open ? 1 : only_use_old_forward_open);
 
                 new_session = 1;
             }
@@ -2081,6 +2087,8 @@ int send_forward_open_request(ab_session_p session)
     // if((session->plc_type == AB_PLC_LGX || session->plc_type == AB_PLC_OMRON_NJNX) && session->only_use_old_forward_open && session->max_payload_guess > MAX_CIP_MSG_SIZE) {
     //     session->max_payload_guess = MAX_CIP_MSG_SIZE;
     // }
+
+    pdebug(DEBUG_DETAIL, "Flag prohibiting use of extended ForwardOpen is %d.", session->only_use_old_forward_open);
 
     if(session->only_use_old_forward_open) {
         uint16_t max_payload = 0;
