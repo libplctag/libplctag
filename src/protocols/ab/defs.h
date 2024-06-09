@@ -125,6 +125,7 @@
 
 
 /* base data type byte values */
+#define AB_CIP_DATA_DT          ((uint8_t)0xC0) /* DT value, 64 bit */
 #define AB_CIP_DATA_BIT         ((uint8_t)0xC1) /* Boolean value, 1 bit */
 #define AB_CIP_DATA_SINT        ((uint8_t)0xC2) /* Signed 8–bit integer value */
 #define AB_CIP_DATA_INT         ((uint8_t)0xC3) /* Signed 16–bit integer value */
