@@ -156,7 +156,9 @@ struct tag_vtable_t eip_cip_vtable = {
 
     /* attribute accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib
+    ab_set_int_attrib,
+
+    ab_get_byte_array_attrib
 };
 
 /* default string types used for ControlLogix-class PLCs. */

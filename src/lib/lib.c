@@ -2124,6 +2124,49 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
 
 
 
+LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_name, uint8_t *buffer, int buffer_length)
+{
+    int rc = PLCTAG_STATUS_OK;
+    plc_tag_p tag = NULL;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    if(!attrib_name || str_length(attrib_name) == 0) {
+        pdebug(DEBUG_WARN, "Attribute name must not be null or zero-length!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(!buffer) {
+        pdebug(DEBUG_WARN, "Host data buffer pointer must not be null!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    if(buffer_length <= 0) {
+        pdebug(DEBUG_WARN, "Buffer length must not be negative or zero!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    tag = lookup_tag(id);
+
+    if(!tag) {
+        pdebug(DEBUG_WARN,"Tag not found.");
+        return PLCTAG_ERR_NOT_FOUND;
+    }
+
+    critical_block(tag->api_mutex) {
+        if(tag->vtable->get_byte_array_attrib) {
+            rc = tag->vtable->get_byte_array_attrib(tag, attrib_name, buffer, buffer_length);
+        }
+    }
+
+    rc_dec(tag);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return rc;
+}
+
+
 
 LIB_EXPORT int plc_tag_get_size(int32_t id)
 {

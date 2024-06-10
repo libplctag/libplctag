@@ -107,7 +107,9 @@ struct tag_vtable_t default_vtable = {
 
     /* attribute accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib
+    ab_set_int_attrib,
+
+    ab_get_byte_array_attrib
 };
 
 
@@ -883,6 +885,17 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
             default: 
                 pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type);
                 break;
+        } 
+    } else if(str_cmp_i(attrib_name, "native_plc_tag_type_bytes.length") == 0) {
+        switch(tag->plc_type) {
+            case AB_PLC_LGX: /* fall through */
+            case AB_PLC_MICRO800: /* fall through */
+            case AB_PLC_OMRON_NJNX:
+                res = (int)(tag->encoded_type_info_size);
+                break;
+            default: 
+                pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type);
+                break;
         }
     } else {
         pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
@@ -903,6 +916,48 @@ int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
     raw_tag->status  = PLCTAG_ERR_UNSUPPORTED;
 
     return PLCTAG_ERR_UNSUPPORTED;
+}
+
+int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length)
+{
+    int rc = PLCTAG_STATUS_OK;
+    ab_tag_p tag = (ab_tag_p)raw_tag;
+    int bytes_to_copy = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    /* assume we have a match. */
+    tag->status = PLCTAG_STATUS_OK;
+
+    /* match the attribute. */
+    if(str_cmp_i(attrib_name, "native_plc_tag_type_bytes") == 0) {
+        switch(tag->plc_type) {
+            case AB_PLC_LGX: /* fall through */
+            case AB_PLC_MICRO800: /* fall through */
+            case AB_PLC_OMRON_NJNX:
+                if(tag->encoded_name_size > buffer_length) {
+                    pdebug(DEBUG_WARN, "Buffer length is too small for tag type information!");
+                    rc = PLCTAG_ERR_TOO_SMALL;
+                } else if(tag->encoded_type_info_size < buffer_length) {
+                    pdebug(DEBUG_INFO, "Tag type info is smaller than the buffer can hold.");
+                    
+                    /* copy the data */
+                    mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), tag->encoded_type_info_size);
+
+                    /* return the number of bytes copied */
+                    rc = tag->encoded_type_info_size;
+                }
+                break;
+            default: 
+                pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type);
+                break;
+        }
+    } else {
+        pdebug(DEBUG_WARN, "Unsupported attribute name \"%s\"!", attrib_name);
+        tag->status = PLCTAG_ERR_UNSUPPORTED;
+    }
+
+    return rc;
 }
 
 

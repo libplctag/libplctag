@@ -82,7 +82,9 @@ struct tag_vtable_t lgx_pccc_vtable = {
 
     /* data accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib
+    ab_set_int_attrib,
+    
+    ab_get_byte_array_attrib
 };
 
 static int check_read_status(ab_tag_p tag);

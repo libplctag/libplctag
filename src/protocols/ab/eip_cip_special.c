@@ -169,7 +169,9 @@ struct tag_vtable_t raw_tag_vtable = {
 
     /* attribute accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib
+    ab_set_int_attrib,
+
+    ab_get_byte_array_attrib
 };
 
 /* define the vtable for listing tag type. */
@@ -183,7 +185,9 @@ struct tag_vtable_t listing_tag_vtable = {
 
     /* attribute accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib
+    ab_set_int_attrib,
+
+    ab_get_byte_array_attrib
 };
 
 
@@ -198,7 +202,9 @@ struct tag_vtable_t udt_tag_vtable = {
 
     /* attribute accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib
+    ab_set_int_attrib,
+    
+    ab_get_byte_array_attrib
 };
 
 

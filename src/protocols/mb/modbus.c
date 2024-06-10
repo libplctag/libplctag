@@ -262,7 +262,9 @@ struct tag_vtable_t modbus_vtable = {
 
     /* data accessors */
     mb_get_int_attrib,
-    mb_set_int_attrib
+    mb_set_int_attrib,
+
+    NULL /* no buffer attribute handler */
 };
 
 

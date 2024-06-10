@@ -63,7 +63,9 @@ struct tag_vtable_t eip_plc5_dhp_vtable = {
 
     /* data accessors */
     ab_get_int_attrib,
-    ab_set_int_attrib
+    ab_set_int_attrib,
+    
+    ab_get_byte_array_attrib
 };
 
 

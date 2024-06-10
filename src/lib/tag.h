@@ -63,6 +63,8 @@ struct tag_vtable_t {
     /* attribute accessors. */
     int (*get_int_attrib)(plc_tag_p tag, const char *attrib_name, int default_value);
     int (*set_int_attrib)(plc_tag_p tag, const char *attrib_name, int new_value);
+
+    int (*get_byte_array_attrib)(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 };
 
 typedef struct tag_vtable_t *tag_vtable_p;

@@ -62,8 +62,9 @@ struct tag_vtable_t system_tag_vtable = {
     /* data accessors */
 
     /* get_int_attrib */ NULL,
-    /* set_int_attrib */ NULL
+    /* set_int_attrib */ NULL,
 
+    /* get_byte_array_attrib */ NULL
 };
 
 tag_byte_order_t system_tag_byte_order = {
