@@ -66,6 +66,8 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag)
     if(rc != PLCTAG_ERR_BAD_PARAM) {
         printf("ERROR: getting type info with a NULL buffer pointer does not return PLCTAG_ERR_BAD_PARAM but instead returns %s!\n", plc_tag_decode_error(rc));
         return PLCTAG_ERR_BAD_REPLY;
+    } else {
+        printf("PASSED\n");
     }
 
     /* test zero length buffer */
@@ -73,6 +75,20 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag)
     rc = plc_tag_get_byte_array_attribute(tag, "native_plc_tag_type_bytes", &(type_buffer[0]), 0);
     if(rc != PLCTAG_ERR_BAD_PARAM) {
         printf("ERROR: getting type info with a zero length buffer does not return PLCTAG_ERR_BAD_PARAM but instead returns %s!\n", plc_tag_decode_error(rc));
+        return PLCTAG_ERR_BAD_REPLY;
+    } else {
+        printf("PASSED\n");
+    }
+
+    /* test exact buffer length */
+    printf("\tTest with exact buffer length: ");
+    type_size = plc_tag_get_byte_array_attribute(tag, "native_plc_tag_type_bytes", &(type_buffer[0]), type_size);
+    if(type_size < 0) {
+        printf("ERROR: got error %s (%d) trying to get the attribute byte array!\n", plc_tag_decode_error(type_size), type_size);
+        return PLCTAG_ERR_BAD_REPLY;
+    }
+    if((type_size != 2) && (type_size != 4)) {
+        printf("ERROR: expected type byte array copied length to be 2 or 4 bytes, but got %d!\n", type_size);
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");

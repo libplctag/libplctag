@@ -1408,49 +1408,41 @@ static int check_read_status_connected(ab_tag_p tag)
          */
         payload_size = (data_end - data);
         if(payload_size > 0) {
-            /* the first byte of the response is a type byte. */
-            pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
+            /* skip the copy if we already have type data */
+            if(tag->encoded_type_info_size == 0) {
+                int type_length = 0;
 
-            /* handle the data type part.  This can be long. */
+                /* the first byte of the response is a type byte. */
+                pdebug(DEBUG_DETAIL, "type byte = %d (0x%02x)", (int)*data, (int)*data);
 
-            /* check for a simple/base type */
-            if ((*data) >= AB_CIP_DATA_BIT && (*data) <= AB_CIP_DATA_STRINGI) {
-                /* copy the type info for later. */
-                if (tag->encoded_type_info_size == 0) {
-                    tag->encoded_type_info_size = 2;
-                    mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
-                }
+                if(cip_lookup_encoded_type_size(*data, &type_length) == PLCTAG_STATUS_OK) {
+                    /* found it and we got the type data size */
 
-                /* skip the type byte and zero length byte */
-                data += 2;
-            } else if ((*data) == AB_CIP_DATA_ABREV_STRUCT || (*data) == AB_CIP_DATA_ABREV_ARRAY ||
-                       (*data) == AB_CIP_DATA_FULL_STRUCT || (*data) == AB_CIP_DATA_FULL_ARRAY) {
-                /* this is an aggregate type of some sort, the type info is variable length */
-                int type_length = *(data + 1) + 2;  /*
-                                                       * MAGIC
-                                                       * add 2 to get the total length including
-                                                       * the type byte and the length byte.
-                                                       */
+                    /* some types use the second byte to indicate how many bytes more are used. */
+                    if(type_length == 0) {
+                        type_length = *(data + 1) + 2;
+                    }
 
-                /* check for extra long types */
-                if (type_length > MAX_TAG_TYPE_INFO) {
-                    pdebug(DEBUG_WARN, "Read data type info is too long (%d)!", type_length);
-                    rc = PLCTAG_ERR_TOO_LARGE;
-                    break;
-                }
+                    if(type_length <= 0) {
+                        pdebug(DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                        rc = PLCTAG_ERR_UNSUPPORTED;
+                        break;
+                    }
 
-                /* copy the type info for later. */
-                if (tag->encoded_type_info_size == 0) {
+                    pdebug(DEBUG_DETAIL, "Type data is %d bytes long.", type_length);
+                    pdebug_dump_bytes(DEBUG_DETAIL, data, type_length);
+
                     tag->encoded_type_info_size = type_length;
                     mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
+                } else {
+                    pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x", *data);
+                    rc = PLCTAG_ERR_UNSUPPORTED;
+                    break;
                 }
-
-                data += type_length;
-            } else {
-                pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=%d", *data);
-                rc = PLCTAG_ERR_UNSUPPORTED;
-                break;
             }
+
+            /* skip past the type data */
+            data += (tag->encoded_type_info_size);
 
             /* check payload size now that we have bumped past the data type info. */
             payload_size = (data_end - data);
@@ -1621,51 +1613,41 @@ static int check_read_status_unconnected(ab_tag_p tag)
         /* check to see if this is a partial response. */
         partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
 
-        /* the first byte of the response is a type byte. */
-        pdebug(DEBUG_DETAIL, "type byte = %d (%x)", (int)*data, (int)*data);
+        /* skip the copy if we already have type data */
+        if(tag->encoded_type_info_size == 0) {
+            int type_length = 0;
 
-        /* copy the type data. */
+            /* the first byte of the response is a type byte. */
+            pdebug(DEBUG_DETAIL, "type byte = %d (0x%02x)", (int)*data, (int)*data);
 
-        /* check for a simple/base type */
+            if(cip_lookup_encoded_type_size(*data, &type_length) == PLCTAG_STATUS_OK) {
+                /* found it and we got the type data size */
 
-        if ((*data) >= AB_CIP_DATA_BIT && (*data) <= AB_CIP_DATA_STRINGI) {
-            /* copy the type info for later. */
-            if (tag->encoded_type_info_size == 0) {
-                tag->encoded_type_info_size = 2;
-                mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
-            }
+                /* some types use the second byte to indicate how many bytes more are used. */
+                if(type_length == 0) {
+                    type_length = *(data + 1) + 2;
+                }
 
-            /* skip the type byte and zero length byte */
-            data += 2;
-        } else if ((*data) == AB_CIP_DATA_ABREV_STRUCT || (*data) == AB_CIP_DATA_ABREV_ARRAY ||
-                   (*data) == AB_CIP_DATA_FULL_STRUCT || (*data) == AB_CIP_DATA_FULL_ARRAY) {
-            /* this is an aggregate type of some sort, the type info is variable length */
-            int type_length =
-                *(data + 1) + 2;  /*
-                                   * MAGIC
-                                   * add 2 to get the total length including
-                                   * the type byte and the length byte.
-                                   */
+                if(type_length <= 0) {
+                    pdebug(DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                    rc = PLCTAG_ERR_UNSUPPORTED;
+                    break;
+                }
 
-            /* check for extra long types */
-            if (type_length > MAX_TAG_TYPE_INFO) {
-                pdebug(DEBUG_WARN, "Read data type info is too long (%d)!", type_length);
-                rc = PLCTAG_ERR_TOO_LARGE;
-                break;
-            }
+                pdebug(DEBUG_DETAIL, "Type data is %d bytes long.", type_length);
+                pdebug_dump_bytes(DEBUG_DETAIL, data, type_length);
 
-            /* copy the type info for later. */
-            if (tag->encoded_type_info_size == 0) {
                 tag->encoded_type_info_size = type_length;
                 mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
+            } else {
+                pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x", *data);
+                rc = PLCTAG_ERR_UNSUPPORTED;
+                break;
             }
-
-            data += type_length;
-        } else {
-            pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=%d", *data);
-            rc = PLCTAG_ERR_UNSUPPORTED;
-            break;
         }
+
+        /* skip past the type data */
+        data += (tag->encoded_type_info_size);
 
         /* check payload size now that we have bumped past the data type info. */
         payload_size = (data_end - data);
@@ -1686,7 +1668,6 @@ static int check_read_status_unconnected(ab_tag_p tag)
         }
 
         pdebug(DEBUG_INFO, "Got %d bytes of data", (int)payload_size);
-
 
         /*
          * copy the data, but only if this is not

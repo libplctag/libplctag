@@ -839,180 +839,283 @@ int parse_numeric_segment(ab_tag_p tag, const char *name, int *encoded_index, in
 
 
 
-//
-//typedef enum { START, ARRAY, DOT, NAME } encode_state_t;
-//
-///*
-// * cip_encode_tag_name()
-// *
-// * This takes a LGX-style tag name like foo[14].blah and
-// * turns it into an IOI path/string.
-// */
-//
-//int cip_encode_tag_name_old(ab_tag_p tag,const char *name)
-//{
-//    uint8_t *data = tag->encoded_name;
-//    const char *p = name;
-//    uint8_t *word_count = NULL;
-//    uint8_t *dp = NULL;
-//    uint8_t *name_len;
-//    encode_state_t state;
-//    int first_num = 1;
-//
-//    /* reserve room for word count for IOI string. */
-//    word_count = data;
-//    dp = data + 1;
-//
-//    state = START;
-//
-//    while(*p && (dp - data) < MAX_TAG_NAME) {
-//        switch(state) {
-//        case START:
-//
-//            /* must start with an alpha character or _ or :. */
-//            if(isalpha(*p) || *p == '_' || *p == ':') {
-//                state = NAME;
-//            } else if(*p == '.') {
-//                state = DOT;
-//            } else if(*p == '[') {
-//                state = ARRAY;
-//            } else {
-//                return 0;
-//            }
-//
-//            break;
-//
-//        case NAME:
-//            *dp = 0x91; /* start of ASCII name */
-//            dp++;
-//            name_len = dp;
-//            *name_len = 0;
-//            dp++;
-//
-//            while(isalnum(*p) || *p == '_' || *p == ':') {
-//                *dp = (uint8_t)*p;
-//                dp++;
-//                p++;
-//                (*name_len)++;
-//            }
-//
-//            /* must pad the name to a multiple of two bytes */
-//            if(*name_len & 0x01) {
-//                *dp = 0;
-//                dp++;
-//            }
-//
-//            state = START;
-//
-//            break;
-//
-//        case ARRAY:
-//            /* move the pointer past the [ character */
-//            p++;
-//
-//            do {
-//                long int val;
-//                char *np = NULL;
-//
-//                /* skip past a commas. */
-//                if(!first_num && *p == ',') {
-//                    p++;
-//                }
-//
-//                /* get the numeric value. */
-//                val = strtol(p, &np, 10);
-//
-//                if(np == p) {
-//                    /* we must have a number */
-//                    pdebug(DEBUG_WARN, "Expected number in tag name string!");
-//                    return 0;
-//                } else {
-//                    pdebug(DEBUG_DETAIL, "got number %ld.", val);
-//                }
-//
-//                if(val < 0) {
-//                    pdebug(DEBUG_WARN, "Array index must be greater than or equal to zero!");
-//                    return 0;
-//                }
-//
-//                first_num = 0;
-//
-//                p = np;
-//
-//                if(val > 0xFFFF) {
-//                    *dp = 0x2A;
-//                    dp++;  /* 4-byte value */
-//                    *dp = 0;
-//                    dp++;     /* padding */
-//
-//                    /* copy the value in little-endian order */
-//                    *dp = (uint8_t)val & 0xFF;
-//                    dp++;
-//                    *dp = (uint8_t)((val >> 8) & 0xFF);
-//                    dp++;
-//                    *dp = (uint8_t)((val >> 16) & 0xFF);
-//                    dp++;
-//                    *dp = (uint8_t)((val >> 24) & 0xFF);
-//                    dp++;
-//                } else if(val > 0xFF) {
-//                    *dp = 0x29;
-//                    dp++;  /* 2-byte value */
-//                    *dp = 0;
-//                    dp++;     /* padding */
-//
-//                    /* copy the value in little-endian order */
-//                    *dp = (uint8_t)val & 0xFF;
-//                    dp++;
-//                    *dp = (uint8_t)((val >> 8) & 0xFF);
-//                    dp++;
-//                } else {
-//                    *dp = 0x28;
-//                    dp++;  /* 1-byte value */
-//                    *dp = (uint8_t)val;
-//                    dp++;     /* value */
-//                }
-//
-//                /* eat spaces */
-//                while(*p == ' ') {
-//                    p++;
-//                }
-//            } while(*p == ',');
-//
-//            if(*p != ']') {
-//                return 0;
-//            }
-//
-//            p++;
-//
-//            state = START;
-//
-//            break;
-//
-//        case DOT:
-//            p++;
-//            state = START;
-//            break;
-//
-//        default:
-//            /* this should never happen */
-//            return 0;
-//
-//            break;
-//        }
-//    }
-//
-//    if((dp - data) >= MAX_TAG_NAME) {
-//        pdebug(DEBUG_WARN,"Encoded tag name is too long!  Length=%d", (dp - data));
-//        return 0;
-//    }
-//
-//    /* word_count is in units of 16-bit integers, do not
-//     * count the word_count value itself.
-//     */
-//    *word_count = (uint8_t)((dp - data)-1)/2;
-//
-//    /* store the size of the whole result */
-//    tag->encoded_name_size = (int)(dp - data);
-//
-//    return 1;
-//}
+struct cip_type_lookup_entry_t {
+    int is_found;
+    int type_data_length;
+    int instance_data_length;
+};
+
+static struct cip_type_lookup_entry_t cip_type_lookup[] = {
+    /* 0x00 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x01 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x02 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x03 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x04 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x05 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x06 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x07 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x08 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x09 */ { PLCTAG_STATUS_OK,    2, 8 },   /* TIME_NSEC: OMRON-specific, Time in nanoseconds */
+    /* 0x0a */ { PLCTAG_STATUS_OK,    2, 8 },   /* DATE_AND_TIME_NSEC: OMRON-specific, Date/Time in nanoseconds*/
+    /* 0x0b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x0c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x0d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x0e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x0f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x10 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x11 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x12 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x13 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x14 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x15 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x16 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x17 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x18 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x19 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x1a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x1b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x1c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x1d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x1e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x1f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x20 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x21 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x22 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x23 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x24 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x25 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x26 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x27 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x28 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x29 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x2a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x2b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x2c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x2d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x2e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x2f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x30 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x31 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x32 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x33 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x34 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x35 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x36 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x37 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x38 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x39 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x3a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x3b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x3c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x3d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x3e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x3f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x40 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x41 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x42 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x43 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x44 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x45 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x46 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x47 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x48 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x49 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x4a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x4b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x4c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x4d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x4e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x4f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x50 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x51 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x52 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x53 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x54 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x55 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x56 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x57 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x58 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x59 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x5a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x5b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x5c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x5d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x5e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x5f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x60 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x61 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x62 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x63 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x64 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x65 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x66 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x67 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x68 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x69 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x6a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x6b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x6c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x6d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x6e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x6f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x70 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x71 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x72 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x73 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x74 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x75 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x76 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x77 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x78 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x79 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x7a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x7b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x7c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x7d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x7e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x7f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x80 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x81 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x82 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x83 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x84 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x85 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x86 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x87 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x88 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x89 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x8a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x8b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x8c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x8d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x8e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x8f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x90 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x91 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x92 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x93 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x94 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x95 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x96 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x97 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x98 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x99 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x9a */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x9b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x9c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x9d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x9e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x9f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xa0 */ { PLCTAG_STATUS_OK,    4, 0 },   /* Data is an abbreviated struct type, i.e. a CRC of the actual type descriptor */
+    /* 0xa1 */ { PLCTAG_STATUS_OK,    4, 0 },   /* Data is an abbreviated array type. The limits are left off */
+    /* 0xa2 */ { PLCTAG_STATUS_OK,    0, 0 },   /* Data is a struct type descriptor */
+    /* 0xa3 */ { PLCTAG_STATUS_OK,    0, 0 },   /* Data is an array type descriptor */
+    /* 0xa4 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xa5 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xa6 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xa7 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xa8 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xa9 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xaa */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xab */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xac */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xad */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xae */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xaf */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb0 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb1 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb2 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb3 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb4 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb5 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb6 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb7 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb8 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xb9 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xba */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xbb */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xbc */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xbd */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xbe */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xbf */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xc0 */ { PLCTAG_STATUS_OK,    2, 8 },   /* DT: DT value, 64 bit */
+    /* 0xc1 */ { PLCTAG_STATUS_OK,    2, 1 },   /* BOOL: Boolean value, 1 bit */
+    /* 0xc2 */ { PLCTAG_STATUS_OK,    2, 1 },   /* SINT: Signed 8–bit integer value */
+    /* 0xc3 */ { PLCTAG_STATUS_OK,    2, 2 },   /* INT: Signed 16–bit integer value */
+    /* 0xc4 */ { PLCTAG_STATUS_OK,    2, 4 },   /* DINT: Signed 32–bit integer value */
+    /* 0xc5 */ { PLCTAG_STATUS_OK,    2, 8 },   /* LINT: Signed 64–bit integer value */
+    /* 0xc6 */ { PLCTAG_STATUS_OK,    2, 1 },   /* USINT: Unsigned 8–bit integer value */
+    /* 0xc7 */ { PLCTAG_STATUS_OK,    2, 2 },   /* UINT: Unsigned 16–bit integer value */
+    /* 0xc8 */ { PLCTAG_STATUS_OK,    2, 4 },   /* UDINT: Unsigned 32–bit integer value */
+    /* 0xc9 */ { PLCTAG_STATUS_OK,    2, 8 },   /* ULINT: Unsigned 64–bit integer value */
+    /* 0xca */ { PLCTAG_STATUS_OK,    2, 4 },   /* REAL: 32–bit floating point value, IEEE format */
+    /* 0xcb */ { PLCTAG_STATUS_OK,    2, 8 },   /* LREAL: 64–bit floating point value, IEEE format */
+    /* 0xcc */ { PLCTAG_STATUS_OK,    2, 4 },   /* STIME: System Time Synchronous time value */
+    /* 0xcd */ { PLCTAG_STATUS_OK,    2, 2 },   /* DATE: Date value */
+    /* 0xce */ { PLCTAG_STATUS_OK,    2, 4 },   /* TIME_OF_DAY: Time of day value */
+    /* 0xcf */ { PLCTAG_STATUS_OK,    2, 8 },   /* DATE_AND_TIME: Date and time of day value */
+    /* 0xd0 */ { PLCTAG_STATUS_OK,    2, 84},   /* STRING: Character string, 2 byte count word, 1 byte per character */
+    /* 0xd1 */ { PLCTAG_STATUS_OK,    2, 1 },   /* BYTE: 8-bit bit string */
+    /* 0xd2 */ { PLCTAG_STATUS_OK,    2, 2 },   /* WORD: 16-bit bit string */
+    /* 0xd3 */ { PLCTAG_STATUS_OK,    2, 4 },   /* DWORD: 32-bit bit string */
+    /* 0xd4 */ { PLCTAG_STATUS_OK,    2, 8 },   /* LWORD: 64-bit bit string */
+    /* 0xd5 */ { PLCTAG_STATUS_OK,    2, 0 },   /* STRING2: Wide string, 2-byte count, 2 bytes per character, utf-16-le */
+    /* 0xd6 */ { PLCTAG_STATUS_OK,    2, 4 },   /* FTIME: High resolution duration value */
+    /* 0xd7 */ { PLCTAG_STATUS_OK,    2, 8 },   /* TIME: Medium resolution duration value */
+    /* 0xd8 */ { PLCTAG_STATUS_OK,    2, 2 },   /* ITIME: Low resolution duration value */
+    /* 0xd9 */ { PLCTAG_STATUS_OK,    2, 0 },   /* STRINGN: N-byte per char character string */
+    /* 0xda */ { PLCTAG_STATUS_OK,    2, 0 },   /* SHORT_STRING: 1 byte per character and 1 byte length */
+    /* 0xdb */ { PLCTAG_STATUS_OK,    2, 4 },   /* TIME: Duration in milliseconds */
+    /* 0xdc */ { PLCTAG_STATUS_OK,    2, 0 },   /* EPATH: CIP path segment(s) */
+    /* 0xdd */ { PLCTAG_STATUS_OK,    2, 2 },   /* ENGUNIT: Engineering units */
+    /* 0xde */ { PLCTAG_STATUS_OK,    2, 0 },   /* STRINGI: International character string (encoding?) */
+    /* 0xdf */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe0 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe1 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe2 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe3 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe4 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe5 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe6 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe7 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe8 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xe9 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xea */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xeb */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xec */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xed */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xee */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xef */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf0 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf1 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf2 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf3 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf4 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf5 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf6 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf7 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf8 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xf9 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xfa */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xfb */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xfc */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xfd */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xfe */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0xff */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+};
+
+
+
+int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size)
+{
+    *type_size = cip_type_lookup[type_byte].type_data_length;
+    return cip_type_lookup[type_byte].is_found;
+}
+
+
+int cip_lookup_data_element_size(uint8_t type_byte, int *element_size)
+{
+    *element_size = cip_type_lookup[type_byte].instance_data_length;
+    return cip_type_lookup[type_byte].is_found;
+}
+
