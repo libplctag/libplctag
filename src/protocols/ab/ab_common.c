@@ -935,11 +935,11 @@ int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t
             case AB_PLC_LGX: /* fall through */
             case AB_PLC_MICRO800: /* fall through */
             case AB_PLC_OMRON_NJNX:
-                if(tag->encoded_name_size > buffer_length) {
-                    pdebug(DEBUG_WARN, "Buffer length is too small for tag type information!");
+                if(tag->encoded_type_info_size > buffer_length) {
+                    pdebug(DEBUG_WARN, "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.", tag->encoded_type_info_size, buffer_length);
                     rc = PLCTAG_ERR_TOO_SMALL;
-                } else if(tag->encoded_type_info_size < buffer_length) {
-                    pdebug(DEBUG_INFO, "Tag type info is smaller than the buffer can hold.");
+                } else if(tag->encoded_type_info_size <= buffer_length) {
+                    pdebug(DEBUG_INFO, "Tag type info is smaller, %d bytes, than the buffer can hold, %d bytes.", tag->encoded_type_info_size, buffer_length);
                     
                     /* copy the data */
                     mem_copy((void *)buffer, (void *)&(tag->encoded_type_info[0]), tag->encoded_type_info_size);
