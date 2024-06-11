@@ -850,15 +850,15 @@ static struct cip_type_lookup_entry_t cip_type_lookup[] = {
     /* 0x01 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0x02 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0x03 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
-    /* 0x04 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
-    /* 0x05 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
-    /* 0x06 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
-    /* 0x07 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
-    /* 0x08 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x04 */ { PLCTAG_STATUS_OK,    2, 2 },   /* UINT_BCD: OMRON-specific */
+    /* 0x05 */ { PLCTAG_ERR_NO_MATCH, 2, 4 },   /* UDINT_BCD: OMRON-specific */
+    /* 0x06 */ { PLCTAG_ERR_NO_MATCH, 2, 8 },   /* ULINT_BCD: OMRON-specific */
+    /* 0x07 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? ENUM: OMRON-specific */
+    /* 0x08 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? DATE_NSEC: OMRON-specific */
     /* 0x09 */ { PLCTAG_STATUS_OK,    2, 8 },   /* TIME_NSEC: OMRON-specific, Time in nanoseconds */
     /* 0x0a */ { PLCTAG_STATUS_OK,    2, 8 },   /* DATE_AND_TIME_NSEC: OMRON-specific, Date/Time in nanoseconds*/
-    /* 0x0b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
-    /* 0x0c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
+    /* 0x0b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? TIME_OF_DAY_NSEC: OMRON-specific */
+    /* 0x0c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? UNION: Omron-specific */
     /* 0x0d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0x0e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0x0f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
@@ -1008,8 +1008,8 @@ static struct cip_type_lookup_entry_t cip_type_lookup[] = {
     /* 0x9f */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0xa0 */ { PLCTAG_STATUS_OK,    4, 0 },   /* Data is an abbreviated struct type, i.e. a CRC of the actual type descriptor */
     /* 0xa1 */ { PLCTAG_STATUS_OK,    4, 0 },   /* Data is an abbreviated array type. The limits are left off */
-    /* 0xa2 */ { PLCTAG_STATUS_OK,    0, 0 },   /* Data is a struct type descriptor */
-    /* 0xa3 */ { PLCTAG_STATUS_OK,    0, 0 },   /* Data is an array type descriptor */
+    /* 0xa2 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* Data is a struct type descriptor, marked no match because we do not know how to parse it */
+    /* 0xa3 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* Data is an array type descriptor, marked no match because we do not know how to parse it */
     /* 0xa4 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0xa5 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0xa6 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
