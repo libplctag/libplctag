@@ -80,6 +80,7 @@ tag_byte_order_t plc5_tag_byte_order = {
     .str_is_zero_terminated = 0,
     .str_is_byte_swapped = 1,
 
+    .str_pad_to_multiple_bytes = 2,
     .str_count_word_bytes = 2,
     .str_max_capacity = 82,
     .str_total_length = 84,
