@@ -879,7 +879,7 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
                 pdebug(DEBUG_WARN, "Unsupported PLC type %d!", tag->plc_type);
                 break;
         } 
-    } else if(str_cmp_i(attrib_name, "native_plc_tag_type_bytes.length") == 0) {
+    } else if(str_cmp_i(attrib_name, "raw_tag_type_bytes.length") == 0) {
         switch(tag->plc_type) {
             case AB_PLC_LGX: /* fall through */
             case AB_PLC_MICRO800: /* fall through */
@@ -923,7 +923,7 @@ int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t
     tag->status = PLCTAG_STATUS_OK;
 
     /* match the attribute. */
-    if(str_cmp_i(attrib_name, "native_plc_tag_type_bytes") == 0) {
+    if(str_cmp_i(attrib_name, "raw_tag_type_bytes") == 0) {
         switch(tag->plc_type) {
             case AB_PLC_LGX: /* fall through */
             case AB_PLC_MICRO800: /* fall through */
