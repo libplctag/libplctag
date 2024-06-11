@@ -75,7 +75,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
                 plc_tag_destroy(tag_id);
                 exit(1);
             }
-            
+
             if(status == PLCTAG_STATUS_OK && data) {
                 int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
                 int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
@@ -95,7 +95,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
                 plc_tag_destroy(tag_id);
                 exit(1);
             }
-            
+
             printf("Tag read operation started with status %s.\n", plc_tag_decode_error(status));
             break;
 
@@ -125,17 +125,24 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
 
 
 
-void wait_for_ok(int32_t tag) 
+void wait_for_ok(int32_t tag, int32_t timeout_ms)
 {
     int rc = PLCTAG_STATUS_OK;
+    int64_t timeout_time = timeout_ms + util_time_ms();
 
     fprintf(stderr, "wait_for_ok() starting.\n");
 
-    rc = plc_tag_status(tag);
-    while(rc == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(10);
+    do {
         rc = plc_tag_status(tag);
-    }
+
+        if(rc == PLCTAG_STATUS_PENDING) {
+            util_sleep_ms(20);
+
+            if(timeout_time >= util_time_ms()) {
+                rc = PLCTAG_ERR_TIMEOUT;
+            }
+        }
+    } while(rc == PLCTAG_STATUS_PENDING);
 
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr, "wait_for_ok(): Error %s returned on tag operation.!\n", plc_tag_decode_error(rc));
@@ -189,7 +196,7 @@ int main(int argc, const char **argv)
     }
 
     printf("Waiting for tag creation to complete.\n");
-    wait_for_ok(tag);
+    wait_for_ok(tag, DATA_TIMEOUT);
 
     /* get the data */
     printf("Reading tag data.\n");
@@ -201,7 +208,7 @@ int main(int argc, const char **argv)
     }
 
     printf("Waiting for tag read to complete.\n");
-    wait_for_ok(tag);
+    wait_for_ok(tag, DATA_TIMEOUT);
 
     /* print out the data */
     for(i = 0; i < elem_count; i++) {
@@ -222,7 +229,7 @@ int main(int argc, const char **argv)
     }
 
     printf("Waiting for tag write to complete.\n");
-    wait_for_ok(tag);
+    wait_for_ok(tag, DATA_TIMEOUT);
 
     /* get the data again*/
     printf("Reading tag data.\n");
@@ -234,7 +241,7 @@ int main(int argc, const char **argv)
     }
 
     printf("Waiting for tag read to complete.\n");
-    wait_for_ok(tag);
+    wait_for_ok(tag, DATA_TIMEOUT);
 
     /* print out the data */
     for(i = 0; i < elem_count; i++) {
