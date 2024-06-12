@@ -44,7 +44,7 @@
 
 typedef enum {
     TYPE_BIT, TYPE_I8, TYPE_U8, TYPE_I16, TYPE_U16, TYPE_I32, TYPE_U32, TYPE_I64, TYPE_U64,
-    TYPE_F32, TYPE_F64, TYPE_STRING
+    TYPE_F32, TYPE_F64, TYPE_STRING, TYPE_META
 } element_type_t;
 
 struct run_args {
@@ -167,10 +167,13 @@ void usage(void)
             "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--timeout=<timeout>] [--debug=<debug>] \n"
             "\n"
             "  <type>    - type is one of 'bit', 'uint8', 'sint8', 'uint16', 'sint16', \n "
-            "              'uint32', 'sint32', 'real32', 'real64', or 'string'.  The type is \n"
-            "              the type of the data to be read/written to the named tag.  The\n"
-            "              types starting with 'u' are unsigned and with 's' are signed.\n"
-            "              For floating point, use 'real32' or 'real64'.  \n"
+            "              'uint32', 'sint32', 'real32', 'real64', 'string' or 'metadata'.  \n"
+            "              The type is the type of the data to be read/written to the named tag.\n"
+            "              The types starting with 'u' are unsigned and with 's' are signed.\n"
+            "              For floating point, use 'real32' or 'real64'.  The 'metadata' type\n"
+            "              returns information about the raw (device) tag type data, the size of\n"
+            "              a single element and the number of elements that were requested, not the\n"
+            "              actual size of the tag in the device!\n"
             "\n"
             "  <tag string> - The path to the device containing the named data.  This value may need to\n"
             "              be quoted.   Use double quotes on Windows and single quotes on Unix-like systems.\n"
@@ -342,6 +345,8 @@ void parse_type(char *type_str, struct run_args *args)
         printf("Setting type to TYPE_STRING.\n");
 
         args->element_type = TYPE_STRING;
+    } else if(strcasecmp(type_str, "metadata") == 0) {
+        args->element_type = TYPE_META;
     } else {
         printf("ERROR: Unknown type %s!\n", type_str);
         cleanup(args);
@@ -702,7 +707,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
         case TYPE_STRING:
             args->write_vals.string = calloc((size_t)(unsigned int)args->write_val_count, sizeof(char *));
             if(!args->write_vals.string) {
-                printf("ERROR: Unable to allocate value array for write values!");
+                printf("ERROR: Unable to allocate value array for write values!\n");
                 cleanup(args);
                 exit(1);
             }
@@ -727,6 +732,13 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     val_start = -1;
                 }
             }
+
+            break;
+
+        case TYPE_META:
+            printf("ERROR: Cannot write tag metadata!\n");
+            cleanup(args);
+            exit(1);
 
             break;
 
@@ -851,6 +863,31 @@ void dump_values(struct run_args *args)
                     }
 
                     offset += plc_tag_get_string_total_length(tag, offset);
+
+                    break;
+
+                case TYPE_META:
+                    {
+                        int element_size = plc_tag_get_int_attribute(tag, "elem_size", 0);
+                        int element_count = plc_tag_get_int_attribute(tag, "elem_count", 0);
+                        uint8_t tag_type_data[32];
+                        int type_data_size = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", &tag_type_data[0], (int)(unsigned int)sizeof(tag_type_data));
+
+                        if(type_data_size < 0) {
+                            printf("ERROR: error %s getting tag type information!\n", plc_tag_decode_error(type_data_size));
+                            cleanup(args);
+                            exit(1);
+                        }
+
+                        printf("Tag raw type data: ");
+                        for(int i=0; i < type_data_size; i++) {
+                            printf(" 0x%02x", tag_type_data[i]);
+                        }
+                        printf("\nTag element size: %d\nTag element count: %d\n", element_size, element_count);
+                    }
+
+                    /* skip the whole tag. */
+                    offset += plc_tag_get_size(tag);
 
                     break;
 
@@ -1044,6 +1081,13 @@ void update_values(struct run_args *args)
 
                     break;
 
+                case TYPE_META:
+                    printf("ERROR: Metadata cannot be written!\n");
+                    cleanup(args);
+                    exit(1);
+
+                    break;
+
                 default:
                     printf("ERROR: Unsupported tag type %d!\n", args->element_type);
                     cleanup(args);
@@ -1055,4 +1099,3 @@ void update_values(struct run_args *args)
         }
     }
 }
-

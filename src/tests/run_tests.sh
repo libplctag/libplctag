@@ -64,6 +64,17 @@ else
 fi
 
 let TEST++
+echo -n "Test $TEST: test tag_rw2 to get tag metadata ... "
+$TEST_DIR/tag_rw2 --type=metadata '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=logix&name=TestBOOLArray' > "${TEST}_tag_rw2_metadata.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
 echo -n "Test $TEST: basic large tag read/write... "
 $TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1000&name=TestBigArray' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "${TEST}_big_tag_test.log" 2>&1
 if [ $? != 0 ]; then
