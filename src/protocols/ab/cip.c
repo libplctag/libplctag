@@ -851,13 +851,13 @@ static struct cip_type_lookup_entry_t cip_type_lookup[] = {
     /* 0x02 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0x03 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0x04 */ { PLCTAG_STATUS_OK,    2, 2 },   /* UINT_BCD: OMRON-specific */
-    /* 0x05 */ { PLCTAG_ERR_NO_MATCH, 2, 4 },   /* UDINT_BCD: OMRON-specific */
-    /* 0x06 */ { PLCTAG_ERR_NO_MATCH, 2, 8 },   /* ULINT_BCD: OMRON-specific */
-    /* 0x07 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? ENUM: OMRON-specific */
-    /* 0x08 */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? DATE_NSEC: OMRON-specific */
+    /* 0x05 */ { PLCTAG_STATUS_OK,    2, 4 },   /* UDINT_BCD: OMRON-specific */
+    /* 0x06 */ { PLCTAG_STATUS_OK,    2, 8 },   /* ULINT_BCD: OMRON-specific */
+    /* 0x07 */ { PLCTAG_STATUS_OK,    2, 4 },   /* ENUM: OMRON-specific */
+    /* 0x08 */ { PLCTAG_STATUS_OK,    2, 8 },   /* DATE_NSEC: OMRON-specific */
     /* 0x09 */ { PLCTAG_STATUS_OK,    2, 8 },   /* TIME_NSEC: OMRON-specific, Time in nanoseconds */
     /* 0x0a */ { PLCTAG_STATUS_OK,    2, 8 },   /* DATE_AND_TIME_NSEC: OMRON-specific, Date/Time in nanoseconds*/
-    /* 0x0b */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? TIME_OF_DAY_NSEC: OMRON-specific */
+    /* 0x0b */ { PLCTAG_STATUS_OK,    2, 8 },   /* TIME_OF_DAY_NSEC: OMRON-specific */
     /* 0x0c */ { PLCTAG_ERR_NO_MATCH, 0, 0 },   /* ???? UNION: Omron-specific */
     /* 0x0d */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
     /* 0x0e */ { PLCTAG_ERR_NO_MATCH, 0, 0 },
@@ -1118,4 +1118,3 @@ int cip_lookup_data_element_size(uint8_t type_byte, int *element_size)
     *element_size = cip_type_lookup[type_byte].instance_data_length;
     return cip_type_lookup[type_byte].is_found;
 }
-
