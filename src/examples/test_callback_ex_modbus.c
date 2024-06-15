@@ -138,7 +138,7 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms)
         if(rc == PLCTAG_STATUS_PENDING) {
             util_sleep_ms(20);
 
-            if(timeout_time >= util_time_ms()) {
+            if(timeout_time < util_time_ms()) {
                 rc = PLCTAG_ERR_TIMEOUT;
             }
         }
