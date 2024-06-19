@@ -749,7 +749,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     }
 
     /* allocate the session struct and the buffer in the same allocation. */
-    pdebug(DEBUG_DETAIL, "Allocationg %d total bytes of memory with %d bytes for data buffer static data, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
+    pdebug(DEBUG_DETAIL, "Allocating %d total bytes of memory with %d bytes for data buffer static data, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
                           total_allocation_size,
                           (data_buffer_is_static ? data_buffer_capacity : 0),
                           str_length(host)+1,
