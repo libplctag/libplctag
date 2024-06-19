@@ -77,7 +77,7 @@
 #define SESSION_IDLE_WAIT_TIME (100)
 
 /* make sure we try hard to get a good payload size */
-#define GET_MAX_PAYLOAD_SIZE(sess) ((sess->max_payload_size > 0) ? (sess->max_payload_size) : ((sess->fo_conn_size != 0) ? (sess->fo_conn_size) : (sess->fo_ex_conn_size)))
+#define GET_MAX_PAYLOAD_SIZE(sess) ((sess->max_payload_size > 0) ? (sess->max_payload_size) : ((sess->fo_conn_size > 0) ? (sess->fo_conn_size) : (sess->fo_ex_conn_size)))
 
 
 /* plc-specific session constructors */
@@ -246,6 +246,8 @@ int session_get_max_payload(ab_session_p session)
     critical_block(session->mutex) {
         result = GET_MAX_PAYLOAD_SIZE(session);
     }
+
+    pdebug(DEBUG_DETAIL, "max payload size is %d bytes.", result);
 
     return result;
 }
@@ -1669,6 +1671,11 @@ int process_requests(ab_session_p session)
 
     /* grab a request off the front of the list. */
     critical_block(session->mutex) {
+        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+
+        // FIXME - no logging in a mutex!
+        pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+
         /* is there anything to do? */
         if(vector_length(session->requests)) {
             /* get rid of all aborted requests. */
@@ -1677,7 +1684,7 @@ int process_requests(ab_session_p session)
             /* if there are still requests after purging all the aborted requests, process them. */
 
             /* how much space do we have to work with. */
-            remaining_space = GET_MAX_PAYLOAD_SIZE(session) - (int)sizeof(cip_multi_req_header);
+            remaining_space = max_payload_size - (int)sizeof(cip_multi_req_header);
 
             if(vector_length(session->requests)) {
                 do {
@@ -1835,7 +1842,12 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
             pdebug(DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->mutex) {
-                request_capacity = (int)(GET_MAX_PAYLOAD_SIZE(session) + EIP_CIP_PREFIX_SIZE);
+                int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+
+                // FIXME - no logging in a mutex!
+                pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+
+                request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
@@ -1882,7 +1894,12 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
             pdebug(DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->mutex) {
-                request_capacity = (int)(GET_MAX_PAYLOAD_SIZE(session) + EIP_CIP_PREFIX_SIZE);
+                int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+
+                // FIXME: no logging in a mutex!
+                pdebug(DEBUG_DETAIL, "max payload size %d", max_payload_size);
+
+                request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
@@ -2710,7 +2727,12 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req)
     uint8_t *buffer = NULL;
 
     critical_block(session->mutex) {
-        request_capacity = (size_t)(GET_MAX_PAYLOAD_SIZE(session) + EIP_CIP_PREFIX_SIZE);
+        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+
+        // FIXME: no logging in a mutex!
+        pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+
+        request_capacity = (size_t)(max_payload_size + EIP_CIP_PREFIX_SIZE);
     }
 
     pdebug(DEBUG_DETAIL, "Starting.");
