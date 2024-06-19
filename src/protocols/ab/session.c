@@ -1674,7 +1674,7 @@ int process_requests(ab_session_p session)
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
         // FIXME - no logging in a mutex!
-        pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+        //pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
 
         /* is there anything to do? */
         if(vector_length(session->requests)) {
@@ -1845,7 +1845,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
                 // FIXME - no logging in a mutex!
-                pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+                // pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
 
                 request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
@@ -1897,7 +1897,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
                 int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
                 // FIXME: no logging in a mutex!
-                pdebug(DEBUG_DETAIL, "max payload size %d", max_payload_size);
+                // pdebug(DEBUG_DETAIL, "max payload size %d", max_payload_size);
 
                 request_capacity = (int)(max_payload_size + EIP_CIP_PREFIX_SIZE);
             }
@@ -2730,7 +2730,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req)
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
 
         // FIXME: no logging in a mutex!
-        pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+        // pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
 
         request_capacity = (size_t)(max_payload_size + EIP_CIP_PREFIX_SIZE);
     }
