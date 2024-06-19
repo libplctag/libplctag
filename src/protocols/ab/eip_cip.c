@@ -571,7 +571,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset)
 
     /* add the byte offset for this request */
     if(read_cmd == AB_EIP_CMD_CIP_READ_FRAG) {
-        /* FIXME - this may not work on some proessors. */
+        /* FIXME - this may not work on some processors. */
         *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
         data += sizeof(uint32_le);
     }
