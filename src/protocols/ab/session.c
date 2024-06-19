@@ -1152,6 +1152,10 @@ void session_destroy(void *session_arg)
         session->mutex = NULL;
     }
 
+    if(!session->data_buffer_is_static) {
+        mem_free(session->data);
+    }
+
     /* these are all allocated in one large block. */
 
     // pdebug(DEBUG_DETAIL, "Cleaning up allocated memory for paths and host name.");
