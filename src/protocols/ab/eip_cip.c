@@ -1635,74 +1635,83 @@ static int check_read_status_unconnected(ab_tag_p tag)
         /* check to see if this is a partial response. */
         partial_data = (cip_resp->status == AB_CIP_STATUS_FRAG);
 
-        /* skip the copy if we already have type data */
-        if(tag->encoded_type_info_size == 0) {
-            int type_length = 0;
+         /*
+         * check to see if there is any data to process.  If this is a packed
+         * response, there might not be.
+         */
+        payload_size = (data_end - data);
+        if(payload_size > 0) {
+            /* skip the copy if we already have type data */
+            if(tag->encoded_type_info_size == 0) {
+                int type_length = 0;
 
-            /* the first byte of the response is a type byte. */
-            pdebug(DEBUG_DETAIL, "type byte = %d (0x%02x)", (int)*data, (int)*data);
+                /* the first byte of the response is a type byte. */
+                pdebug(DEBUG_DETAIL, "type byte = %d (0x%02x)", (int)*data, (int)*data);
 
-            if(cip_lookup_encoded_type_size(*data, &type_length) == PLCTAG_STATUS_OK) {
-                /* found it and we got the type data size */
+                if(cip_lookup_encoded_type_size(*data, &type_length) == PLCTAG_STATUS_OK) {
+                    /* found it and we got the type data size */
 
-                /* some types use the second byte to indicate how many bytes more are used. */
-                if(type_length == 0) {
-                    type_length = *(data + 1) + 2;
-                }
+                    /* some types use the second byte to indicate how many bytes more are used. */
+                    if(type_length == 0) {
+                        type_length = *(data + 1) + 2;
+                    }
 
-                if(type_length <= 0) {
-                    pdebug(DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                    if(type_length <= 0) {
+                        pdebug(DEBUG_WARN, "Unable to determine type data length for type byte 0x%02x!", *data);
+                        rc = PLCTAG_ERR_UNSUPPORTED;
+                        break;
+                    }
+
+                    pdebug(DEBUG_DETAIL, "Type data is %d bytes long.", type_length);
+                    pdebug_dump_bytes(DEBUG_DETAIL, data, type_length);
+
+                    tag->encoded_type_info_size = type_length;
+                    mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
+                } else {
+                    pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x", *data);
                     rc = PLCTAG_ERR_UNSUPPORTED;
                     break;
                 }
-
-                pdebug(DEBUG_DETAIL, "Type data is %d bytes long.", type_length);
-                pdebug_dump_bytes(DEBUG_DETAIL, data, type_length);
-
-                tag->encoded_type_info_size = type_length;
-                mem_copy(tag->encoded_type_info, data, tag->encoded_type_info_size);
-            } else {
-                pdebug(DEBUG_WARN, "Unsupported data type returned, type byte=0x%02x", *data);
-                rc = PLCTAG_ERR_UNSUPPORTED;
-                break;
             }
-        }
 
-        /* skip past the type data */
-        data += (tag->encoded_type_info_size);
+            /* skip past the type data */
+            data += (tag->encoded_type_info_size);
 
-        /* check payload size now that we have bumped past the data type info. */
-        payload_size = (data_end - data);
+            /* check payload size now that we have bumped past the data type info. */
+            payload_size = (data_end - data);
 
-        /* copy the data into the tag and realloc if we need more space. */
-        if(payload_size + tag->offset > tag->size) {
-            tag->size = (int)payload_size + tag->offset;
-            tag->elem_size = tag->size / tag->elem_count;
+            /* copy the data into the tag and realloc if we need more space. */
+            if(payload_size + tag->offset > tag->size) {
+                tag->size = (int)payload_size + tag->offset;
+                tag->elem_size = tag->size / tag->elem_count;
 
-            pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
+                pdebug(DEBUG_DETAIL, "Increasing tag buffer size to %d bytes.", tag->size);
 
-            tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
-            if(!tag->data) {
-                pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
-                rc = PLCTAG_ERR_NO_MEM;
-                break;
+                tag->data = (uint8_t*)mem_realloc(tag->data, tag->size);
+                if(!tag->data) {
+                    pdebug(DEBUG_WARN, "Unable to reallocate tag data memory!");
+                    rc = PLCTAG_ERR_NO_MEM;
+                    break;
+                }
             }
+
+            pdebug(DEBUG_INFO, "Got %d bytes of data", (int)payload_size);
+
+            /*
+            * copy the data, but only if this is not
+            * a pre-read for a subsequent write!  We do not
+            * want to overwrite the data the upstream has
+            * put into the tag's data buffer.
+            */
+            if (!tag->pre_write_read) {
+                mem_copy(tag->data + tag->offset, data, (int)payload_size);
+            }
+
+            /* bump the byte offset */
+            tag->offset += (int)payload_size;
+        } else {
+            pdebug(DEBUG_DETAIL, "Response returned no data and no error.");
         }
-
-        pdebug(DEBUG_INFO, "Got %d bytes of data", (int)payload_size);
-
-        /*
-         * copy the data, but only if this is not
-         * a pre-read for a subsequent write!  We do not
-         * want to overwrite the data the upstream has
-         * put into the tag's data buffer.
-         */
-        if (!tag->pre_write_read) {
-            mem_copy(tag->data + tag->offset, data, (int)payload_size);
-        }
-
-        /* bump the byte offset */
-        tag->offset += (int)payload_size;
 
         /* set the return code */
         rc = PLCTAG_STATUS_OK;
@@ -1728,7 +1737,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
         tag->read_in_progress = 0;
 
         /* skip if we are doing a pre-write read. */
-        if (!tag->pre_write_read && partial_data && tag->offset < tag->size) {
+        if (!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
             rc = tag_read_start(tag);
@@ -1738,7 +1747,6 @@ static int check_read_status_unconnected(ab_tag_p tag)
             /* if this is a pre-read for a write, then pass off to the write routine */
             if (tag->pre_write_read) {
                 pdebug(DEBUG_DETAIL, "Restarting write call now.");
-
                 tag->pre_write_read = 0;
                 rc = tag_write_start(tag);
             }
@@ -1755,7 +1763,9 @@ static int check_read_status_unconnected(ab_tag_p tag)
     }
 
     /* release the referene to the request. */
-    rc_dec(request);
+
+    // FIXME - why is this different than the connected case?
+    // rc_dec(request);
 
     pdebug(DEBUG_SPEW, "Done.");
 
