@@ -125,6 +125,7 @@
 
 
 /* base data type byte values */
+/* OBSOLETE - this is now in cip.c in a table. */
 #define AB_CIP_DATA_DT          ((uint8_t)0xC0) /* DT value, 64 bit */
 #define AB_CIP_DATA_BIT         ((uint8_t)0xC1) /* Boolean value, 1 bit */
 #define AB_CIP_DATA_SINT        ((uint8_t)0xC2) /* Signed 8–bit integer value */
@@ -192,7 +193,17 @@
 //#define AB_PLC_MICRO800     (4)
 //#define AB_PLC_LGX_PCCC    (5)
 
-typedef enum { AB_PLC_NONE = 0, AB_PLC_PLC5 = 1, AB_PLC_SLC, AB_PLC_MLGX, AB_PLC_LGX, AB_PLC_LGX_PCCC, AB_PLC_MICRO800, AB_PLC_OMRON_NJNX } plc_type_t;
+typedef enum {
+               AB_PLC_NONE = 0,
+               AB_PLC_PLC5 = 1,
+               AB_PLC_SLC,
+               AB_PLC_MLGX,
+               AB_PLC_LGX,
+               AB_PLC_LGX_PCCC,
+               AB_PLC_MICRO800,
+               AB_PLC_OMRON_NJNX,
+               AB_PLC_TYPE_LAST,
+            } plc_type_t;
 
 
 /*********************************************************************

@@ -34,6 +34,8 @@
 #ifndef __PLCTAG_AB_SESSION_H__
 #define __PLCTAG_AB_SESSION_H__ 1
 
+#include <stdbool.h>
+
 #include <ab/ab_common.h>
 #include <ab/defs.h>
 #include <util/rc.h>
@@ -48,6 +50,9 @@
 #define SESSION_MIN_REQUESTS    (10)
 #define SESSION_INC_REQUESTS    (10)
 
+#define MAX_CONN_PATH       (260)   /* 256 plus padding. */
+#define MAX_IP_ADDR_SEG_LEN (16)
+
 
 struct ab_session_t {
 //    int status;
@@ -61,9 +66,13 @@ struct ab_session_t {
     sock_p sock;
 
     /* connection variables. */
-    int use_connected_msg;
-    int only_use_old_forward_open;
+    bool use_connected_msg;
+    bool only_use_old_forward_open;
+    int fo_conn_size; /* old FO max connection size */
+    int fo_ex_conn_size; /* extended FO max connection size */
     uint16_t max_payload_guess;
+    uint16_t max_payload_size;
+
     uint32_t orig_connection_id;
     uint32_t targ_connection_id;
     uint16_t conn_seq_num;
@@ -71,7 +80,6 @@ struct ab_session_t {
 
     plc_type_t plc_type;
 
-    uint16_t max_payload_size;
     uint8_t *conn_path;
     uint8_t conn_path_size;
     uint16_t dhp_dest;
@@ -88,12 +96,15 @@ struct ab_session_t {
     /* list of outstanding requests for this session */
     vector_p requests;
 
-    /* data for receiving messages */
     uint64_t resp_seq_id;
+
+    /* data for receiving messages */
     uint32_t data_offset;
     uint32_t data_capacity;
     uint32_t data_size;
-    uint8_t data[MAX_PACKET_SIZE_EX];
+    uint8_t *data;
+    bool data_buffer_is_static;
+    // uint8_t data[MAX_PACKET_SIZE_EX];
 
     uint64_t packet_count;
 
