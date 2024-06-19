@@ -76,6 +76,10 @@
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define SESSION_IDLE_WAIT_TIME (100)
 
+/* make sure we try hard to get a good payload size */
+#define GET_MAX_PAYLOAD_SIZE(sess) ((sess->max_payload_size > 0) ? (sess->max_payload_size) : ((sess->fo_conn_size != 0) ? (sess->fo_conn_size) : (sess->fo_ex_conn_size)))
+
+
 /* plc-specific session constructors */
 static ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
 static ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
@@ -240,7 +244,7 @@ int session_get_max_payload(ab_session_p session)
     }
 
     critical_block(session->mutex) {
-        result = session->max_payload_size;
+        result = GET_MAX_PAYLOAD_SIZE(session);
     }
 
     return result;
@@ -323,8 +327,6 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
                     session = NULL;
                     break;
             }
-
-            // session = session_create_unsafe(session_gw, session_path, plc_type, &use_connected_msg, connection_group_id);
 
             if (session == AB_SESSION_NULL) {
                 pdebug(DEBUG_WARN, "unable to create or find a session!");
@@ -525,6 +527,7 @@ ab_session_p create_plc5_session_unsafe(const char *host, const char *path, int 
             session->only_use_old_forward_open = true;
             session->fo_conn_size = MAX_CIP_PLC5_MSG_SIZE;
             session->fo_ex_conn_size = 0;
+            session->max_payload_size = session->fo_conn_size;
         } else {
             pdebug(DEBUG_WARN, "Unable to create PLC/5 session!");
         }
@@ -549,6 +552,7 @@ ab_session_p create_slc_session_unsafe(const char *host, const char *path, int *
             session->only_use_old_forward_open = true;
             session->fo_conn_size = MAX_CIP_SLC_MSG_SIZE;
             session->fo_ex_conn_size = 0;
+            session->max_payload_size = session->fo_conn_size;
         } else {
             pdebug(DEBUG_WARN, "Unable to create SLC 500 session!");
         }
@@ -573,6 +577,7 @@ ab_session_p create_mlgx_session_unsafe(const char *host, const char *path, int 
             session->only_use_old_forward_open = true;
             session->fo_conn_size = MAX_CIP_MLGX_MSG_SIZE;
             session->fo_ex_conn_size = 0;
+            session->max_payload_size = session->fo_conn_size;
         } else {
             pdebug(DEBUG_WARN, "Unable to create Micrologix session!");
         }
@@ -597,6 +602,7 @@ ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *
             session->only_use_old_forward_open = false;
             session->fo_conn_size = MAX_CIP_LGX_MSG_SIZE;
             session->fo_ex_conn_size = MAX_CIP_LGX_MSG_SIZE_EX;
+            session->max_payload_size = session->fo_conn_size;
         } else {
             pdebug(DEBUG_WARN, "Unable to create *Logix session!");
         }
@@ -621,6 +627,7 @@ ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, 
             session->only_use_old_forward_open = true;
             session->fo_conn_size = MAX_CIP_LGX_PCCC_MSG_SIZE;
             session->fo_ex_conn_size = 0;
+            session->max_payload_size = session->fo_conn_size;
         } else {
             pdebug(DEBUG_WARN, "Unable to create Micrologix session!");
         }
@@ -699,6 +706,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     int conn_path_offset = 0;
     uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
     int tmp_conn_path_size = MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN;
+    int is_dhp = 0;
+    uint16_t dhp_dest = 0;
 
     pdebug(DEBUG_INFO, "Starting");
 
@@ -726,7 +735,7 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
         total_allocation_size += str_length(path) + 1;
 
         /* encode the path */
-        rc = cip_encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &session->is_dhp, &session->dhp_dest);
+        rc = cip_encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_INFO, "Unable to convert path string to binary path, error %s!", plc_tag_decode_error(rc));
             // rc_dec(session);
@@ -812,6 +821,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     session->failed = 0;
     session->conn_serial_number = (uint16_t)(uintptr_t)(intptr_t)rand();
     session->session_seq_id = (uint64_t)rand();
+    session->is_dhp = is_dhp;
+    session->dhp_dest = dhp_dest;
 
     pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
     session->connection_group_id = connection_group_id;
@@ -1662,7 +1673,7 @@ int process_requests(ab_session_p session)
             /* if there are still requests after purging all the aborted requests, process them. */
 
             /* how much space do we have to work with. */
-            remaining_space = session->max_payload_size - (int)sizeof(cip_multi_req_header);
+            remaining_space = GET_MAX_PAYLOAD_SIZE(session) - (int)sizeof(cip_multi_req_header);
 
             if(vector_length(session->requests)) {
                 do {
@@ -1820,7 +1831,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
             pdebug(DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->mutex) {
-                request_capacity = (int)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+                request_capacity = (int)(GET_MAX_PAYLOAD_SIZE(session) + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
@@ -1867,7 +1878,7 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet)
             pdebug(DEBUG_INFO, "Request buffer too small, allocating larger buffer.");
 
             critical_block(session->mutex) {
-                request_capacity = (int)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+                request_capacity = (int)(GET_MAX_PAYLOAD_SIZE(session) + EIP_CIP_PREFIX_SIZE);
             }
 
             /* make sure it will fit. */
@@ -2695,7 +2706,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req)
     uint8_t *buffer = NULL;
 
     critical_block(session->mutex) {
-        request_capacity = (size_t)(session->max_payload_size + EIP_CIP_PREFIX_SIZE);
+        request_capacity = (size_t)(GET_MAX_PAYLOAD_SIZE(session) + EIP_CIP_PREFIX_SIZE);
     }
 
     pdebug(DEBUG_DETAIL, "Starting.");
