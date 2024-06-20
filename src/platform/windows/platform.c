@@ -1308,6 +1308,8 @@ static int socket_lib_init(void)
 
 extern int socket_create(sock_p *s)
 {
+    int rc = PLCTAG_STATUS_OK;
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!socket_lib_init()) {
@@ -2116,22 +2118,22 @@ int socket_destroy(sock_p *s)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(s->wake_read_fd != INVALID_SOCKET) {
-        if(closesocket(s->wake_read_fd)) {
+    if((*)s->wake_read_fd != INVALID_SOCKET) {
+        if(closesocket((*s)->wake_read_fd)) {
             pdebug(DEBUG_WARN, "Error closing wake read socket!");
             rc = PLCTAG_ERR_CLOSE;
         }
 
-        s->wake_read_fd = INVALID_SOCKET;
+        (*s)->wake_read_fd = INVALID_SOCKET;
     }
 
-    if(s->wake_write_fd != INVALID_SOCKET) {
-        if(closesocket(s->wake_write_fd)) {
+    if((*s)->wake_write_fd != INVALID_SOCKET) {
+        if(closesocket((*s)->wake_write_fd)) {
             pdebug(DEBUG_WARN, "Error closing wake write socket!");
             rc = PLCTAG_ERR_CLOSE;
         }
 
-        s->wake_write_fd = INVALID_SOCKET;
+        (*s)->wake_write_fd = INVALID_SOCKET;
     }
 
     socket_close(*s);
