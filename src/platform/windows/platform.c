@@ -1334,7 +1334,7 @@ extern int socket_create(sock_p *s)
     (*s)->wake_write_fd = INVALID_SOCKET;
 
     pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
-    rc = sock_create_event_wakeup_channel(s);
+    rc = sock_create_event_wakeup_channel((*s));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create wake channel, error %s!", plc_tag_decode_error(rc));
         return rc;
@@ -2118,7 +2118,7 @@ int socket_destroy(sock_p *s)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if((*)s->wake_read_fd != INVALID_SOCKET) {
+    if((*s)->wake_read_fd != INVALID_SOCKET) {
         if(closesocket((*s)->wake_read_fd)) {
             pdebug(DEBUG_WARN, "Error closing wake read socket!");
             rc = PLCTAG_ERR_CLOSE;
