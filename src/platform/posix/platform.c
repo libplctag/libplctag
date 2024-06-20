@@ -1224,6 +1224,8 @@ static int sock_create_event_wakeup_channel(sock_p sock);
 
 extern int socket_create(sock_p *s)
 {
+    int32_t rc = PLCTAG_STATUS_OK;
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!s) {
@@ -1241,6 +1243,13 @@ extern int socket_create(sock_p *s)
     (*s)->fd = INVALID_SOCKET;
     (*s)->wake_read_fd = INVALID_SOCKET;
     (*s)->wake_write_fd = INVALID_SOCKET;
+
+    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    rc = sock_create_event_wakeup_channel((*s));
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
+        return rc;
+    }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -2014,24 +2023,6 @@ int socket_close(sock_p s)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(s->wake_read_fd != INVALID_SOCKET) {
-        if(close(s->wake_read_fd)) {
-            pdebug(DEBUG_WARN, "Error closing read wake socket!");
-            rc = PLCTAG_ERR_CLOSE;
-        }
-
-        s->wake_read_fd = INVALID_SOCKET;
-    }
-
-    if(s->wake_write_fd != INVALID_SOCKET) {
-        if(close(s->wake_write_fd)) {
-            pdebug(DEBUG_WARN, "Error closing write wake socket!");
-            rc = PLCTAG_ERR_CLOSE;
-        }
-
-        s->wake_write_fd = INVALID_SOCKET;
-    }
-
     if(s->fd != INVALID_SOCKET) {
         if(close(s->fd)) {
             pdebug(DEBUG_WARN, "Error closing socket!");
@@ -2058,6 +2049,25 @@ int socket_destroy(sock_p *s)
     if(!s || !*s) {
         pdebug(DEBUG_WARN, "Socket pointer or pointer to socket pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
+    }
+
+    /* close the wake sockets */
+    if((*s)->wake_read_fd != INVALID_SOCKET) {
+        if(close((*s)->wake_read_fd)) {
+            pdebug(DEBUG_WARN, "Error closing read wake socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
+
+        (*s)->wake_read_fd = INVALID_SOCKET;
+    }
+
+    if((*s)->wake_write_fd != INVALID_SOCKET) {
+        if(close((*s)->wake_write_fd)) {
+            pdebug(DEBUG_WARN, "Error closing write wake socket!");
+            rc = PLCTAG_ERR_CLOSE;
+        }
+
+        (*s)->wake_write_fd = INVALID_SOCKET;
     }
 
     socket_close(*s);
