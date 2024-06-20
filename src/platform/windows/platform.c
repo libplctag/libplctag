@@ -2107,6 +2107,8 @@ int socket_close(sock_p s)
 
 int socket_destroy(sock_p *s)
 {
+    int rc = PLCTAG_STATUS_OK;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     if(!s || !*s) {
