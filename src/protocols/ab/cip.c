@@ -54,11 +54,11 @@ static int match_numeric_segment(const char *path, size_t *path_index, uint8_t *
 static int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_path, size_t *conn_path_index);
 static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, uint8_t *src_node, uint8_t *dest_node);
 
-#define MAX_IP_ADDR_SEG_LEN (16)
+// #define MAX_IP_ADDR_SEG_LEN (16)
 
 
 
-int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t **conn_path, uint8_t *conn_path_size, int *is_dhp, uint16_t *dhp_dest)
+int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest)
 {
     size_t path_len = 0;
     size_t conn_path_index = 0;
@@ -66,7 +66,8 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
     uint8_t dhp_port = 0;
     uint8_t dhp_src_node = 0;
     uint8_t dhp_dest_node = 0;
-    uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    // uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
+    size_t max_conn_path_size = (*tmp_conn_path_size) - MAX_IP_ADDR_SEG_LEN;
 
     pdebug(DEBUG_DETAIL, "Starting");
 
@@ -74,7 +75,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
 
     path_len = (size_t)(ssize_t)str_length(path);
 
-    while(path_index < path_len && path[path_index] && conn_path_index < MAX_CONN_PATH) {
+    while(path_index < path_len && path[path_index] && conn_path_index < max_conn_path_size) {
         /* skip spaces before each segment */
         while(path[path_index] == ' ') {
             path_index++;
@@ -106,8 +107,8 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
         }
     }
 
-    if(conn_path_index >= MAX_CONN_PATH) {
-        pdebug(DEBUG_WARN, "Encoded connection path is too long (%d >= %d).", (int)(ssize_t)conn_path_index, MAX_CONN_PATH);
+    if(conn_path_index >= max_conn_path_size) {
+        pdebug(DEBUG_WARN, "Encoded connection path is too long (%d >= %d).", (int)(ssize_t)conn_path_index, max_conn_path_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -165,20 +166,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
         conn_path_index++;
     }
 
-    if(conn_path_index > 0) {
-        /* allocate space for the connection path */
-        *conn_path = mem_alloc((int)(unsigned int)conn_path_index);
-        if(! *conn_path) {
-            pdebug(DEBUG_WARN, "Unable to allocate connection path!");
-            return PLCTAG_ERR_NO_MEM;
-        }
-
-        mem_copy(*conn_path, &tmp_conn_path[0], (int)(unsigned int)conn_path_index);
-    } else {
-        *conn_path = NULL;
-    }
-
-    *conn_path_size = (uint8_t)conn_path_index;
+    *tmp_conn_path_size = (uint8_t)conn_path_index;
 
     pdebug(DEBUG_DETAIL, "Done");
 

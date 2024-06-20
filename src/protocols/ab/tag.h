@@ -37,7 +37,6 @@
 /* do these first */
 #define MAX_TAG_NAME        (260)
 #define MAX_TAG_TYPE_INFO   (64)
-#define MAX_CONN_PATH       (260)   /* 256 plus padding. */
 
 /* they are used in some of these includes */
 #include <lib/libplctag.h>
