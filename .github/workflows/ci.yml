@@ -50,10 +50,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] &
+        ${{ env.DIST }}/ab_server --plc=Micro800 '--tag=TestDINTArray:DINT[10]' &  2>&1 Test_Micro800_simulator.log
         sleep 2
         echo "test getting a tag on a Micro800."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]'
+        ${{ env.DIST }}/tag_rw2 --type=sint32  '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=4
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -750,4 +750,3 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
-
