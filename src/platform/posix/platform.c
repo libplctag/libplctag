@@ -1380,12 +1380,12 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
         freeaddrinfo(res_head);
     }
 
-    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
-    rc = sock_create_event_wakeup_channel(s);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
-        return rc;
-    }
+    // pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    // rc = sock_create_event_wakeup_channel(s);
+    // if(rc != PLCTAG_STATUS_OK) {
+    //     pdebug(DEBUG_WARN, "Unable to create wake pipe, error %s!", plc_tag_decode_error(rc));
+    //     return rc;
+    // }
 
     /* now try to connect to the remote gateway.  We may need to
      * try several of the IPs we have.
