@@ -156,7 +156,7 @@ int send_tag_data(int32_t tag, uint8_t *data, size_t data_size)
 
         rc = print_tag_data(tag);
         if(rc != PLCTAG_STATUS_OK) {
-            printf("\nERROR: Unable to print the response! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+            printf("\n\nERROR: Unable to print the response! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
             break;
         }
     } while(0);
@@ -185,12 +185,12 @@ int32_t get_tag_instance_counts(int32_t tag, uint16_t *num_instances, uint16_t *
                 uint8_t cip_status = plc_tag_get_uint8(tag, 2);
 
                 if(cip_status != 0) {
-                    printf("ERROR: CIP command failed on remote PLC with error code %x!", (unsigned int)cip_status);
+                    printf("\nERROR: CIP command failed on remote PLC with error code %x!", (unsigned int)cip_status);
                     rc = PLCTAG_ERR_REMOTE_ERR;
                     break;
                 }
             } else {
-                printf("ERROR: Insufficient data returned in CIP response to get full CIP header!");
+                printf("\nERROR: Insufficient data returned in CIP response to get full CIP header!");
                 rc = PLCTAG_ERR_TOO_SMALL;
                 break;
             }
@@ -200,9 +200,9 @@ int32_t get_tag_instance_counts(int32_t tag, uint16_t *num_instances, uint16_t *
                 *num_instances = plc_tag_get_uint16(tag, 6);
                 *max_id = plc_tag_get_uint16(tag, 8);
 
-                printf("INFO: the number of instances is %"PRIu16" and the max instance ID is %"PRIu16".\n", *num_instances, *max_id);
+                printf("\nINFO: the number of instances is %"PRIu16" and the max instance ID is %"PRIu16".\n", *num_instances, *max_id);
             } else {
-                printf("ERROR: Insufficient data returned in CIP response to get all attribute values!");
+                printf("\nERROR: Insufficient data returned in CIP response to get all attribute values!");
                 rc = PLCTAG_ERR_TOO_SMALL;
                 break;
             }
@@ -244,7 +244,7 @@ int32_t get_tag_info(int32_t tag, uint16_t tag_instance_id, char *tag_name, int 
 
         /* did we get enough data? */
         if(plc_tag_get_size(tag) < 10) {
-            printf("ERROR: Insufficient data returned in CIP response!");
+            printf("\nERROR:: Insufficient data returned in CIP response!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
@@ -345,7 +345,7 @@ int get_tag_attributes(int32_t tag, const char *tag_name)
 
         rc = send_tag_data(tag, request, (size_t)(unsigned int)req_index);
         if(rc != PLCTAG_STATUS_OK) {
-            printf("ERROR: Error getting \"%s\" attribute data!\n", tag_name);
+            printf("\nERROR:: Error getting \"%s\" attribute data!\n", tag_name);
             break;
         }
 
@@ -481,7 +481,7 @@ int main(int argc, char **argv)
 
     tag_string = setup_tag_string(argc, argv);
     if(!tag_string) {
-        printf("ERROR: unable to create tag string!\n");
+        printf("\nERROR:: unable to create tag string!\n");
         usage();
     }
 
@@ -491,14 +491,14 @@ int main(int argc, char **argv)
         /* create the tag */
         tag = plc_tag_create(tag_string, DATA_TIMEOUT);
         if(tag < 0) {
-            printf("ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+            printf("\nERROR: %s: Could not create tag!\n", plc_tag_decode_error(tag));
             rc = tag;
             break;
         }
 
         rc = get_tag_instance_counts(tag, &num_instances, &max_id);
         if(rc < 0) {
-            printf("ERROR %s: Could not run Get_Attribute_All on class 6A!\n", plc_tag_decode_error(rc));
+            printf("\nERROR: %s: Could not run Get_Attribute_All on class 6A!\n", plc_tag_decode_error(rc));
             break;
         }
 
@@ -508,7 +508,7 @@ int main(int argc, char **argv)
             /* no need to zero out the buffer as get_tag_name will zero out anything it does not overwrite */
             rc = get_tag_info(tag, id, tag_name, sizeof(tag_name));
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_NOT_FOUND) {
-                printf("ERROR %s: Could not run Get_Attribute_All on tag instance!\n", plc_tag_decode_error(rc));
+                printf("\nERROR: %s: Could not run Get_Attribute_All on tag instance!\n", plc_tag_decode_error(rc));
                 break;
             }
 
