@@ -239,8 +239,8 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[4] = (uint8_t)0x24;
                 plc->path[5] = (uint8_t)0x01;
                 plc->path_len = 6;
-                plc->client_to_server_max_packet = 508;
-                plc->server_to_client_max_packet = 508;
+                plc->client_to_server_max_packet = 504;
+                plc->server_to_client_max_packet = 504;
                 needs_path = true;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Micro800") == 0) {
@@ -251,8 +251,8 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[2] = (uint8_t)0x24;
                 plc->path[3] = (uint8_t)0x01;
                 plc->path_len = 4;
-                plc->client_to_server_max_packet = 508;
-                plc->server_to_client_max_packet = 508;
+                plc->client_to_server_max_packet = 504;
+                plc->server_to_client_max_packet = 504;
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Omron") == 0) {
@@ -275,8 +275,8 @@ void process_args(int argc, const char **argv, plc_s *plc)
                 plc->path[14] = (uint8_t)0x24;
                 plc->path[15] = (uint8_t)0x01;
                 plc->path_len = 16;
-                plc->client_to_server_max_packet = 508;
-                plc->server_to_client_max_packet = 508;
+                plc->client_to_server_max_packet = 504;
+                plc->server_to_client_max_packet = 504;
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "PLC/5") == 0) {
