@@ -367,7 +367,7 @@ jobs:
 
   windows_x64:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     env:
       VERSION: "@VERSION@"
@@ -482,7 +482,7 @@ jobs:
 
   windows_x86:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     env:
       VERSION: "@VERSION@"
@@ -597,7 +597,7 @@ jobs:
 
   windows_ARM:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     env:
       VERSION: "@VERSION@"
@@ -626,7 +626,7 @@ jobs:
 
   windows_ARM64:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     env:
       VERSION: "@VERSION@"
