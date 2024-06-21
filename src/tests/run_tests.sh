@@ -303,9 +303,34 @@ else
 fi
 
 
-
-
 # echo "  Killing AB emulator."
+killall -TERM ab_server > /dev/null 2>&1
+
+# echo -n "  Starting AB emulator for Micro800 tests... "
+$TEST_DIR/ab_server --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] > micro800_emulator.log 2>&1 &
+EMULATOR_PID=$!
+if [ $? != 0 ]; then
+    # echo "FAILURE"
+    echo "Unable to start Micro800 emulator!"
+    exit 1
+# else
+    # echo "OK"
+fi
+
+
+let TEST++
+echo -n "Test $TEST: basic Micro800 read/write... "
+$TEST_DIR/./tag_rw2 --type=sint32  '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micro800&name=TestDINTArray' --write=42 --debug=4 > "${TEST}_micro800_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+# echo "  Killing Omron emulator."
 killall -TERM ab_server > /dev/null 2>&1
 
 
