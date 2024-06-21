@@ -110,6 +110,10 @@ void tag_callback(int32_t tag_id, int event, int status)
             fprintf(stderr, "Tag %d automatic operation was aborted!\n", tag_id);
             break;
 
+        case PLCTAG_EVENT_CREATED:
+            fprintf(stderr, "Tag was creation finished.\n");
+            break;
+
         case PLCTAG_EVENT_DESTROYED:
             fprintf(stderr, "Tag was destroyed.\n");
             break;
@@ -217,4 +221,3 @@ int main(int argc, char **argv)
 
     return rc;
 }
-
