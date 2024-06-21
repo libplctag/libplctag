@@ -19,6 +19,9 @@ jobs:
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
+    - name Print out current branch
+      run: echo "$BRANCH"
+
     - name: "Checkout library source."
       uses: actions/checkout@v4
       with:
