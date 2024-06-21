@@ -704,7 +704,9 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     int data_buffer_capacity = EIP_CIP_PREFIX_SIZE + max_payload_capacity;
     int data_buffer_offset = 0;
     int host_name_offset = 0;
+    int host_name_size = 0;
     int path_offset = 0;
+    int path_size = 0;
     int conn_path_offset = 0;
     uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
     int tmp_conn_path_size = MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN;
@@ -729,12 +731,14 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
 
     /* add in space for the host name.  + 1 for the NUL terminator. */
     host_name_offset = total_allocation_size;
-    total_allocation_size += str_length(host) + 1;
+    host_name_size = str_length(host) + 1;
+    total_allocation_size += host_name_size;
 
     /* add in space for the path copy. */
     if(path && str_length(path) > 0) {
         path_offset = total_allocation_size;
-        total_allocation_size += str_length(path) + 1;
+        path_size = str_length(path) + 1;
+        total_allocation_size += path_size;
     } else {
         path_offset = 0;
     }
@@ -784,11 +788,11 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
 
     /* point the host pointer just after the data. */
     session->host = (char *)(session) + host_name_offset;
-    str_copy(session->host, str_length(host), host);
+    str_copy(session->host, host_name_size, host);
 
     if(path_offset) {
         session->path = (char *)(session) + path_offset;
-        str_copy(session->path, str_length(path), path);
+        str_copy(session->path, path_size, path);
     }
 
     if(conn_path_offset) {
