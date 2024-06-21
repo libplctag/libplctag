@@ -452,6 +452,7 @@ elseif (BUILD_EXAMPLES)
                             data_dumper
                             list_tags_logix
                             list_tags_micro8x0
+                            list_tags_omron
                             multithread
                             multithread_cached_read
                             multithread_plc5
