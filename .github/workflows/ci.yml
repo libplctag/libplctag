@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - name: Print out current branch
-      run: echo ${{ env.BRANCH }}
+      run: echo "Building branch ${{ env.BRANCH }}"
 
     - name: "Checkout library source."
       uses: actions/checkout@v4
@@ -134,10 +134,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - name: Checkout library source
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
       uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
       run: sudo apt update; sudo apt-get -y --force-yes install gcc-multilib g++-multilib
@@ -245,9 +251,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -352,9 +365,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -380,11 +400,17 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
       with:
-        ref: my-branch
+        ref: ${{ env.BRANCH }}
+
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
@@ -496,9 +522,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -611,9 +644,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_windows_Arm"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -640,9 +680,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_windows_Arm64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -669,10 +716,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_linux_arm6hf"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
     - name: "Checkout library source."
       uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
       run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
@@ -702,10 +755,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_linux_arm7l"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
     - name: "Checkout library source."
       uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
       run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
@@ -735,10 +794,16 @@ jobs:
       ARTIFACT: "libplctag_2.6.1_linux_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
     - name: "Checkout library source."
       uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
       run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-arm64
