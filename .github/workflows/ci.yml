@@ -19,7 +19,7 @@ jobs:
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - name Print out current branch
+    - name: Print out current branch
       run: echo ${{ env.BRANCH }}
 
     - name: "Checkout library source."
