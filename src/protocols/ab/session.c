@@ -735,20 +735,20 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     if(path && str_length(path) > 0) {
         path_offset = total_allocation_size;
         total_allocation_size += str_length(path) + 1;
-
-        /* encode the path */
-        rc = cip_encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
-        if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_INFO, "Unable to convert path string to binary path, error %s!", plc_tag_decode_error(rc));
-            // rc_dec(session);
-            return NULL;
-        }
-
-        conn_path_offset = total_allocation_size;
-        total_allocation_size += tmp_conn_path_size;
     } else {
         path_offset = 0;
     }
+
+    /* encode the path */
+    rc = cip_encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_INFO, "Unable to convert path string to binary path, error %s!", plc_tag_decode_error(rc));
+        // rc_dec(session);
+        return NULL;
+    }
+
+    conn_path_offset = total_allocation_size;
+    total_allocation_size += tmp_conn_path_size;
 
     /* allocate the session struct and the buffer in the same allocation. */
     pdebug(DEBUG_DETAIL, "Allocating %d total bytes of memory with %d bytes for data buffer static data, %d bytes for the host name, %d bytes for the path, %d bytes for the encoded path.",
