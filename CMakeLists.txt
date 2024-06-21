@@ -495,6 +495,7 @@ elseif (BUILD_EXAMPLES)
                             async_stress
                             list_tags_logix
                             list_tags_micro8x0
+                            list_tags_omron
                             multithread
                             plc5
                             simple
