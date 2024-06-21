@@ -156,6 +156,7 @@ slice_s handle_forward_open(slice_s input, slice_s output, plc_s *plc)
     /* minimum length check */
     if(slice_len(input) < CIP_FORWARD_OPEN_MIN_SIZE) {
         /* FIXME - send back the right error. */
+        info("Forward open request size, %d, too small.   Should be greater than %d.  Skipped processing!", slice_len(input), CIP_FORWARD_OPEN_MIN_SIZE);
         return make_cip_error(output, (uint8_t)(slice_get_uint8(input, 0) | (uint8_t)CIP_DONE), (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
     }
 
@@ -190,7 +191,7 @@ slice_s handle_forward_open(slice_s input, slice_s output, plc_s *plc)
     /* check the remaining length */
     if(offset >= slice_len(input)) {
         /* FIXME - send back the right error. */
-        info("Forward open request size, %d, too small.   Should be greater than %d!", slice_len(input), offset);
+        info("Forward open request size, %d, too small.   Should be greater than %d.  Ran out of space processing the packet!", slice_len(input), offset);
         return make_cip_error(output, (uint8_t)(slice_get_uint8(input, 0) | CIP_DONE), (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
     }
 
@@ -778,4 +779,3 @@ slice_s make_cip_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool ex
 
     return slice_from_slice(output, 0, result_size);
 }
-
