@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - name Print out current branch
-      run: echo "$BRANCH"
+      run: echo ${{ env.BRANCH }}
 
     - name: "Checkout library source."
       uses: actions/checkout@v4
