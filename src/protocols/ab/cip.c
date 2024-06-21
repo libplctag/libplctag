@@ -75,7 +75,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
 
     path_len = (size_t)(ssize_t)str_length(path);
 
-    while(path_index < path_len && path[path_index] && conn_path_index < max_conn_path_size) {
+    while(path && path[path_index] && path_index < path_len && conn_path_index < max_conn_path_size) {
         /* skip spaces before each segment */
         while(path[path_index] == ' ') {
             path_index++;
