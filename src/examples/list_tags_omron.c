@@ -451,13 +451,20 @@ int32_t process_instance_data(int32_t tag, tag_entry_p *tags, uint16_t num_insta
     do {
         /* process the data */
         cursor = 4; /* skip past the CIP header */
-        uint32_t num_batch_instances = plc_tag_get_uint32(tag, cursor);
+        uint32_t batch_size = plc_tag_get_uint32(tag, cursor);
         cursor += 4;
 
-        printf("\nINFO: processing %"PRIu32" instances starting at instance index %"PRIu16".\n", num_batch_instances, current_tag_entry_index);
+        /* if there are no entries, then we are done */
+        if(batch_size == 0) {
+            printf("\nINFO: Got no instance entries back.  Done.\n");
+            rc = batch_size;
+            break;
+        }
+
+        printf("\nINFO: processing %"PRIu32" instances starting at instance index %"PRIu16".\n", batch_size, current_tag_entry_index);
 
         for(int instance_index = current_tag_entry_index;
-                instance_index < num_batch_instances && instance_index < num_instances;
+                instance_index < batch_size && instance_index < num_instances;
                 instance_index++) {
             uint32_t instance_id = plc_tag_get_uint32(tag, cursor);
             cursor += 4;
@@ -500,7 +507,7 @@ int32_t process_instance_data(int32_t tag, tag_entry_p *tags, uint16_t num_insta
             }
         }
 
-        rc = (int32_t)num_batch_instances;
+        rc = (int32_t)batch_size;
     } while(0);
 
     return rc;
@@ -511,7 +518,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 {
     int32_t rc = PLCTAG_STATUS_OK;
     int cursor = 0;
-    int16_t num_batch_instances = 0;
+    int16_t batch_size = 0;
 
     uint8_t request[] = {
                          (uint8_t)Omron_Get_All_Instances,
@@ -538,25 +545,9 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
             break;
         }
 
-        print_tag_data(tag);
-
-        num_batch_instances = process_instance_data(tag, &tags, num_instances, current_tag_entry_index);
-        if(num_batch_instances < 0) {
-            rc = num_batch_instances;
-            break;
-        } else {
-            rc = num_batch_instances;
-        }
-
-        for(int32_t instance_index=current_tag_entry_index;
-                    instance_index < (current_tag_entry_index + num_batch_instances)
-                    && instance_index < num_instances;
-                    instance_index++) {
-            printf("\n\nTag %s (%04"PRIx32"):\n", tags[instance_index].tag_name, tags[instance_index].instance_id);
-            rc = get_tag_attributes(tag, tags[instance_index].tag_name);
-            if(rc != PLCTAG_STATUS_OK)
-            break;
-        }
+        /* a zero batch size indicates that we are done */
+        batch_size = process_instance_data(tag, &tags, num_instances, current_tag_entry_index);
+        rc = batch_size;
     } while(0);
 
     return rc;
@@ -649,6 +640,8 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
+
     // plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     tag_string = setup_tag_string(argc, argv);
@@ -656,8 +649,6 @@ int main(int argc, char **argv)
         printf("\nERROR:: unable to create tag string!\n");
         usage();
     }
-
-    printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
     do {
         /* create the tag */
@@ -692,7 +683,14 @@ int main(int argc, char **argv)
             }
 
             rc = num_instances_processed;
-        } while(rc > 0);
+        } while(rc > 0); /* zero entries or a negative terminate the loop */
+
+        for(int32_t instance_index=0; instance_index < current_tag_entry_index; instance_index++) {
+            printf("\n\nTag %s (%04"PRIx32"):\n", tags[instance_index].tag_name, tags[instance_index].instance_id);
+            rc = get_tag_attributes(tag, tags[instance_index].tag_name);
+            if(rc != PLCTAG_STATUS_OK)
+            break;
+        }
 
         // for(uint16_t id = 1; id <= max_id; id++) {
         //     char tag_name[128];
