@@ -277,7 +277,7 @@ int32_t get_tag_info(int32_t tag, uint16_t tag_instance_id, char *tag_name, int 
 
         uint8_t name_len = plc_tag_get_uint8(tag, 8);
 
-        printf("INFO: Tag name is %u characters long.\n", (unsigned int)name_len);
+        printf("\nINFO: Tag name is %u characters long.\n", (unsigned int)name_len);
 
         /* FIXME should check for sanity here. */
         if(plc_tag_get_size(tag) < (9 + name_len + 4)) {
@@ -377,14 +377,14 @@ int get_tag_attributes(int32_t tag, const char *tag_name)
         uint32_t tag_element_type_id = plc_tag_get_uint32(tag, cursor);
         cursor += 4;
 
-        printf("INFO: Tag \"%s\" has attributes:\n", tag_name);
+        printf("\nINFO: Tag \"%s\" has attributes:\n", tag_name);
         printf("\tTag type %02x\n", (unsigned int)tag_data_type);
         printf("\tTag element size %"PRIu32"\n", tag_type_len);
 
         /* print array specific information */
         if(tag_data_type == 0xa1 || tag_data_type == 0xa3) {
-            printf("\t\tTag array element type 0x%02x", (unsigned int)tag_data_element_type);
-            printf("\t\tTag array element type ID %04"PRIx32, tag_element_type_id);
+            printf("\t\tTag array element type 0x%02x\n", (unsigned int)tag_data_element_type);
+            printf("\t\tTag array element type ID %04"PRIx32"\n", tag_element_type_id);
             printf("\t\tTag array dimensions: [");
             for(uint8_t i=0; i < num_array_dimensions && i < 10; i++) {
                 if(i != 0) printf(", ");
