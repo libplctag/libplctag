@@ -2,9 +2,9 @@ name: libplctag CI
 
 on:
   push:
-    branches: [ release, prerelease ]
+    branches: [ release, prerelease, split_omron ]
   pull_request:
-    branches: [ release, prerelease ]
+    branches: [ release, prerelease, split_omron ]
 
 jobs:
   ubuntu_x64:
@@ -750,4 +750,3 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
-
