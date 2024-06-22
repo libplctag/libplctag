@@ -60,6 +60,7 @@ enum {
     Symbolic_Translation = 0x4B,
     Read_Tag_Fragmented = 0x52,
     Get_All_Tags_Attributes = 0x55,
+    Omron_Get_All_Instances = 0x5F,
 } cip_commands;
 
 /*
@@ -395,6 +396,40 @@ int get_tag_attributes(int32_t tag, const char *tag_name)
 
     return rc;
 }
+
+
+
+int32_t get_instance_data_fast(int32_t tag)
+{
+    int32_t rc = PLCTAG_STATUS_OK;
+    uint8_t request[] = {
+                         (uint8_t)Omron_Get_All_Instances,
+                         0x03,                       /* 3 words in path */
+                         0x20, 0x6a,                 /* Class 6A */
+                         0x25, 0x00, 0x00, 0x00,     /* replace instance*/
+                         0x01, 0x00, 0x00, 0x00,     /* starting instance ID */
+                         0x64, 0x00, 0x00, 0x00,     /* number of instances to get */
+                         0x02, 0x00                  /* 1 = system tags, 2 = user tags */
+                        };
+
+    do {
+        rc = send_tag_data(tag, request, sizeof(request));
+        if(rc != PLCTAG_STATUS_OK) break;
+
+        /* did we get enough data? */
+        if(plc_tag_get_size(tag) < 10) {
+            printf("\nERROR:: Insufficient data returned in CIP response!");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        print_tag_data(tag);
+    } while(0);
+
+    return rc;
+}
+
+
 
 
 
