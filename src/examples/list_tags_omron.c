@@ -537,6 +537,12 @@ int main(int argc, char **argv)
             break;
         }
 
+        rc = get_instance_data_fast(tag);
+        if(rc < 0) {
+            printf("\nERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
         for(uint16_t id = 1; id <= max_id; id++) {
             char tag_name[128];
 
