@@ -584,11 +584,22 @@ char *setup_tag_string(int argc, char **argv)
     }
 
     if(argc == 3) {
+
+        printf("INFO: argv[0] = \"%s\".\n", argv[0]);
+        printf("INFO: argv[1] = \"%s\".\n", argv[1]);
+        printf("INFO: argv[2] = \"%s\".\n", argv[2]);
+
         /* two args */
         if(strcasecmp("--debug", argv[1]) == 0) {
+            printf("INFO: debug arg is in argv[1]=\"%s\"\n", argv[1]);
+            printf("INFO: host arg is in argv[2]=\"%s\"\n", argv[2]);
+
             gateway = argv[2];
             plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
         } else if(strcasecmp("--debug", argv[2]) == 0) {
+            printf("INFO: debug arg is in argv[2]=\"%s\"\n", argv[2]);
+            printf("INFO: host arg is in argv[1]=\"%s\"\n", argv[1]);
+
             gateway = argv[1];
             plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
         } else {
@@ -600,8 +611,6 @@ char *setup_tag_string(int argc, char **argv)
     } else {
         usage();
     }
-
-    gateway = argv[1];
 
     /* build the tag string. */
     snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway);
