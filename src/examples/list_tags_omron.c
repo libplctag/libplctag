@@ -639,7 +639,7 @@ int main(int argc, char **argv)
     uint16_t max_id = 0;
     tag_entry_p tags;
     uint16_t current_tag_entry_index = 0;
-    uint16_t next_instance_id = (uint16_t)0;
+    uint16_t next_instance_id = (uint16_t)1;
 
     printf("WARNING: This code is not complete and still very EXPERIMENTAL!\n");
 
@@ -690,6 +690,8 @@ int main(int argc, char **argv)
                 current_tag_entry_index += num_instances_processed;
                 next_instance_id = tags[current_tag_entry_index - 1].instance_id + 1;
             }
+
+            rc = num_instances_processed;
         } while(rc > 0);
 
         // for(uint16_t id = 1; id <= max_id; id++) {
