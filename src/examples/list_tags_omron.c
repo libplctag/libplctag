@@ -640,6 +640,8 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 
         tag_size = plc_tag_get_size(tag);
 
+        printf("INFO: response size is %d bytes.\n", tag_size);
+
         if(tag_size < 4) {
             printf("ERROR: Not enough data returned for a CIP response!\n");
             rc = PLCTAG_ERR_TOO_SMALL;
@@ -658,7 +660,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
         printf("INFO: CIP reply status %"PRIu8".\n", cip_status);
 
         /* did we get enough data? */
-        if(plc_tag_get_size(tag) < 6) {
+        if(tag_size < 6) {
             printf("ERROR:: Insufficient data returned in CIP response!\n");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
