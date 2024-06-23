@@ -675,7 +675,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 
         if(batch_size == 0) {
             printf("INFO: No more tags to enumerate.\n");
-            rc = 0;
+            rc = tag_index;
             break;
         }
 
@@ -693,9 +693,9 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 
                 cursor = new_cursor;
                 next_instance_id = tags[tag_index].instance_id + 1;
-                rc = (int32_t)tag_index;
 
                 tag_index++;
+                rc = (int32_t)tag_index;
             } else {
                 printf("ERROR: Failed to process instance #%"PRIu32".\n", tag_index);
                 rc = new_cursor;
@@ -849,10 +849,6 @@ int main(int argc, char **argv)
         }
 
         int32_t num_instances_processed = get_instance_data_fast(tag, tags, num_instances, true);
-        if(num_instances == 0) {
-            printf("INFO: Done getting initial tag information.\n");
-            break;
-        }
         if(num_instances_processed < 0) {
             rc = num_instances_processed;
             printf("ERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(rc));
