@@ -403,6 +403,7 @@ int get_tag_attributes_by_name(int32_t tag, const char *tag_name)
             cursor += 1;
 
             /* skip 3 unknown bytes */
+            cursor += 3;
 
             uint32_t alternate_element_type_id = plc_tag_get_uint32(tag, cursor);
             cursor += 4;
