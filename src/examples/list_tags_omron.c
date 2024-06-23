@@ -852,9 +852,9 @@ int main(int argc, char **argv)
         printf("INFO: Retrieved and procssed %"PRId32" tag instances.\n", num_instances_processed);
 
         if(num_instances_processed < 0) {
-            rc = num_instances_processed;
+            // rc = num_instances_processed;
             printf("ERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(rc));
-            break;
+            // break;
         }
 
         /* dump everything out and get detailed info for each tag. */
