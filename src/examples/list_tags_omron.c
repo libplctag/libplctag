@@ -474,6 +474,8 @@ int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_
 
         /* calculate where we should end, 6 = 2 for length, 4 for ID */
         end_cursor = start_cursor + 6 + instance_data_len;
+        printf("INFO: start cursor %"PRIu32", cursor %"PRIu32", instance data length  %"PRIu16", end cursor %"PRIu32"\n",
+                start_cursor, cursor, instance_data_len, cursor);
 
         /* skip the class? */
         cursor += 2;
@@ -498,8 +500,8 @@ int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_
         printf("INFO: Processed instance %"PRIu32" with name %s starting at location %"PRIu32" and ending at location %"PRIu32".\n",
                 tag_entry->instance_id, tag_entry->tag_name, start_cursor, cursor);
 
-        /* bump the cursor past to the next one but take into account the padding */
-        cursor += name_length & 0x01;
+        /* bump the cursor past to the next entry but take into account the padding */
+        cursor += name_length + name_length & 0x01;
 
         if(cursor != end_cursor) {
             printf("ERROR: check for cursor position failed!  Expected %"PRIu32" but got %"PRIu32".\n", end_cursor, cursor);
