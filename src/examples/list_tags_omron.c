@@ -434,6 +434,11 @@ int get_tag_attributes(int32_t tag, const char *tag_name)
                 total_elements *= (dimension_element_counts[i] == 0) ? 1 : dimension_element_counts[i];
             }
 
+            if(tag_data_element_type == 0xC1) {
+                /* fix up the length for BOOL arrays */
+                total_elements = (total_elements + 15)/16;
+            }
+
             printf("\t\tTag total size in bytes: %"PRIu32"\n", (total_elements * tag_type_len));
         }
     } while(0);
