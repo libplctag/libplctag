@@ -427,6 +427,14 @@ int get_tag_attributes(int32_t tag, const char *tag_name)
                 printf("%"PRIu32, array_start_indexes[i]);
             }
             printf("]\n");
+
+            uint32_t total_elements = 1;
+
+            for(uint8_t i=0; i < num_array_dimensions; i++) {
+                total_elements *= (dimension_element_counts[i] == 0) ? 1 : dimension_element_counts[i];
+            }
+
+            printf("\t\tTag total size in bytes: %"PRIu32"\n", (total_elements * tag_type_len));
         }
     } while(0);
 
@@ -443,86 +451,151 @@ struct tag_entry_t {
 typedef struct tag_entry_t tag_entry_t;
 typedef tag_entry_t *tag_entry_p;
 
-int32_t process_instance_data(int32_t tag, tag_entry_p *tags, uint16_t num_instances, uint16_t current_tag_entry_index)
+
+int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_t start_cursor)
 {
     int32_t rc = PLCTAG_STATUS_OK;
-    uint32_t cursor = 0;
-    uint32_t check_cursor = 0;
-    int32_t processed_instance_count = 0;
+    uint32_t cursor = start_cursor;
+    uint32_t end_cursor = 0;
 
     do {
-        /* process the data */
-        cursor = 4; /* skip past the CIP header */
-        uint32_t batch_size = plc_tag_get_uint32(tag, cursor);
+        uint32_t instance_id = plc_tag_get_uint32(tag, cursor);
         cursor += 4;
 
-        /* if there are no entries, then we are done */
-        if(batch_size == 0) {
-            printf("INFO: Got no instance entries back.  Done.\n");
-            rc = batch_size;
+        tag_entry->instance_id = instance_id;
+
+        uint16_t instance_data_len = plc_tag_get_uint16(tag, cursor);
+        cursor += 2;
+
+        /* calculate where we should end, 6 = 2 for length, 4 for ID */
+        end_cursor = start_cursor + 6 + instance_data_len;
+
+        /* skip the class? */
+        cursor += 2;
+
+        /* skip the instance, again */
+        cursor += 4;
+
+        /* read the tag name */
+        uint8_t name_length = plc_tag_get_uint8(tag, cursor);
+        cursor += 1;
+
+        uint8_t char_index = 0;
+        for(char_index = 0; char_index < name_length && char_index < (sizeof(tag_entry->tag_name) - 1); char_index++) {
+            tag_entry->tag_name[char_index] = (char)plc_tag_get_uint8(tag, cursor + char_index);
+        }
+
+        /* zero out the rest of the buffer */
+        for(; char_index < sizeof(tag_entry->tag_name); char_index++) {
+            tag_entry->tag_name[char_index] = 0;
+        }
+
+        printf("INFO: Processed instance %"PRIu32" with name %s starting at location %"PRIu32" and ending at location %"PRIu32".\n",
+                tag_entry->instance_id, tag_entry->tag_name, start_cursor, cursor);
+
+        /* bump the cursor past to the next one but take into account the padding */
+        cursor += name_length & 0x01;
+
+        if(cursor != end_cursor) {
+            printf("ERROR: check for cursor position failed!  Expected %"PRIu32" but got %"PRIu32".\n", end_cursor, cursor);
+            rc = PLCTAG_ERR_READ;
             break;
         }
 
-        printf("INFO: processing %"PRIu32" instances starting at instance index %"PRIu16".\n", batch_size, current_tag_entry_index);
-
-        for(int instance_index = current_tag_entry_index;
-                instance_index < batch_size && instance_index < num_instances;
-                instance_index++) {
-            uint32_t instance_id = plc_tag_get_uint32(tag, cursor);
-            cursor += 4;
-
-            tags[instance_index]->instance_id = instance_id;
-
-            uint16_t instance_data_len = plc_tag_get_uint16(tag, cursor);
-            cursor += 2;
-
-            /* calculate a check */
-            check_cursor = cursor + instance_data_len;
-
-            /* skip the class? */
-            cursor += 2;
-
-            /* skip the instance, again */
-            cursor += 4;
-
-            /* read the tag name */
-            uint8_t name_length = plc_tag_get_uint8(tag, cursor);
-            cursor += 1;
-
-            uint8_t char_index = 0;
-            for(char_index = 0; char_index < name_length && char_index < (sizeof((*tags)[instance_index].tag_name) - 1); char_index++) {
-                (*tags)[instance_index].tag_name[char_index] = (char)plc_tag_get_uint8(tag, cursor + char_index);
-            }
-
-            /* zero out the rest of the buffer */
-            for(; char_index < sizeof((*tags)[instance_index].tag_name); char_index++) {
-                (*tags)[instance_index].tag_name[char_index] = 0;
-            }
-
-            /* bump the cursor past to the next one but take into account the padding */
-            cursor += name_length + (name_length & 0x01 ? 1 : 0);
-
-            if(check_cursor != cursor) {
-                printf("ERROR: check for cursor position failed!  Expected %"PRIu32" but got %"PRIu32".\n", check_cursor, cursor);
-                rc = PLCTAG_ERR_BAD_STATUS;
-                break;
-            }
-        }
-
-        rc = (int32_t)batch_size;
+        rc = cursor;
     } while(0);
 
     return rc;
 }
 
 
-int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_instances, int16_t next_instance_id, int16_t current_tag_entry_index)
+
+// int32_t process_instance_data(int32_t tag, tag_entry_p *tags, uint16_t num_instances, uint16_t current_tag_entry_index)
+// {
+//     int32_t rc = PLCTAG_STATUS_OK;
+//     uint32_t cursor = 0;
+//     int32_t processed_instance_count = 0;
+
+//     do {
+//         /* process the data */
+//         cursor = 4; /* skip past the CIP header */
+//         uint16_t batch_size = plc_tag_get_uint16(tag, cursor);
+//         cursor += 2;
+
+//         /* if there are no entries, then we are done */
+//         if(batch_size == 0) {
+//             printf("INFO: Got no instance entries back.  Done.\n");
+//             rc = batch_size;
+//             break;
+//         }
+
+//         printf("INFO: processing %"PRIu32" instances starting at instance index %"PRIu16".\n", batch_size, current_tag_entry_index);
+
+//         /* skip another INT field.  What is it for? */
+//         cursor += 2;
+
+//         for(int instance_index = current_tag_entry_index;
+//                 instance_index < (batch_size + current_tag_entry_index)
+//                     && instance_index < num_instances;
+//                 instance_index++) {
+//             uint32_t instance_id = plc_tag_get_uint32(tag, cursor);
+//             cursor += 4;
+
+//             tags[instance_index]->instance_id = instance_id;
+
+//             uint16_t instance_data_len = plc_tag_get_uint16(tag, cursor);
+//             cursor += 2;
+
+//             /* calculate a check */
+//             check_cursor = cursor + instance_data_len;
+
+//             /* skip the class? */
+//             cursor += 2;
+
+//             /* skip the instance, again */
+//             cursor += 4;
+
+//             /* read the tag name */
+//             uint8_t name_length = plc_tag_get_uint8(tag, cursor);
+//             cursor += 1;
+
+//             uint8_t char_index = 0;
+//             for(char_index = 0; char_index < name_length && char_index < (sizeof((*tags)[instance_index].tag_name) - 1); char_index++) {
+//                 (*tags)[instance_index].tag_name[char_index] = (char)plc_tag_get_uint8(tag, cursor + char_index);
+//             }
+
+//             /* zero out the rest of the buffer */
+//             for(; char_index < sizeof((*tags)[instance_index].tag_name); char_index++) {
+//                 (*tags)[instance_index].tag_name[char_index] = 0;
+//             }
+
+//             /* bump the cursor past to the next one but take into account the padding */
+//             cursor += name_length + (name_length & 0x01 ? 1 : 0);
+
+//             if(check_cursor != cursor) {
+//                 printf("ERROR: check for cursor position failed!  Expected %"PRIu32" but got %"PRIu32".\n", check_cursor, cursor);
+//                 rc = PLCTAG_ERR_BAD_STATUS;
+//                 break;
+//             }
+//         }
+
+//         rc = (int32_t)batch_size;
+//     } while(0);
+
+//     return rc;
+// }
+
+
+int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_instances)
 {
     int32_t rc = PLCTAG_STATUS_OK;
-    int cursor = 0;
     int16_t batch_size = 0;
     int tag_size = 0;
     uint8_t cip_status = 0;
+    int32_t cursor = 0;
+    int32_t new_cursor = 0;
+    uint32_t tag_index = 0;
+    uint32_t next_instance_id = 1;
 
     uint8_t request[] = {
                          (uint8_t)Omron_Get_All_Instances,
@@ -535,9 +608,13 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
                         };
 
     do {
+        printf("INFO: Getting batch of tag info starting at tag ID %"PRIu32".\n", next_instance_id);
+
         /* patch up the next instance ID */
         request[8] = (next_instance_id & 0xFF);
         request[9] = ((next_instance_id >> 8) & 0xFF);
+        request[10] = ((next_instance_id >> 16) & 0xFF);
+        request[11] = ((next_instance_id >> 24) & 0xFF);
 
         rc = send_tag_data(tag, request, sizeof(request));
         if(rc != PLCTAG_STATUS_OK) break;
@@ -554,7 +631,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 
         /* check the CIP status */
         if(cip_status == 0x08) {
-            printf("ERROR: PLC does not support the tag instance service!\n");
+            printf("ERROR: PLC does not support the batch tag instance service!\n");
             rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
@@ -568,10 +645,44 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
             break;
         }
 
-        /* a zero batch size indicates that we are done */
-        batch_size = process_instance_data(tag, &tags, num_instances, current_tag_entry_index);
-        rc = batch_size;
-    } while(0);
+        /* jump past the CIP header */
+        cursor = 4;
+
+        /* how many instances did we get? */
+        uint16_t batch_size = plc_tag_get_uint16(tag, cursor);
+        cursor += 2;
+
+        if(batch_size == 0) {
+            printf("INFO: No more tags to enumerate.\n");
+            rc = PLCTAG_STATUS_OK;
+            break;
+        }
+
+        printf("INFO: Processing batch of %"PRIu16" instances.\n", batch_size);
+
+        /* skip past another 16-bit number.  No idea what it is. */
+        cursor += 2;
+
+        for(; tag_index < num_instances; tag_index++) {
+            printf("INFO: Processing instance #%"PRIu32".\n", tag_index);
+
+            new_cursor = process_single_instance_data(tag, &(tags[tag_index]), cursor);
+            if(new_cursor > 0) {
+                printf("INFO: Processed instance %"PRIu32".\n", tag_index);
+                cursor = new_cursor;
+                next_instance_id = tags[tag_index].instance_id + 1;
+                rc = (int32_t)tag_index;
+            } else {
+                printf("ERROR: Failed to process instance %"PRIu32".\n", tag_index);
+                rc = new_cursor;
+                break;
+            }
+        }
+
+        if(rc < 0) {
+            break;
+        }
+    } while(1);
 
     return rc;
 }
@@ -639,7 +750,7 @@ char *setup_tag_string(int argc, char **argv)
     snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway);
 
     /* FIXME - check size! */
-    printf("Using tag string \"%s\".\n", tag_string);
+    printf("INFO: Using tag string \"%s\".\n", tag_string);
 
     return strdup(tag_string);
 }
@@ -708,19 +819,14 @@ int main(int argc, char **argv)
             break;
         }
 
-        do {
-            int32_t num_instances_processed = get_instance_data_fast(tag, tags, num_instances, next_instance_id, current_tag_entry_index);
-            if(num_instances_processed < 0) {
-                printf("ERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(num_instances_processed));
-            } else {
-                current_tag_entry_index += num_instances_processed;
-                next_instance_id = tags[current_tag_entry_index - 1].instance_id + 1;
-            }
-
+        int32_t num_instances_processed = get_instance_data_fast(tag, tags, num_instances);
+        if(num_instances_processed < 0) {
             rc = num_instances_processed;
-        } while(rc > 0); /* zero entries or a negative terminate the loop */
+            printf("ERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(rc));
+            break;
+        }
 
-        for(int32_t instance_index=0; instance_index < current_tag_entry_index; instance_index++) {
+        for(int32_t instance_index=0; instance_index < num_instances_processed; instance_index++) {
             printf("\nTag %s (%04"PRIx32"):\n", tags[instance_index].tag_name, tags[instance_index].instance_id);
             rc = get_tag_attributes(tag, tags[instance_index].tag_name);
             if(rc != PLCTAG_STATUS_OK)
