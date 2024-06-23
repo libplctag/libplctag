@@ -307,7 +307,7 @@ int32_t get_tag_info(int32_t tag, uint16_t tag_instance_id, char *tag_name, int 
 
 
 
-int get_tag_attributes(int32_t tag, const char *tag_name)
+int get_tag_attributes_by_name(int32_t tag, const char *tag_name)
 {
     int rc = PLCTAG_STATUS_OK;
     uint8_t request[130] = {0};
@@ -403,6 +403,7 @@ int get_tag_attributes(int32_t tag, const char *tag_name)
             cursor += 1;
 
             /* skip 3 unknown bytes */
+
             uint32_t alternate_element_type_id = plc_tag_get_uint32(tag, cursor);
             cursor += 4;
 
@@ -497,15 +498,13 @@ int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_
             tag_entry->tag_name[char_index] = 0;
         }
 
-        /* total string length includes the count byte */
-        uint32_t string_length = 1 + name_length;
+        /* bump the cursor */
+        cursor += name_length;
 
-        /* the string must take up an even number of bytes */
-        string_length += (string_length & 0x01);
+        /* if the byte position is odd, we need a padding byte. */
+        cursor += (cursor & 0x01);
 
-        cursor += string_length;
-
-        printf("INFO: Processed instance %"PRIu32" with name %s starting at location %"PRIu32" and ending at location %"PRIu32".\n",
+        printf("INFO: Processed tag instance ID %"PRIu32" with name %s starting at location %"PRIu32" and ending at location %"PRIu32".\n",
                 tag_entry->instance_id, tag_entry->tag_name, start_cursor, cursor);
 
         if(cursor != end_cursor) {
@@ -622,6 +621,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
     do {
         printf("INFO: Getting batch of tag info starting at tag ID %"PRIu32".\n", next_instance_id);
 
+        /* don't really need to do this each time around the loop */
         if(is_user) {
             request[16] = 0x02;
         } else {
@@ -847,7 +847,7 @@ int main(int argc, char **argv)
         /* dump everything out and get detailed info for each tag. */
         for(int32_t instance_index=0; instance_index < num_instances_processed; instance_index++) {
             printf("\nTag %s (%04"PRIx32"):\n", tags[instance_index].tag_name, tags[instance_index].instance_id);
-            rc = get_tag_attributes(tag, tags[instance_index].tag_name);
+            rc = get_tag_attributes_by_name(tag, tags[instance_index].tag_name);
             if(rc != PLCTAG_STATUS_OK) {
                 break;
             }
