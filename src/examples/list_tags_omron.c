@@ -657,7 +657,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
         printf("INFO: CIP reply status %"PRIu8".\n", cip_status);
 
         /* did we get enough data? */
-        if(plc_tag_get_size(tag) < 10) {
+        if(plc_tag_get_size(tag) < 6) {
             printf("ERROR:: Insufficient data returned in CIP response!\n");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
@@ -672,7 +672,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 
         if(batch_size == 0) {
             printf("INFO: No more tags to enumerate.\n");
-            rc = PLCTAG_STATUS_OK;
+            rc = 0;
             break;
         }
 
@@ -846,6 +846,10 @@ int main(int argc, char **argv)
         }
 
         int32_t num_instances_processed = get_instance_data_fast(tag, tags, num_instances, true);
+        if(num_instances == 0) {
+            printf("INFO: Done getting initial tag information.\n");
+            break;
+        }
         if(num_instances_processed < 0) {
             rc = num_instances_processed;
             printf("ERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(rc));
