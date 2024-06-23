@@ -501,7 +501,7 @@ int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_
                 tag_entry->instance_id, tag_entry->tag_name, start_cursor, cursor);
 
         /* bump the cursor past to the next entry but take into account the padding */
-        cursor += name_length + name_length & 0x01;
+        cursor += name_length + (name_length & 0x01);
 
         if(cursor != end_cursor) {
             printf("ERROR: check for cursor position failed!  Expected %"PRIu32" but got %"PRIu32".\n", end_cursor, cursor);
