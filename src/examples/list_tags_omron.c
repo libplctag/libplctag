@@ -92,7 +92,7 @@ static int set_tag_data(int32_t tag, uint8_t *data, size_t raw_data_size)
 
     rc = plc_tag_set_size(tag, data_size);
     if(rc < 0) {
-        printf( "\nERROR: Unable to set the payload size on the tag %s!\n", plc_tag_decode_error(rc));
+        printf( "ERROR: Unable to set the payload size on the tag %s!\n", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -103,7 +103,7 @@ static int set_tag_data(int32_t tag, uint8_t *data, size_t raw_data_size)
         rc = plc_tag_set_uint8(tag, i, data[i]);
 
         if(rc != PLCTAG_STATUS_OK) {
-            printf( "\nERROR: %s (%d) Unable to set the payload data in the tag at location %d!\n", plc_tag_decode_error(rc), rc, i);
+            printf( "ERROR: %s (%d) Unable to set the payload data in the tag at location %d!\n", plc_tag_decode_error(rc), rc, i);
         }
     }
 
@@ -115,7 +115,7 @@ int print_tag_data(int32_t tag)
 {
     int size = plc_tag_get_size(tag);
     if(size < 0) {
-        printf( "\nERROR: Unable to get the payload size on the tag %s!\n", plc_tag_decode_error(size));
+        printf( "ERROR: Unable to get the payload size on the tag %s!\n", plc_tag_decode_error(size));
         return size;
     }
 
@@ -124,6 +124,8 @@ int print_tag_data(int32_t tag)
         uint8_t data = plc_tag_get_uint8(tag, i);
         printf(" %02x", (unsigned int)data);
     }
+
+    printf("\n");
 
     return PLCTAG_STATUS_OK;
 }
@@ -138,26 +140,26 @@ int send_tag_data(int32_t tag, uint8_t *data, size_t data_size)
         /* copy data into the tag buffer */
         rc = set_tag_data(tag, data, data_size);
         if(rc != PLCTAG_STATUS_OK)  {
-            printf("\nERROR: Unable to set the request data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
+            printf("ERROR: Unable to set the request data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
             break;
         }
 
-        printf("\n\tSending data: ");
+        printf("\tSending request data: ");
 
         print_tag_data(tag);
 
         /* get the data, Write is the only action supported. */
         rc = plc_tag_write(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
-            printf("\nERROR: Unable to send the raw request! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+            printf("ERROR: Unable to send the raw request! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
             break;
         }
 
-        printf("\n\tReceived response data: ");
+        printf("\tReceived response data: ");
 
         rc = print_tag_data(tag);
         if(rc != PLCTAG_STATUS_OK) {
-            printf("\n\nERROR: Unable to print the response! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+            printf("ERROR: Unable to print the response! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
             break;
         }
     } while(0);
@@ -186,12 +188,12 @@ int32_t get_tag_instance_counts(int32_t tag, uint16_t *num_instances, uint16_t *
                 uint8_t cip_status = plc_tag_get_uint8(tag, 2);
 
                 if(cip_status != 0) {
-                    printf("\nERROR: CIP command failed on remote PLC with error code %x!", (unsigned int)cip_status);
+                    printf("ERROR: CIP command failed on remote PLC with error code %x!\n", (unsigned int)cip_status);
                     rc = PLCTAG_ERR_REMOTE_ERR;
                     break;
                 }
             } else {
-                printf("\nERROR: Insufficient data returned in CIP response to get full CIP header!");
+                printf("ERROR: Insufficient data returned in CIP response to get full CIP header!\n");
                 rc = PLCTAG_ERR_TOO_SMALL;
                 break;
             }
@@ -201,9 +203,9 @@ int32_t get_tag_instance_counts(int32_t tag, uint16_t *num_instances, uint16_t *
                 *num_instances = plc_tag_get_uint16(tag, 6);
                 *max_id = plc_tag_get_uint16(tag, 8);
 
-                printf("\nINFO: the number of instances is %"PRIu16" and the max instance ID is %"PRIu16".\n", *num_instances, *max_id);
+                printf("INFO: the number of instances is %"PRIu16" and the max instance ID is %"PRIu16".\n", *num_instances, *max_id);
             } else {
-                printf("\nERROR: Insufficient data returned in CIP response to get all attribute values!");
+                printf("ERROR: Insufficient data returned in CIP response to get all attribute values!\n");
                 rc = PLCTAG_ERR_TOO_SMALL;
                 break;
             }
@@ -246,7 +248,7 @@ int32_t get_tag_info(int32_t tag, uint16_t tag_instance_id, char *tag_name, int 
 
         /* did we get enough data? */
         if(plc_tag_get_size(tag) < 20) {
-            printf("\nERROR:: Insufficient data returned in CIP response!");
+            printf("ERROR:: Insufficient data returned in CIP response!\n");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
@@ -256,7 +258,7 @@ int32_t get_tag_info(int32_t tag, uint16_t tag_instance_id, char *tag_name, int 
 
         /* IDs are not necessarily continguous, so report anything missing but don't stop. */
         if(cip_status != 0) {
-            printf("\nERROR: CIP command failed on remote PLC with error code %x!", (unsigned int)cip_status);
+            printf("ERROR: CIP command failed on remote PLC with error code %x!\n", (unsigned int)cip_status);
             return PLCTAG_ERR_NOT_FOUND;
         }
 
@@ -281,11 +283,11 @@ int32_t get_tag_info(int32_t tag, uint16_t tag_instance_id, char *tag_name, int 
 
         uint8_t name_len = plc_tag_get_uint8(tag, 8);
 
-        printf("\nINFO: Tag name is %u characters long.\n", (unsigned int)name_len);
+        printf("INFO: Tag name is %u characters long.\n", (unsigned int)name_len);
 
         /* FIXME should check for sanity here. */
         if(plc_tag_get_size(tag) < (9 + name_len + 4)) {
-            printf("\nERROR: Insufficient space in response!  Expected %d bytes, but got %d bytes", (int)(unsigned int)(9 + name_len + 4), plc_tag_get_size(tag));
+            printf("ERROR: Insufficient space in response!  Expected %d bytes, but got %d bytes.\n", (int)(unsigned int)(9 + name_len + 4), plc_tag_get_size(tag));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
@@ -352,7 +354,7 @@ int get_tag_attributes(int32_t tag, const char *tag_name)
 
         rc = send_tag_data(tag, request, (size_t)(unsigned int)req_index);
         if(rc != PLCTAG_STATUS_OK) {
-            printf("\nERROR:: Error getting \"%s\" attribute data!\n", tag_name);
+            printf("ERROR:: Error getting \"%s\" attribute data!\n", tag_name);
             break;
         }
 
@@ -456,12 +458,12 @@ int32_t process_instance_data(int32_t tag, tag_entry_p *tags, uint16_t num_insta
 
         /* if there are no entries, then we are done */
         if(batch_size == 0) {
-            printf("\nINFO: Got no instance entries back.  Done.\n");
+            printf("INFO: Got no instance entries back.  Done.\n");
             rc = batch_size;
             break;
         }
 
-        printf("\nINFO: processing %"PRIu32" instances starting at instance index %"PRIu16".\n", batch_size, current_tag_entry_index);
+        printf("INFO: processing %"PRIu32" instances starting at instance index %"PRIu16".\n", batch_size, current_tag_entry_index);
 
         for(int instance_index = current_tag_entry_index;
                 instance_index < batch_size && instance_index < num_instances;
@@ -519,6 +521,8 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
     int32_t rc = PLCTAG_STATUS_OK;
     int cursor = 0;
     int16_t batch_size = 0;
+    int tag_size = 0;
+    uint8_t cip_status = 0;
 
     uint8_t request[] = {
                          (uint8_t)Omron_Get_All_Instances,
@@ -526,21 +530,40 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
                          0x20, 0x6a,                 /* Class 6A */
                          0x25, 0x00, 0x00, 0x00,     /* replace instance*/
                          0x00, 0x00, 0x00, 0x00,     /* starting instance ID */
-                         0x64, 0x00, 0x00, 0x00,     /* number of instances to get */
+                         0x20, 0x00, 0x00, 0x00,     /* number of instances to get */
                          0x02, 0x00                  /* 1 = system tags, 2 = user tags */
                         };
 
     do {
         /* patch up the next instance ID */
-        request[7] = (next_instance_id & 0xFF);
-        request[8] = ((next_instance_id >> 8) & 0xFF);
+        request[8] = (next_instance_id & 0xFF);
+        request[9] = ((next_instance_id >> 8) & 0xFF);
 
         rc = send_tag_data(tag, request, sizeof(request));
         if(rc != PLCTAG_STATUS_OK) break;
 
+        tag_size = plc_tag_get_size(tag);
+
+        if(tag_size < 4) {
+            printf("ERROR: Not enough data returned for a CIP response!\n");
+            rc = PLCTAG_ERR_TOO_SMALL;
+            break;
+        }
+
+        cip_status = plc_tag_get_uint8(tag, 2);
+
+        /* check the CIP status */
+        if(cip_status == 0x08) {
+            printf("ERROR: PLC does not support the tag instance service!\n");
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
+        printf("INFO: CIP reply status %"PRIu8".\n", cip_status);
+
         /* did we get enough data? */
         if(plc_tag_get_size(tag) < 10) {
-            printf("\nERROR:: Insufficient data returned in CIP response!");
+            printf("ERROR:: Insufficient data returned in CIP response!\n");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
@@ -559,9 +582,9 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 
 void usage()
 {
-    printf("Usage: list_tags_omron <PLC IP> [--debug]"
-           "\n\t\tExample: list_tags_omron 10.1.2.3"
-           "\nAdding the optional --debug flag will turn on some debugging in the library.\n"
+    printf("Usage: list_tags_omron <PLC IP> [--debug]\n"
+           "\t\tExample: list_tags_omron 10.1.2.3\n"
+           "\tAdding the optional --debug flag will turn on some debugging in the library.\n"
           );
     exit(1);
 }
@@ -585,20 +608,20 @@ char *setup_tag_string(int argc, char **argv)
 
     if(argc == 3) {
 
-        printf("INFO: argv[0] = \"%s\".\n", argv[0]);
-        printf("INFO: argv[1] = \"%s\".\n", argv[1]);
-        printf("INFO: argv[2] = \"%s\".\n", argv[2]);
+        // printf("INFO: argv[0] = \"%s\".\n", argv[0]);
+        // printf("INFO: argv[1] = \"%s\".\n", argv[1]);
+        // printf("INFO: argv[2] = \"%s\".\n", argv[2]);
 
         /* two args */
         if(strcasecmp("--debug", argv[1]) == 0) {
-            printf("INFO: debug arg is in argv[1]=\"%s\"\n", argv[1]);
-            printf("INFO: host arg is in argv[2]=\"%s\"\n", argv[2]);
+            // printf("INFO: debug arg is in argv[1]=\"%s\"", argv[1]);
+            // printf("INFO: host arg is in argv[2]=\"%s\"", argv[2]);
 
             gateway = argv[2];
             plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
         } else if(strcasecmp("--debug", argv[2]) == 0) {
-            printf("INFO: debug arg is in argv[2]=\"%s\"\n", argv[2]);
-            printf("INFO: host arg is in argv[1]=\"%s\"\n", argv[1]);
+            // printf("INFO: debug arg is in argv[2]=\"%s\"", argv[2]);
+            // printf("INFO: host arg is in argv[1]=\"%s\"", argv[1]);
 
             gateway = argv[1];
             plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
@@ -655,7 +678,7 @@ int main(int argc, char **argv)
 
     tag_string = setup_tag_string(argc, argv);
     if(!tag_string) {
-        printf("\nERROR:: unable to create tag string!\n");
+        printf("ERROR:: unable to create tag string!\n");
         usage();
     }
 
@@ -663,21 +686,24 @@ int main(int argc, char **argv)
         /* create the tag */
         tag = plc_tag_create(tag_string, DATA_TIMEOUT);
         if(tag < 0) {
-            printf("\nERROR: %s: Could not create tag!\n", plc_tag_decode_error(tag));
+            printf("ERROR: %s: Could not create tag!\n", plc_tag_decode_error(tag));
             rc = tag;
             break;
         }
 
         rc = get_tag_instance_counts(tag, &num_instances, &max_id);
         if(rc < 0) {
-            printf("\nERROR: %s: Could not run Get_Attribute_All on class 6A!\n", plc_tag_decode_error(rc));
+            printf("ERROR: %s: Could not run Get_Attribute_All on class 6A!\n", plc_tag_decode_error(rc));
             break;
         }
+
+        // num_instances = 300;
+        // max_id = 300;
 
         /* allocate the tags array to store the instance data */
         tags = calloc(num_instances, sizeof(struct tag_entry_t));
         if(!tags) {
-            printf("ERROR: unable to allocate memory for tags!");
+            printf("ERROR: unable to allocate memory for tags!\n");
             rc = PLCTAG_ERR_NO_MEM;
             break;
         }
@@ -685,7 +711,7 @@ int main(int argc, char **argv)
         do {
             int32_t num_instances_processed = get_instance_data_fast(tag, tags, num_instances, next_instance_id, current_tag_entry_index);
             if(num_instances_processed < 0) {
-                printf("\nERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(num_instances_processed));
+                printf("ERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(num_instances_processed));
             } else {
                 current_tag_entry_index += num_instances_processed;
                 next_instance_id = tags[current_tag_entry_index - 1].instance_id + 1;
@@ -695,7 +721,7 @@ int main(int argc, char **argv)
         } while(rc > 0); /* zero entries or a negative terminate the loop */
 
         for(int32_t instance_index=0; instance_index < current_tag_entry_index; instance_index++) {
-            printf("\n\nTag %s (%04"PRIx32"):\n", tags[instance_index].tag_name, tags[instance_index].instance_id);
+            printf("\nTag %s (%04"PRIx32"):\n", tags[instance_index].tag_name, tags[instance_index].instance_id);
             rc = get_tag_attributes(tag, tags[instance_index].tag_name);
             if(rc != PLCTAG_STATUS_OK)
             break;
@@ -707,7 +733,7 @@ int main(int argc, char **argv)
         //     /* no need to zero out the buffer as get_tag_name will zero out anything it does not overwrite */
         //     rc = get_tag_info(tag, id, tag_name, sizeof(tag_name));
         //     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_NOT_FOUND) {
-        //         printf("\nERROR: %s: Could not run Get_Attribute_All on tag instance!\n", plc_tag_decode_error(rc));
+        //         printf("ERROR: %s: Could not run Get_Attribute_All on tag instance!\n", plc_tag_decode_error(rc));
         //         break;
         //     }
 
@@ -730,7 +756,7 @@ int main(int argc, char **argv)
         usage();
     }
 
-    printf("\n\n********* Complete *********!\n");
+    printf("\n********* Complete *********!\n");
 
     return 0;
 }
