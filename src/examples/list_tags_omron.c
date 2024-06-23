@@ -586,7 +586,7 @@ int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_
 // }
 
 
-int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_instances)
+int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_instances, bool is_user)
 {
     int32_t rc = PLCTAG_STATUS_OK;
     int16_t batch_size = 0;
@@ -604,11 +604,17 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
                          0x25, 0x00, 0x00, 0x00,     /* replace instance*/
                          0x00, 0x00, 0x00, 0x00,     /* starting instance ID */
                          0x20, 0x00, 0x00, 0x00,     /* number of instances to get */
-                         0x02, 0x00                  /* 1 = system tags, 2 = user tags */
+                         0x00, 0x00                  /* 1 = system tags, 2 = user tags */
                         };
 
     do {
         printf("INFO: Getting batch of tag info starting at tag ID %"PRIu32".\n", next_instance_id);
+
+        if(is_user) {
+            request[16] = 0x02;
+        } else {
+            request[16] = 0x01;
+        }
 
         /* patch up the next instance ID */
         request[8] = (next_instance_id & 0xFF);
@@ -819,41 +825,21 @@ int main(int argc, char **argv)
             break;
         }
 
-        int32_t num_instances_processed = get_instance_data_fast(tag, tags, num_instances);
+        int32_t num_instances_processed = get_instance_data_fast(tag, tags, num_instances, true);
         if(num_instances_processed < 0) {
             rc = num_instances_processed;
             printf("ERROR: %s: Could not run Omron get instances on class 6A!\n", plc_tag_decode_error(rc));
             break;
         }
 
+        /* dump everything out and get detailed info for each tag. */
         for(int32_t instance_index=0; instance_index < num_instances_processed; instance_index++) {
             printf("\nTag %s (%04"PRIx32"):\n", tags[instance_index].tag_name, tags[instance_index].instance_id);
             rc = get_tag_attributes(tag, tags[instance_index].tag_name);
-            if(rc != PLCTAG_STATUS_OK)
-            break;
+            if(rc != PLCTAG_STATUS_OK) {
+                break;
+            }
         }
-
-        // for(uint16_t id = 1; id <= max_id; id++) {
-        //     char tag_name[128];
-
-        //     /* no need to zero out the buffer as get_tag_name will zero out anything it does not overwrite */
-        //     rc = get_tag_info(tag, id, tag_name, sizeof(tag_name));
-        //     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_ERR_NOT_FOUND) {
-        //         printf("ERROR: %s: Could not run Get_Attribute_All on tag instance!\n", plc_tag_decode_error(rc));
-        //         break;
-        //     }
-
-        //     if(rc == PLCTAG_STATUS_OK) {
-        //         printf("Instance 0x%02x: \"%s\".\n", id, tag_name);
-        //     } else {
-        //         printf("Instance 0x%02x seems to be unused.\n", id);
-        //     }
-
-        //     /* get the tag attributes from the name */
-        //     if(rc == PLCTAG_STATUS_OK) {
-        //         rc = get_tag_attributes(tag, tag_name);
-        //     }
-        // }
     } while(0);
 
     if(tag > 0) {
