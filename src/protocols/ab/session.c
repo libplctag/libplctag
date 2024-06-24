@@ -676,7 +676,7 @@ ab_session_p create_omron_njnx_session_unsafe(const char *host, const char *path
     pdebug(DEBUG_INFO, "Starting.");
 
     do {
-        session = session_create_unsafe(MAX_CIP_OMRON_MSG_SIZE_EX, true, host, path, AB_PLC_LGX, use_connected_msg, connection_group_id);
+        session = session_create_unsafe(MAX_CIP_OMRON_MSG_SIZE_EX, true, host, path, AB_PLC_OMRON_NJNX, use_connected_msg, connection_group_id);
         if(session != NULL) {
             session->only_use_old_forward_open = false;
             session->fo_conn_size = MAX_CIP_OMRON_MSG_SIZE;
