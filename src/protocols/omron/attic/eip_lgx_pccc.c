@@ -40,10 +40,9 @@ extern "C"
 
 #include <lib/libplctag.h>
 #include <omron/omron_common.h>
-#include <omron/pccc.h>
 #include <omron/eip_lgx_pccc.h>
 #include <omron/tag.h>
-#include <omron/session.h>
+#include <omron/conn.h>
 #include <omron/defs.h>
 #include <omron/error_codes.h>
 #include <util/debug.h>
@@ -97,7 +96,7 @@ static int check_write_status(omron_tag_p tag);
  */
 int tag_status(omron_tag_p tag)
 {
-    if (!tag->session) {
+    if (!tag->conn) {
         /* this is not OK.  This is fatal! */
         return PLCTAG_ERR_CREATE;
     }
@@ -173,7 +172,7 @@ int tag_read_start(omron_tag_p tag)
 {
     int rc = PLCTAG_STATUS_OK;
     omron_request_p req;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
+    uint16_t conn_seq_id = (uint16_t)(conn_get_new_seq_id(tag->conn));;
     int overhead;
     int data_per_packet;
     eip_cip_uc_req *lgx_pccc;
@@ -210,11 +209,11 @@ int tag_read_start(omron_tag_p tag)
 
     /* TODO - this is not correct for this kind of transaction */
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = conn_get_max_payload(tag->conn) - overhead;
 
     if(data_per_packet <= 0) {
         tag->read_in_progress = 0;
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, conn_get_max_payload(tag->conn));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -225,7 +224,7 @@ int tag_read_start(omron_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = conn_create_request(tag->conn, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         tag->read_in_progress = 0;
@@ -256,7 +255,7 @@ int tag_read_start(omron_tag_p tag)
     /* fill in the PCCC command */
     embed_pccc->pccc_command = OMRON_EIP_PCCC_TYPED_CMD;
     embed_pccc->pccc_status = 0;  /* STS 0 in request */
-    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* TODO - get sequence ID from session? */
+    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* TODO - get sequence ID from conn? */
     embed_pccc->pccc_function = OMRON_EIP_PCCCLGX_TYPED_READ_FUNC;
     embed_pccc->pccc_offset = h2le16((uint16_t)0);
     embed_pccc->pccc_transfer_size = h2le16((uint16_t)tag->elem_count); /* This is the offset items */
@@ -310,15 +309,15 @@ int tag_read_start(omron_tag_p tag)
     lgx_pccc->uc_cmd_length = h2le16((uint16_t)(data - embed_start));
 
     /* copy the path */
-    if(tag->session->conn_path_size > 0) {
-        *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    if(tag->conn->conn_path_size > 0) {
+        *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
         data++;
         *data = 0; /* reserved/pad */
         data++;
-        mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-        data += tag->session->conn_path_size;
+        mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+        data += tag->conn->conn_path_size;
     } else {
-        pdebug(DEBUG_DETAIL, "connection path is of length %d!", tag->session->conn_path_size);
+        pdebug(DEBUG_DETAIL, "connection path is of length %d!", tag->conn->conn_path_size);
     }
 
     /* how big is the unconnected data item? */
@@ -331,11 +330,11 @@ int tag_read_start(omron_tag_p tag)
     //req->send_request = 1;
     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* add the request to the conn's list. */
+    rc = conn_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
         tag->req = rc_dec(req);
         tag->read_in_progress = 0;
 
@@ -376,7 +375,7 @@ static int check_read_status(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = check_read_request_status(tag, request);
+    rc = omron_check_read_reqest_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
         rc_dec(request);
@@ -513,7 +512,7 @@ int tag_write_start(omron_tag_p tag)
     eip_cip_uc_req *lgx_pccc;
     embedded_pccc *embed_pccc;
     uint8_t *data;
-    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
+    uint16_t conn_seq_id = (uint16_t)(conn_get_new_seq_id(tag->conn));;
     omron_request_p req = NULL;
     uint8_t *embed_start;
     int overhead, data_per_packet;
@@ -552,22 +551,22 @@ int tag_write_start(omron_tag_p tag)
                  + (tag->encoded_name_size)
                  +2; /* actual request size in elements */
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = conn_get_max_payload(tag->conn) - overhead;
 
     if(data_per_packet <= 0) {
         tag->write_in_progress = 0;
-        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN,"Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead, conn_get_max_payload(tag->conn));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         tag->write_in_progress = 0;
-        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", session_get_max_payload(tag->session), overhead, data_per_packet);
+        pdebug(DEBUG_DETAIL,"Tag size is %d, write overhead is %d, and write data per packet is %d.", conn_get_max_payload(tag->conn), overhead, data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = conn_create_request(tag->conn, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         tag->write_in_progress = 0;
@@ -598,7 +597,7 @@ int tag_write_start(omron_tag_p tag)
     /* fill in the PCCC command */
     embed_pccc->pccc_command = OMRON_EIP_PCCC_TYPED_CMD;
     embed_pccc->pccc_status = 0;  /* STS 0 in request */
-    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* TODO - get sequence ID from session? */
+    embed_pccc->pccc_seq_num = h2le16(conn_seq_id); /* TODO - get sequence ID from conn? */
     embed_pccc->pccc_function = OMRON_EIP_PCCCLGX_TYPED_WRITE_FUNC;
     embed_pccc->pccc_offset = h2le16(0);
     embed_pccc->pccc_transfer_size = h2le16((uint16_t)tag->elem_count); /* This is the offset items */
@@ -656,26 +655,26 @@ int tag_write_start(omron_tag_p tag)
     lgx_pccc->uc_cmd_length = h2le16((uint16_t)(data - embed_start));
 
     /* copy the path */
-    if(tag->session->conn_path_size > 0) {
-        *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    if(tag->conn->conn_path_size > 0) {
+        *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
         data++;
         *data = 0; /* reserved/pad */
         data++;
-        mem_copy(data, tag->session->conn_path, tag->session->conn_path_size);
-        data += tag->session->conn_path_size;
+        mem_copy(data, tag->conn->conn_path, tag->conn->conn_path_size);
+        data += tag->conn->conn_path_size;
     }
 
     /* how big is the unconnected data item? */
     lgx_pccc->cpf_udi_item_length   = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
 
-    /* get ready to add the request to the queue for this session */
+    /* get ready to add the request to the queue for this conn */
     req->request_size = (int)(data - (req->data));
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* add the request to the conn's list. */
+    rc = conn_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
         tag->write_in_progress = 0;
         tag->req = rc_dec(req);
         return rc;
@@ -720,7 +719,7 @@ static int check_write_status(omron_tag_p tag)
             break;
         }
 
-        /* check to see if it was an abort on the session side. */
+        /* check to see if it was an abort on the conn side. */
         if(tag->req->status != PLCTAG_STATUS_OK) {
             rc = tag->req->status;
             tag->req->abort_request = 1;
@@ -736,7 +735,7 @@ static int check_write_status(omron_tag_p tag)
 
     if(rc != PLCTAG_STATUS_OK) {
         if(rc_is_error(rc)) {
-            /* the request is dead, from session side. */
+            /* the request is dead, from conn side. */
             tag->req = rc_dec(tag->req);
         }
 

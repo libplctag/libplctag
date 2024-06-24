@@ -31,24 +31,45 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_OMRON_CIP_H__
-#define __LIBPLCTAG_OMRON_CIP_H__
+#pragma once
 
 #include <lib/libplctag.h>
 #include <omron/omron_common.h>
 #include <omron/defs.h>
 
 
-//int cip_encode_path(omron_tag_p tag, const char *path);
-extern int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
+/* fake up some generics */
+typedef struct {
+    enum {
+        GET_ATTRIBUTES_ALL = 0x01,
+        GET_ATTRIBUTE_LIST = 0x03,
+        GET_ATTRIBUTE_SINGLE = 0x1E,
 
-//~ char *cip_decode_status(int status);
-extern int cip_encode_tag_name(omron_tag_p tag,const char *name);
+        AB_READ_TAG = 0x4C,
+        AB_READ_TAG_FRAG = 0x52,
+        AB_WRITE_TAG = 0x4D,
+        AB_WRITE_TAG_FRAG = 0x53,
+        AB_MULTI_REQUEST = 0x0A,
+        AB_LIST_TAGS = 0x55,
 
-/* look up the type size in bytes based on the first byte */
-extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);
+        OMRON_READ_TAG = AB_READ_TAG,
+        OMRON_WRITE_TAG = AB_WRITE_TAG,
+        OMRON_MULTI_REQUEST = AB_MULTI_REQUEST,
+        OMRON_LIST_TAGS = 0x5F,
 
-/* look up the element size in bytes based on the first byte */
-extern int cip_lookup_data_element_size(uint8_t type_byte, int *element_size);
 
-#endif
+    } services;
+
+    int32_t (*encode_path)(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
+    int32_t (*encode_tag_name)(omron_tag_p tag,const char *name);
+    int32_t (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
+    int32_t (*lookup_data_element_size)(uint8_t type_byte, int *element_size);
+
+    const char *(*decode_cip_error_short)(uint8_t *data);
+    const char *(*decode_cip_error_long)(uint8_t *data);
+    int (*decode_cip_error_code)(uint8_t *data);
+
+    //int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const char **short_desc, const char **long_desc);
+} cip_generic_t;
+
+extern cip_generic_t cip;

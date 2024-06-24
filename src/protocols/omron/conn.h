@@ -31,8 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PLCTAG_OMRON_SESSION_H__
-#define __PLCTAG_OMRON_SESSION_H__ 1
+#ifndef __PLCTAG_OMRON_CONN_H__
+#define __PLCTAG_OMRON_CONN_H__ 1
 
 #include <stdbool.h>
 
@@ -41,20 +41,20 @@
 #include <util/rc.h>
 #include <util/vector.h>
 
-/* #define MAX_SESSION_HOST    (128) */
+/* #define MAX_CONN_HOST    (128) */
 
-#define SESSION_DEFAULT_TIMEOUT (2000)
+#define CONN_DEFAULT_TIMEOUT (2000)
 
 #define MAX_PACKET_SIZE_EX  (44 + 4002)
 
-#define SESSION_MIN_REQUESTS    (10)
-#define SESSION_INC_REQUESTS    (10)
+#define CONN_MIN_REQUESTS    (10)
+#define CONN_INC_REQUESTS    (10)
 
 #define MAX_CONN_PATH       (260)   /* 256 plus padding. */
 #define MAX_IP_ADDR_SEG_LEN (16)
 
 
-struct omron_session_t {
+struct omron_conn_t {
 //    int status;
     int failed;
     int on_list;
@@ -88,12 +88,12 @@ struct omron_session_t {
     int connection_group_id;
 
     /* registration info */
-    uint32_t session_handle;
+    uint32_t conn_handle;
 
     /* Sequence ID for requests. */
-    uint64_t session_seq_id;
+    uint64_t conn_seq_id;
 
-    /* list of outstanding requests for this session */
+    /* list of outstanding requests for this conn */
     vector_p requests;
 
     uint64_t resp_seq_id;
@@ -132,7 +132,7 @@ struct omron_request_t {
     /* debugging info */
     int tag_id;
 
-    /* allow requests to be packed in the session */
+    /* allow requests to be packed in the conn */
     int allow_packing;
     int packing_num;
 
@@ -147,15 +147,15 @@ struct omron_request_t {
 
 
 
-uint64_t session_get_new_seq_id_unsafe(omron_session_p sess);
-uint64_t session_get_new_seq_id(omron_session_p sess);
+uint64_t conn_get_new_seq_id_unsafe(omron_conn_p sess);
+uint64_t conn_get_new_seq_id(omron_conn_p sess);
 
-extern int session_startup();
-extern void session_teardown();
+extern int conn_startup();
+extern void conn_teardown();
 
-extern int session_find_or_create(omron_session_p *session, attr attribs);
-extern int session_get_max_payload(omron_session_p session);
-extern int session_create_request(omron_session_p session, int tag_id, omron_request_p *request);
-extern int session_add_request(omron_session_p sess, omron_request_p req);
+extern int conn_find_or_create(omron_conn_p *conn, attr attribs);
+extern int conn_get_max_payload(omron_conn_p conn);
+extern int conn_create_request(omron_conn_p conn, int tag_id, omron_request_p *request);
+extern int conn_add_request(omron_conn_p sess, omron_request_p req);
 
 #endif

@@ -39,7 +39,7 @@
 #include <omron/omron_common.h>
 #include <omron/cip.h>
 #include <omron/tag.h>
-#include <omron/session.h>
+#include <omron/conn.h>
 #include <omron/eip_cip.h>  /* for the Logix decode types. */
 #include <omron/eip_cip_special.h>
 #include <omron/error_codes.h>
@@ -159,7 +159,7 @@ static int udt_tag_build_read_fields_request_connected(omron_tag_p tag);
 
 
 /* define the vtable for raw tag type. */
-struct tag_vtable_t raw_tag_vtable = {
+struct tag_vtable_t omron_raw_tag_vtable = {
     (tag_vtable_func)omron_tag_abort, /* shared */
     (tag_vtable_func)NULL, /* read */
     (tag_vtable_func)omron_tag_status, /* shared */
@@ -209,7 +209,7 @@ struct tag_vtable_t udt_tag_vtable = {
 
 
 
-tag_byte_order_t listing_tag_logix_byte_order = {
+tag_byte_order_t omron_tag_listing_byte_order = {
     .is_allocated = 0,
 
     .int16_order = {0,1},
@@ -262,7 +262,7 @@ tag_byte_order_t udt_tag_logix_byte_order = {
 /* Raw tag functions */
 
 
-int setup_raw_tag(omron_tag_p tag)
+int omron_setup_raw_tag(omron_tag_p tag)
 {
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -272,11 +272,11 @@ int setup_raw_tag(omron_tag_p tag)
     tag->elem_count = 1;
     tag->elem_size = 1;
 
-    tag->byte_order = &logix_tag_byte_order;
+    tag->byte_order = &omron_udt_tag_byte_order;
 
-    pdebug(DEBUG_DETAIL, "Setting vtable to %p.", &raw_tag_vtable);
+    pdebug(DEBUG_DETAIL, "Setting vtable to %p.", &omron_raw_tag_vtable);
 
-    tag->vtable = &raw_tag_vtable;
+    tag->vtable = &omron_raw_tag_vtable;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -399,7 +399,7 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = check_write_request_status(tag, request);
+    rc = omron_check_write_request_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Write request status is not OK.");
         rc_dec(request);
@@ -435,9 +435,9 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag)
         // }
 
         // if (cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-        //     pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-        //     pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
-        //     rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+        //     pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, cip.decode_cip_error_short((uint8_t *)&cip_resp->status));
+        //     pdebug(DEBUG_INFO, cip.decode_cip_error_long((uint8_t *)&cip_resp->status));
+        //     rc = cip.decode_cip_error_code((uint8_t *)&cip_resp->status);
         //     break;
         // }
     } while(0);
@@ -506,7 +506,7 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = check_write_request_status(tag, request);
+    rc = omron_check_write_request_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Write request status is not OK.");
         rc_dec(request);
@@ -542,9 +542,9 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag)
         // }
 
         // if (cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-        //     pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-        //     pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
-        //     rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+        //     pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, cip.decode_cip_error_short((uint8_t *)&cip_resp->status));
+        //     pdebug(DEBUG_INFO, cip.decode_cip_error_long((uint8_t *)&cip_resp->status));
+        //     rc = cip.decode_cip_error_code((uint8_t *)&cip_resp->status);
         //     break;
         // }
     } while(0);
@@ -607,14 +607,14 @@ int raw_tag_build_write_request_connected(omron_tag_p tag)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
-    if(tag->size > session_get_max_payload(tag->session)) {
-        pdebug(DEBUG_WARN, "Amount to write exceeds negotiated session size %d!", session_get_max_payload(tag->session));
+    if(tag->size > conn_get_max_payload(tag->conn)) {
+        pdebug(DEBUG_WARN, "Amount to write exceeds negotiated conn size %d!", conn_get_max_payload(tag->conn));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -656,11 +656,11 @@ int raw_tag_build_write_request_connected(omron_tag_p tag)
     /* reset the tag size so that incoming data overwrites the old. */
     tag->size = 0;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* add the request to the conn's list. */
+    rc = conn_add_request(tag->conn, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -688,7 +688,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -732,7 +732,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag)
      */
 
     /* Now copy in the routing information for the embedded message */
-    *data = (tag->session->conn_path_size) / 2; /* in 16-bit words */
+    *data = (tag->conn->conn_path_size) / 2; /* in 16-bit words */
     data++;
     *data = 0;
     data++;    /* copy the tag name into the request */
@@ -776,11 +776,11 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag)
     /* reset the tag size so that incoming data overwrites the old. */
     tag->size = 0;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* add the request to the conn's list. */
+    rc = conn_add_request(tag->conn, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -812,7 +812,7 @@ int raw_tag_build_write_request_unconnected(omron_tag_p tag)
  * We know that we got here because the string "@tags" was in the name.
  */
 
-int setup_tag_listing_tag(omron_tag_p tag, const char *name)
+int omron_setup_tag_listing_tag(omron_tag_p tag, const char *name)
 {
     int rc = PLCTAG_STATUS_OK;
     char **tag_parts = NULL;
@@ -860,7 +860,7 @@ int setup_tag_listing_tag(omron_tag_p tag, const char *name)
                 }
 
                 /* we have a program tag request! */
-                if(cip_encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
+                if(cip.encode_tag_name(tag, tag_parts[0]) != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN, "Tag %s program listing is not able to be encoded!", name);
                     rc = PLCTAG_ERR_BAD_PARAM;
                     break;
@@ -890,7 +890,7 @@ int setup_tag_listing_tag(omron_tag_p tag, const char *name)
         tag->elem_count = 1;
         tag->elem_size = 1;
 
-        tag->byte_order = &listing_tag_logix_byte_order;
+        tag->byte_order = &omron_tag_listing_byte_order;
 
         tag->vtable = &listing_tag_vtable;
 
@@ -1025,7 +1025,7 @@ static int listing_tag_check_read_status_connected(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = check_read_request_status(tag, request);
+    rc = omron_check_read_reqest_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
         rc_dec(request);
@@ -1066,9 +1066,9 @@ static int listing_tag_check_read_status_connected(omron_tag_p tag)
         }
 
         if (cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, cip.decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, cip.decode_cip_error_long((uint8_t *)&cip_resp->status));
+            rc = cip.decode_cip_error_code((uint8_t *)&cip_resp->status);
             break;
         }
 
@@ -1202,7 +1202,7 @@ int listing_tag_build_read_request_connected(omron_tag_p tag)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1306,11 +1306,11 @@ int listing_tag_build_read_request_connected(omron_tag_p tag)
 
     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* add the request to the conn's list. */
+    rc = conn_add_request(tag->conn, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -1342,7 +1342,7 @@ int listing_tag_build_read_request_connected(omron_tag_p tag)
  * Handle UDT tag set up.
  */
 
-int setup_udt_tag(omron_tag_p tag, const char *name)
+int omron_setup_udt_tag(omron_tag_p tag, const char *name)
 {
     int rc = PLCTAG_STATUS_OK;
     const char *tag_id_str = name + str_length("@udt/");
@@ -1502,7 +1502,7 @@ static int udt_tag_check_read_metadata_status_connected(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = check_read_request_status(tag, request);
+    rc = omron_check_read_reqest_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
         rc_dec(request);
@@ -1543,9 +1543,9 @@ static int udt_tag_check_read_metadata_status_connected(omron_tag_p tag)
         }
 
         if (cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, cip.decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, cip.decode_cip_error_long((uint8_t *)&cip_resp->status));
+            rc = cip.decode_cip_error_code((uint8_t *)&cip_resp->status);
             break;
         }
 
@@ -1682,7 +1682,7 @@ int udt_tag_build_read_metadata_request_connected(omron_tag_p tag)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -1780,11 +1780,11 @@ int udt_tag_build_read_metadata_request_connected(omron_tag_p tag)
 
     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* add the request to the conn's list. */
+    rc = conn_add_request(tag->conn, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
         tag->req = rc_dec(req);
         return rc;
     }
@@ -1832,7 +1832,7 @@ int udt_tag_check_read_fields_status_connected(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = check_read_request_status(tag, request);
+    rc = omron_check_read_reqest_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
         rc_dec(request);
@@ -1873,9 +1873,9 @@ int udt_tag_check_read_fields_status_connected(omron_tag_p tag)
         }
 
         if (cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, decode_cip_error_short((uint8_t *)&cip_resp->status));
-            pdebug(DEBUG_INFO, decode_cip_error_long((uint8_t *)&cip_resp->status));
-            rc = decode_cip_error_code((uint8_t *)&cip_resp->status);
+            pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, cip.decode_cip_error_short((uint8_t *)&cip_resp->status));
+            pdebug(DEBUG_INFO, cip.decode_cip_error_long((uint8_t *)&cip_resp->status));
+            rc = cip.decode_cip_error_code((uint8_t *)&cip_resp->status);
             break;
         }
 
@@ -1987,7 +1987,7 @@ int udt_tag_build_read_fields_request_connected(omron_tag_p tag)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
@@ -2074,11 +2074,11 @@ int udt_tag_build_read_fields_request_connected(omron_tag_p tag)
 
     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* add the request to the conn's list. */
+    rc = conn_add_request(tag->conn, req);
 
     if (rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        pdebug(DEBUG_ERROR, "Unable to add request to conn! rc=%d", rc);
         tag->req = rc_dec(req);
         return rc;
     }

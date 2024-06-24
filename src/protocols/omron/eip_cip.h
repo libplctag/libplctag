@@ -36,13 +36,13 @@
 
 #include <omron/omron_common.h>
 
-extern struct tag_vtable_t eip_cip_vtable;
-extern tag_byte_order_t logix_tag_byte_order;
+extern struct tag_vtable_t omron_standard_tag_vtable;
+// extern tag_byte_order_t omron_udt_tag_byte_order;
 extern tag_byte_order_t omron_njnx_tag_byte_order;
-extern tag_byte_order_t logix_tag_listing_byte_order;
+// extern tag_byte_order_t omron_tag_listing_byte_order;
 
 /* tag listing helpers */
-extern int setup_tag_listing(omron_tag_p tag, const char *name);
+// extern int setup_tag_listing(omron_tag_p tag, const char *name);
 
 
 #endif

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2024 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,92 +31,16 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __PLCTAG_OMRON_TAG_H__
-#define __PLCTAG_OMRON_TAG_H__ 1
+#pragma once
 
-/* do these first */
-#define MAX_TAG_NAME        (260)
-#define MAX_TAG_TYPE_INFO   (64)
-
-/* they are used in some of these includes */
-#include <lib/libplctag.h>
 #include <lib/tag.h>
 #include <omron/omron_common.h>
-#include <omron/conn.h>
 
-typedef enum {
-    OMRON_TYPE_BOOL,
-    OMRON_TYPE_BOOL_ARRAY,
-    OMRON_TYPE_CONTROL,
-    OMRON_TYPE_COUNTER,
-    OMRON_TYPE_FLOAT32,
-    OMRON_TYPE_FLOAT64,
-    OMRON_TYPE_INT8,
-    OMRON_TYPE_INT16,
-    OMRON_TYPE_INT32,
-    OMRON_TYPE_INT64,
-    OMRON_TYPE_STRING,
-    OMRON_TYPE_SHORT_STRING,
-    OMRON_TYPE_TIMER,
-    OMRON_TYPE_TAG_ENTRY,  /* not a real AB type, but a pseudo type for AB's internal tag entry. */
-    OMRON_TYPE_TAG_UDT,    /* as above, but for UDTs. */
-    OMRON_TYPE_TAG_RAW     /* raw CIP tag */
-} elem_type_t;
+extern struct tag_vtable_t omron_raw_tag_vtable;
+extern tag_byte_order_t omron_tag_listing_byte_order;
 
-
-struct omron_tag_t {
-    /*struct plc_tag_t p_tag;*/
-    TAG_BASE_STRUCT;
-
-    /* how do we talk to this device? */
-    plc_type_t plc_type;
-
-    /* pointers back to conn */
-    omron_conn_p conn;
-    int use_connected_msg;
-
-    /* this contains the encoded name */
-    uint8_t encoded_name[MAX_TAG_NAME];
-    int encoded_name_size;
-
-//    const char *read_group;
-
-    /* storage for the encoded type. */
-    uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
-    int encoded_type_info_size;
-
-    elem_type_t elem_type;
-
-    int elem_count;
-    int elem_size;
-
-    int special_tag;
-
-    /* Used for standard tags. How much data can we send per packet? */
-    int write_data_per_packet;
-
-    /* used for listing tags. */
-    uint32_t next_id;
-
-    /* used for UDT tags. */
-    uint8_t udt_get_fields;
-    uint16_t udt_id;
-
-    /* requests */
-    int pre_write_read;
-    int first_read;
-    omron_request_p req;
-    int offset;
-
-    int allow_packing;
-
-    /* flags for operations */
-    int read_in_progress;
-    int write_in_progress;
-    /*int connect_in_progress;*/
-};
-
-
-
-
-#endif
+/* tag creation helpers */
+//extern int setup_special_cip_tag(omron_tag_p tag, const char *name);
+extern int omron_setup_raw_tag(omron_tag_p tag);
+extern int omron_setup_tag_listing_tag(omron_tag_p tag, const char *name);
+extern int omron_setup_udt_tag(omron_tag_p tag, const char *name);

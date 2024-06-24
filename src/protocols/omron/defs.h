@@ -62,8 +62,8 @@
 #define OMRON_EIP_DEFAULT_TIMEOUT 2000 /* in ms */
 
 /* AB Commands */
-#define OMRON_EIP_REGISTER_SESSION     ((uint16_t)0x0065)
-#define OMRON_EIP_UNREGISTER_SESSION   ((uint16_t)0x0066)
+#define OMRON_EIP_REGISTER_CONN     ((uint16_t)0x0065)
+#define OMRON_EIP_UNREGISTER_CONN   ((uint16_t)0x0066)
 #define OMRON_EIP_UNCONNECTED_SEND     ((uint16_t)0x006F)
 #define OMRON_EIP_CONNECTED_SEND       ((uint16_t)0x0070)
 
@@ -83,8 +83,6 @@
 #define OMRON_EIP_CMD_CIP_READ             ((uint8_t)0x4C)
 #define OMRON_EIP_CMD_CIP_WRITE            ((uint8_t)0x4D)
 #define OMRON_EIP_CMD_CIP_RMW              ((uint8_t)0x4E)
-#define OMRON_EIP_CMD_CIP_READ_FRAG        ((uint8_t)0x52)
-#define OMRON_EIP_CMD_CIP_WRITE_FRAG       ((uint8_t)0x53)
 #define OMRON_EIP_CMD_CIP_LIST_TAGS        ((uint8_t)0x55)
 
 /* flag set when command is OK */
@@ -195,13 +193,7 @@
 
 typedef enum {
                OMRON_PLC_NONE = 0,
-               OMRON_PLC_PLC5 = 1,
-               OMRON_PLC_SLC,
-               OMRON_PLC_MLGX,
-               OMRON_PLC_LGX,
-               OMRON_PLC_LGX_PCCC,
-               OMRON_PLC_MICRO800,
-               OMRON_PLC_OMRON_NJNX,
+               OMRON_PLC_OMRON_NJNX = 7,
                OMRON_PLC_TYPE_LAST,
             } plc_type_t;
 
@@ -239,7 +231,7 @@ START_PACK typedef struct {
 START_PACK typedef struct {
     uint16_le encap_command;
     uint16_le encap_length;
-    uint32_le encap_session_handle;
+    uint32_le encap_conn_handle;
     uint32_le encap_status;
     uint64_le encap_sender_context;
     uint32_le encap_options;
@@ -250,7 +242,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;         /* ALWAYS 0x0065 Register Session*/
     uint16_le encap_length;   /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -258,10 +250,10 @@ START_PACK typedef struct {
                                      */
     uint32_le encap_options;         /* 0, reserved for future use */
 
-    /* session registration request */
+    /* conn registration request */
     uint16_le eip_version;
     uint16_le option_flags;
-} END_PACK eip_session_reg_req;
+} END_PACK eip_conn_reg_req;
 
 
 /* Forward Open Request */
@@ -269,7 +261,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;   /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -329,7 +321,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;   /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -391,7 +383,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;   /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;/* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -434,7 +426,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;   /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;/* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -476,7 +468,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;   /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;/* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -514,7 +506,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
     uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -545,7 +537,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
     uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;/* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -594,7 +586,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
     uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;/* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -642,7 +634,7 @@ START_PACK typedef struct {
 //    /* encap header */
 //    uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
 //    uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-//    uint32_le encap_session_handle;  /* from session set up */
+//    uint32_le encap_conn_handle;  /* from conn set up */
 //    uint32_le encap_status;          /* always _sent_ as 0 */
 //    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
 //                                     * identifying responses when more than one
@@ -689,7 +681,7 @@ START_PACK typedef struct {
 //    /* encap header */
 //    uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
 //    uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-//    uint32_le encap_session_handle;  /* from session set up */
+//    uint32_le encap_conn_handle;  /* from conn set up */
 //    uint32_le encap_status;          /* always _sent_ as 0 */
 //    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
 //                                     * identifying responses when more than one
@@ -732,7 +724,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
     uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -769,7 +761,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;    /* ALWAYS 0x0070 Connected Send */
     uint16_le encap_length;   /* packet size in bytes less the header size, which is 24 bytes */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;/* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -809,7 +801,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;          /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -854,7 +846,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;          /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -887,7 +879,7 @@ START_PACK typedef struct {
 //    /* encap header */
 //    uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
 //    uint16_le encap_length;          /* packet size in bytes - 24 */
-//    uint32_le encap_session_handle;  /* from session set up */
+//    uint32_le encap_conn_handle;  /* from conn set up */
 //    uint32_le encap_status;          /* always _sent_ as 0 */
 //    uint64_le encap_sender_context;  /* whatever we want to set this to, used for
 //                                     * identifying responses when more than one
@@ -930,7 +922,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;          /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -975,7 +967,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;          /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
@@ -1031,7 +1023,7 @@ START_PACK typedef struct {
     /* encap header */
     uint16_le encap_command;         /* ALWAYS 0x006f Unconnected Send*/
     uint16_le encap_length;          /* packet size in bytes - 24 */
-    uint32_le encap_session_handle;  /* from session set up */
+    uint32_le encap_conn_handle;  /* from conn set up */
     uint32_le encap_status;          /* always _sent_ as 0 */
     uint64_le encap_sender_context;  /* whatever we want to set this to, used for
                                      * identifying responses when more than one
