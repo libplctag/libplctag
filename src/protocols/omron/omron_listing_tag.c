@@ -200,6 +200,7 @@ int omron_setup_tag_listing_tag(omron_tag_p tag, const char *name)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* FIXME - Omron tag listing does _NOT_ work like this. Rewrite for Omron. */
+    pdebug(DEBUG_WARN, "UDT listing is not supported for Omron PLCs.");
     return PLCTAG_ERR_UNSUPPORTED;
 
     do {
