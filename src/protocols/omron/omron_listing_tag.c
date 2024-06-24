@@ -199,6 +199,9 @@ int omron_setup_tag_listing_tag(omron_tag_p tag, const char *name)
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
+    /* FIXME - Omron tag listing does _NOT_ work like this. Rewrite for Omron. */
+    return PLCTAG_ERR_UNSUPPORTED;
+
     do {
         /* is it a bare tag listing? */
         if(str_cmp_i(name, "@tags") == 0) {
