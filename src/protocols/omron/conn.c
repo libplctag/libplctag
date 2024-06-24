@@ -76,7 +76,7 @@
 #define CONN_IDLE_WAIT_TIME (100)
 
 /* make sure we try hard to get a good payload size */
-#define GET_MAX_PAYLOAD_SIZE(sess) ((sess->max_payload_size > 0) ? (sess->max_payload_size) : ((sess->fo_conn_size > 0) ? (sess->fo_conn_size) : (sess->fo_ex_conn_size)))
+#define GET_MAX_PAYLOAD_SIZE(conn) ((conn->max_payload_size > 0) ? (conn->max_payload_size) : ((conn->fo_conn_size > 0) ? (conn->fo_conn_size) : (conn->fo_ex_conn_size)))
 
 
 /* plc-specific conn constructors */
@@ -95,7 +95,7 @@ static int add_conn_unsafe(omron_conn_p n);
 static int remove_conn_unsafe(omron_conn_p n);
 static omron_conn_p find_conn_by_host_unsafe(const char *gateway, const char *path, int connection_group_id);
 static int conn_match_valid(const char *host, const char *path, omron_conn_p conn);
-static int conn_add_request_unsafe(omron_conn_p sess, omron_request_p req);
+static int conn_add_request_unsafe(omron_conn_p conn, omron_request_p req);
 static int conn_open_socket(omron_conn_p conn);
 static void conn_destroy(void *conn);
 static int conn_register(omron_conn_p conn);
@@ -174,7 +174,7 @@ void conn_teardown()
             }
         }
 
-        pdebug(DEBUG_DETAIL, "Sessions all terminated.");
+        pdebug(DEBUG_DETAIL, "Connections all terminated.");
 
         vector_destroy(conns);
 
@@ -207,9 +207,9 @@ void conn_teardown()
  * integer as an atomic entity.
  */
 
-uint64_t conn_get_new_seq_id_unsafe(omron_conn_p sess)
+uint64_t conn_get_new_seq_id_unsafe(omron_conn_p conn)
 {
-    return sess->conn_seq_id++;
+    return conn->conn_seq_id++;
 }
 
 /*
@@ -218,13 +218,13 @@ uint64_t conn_get_new_seq_id_unsafe(omron_conn_p sess)
  * A thread-safe function to get a new conn sequence ID.
  */
 
-uint64_t conn_get_new_seq_id(omron_conn_p sess)
+uint64_t conn_get_new_seq_id(omron_conn_p conn)
 {
     uint16_t res = 0;
 
     //pdebug(DEBUG_DETAIL, "entering critical block %p",conn_mutex);
-    critical_block(sess->mutex) {
-        res = (uint16_t)conn_get_new_seq_id_unsafe(sess);
+    critical_block(conn->mutex) {
+        res = (uint16_t)conn_get_new_seq_id_unsafe(conn);
     }
     //pdebug(DEBUG_DETAIL, "leaving critical block %p", conn_mutex);
 
@@ -445,7 +445,7 @@ int conn_match_valid(const char *host, const char *path, omron_conn_p conn)
     }
 
     if(!str_length(conn->host)) {
-        pdebug(DEBUG_WARN, "Session host is NULL or zero length!");
+        pdebug(DEBUG_WARN, "Connection host is NULL or zero length!");
         return 0;
     }
 
@@ -527,9 +527,9 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     pdebug(DEBUG_INFO, "Starting");
 
     if(*use_connected_msg) {
-        pdebug(DEBUG_DETAIL, "Session should use connected messaging.");
+        pdebug(DEBUG_DETAIL, "Connection should use connected messaging.");
     } else {
-        pdebug(DEBUG_DETAIL, "Session should not use connected messaging.");
+        pdebug(DEBUG_DETAIL, "Connection should not use connected messaging.");
     }
 
     /* add in space for the data buffer. */
@@ -889,7 +889,7 @@ void conn_destroy(void *conn_arg)
     pdebug(DEBUG_INFO, "Starting.");
 
     if (!conn) {
-        pdebug(DEBUG_WARN, "Session ptr is null!");
+        pdebug(DEBUG_WARN, "Connection ptr is null!");
 
         return;
     }
@@ -897,7 +897,7 @@ void conn_destroy(void *conn_arg)
     /* so remove the conn from the list so no one else can reference it. */
     remove_conn(conn);
 
-    pdebug(DEBUG_INFO, "Session sent %" PRId64 " packets.", conn->packet_count);
+    pdebug(DEBUG_INFO, "Connection sent %" PRId64 " packets.", conn->packet_count);
 
     /* terminate the conn thread first. */
     conn->terminating = 1;
@@ -1011,7 +1011,7 @@ int conn_add_request_unsafe(omron_conn_p conn, omron_request_p req)
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!conn) {
-        pdebug(DEBUG_WARN, "Session is null!");
+        pdebug(DEBUG_WARN, "Connection is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -1039,17 +1039,17 @@ int conn_add_request_unsafe(omron_conn_p conn, omron_request_p req)
  *
  * This is a thread-safe version of the above routine.
  */
-int conn_add_request(omron_conn_p sess, omron_request_p req)
+int conn_add_request(omron_conn_p conn, omron_request_p req)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting. sess=%p, req=%p", sess, req);
+    pdebug(DEBUG_INFO, "Starting. conn=%p, req=%p", conn, req);
 
-    critical_block(sess->mutex) {
-        rc = conn_add_request_unsafe(sess, req);
+    critical_block(conn->mutex) {
+        rc = conn_add_request_unsafe(conn, req);
     }
 
-    cond_signal(sess->wait_cond);
+    cond_signal(conn->wait_cond);
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -1093,7 +1093,7 @@ int conn_remove_request_unsafe(omron_conn_p conn, omron_request_p req)
 
 
 /*****************************************************************
- **************** Session handling functions *********************
+ **************** Connection handling functions *********************
  ****************************************************************/
 
 
@@ -1180,7 +1180,7 @@ THREAD_FUNC(conn_handler)
 
                 /* don't wait more.  The TCP connect check will wait in select(). */
             } else {
-                pdebug(DEBUG_WARN, "Session connect failed %s!", plc_tag_decode_error(rc));
+                pdebug(DEBUG_WARN, "Connection connect failed %s!", plc_tag_decode_error(rc));
                 state = CONN_CLOSE_SOCKET;
             }
 
@@ -1436,7 +1436,7 @@ int purge_aborted_requests_unsafe(omron_conn_p conn)
             /* set the debug tag to the owning tag. */
             debug_set_tag_id(request->tag_id);
 
-            pdebug(DEBUG_DETAIL, "Session thread releasing aborted request %p.", request);
+            pdebug(DEBUG_DETAIL, "Connection thread releasing aborted request %p.", request);
 
             request->status = PLCTAG_ERR_ABORT;
             request->request_size = 0;
@@ -1971,7 +1971,7 @@ int send_eip_request(omron_conn_p conn, int timeout)
     pdebug(DEBUG_INFO, "Starting.");
 
     if(!conn) {
-        pdebug(DEBUG_WARN, "Session pointer is null.");
+        pdebug(DEBUG_WARN, "Connection pointer is null.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -2010,7 +2010,7 @@ int send_eip_request(omron_conn_p conn, int timeout)
     } while(!conn->terminating && rc >= 0 && conn->data_offset < conn->data_size && timeout_time > time_ms());
 
     if(conn->terminating) {
-        pdebug(DEBUG_WARN, "Session is terminating.");
+        pdebug(DEBUG_WARN, "Connection is terminating.");
         return PLCTAG_ERR_ABORT;
     }
 
@@ -2101,7 +2101,7 @@ int recv_eip_response(omron_conn_p conn, int timeout)
     } while(!conn->terminating && conn->data_offset < data_needed && timeout_time > time_ms());
 
     if(conn->terminating) {
-        pdebug(DEBUG_INFO, "Session is terminating, returning...");
+        pdebug(DEBUG_INFO, "Connection is terminating, returning...");
         return PLCTAG_ERR_ABORT;
     }
 
