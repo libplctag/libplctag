@@ -121,7 +121,7 @@ int omron_init(void)
 {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO,"Initializing AB protocol library.");
+    pdebug(DEBUG_INFO,"Initializing Omron CIP protocol library.");
 
     omron_protocol_terminating = 0;
 
@@ -140,7 +140,7 @@ int omron_init(void)
  */
 void omron_teardown(void)
 {
-    pdebug(DEBUG_INFO,"Releasing global AB protocol resources.");
+    pdebug(DEBUG_INFO,"Releasing global Omron CIP protocol resources.");
 
     if(omron_conn_handler_thread) {
         pdebug(DEBUG_INFO,"Terminating IO thread.");
