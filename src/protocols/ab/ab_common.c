@@ -258,15 +258,15 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
         tag->allow_packing = 0;
         break;
 
-    case AB_PLC_OMRON_NJNX:
-        tag->use_connected_msg = 1;
+    // case AB_PLC_OMRON_NJNX:
+    //     tag->use_connected_msg = 1;
 
-        /*
-         * Default packing to off.  Omron requires the client to do the calculation of
-         * whether the results will fit or not.
-         */
-        tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
-        break;
+    //     /*
+    //      * Default packing to off.  Omron requires the client to do the calculation of
+    //      * whether the results will fit or not.
+    //      */
+    //     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
+    //     break;
 
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
@@ -409,31 +409,31 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
         break;
 
-    case AB_PLC_OMRON_NJNX:
-        pdebug(DEBUG_DETAIL, "Setting up OMRON NJ/NX Series tag.");
+    // case AB_PLC_OMRON_NJNX:
+    //     pdebug(DEBUG_DETAIL, "Setting up OMRON NJ/NX Series tag.");
 
-        if(str_length(path) == 0) {
-            pdebug(DEBUG_WARN,"A path is required for this PLC type.");
-            tag->status = PLCTAG_ERR_BAD_PARAM;
-            return (plc_tag_p)tag;
-        }
+    //     if(str_length(path) == 0) {
+    //         pdebug(DEBUG_WARN,"A path is required for this PLC type.");
+    //         tag->status = PLCTAG_ERR_BAD_PARAM;
+    //         return (plc_tag_p)tag;
+    //     }
 
-        /* if we did not fill in the byte order elsewhere, fill it in now. */
-        if(!tag->byte_order) {
-            pdebug(DEBUG_DETAIL, "Using default Omron byte order.");
-            tag->byte_order = &omron_njnx_tag_byte_order;
-        }
+    //     /* if we did not fill in the byte order elsewhere, fill it in now. */
+    //     if(!tag->byte_order) {
+    //         pdebug(DEBUG_DETAIL, "Using default Omron byte order.");
+    //         tag->byte_order = &omron_njnx_tag_byte_order;
+    //     }
 
-        /* if this was not filled in elsewhere default to generic *Logix */
-        if(tag->vtable == &default_vtable || !tag->vtable) {
-            pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
-            tag->vtable = &eip_cip_vtable;
-        }
+    //     /* if this was not filled in elsewhere default to generic *Logix */
+    //     if(tag->vtable == &default_vtable || !tag->vtable) {
+    //         pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
+    //         tag->vtable = &eip_cip_vtable;
+    //     }
 
-        tag->use_connected_msg = 1;
-        tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
+    //     tag->use_connected_msg = 1;
+    //     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
 
-        break;
+    //     break;
 
     default:
         pdebug(DEBUG_WARN, "Unknown PLC type!");
@@ -448,9 +448,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     tag->elem_count = attr_get_int(attribs,"elem_count", 1);
 
     switch(tag->plc_type) {
-    case AB_PLC_OMRON_NJNX:
-        /* fall through */
+    // case AB_PLC_OMRON_NJNX:
     case AB_PLC_LGX:
+        /* fall through */
     case AB_PLC_MICRO800:
         /* fill this in when we read the tag. */
         //tag->elem_size = 0;
@@ -552,7 +552,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
 
     case AB_PLC_LGX:
     case AB_PLC_MICRO800:
-    case AB_PLC_OMRON_NJNX:
+    // case AB_PLC_OMRON_NJNX:
         /* look for the elem_type attribute. */
         elem_type = attr_get_str(attribs, "elem_type", NULL);
         if(elem_type) {
@@ -608,7 +608,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
              * Otherwise this is an error.
              */
             int elem_size = attr_get_int(attribs, "elem_size", 0);
-            int cip_plc = !!(tag->plc_type == AB_PLC_LGX || tag->plc_type == AB_PLC_MICRO800 || tag->plc_type == AB_PLC_OMRON_NJNX);
+            int cip_plc = !!(tag->plc_type == AB_PLC_LGX || tag->plc_type == AB_PLC_MICRO800 /*|| tag->plc_type == AB_PLC_OMRON_NJNX*/);
 
             if(cip_plc) {
                 const char *tmp_tag_name = attr_get_str(attribs, "name", NULL);
@@ -618,20 +618,9 @@ int get_tag_data_type(ab_tag_p tag, attr attribs)
                 if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
                     special_tag_rc = setup_raw_tag(tag);
                 } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
-                    // if(tag->plc_type != AB_PLC_OMRON_NJNX) {
                         special_tag_rc = setup_tag_listing_tag(tag, tmp_tag_name);
-                    // } else {
-                    //     pdebug(DEBUG_WARN, "Tag listing is not supported for Omron PLCs.");
-                    //     special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
-                    // }
                 } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
-                    // if(tag->plc_type != AB_PLC_OMRON_NJNX) {
-                        /* only supported on *Logix */
                         special_tag_rc = setup_udt_tag(tag, tmp_tag_name);
-                    // } else {
-                    //     pdebug(DEBUG_WARN, "UDT listing is not supported for Omron PLCs.");
-                    //     special_tag_rc = PLCTAG_ERR_UNSUPPORTED;
-                    // }
                 } /* else not a special tag. */
 
                 if(special_tag_rc != PLCTAG_STATUS_OK) {
@@ -878,7 +867,7 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
                 break;
             case AB_PLC_LGX: /* fall through */
             case AB_PLC_MICRO800: /* fall through */
-            case AB_PLC_OMRON_NJNX:
+            // case AB_PLC_OMRON_NJNX:
                 res = (int)(tag->elem_type);
                 break;
             default:
@@ -889,7 +878,7 @@ int ab_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
         switch(tag->plc_type) {
             case AB_PLC_LGX: /* fall through */
             case AB_PLC_MICRO800: /* fall through */
-            case AB_PLC_OMRON_NJNX:
+            // case AB_PLC_OMRON_NJNX:
                 res = (int)(tag->encoded_type_info_size);
                 break;
             default:
@@ -933,7 +922,7 @@ int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t
         switch(tag->plc_type) {
             case AB_PLC_LGX: /* fall through */
             case AB_PLC_MICRO800: /* fall through */
-            case AB_PLC_OMRON_NJNX:
+            // case AB_PLC_OMRON_NJNX:
                 if(tag->encoded_type_info_size > buffer_length) {
                     pdebug(DEBUG_WARN, "Tag type info is larger, %d bytes, than the buffer can hold, %d bytes.", tag->encoded_type_info_size, buffer_length);
                     rc = PLCTAG_ERR_TOO_SMALL;
@@ -1068,7 +1057,7 @@ int check_tag_name(ab_tag_p tag, const char* name)
 
     case AB_PLC_MICRO800:
     case AB_PLC_LGX:
-    case AB_PLC_OMRON_NJNX:
+    // case AB_PLC_OMRON_NJNX:
         if ((rc = cip_encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "parse of CIP-style tag name %s failed!", name);
 
