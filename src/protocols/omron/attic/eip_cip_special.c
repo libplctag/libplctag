@@ -40,7 +40,7 @@
 #include <omron/cip.h>
 #include <omron/tag.h>
 #include <omron/conn.h>
-#include <omron/eip_cip.h>  /* for the Logix decode types. */
+#include <omron/omron_standard_tag.h>  /* for the Logix decode types. */
 #include <omron/eip_cip_special.h>
 #include <omron/error_codes.h>
 #include <util/attr.h>

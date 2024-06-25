@@ -31,8 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_OMRON_EIP_CIP_H__
-#define __LIBPLCTAG_OMRON_EIP_CIP_H__
+#pragma once
 
 #include <omron/omron_common.h>
 
@@ -43,6 +42,3 @@ extern tag_byte_order_t omron_njnx_tag_byte_order;
 
 /* tag listing helpers */
 // extern int setup_tag_listing(omron_tag_p tag, const char *name);
-
-
-#endif

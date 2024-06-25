@@ -40,7 +40,7 @@
 #include <omron/cip.h>
 #include <omron/tag.h>
 #include <omron/conn.h>
-#include <omron/eip_cip.h>
+#include <omron/omron_standard_tag.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/vector.h>

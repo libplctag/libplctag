@@ -41,7 +41,7 @@
 #include <omron/omron_common.h>
 #include <omron/cip.h>
 #include <omron/defs.h>
-#include <omron/eip_cip.h>
+#include <omron/omron_standard_tag.h>
 #include <omron/omron_listing_tag.h>
 #include <omron/omron_raw_tag.h>
 #include <omron/omron_udt_tag.h>
