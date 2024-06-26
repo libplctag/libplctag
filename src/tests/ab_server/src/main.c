@@ -197,14 +197,16 @@ void usage(void)
                     "    CIP-based PLC tags are in the format: <name>:<type>[<sizes>] where:\n"
                     "        <name> is alphanumeric, starting with an alpha character.\n"
                     "        <type> is one of:\n"
+                    "            SINT   - 1-byte signed integer.  Requires array size(s).\n"
                     "            INT    - 2-byte signed integer.  Requires array size(s).\n"
                     "            DINT   - 4-byte signed integer.  Requires array size(s).\n"
                     "            LINT   - 8-byte signed integer.  Requires array size(s).\n"
                     "            REAL   - 4-byte floating point number.  Requires array size(s).\n"
                     "            LREAL  - 8-byte floating point number.  Requires array size(s).\n"
                     "            STRING - 82-byte string.  Requires array size(s).\n"
+                    "            BOOL   - 1-byte boolean value.  Requires array size(s).\n"
                     "\n"
-                    "        <sizes>> field is one or more (up to 3) numbers separated by commas.\n"
+                    "        <sizes> field is one or more (up to 3) numbers separated by commas.\n"
                     "\n"
                     "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n");
 
@@ -656,6 +658,9 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
     } else if(str_cmp_i(type_str, "STRING") == 0) {
         tag->tag_type = TAG_CIP_TYPE_STRING;
         tag->elem_size = 88;
+    } else if(str_cmp_i(type_str, "BOOL") == 0){
+        tag->tag_type = TAG_CIP_TYPE_BOOL;
+        tag->elem_size = 1;
     } else {
         fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
         usage();

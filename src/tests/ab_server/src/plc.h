@@ -40,6 +40,7 @@
 typedef uint16_t tag_type_t;
 
 /* CIP data types. */
+#define TAG_CIP_TYPE_BOOL        ((tag_type_t)0x00C1) /* 8-bit boolean value */
 #define TAG_CIP_TYPE_SINT        ((tag_type_t)0x00C2) /* Signed 8–bit integer value */
 #define TAG_CIP_TYPE_INT         ((tag_type_t)0x00C3) /* Signed 16–bit integer value */
 #define TAG_CIP_TYPE_DINT        ((tag_type_t)0x00C4) /* Signed 32–bit integer value */

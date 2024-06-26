@@ -99,22 +99,31 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc)
 
     /* match the prefix and dispatch. */
     if(slice_match_bytes(input, CIP_READ, sizeof(CIP_READ))) {
+        info("Case CIP_READ");
         return handle_read_request(input, output, plc);
     } else if(slice_match_bytes(input, CIP_READ_FRAG, sizeof(CIP_READ_FRAG))) {
+        info("Case CIP_READ_FRAG");
         return handle_read_request(input, output, plc);
     } else if(slice_match_bytes(input, CIP_WRITE, sizeof(CIP_WRITE))) {
+        info("Case CIP_WRITE");
         return handle_write_request(input, output, plc);
     } else if(slice_match_bytes(input, CIP_WRITE_FRAG, sizeof(CIP_WRITE_FRAG))) {
+        info("Case CIP_WRITE_FRAG");
         return handle_write_request(input, output, plc);
     } else if(slice_match_bytes(input, CIP_FORWARD_OPEN, sizeof(CIP_FORWARD_OPEN))) {
+        info("Case CIP_FORWARD_OPEN");
         return handle_forward_open(input, output, plc);
     } else if(slice_match_bytes(input, CIP_FORWARD_OPEN_EX, sizeof(CIP_FORWARD_OPEN_EX))) {
+        info("Case CIP_FORWARD_OPEN_EX");
         return handle_forward_open(input, output, plc);
     } else if(slice_match_bytes(input, CIP_FORWARD_CLOSE, sizeof(CIP_FORWARD_CLOSE))) {
+        info("Case CIP_FORWARD_CLOSE");
         return handle_forward_close(input, output, plc);
     } else if(slice_match_bytes(input, CIP_PCCC_EXECUTE, sizeof(CIP_PCCC_EXECUTE))) {
+        info("Case CIP_PCCC_EXECUTE");
         return dispatch_pccc_request(input, output, plc);
     } else {
+        info("Case NOT EXPECTED!");
             return make_cip_error(output, (uint8_t)(slice_get_uint8(input, 0) | (uint8_t)CIP_DONE), (uint8_t)CIP_ERR_UNSUPPORTED, false, (uint16_t)0);
     }
 }
@@ -564,7 +573,7 @@ slice_s handle_write_request(slice_s input, slice_s output, plc_s *plc)
     info("tag_data_length = %d", tag_data_length);
 
     /* get the write amount requested. */
-    total_request_size = slice_len(input) - offset;
+    total_request_size = slice_len(input) - offset - 1;
 
     info("total_request_size = %d", total_request_size);
 

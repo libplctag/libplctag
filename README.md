@@ -35,9 +35,9 @@
 
 **libplctag** is an open source C library for Linux, Windows and macOS using **EtherNet/IP** or **Modbus TCP** to read and write tags in PLCs.  The library has been in production since early 2012 and is used by multiple organizations for many tasks including controlling radio telescopes, large and precision manufacturing, controlling fitness equipment, food handling and many, many more.
 
-Current Stable Version: 2.5
+Current Stable Version: 2.6
 
-Old Stable Version: 2.4
+Old Stable Version: 2.5
 
 ## WARNING - DISCLAIMER
 
