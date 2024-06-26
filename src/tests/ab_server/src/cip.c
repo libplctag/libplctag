@@ -573,7 +573,7 @@ slice_s handle_write_request(slice_s input, slice_s output, plc_s *plc)
     info("tag_data_length = %d", tag_data_length);
 
     /* get the write amount requested. */
-    total_request_size = slice_len(input) - offset - 1;
+    total_request_size = slice_len(input) - offset;
 
     info("total_request_size = %d", total_request_size);
 
