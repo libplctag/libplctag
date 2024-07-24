@@ -42,9 +42,9 @@
 #include <omron/cip.h>
 #include <omron/defs.h>
 #include <omron/omron_standard_tag.h>
-#include <omron/omron_listing_tag.h>
+// #include <omron/omron_listing_tag.h>
 #include <omron/omron_raw_tag.h>
-#include <omron/omron_udt_tag.h>
+// #include <omron/omron_udt_tag.h>
 #include <omron/conn.h>
 #include <omron/tag.h>
 #include <util/attr.h>
@@ -383,11 +383,13 @@ int get_tag_data_type(omron_tag_p tag, attr attribs)
         /* check for special tags. */
         if(str_cmp_i(tmp_tag_name, "@raw") == 0) {
             special_tag_rc = omron_setup_raw_tag(tag);
-        } else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
-                special_tag_rc = omron_setup_tag_listing_tag(tag, tmp_tag_name);
-        } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
-                special_tag_rc = omron_setup_udt_tag(tag, tmp_tag_name);
-        } /* else not a special tag. */
+        }
+
+        // else if(str_str_cmp_i(tmp_tag_name, "@tags")) {
+        //         special_tag_rc = omron_setup_tag_listing_tag(tag, tmp_tag_name);
+        // } else if(str_str_cmp_i(tmp_tag_name, "@udt/")) {
+        //         special_tag_rc = omron_setup_udt_tag(tag, tmp_tag_name);
+        // } /* else not a special tag. */
 
         if(special_tag_rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error parsing tag listing name!");
