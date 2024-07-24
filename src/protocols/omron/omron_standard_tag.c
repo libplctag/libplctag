@@ -985,6 +985,7 @@ int build_write_request_connected(omron_tag_p tag, int byte_offset)
     data += sizeof(uint16_le);
 
     if (multiple_requests) {
+        // FIXME - add 0x80 data segment stuff here
         /* put in the byte offset */
         *((uint32_le*)data) = h2le32((uint32_t)(byte_offset));
         data += sizeof(uint32_le);
@@ -1143,6 +1144,7 @@ int build_write_request_unconnected(omron_tag_p tag, int byte_offset)
     data += sizeof(uint16_le);
 
     if (multiple_requests) {
+        // FIXME - add 0x80 data segment stuff here.
         /* put in the byte offset */
         *((uint32_le*)data) = h2le32((uint32_t)byte_offset);
         data += sizeof(uint32_le);
