@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2024 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,18 +31,45 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_EIP_CIP_H__
-#define __LIBPLCTAG_AB_EIP_CIP_H__
+#pragma once
 
-#include <ab/ab_common.h>
-
-extern struct tag_vtable_t eip_cip_vtable;
-extern tag_byte_order_t logix_tag_byte_order;
-// extern tag_byte_order_t omron_njnx_tag_byte_order;
-extern tag_byte_order_t logix_tag_listing_byte_order;
-
-/* tag listing helpers */
-extern int setup_tag_listing(ab_tag_p tag, const char *name);
+#include <lib/libplctag.h>
+#include <omron/omron_common.h>
+#include <omron/defs.h>
 
 
-#endif
+/* fake up some generics */
+typedef struct {
+    enum {
+        GET_ATTRIBUTES_ALL = 0x01,
+        GET_ATTRIBUTE_LIST = 0x03,
+        GET_ATTRIBUTE_SINGLE = 0x1E,
+
+        AB_READ_TAG = 0x4C,
+        AB_READ_TAG_FRAG = 0x52,
+        AB_WRITE_TAG = 0x4D,
+        AB_WRITE_TAG_FRAG = 0x53,
+        AB_MULTI_REQUEST = 0x0A,
+        AB_LIST_TAGS = 0x55,
+
+        OMRON_READ_TAG = AB_READ_TAG,
+        OMRON_WRITE_TAG = AB_WRITE_TAG,
+        OMRON_MULTI_REQUEST = AB_MULTI_REQUEST,
+        OMRON_LIST_TAGS = 0x5F,
+
+
+    } services;
+
+    int32_t (*encode_path)(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
+    int32_t (*encode_tag_name)(omron_tag_p tag,const char *name);
+    int32_t (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
+    int32_t (*lookup_data_element_size)(uint8_t type_byte, int *element_size);
+
+    const char *(*decode_cip_error_short)(uint8_t *data);
+    const char *(*decode_cip_error_long)(uint8_t *data);
+    int (*decode_cip_error_code)(uint8_t *data);
+
+    //int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const char **short_desc, const char **long_desc);
+} cip_generic_t;
+
+extern cip_generic_t cip;

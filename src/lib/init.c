@@ -39,6 +39,7 @@
 #include <util/debug.h>
 #include <ab/ab.h>
 #include <mb/modbus.h>
+#include <omron/omron.h>
 #include <system/system.h>
 #include <lib/init.h>
 
@@ -146,6 +147,8 @@ void destroy_modules(void)
 
     mb_teardown();
 
+    omron_teardown();
+
     lib_teardown();
 
     spin_block(&library_initialization_lock) {
@@ -217,6 +220,11 @@ int initialize_modules(void)
                     rc = mb_init();
                 }
 
+                pdebug(DEBUG_INFO,"Initializing Omron module.");
+                if(rc == PLCTAG_STATUS_OK) {
+                    rc = omron_init();
+                }
+
                 /* hook the destructor */
                 atexit(plc_tag_shutdown);
 
@@ -232,4 +240,3 @@ int initialize_modules(void)
 
     return rc;
 }
-

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2024 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,18 +31,13 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_EIP_CIP_H__
-#define __LIBPLCTAG_AB_EIP_CIP_H__
-
-#include <ab/ab_common.h>
-
-extern struct tag_vtable_t eip_cip_vtable;
-extern tag_byte_order_t logix_tag_byte_order;
-// extern tag_byte_order_t omron_njnx_tag_byte_order;
-extern tag_byte_order_t logix_tag_listing_byte_order;
-
-/* tag listing helpers */
-extern int setup_tag_listing(ab_tag_p tag, const char *name);
+#pragma once
 
 
-#endif
+#include <lib/libplctag.h>
+#include <lib/tag.h>
+#include <util/attr.h>
+
+void omron_teardown(void);
+int omron_init();
+plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);

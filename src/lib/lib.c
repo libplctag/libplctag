@@ -1092,6 +1092,8 @@ LIB_EXPORT void plc_tag_shutdown(void)
 {
     int tag_table_entries = 0;
 
+    debug_set_tag_id(0);
+
     pdebug(DEBUG_INFO, "Starting.");
 
     /* terminate anything waiting on the library and prevent any tags from being created. */
@@ -4232,7 +4234,7 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             }
         }
 
-        /* Should we pad the string to a multiple of 1 (no padding), 2, or 4 bytes. Adding padding causes issues when writing OmronNJ strings, 
+        /* Should we pad the string to a multiple of 1 (no padding), 2, or 4 bytes. Adding padding causes issues when writing OmronNJ strings,
             2 byte padding is required for certain AB PLCs*/
         if(attr_get_str(attribs, "str_pad_to_multiple_bytes", NULL)) {
             str_param = attr_get_int(attribs, "str_pad_to_multiple_bytes", 0);
@@ -4501,6 +4503,3 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
 
     return string_length;
 }
-
-
-

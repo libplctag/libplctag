@@ -31,18 +31,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIBPLCTAG_AB_EIP_CIP_H__
-#define __LIBPLCTAG_AB_EIP_CIP_H__
+#ifndef __OMRON_PROTOCOL_ERROR_CODES_H__
+#define __OMRON_PROTOCOL_ERROR_CODES_H__ 1
 
-#include <ab/ab_common.h>
-
-extern struct tag_vtable_t eip_cip_vtable;
-extern tag_byte_order_t logix_tag_byte_order;
-// extern tag_byte_order_t omron_njnx_tag_byte_order;
-extern tag_byte_order_t logix_tag_listing_byte_order;
-
-/* tag listing helpers */
-extern int setup_tag_listing(ab_tag_p tag, const char *name);
-
+extern const char *decode_cip_error_short(uint8_t *data);
+extern const char *decode_cip_error_long(uint8_t *data);
+extern int decode_cip_error_code(uint8_t *data);
 
 #endif

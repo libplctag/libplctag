@@ -55,8 +55,8 @@
 #define MAX_CIP_MICRO800_MSG_SIZE_EX     (0xFFFF & 4002)
 
 /* Omron is special */
-#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1994)
-#define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
+// #define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1994)
+// #define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
 
 /* maximum for PCCC embedded within CIP. */
 #define MAX_CIP_PLC5_MSG_SIZE (244)
@@ -87,7 +87,7 @@ static ab_session_p create_mlgx_session_unsafe(const char *host, const char *pat
 static ab_session_p create_lgx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
 static ab_session_p create_lgx_pccc_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
 static ab_session_p create_micro800_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
-static ab_session_p create_omron_njnx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
+// static ab_session_p create_omron_njnx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
 
 static ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is_static, const char *host, const char *path, plc_type_t plc_type, int *use_connected_msg, int connection_group_id);
 static int session_init(ab_session_p session);
@@ -320,9 +320,9 @@ int session_find_or_create(ab_session_p *tag_session, attr attribs)
                     session = create_micro800_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
                     break;
 
-                case AB_PLC_OMRON_NJNX:
-                    session = create_omron_njnx_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
-                    break;
+                // case AB_PLC_OMRON_NJNX:
+                //     session = create_omron_njnx_session_unsafe(session_gw, session_path, &use_connected_msg, connection_group_id);
+                //     break;
 
                 default:
                     pdebug(DEBUG_WARN, "Unknown PLC type %d!", plc_type);
@@ -669,28 +669,28 @@ ab_session_p create_micro800_session_unsafe(const char *host, const char *path, 
 
 
 
-ab_session_p create_omron_njnx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id)
-{
-    ab_session_p session = NULL;
+// ab_session_p create_omron_njnx_session_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id)
+// {
+//     ab_session_p session = NULL;
 
-    pdebug(DEBUG_INFO, "Starting.");
+//     pdebug(DEBUG_INFO, "Starting.");
 
-    do {
-        session = session_create_unsafe(MAX_CIP_OMRON_MSG_SIZE_EX, true, host, path, AB_PLC_LGX, use_connected_msg, connection_group_id);
-        if(session != NULL) {
-            session->only_use_old_forward_open = false;
-            session->fo_conn_size = MAX_CIP_OMRON_MSG_SIZE;
-            session->fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX;
-            session->max_payload_size = session->fo_conn_size;
-        } else {
-            pdebug(DEBUG_WARN, "Unable to create *Logix session!");
-        }
-    } while(0);
+//     do {
+//         session = session_create_unsafe(MAX_CIP_OMRON_MSG_SIZE_EX, true, host, path, AB_PLC_OMRON_NJNX, use_connected_msg, connection_group_id);
+//         if(session != NULL) {
+//             session->only_use_old_forward_open = false;
+//             session->fo_conn_size = MAX_CIP_OMRON_MSG_SIZE;
+//             session->fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX;
+//             session->max_payload_size = session->fo_conn_size;
+//         } else {
+//             pdebug(DEBUG_WARN, "Unable to create *Logix session!");
+//         }
+//     } while(0);
 
-    pdebug(DEBUG_INFO, "Done.");
+//     pdebug(DEBUG_INFO, "Done.");
 
-    return session;
-}
+//     return session;
+// }
 
 
 
