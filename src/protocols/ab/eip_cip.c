@@ -177,7 +177,7 @@ tag_byte_order_t logix_tag_byte_order = {
     .str_is_zero_terminated = 0,
     .str_is_byte_swapped = 0,
 
-    .str_pad_to_multiple_bytes = 2,
+    .str_pad_to_multiple_bytes = 1,
     .str_count_word_bytes = 4,
     .str_max_capacity = 82,
     .str_total_length = 88,
@@ -201,7 +201,7 @@ tag_byte_order_t logix_tag_listing_byte_order = {
     .str_is_zero_terminated = 0,
     .str_is_byte_swapped = 0,
 
-    .str_pad_to_multiple_bytes = 2,
+    .str_pad_to_multiple_bytes = 1,
     .str_count_word_bytes = 2,
     .str_max_capacity = 0,
     .str_total_length = 0,
