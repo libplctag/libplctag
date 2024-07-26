@@ -80,28 +80,28 @@ struct tag_vtable_t omron_standard_tag_vtable = {
     omron_get_byte_array_attrib
 };
 
-/* default string types used for ControlLogix-class PLCs. */
-tag_byte_order_t omron_udt_tag_byte_order = {
-    .is_allocated = 0,
+// /* default string types used for ControlLogix-class PLCs. */
+// tag_byte_order_t omron_udt_tag_byte_order = {
+//     .is_allocated = 0,
 
-    .int16_order = {0,1},
-    .int32_order = {0,1,2,3},
-    .int64_order = {0,1,2,3,4,5,6,7},
-    .float32_order = {0,1,2,3},
-    .float64_order = {0,1,2,3,4,5,6,7},
+//     .int16_order = {0,1},
+//     .int32_order = {0,1,2,3},
+//     .int64_order = {0,1,2,3,4,5,6,7},
+//     .float32_order = {0,1,2,3},
+//     .float64_order = {0,1,2,3,4,5,6,7},
 
-    .str_is_defined = 1,
-    .str_is_counted = 1,
-    .str_is_fixed_length = 1,
-    .str_is_zero_terminated = 0,
-    .str_is_byte_swapped = 0,
+//     .str_is_defined = 1,
+//     .str_is_counted = 1,
+//     .str_is_fixed_length = 1,
+//     .str_is_zero_terminated = 0,
+//     .str_is_byte_swapped = 0,
 
-    .str_pad_to_multiple_bytes = 2,
-    .str_count_word_bytes = 4,
-    .str_max_capacity = 82,
-    .str_total_length = 88,
-    .str_pad_bytes = 2
-};
+//     .str_pad_to_multiple_bytes = 1,
+//     .str_count_word_bytes = 4,
+//     .str_max_capacity = 82,
+//     .str_total_length = 88,
+//     .str_pad_bytes = 2
+// };
 
 
 /* default string types used for Omron-NJ/NX PLCs. */
