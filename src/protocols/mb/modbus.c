@@ -195,6 +195,7 @@ tag_byte_order_t modbus_tag_byte_order = {
     .str_is_zero_terminated = 0,
     .str_is_byte_swapped = 0,
 
+    .str_pad_to_multiple_bytes = 0,
     .str_count_word_bytes = 0,
     .str_max_capacity = 0,
     .str_total_length = 0,
@@ -1331,7 +1332,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
         tag_raise_event((plc_tag_p)tag, event, (int8_t)event_status);
         plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
     }
-    
+
     /*
      * Call the generic tag tickler function to handle auto read/write and set
      * up events.
@@ -2435,7 +2436,7 @@ void mb_teardown(void)
 
         while(1) {
             int plcs_remain = 0;
-            
+
             critical_block(mb_mutex) {
                 plcs_remain = plcs ? 1 : 0;
             }
@@ -2481,4 +2482,3 @@ int mb_init()
 
     return rc;
 }
-

@@ -203,7 +203,7 @@ struct tag_vtable_t udt_tag_vtable = {
     /* attribute accessors */
     ab_get_int_attrib,
     ab_set_int_attrib,
-    
+
     ab_get_byte_array_attrib
 };
 
@@ -224,6 +224,7 @@ tag_byte_order_t listing_tag_logix_byte_order = {
     .str_is_zero_terminated = 0,
     .str_is_byte_swapped = 0,
 
+    .str_pad_to_multiple_bytes = 1,
     .str_count_word_bytes = 2,
     .str_max_capacity = 0,
     .str_total_length = 0,
@@ -246,6 +247,7 @@ tag_byte_order_t udt_tag_logix_byte_order = {
     .str_is_zero_terminated = 1,
     .str_is_byte_swapped = 0,
 
+    .str_pad_to_multiple_bytes = 1,
     .str_count_word_bytes = 0,
     .str_max_capacity = 0,
     .str_total_length = 0,
@@ -2090,5 +2092,3 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag)
 
     return PLCTAG_STATUS_OK;
 }
-
-
