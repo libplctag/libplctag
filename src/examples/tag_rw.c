@@ -67,6 +67,8 @@
 void usage(void)
 {
     printf( "Usage:\n "
+            "WARNING: THIS PROGRAM IS DEPRECATED AND WILL BE REMOVED IN A FUTURE RELEASE.\n"
+            "USE THE tag_rw2 PROGRAM INSTEAD.\n"
             "tag_rw -t <type> -p <path> [-w <val>] [-d <lvl>] \n"
             "  -t <type> - type is one of 'uint8', 'sint8', 'uint16', 'sint16', \n "
             "              'uint32', 'sint32', or 'real32'.  The type is the type\n"
@@ -108,7 +110,7 @@ void check_version(void)
 
 void print_lib_version(void)
 {
-    printf("Library version %d.%d.%d.\n", 
+    printf("Library version %d.%d.%d.\n",
                 plc_tag_get_int_attribute(0, "version_major", 0),
                 plc_tag_get_int_attribute(0, "version_minor", 0),
                 plc_tag_get_int_attribute(0, "version_patch", 0));
