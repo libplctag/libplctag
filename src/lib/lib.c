@@ -286,7 +286,7 @@ void plc_tag_generic_tickler(plc_tag_p tag)
             if(tag->tag_is_dirty) {
                 /* abort any in flight read if the tag is dirty. */
                 if(tag->read_in_flight) {
-                    if(tag->vtable->abort) {
+                    if(tag->vtable && tag->vtable->abort) {
                         tag->vtable->abort(tag);
                     }
 
@@ -310,8 +310,11 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     pdebug(DEBUG_DETAIL, "Triggering automatic write start.");
 
                     /* clear out any outstanding reads. */
-                    if(tag->read_in_flight && tag->vtable->abort) {
-                        tag->vtable->abort(tag);
+                    if(tag->read_in_flight) {
+                        if(tag->vtable && tag->vtable->abort) {
+                            tag->vtable->abort(tag);
+                        }
+
                         tag->read_in_flight = 0;
                     }
 
@@ -319,7 +322,7 @@ void plc_tag_generic_tickler(plc_tag_p tag)
                     tag->write_in_flight = 1;
                     tag->auto_sync_next_write = 0;
 
-                    if(tag->vtable->write) {
+                    if(tag->vtable && tag->vtable->write) {
                         tag->status = (int8_t)tag->vtable->write(tag);
                     }
 
@@ -348,7 +351,7 @@ void plc_tag_generic_tickler(plc_tag_p tag)
 
                     tag->read_in_flight = 1;
 
-                    if(tag->vtable->read) {
+                    if(tag->vtable && tag->vtable->read) {
                         tag->status = (int8_t)tag->vtable->read(tag);
                     }
 
@@ -554,7 +557,7 @@ THREAD_FUNC(tag_tickler_func)
                         plc_tag_generic_tickler(tag);
 
                         /* call the tickler function if we can. */
-                        if(tag->vtable->tickler) {
+                        if(tag->vtable && tag->vtable->tickler) {
                             /* call the tickler on the tag. */
                             tag->vtable->tickler(tag);
 
@@ -973,17 +976,19 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
     pdebug(DEBUG_INFO, "Returning mapped tag ID %d", id);
 
     /* wake up tag's PLC here. */
-    if(tag->vtable->wake_plc) {
+    if(tag->vtable && tag->vtable->wake_plc) {
         tag->vtable->wake_plc(tag);
     }
 
     /* get the tag status. */
-    rc = tag->vtable->status(tag);
+    if(tag->vtable && tag->vtable->status) {
+        rc = tag->vtable->status(tag);
+    }
 
     /* check to see if there was an error during tag creation. */
     if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-        if(tag->vtable->abort) {
+        if(tag->vtable && tag->vtable->abort) {
             tag->vtable->abort(tag);
         }
 
@@ -1026,7 +1031,7 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while waiting for tag creation to complete!", plc_tag_decode_error(rc));
-                if(tag->vtable->abort) {
+                if(tag->vtable && tag->vtable->abort) {
                     tag->vtable->abort(tag);
                 }
 
@@ -1040,12 +1045,16 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
             }
 
             /* get the tag status. */
-            rc = tag->vtable->status(tag);
+            if(tag->vtable && tag->vtable->status) {
+                rc = tag->vtable->status(tag);
+            } else {
+                pdebug(DEBUG_WARN, "Tag does not have a status function!");
+            }
 
             /* check to see if there was an error during tag creation. */
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "Error %s while trying to create tag!", plc_tag_decode_error(rc));
-                if(tag->vtable->abort) {
+                if(tag->vtable && tag->vtable->abort) {
                     tag->vtable->abort(tag);
                 }
 
@@ -1494,14 +1503,13 @@ LIB_EXPORT int plc_tag_abort(int32_t id)
         /* who knows what state the tag data is in.  */
         tag->read_cache_expire = (uint64_t)0;
 
-        if(!tag->vtable || !tag->vtable->abort) {
-            pdebug(DEBUG_WARN,"Tag does not have a abort function!");
-            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
-            break;
-        }
-
         /* this may be synchronous. */
-        rc = tag->vtable->abort(tag);
+        if(tag->vtable && tag->vtable->abort) {
+            rc = tag->vtable->abort(tag);
+        } else {
+            pdebug(DEBUG_WARN, "Tag does not have an abort function.");
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
 
         tag->read_in_flight = 0;
         tag->read_complete = 0;
@@ -1560,9 +1568,7 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id)
     pdebug(DEBUG_DETAIL, "Aborting any in-flight operations.");
 
     critical_block(tag->api_mutex) {
-        if(!tag->vtable || !tag->vtable->abort) {
-            pdebug(DEBUG_WARN,"Tag does not have a abort function!");
-        } else {
+        if(tag->vtable && tag->vtable->abort) {
             /* Force a clean up. */
             tag->vtable->abort(tag);
         }
@@ -1652,7 +1658,12 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
         cond_clear(tag->tag_cond_wait);
 
         /* the protocol implementation does not do the timeout. */
-        rc = tag->vtable->read(tag);
+        if(tag->vtable && tag->vtable->read) {
+            rc = tag->vtable->read(tag);
+        } else {
+            pdebug(DEBUG_WARN, "Attempt to call read on a tag that does not support reads.");
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
 
         /* if not pending then check for success or error. */
         if(rc != PLCTAG_STATUS_PENDING) {
@@ -1661,7 +1672,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout)
 
                 pdebug(DEBUG_WARN,"Response from read command returned error %s!", plc_tag_decode_error(rc));
 
-                if(tag->vtable->abort) {
+                if(tag->vtable && tag->vtable->abort) {
                     tag->vtable->abort(tag);
                 }
             }
@@ -1774,11 +1785,15 @@ LIB_EXPORT int plc_tag_status(int32_t id)
     }
 
     critical_block(tag->api_mutex) {
-        if(tag && tag->vtable->tickler) {
+        if(tag->vtable && tag->vtable->tickler) {
             tag->vtable->tickler(tag);
         }
 
-        rc = tag->vtable->status(tag);
+        if(tag->vtable && tag->vtable->status) {
+            rc = tag->vtable->status(tag);
+        } else {
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
 
         if(rc == PLCTAG_STATUS_OK) {
             if(tag->read_in_flight || tag->write_in_flight) {
@@ -1857,7 +1872,12 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
         plc_tag_generic_handle_event_callbacks(tag);
 
         /* the protocol implementation does not do the timeout. */
-        rc = tag->vtable->write(tag);
+        if(tag->vtable && tag->vtable->write) {
+            rc = tag->vtable->write(tag);
+        } else {
+            pdebug(DEBUG_WARN, "Attempt to call write on a tag that does not support writes.");
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
 
         /* if not pending then check for success or error. */
         if(rc != PLCTAG_STATUS_PENDING) {
@@ -1866,7 +1886,7 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout)
 
                 pdebug(DEBUG_WARN,"Response from write command returned error %s!", plc_tag_decode_error(rc));
 
-                if(tag->vtable->abort) {
+                if(tag->vtable && tag->vtable->abort) {
                     tag->vtable->abort(tag);
                 }
             }
@@ -2018,8 +2038,11 @@ LIB_EXPORT int plc_tag_get_int_attribute(int32_t id, const char *attrib_name, in
                 tag->status = PLCTAG_STATUS_OK;
                 res = tag->connection_group_id;
             } else {
-                if(tag->vtable->get_int_attrib) {
+                if(tag->vtable && tag->vtable->get_int_attrib) {
                     res = tag->vtable->get_int_attrib(tag, attrib_name, default_value);
+                } else {
+                    res = default_value;
+                    tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
                 }
             }
         }
@@ -2109,9 +2132,11 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
                     res = PLCTAG_ERR_OUT_OF_BOUNDS;
                 }
             } else {
-                if(tag->vtable->set_int_attrib) {
+                if(tag->vtable && tag->vtable->set_int_attrib) {
                     res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
                     tag->status = (int8_t)res;
+                } else {
+                    tag->status = PLCTAG_ERR_NOT_IMPLEMENTED;
                 }
             }
         }
@@ -2156,8 +2181,10 @@ LIB_EXPORT int plc_tag_get_byte_array_attribute(int32_t id, const char *attrib_n
     }
 
     critical_block(tag->api_mutex) {
-        if(tag->vtable->get_byte_array_attrib) {
+        if(tag->vtable && tag->vtable->get_byte_array_attrib) {
             rc = tag->vtable->get_byte_array_attrib(tag, attrib_name, buffer, buffer_length);
+        } else {
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
         }
     }
 
