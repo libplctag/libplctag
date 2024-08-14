@@ -783,23 +783,10 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
 static int filter_printable_u8_data(uint8_t val)
 {
-    if(isalnum(val)) {
+    if(val >= 0x20 && val <= 0x7E) {
         return (int)val;
     } else {
-        switch(val) {
-            case '_':
-            case ' ':
-            case '-':
-            case '+':
-            case ':':
-            case '/':
-                return (int)val;
-                break;
-
-            default:
-                return (int)'.';
-                break;
-        }
+        return (int)' ';
     }
 }
 
