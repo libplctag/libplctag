@@ -49,6 +49,8 @@
 static int parse_pccc_file_type(const char **str, pccc_addr_t *address);
 static int parse_pccc_file_num(const char **str, pccc_addr_t *address);
 static int parse_pccc_elem_num(const char **str, pccc_addr_t *address);
+static int parse_pccc_subelem(const char **str, pccc_addr_t *address);
+static int parse_pccc_subelem_num(const char **str, pccc_addr_t *address);
 static int parse_pccc_subelem_mnemonic(const char **str, pccc_addr_t *address);
 static int parse_pccc_bit_num(const char **str, pccc_addr_t *address);
 static void encode_data(uint8_t *data, int *index, int val);
@@ -173,13 +175,9 @@ int parse_pccc_logical_address(const char *file_address, pccc_addr_t *address)
 
         /* we allow the file number to be skipped if it is output or input */
         rc = parse_pccc_file_num(&p, address);
-        if(rc != PLCTAG_STATUS_OK &&
-           (address->file_type != PCCC_FILE_OUTPUT || address->file_type != PCCC_FILE_INPUT)) {
+        if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for file number! Error %s!", plc_tag_decode_error(rc));
             break;
-        } else {
-            /* we succeeded parsing the file number or we have an I or O data file. */
-            rc = PLCTAG_STATUS_OK;
         }
 
         if((rc = parse_pccc_elem_num(&p, address)) != PLCTAG_STATUS_OK) {
@@ -187,10 +185,21 @@ int parse_pccc_logical_address(const char *file_address, pccc_addr_t *address)
             break;
         }
 
-        if((rc = parse_pccc_subelem_mnemonic(&p, address)) != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for subelement number! Error %s!", plc_tag_decode_error(rc));
+        /* a sub-element could be a mnemonic or a numeric entry. */
+        if((rc = parse_pccc_subelem(&p, address)) != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for element number! Error %s!", plc_tag_decode_error(rc));
             break;
         }
+
+        // if((rc = parse_pccc_elem_num(&p, address)) != PLCTAG_STATUS_OK) {
+        //     pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for element number! Error %s!", plc_tag_decode_error(rc));
+        //     break;
+        // }
+
+        // if((rc = parse_pccc_subelem_mnemonic(&p, address)) != PLCTAG_STATUS_OK) {
+        //     pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for subelement number! Error %s!", plc_tag_decode_error(rc));
+        //     break;
+        // }
 
         if((rc = parse_pccc_bit_num(&p, address)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for subelement number! Error %s!", plc_tag_decode_error(rc));
@@ -893,13 +902,20 @@ int parse_pccc_file_num(const char **str, pccc_addr_t *address)
 
     pdebug(DEBUG_DETAIL,"Starting.");
 
-    if(!str || !*str || !isdigit(**str)) {
+    if(!str || !*str) {
         pdebug(DEBUG_WARN,"Expected data-table file number!");
         address->file = -1;
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* FIXME - why are we not using strtol here? We should support octal. */
+    /* if this is I or O, then we can skip the data file number. */
+    if((address->file_type == PCCC_FILE_INPUT || address->file_type == PCCC_FILE_OUTPUT) && !isdigit(**str)) {
+        /* skip the data file number */
+        pdebug(DEBUG_DETAIL, "Data file number omitted for I or O data file.");
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* FIXME - why are we not using strtol here? We should also support octal. */
     while(**str && isdigit(**str) && tmp < 65535) {
         tmp *= 10;
         tmp += (int)((**str) - '0');
@@ -936,12 +952,111 @@ int parse_pccc_elem_num(const char **str, pccc_addr_t *address)
         (*str)++;
     }
 
+    pdebug(DEBUG_DETAIL, "Found element %d.", tmp);
+
     address->element = tmp;
 
     pdebug(DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
+
+
+int parse_pccc_subelem(const char **str, pccc_addr_t *address)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL,"Starting.");
+
+    if(!str || !*str) {
+        pdebug(DEBUG_WARN,"Called with bad string pointer!");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /*
+     * if we have a null character we are at the end of the name
+     * and the subelement is not there.  That is not an error.
+     */
+
+    if( (**str) == 0) {
+        pdebug(DEBUG_DETAIL, "No subelement in this name.");
+        address->sub_element = -1;
+        return PLCTAG_STATUS_OK;
+    }
+
+    /*
+     * We do have a character.  It must be . or / to be valid.
+     * The . character is valid before a mnemonic or number for a field in a structured type.
+     * The / character is valid before a bit number.
+     *
+     * If we see a bit number, then punt out of this routine.
+     */
+
+    if((**str) == '/') {
+        pdebug(DEBUG_DETAIL, "No subelement in this logical address.");
+        address->sub_element = -1;
+        return PLCTAG_STATUS_OK;
+    }
+
+    /* make sure the next character is either / or . and nothing else. */
+    if((**str) != '.') {
+        pdebug(DEBUG_WARN, "Bad subelement field in logical address.");
+        return PLCTAG_ERR_BAD_PARAM;
+    }
+
+    /* step past the . character */
+    (*str)++;
+
+    /* try a number. */
+    rc = parse_pccc_subelem_num(str, address);
+    if(rc == PLCTAG_STATUS_OK) {
+        /* we found a numeric sub-element */
+        pdebug(DEBUG_DETAIL, "Found numeric sub-element %d.", address->sub_element);
+        return rc;
+    }
+
+    if(rc == PLCTAG_ERR_NO_MATCH) {
+        /* not a numeric sub-element, try matching a mnemonic. */
+        return parse_pccc_subelem_mnemonic(str, address);
+    }
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return rc;
+}
+
+
+
+int parse_pccc_subelem_num(const char **str, pccc_addr_t *address)
+{
+    int tmp = 0;
+
+    pdebug(DEBUG_DETAIL,"Starting.");
+
+    /* is it a numeric sub-element? */
+    if(!isdigit(**str)) {
+        /* nope, it is not. */
+        pdebug(DEBUG_DETAIL, "Not a numeric sub-element.");
+        return PLCTAG_ERR_NO_MATCH;
+    }
+
+    while(**str && isdigit(**str) && tmp < 65535) {
+        tmp *= 10;
+        tmp += (int)((**str) - '0');
+        (*str)++;
+    }
+
+    pdebug(DEBUG_DETAIL, "Found sub-element %d.", tmp);
+
+    address->sub_element = tmp;
+
+    pdebug(DEBUG_DETAIL, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
 
 struct {
     pccc_file_t file_type;
