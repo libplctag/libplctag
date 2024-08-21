@@ -191,16 +191,6 @@ int parse_pccc_logical_address(const char *file_address, pccc_addr_t *address)
             break;
         }
 
-        // if((rc = parse_pccc_elem_num(&p, address)) != PLCTAG_STATUS_OK) {
-        //     pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for element number! Error %s!", plc_tag_decode_error(rc));
-        //     break;
-        // }
-
-        // if((rc = parse_pccc_subelem_mnemonic(&p, address)) != PLCTAG_STATUS_OK) {
-        //     pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for subelement number! Error %s!", plc_tag_decode_error(rc));
-        //     break;
-        // }
-
         if((rc = parse_pccc_bit_num(&p, address)) != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Unable to parse PCCC-style tag for subelement number! Error %s!", plc_tag_decode_error(rc));
             break;
@@ -998,7 +988,7 @@ int parse_pccc_subelem(const char **str, pccc_addr_t *address)
         return PLCTAG_STATUS_OK;
     }
 
-    /* make sure the next character is either / or . and nothing else. */
+    /* make sure the next character is . and nothing else. */
     if((**str) != '.') {
         pdebug(DEBUG_WARN, "Bad subelement field in logical address.");
         return PLCTAG_ERR_BAD_PARAM;
