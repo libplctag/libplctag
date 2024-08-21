@@ -32,6 +32,7 @@
  ***************************************************************************/
 
 
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -44,7 +45,7 @@
 
 typedef enum {
     TYPE_BIT, TYPE_I8, TYPE_U8, TYPE_I16, TYPE_U16, TYPE_I32, TYPE_U32, TYPE_I64, TYPE_U64,
-    TYPE_F32, TYPE_F64, TYPE_STRING, TYPE_META
+    TYPE_F32, TYPE_F64, TYPE_STRING, TYPE_META, TYPE_RAW
 } element_type_t;
 
 struct run_args {
@@ -121,17 +122,27 @@ int main(int argc, char **argv)
         }
 
         /* start with a read. */
-        rc = plc_tag_read(args.tag, args.timeout);
-        if(rc != PLCTAG_STATUS_OK) {
-            printf("ERROR: Error returned while trying to read tag %s!\n", plc_tag_decode_error(rc));
-            break;
-        }
+        if(args.element_type != TYPE_RAW) {
+            rc = plc_tag_read(args.tag, args.timeout);
+            if(rc != PLCTAG_STATUS_OK) {
+                printf("ERROR: Error returned while trying to read tag %s!\n", plc_tag_decode_error(rc));
+                break;
+            }
 
-        /* dump out the tag values. */
-        dump_values(&args);
+            /* dump out the tag values. */
+            dump_values(&args);
+        }
 
         /* is there something to write? */
         if(args.write_val_count > 0) {
+            if(args.element_type == TYPE_RAW) {
+                rc = plc_tag_set_size(args.tag, args.write_val_count);
+                if(rc != PLCTAG_STATUS_OK) {
+                    printf("ERROR: Error returned while trying to set tag size %s!\n", plc_tag_decode_error(rc));
+                    break;
+                }
+            }
+
             update_values(&args);
 
             rc = plc_tag_write(args.tag, args.timeout);
@@ -140,13 +151,15 @@ int main(int argc, char **argv)
                 break;
             }
 
-            printf("New values written to tag.\n");
+            if(args.element_type != TYPE_RAW) {
+                printf("New values written to tag.\n");
 
-            /* read it back in and dump the values. */
-            rc = plc_tag_read(args.tag, args.timeout);
-            if(rc != PLCTAG_STATUS_OK) {
-                printf("ERROR: Error returned while trying to read tag %s!\n", plc_tag_decode_error(rc));
-                break;
+                /* read it back in and dump the values. */
+                rc = plc_tag_read(args.tag, args.timeout);
+                if(rc != PLCTAG_STATUS_OK) {
+                    printf("ERROR: Error returned while trying to read tag %s!\n", plc_tag_decode_error(rc));
+                    break;
+                }
             }
 
             /* dump out the tag values. */
@@ -347,6 +360,8 @@ void parse_type(char *type_str, struct run_args *args)
         args->element_type = TYPE_STRING;
     } else if(strcasecmp(type_str, "metadata") == 0) {
         args->element_type = TYPE_META;
+    } else if(strcasecmp(type_str, "raw") == 0) {
+        args->element_type = TYPE_RAW;
     } else {
         printf("ERROR: Unknown type %s!\n", type_str);
         cleanup(args);
@@ -404,6 +419,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
     /* now that we know the number of arguments, we can process them. */
     switch(args->element_type) {
         case TYPE_BIT:
+        case TYPE_RAW:
         case TYPE_U8:
             args->write_vals.u8 = calloc((size_t)(unsigned int)args->write_val_count, sizeof(uint8_t));
             if(!args->write_vals.u8) {
@@ -418,10 +434,20 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
-                    if(sscanf_platform(&(tmp_vals[val_start]), "%" SCNu8 "", &(args->write_vals.u8[elem_index])) != 1) {
-                        printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
-                        cleanup(args);
-                        usage();
+                    if(args->element_type != TYPE_RAW) {
+                        if(sscanf_platform(&(tmp_vals[val_start]), "%" SCNu8 "", &(args->write_vals.u8[elem_index])) != 1) {
+                            printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
+                            cleanup(args);
+                            usage();
+                        }
+                    } else {
+                        if(sscanf_platform(&(tmp_vals[val_start]), "%" SCNx8 "", &(args->write_vals.u8[elem_index])) != 1) {
+                            printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
+                            cleanup(args);
+                            usage();
+                        }
+                        // FIXME
+                        printf("Got hex %x\n", args->write_vals.u8[elem_index]);
                     }
 
                     elem_index++;
@@ -755,12 +781,22 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 }
 
 
+static int filter_printable_u8_data(uint8_t val)
+{
+    if(val >= 0x20 && val <= 0x7E) {
+        return (int)val;
+    } else {
+        return (int)' ';
+    }
+}
+
 
 void dump_values(struct run_args *args)
 {
     int item_index = 0;
     int offset = 0;
     int32_t tag = args->tag;
+    uint8_t tmp_u8;
 
     /* display the data */
     if(args->element_type == TYPE_BIT) {
@@ -781,43 +817,45 @@ void dump_values(struct run_args *args)
         offset = 0;
         while(offset < len) {
             switch(args->element_type) {
+                case TYPE_RAW:
                 case TYPE_U8:
-                    printf("data[%d]=%" PRIu8 " (%" PRIx8 ")\n", item_index, plc_tag_get_uint8(tag, offset), plc_tag_get_uint8(tag, offset));
+                    tmp_u8 = plc_tag_get_uint8(tag, offset);
+                    printf("data[%d]=%" PRIu8 " (0x%02" PRIx8 ") '%c'\n", item_index, tmp_u8, tmp_u8, filter_printable_u8_data(tmp_u8));
                     offset += 1;
                     break;
 
                 case TYPE_U16:
-                    printf("data[%d]=%" PRIu16 " (%" PRIx16 ")\n", item_index, plc_tag_get_uint16(tag, offset),plc_tag_get_uint16(tag, offset));
+                    printf("data[%d]=%" PRIu16 " (0x%04" PRIx16 ")\n", item_index, plc_tag_get_uint16(tag, offset),plc_tag_get_uint16(tag, offset));
                     offset += 2;
                     break;
 
                 case TYPE_U32:
-                    printf("data[%d]=%" PRIu32 " (%" PRIx32 ")\n",item_index, plc_tag_get_uint32(tag, offset), plc_tag_get_uint32(tag, offset));
+                    printf("data[%d]=%" PRIu32 " (0x%08" PRIx32 ")\n",item_index, plc_tag_get_uint32(tag, offset), plc_tag_get_uint32(tag, offset));
                     offset += 4;
                     break;
 
                 case TYPE_U64:
-                    printf("data[%d]=%" PRIu64 " (%" PRIx64 ")\n", item_index, plc_tag_get_uint64(tag, offset),plc_tag_get_uint64(tag, offset));
+                    printf("data[%d]=%" PRIu64 " (0x%016" PRIx64 ")\n", item_index, plc_tag_get_uint64(tag, offset),plc_tag_get_uint64(tag, offset));
                     offset += 8;
                     break;
 
                 case TYPE_I8:
-                    printf("data[%d]=%" PRId8 " (%" PRIx8 ")\n", item_index, plc_tag_get_int8(tag, offset),plc_tag_get_int8(tag, offset));
+                    printf("data[%d]=%" PRId8 " (0x02%" PRIx8 ")\n", item_index, plc_tag_get_int8(tag, offset),plc_tag_get_int8(tag, offset));
                     offset += 1;
                     break;
 
                 case TYPE_I16:
-                    printf("data[%d]=%" PRId16 " (%" PRIx16 ")\n", item_index, plc_tag_get_int16(tag, offset),plc_tag_get_int16(tag, offset));
+                    printf("data[%d]=%" PRId16 " (0x%04" PRIx16 ")\n", item_index, plc_tag_get_int16(tag, offset),plc_tag_get_int16(tag, offset));
                     offset += 2;
                     break;
 
                 case TYPE_I32:
-                    printf("data[%d]=%" PRId32 " (%" PRIx32 ")\n", item_index, plc_tag_get_int32(tag, offset),plc_tag_get_int32(tag, offset));
+                    printf("data[%d]=%" PRId32 " (0x%08" PRIx32 ")\n", item_index, plc_tag_get_int32(tag, offset),plc_tag_get_int32(tag, offset));
                     offset += 4;
                     break;
 
                 case TYPE_I64:
-                    printf("data[%d]=%" PRId64 " (%" PRIx64 ")\n", item_index, plc_tag_get_int64(tag, offset),plc_tag_get_int64(tag, offset));
+                    printf("data[%d]=%" PRId64 " (0x%016" PRIx64 ")\n", item_index, plc_tag_get_int64(tag, offset),plc_tag_get_int64(tag, offset));
                     offset += 8;
                     break;
 
@@ -938,7 +976,7 @@ void update_values(struct run_args *args)
     int rc = PLCTAG_STATUS_OK;
     int32_t tag = args->tag;
 
-    /* display the data */
+    /* update the data */
     if(args->element_type == TYPE_BIT) {
         rc = plc_tag_set_bit(tag, offset, (int)(unsigned int)args->write_vals.u8[0]);
 
@@ -952,8 +990,10 @@ void update_values(struct run_args *args)
 
         item_index = 0;
         offset = 0;
+
         while(offset < len && item_index < args->write_val_count) {
             switch(args->element_type) {
+                case TYPE_RAW:
                 case TYPE_U8:
                     rc = plc_tag_set_uint8(tag, offset, args->write_vals.u8[item_index]);
                     if(rc != PLCTAG_STATUS_OK) {
