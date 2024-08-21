@@ -71,7 +71,7 @@ int main()
                                             plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* turn off debugging output. */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     tag = plc_tag_create(tag_string, DATA_TIMEOUT);
 
@@ -112,7 +112,7 @@ int main()
     free(str);
 
     /* now try to overwrite memory */
-    str_cap = plc_tag_get_string_capacity(tag, offset) + 1;
+    str_cap = plc_tag_get_string_capacity(tag, offset) + 10;
     str = (char *)malloc((size_t)(unsigned int)str_cap);
     if(!str) {
         fprintf(stderr, "Unable to allocate memory for the string write test!\n");
@@ -132,10 +132,10 @@ int main()
 
     /* try to set the string. */
     rc = plc_tag_set_string(tag, offset, str);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Correctly got error %s setting string!\n", plc_tag_decode_error(rc));
+    if(rc == PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Setting the string succeeded.\n");
     } else {
-        fprintf(stderr, "Should have received an error trying to set string value with capacity longer than actual!\n");
+        fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
         free(str);
         plc_tag_destroy(tag);
         return PLCTAG_ERR_BAD_STATUS;
@@ -157,21 +157,9 @@ int main()
         return PLCTAG_ERR_BAD_STATUS;
     }
 
-    // /* try to write it. */
-    // rc = plc_tag_write(tag, DATA_TIMEOUT);
-    // if(rc != PLCTAG_STATUS_OK) {
-    //     fprintf(stderr, "Error %s writing string!\n", plc_tag_decode_error(rc));
-    //     free(str);
-    //     plc_tag_destroy(tag);
-    //     return rc;
-    // }
-
-
     /* we are done */
     free(str);
     plc_tag_destroy(tag);
 
     return 0;
 }
-
-

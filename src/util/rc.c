@@ -160,10 +160,10 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     refcount_p rc = NULL;
     char *result = NULL;
 
-    pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
+    pdebug(DEBUG_DETAIL,"Starting, called from %s:%d for %p",func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_SPEW,"Invalid pointer passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_WARN,"Invalid pointer passed from %s:%d!", func, line_num);
         return result;
     }
 
@@ -183,9 +183,9 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     }
 
     if(!result) {
-        pdebug(DEBUG_SPEW,"Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
+        pdebug(DEBUG_DETAIL,"Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
     } else {
-        pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
+        pdebug(DEBUG_DETAIL,"Ref count is %d for %p.", count, data);
     }
 
     /* return the result pointer. */
@@ -211,10 +211,10 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     int invalid = 0;
     refcount_p rc = NULL;
 
-    pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
+    pdebug(DEBUG_DETAIL,"Starting, called from %s:%d for %p",func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_SPEW,"Null reference passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_WARN,"Null reference passed from %s:%d!", func, line_num);
         return NULL;
     }
 
@@ -235,7 +235,7 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     if(invalid) {
         pdebug(DEBUG_WARN,"Reference has invalid count %d!", count);
     } else {
-        pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
+        pdebug(DEBUG_DETAIL,"Ref count is %d for %p.", count, data);
 
         /* clean up only if count is zero. */
         if(rc && count <= 0) {
