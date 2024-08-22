@@ -46,7 +46,8 @@
 
 #define REQUIRED_VERSION 2,4,10
 
-static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]";
+// static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=1&str_max_capacity=16&str_total_length=20&str_pad_bytes=0";
+static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=0&str_max_capacity=16&str_total_length=0&str_pad_bytes=0";
 
 #define DATA_TIMEOUT 5000
 
@@ -133,7 +134,23 @@ int main()
     /* try to set the string. */
     rc = plc_tag_set_string(tag, offset, str);
     if(rc == PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Setting the string succeeded.\n");
+        fprintf(stderr, "Setting the tiny string succeeded.\n");
+    } else {
+        fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
+        free(str);
+        plc_tag_destroy(tag);
+        return PLCTAG_ERR_BAD_STATUS;
+    }
+
+    /* put in a larger, but still valid, string */
+    for(int i=0; (i < 6) && i < (str_cap - 1); i++) {
+        str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
+    }
+
+    /* try to set the string. */
+    rc = plc_tag_set_string(tag, offset, str);
+    if(rc == PLCTAG_STATUS_OK) {
+        fprintf(stderr, "Setting the small string succeeded.\n");
     } else {
         fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
         free(str);
