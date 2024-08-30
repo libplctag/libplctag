@@ -266,6 +266,7 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
 
     tag->use_connected_msg = 1;
     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
+    tag->supports_fragmented_read = 0; /* fragmented read is not currently supported */
 
     /* pass the connection requirement since it may be overridden above. */
     attr_set_int(attribs, "use_connected_msg", tag->use_connected_msg);

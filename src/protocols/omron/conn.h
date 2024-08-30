@@ -142,6 +142,10 @@ struct omron_request_t {
     /* used by the background thread for incrementally getting data */
     int request_size; /* total bytes, not just data */
     int request_capacity;
+    int response_size; /* size of data we expect to be returned by this request */
+
+    int first_read; /* whether this tag is being read for the first time and its size is therefor unknown*/
+    int supports_fragmented_read; /* if fragmented read is supported then we do not need to worry about the response*/
     uint8_t *data;
 };
 
