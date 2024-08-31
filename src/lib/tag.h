@@ -128,6 +128,7 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
                         uint8_t event_write_started: 1; \
                         uint8_t event_write_complete_enable: 1; \
                         uint8_t event_write_complete: 1; \
+                        uint8_t allow_field_resize:1; \
                         int8_t event_creation_complete_status; \
                         int8_t event_deletion_started_status; \
                         int8_t event_operation_aborted_status; \
@@ -269,4 +270,3 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             break;
     }
 }
-

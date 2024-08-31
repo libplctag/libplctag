@@ -46,11 +46,121 @@
 
 #define REQUIRED_VERSION 2,4,10
 
-// static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=1&str_max_capacity=16&str_total_length=20&str_pad_bytes=0";
-static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=0&str_max_capacity=16&str_total_length=0&str_pad_bytes=0";
+static const char *tag_string1 = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=0&str_max_capacity=16&str_total_length=0&str_pad_bytes=0";
+static const char *tag_string2 = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=0&str_max_capacity=16&str_total_length=0&str_pad_bytes=0&allow_field_resize=1";
 
 #define DATA_TIMEOUT 5000
 
+
+
+int test_string(const char *tag_string)
+{
+    int32_t tag = 0;
+    int rc;
+    int offset = 0;
+    int str_cap = 0;
+    char *str = NULL;
+
+    do {
+        tag = plc_tag_create(tag_string, DATA_TIMEOUT);
+
+        /* everything OK? */
+        if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+            fprintf(stderr,"Error %s creating tag!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* get the data */
+        rc = plc_tag_read(tag, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Error %s trying to read tag!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* print out the data */
+        str_cap = plc_tag_get_string_length(tag, offset) + 1; /* +1 for the zero termination. */
+        str = (char *)malloc((size_t)(unsigned int)str_cap);
+        if(!str) {
+            fprintf(stderr, "Unable to allocate memory for the string!\n");
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
+
+        rc = plc_tag_get_string(tag, offset, str, str_cap);
+        if(rc != PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Error %s getting string value!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
+        fprintf(stderr, "tag string data = '%s'\n", str);
+
+        free(str);
+
+        /* now try to overwrite memory */
+        str_cap = plc_tag_get_string_capacity(tag, offset) + 10;
+        str = (char *)malloc((size_t)(unsigned int)str_cap);
+        if(!str) {
+            fprintf(stderr, "Unable to allocate memory for the string write test!\n");
+            rc = PLCTAG_ERR_NO_MEM;
+            break;
+        }
+
+        /* clear out the string memory */
+        memset(str, 0, (unsigned int)str_cap);
+
+        /* try to write a shorter string but with a long capacity. */
+
+        /* put in a tiny string */
+        for(int i=0; (i < 2) && i < (str_cap - 1); i++) {
+            str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
+        }
+
+        /* try to set the string. */
+        rc = plc_tag_set_string(tag, offset, str);
+        if(rc == PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Setting the tiny string succeeded.\n");
+        } else {
+            fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* put in a larger, but still valid, string */
+        for(int i=0; (i < 6) && i < (str_cap - 1); i++) {
+            str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
+        }
+
+        /* try to set the string. */
+        rc = plc_tag_set_string(tag, offset, str);
+        if(rc == PLCTAG_STATUS_OK) {
+            fprintf(stderr, "Setting the small string succeeded.\n");
+        } else {
+            fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* fill it completely with garbage */
+        for(int i=0; i < (str_cap - 1); i++) {
+            str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
+        }
+
+        /* try to set the string. */
+        rc = plc_tag_set_string(tag, offset, str);
+        if(rc == PLCTAG_ERR_TOO_LARGE) {
+            fprintf(stderr, "Correctly got error %s setting string!\n", plc_tag_decode_error(rc));
+            rc = PLCTAG_STATUS_OK;
+        } else {
+            fprintf(stderr, "Should have error PLCTAG_ERR_TOO_LARGE but got %s trying to set string value with capacity longer than actual!\n", plc_tag_decode_error(rc));
+            rc = PLCTAG_ERR_BAD_STATUS;
+            break;
+        }
+    } while(0);
+
+    /* we are done */
+    free(str);
+    plc_tag_destroy(tag);
+
+    return rc;
+}
 
 int main()
 {
@@ -74,109 +184,19 @@ int main()
     /* turn off debugging output. */
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
-    tag = plc_tag_create(tag_string, DATA_TIMEOUT);
-
-    /* everything OK? */
-    if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error %s creating tag!\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
-        return rc;
+    /* we expect a failure here. */
+    rc = test_string(tag_string1);
+    if(rc != PLCTAG_ERR_NOT_ALLOWED) {
+        fprintf(stderr, "Unexpected failure error %s!", plc_tag_decode_error(rc));
+        return 1;
     }
 
-    /* get the data */
-    rc = plc_tag_read(tag, DATA_TIMEOUT);
+    /* We expect success here */
+    rc = test_string(tag_string2);
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Error %s trying to read tag!\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
-        return rc;
+        fprintf(stderr, "Unexpected failure %s!", plc_tag_decode_error(rc));
+        return 1;
     }
-
-    /* print out the data */
-    str_cap = plc_tag_get_string_length(tag, offset) + 1; /* +1 for the zero termination. */
-    str = (char *)malloc((size_t)(unsigned int)str_cap);
-    if(!str) {
-        fprintf(stderr, "Unable to allocate memory for the string!\n");
-        plc_tag_destroy(tag);
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    rc = plc_tag_get_string(tag, offset, str, str_cap);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Error %s getting string value!\n", plc_tag_decode_error(rc));
-        free(str);
-        plc_tag_destroy(tag);
-        return rc;
-    }
-
-    fprintf(stderr, "tag string data = '%s'\n", str);
-
-    free(str);
-
-    /* now try to overwrite memory */
-    str_cap = plc_tag_get_string_capacity(tag, offset) + 10;
-    str = (char *)malloc((size_t)(unsigned int)str_cap);
-    if(!str) {
-        fprintf(stderr, "Unable to allocate memory for the string write test!\n");
-        plc_tag_destroy(tag);
-        return PLCTAG_ERR_NO_MEM;
-    }
-
-    /* clear out the string memory */
-    memset(str, 0, (unsigned int)str_cap);
-
-    /* try to write a shorter string but with a long capacity. */
-
-    /* put in a tiny string */
-    for(int i=0; (i < 2) && i < (str_cap - 1); i++) {
-        str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
-    }
-
-    /* try to set the string. */
-    rc = plc_tag_set_string(tag, offset, str);
-    if(rc == PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Setting the tiny string succeeded.\n");
-    } else {
-        fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
-        free(str);
-        plc_tag_destroy(tag);
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    /* put in a larger, but still valid, string */
-    for(int i=0; (i < 6) && i < (str_cap - 1); i++) {
-        str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
-    }
-
-    /* try to set the string. */
-    rc = plc_tag_set_string(tag, offset, str);
-    if(rc == PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Setting the small string succeeded.\n");
-    } else {
-        fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
-        free(str);
-        plc_tag_destroy(tag);
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    /* fill it completely with garbage */
-    for(int i=0; i < (str_cap - 1); i++) {
-        str[i] = (char)(0x30 + (i % 10)); /* 01234567890123456789... */
-    }
-
-    /* try to set the string. */
-    rc = plc_tag_set_string(tag, offset, str);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr, "Correctly got error %s setting string!\n", plc_tag_decode_error(rc));
-    } else {
-        fprintf(stderr, "Should have received an error trying to set string value with capacity longer than actual!\n");
-        free(str);
-        plc_tag_destroy(tag);
-        return PLCTAG_ERR_BAD_STATUS;
-    }
-
-    /* we are done */
-    free(str);
-    plc_tag_destroy(tag);
 
     return 0;
 }
