@@ -944,6 +944,9 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
         tag->auto_sync_next_write = 0;
     }
 
+    /* See if we are allowed to resize fields */
+    tag->allow_field_resize = attr_get_int(attribs, "allow_field_resize", 0);
+
     /* set up the tag byte order if there are any overrides. */
     rc = set_tag_byte_order(tag, attribs);
     if(rc != PLCTAG_STATUS_OK) {
@@ -2062,12 +2065,12 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
     int res = PLCTAG_ERR_NOT_FOUND;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_SPEW, "Starting.");
-
     if(!attrib_name || str_length(attrib_name) == 0) {
         pdebug(DEBUG_WARN, "Attribute name must not be null or zero-length!");
         return PLCTAG_ERR_BAD_PARAM;
     }
+
+    pdebug(DEBUG_DETAIL, "Starting for int attribute %s.", attrib_name);
 
     /* get library attributes */
     if(id == 0) {
@@ -2131,6 +2134,10 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
                     tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                     res = PLCTAG_ERR_OUT_OF_BOUNDS;
                 }
+            } else if(str_cmp_i(attrib_name, "allow_field_resize") == 0) {
+                tag->allow_field_resize = (new_value > 0 ? 1 : 0);
+                tag->status = PLCTAG_STATUS_OK;
+                res = PLCTAG_STATUS_OK;
             } else {
                 if(tag->vtable && tag->vtable->set_int_attrib) {
                     res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
@@ -3611,6 +3618,14 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         if(new_string_size_in_buffer < 0) {
             pdebug(DEBUG_WARN, "Error getting new string size!");
             rc = new_string_size_in_buffer;
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL, "allow_field_resize=%d, old_string_size_in_buffer=%"PRId32", new_string_size_in_buffer=%"PRId32".", tag->allow_field_resize, old_string_size_in_buffer, new_string_size_in_buffer);
+
+        if(!tag->allow_field_resize && (new_string_size_in_buffer != old_string_size_in_buffer)) {
+            pdebug(DEBUG_DETAIL, "This tag does not allow resizing of fields.");
+            rc = PLCTAG_ERR_NOT_ALLOWED;
             break;
         }
 
