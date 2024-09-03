@@ -44,7 +44,8 @@
  * STRING types are a DINT (4 bytes) followed by 82 bytes of characters.  Then two bytes of padding.
  */
 
-#define REQUIRED_VERSION 2,4,10
+/* need at least 2.6.3 for support for allow_field_resize flag. */
+#define REQUIRED_VERSION 2,6,3
 
 static const char *tag_string1 = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=0&str_max_capacity=16&str_total_length=0&str_pad_bytes=0";
 static const char *tag_string2 = "protocol=ab-eip&gateway=10.206.1.40&path=1,0&plc=ControlLogix&name=CB_Txt[0,0]&str_is_counted=1&str_count_word_bytes=4&str_is_fixed_length=0&str_max_capacity=16&str_total_length=0&str_pad_bytes=0&allow_field_resize=1";
