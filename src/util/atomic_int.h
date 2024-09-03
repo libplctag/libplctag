@@ -35,6 +35,8 @@
 
 #include <platform.h>
 
+#define ATOMIC_INT_STATIC_INIT {0}
+
 typedef struct { lock_t lock; volatile int val; } atomic_int;
 
 extern void atomic_init(atomic_int *a, int new_val);

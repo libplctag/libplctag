@@ -38,6 +38,7 @@
 #include <ab/error_codes.h>
 #include <ab/session.h>
 #include <ab/tag.h>
+#include <util/atomic_int.h>
 #include <util/debug.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -131,6 +132,7 @@ static int session_request_increase_buffer(ab_request_p request, int new_capacit
 
 static volatile mutex_p session_mutex = NULL;
 static volatile vector_p sessions = NULL;
+static atomic_int library_shutting_down = ATOMIC_INT_STATIC_INIT;
 
 
 
@@ -138,6 +140,8 @@ static volatile vector_p sessions = NULL;
 int session_startup()
 {
     int rc = PLCTAG_STATUS_OK;
+
+    atomic_set(&library_shutting_down, 0);
 
     if((rc = mutex_create((mutex_p *)&session_mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
@@ -155,21 +159,49 @@ int session_startup()
 
 void session_teardown()
 {
+    int remaining_sessions = 0;
+
     pdebug(DEBUG_INFO, "Starting.");
+
+    /* flag all open sessions for termination */
+    pdebug(DEBUG_INFO, "Marking all open sessions for termination.");
+
+    if(session_mutex) {
+        critical_block(session_mutex) {
+            if(sessions == NULL) {
+                pdebug(DEBUG_INFO, "Session list is already destroyed.");
+
+                break;
+            }
+
+            remaining_sessions = vector_length(sessions);
+
+            for(int sess_index = 0; sess_index < remaining_sessions; sess_index++) {
+                ab_session_p session = vector_get(sessions, sess_index);
+
+                if(session) {
+                    session->terminating = 1;
+                }
+            }
+        }
+    }
+
+    /* flag the whole library shutting down. */
+    pdebug(DEBUG_INFO, "Setting library shutdown flag.");
+
+    atomic_set(&library_shutting_down, 1);
 
     if(sessions && session_mutex) {
         pdebug(DEBUG_DETAIL, "Waiting for sessions to terminate.");
 
         while(1) {
-            int remaining_sessions = 0;
-
             critical_block(session_mutex) {
                 remaining_sessions = vector_length(sessions);
             }
 
             /* wait for things to terminate. */
             if(remaining_sessions > 0) {
-                sleep_ms(10); // MAGIC
+                sleep_ms(50); // MAGIC
             } else {
                 break;
             }
@@ -188,6 +220,8 @@ void session_teardown()
         mutex_destroy((mutex_p *)&session_mutex);
         session_mutex = NULL;
     }
+
+    atomic_set(&library_shutting_down, 0);
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -1306,7 +1340,7 @@ THREAD_FUNC(session_handler)
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
-    while(!session->terminating) {
+    while(!session->terminating && !atomic_get(&library_shutting_down)) {
         /* how long should we wait if nothing wakes us? */
         wait_until_time = time_ms() + SESSION_IDLE_WAIT_TIME;
 

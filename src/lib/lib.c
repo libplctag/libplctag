@@ -84,12 +84,12 @@ static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
 static int set_tag_byte_order(plc_tag_p tag, attr attribs);
 static int check_byte_order_str(const char *byte_order, int length);
-// static int get_string_count_size_unsafe(plc_tag_p tag, int offset);
+static int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset);
 static int get_string_length_unsafe(plc_tag_p tag, int offset);
-// static int get_string_capacity_unsafe(plc_tag_p tag, int offset);
-// static int get_string_padding_unsafe(plc_tag_p tag, int offset);
-// static int get_string_total_length_unsafe(plc_tag_p tag, int offset);
-// static int get_string_byte_swapped_index_unsafe(plc_tag_p tag, int offset, int char_index);
+static int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int new_split_index);
+static int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size);
+static int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val);
+
 
 #ifdef LIPLCTAGDLL_EXPORTS
     #if defined(_WIN32) || (defined(_WIN64)
@@ -943,6 +943,9 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
     } else {
         tag->auto_sync_next_write = 0;
     }
+
+    /* See if we are allowed to resize fields */
+    tag->allow_field_resize = attr_get_int(attribs, "allow_field_resize", 0);
 
     /* set up the tag byte order if there are any overrides. */
     rc = set_tag_byte_order(tag, attribs);
@@ -2062,12 +2065,12 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
     int res = PLCTAG_ERR_NOT_FOUND;
     plc_tag_p tag = NULL;
 
-    pdebug(DEBUG_SPEW, "Starting.");
-
     if(!attrib_name || str_length(attrib_name) == 0) {
         pdebug(DEBUG_WARN, "Attribute name must not be null or zero-length!");
         return PLCTAG_ERR_BAD_PARAM;
     }
+
+    pdebug(DEBUG_DETAIL, "Starting for int attribute %s.", attrib_name);
 
     /* get library attributes */
     if(id == 0) {
@@ -2131,6 +2134,10 @@ LIB_EXPORT int plc_tag_set_int_attribute(int32_t id, const char *attrib_name, in
                     tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                     res = PLCTAG_ERR_OUT_OF_BOUNDS;
                 }
+            } else if(str_cmp_i(attrib_name, "allow_field_resize") == 0) {
+                tag->allow_field_resize = (new_value > 0 ? 1 : 0);
+                tag->status = PLCTAG_STATUS_OK;
+                res = PLCTAG_STATUS_OK;
             } else {
                 if(tag->vtable && tag->vtable->set_int_attrib) {
                     res = tag->vtable->set_int_attrib(tag, attrib_name, new_value);
@@ -2242,18 +2249,7 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size)
     }
 
     critical_block(tag->api_mutex) {
-        uint8_t *new_data = mem_realloc(tag->data, new_size);
-
-        if(new_data) {
-            /* return the old size */
-            rc = tag->size;
-            tag->data = new_data;
-            tag->size = new_size;
-            tag->status = PLCTAG_STATUS_OK;
-        } else {
-            rc = (int)PLCTAG_ERR_NO_MEM;
-            tag->status = (int8_t)rc;
-        }
+        rc = resize_tag_buffer_unsafe(tag, new_size);
     }
 
     rc_dec(tag);
@@ -3520,11 +3516,22 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
 
         /* check the amount of space. */
         if(string_start_offset + (int)tag->byte_order->str_count_word_bytes + max_len <= tag->size) {
-            for(int i = 0; i < max_len; i++) {
+            for(int i = 0; i < max_len && i < tag->size; i++) {
                 size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
                                   + (size_t)(unsigned int)string_start_offset
                                   + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
-                buffer[i] = (char)tag->data[char_index];
+
+                if(char_index < tag->size) {
+                    buffer[i] = (char)tag->data[char_index];
+                } else {
+                    pdebug(DEBUG_WARN, "Out of bounds index, %zu, generated!", char_index);
+                    rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                    break;
+                }
+            }
+
+            if(rc != PLCTAG_STATUS_OK) {
+                break;
             }
 
             tag->status = PLCTAG_STATUS_OK;
@@ -3544,25 +3551,19 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
 }
 
 
+
 LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const char *string_val)
 {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(tag_id);
-    int string_length = 0;
+    unsigned int string_length = 0;
+    unsigned int string_data_start_offset = (unsigned int)string_start_offset;
 
     pdebug(DEBUG_DETAIL, "Starting with string %s.", string_val);
 
     if(!tag) {
         pdebug(DEBUG_WARN,"Tag not found.");
         return PLCTAG_ERR_NOT_FOUND;
-    }
-
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN,"Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
     }
 
     /* are strings defined for this tag? */
@@ -3591,54 +3592,56 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
     string_length = str_length(string_val);
 
+    /* will the string fit in the space on the PLC?  If we have a max capacity we check. */
+    if(tag->byte_order->str_max_capacity && string_length > tag->byte_order->str_max_capacity) {
+        pdebug(DEBUG_WARN, "String is longer, %u bytes, than the maximum capacity, %u!", string_length, tag->byte_order->str_max_capacity);
+        rc = PLCTAG_ERR_TOO_LARGE;
+        tag->status = (int8_t)rc;
+        rc_dec(tag);
+        return rc;
+    }
+
+    /* we may be changing things, so take the mutex */
     critical_block(tag->api_mutex) {
-        int string_capacity = (tag->byte_order->str_max_capacity ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset));
-        int string_last_offset = string_start_offset + (int)(tag->byte_order->str_count_word_bytes) + string_capacity + (tag->byte_order->str_is_zero_terminated ? 1 : 0);
+        unsigned int string_last_offset = 0;
+        int old_string_size_in_buffer = 0;
+        int new_string_size_in_buffer = 0;
 
-        /* initial checks - these must be done in the critical block otherwise someone could change the tag buffer size etc. underneath us. */
-pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", string_capacity, string_last_offset, (int)tag->size);
-
-        /* will it fit at all? */
-        if(string_capacity < string_length) {
-            pdebug(DEBUG_WARN, "Passed string value is longer than allowed string capacity!");
-            rc = PLCTAG_ERR_TOO_LARGE;
-            tag->status = (int8_t)rc;
+        old_string_size_in_buffer = get_string_total_length_unsafe(tag, string_start_offset);
+        if(old_string_size_in_buffer < 0) {
+            pdebug(DEBUG_WARN, "Error getting existing string size in the tag buffer!");
+            rc = old_string_size_in_buffer;
             break;
         }
 
-        /* do we have a mismatch between what is in the tag buffer and the string or configuration? */
-        if(string_last_offset > tag->size) {
-            pdebug(DEBUG_WARN, "Bad configuration? String capacity/size is larger than the tag buffer!");
-            rc = PLCTAG_ERR_BAD_CONFIG;
-            tag->status = (int8_t)rc;
+        new_string_size_in_buffer = get_new_string_total_length_unsafe(tag, string_val);
+        if(new_string_size_in_buffer < 0) {
+            pdebug(DEBUG_WARN, "Error getting new string size!");
+            rc = new_string_size_in_buffer;
             break;
         }
 
-        /* copy the string data into the tag. */
-        rc = PLCTAG_STATUS_OK;
-        for(int i = 0; i < string_length; i++) {
-            size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
-                            + (size_t)(unsigned int)string_start_offset
-                            + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+        pdebug(DEBUG_DETAIL, "allow_field_resize=%d, old_string_size_in_buffer=%"PRId32", new_string_size_in_buffer=%"PRId32".", tag->allow_field_resize, old_string_size_in_buffer, new_string_size_in_buffer);
 
-            if(char_index < (size_t)(uint32_t)tag->size) {
-                tag->data[char_index] = (uint8_t)string_val[i];
-            } else {
-                pdebug(DEBUG_WARN, "Out of bounds index generated during string copy!");
-                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
-
-                /* note: only breaks out of the for loop, we need another break. */
-                break;
-            }
+        if(!tag->allow_field_resize && (new_string_size_in_buffer != old_string_size_in_buffer)) {
+            pdebug(DEBUG_DETAIL, "This tag does not allow resizing of fields.");
+            rc = PLCTAG_ERR_NOT_ALLOWED;
+            break;
         }
 
-        /* break out of the critical block if bad status. */
+        rc = resize_tag_buffer_at_offset_unsafe(tag, string_start_offset + old_string_size_in_buffer, string_start_offset + new_string_size_in_buffer);
         if(rc != PLCTAG_STATUS_OK) {
-            tag->status = (int8_t)rc;
             break;
+        }
+
+        /* zero out the string data in the buffer. */
+        pdebug(DEBUG_DETAIL, "Zeroing out the string data in the buffer.");
+        for(unsigned int i = string_start_offset; i < (string_start_offset + new_string_size_in_buffer) && i < tag->size; i++) {
+            tag->data[i] = 0;
         }
 
         /* if the string is counted, set the length */
+        pdebug(DEBUG_DETAIL, "Set count word if the string is counted.");
         if(tag->byte_order->str_is_counted) {
             int last_count_word_index = string_start_offset + (int)(unsigned int)tag->byte_order->str_count_word_bytes;
 
@@ -3649,17 +3652,38 @@ pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", st
                 break;
             }
 
+            /* move the index of the string data start past the count word. */
+            string_data_start_offset += tag->byte_order->str_count_word_bytes;
+
             switch(tag->byte_order->str_count_word_bytes) {
                 case 1:
+                    if(string_length > UINT8_MAX) {
+                        pdebug(DEBUG_WARN, "String length, %u, is greater than can be expressed in a one-byte count word!", string_length);
+                        rc = PLCTAG_ERR_TOO_LARGE;
+                        break;
+                    }
+
                     tag->data[string_start_offset] = (uint8_t)(unsigned int)string_length;
                     break;
 
                 case 2:
+                    if(string_length > UINT16_MAX) {
+                        pdebug(DEBUG_WARN, "String length, %u, is greater than can be expressed in a two-byte count word!", string_length);
+                        rc = PLCTAG_ERR_TOO_LARGE;
+                        break;
+                    }
+
                     tag->data[string_start_offset + tag->byte_order->int16_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
                     tag->data[string_start_offset + tag->byte_order->int16_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
                     break;
 
                 case 4:
+                    if(string_length > UINT32_MAX) {
+                        pdebug(DEBUG_WARN, "String length, %u, is greater than can be expressed in a four-byte count word!", string_length);
+                        rc = PLCTAG_ERR_TOO_LARGE;
+                        break;
+                    }
+
                     tag->data[string_start_offset + tag->byte_order->int32_order[0]] = (uint8_t)((((unsigned int)string_length) >> 0 ) & 0xFF);
                     tag->data[string_start_offset + tag->byte_order->int32_order[1]] = (uint8_t)((((unsigned int)string_length) >> 8 ) & 0xFF);
                     tag->data[string_start_offset + tag->byte_order->int32_order[2]] = (uint8_t)((((unsigned int)string_length) >> 16) & 0xFF);
@@ -3674,17 +3698,28 @@ pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", st
             }
         }
 
-        /* zero pad the rest. */
-        rc = PLCTAG_STATUS_OK;
-        for(int i = string_length; i < string_capacity; i++) {
-            size_t char_index = (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
-                            + (size_t)(unsigned int)string_start_offset
-                            + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
+        /* if status is bad, punt out of the critical block */
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s (%d) trying to set the count word!", plc_tag_decode_error(rc), rc);
+            tag->status = (int8_t)rc;
+            break;
+        }
+
+        /* copy the string data into the tag. */
+        pdebug(DEBUG_DETAIL, "Copying %u bytes of the string into the tag data buffer.", string_length);
+        for(unsigned int i = 0; i < string_length; i++) {
+            size_t char_index = 0;
+
+            if(tag->byte_order->str_is_byte_swapped) {
+                char_index = string_data_start_offset + ((i & 0x01) ? i - 1 : i + 1);
+            } else {
+                char_index = string_data_start_offset + i;
+            }
 
             if(char_index < (size_t)(uint32_t)tag->size) {
-                tag->data[char_index] = (uint8_t)0;
+                tag->data[char_index] = (uint8_t)string_val[i];
             } else {
-                pdebug(DEBUG_WARN, "Out of bounds index generated during string zero padding!");
+                pdebug(DEBUG_WARN, "Out of bounds index, %zu, generated during string copy!  Tag size is %"PRId32".", char_index, tag->size);
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
 
                 /* note: only breaks out of the for loop, we need another break. */
@@ -3698,6 +3733,22 @@ pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", st
             break;
         }
 
+        pdebug(DEBUG_DETAIL, "If string is nul terminated we need to set the termination byte.");
+        if(tag->byte_order->str_is_zero_terminated) {
+            pdebug(DEBUG_DETAIL, "Setting the nul termination byte.");
+
+            if(string_data_start_offset + string_length < tag->size) {
+                tag->data[string_data_start_offset + string_length] = (uint8_t)0;
+            } else {
+                pdebug(DEBUG_WARN, "Index of nul termination byte, %u, is outside of the tag data of %u bytes!", string_data_start_offset + string_length, tag->size);
+                rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
+            }
+        }
+
+        pdebug(DEBUG_DETAIL, "String data in buffer:");
+        pdebug_dump_bytes(DEBUG_DETAIL, tag->data + string_start_offset, new_string_size_in_buffer);
+
         /* if this is an auto-write tag, set the dirty flag to eventually trigger a write */
         if(rc == PLCTAG_STATUS_OK && tag->auto_sync_write_ms > 0) {
             tag->tag_is_dirty = 1;
@@ -3710,7 +3761,7 @@ pdebug(DEBUG_WARN, "string_capacity=%d, string_last_offset=%d, tag_size=%d.", st
 
     rc_dec(tag);
 
-    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
+    pdebug(DEBUG_DETAIL, "Done with status %s (%d).", plc_tag_decode_error(rc), rc);
 
     return rc;
 }
@@ -3753,6 +3804,7 @@ LIB_EXPORT int plc_tag_get_string_capacity(int32_t id, int string_start_offset)
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
+    /* FIXME - there is no capacity that is valid if it str_max_capacity is not set.  Should return 0 or an error. */
     critical_block(tag->api_mutex) {
         string_capacity = (tag->byte_order->str_max_capacity ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset));
     }
@@ -3813,8 +3865,6 @@ LIB_EXPORT int plc_tag_get_string_length(int32_t id, int string_start_offset)
 }
 
 
-
-
 LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offset)
 {
     int total_length = 0;
@@ -3850,11 +3900,9 @@ LIB_EXPORT int plc_tag_get_string_total_length(int32_t id, int string_start_offs
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
+    /* FIXME - what about byte swapping?  If the string length is not even, what happens? */
     critical_block(tag->api_mutex) {
-        total_length = (int)(tag->byte_order->str_count_word_bytes)
-                     + (tag->byte_order->str_is_fixed_length ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset))
-                     + (tag->byte_order->str_is_zero_terminated ? (int)1 : (int)0)
-                     + (int)(tag->byte_order->str_pad_bytes);
+        total_length = get_string_total_length_unsafe(tag, string_start_offset);
     }
 
     rc_dec(tag);
@@ -3887,11 +3935,13 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     }
 
     if(!buffer) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Buffer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(buffer_size <= 0) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"The buffer must have some capacity for data.");
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -3916,7 +3966,7 @@ LIB_EXPORT int plc_tag_set_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
             }
         }
     } else {
-        pdebug(DEBUG_WARN,"Trying to write a list of value on a Tag bit.");
+        pdebug(DEBUG_WARN,"Trying to write a list of values on a Tag bit.");
         tag->status = PLCTAG_ERR_UNSUPPORTED;
         rc=PLCTAG_ERR_UNSUPPORTED;
     }
@@ -3948,11 +3998,13 @@ LIB_EXPORT int plc_tag_get_raw_bytes(int32_t id, int offset, uint8_t *buffer, in
     }
 
     if(!buffer) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"Buffer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(buffer_size <= 0) {
+        rc_dec(tag);
         pdebug(DEBUG_WARN,"The buffer must have some capacity for data.");
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -4300,7 +4352,16 @@ int set_tag_byte_order(plc_tag_p tag, attr attribs)
             + tag->byte_order->str_pad_bytes)
           > tag->byte_order->str_total_length)
         {
-            pdebug(DEBUG_WARN, "Tag string total length must be at least the sum of the other string components!");
+            pdebug(DEBUG_WARN, "Tag string total length, %d bytes, must be at least the sum, %d, of the other string components!", tag->byte_order->str_total_length,
+                                tag->byte_order->str_is_zero_terminated
+                                + tag->byte_order->str_max_capacity
+                                + tag->byte_order->str_count_word_bytes
+                                + tag->byte_order->str_pad_bytes);
+            pdebug(DEBUG_DETAIL, "str_is_zero_terminated=%d, str_max_capacity=%d, str_count_word_bytes=%d, str_pad_bytes=%d",
+                                  tag->byte_order->str_is_zero_terminated,
+                                  tag->byte_order->str_max_capacity,
+                                  tag->byte_order->str_count_word_bytes,
+                                  tag->byte_order->str_pad_bytes);
             return PLCTAG_ERR_BAD_PARAM;
         }
 
@@ -4463,6 +4524,32 @@ int add_tag_lookup(plc_tag_p tag)
 
 
 
+/**
+ * @brief Get the total length of the string currently in the tag.
+ *
+ * @param tag
+ * @param string_start_offset
+ * @return int
+ */
+int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset)
+{
+    int total_length = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    total_length = (int)(tag->byte_order->str_count_word_bytes)
+                      + (tag->byte_order->str_is_fixed_length ? (int)(tag->byte_order->str_max_capacity) : get_string_length_unsafe(tag, string_start_offset))
+                      + (tag->byte_order->str_is_zero_terminated ? (int)1 : (int)0)
+                      + (int)(tag->byte_order->str_pad_bytes);
+
+    pdebug(DEBUG_DETAIL, "Done with length %d.", total_length);
+
+    return total_length;
+}
+
+
+
+
 
 
 /*
@@ -4529,4 +4616,174 @@ int get_string_length_unsafe(plc_tag_p tag, int offset)
     }
 
     return string_length;
+}
+
+
+int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val)
+{
+    int string_size_in_buffer = 0;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        int string_length = str_length(string_val);
+
+        /* if this is a fixed-size string, use that data. */
+        if(tag->byte_order->str_is_fixed_length) {
+            if(tag->byte_order->str_total_length) {
+                string_size_in_buffer = tag->byte_order->str_total_length;
+                pdebug(DEBUG_DETAIL, "String is fixed size, so use the total length %d as the size in the buffer.", tag->byte_order->str_total_length);
+                break;
+            } else {
+                pdebug(DEBUG_WARN, "Unsupported configuration.  You must set the total string length if you set the flag for string is fixed size!");
+                string_size_in_buffer = PLCTAG_ERR_BAD_CONFIG;
+                break;
+            }
+        }
+
+        /* add the incoming string size. */
+        string_size_in_buffer = string_length;
+        pdebug(DEBUG_DETAIL, "String size in buffer is at least %u after the incoming string length %u.", string_size_in_buffer, string_length);
+
+        /* OK the string will fit, now lets add the count word if any. */
+        if(tag->byte_order->str_count_word_bytes) {
+            string_size_in_buffer += (int)(tag->byte_order->str_count_word_bytes);
+            pdebug(DEBUG_DETAIL, "String size in buffer is %u after adding count word size, %u.", string_size_in_buffer, tag->byte_order->str_count_word_bytes);
+        }
+
+        /* any terminator byte? */
+        if(tag->byte_order->str_is_zero_terminated) {
+            string_size_in_buffer += 1;
+            pdebug(DEBUG_DETAIL, "String is zero terminated so the string size in the tag buffer is at least %u.", string_size_in_buffer);
+        }
+
+        /* any pad bytes? */
+        if(tag->byte_order->str_pad_bytes) {
+            string_size_in_buffer += tag->byte_order->str_pad_bytes;
+            pdebug(DEBUG_DETAIL, "String has %u padding bytes so the string size in the tag buffer is at least %u.", tag->byte_order->str_pad_bytes, string_size_in_buffer);
+        }
+
+        /* bytes reordered?  If so, we need an even string size in the buffer. */
+        if(tag->byte_order->str_is_byte_swapped) {
+            if(string_length & 0x01) {
+                string_size_in_buffer += 1;
+                pdebug(DEBUG_DETAIL, "String is byte swapped so length is now %u.", string_size_in_buffer);
+            }
+        }
+
+        pdebug(DEBUG_DETAIL, "Final string size in the tag buffer is %u bytes.", string_size_in_buffer);
+
+    } while(0);
+
+    if(string_size_in_buffer >= 0) {
+        pdebug(DEBUG_DETAIL, "Done with size %d.", string_size_in_buffer);
+    } else {
+        pdebug(DEBUG_WARN, "Error %s found while calculating the new string size in the tag buffer.", plc_tag_decode_error(string_size_in_buffer));
+    }
+
+    return string_size_in_buffer;
+}
+
+
+int resize_tag_buffer_unsafe(plc_tag_p tag, int new_size)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        uint8_t *new_data = NULL;
+
+        pdebug(DEBUG_INFO, "Changing the tag buffer size from %d to %d.", tag->size, new_size);
+
+        new_data = mem_realloc(tag->data, (int)new_size);
+        if(!new_data) {
+            pdebug(DEBUG_WARN, "Unable to allocate new tag data buffer!");
+            rc = PLCTAG_ERR_NO_MEM;
+            tag->status = (int8_t)rc;
+            break;
+        }
+
+        tag->data = new_data;
+        tag->size = new_size;
+    } while(0);
+
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
+
+    return rc;
+}
+
+
+int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int new_split_index)
+{
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_DETAIL, "Starting.");
+
+    do {
+        pdebug(DEBUG_DETAIL, "Move old index %d to new index %d.", old_split_index, new_split_index);
+
+        /* double check the data. */
+        if(old_split_index < 0 || old_split_index > tag->size) {
+            /* not good. */
+            pdebug(DEBUG_WARN, "Old split index %d is outside tag data, %d bytes!", old_split_index, tag->size);
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        if(new_split_index < 0) {
+            /* not good. */
+            pdebug(DEBUG_WARN, "New split index %d is outside tag data!", old_split_index);
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        if(new_split_index == old_split_index) {
+            /* nothing to do! */
+            pdebug(DEBUG_INFO, "Tag new size is the same as the tag old size so nothing to do.");
+            break;
+        }
+
+        /* are we shrinking or growing? */
+        if(new_split_index < old_split_index) {
+            pdebug(DEBUG_DETAIL, "Shrinking tag buffer by %d bytes", old_split_index - new_split_index);
+
+            /* shrinking.  We must move the existing data down to the new end point of the string. */
+            void *old_split_ptr = tag->data + old_split_index;
+            void *new_split_ptr = tag->data + new_split_index;
+            int amount_to_move = tag->size - old_split_index;
+            int new_tag_size = tag->size - (old_split_index - new_split_index);
+
+            /* amount_to_move will be positive or zero because of the above if check. */
+            mem_move(new_split_ptr, old_split_ptr, amount_to_move);
+
+            rc = resize_tag_buffer_unsafe(tag, new_tag_size);
+            break;
+        }
+
+        /* are we shrinking or growing? */
+        if(new_split_index > old_split_index) {
+            pdebug(DEBUG_DETAIL, "Growing tag buffer by %d bytes", new_split_index - old_split_index);
+
+            /* growing.  We must move the existing data up to the new end point of the string. */
+            void *old_split_ptr = tag->data + old_split_index;
+            void *new_split_ptr = tag->data + new_split_index;
+            int amount_to_move = tag->size - old_split_index;
+            int new_tag_size = tag->size + (new_split_index - old_split_index);
+
+            /* resize the buffer now. */
+            rc = resize_tag_buffer_unsafe(tag, new_tag_size);
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to resize the tag buffer!");
+                break;
+            }
+
+            /* amount_to_move will be positive or zero because of the above if check. */
+            mem_move(new_split_ptr, old_split_ptr, amount_to_move);
+        }
+    } while(0);
+
+    pdebug(DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
+
+    return rc;
 }

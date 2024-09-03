@@ -163,7 +163,7 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_SPEW,"Invalid pointer passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_WARN,"Invalid pointer passed from %s:%d!", func, line_num);
         return result;
     }
 
@@ -183,7 +183,7 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     }
 
     if(!result) {
-        pdebug(DEBUG_SPEW,"Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
+        pdebug(DEBUG_WARN,"Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
     } else {
         pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
     }
@@ -214,7 +214,7 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_SPEW,"Null reference passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_WARN,"Null reference passed from %s:%d!", func, line_num);
         return NULL;
     }
 

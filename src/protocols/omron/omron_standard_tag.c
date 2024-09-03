@@ -410,6 +410,13 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset)
 
     req->allow_packing = tag->allow_packing;
 
+    /* set the response size to the size of data from the previous read */
+    req->response_size = tag->size;
+
+    /* if this is the first read of the tag then we do not know the size of the response data and cannot use packing unless the plc supports fragmented reads*/
+    req->first_read = tag->first_read;
+    req->supports_fragmented_read = tag->supports_fragmented_read;
+
     /* add the request to the conn's list. */
     rc = conn_add_request(tag->conn, req);
 
@@ -541,6 +548,13 @@ int build_read_request_unconnected(omron_tag_p tag, int byte_offset)
 
     /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
+
+    /* set the response size to the size of data from the previous read */
+    req->response_size = tag->size;
+
+    /* if this is the first read of the tag then we do not know the size of the response data and cannot use packing unless the plc supports fragmented reads*/
+    req->first_read = tag->first_read;
+    req->supports_fragmented_read = tag->supports_fragmented_read;
 
     /* add the request to the conn's list. */
     rc = conn_add_request(tag->conn, req);
