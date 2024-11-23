@@ -479,6 +479,7 @@ elseif (BUILD_EXAMPLES)
                             string_non_standard_udt
                             string_standard
                             test_alternate_tag_listing
+                            test_array_notation
                             test_auto_sync
                             test_callback
                             test_callback_ex
@@ -516,6 +517,7 @@ elseif (BUILD_EXAMPLES)
                             slc500
                             string_non_standard_udt
                             string_standard
+                            test_array_notation
                             test_callback
                             test_callback_ex
                             test_connection_group
