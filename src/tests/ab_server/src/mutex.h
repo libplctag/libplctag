@@ -33,21 +33,65 @@
 
 #pragma once
 
-#include <signal.h>
-#include <stdbool.h>
-#include "slice.h"
-
+/* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
-    TCP_SERVER_INCOMPLETE = 100001,
-    TCP_SERVER_PROCESSED = 100002,
-    TCP_SERVER_DONE = 100003,
-    TCP_SERVER_BAD_REQUEST = 100004,
-    TCP_SERVER_UNSUPPORTED = 100005
-} tcp_server_status_t;
+    MUTEX_STATUS_OK             = 0,
+    MUTEX_ERR_NULL_PTR          = -25,
+    MUTEX_ERR_MUTEX_DESTROY     = -14,
+    MUTEX_ERR_MUTEX_INIT        = -15,
+    MUTEX_ERR_MUTEX_LOCK        = -16,
+    MUTEX_ERR_MUTEX_UNLOCK      = -17
+} mutex_err_t;
 
-typedef struct tcp_server *tcp_server_p;
+/* mutex functions/defs */
+typedef struct mutex_t *mutex_p;
+extern int mutex_create(mutex_p *m);
+// extern int mutex_lock(mutex_p m);
+// extern int mutex_try_lock(mutex_p m);
+// extern int mutex_unlock(mutex_p m);
+extern int mutex_destroy(mutex_p *m);
 
-extern tcp_server_p tcp_server_create(const char *host, const char *port, slice_s (*handler)(slice_s input, slice_s output, void *context), void *context, size_t context_size);
-extern void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate);
-extern void tcp_server_destroy(tcp_server_p server);
+extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
+extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
+extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 
+#if defined(_WIN32) && defined(_MSC_VER)
+    /* MinGW on Windows does not need this. */
+    #define __func__ __FUNCTION__
+#endif
+
+#define mutex_lock(m) mutex_lock_impl(__func__, __LINE__, m)
+#define mutex_try_lock(m) mutex_try_lock_impl(__func__, __LINE__, m)
+#define mutex_unlock(m) mutex_unlock_impl(__func__, __LINE__, m)
+
+/* macros are evil */
+
+/*
+ * Use this one like this:
+ *
+ *     critical_block(my_mutex) {
+ *         locked_data++;
+ *         foo(locked_data);
+ *     }
+ *
+ * The macro locks and unlocks for you.  Derived from ideas/code on StackOverflow.com.
+ *
+ * Do not use break, return, goto or continue inside the synchronized block if
+ * you intend to have them apply to a loop outside the synchronized block.
+ *
+ * You can use break, but it will drop out of the inner for loop and correctly
+ * unlock the mutex.  It will NOT break out of any surrounding loop outside the
+ * synchronized block.
+ */
+
+#if IS_WINDOWS
+#define PLCTAG_CAT2(a,b) a##b
+#define PLCTAG_CAT(a,b) PLCTAG_CAT2(a,b)
+#define LINE_ID(base) PLCTAG_CAT(base,__LINE__)
+
+#define critical_block(lock) \
+for(int LINE_ID(__sync_flag_nargle_) = 1; LINE_ID(__sync_flag_nargle_); LINE_ID(__sync_flag_nargle_) = 0, mutex_unlock(lock))  for(int LINE_ID(__sync_rc_nargle_) = mutex_lock(lock); LINE_ID(__sync_rc_nargle_) == MUTEX_STATUS_OK && LINE_ID(__sync_flag_nargle_) ; LINE_ID(__sync_flag_nargle_) = 0)
+#else
+#define critical_block(lock) \
+for(int __sync_flag_nargle_##__LINE__ = 1; __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0, mutex_unlock(lock))  for(int __sync_rc_nargle_##__LINE__ = mutex_lock(lock); __sync_rc_nargle_##__LINE__ == MUTEX_STATUS_OK && __sync_flag_nargle_##__LINE__ ; __sync_flag_nargle_##__LINE__ = 0)
+#endif

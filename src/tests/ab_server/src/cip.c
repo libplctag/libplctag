@@ -492,9 +492,11 @@ slice_s handle_read_request(slice_s input, slice_s output, plc_s *plc)
     info("copy start location = %d", offset);
     info("output space = %d", slice_len(output) - offset);
 
-    /* FIXME - use memcpy */
-    for(size_t i=0; i < amount_to_copy; i++) {
-        slice_set_uint8(output, offset + i, tag->data[read_start_offset + i]);
+    critical_block(tag->data_mutex) {
+        /* FIXME - use memcpy */
+        for(size_t i=0; i < amount_to_copy; i++) {
+            slice_set_uint8(output, offset + i, tag->data[byte_offset + i]);
+        }
     }
 
     offset += amount_to_copy;
@@ -587,7 +589,9 @@ slice_s handle_write_request(slice_s input, slice_s output, plc_s *plc)
     info("byte_offset = %d", write_start_offset);
     info("offset = %d", offset);
     info("total_request_size = %d", total_request_size);
-    memcpy(&tag->data[write_start_offset], slice_get_bytes(input, offset), total_request_size);
+    critical_block(tag->data_mutex) {
+        memcpy(&tag->data[byte_offset], slice_get_bytes(input, offset), total_request_size);
+    }
 
     /* start making the response. */
     offset = 0;

@@ -246,7 +246,7 @@ int socket_accept(int sock)
             return (int)accept(sock, NULL, NULL);
         }
     } else if (num_accept_ready < 0) {
-        info("Error selecting the listen socket!");
+        info("Error selecting the listen socket! Errno=%d.", errno);
         return SOCKET_ERR_SELECT;
     } 
 

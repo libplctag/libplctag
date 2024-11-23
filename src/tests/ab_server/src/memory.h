@@ -33,21 +33,17 @@
 
 #pragma once
 
-#include <signal.h>
-#include <stdbool.h>
-#include "slice.h"
-
+/* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
-    TCP_SERVER_INCOMPLETE = 100001,
-    TCP_SERVER_PROCESSED = 100002,
-    TCP_SERVER_DONE = 100003,
-    TCP_SERVER_BAD_REQUEST = 100004,
-    TCP_SERVER_UNSUPPORTED = 100005
-} tcp_server_status_t;
+    MEMORY_STATUS_OK            = 0,
+} memory_err_t;
 
-typedef struct tcp_server *tcp_server_p;
 
-extern tcp_server_p tcp_server_create(const char *host, const char *port, slice_s (*handler)(slice_s input, slice_s output, void *context), void *context, size_t context_size);
-extern void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate);
-extern void tcp_server_destroy(tcp_server_p server);
-
+/* memory functions/defs */
+extern void *mem_alloc(int size);
+extern void *mem_realloc(void *orig, int size);
+extern void mem_free(const void *mem);
+extern void mem_set(void *dest, int c, int size);
+extern void mem_copy(void *dest, void *src, int size);
+extern void mem_move(void *dest, void *src, int size);
+extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);

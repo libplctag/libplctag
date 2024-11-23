@@ -33,21 +33,37 @@
 
 #pragma once
 
-#include <signal.h>
-#include <stdbool.h>
-#include "slice.h"
-
+/* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
-    TCP_SERVER_INCOMPLETE = 100001,
-    TCP_SERVER_PROCESSED = 100002,
-    TCP_SERVER_DONE = 100003,
-    TCP_SERVER_BAD_REQUEST = 100004,
-    TCP_SERVER_UNSUPPORTED = 100005
-} tcp_server_status_t;
+    THREAD_STATUS_OK            = 0,
+    THREAD_ERR_NULL_PTR         = -25,
+    THREAD_ERR_THREAD_CREATE    = -30,
+    THREAD_ERR_THREAD_JOIN      = -31
+} thread_err_t;
 
-typedef struct tcp_server *tcp_server_p;
+typedef struct thread_t *thread_p;
+#if IS_WINDOWS
+#define thread_func_t LPTHREAD_START_ROUTINE
+#define NO_RETURN __declspec(noreturn)
+#else
+typedef void *(*thread_func_t)(void *arg);
+#define NO_RETURN __attribute__((noreturn))
+#endif
+extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg);
+NO_RETURN extern void thread_stop(void);
+extern void thread_kill(thread_p t);
+extern int thread_join(thread_p t);
+extern int thread_detach();
+extern int thread_destroy(thread_p *t);
 
-extern tcp_server_p tcp_server_create(const char *host, const char *port, slice_s (*handler)(slice_s input, slice_s output, void *context), void *context, size_t context_size);
-extern void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate);
-extern void tcp_server_destroy(tcp_server_p server);
+#if IS_WINDOWS
+#define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
+#define THREAD_RETURN(val) return (DWORD)val;
 
+#define THREAD_LOCAL __declspec(thread)
+#else
+#define THREAD_FUNC(func) void *func(void *arg)
+#define THREAD_RETURN(val) return (void *)val;
+
+#define THREAD_LOCAL __thread
+#endif
