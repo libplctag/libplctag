@@ -56,10 +56,12 @@ inline static uint8_t *slice_get_bytes(slice_s s, size_t index) {  if(slice_in_b
 inline static bool slice_has_err(slice_s s) { if(s.data == NULL) { return true; } else { return false; } }
 inline static int slice_get_err(slice_s s) { return (int)(ssize_t)slice_len(s); }
 inline static bool slice_match_bytes(slice_s s, const uint8_t *data, size_t data_len) {
-    if(data_len > slice_len(s)) {
+    /* must be an exact match */
+    if(data_len != slice_len(s)) {
         /* fprintf(stderr, "lengths do not match! Slice has length %d and bytes have length %d!\n", (int)slice_len(s), (int)data_len); */
         return false;
     }
+
     for(size_t i=0; i < data_len; i++) {
         /* fprintf(stderr,"Comparing element %d, %x and %x\n", (int)i, (int)slice_get_uint8(s, (ssize_t)i), data[i]); */
         if(slice_get_uint8(s, i) != data[i]) {
@@ -174,4 +176,3 @@ inline static void slice_set_uin64_le(slice_s output_buf, size_t offset, uint64_
         slice_set_uint8(output_buf, offset + 7, (uint8_t)((val >> 56) & 0xFF));
     }
 }
-
