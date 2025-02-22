@@ -101,6 +101,50 @@ inline static slice_s slice_from_slice(slice_s src, size_t start, size_t len) {
 
 /* helper functions to get and set data in a slice. */
 
+inline static bool slice_copy_data_in(slice_s dest, uint8_t *src_data, size_t src_len) {
+    if(slice_has_err(dest)) {
+        return false;
+    }
+
+    if(slice_len(dest) < src_len) {
+        return false;
+    }
+
+    memcpy(dest.data, src_data, src_len);
+
+    return true;
+}
+
+inline bool slice_copy_data_out(uint8_t *dest_data, size_t dest_len, slice_s src) {
+    if(slice_has_err(src)) {
+        return false;
+    }
+
+    if(slice_len(src) > dest_len) {
+        return false;
+    }
+
+    memcpy(dest_data, src.data, slice_len(src));
+
+    return true;
+}
+
+inline bool slice_copy_slice(slice_s dest, slice_s src) {
+    if(slice_has_err(dest) || slice_has_err(src)) {
+        return false;
+    }
+
+    if(slice_len(dest) < slice_len(src)) {
+        return false;
+    }
+
+    memcpy(dest.data, src.data, slice_len(src));
+
+    return true;
+}
+
+
+
 inline static uint16_t slice_get_uint16_le(slice_s input_buf, size_t offset) {
     uint16_t res = 0;
 
