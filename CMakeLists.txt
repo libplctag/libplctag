@@ -1,4 +1,4 @@
-#   Copyright (C) 2022 by Kyle Hayes
+#   Copyright (C) 2025 by Kyle Hayes
 #   Author Kyle Hayes  kyle.hayes@gmail.com
 #
 # This software is available under either the Mozilla Public license
@@ -486,6 +486,7 @@ elseif (BUILD_EXAMPLES)
                             test_callback_ex_logix
                             test_callback_ex_modbus
                             test_connection_group
+                            test_indexed_tags
                             test_many_tag_perf
                             test_raw_cip
                             test_reconnect
@@ -521,6 +522,7 @@ elseif (BUILD_EXAMPLES)
                             test_callback
                             test_callback_ex
                             test_connection_group
+                            test_indexed_tags
                             test_event_windows
                             test_raw_cip
                             test_shutdown
