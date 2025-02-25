@@ -35,9 +35,13 @@
 
 #if IS_WINDOWS
     #include <process.h>
+    #include <handleapi.h>
+    #include <processthreadsapi.h>
+    #include <synchapi.h>
 #else
     #include <pthread.h>
 #endif
+
 #include "thread.h"
 #include "memory.h"
 #include "utils.h"
