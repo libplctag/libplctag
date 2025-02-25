@@ -57,7 +57,8 @@
 
 /* non-tag commands */
 //4b 02 20 67 24 01 07 3d f3 45 43 50 21
-// const uint8_t CIP_PCCC_EXECUTE[] = { 0x4B, 0x02, 0x20, 0x67, 0x24, 0x01, 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21 };
+// const uint8_t CIP_PCCC_EXECUTE_OBJ[] = { 0x02, 0x20, 0x67, 0x24, 0x01 };
+// const uint8_t CIP_PCCC_PREFIX[] = { 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21 };
 // const uint8_t CIP_FORWARD_CLOSE[] = { 0x4E, 0x02, 0x20, 0x06, 0x24, 0x01 };
 const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = { 0x20, 0x06, 0x24, 0x01 };
 // const uint8_t CIP_LIST_TAGS[] = { 0x55, 0x02, 0x20, 0x02, 0x24, 0x01 };
@@ -142,6 +143,12 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc)
         return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
 
+    info("CIP Service: %02x", cip_service);
+    info("CIP Path:");
+    slice_dump(cip_service_path);
+    info("CIP Payload:");
+    slice_dump(cip_service_payload);
+
     switch(cip_service) {
         case CIP_SRV_FORWARD_OPEN:
         case CIP_SRV_FORWARD_OPEN_EX:
@@ -160,6 +167,10 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc)
         case CIP_SRV_WRITE_NAMED_TAG:
         case CIP_SRV_WRITE_NAMED_TAG_FRAG:
             return handle_write_request(cip_service, cip_service_path, cip_service_payload, output, plc);
+            break;
+
+        case CIP_SRV_PCCC_EXECUTE:
+            return dispatch_pccc_request(input, output, plc);
             break;
 
         default:
@@ -206,7 +217,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
         info("Processing Forward Open Extended request.");
     }
 
-    if(!slice_match_bytes(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
+    if(!slice_match_data_exact(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
         info("Forward Open service requested from wrong object!");
         slice_dump(cip_service_path);
         return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
@@ -268,7 +279,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     info("Connection path slice:");
     slice_dump(conn_path_slice);
 
-    if(!slice_match_bytes(conn_path_slice, &(plc->path[0]), plc->path_len)) {
+    if(!slice_match_data_exact(conn_path_slice, &(plc->path[0]), plc->path_len)) {
         slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
 
         info("Forward open request path did not match the path for this PLC!");
@@ -348,7 +359,7 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
     size_t offset = 0;
     forward_close_s fc_req = {0};
 
-    if(!slice_match_bytes(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
+    if(!slice_match_data_exact(cip_service_path, CIP_OBJ_CONNECTION_MANAGER, sizeof(CIP_OBJ_CONNECTION_MANAGER))) {
         info("Forward Open service requested from wrong object!");
         slice_dump(cip_service_path);
         return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
@@ -392,7 +403,7 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
     info("Connection path slice:");
     slice_dump(conn_path_slice);
 
-    if(!slice_match_bytes(conn_path_slice, &(plc->path[0]), plc->path_len)) {
+    if(!slice_match_data_exact(conn_path_slice, &(plc->path[0]), plc->path_len)) {
         slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
 
         info("Forward Cpen request path did not match the path for this PLC!");
@@ -710,6 +721,7 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
 }
 
 
+
 slice_s make_cip_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error)
 {
     size_t result_size = 0;
@@ -775,7 +787,7 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
     *tag = plc->tags;
 
     while(*tag) {
-        if(slice_match_string(tag_name_slice, (*tag)->name)) {
+        if(slice_match_string_exact(tag_name_slice, (*tag)->name)) {
             info("Found tag %s", (*tag)->name);
             break;
         }
