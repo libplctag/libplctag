@@ -1,6 +1,7 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *   Author Heath Raftery                                                  *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
  * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
@@ -33,6 +34,8 @@
 
 #pragma once
 
+#include "compat.h"
+
 /* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
     MUTEX_STATUS_OK             = 0,
@@ -55,7 +58,7 @@ extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
 
-#if defined(_WIN32) && defined(_MSC_VER)
+#if defined(IS_WINDOWS) && defined(IS_MSVC)
     /* MinGW on Windows does not need this. */
     #define __func__ __FUNCTION__
 #endif
