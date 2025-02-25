@@ -1,6 +1,7 @@
 /***************************************************************************
  *   Copyright (C) 2020 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *   Author Heath Raftery                                                  *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
  * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
@@ -34,10 +35,16 @@
 #include "compat.h"
 
 #if IS_WINDOWS
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <process.h>
+    #include <handleapi.h>
+    #include <processthreadsapi.h>
     #include <synchapi.h>
 #else
     #include <pthread.h>
 #endif
+
 #include "mutex.h"
 #include "memory.h"
 #include "utils.h"
@@ -54,8 +61,8 @@ struct mutex_t {
 
 int mutex_create(mutex_p *m)
 {
-#if IS_WINDOWS
-#else
+
+#if !defined(IS_WINDOWS)
     pthread_mutexattr_t mutex_attribs;
 #endif
 

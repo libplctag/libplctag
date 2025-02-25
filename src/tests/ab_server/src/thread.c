@@ -1,6 +1,7 @@
 /***************************************************************************
  *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *   Author Heath Raftery                                                  *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
  * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
