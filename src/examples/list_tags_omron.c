@@ -337,7 +337,7 @@ int get_tag_attributes_by_name(int32_t tag, const char *tag_name)
 
         /* string length in bytes. */
         string_byte_len = &request[req_index];
-        *string_byte_len = strlen(tag_name);
+        *string_byte_len = (uint8_t)strlen(tag_name);
         req_index++;
 
         /* copy the string */
