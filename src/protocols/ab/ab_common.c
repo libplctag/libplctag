@@ -1123,19 +1123,22 @@ int check_read_request_status(ab_tag_p tag, ab_request_p request)
         /* check to see if it was an abort on the session side. */
         if(request->status != PLCTAG_STATUS_OK) {
             rc = request->status;
-            request->abort_request = 1;
 
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+            if(rc_is_error(request->status)) {
+                request->abort_request = 1;
 
-            tag->read_in_progress = 0;
-            tag->offset = 0;
+                pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
-            /* TODO - why is this here? */
-            tag->size = tag->elem_count * tag->elem_size;
+                tag->read_in_progress = 0;
+                tag->offset = 0;
 
-            break;
+                /* TODO - why is this here? */
+                tag->size = tag->elem_count * tag->elem_size;
+            }
         }
     }
+
+    /* FIXME - this logic above and below looks cluttered.  Needs refactor. */
 
     if(rc != PLCTAG_STATUS_OK) {
         if(rc_is_error(rc)) {
@@ -1143,8 +1146,14 @@ int check_read_request_status(ab_tag_p tag, ab_request_p request)
             tag->read_in_progress = 0;
             tag->offset = 0;
 
-            rc_dec(tag->req);
-            tag->req = NULL;
+            if(tag->req) {
+                /* belt and suspenders, make absolutely sure that the abort flag is set. */
+                spin_block(&tag->req->lock) {
+                    tag->req->abort_request = 1;
+                }
+
+                tag->req = rc_dec(tag->req);
+            }
         }
 
         pdebug(DEBUG_DETAIL, "Read not ready with status %s.", plc_tag_decode_error(rc));
@@ -1202,16 +1211,19 @@ int check_write_request_status(ab_tag_p tag, ab_request_p request)
         /* check to see if it was an abort on the session side. */
         if(request->status != PLCTAG_STATUS_OK) {
             rc = request->status;
-            request->abort_request = 1;
 
-            pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
+            if(rc_is_error(request->status)) {
+                request->abort_request = 1;
 
-            tag->write_in_progress = 0;
-            tag->offset = 0;
+                pdebug(DEBUG_WARN,"Session reported failure of request: %s.", plc_tag_decode_error(rc));
 
-            break;
+                tag->write_in_progress = 0;
+                tag->offset = 0;
+            }
         }
     }
+
+    /* FIXME - this logic above and below looks cluttered.  Needs refactor. */
 
     if(rc != PLCTAG_STATUS_OK) {
         if(rc_is_error(rc)) {
@@ -1219,8 +1231,14 @@ int check_write_request_status(ab_tag_p tag, ab_request_p request)
             tag->read_in_progress = 0;
             tag->offset = 0;
 
-            rc_dec(tag->req);
-            tag->req = NULL;
+            if(tag->req) {
+                /* make absolutely sure that the abort flag is set. */
+                spin_block(&tag->req->lock) {
+                    tag->req->abort_request = 1;
+                }
+
+                tag->req = rc_dec(tag->req);
+            }
         }
 
         pdebug(DEBUG_DETAIL, "Write not ready with status %s.", plc_tag_decode_error(rc));
