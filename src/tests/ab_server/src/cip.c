@@ -59,7 +59,7 @@
 //4b 02 20 67 24 01 07 3d f3 45 43 50 21
 // const uint8_t CIP_PCCC_EXECUTE[] = { 0x4B, 0x02, 0x20, 0x67, 0x24, 0x01, 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21 };
 // const uint8_t CIP_FORWARD_CLOSE[] = { 0x4E, 0x02, 0x20, 0x06, 0x24, 0x01 };
-const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = { 0x02, 0x20, 0x06, 0x24, 0x01 };
+const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = { 0x20, 0x06, 0x24, 0x01 };
 // const uint8_t CIP_LIST_TAGS[] = { 0x55, 0x02, 0x20, 0x02, 0x24, 0x01 };
 // const uint8_t CIP_FORWARD_OPEN_EX[] = { 0x5B, 0x02, 0x20, 0x06, 0x24, 0x01 };
 
@@ -121,15 +121,10 @@ static slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path
 static slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output, plc_s *plc);
 
 static bool parse_cip_request(slice_s input, uint8_t *cip_service, slice_s *cip_service_path, slice_s *cip_service_payload);
+static bool extract_cip_path(slice_s input, size_t *offset, bool padded, slice_s *output);
 static bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num_indexes, uint32_t *indexes);
 static bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexes, uint32_t *indexes, uint16_t request_element_count, size_t *request_start_byte_offset, size_t *request_end_byte_offset);
 
-
-
-// static bool parse_cip_path(slice_s input, slice_s *cip_path, slice_s *input_remainder);
-// static bool find_tag(slice_s tag_name_slice, tag_def_s **tag);
-// static bool process_tag_segment(plc_s *plc, slice_s input, tag_def_s **tag, size_t *start_read_offset);
-// static bool match_path(slice_s input, bool need_pad, uint8_t *path, uint8_t path_len);
 
 
 
@@ -200,7 +195,8 @@ typedef struct {
 
 slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output, plc_s *plc)
 {
-    slice_s conn_path;
+    slice_s path_payload = {0};
+    slice_s conn_path_slice = {0};
     size_t offset = 0;
     forward_open_s fo_req = {0};
 
@@ -258,17 +254,26 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     }
 
     /* Get the connection path */
-    conn_path = slice_from_slice(cip_service_payload, offset, slice_len(cip_service_payload));
+    path_payload = slice_from_slice(cip_service_payload, offset, slice_len(cip_service_payload));
+
+    info("Forward Open path payload:");
+    slice_dump(path_payload);
+
+    offset = 0;
+    if(!extract_cip_path(path_payload, &offset, false, &conn_path_slice)) {
+        info("Unable to extract the connection path from the Forward Open request!");
+        return make_cip_error(output, cip_service, CIP_ERR_PATH_SEGMENT, false, 0);
+    }
 
     info("Connection path slice:");
-    slice_dump(conn_path);
+    slice_dump(conn_path_slice);
 
-    if(!slice_match_bytes(conn_path, &(plc->path[0]), plc->path_len)) {
+    if(!slice_match_bytes(conn_path_slice, &(plc->path[0]), plc->path_len)) {
         slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
 
         info("Forward open request path did not match the path for this PLC!");
         info("FO path:");
-        slice_dump(conn_path);
+        slice_dump(conn_path_slice);
         info("PLC path:");
         slice_dump(plc_path);
 
@@ -339,7 +344,7 @@ typedef struct {
 
 slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output, plc_s *plc)
 {
-    slice_s conn_path;
+    slice_s conn_path_slice;
     size_t offset = 0;
     forward_close_s fc_req = {0};
 
@@ -348,7 +353,7 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
         slice_dump(cip_service_path);
         return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0);
     } else {
-        info("Forward Open service requested of Connection Manager Object instance 1.");
+        info("Forward Close service requested of Connection Manager Object instance 1.");
     }
 
     /* minimum length check */
@@ -379,17 +384,20 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
      * length.
      */
 
-    conn_path = slice_from_slice(cip_service_payload, offset, slice_len(cip_service_payload));
+     if(!extract_cip_path(cip_service_payload, &offset, true, &conn_path_slice)) {
+        info("Unable to extract the connection path from the Forward Close request!");
+        return make_cip_error(output, cip_service, CIP_ERR_PATH_SEGMENT, false, 0);
+    }
 
     info("Connection path slice:");
-    slice_dump(conn_path);
+    slice_dump(conn_path_slice);
 
-    if(!slice_match_bytes(conn_path, &(plc->path[0]), plc->path_len)) {
+    if(!slice_match_bytes(conn_path_slice, &(plc->path[0]), plc->path_len)) {
         slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
 
         info("Forward Cpen request path did not match the path for this PLC!");
         info("FC path:");
-        slice_dump(conn_path);
+        slice_dump(conn_path_slice);
         info("PLC path:");
         slice_dump(plc_path);
 
@@ -608,7 +616,7 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     /* what service are we handling? */
     if(cip_service == CIP_SRV_WRITE_NAMED_TAG) {
         info("Processing Write Named Tag request.");
-        required_request_payload_size = CIP_WRITE_FRAG_MIN_SIZE;
+        required_request_payload_size = CIP_WRITE_PAYLOAD_MIN_SIZE;
     } else {
         info("Processing Write Named Tag Fragmented request.");
         required_request_payload_size = CIP_WRITE_FRAG_PAYLOAD_MIN_SIZE;
@@ -702,179 +710,6 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
 }
 
 
-
-/*
- * we should see:
- *  0x91 <name len> <name bytes> (<numeric segment>){0-3}
- *
- * find the tag name, then check the numeric segments, if any, against the
- * tag dimensions.
- */
-
-bool process_tag_segment(plc_s *plc, slice_s input, tag_def_s **tag, size_t *start_read_offset)
-{
-    size_t offset = 0;
-    uint8_t symbolic_marker = slice_get_uint8(input, offset); offset++;
-    uint8_t name_len = 0;
-    slice_s tag_name;
-    size_t dimensions[3] = { 0, 0, 0};
-    size_t dimension_index = 0;
-
-    if(symbolic_marker != CIP_SYMBOLIC_SEGMENT_MARKER)  {
-        info("Expected symbolic segment but found %x!", symbolic_marker);
-        return false;
-    }
-
-    /* get and check the length of the symbolic name part. */
-    name_len = slice_get_uint8(input, offset); offset++;
-    if(name_len >= slice_len(input)) {
-        info("Insufficient space in symbolic segment for name.   Needed %d bytes but only had %d bytes!", name_len, slice_len(input)-1);
-        return false;
-    }
-
-    /* bump the offset.   Must be 16-bit aligned, so pad if needed. */
-    offset += (size_t)(name_len + ((name_len & 0x01) ? 1 : 0));
-
-    /* try to find the tag. */
-    tag_name = slice_from_slice(input, 2, name_len);
-    *tag = plc->tags;
-
-    while(*tag) {
-        if(slice_match_string(tag_name, (*tag)->name)) {
-            info("Found tag %s", (*tag)->name);
-            break;
-        }
-
-        (*tag) = (*tag)->next_tag;
-    }
-
-    if(*tag) {
-        slice_s numeric_segments = slice_from_slice(input, offset, slice_len(input));
-
-        dimension_index = 0;
-
-        info("Numeric segment(s):");
-        slice_dump(numeric_segments);
-
-        while(slice_len(numeric_segments) > 0) {
-            uint8_t segment_type = slice_get_uint8(numeric_segments, 0);
-
-            if(dimension_index >= 3) {
-                info("More numeric segments than expected!   Remaining request:");
-                slice_dump(numeric_segments);
-                return false;
-            }
-
-            switch(segment_type) {
-                case 0x28: /* single byte value. */
-                    dimensions[dimension_index] = (size_t)slice_get_uint8(numeric_segments, 1);
-                    dimension_index++;
-                    numeric_segments = slice_from_slice(numeric_segments, 2, slice_len(numeric_segments));
-                    break;
-
-                case 0x29: /* two byte value */
-                    dimensions[dimension_index] = (size_t)slice_get_uint16_le(numeric_segments, 2);
-                    dimension_index++;
-                    numeric_segments = slice_from_slice(numeric_segments, 4, slice_len(numeric_segments));
-                    break;
-
-                case 0x2A: /* four byte value */
-                    dimensions[dimension_index] = (size_t)slice_get_uint32_le(numeric_segments, 2);
-                    dimension_index++;
-                    numeric_segments = slice_from_slice(numeric_segments, 6, slice_len(numeric_segments));
-                    break;
-
-                default:
-                    info("Unexpected numeric segment marker %x!", segment_type);
-                    return false;
-                    break;
-            }
-        }
-
-        /* calculate the element offset. */
-        if(dimension_index > 0) {
-            size_t element_offset = 0;
-
-            if(dimension_index != (*tag)->num_dimensions) {
-                info("Required %d numeric segments, but only found %d!", (*tag)->num_dimensions, dimension_index);
-                return false;
-            }
-
-            /* check in bounds. */
-            for(size_t i=0; i < dimension_index; i++) {
-                if(dimensions[i] >= (*tag)->dimensions[i]) {
-                    info("Dimension %d is out of bounds, must be 0 <= %d < %d", (int)i, dimensions[i], (*tag)->dimensions[i]);
-                    return false;
-                }
-            }
-
-            /* calculate the offset. */
-            if ((*tag)->num_dimensions == 1) {
-                // Simple single dimension array
-                element_offset = dimensions[0];
-            } else {
-                // Multi-dimensional calculation
-                element_offset = (size_t)(dimensions[0] * ((*tag)->dimensions[1] * (*tag)->dimensions[2]) +
-                                        dimensions[1] *  (*tag)->dimensions[2] +
-                                        dimensions[2]);
-            }
-
-            *start_read_offset = (size_t)((*tag)->elem_size * element_offset);
-            info("Calculated byte offset %zu for dimension %zu", *start_read_offset, dimensions[0]);
-        } else {
-            *start_read_offset = 0;
-        }
-    } else {
-        info("Tag %.*s not found!", slice_len(tag_name), (const char *)(tag_name.data));
-        return false;
-    }
-
-    return true;
-}
-
-/* match a path.   This is tricky, thanks, Rockwell. */
-bool match_path(slice_s input, bool need_pad, uint8_t *path, uint8_t path_len)
-{
-    size_t input_len = slice_len(input);
-    size_t input_path_len = 0;
-    size_t path_start = 0;
-
-    info("Starting with request path:");
-    slice_dump(input);
-    info("and stored path:");
-    slice_dump(slice_make(path, (ssize_t)path_len));
-
-    if(input_len < path_len) {
-        info("path does not match lengths.   Input length %zu, path length %zu.", input_len, path_len);
-        return false;
-    }
-
-    /* the first byte of the path input is the length byte in 16-bit words */
-    input_path_len = (size_t)slice_get_uint8(input, 0);
-
-    /* check it against the passed path length */
-    if((input_path_len * 2) != path_len) {
-        info("path is wrong length.   Got %zu but expected %zu!", input_path_len*2, path_len);
-        return false;
-    }
-
-    /* where does the path start? */
-    if(need_pad) {
-        path_start = 2;
-    } else {
-        path_start = 1;
-    }
-
-    info("Comparing slice:");
-    slice_dump(slice_from_slice(input, path_start, slice_len(input)));
-    info("with slice:");
-    slice_dump(slice_make(path, (ssize_t)path_len));
-
-    return slice_match_bytes(slice_from_slice(input, path_start, slice_len(input)), path, path_len);
-}
-
-
-
 slice_s make_cip_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error)
 {
     size_t result_size = 0;
@@ -953,48 +788,45 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
         return false;
     }
 
-    /* get the remaining parts which could be indexes. */
-    tag_path_remainder = slice_from_slice(tag_path, offset, slice_len(tag_path) - offset);
-
     /* Initialize the number of indexes to zero */
     *num_indexes = 0;
 
-    /* start the offset again */
-    offset = 0;
-
     /* Parse the numeric segments (indexes) */
-    while (offset < slice_len(tag_path_remainder)) {
+    while (offset < slice_len(tag_path)) {
         uint8_t segment_type = slice_get_uint8(tag_path, offset);
 
         switch (segment_type) {
             case 0x28: // Single byte value
                 offset += 1; // skip segment type
                 indexes[*num_indexes] = (uint32_t)slice_get_uint8(tag_path, offset);
+                info("Numeric segment: %u", indexes[*num_indexes]);
                 offset += 1;
                 break;
 
             case 0x29: // Two byte value
                 offset += 2; // skip segment type and padding
                 indexes[*num_indexes] = (uint32_t)slice_get_uint16_le(tag_path, offset);
+                info("Numeric segment: %u", indexes[*num_indexes]);
                 offset += 2;
                 break;
 
             case 0x2A: // Four byte value
                 offset += 2; // skip segment type and padding
                 indexes[*num_indexes] = (uint32_t)slice_get_uint32_le(tag_path, offset);
+                info("Numeric segment: %u", indexes[*num_indexes]);
                 offset += 4;
                 break;
 
             default:
-                info("Unexpected numeric segment marker %x!", segment_type);
+                info("Unexpected numeric segment marker %x at position %zu!", segment_type, offset);
                 return false;
                 break;
         }
 
         (*num_indexes)++;
 
-        if (*num_indexes >= max_indexes) {
-            info("More numeric segments than expected!");
+        if (*num_indexes > max_indexes) {
+            info("More numeric segments, %zu, than expected, %zu!", *num_indexes, max_indexes);
             return false;
         }
     }
@@ -1004,6 +836,43 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
         info("Required zero or %zu numeric segments, but only found %zu!", (*tag)->num_dimensions, (size_t)*num_indexes);
         return false;
     }
+
+    return true;
+}
+
+
+bool extract_cip_path(slice_s input, size_t *offset, bool padded, slice_s *output)
+{
+    uint8_t path_len = 0;
+
+    /* Check if the input slice is long enough to contain the path length and path */
+    if (slice_len(input) < ((*offset) + (padded ? 2 : 1))) {
+        info("CIP path is too short to contain path length and path!");
+        return false;
+    }
+
+    /* Get the path length */
+    path_len = slice_get_uint8(input, (*offset)); (*offset)++;
+    if (path_len == 0) {
+        info("CIP path length is zero!");
+        return false;
+    }
+
+    if(padded) {
+        *offset += 1; /* skip the padding byte */
+    }
+
+    /* Check if the input slice is long enough to contain the path */
+    if (slice_len(input) < ((*offset) + (path_len * 2))) {
+        info("CIP path is too short to contain the specified path length %u!", path_len * 2);
+        return false;
+    }
+
+    /* return the slice with the path data. */
+    *output = slice_from_slice(input, *offset, path_len * 2);
+
+    /* update the offset to past the path. */
+    *offset += path_len * 2;
 
     return true;
 }
@@ -1107,18 +976,11 @@ bool parse_cip_request(slice_s input, uint8_t *cip_service, slice_s *cip_service
     /* Get the service code */
     *cip_service = slice_get_uint8(input, offset); offset++;
 
-    /* Get the path size (count is in 16-bit words) */
-    path_length = slice_get_uint8(input, offset) * 2; offset++;
-
-    /* Check if the input slice is long enough to contain the path and payload */
-    if (slice_len(input) < (offset + path_length)) {
-        info("CIP request is too short to contain the specified path length!");
+    /* extract the service path slice */
+    if(!extract_cip_path(input, &offset, false, cip_service_path)) {
+        info("Unable to extract CIP service path!");
         return false;
     }
-
-    /* extract the service path slice */
-    *cip_service_path = slice_from_slice(input, offset, path_length);
-    offset += path_length;
 
     /* Extract the service payload slice */
     *cip_service_payload = slice_from_slice(input, offset, slice_len(input) - offset);
