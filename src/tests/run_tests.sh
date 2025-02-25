@@ -243,7 +243,7 @@ killall -TERM ab_server > /dev/null 2>&1
 
 
 # echo -n "  Starting AB emulator for ControlLogix tests... "
-$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]"  --delay=5  > ab_emulator.log 2>&1 &
+$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]"  --delay=5  > ab_emulator.log 2>&1 &
 EMULATOR_PID=$!
 if [ $? != 0 ]; then
     echo "Unable to start AB/ControlLogix emulator!"
@@ -261,7 +261,6 @@ else
     echo "OK"
     let SUCCESSES++
 fi
-
 
 let TEST++
 echo -n "Test $TEST: emulator test callbacks... "
