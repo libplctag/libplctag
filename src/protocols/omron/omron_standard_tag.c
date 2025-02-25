@@ -1290,7 +1290,7 @@ static int check_read_status_connected(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = omron_check_read_reqest_status(tag, request);
+    rc = omron_check_read_request_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
         rc_dec(request);
@@ -1500,7 +1500,7 @@ static int check_read_status_unconnected(omron_tag_p tag)
 
     /* guard against the request being deleted out from underneath us. */
     request = rc_inc(tag->req);
-    rc = omron_check_read_reqest_status(tag, request);
+    rc = omron_check_read_request_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
         rc_dec(request);
