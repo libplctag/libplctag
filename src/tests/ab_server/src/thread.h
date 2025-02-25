@@ -1,6 +1,7 @@
 /***************************************************************************
  *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *   Author Heath Raftery                                                  *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
  * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
@@ -33,24 +34,45 @@
 
 #pragma once
 
-#include "slice.h"
+#include "compat.h"
 
+#if IS_WINDOWS
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <processthreadsapi.h>
+#endif
+
+/* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
-    SOCKET_STATUS_OK    = -1,
-    SOCKET_ERR_STARTUP  = -2,
-    SOCKET_ERR_OPEN     = -3,
-    SOCKET_ERR_CREATE   = -4,
-    SOCKET_ERR_BIND     = -5,
-    SOCKET_ERR_LISTEN   = -6,
-    SOCKET_ERR_SETOPT   = -7,
-    SOCKET_ERR_READ     = -8,
-    SOCKET_ERR_WRITE    = -9,
-    SOCKET_ERR_SELECT   = -10,
-    SOCKET_ERR_ACCEPT   = -11
-} socket_err_t;
+    THREAD_STATUS_OK            = 0,
+    THREAD_ERR_NULL_PTR         = -25,
+    THREAD_ERR_THREAD_CREATE    = -30,
+    THREAD_ERR_THREAD_JOIN      = -31
+} thread_err_t;
 
-extern int socket_open(const char *host, const char *port);
-extern void socket_close(int sock);
-extern int socket_accept(int sock);
-extern slice_s socket_read(int sock, slice_s in_buf);
-extern int socket_write(int sock, slice_s out_buf);
+typedef struct thread_t *thread_p;
+#if IS_WINDOWS
+#define thread_func_t LPTHREAD_START_ROUTINE
+#define NO_RETURN __declspec(noreturn)
+#else
+typedef void *(*thread_func_t)(void *arg);
+#define NO_RETURN __attribute__((noreturn))
+#endif
+extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg);
+NO_RETURN extern void thread_stop(void);
+extern void thread_kill(thread_p t);
+extern int thread_join(thread_p t);
+extern int thread_detach();
+extern int thread_destroy(thread_p *t);
+
+#if IS_WINDOWS
+#define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
+#define THREAD_RETURN(val) return (DWORD)val;
+
+#define THREAD_LOCAL __declspec(thread)
+#else
+#define THREAD_FUNC(func) void *func(void *arg)
+#define THREAD_RETURN(val) return (void *)val;
+
+#define THREAD_LOCAL __thread
+#endif

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -33,24 +33,17 @@
 
 #pragma once
 
-#include "slice.h"
-
+/* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
-    SOCKET_STATUS_OK    = -1,
-    SOCKET_ERR_STARTUP  = -2,
-    SOCKET_ERR_OPEN     = -3,
-    SOCKET_ERR_CREATE   = -4,
-    SOCKET_ERR_BIND     = -5,
-    SOCKET_ERR_LISTEN   = -6,
-    SOCKET_ERR_SETOPT   = -7,
-    SOCKET_ERR_READ     = -8,
-    SOCKET_ERR_WRITE    = -9,
-    SOCKET_ERR_SELECT   = -10,
-    SOCKET_ERR_ACCEPT   = -11
-} socket_err_t;
+    MEMORY_STATUS_OK            = 0,
+} memory_err_t;
 
-extern int socket_open(const char *host, const char *port);
-extern void socket_close(int sock);
-extern int socket_accept(int sock);
-extern slice_s socket_read(int sock, slice_s in_buf);
-extern int socket_write(int sock, slice_s out_buf);
+
+/* memory functions/defs */
+extern void *mem_alloc(int size);
+extern void *mem_realloc(void *orig, int size);
+extern void mem_free(const void *mem);
+extern void mem_set(void *dest, int c, int size);
+extern void mem_copy(void *dest, void *src, int size);
+extern void mem_move(void *dest, void *src, int size);
+extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);
