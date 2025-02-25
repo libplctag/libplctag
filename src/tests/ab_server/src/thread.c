@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -34,6 +34,8 @@
 #include "compat.h"
 
 #if IS_WINDOWS
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
     #include <process.h>
     #include <handleapi.h>
     #include <processthreadsapi.h>

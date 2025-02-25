@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -34,6 +34,8 @@
 #include "compat.h"
 
 #if IS_WINDOWS
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
     #include <winsock2.h>
     #include <ws2tcpip.h>
 #else
@@ -225,7 +227,7 @@ void socket_close(int sock)
 int socket_accept(int sock)
 {
     fd_set accept_fd_set;
-    TIMEVAL timeout; 
+    TIMEVAL timeout;
     int num_accept_ready = 0;
 
     /* set the timeout to zero */
@@ -248,7 +250,7 @@ int socket_accept(int sock)
     } else if (num_accept_ready < 0) {
         info("Error selecting the listen socket! Errno=%d.", errno);
         return SOCKET_ERR_SELECT;
-    } 
+    }
 
     return SOCKET_STATUS_OK;
 }
@@ -260,7 +262,7 @@ slice_s socket_read(int sock, slice_s in_buf)
     int rc = (int)recv(sock, (char *)in_buf.data, (int)in_buf.len, 0);
 #else
     int rc = (int)recv(sock, (char *)in_buf.data, (size_t)in_buf.len, 0);
-#endif 
+#endif
 
     if(rc < 0) {
 #ifdef IS_WINDOWS
@@ -322,4 +324,3 @@ int socket_write(int sock, slice_s out_buf)
 
     return (int)(unsigned int)total_bytes_written;
 }
-
