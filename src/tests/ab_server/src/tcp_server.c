@@ -98,6 +98,7 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate)
             bool thread_created = false;
             /* The client thread is responsible for freeing these */
             /* TODO: A malloc'ed blob inside a malloc'ed blob is too much. Simplify. */
+            // FIXME - combine the allocations and use calloc or memset to get zeroed memory
             struct client_session *session = malloc(sizeof(struct client_session));
             session->server_context = malloc(server->context_size);
             if(session && session->server_context) {
@@ -106,7 +107,7 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate)
                 session->client_fd   = client_fd; /* copy of a temporary value - no thread safety concerns */
                 session->server      = server;    /* reference to a long-lived struct, which has values and the original context */
                 session->server_done = &done;     /* reference to a flag that any thread can raise (and all must monitor) */
-                
+
                 /* spawn new thread to handle the connection */
                 if(thread_create(&(session->thread), conn_handler, 10*1024, session) == THREAD_STATUS_OK) {
                     thread_created = true;
@@ -154,14 +155,15 @@ THREAD_FUNC(conn_handler)
 {
     client_session_p session = arg;
     uint8_t buf[4200];  /* CIP only allows 4002 for the CIP request, but there is overhead. */
-    session->buffer = slice_make(buf, sizeof(buf));
-
-    tcp_server_p server = session->server;
-    slice_s tmp_input = session->buffer;
-    slice_s tmp_output;
+    tcp_server_p server = (tcp_server_p)session->server; /* need to cast for C++ */
+    slice_s tmp_input = {0};
+    slice_s tmp_output = {0};
     int rc;
 
     info("Got new client connection, going into processing loop.");
+
+    session->buffer = slice_make(buf, sizeof(buf));
+    tmp_input = session->buffer;
 
     do {
         rc = TCP_SERVER_PROCESSED;
