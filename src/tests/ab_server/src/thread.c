@@ -141,11 +141,11 @@ void thread_kill(thread_p t)
 #if IS_WINDOWS
         TerminateThread(t->h_thread, (DWORD)0);
 #else
-#ifdef __ANDROID__
+    #ifdef __ANDROID__
         pthread_kill(t->p_thread, 0);
-#else
+    #else
         pthread_cancel(t->p_thread);
-#endif /* __ANDROID__ */
+    #endif /* __ANDROID__ */
 #endif /* IS_WINDOWS */
     }
 }
