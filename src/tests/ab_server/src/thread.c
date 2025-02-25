@@ -165,7 +165,9 @@ void thread_kill(thread_p t)
 
 int thread_join(thread_p t)
 {
+#if !defined(IS_WINDOWS)
     void *unused;
+#endif
 
     info("DETAIL: Starting.");
 

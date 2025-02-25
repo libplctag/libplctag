@@ -34,6 +34,14 @@
 
 #pragma once
 
+#include "compat.h"
+
+#if IS_WINDOWS
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <processthreadsapi.h>
+#endif
+
 /* Derived from PLCTAG_STATUS_OK et al. */
 typedef enum {
     THREAD_STATUS_OK            = 0,
