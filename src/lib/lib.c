@@ -4763,11 +4763,12 @@ int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int n
 
         /* are we shrinking or growing? */
         if(new_split_index > old_split_index) {
+            void *old_split_ptr = NULL;
+            void *new_split_ptr = NULL;
+
             pdebug(DEBUG_DETAIL, "Growing tag buffer by %d bytes", new_split_index - old_split_index);
 
             /* growing.  We must move the existing data up to the new end point of the string. */
-            void *old_split_ptr = tag->data + old_split_index;
-            void *new_split_ptr = tag->data + new_split_index;
             int amount_to_move = tag->size - old_split_index;
             int new_tag_size = tag->size + (new_split_index - old_split_index);
 
@@ -4777,6 +4778,10 @@ int resize_tag_buffer_at_offset_unsafe(plc_tag_p tag, int old_split_index, int n
                 pdebug(DEBUG_WARN, "Unable to resize the tag buffer!");
                 break;
             }
+
+            /* the tag data pointer may have changed, now calculate the two pointers. */
+            old_split_ptr = tag->data + old_split_index;
+            new_split_ptr = tag->data + new_split_index;
 
             /* amount_to_move will be positive or zero because of the above if check. */
             mem_move(new_split_ptr, old_split_ptr, amount_to_move);
