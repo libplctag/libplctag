@@ -145,6 +145,8 @@ set(BUILD_EXAMPLES 1 CACHE BOOL "Build examples or not")
 
 set(USE_SANITIZERS 1 CACHE BOOL "Build with google sanitizers or not")
 
+message("Building with sanitizers: ${USE_SANITIZERS}")
+
 # set flags for MacOSX
 if (APPLE)
     set(CMAKE_MACOSX_RPATH ON)
@@ -200,9 +202,15 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     SET(STR_OP_OVERFLOW_OFF "")
 
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fsanitize=undefined -fsanitize=address -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
-    set(BASE_DEBUG_LINK_FLAGS "-fsanitize=undefined -fsanitize=address")
+    set(BASE_DEBUG_LINK_FLAGS "")
+
+    if(USE_SANITIZERS)
+        SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=leak -fsanitize=undefined")
+        STRING(APPEND BASE_DEBUG_FLAGS ${SANITIZERS_FLAGS})
+        STRING(APPEND BASE_DEBUG_LINK_FLAGS ${SANITIZERS_FLAGS})
+    endif()
 
     if(APPLE)
         set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D_DARWIN_C_SOURCE")
