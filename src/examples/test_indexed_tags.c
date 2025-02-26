@@ -604,7 +604,6 @@ void cleanup_test_3_dim(void)
 
 int main()
 {
-    int32_t tag = 0;
     int32_t rc;
 
     /* check the library version. */

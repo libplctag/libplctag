@@ -165,11 +165,7 @@ int test_string(const char *tag_string)
 
 int main()
 {
-    int32_t tag = 0;
     int rc;
-    int offset = 0;
-    int str_cap = 0;
-    char *str = NULL;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {

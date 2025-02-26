@@ -945,7 +945,7 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str, void (*tag_callback
     }
 
     /* See if we are allowed to resize fields */
-    tag->allow_field_resize = attr_get_int(attribs, "allow_field_resize", 0);
+    tag->allow_field_resize = (uint8_t)attr_get_int(attribs, "allow_field_resize", 0);
 
     /* set up the tag byte order if there are any overrides. */
     rc = set_tag_byte_order(tag, attribs);
