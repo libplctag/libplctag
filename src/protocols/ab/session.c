@@ -1789,8 +1789,16 @@ int process_requests(ab_session_p session)
              * status back to the tag.
              */
             if(num_bundled_requests > 1) {
+                cip_multi_resp_header *multi_resp = NULL;
+
                 if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_UNCONNECTED_SEND) {
                     eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(session->data);
+                    uint16_t udi_item_length = le2h16(resp->cpf_udi_item_length);
+                    size_t response_overhead = 0;
+                    size_t response_size = 0;
+
+                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
+
                     pdebug(DEBUG_INFO, "Received unconnected packet with session sequence ID %llx", resp->encap_sender_context);
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
@@ -1799,8 +1807,28 @@ int process_requests(ab_session_p session)
                         pdebug(DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
                     }
+
+                    response_overhead = (size_t)((uint8_t*)multi_resp - session->data);
+                    response_size = (size_t)session->data_size - response_overhead;
+
+                    /* check the passed UDI data item size against what we really got. */
+                    if((size_t)udi_item_length != response_size) {
+                        pdebug(DEBUG_WARN, "Incorrectly constructed response! UDI data length field is %zu but actual size is %zu!",
+                                            (size_t)udi_item_length,
+                                            response_size
+                              );
+
+                        rc = PLCTAG_ERR_BAD_DATA;
+                        break;
+                    }
                 } else if(le2h16(((eip_encap *)(session->data))->encap_command) == AB_EIP_CONNECTED_SEND) {
                     eip_cip_co_resp *resp = (eip_cip_co_resp *)(session->data);
+                    uint16_t cdi_item_length = le2h16(resp->cpf_cdi_item_length);
+                    size_t response_overhead = 0;
+                    size_t response_size = 0;
+
+                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
+
                     pdebug(DEBUG_INFO, "Received connected packet with connection ID %x and sequence ID %u(%x)", le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
@@ -1809,7 +1837,58 @@ int process_requests(ab_session_p session)
                         pdebug(DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
                     }
+
+                    response_overhead = (size_t)((uint8_t*)(&resp->cpf_conn_seq_num) - session->data);
+                    response_size = (size_t)session->data_size - response_overhead;
+
+                    pdebug(DEBUG_DETAIL, "response_overhead=%zu", response_overhead);
+                    pdebug(DEBUG_DETAIL, "response_size=%zu", response_size);
+
+                    /* check the passed CDI data item size against what we really got. */
+                    if((size_t)cdi_item_length != response_size) {
+                        pdebug(DEBUG_WARN, "Incorrectly constructed response! CDI data length field is %zu but actual size is %zu!",
+                                            (size_t)cdi_item_length,
+                                            response_size
+                              );
+
+                        rc = PLCTAG_ERR_BAD_DATA;
+                        break;
+                    }
+                } else {
+                    pdebug(DEBUG_WARN, "Unexpected EIP packet type, %04x!", le2h16(((eip_encap *)(session->data))->encap_command));
+                    rc = PLCTAG_ERR_BAD_DATA;
+                    break;
                 }
+
+                /* we have multiple requests, sanity check the data. */
+                if(le2h16(multi_resp->request_count) == num_bundled_requests) {
+                    size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - session->data);
+
+                    pdebug(DEBUG_DETAIL, "offset_base=%zu", offset_base);
+
+                    /* check all the offsets */
+                    for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
+                        size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
+
+                        pdebug(DEBUG_DETAIL, "Response %d starts at byte offset %zu", resp_offset);
+
+                        if(resp_offset >= (size_t)session->data_size) {
+                            pdebug(DEBUG_WARN, "Response %d has offset %zu which is outside the session data!", resp_offset);
+                            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                            break;
+                        }
+                    }
+                } else {
+                    pdebug(DEBUG_WARN, "Expected %d packed response back but got %zu!", num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    rc = PLCTAG_ERR_BAD_DATA;
+                    break;
+                }
+
+            }
+
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Got error %s when processing incoming response(s)!", plc_tag_decode_error(rc));
+                break;
             }
 
             /* copy the results back out. Every request gets a copy. */
