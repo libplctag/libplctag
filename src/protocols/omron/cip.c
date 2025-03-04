@@ -57,7 +57,7 @@ static const char *decode_cip_error_long(uint8_t *data);
 static int decode_cip_error_code(uint8_t *data);
 
 /* public access point */
-cip_generic_t cip = {
+cip_generic_t CIP = {
     .encode_path = encode_path,
     .encode_tag_name = encode_tag_name,
     .lookup_data_element_size = lookup_data_element_size,
