@@ -72,4 +72,4 @@ typedef struct {
     //int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const char **short_desc, const char **long_desc);
 } cip_generic_t;
 
-extern cip_generic_t cip;
+extern cip_generic_t CIP;
