@@ -1460,14 +1460,15 @@ int purge_aborted_requests_unsafe(omron_conn_p conn)
 }
 
 
-
 int process_requests(omron_conn_p conn)
 {
     int rc = PLCTAG_STATUS_OK;
     omron_request_p request = NULL;
     omron_request_p bundled_requests[MAX_REQUESTS] = {NULL};
     int num_bundled_requests = 0;
-    int remaining_space = 0;
+    int remaining_request_space = 0;
+    int remaining_response_space = 0;
+    int allow_packing = 0;
 
     debug_set_tag_id(0);
 
@@ -1500,28 +1501,43 @@ int process_requests(omron_conn_p conn)
             /* if there are still requests after purging all the aborted requests, process them. */
 
             /* how much space do we have to work with. */
-            remaining_space = max_payload_size - (int)sizeof(cip_multi_req_header);
+            remaining_request_space = max_payload_size - (int)sizeof(cip_multi_req_header);
 
-            if(vector_length(conn->requests)) {
+             /* -2 bytes for the msp (multi service packet) number of packets and -4 bytes for the cip response header,
+              * we later subtract 2 bytes for each packet, this is to allow for the INT offset to the packet within the msp
+              * finally we subtract 10 bytes just to give a comfort blanket as I had seen PLC_TAG_TOO_LARGE issue without it due to too much
+              * data being packed into a single packet */
+             remaining_response_space = max_payload_size - 2 - 4 - 10;
+
+             if(vector_length(conn->requests)) {
                 do {
                     request = vector_get(conn->requests, 0);
 
-                    remaining_space = remaining_space - get_payload_size(request);
+                    remaining_request_space = remaining_request_space - get_payload_size(request);
+
+                    /* calculate if all of the response data from the packed requests will fit into a single response packet.
+                     * the -8 bytes is the maximum padding between packets, the -2 bytes is from the offset integer which stores the
+                     * offset to this packet */
+                    remaining_response_space = remaining_response_space - request->response_size - 8 - 2;
+
+                    /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must have been read
+                     * before, so that its response size is known */
+                    allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
 
                     /*
                      * If we have a non-packable request, only queue it if it is the first one.
                      * If the request is packable, keep queuing as long as there is space.
                      */
 
-                    if(num_bundled_requests == 0 || (request->allow_packing && remaining_space > 0)) {
-                        //pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1, remaining_space);
+                     if((num_bundled_requests == 0) || ((allow_packing && (remaining_request_space > 0)) && ((remaining_response_space >= 0) || (request->supports_fragmented_read)))) {
+                        //pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1, remaining_request_space);
                         bundled_requests[num_bundled_requests] = request;
                         num_bundled_requests++;
 
                         /* remove it from the queue. */
                         vector_remove(conn->requests, 0);
                     }
-                } while(vector_length(conn->requests) && remaining_space > 0 && num_bundled_requests < MAX_REQUESTS && request->allow_packing);
+                } while(vector_length(conn->requests) && (remaining_request_space > 0) && (num_bundled_requests < MAX_REQUESTS) && allow_packing && ((remaining_response_space >= 0) || (request->supports_fragmented_read)));
             } else {
                 pdebug(DEBUG_DETAIL, "All requests in queue were aborted, nothing to do.");
             }
