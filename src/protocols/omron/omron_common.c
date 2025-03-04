@@ -717,7 +717,7 @@ int check_tag_name(omron_tag_p tag, const char* name)
     }
 
     /* attempt to parse the tag name */
-    if ((rc = cip.encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
+    if ((rc = CIP.encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "parse of CIP-style tag name %s failed!", name);
 
         return rc;
