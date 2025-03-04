@@ -1879,7 +1879,7 @@ int process_requests(ab_session_p session)
                         }
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "Expected %d packed response back but got %zu!", num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
