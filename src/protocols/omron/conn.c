@@ -1526,7 +1526,8 @@ int process_requests(omron_conn_p conn)
 
                     /*
                      * If we have a non-packable request, only queue it if it is the first one.
-                     * If the request is packable, keep queuing as long as there is space.
+                     * If the request is packable, keep queuing as long as there is space in both the 
+                     * request packet and if fragmented reads are not supported then also in the expected response packet.
                      */
 
                      if((num_bundled_requests == 0) || ((allow_packing && (remaining_request_space > 0)) && ((remaining_response_space >= 0) || (request->supports_fragmented_read)))) {
