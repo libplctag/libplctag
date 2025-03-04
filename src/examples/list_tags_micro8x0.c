@@ -384,7 +384,6 @@ char *setup_tag_string(int argc, char **argv)
 {
     char tag_string[TAG_STRING_SIZE+1] = {0};
     const char *gateway = NULL;
-    const char *path = NULL;
 
     if(argc < 2) {
         usage();
@@ -401,8 +400,6 @@ char *setup_tag_string(int argc, char **argv)
     //     fprintf(stderr, "PLC path must not be zero length!\n");
     //     usage();
     // }
-
-    path = argv[2];
 
     /* build the tag string. */
     snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway);

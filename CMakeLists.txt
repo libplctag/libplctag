@@ -1,4 +1,4 @@
-#   Copyright (C) 2022 by Kyle Hayes
+#   Copyright (C) 2025 by Kyle Hayes
 #   Author Kyle Hayes  kyle.hayes@gmail.com
 #
 # This software is available under either the Mozilla Public license
@@ -30,10 +30,10 @@
 #   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
-# the project is version 2.5
+# the project version
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 6)
-set (libplctag_VERSION_PATCH 3)
+set (libplctag_VERSION_PATCH 4)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -145,6 +145,8 @@ set(BUILD_EXAMPLES 1 CACHE BOOL "Build examples or not")
 
 set(USE_SANITIZERS 1 CACHE BOOL "Build with google sanitizers or not")
 
+message("Building with sanitizers: ${USE_SANITIZERS}")
+
 # set flags for MacOSX
 if (APPLE)
     set(CMAKE_MACOSX_RPATH ON)
@@ -200,9 +202,15 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     SET(STR_OP_OVERFLOW_OFF "")
 
     set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fsanitize=undefined -fsanitize=address -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
+    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
-    set(BASE_DEBUG_LINK_FLAGS "-fsanitize=undefined -fsanitize=address")
+    set(BASE_DEBUG_LINK_FLAGS "")
+
+    if(USE_SANITIZERS)
+        SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=leak -fsanitize=undefined")
+        STRING(APPEND BASE_DEBUG_FLAGS ${SANITIZERS_FLAGS})
+        STRING(APPEND BASE_DEBUG_LINK_FLAGS ${SANITIZERS_FLAGS})
+    endif()
 
     if(APPLE)
         set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D_DARWIN_C_SOURCE")
@@ -479,12 +487,14 @@ elseif (BUILD_EXAMPLES)
                             string_non_standard_udt
                             string_standard
                             test_alternate_tag_listing
+                            test_array_notation
                             test_auto_sync
                             test_callback
                             test_callback_ex
                             test_callback_ex_logix
                             test_callback_ex_modbus
                             test_connection_group
+                            test_indexed_tags
                             test_many_tag_perf
                             test_raw_cip
                             test_reconnect
@@ -516,9 +526,11 @@ elseif (BUILD_EXAMPLES)
                             slc500
                             string_non_standard_udt
                             string_standard
+                            test_array_notation
                             test_callback
                             test_callback_ex
                             test_connection_group
+                            test_indexed_tags
                             test_event_windows
                             test_raw_cip
                             test_shutdown
@@ -579,6 +591,10 @@ elseif (BUILD_EXAMPLES)
                             ${test_SRC_PATH}/ab_server/src/eip.c
                             ${test_SRC_PATH}/ab_server/src/eip.h
                             ${test_SRC_PATH}/ab_server/src/main.c
+                            ${test_SRC_PATH}/ab_server/src/memory.c
+                            ${test_SRC_PATH}/ab_server/src/memory.h
+                            ${test_SRC_PATH}/ab_server/src/mutex.c
+                            ${test_SRC_PATH}/ab_server/src/mutex.h
                             ${test_SRC_PATH}/ab_server/src/pccc.c
                             ${test_SRC_PATH}/ab_server/src/pccc.h
                             ${test_SRC_PATH}/ab_server/src/plc.h
@@ -587,6 +603,8 @@ elseif (BUILD_EXAMPLES)
                             ${test_SRC_PATH}/ab_server/src/socket.h
                             ${test_SRC_PATH}/ab_server/src/tcp_server.c
                             ${test_SRC_PATH}/ab_server/src/tcp_server.h
+                            ${test_SRC_PATH}/ab_server/src/thread.c
+                            ${test_SRC_PATH}/ab_server/src/thread.h
                             ${test_SRC_PATH}/ab_server/src/utils.c
                             ${test_SRC_PATH}/ab_server/src/utils.h
         )

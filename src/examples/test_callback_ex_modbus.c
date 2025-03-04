@@ -161,8 +161,6 @@ int main(int argc, const char **argv)
     int i;
     int elem_count = 10;
     int elem_size = 2;
-    int64_t start = 0;
-    int64_t end = 0;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);

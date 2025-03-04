@@ -192,7 +192,7 @@ int main(int argc, char **argv)
 {
     int rc = PLCTAG_STATUS_OK;
     char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL)+10] = {0};
-    int32_t tags[NUM_TAGS] = {0};
+    // int32_t tags[NUM_TAGS] = {0};
 #if defined(WIN32) || defined(_WIN32)
     HANDLE read_threads[NUM_TAGS];
     HANDLE write_threads[NUM_TAGS];
@@ -256,8 +256,6 @@ int main(int argc, char **argv)
 #else
         pthread_create(&write_threads[i], NULL, writer_function, (void*)(intptr_t)tag_id);
 #endif
-
-        tags[i] = tag_id;
     }
 
     /* let everything run for a while */

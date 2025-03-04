@@ -1,6 +1,7 @@
 /***************************************************************************
- *   Copyright (C) 2024 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
+ *   Author Heath Raftery                                                  *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
  * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
@@ -33,43 +34,45 @@
 
 #pragma once
 
-#include <lib/libplctag.h>
-#include <omron/omron_common.h>
-#include <omron/defs.h>
+#include "compat.h"
 
+#if IS_WINDOWS
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <processthreadsapi.h>
+#endif
 
-/* fake up some generics */
-typedef struct {
-    enum {
-        GET_ATTRIBUTES_ALL = 0x01,
-        GET_ATTRIBUTE_LIST = 0x03,
-        GET_ATTRIBUTE_SINGLE = 0x1E,
+/* Derived from PLCTAG_STATUS_OK et al. */
+typedef enum {
+    THREAD_STATUS_OK            = 0,
+    THREAD_ERR_NULL_PTR         = -25,
+    THREAD_ERR_THREAD_CREATE    = -30,
+    THREAD_ERR_THREAD_JOIN      = -31
+} thread_err_t;
 
-        AB_READ_TAG = 0x4C,
-        AB_READ_TAG_FRAG = 0x52,
-        AB_WRITE_TAG = 0x4D,
-        AB_WRITE_TAG_FRAG = 0x53,
-        AB_MULTI_REQUEST = 0x0A,
-        AB_LIST_TAGS = 0x55,
+typedef struct thread_t *thread_p;
+#if IS_WINDOWS
+#define thread_func_t LPTHREAD_START_ROUTINE
+#define NO_RETURN __declspec(noreturn)
+#else
+typedef void *(*thread_func_t)(void *arg);
+#define NO_RETURN __attribute__((noreturn))
+#endif
+extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg);
+NO_RETURN extern void thread_stop(void);
+extern void thread_kill(thread_p t);
+extern int thread_join(thread_p t);
+extern int thread_detach();
+extern int thread_destroy(thread_p *t);
 
-        OMRON_READ_TAG = AB_READ_TAG,
-        OMRON_WRITE_TAG = AB_WRITE_TAG,
-        OMRON_MULTI_REQUEST = AB_MULTI_REQUEST,
-        OMRON_LIST_TAGS = 0x5F,
+#if IS_WINDOWS
+#define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
+#define THREAD_RETURN(val) return (DWORD)val;
 
+#define THREAD_LOCAL __declspec(thread)
+#else
+#define THREAD_FUNC(func) void *func(void *arg)
+#define THREAD_RETURN(val) return (void *)val;
 
-    } services;
-
-    int32_t (*encode_path)(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
-    int32_t (*encode_tag_name)(omron_tag_p tag,const char *name);
-    int32_t (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
-    int32_t (*lookup_data_element_size)(uint8_t type_byte, int *element_size);
-
-    const char *(*decode_cip_error_short)(uint8_t *data);
-    const char *(*decode_cip_error_long)(uint8_t *data);
-    int (*decode_cip_error_code)(uint8_t *data);
-
-    //int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const char **short_desc, const char **long_desc);
-} cip_generic_t;
-
-extern cip_generic_t CIP;
+#define THREAD_LOCAL __thread
+#endif

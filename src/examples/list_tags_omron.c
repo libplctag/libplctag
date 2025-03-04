@@ -37,6 +37,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
 
@@ -236,7 +237,6 @@ int32_t get_tag_info(int32_t tag, uint16_t tag_instance_id, char *tag_name, int 
                          0x25, 0x00, 0x00, 0x00      /* replace instance*/
                         };
     int i = 0;
-    uint32_t cursor = 0;
 
     do {
         /* plug in the instance ID */
@@ -336,7 +336,7 @@ int get_tag_attributes_by_name(int32_t tag, const char *tag_name)
 
         /* string length in bytes. */
         string_byte_len = &request[req_index];
-        *string_byte_len = strlen(tag_name);
+        *string_byte_len = (uint8_t)strlen(tag_name);
         req_index++;
 
         /* copy the string */
@@ -350,7 +350,7 @@ int get_tag_attributes_by_name(int32_t tag, const char *tag_name)
         }
 
         /* fix up the word count */
-        *path_word_count = (req_index-2)/2;
+        *path_word_count = (uint8_t)(req_index-2)/2;
 
         rc = send_tag_data(tag, request, (size_t)(unsigned int)req_index);
         if(rc != PLCTAG_STATUS_OK) {

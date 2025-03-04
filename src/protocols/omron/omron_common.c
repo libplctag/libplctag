@@ -717,7 +717,7 @@ int check_tag_name(omron_tag_p tag, const char* name)
     }
 
     /* attempt to parse the tag name */
-    if ((rc = cip.encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
+    if ((rc = CIP.encode_tag_name(tag, name)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "parse of CIP-style tag name %s failed!", name);
 
         return rc;
@@ -744,7 +744,7 @@ int check_tag_name(omron_tag_p tag, const char* name)
  *
  */
 
-int omron_check_read_reqest_status(omron_tag_p tag, omron_request_p request)
+int omron_check_read_request_status(omron_tag_p tag, omron_request_p request)
 {
     int rc = PLCTAG_STATUS_OK;
 
@@ -788,10 +788,14 @@ int omron_check_read_reqest_status(omron_tag_p tag, omron_request_p request)
     if(rc != PLCTAG_STATUS_OK) {
         if(rc_is_error(rc)) {
             /* the request is dead, from conn side. */
-            tag->read_in_progress = 0;
-            tag->offset = 0;
+            if(tag->req) {
+                /* make absolutely sure that the abort flag is set. */
+                spin_block(&tag->req->lock) {
+                    tag->req->abort_request = 1;
+                }
 
-            tag->req = NULL;
+                tag->req = rc_dec(tag->req);
+            }
         }
 
         pdebug(DEBUG_DETAIL, "Read not ready with status %s.", plc_tag_decode_error(rc));
@@ -863,10 +867,14 @@ int omron_check_write_request_status(omron_tag_p tag, omron_request_p request)
     if(rc != PLCTAG_STATUS_OK) {
         if(rc_is_error(rc)) {
             /* the request is dead, from conn side. */
-            tag->read_in_progress = 0;
-            tag->offset = 0;
+            if(tag->req) {
+                /* make absolutely sure that the abort flag is set. */
+                spin_block(&tag->req->lock) {
+                    tag->req->abort_request = 1;
+                }
 
-            tag->req = NULL;
+                tag->req = rc_dec(tag->req);
+            }
         }
 
         pdebug(DEBUG_DETAIL, "Write not ready with status %s.", plc_tag_decode_error(rc));

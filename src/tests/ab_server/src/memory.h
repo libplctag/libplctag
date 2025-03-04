@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2024 by Kyle Hayes                                      *
+ *   Copyright (C) 2020 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -33,43 +33,17 @@
 
 #pragma once
 
-#include <lib/libplctag.h>
-#include <omron/omron_common.h>
-#include <omron/defs.h>
+/* Derived from PLCTAG_STATUS_OK et al. */
+typedef enum {
+    MEMORY_STATUS_OK            = 0,
+} memory_err_t;
 
 
-/* fake up some generics */
-typedef struct {
-    enum {
-        GET_ATTRIBUTES_ALL = 0x01,
-        GET_ATTRIBUTE_LIST = 0x03,
-        GET_ATTRIBUTE_SINGLE = 0x1E,
-
-        AB_READ_TAG = 0x4C,
-        AB_READ_TAG_FRAG = 0x52,
-        AB_WRITE_TAG = 0x4D,
-        AB_WRITE_TAG_FRAG = 0x53,
-        AB_MULTI_REQUEST = 0x0A,
-        AB_LIST_TAGS = 0x55,
-
-        OMRON_READ_TAG = AB_READ_TAG,
-        OMRON_WRITE_TAG = AB_WRITE_TAG,
-        OMRON_MULTI_REQUEST = AB_MULTI_REQUEST,
-        OMRON_LIST_TAGS = 0x5F,
-
-
-    } services;
-
-    int32_t (*encode_path)(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
-    int32_t (*encode_tag_name)(omron_tag_p tag,const char *name);
-    int32_t (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
-    int32_t (*lookup_data_element_size)(uint8_t type_byte, int *element_size);
-
-    const char *(*decode_cip_error_short)(uint8_t *data);
-    const char *(*decode_cip_error_long)(uint8_t *data);
-    int (*decode_cip_error_code)(uint8_t *data);
-
-    //int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const char **short_desc, const char **long_desc);
-} cip_generic_t;
-
-extern cip_generic_t CIP;
+/* memory functions/defs */
+extern void *mem_alloc(int size);
+extern void *mem_realloc(void *orig, int size);
+extern void mem_free(const void *mem);
+extern void mem_set(void *dest, int c, int size);
+extern void mem_copy(void *dest, void *src, int size);
+extern void mem_move(void *dest, void *src, int size);
+extern int mem_cmp(void *src1, int src1_size, void *src2, int src2_size);

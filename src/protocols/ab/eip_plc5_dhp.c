@@ -64,7 +64,7 @@ struct tag_vtable_t eip_plc5_dhp_vtable = {
     /* data accessors */
     ab_get_int_attrib,
     ab_set_int_attrib,
-    
+
     ab_get_byte_array_attrib
 };
 
@@ -564,11 +564,13 @@ static int check_read_status(ab_tag_p tag)
     }
 
     /* guard against the request being deleted out from underneath us. */
+    /* FIXME - why do we need this? */
     request = rc_inc(tag->req);
+
     rc = check_read_request_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
-        rc_dec(request);
+        request = rc_dec(request);
         return rc;
     }
 
@@ -704,7 +706,7 @@ static int check_write_status(ab_tag_p tag)
      */
 
     rc_dec(request);
-    
+
     tag->write_in_progress = 0;
 
     pdebug(DEBUG_SPEW, "Done.");

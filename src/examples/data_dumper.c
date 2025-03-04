@@ -53,7 +53,7 @@
 typedef enum { UNKNOWN = 0, DINT, INT, SINT, REAL } data_type_t;
 
 struct {
-    const char *name;
+    char *name;
     int rpi;
     int64_t next_read;
     int32_t tag_id;
@@ -170,54 +170,71 @@ char **split_string(const char *str, const char *sep)
  */
 int process_line(const char *line)
 {
+    int rc = PLCTAG_STATUS_OK;
     char **parts = NULL;
 
-    parts = split_string(line, "\t");
-    if(!parts) {
-        fprintf(stderr,"Splitting string failed for string %s!", line);
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    /* make sure we got 4 pieces. */
-    for(int i=0; i < 4; i++) {
-        if(parts[i] == NULL) {
-            fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
-            return PLCTAG_ERR_BAD_CONFIG;
+    do {
+        parts = split_string(line, "\t");
+        if(!parts) {
+            fprintf(stderr,"Splitting string failed for string %s!", line);
+            rc = PLCTAG_ERR_BAD_CONFIG;
+            break;
         }
-    }
 
-    tags[num_tags].name = strdup(parts[0]);
 
-    if(strcasecmp("dint",parts[1]) == 0) {
-        tags[num_tags].data_type = DINT;
-    } else if(strcasecmp("int", parts[1]) == 0) {
-        tags[num_tags].data_type = INT;
-    } else if(strcasecmp("sint", parts[1]) == 0) {
-        tags[num_tags].data_type = SINT;
-    } else if(strcasecmp("real", parts[1]) == 0) {
-        tags[num_tags].data_type = REAL;
+        /* make sure we got 4 pieces. */
+        for(int i=0; i < 4; i++) {
+            if(parts[i] == NULL) {
+                fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
+                free(parts);
+                rc = PLCTAG_ERR_BAD_CONFIG;
+                break;
+            }
+        }
+
+        /* if we dropped out of the for loop, we still need to drop out of the do/while. */
+        if(rc != PLCTAG_STATUS_OK) {
+            break;
+        }
+
+        tags[num_tags].name = strdup(parts[0]);
+
+        if(strcasecmp("dint",parts[1]) == 0) {
+            tags[num_tags].data_type = DINT;
+        } else if(strcasecmp("int", parts[1]) == 0) {
+            tags[num_tags].data_type = INT;
+        } else if(strcasecmp("sint", parts[1]) == 0) {
+            tags[num_tags].data_type = SINT;
+        } else if(strcasecmp("real", parts[1]) == 0) {
+            tags[num_tags].data_type = REAL;
+        } else {
+            fprintf(stderr, "Unknown data type for %s!\n", parts[1]);
+            rc = PLCTAG_ERR_BAD_CONFIG;
+            break;
+        }
+
+        tags[num_tags].rpi = atoi(parts[2]);
+        tags[num_tags].next_read = 0;
+        tags[num_tags].tag_id = plc_tag_create(parts[3], 0); /* create async */
+
+        if(tags[num_tags].tag_id < 0) {
+            fprintf(stderr, "Error, %s, creating tag %s with string %s!\n", plc_tag_decode_error(tags[num_tags].tag_id), tags[num_tags].name, parts[3]);
+            free(parts);
+            return tags[num_tags].tag_id;
+        }
+    } while(0);
+
+    free(parts);
+
+    if(rc != PLCTAG_STATUS_OK) {
+        free(tags[num_tags].name);
     } else {
-        fprintf(stderr, "Unknown data type for %s!\n", parts[1]);
-        return PLCTAG_ERR_BAD_CONFIG;
-    }
-
-    tags[num_tags].rpi = atoi(parts[2]);
-    tags[num_tags].next_read = 0;
-    tags[num_tags].tag_id = plc_tag_create(parts[3], 0); /* create async */
-
-    if(tags[num_tags].tag_id < 0) {
-        fprintf(stderr, "Error, %s, creating tag %s with string %s!\n", plc_tag_decode_error(tags[num_tags].tag_id), tags[num_tags].name, parts[3]);
-        free(parts);
-        return tags[num_tags].tag_id;
+        num_tags++;
     }
 
     //printf("Tag %d has name %s, type %s, RPI %d, and tag string %s\n",num_tags, parts[0], parts[1], tags[num_tags].rpi, parts[3]);
 
-    free(parts);
-
-    num_tags++;
-
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 

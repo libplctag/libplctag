@@ -46,7 +46,7 @@ typedef struct {
     uint8_t *data;
 } slice_s;
 
-inline static slice_s slice_make(uint8_t *data, ssize_t len) { return (slice_s){ .len = len, .data = data }; }
+inline static slice_s slice_make(const uint8_t *data, ssize_t len) { return (slice_s){ .len = len, .data = (uint8_t *)data }; }
 inline static slice_s slice_make_err(ssize_t err) { return slice_make(NULL, err); }
 inline static size_t slice_len(slice_s s) { return (size_t)s.len; }
 inline static bool slice_in_bounds(slice_s s, size_t index) { if(index < (size_t)s.len) { return true; } else { return false; } }
@@ -55,21 +55,32 @@ inline static bool slice_set_uint8(slice_s s, size_t index, uint8_t val) { if(sl
 inline static uint8_t *slice_get_bytes(slice_s s, size_t index) {  if(slice_in_bounds(s, index)) { return &s.data[index];} else { return NULL;} }
 inline static bool slice_has_err(slice_s s) { if(s.data == NULL) { return true; } else { return false; } }
 inline static int slice_get_err(slice_s s) { return (int)(ssize_t)slice_len(s); }
-inline static bool slice_match_bytes(slice_s s, const uint8_t *data, size_t data_len) {
+inline static bool slice_match_data_prefix(slice_s s, const uint8_t *data, size_t data_len) {
+    /* Must be no more data prefix than data in the slice. */
     if(data_len > slice_len(s)) {
-        /* fprintf(stderr, "lengths do not match! Slice has length %d and bytes have length %d!\n", (int)slice_len(s), (int)data_len); */
+        //fprintf(stderr, "Slice has too little data to match prefix bytes. Slice has length %d and bytes have length %d!\n", (int)slice_len(s), (int)data_len);
         return false;
     }
+
     for(size_t i=0; i < data_len; i++) {
-        /* fprintf(stderr,"Comparing element %d, %x and %x\n", (int)i, (int)slice_get_uint8(s, (ssize_t)i), data[i]); */
+        //fprintf(stderr,"Comparing element %d, %x and %x\n", (int)i, (int)slice_get_uint8(s, (ssize_t)i), data[i]);
         if(slice_get_uint8(s, i) != data[i]) {
             return false;
         }
     }
     return true;
 }
-inline static bool slice_match_string(slice_s s, const char *data) { return slice_match_bytes(s, (const uint8_t*)data, strlen(data)); }
+inline static bool slice_match_string_prefix(slice_s s, const char *data) { return slice_match_data_prefix(s, (const uint8_t*)data, strlen(data)); }
+inline static bool slice_match_data_exact(slice_s s, const uint8_t *data, size_t data_len) {
+    /* must be an exact match */
+    if(data_len != slice_len(s)) {
+        //fprintf(stderr, "lengths do not match! Slice has length %d and bytes have length %d!\n", (int)slice_len(s), (int)data_len);
+        return false;
+    }
 
+    return slice_match_data_prefix(s, data, data_len);
+}
+inline static bool slice_match_string_exact(slice_s s, const char *data) { return slice_match_data_exact(s, (const uint8_t*)data, strlen(data)); }
 inline static slice_s slice_from_slice(slice_s src, size_t start, size_t len) {
     ssize_t actual_start;
     ssize_t actual_len;
@@ -98,6 +109,50 @@ inline static slice_s slice_from_slice(slice_s src, size_t start, size_t len) {
 
 
 /* helper functions to get and set data in a slice. */
+
+inline static bool slice_copy_data_in(slice_s dest, uint8_t *src_data, size_t src_len) {
+    if(slice_has_err(dest)) {
+        return false;
+    }
+
+    if(slice_len(dest) < src_len) {
+        return false;
+    }
+
+    memcpy(dest.data, src_data, src_len);
+
+    return true;
+}
+
+inline static bool slice_copy_data_out(uint8_t *dest_data, size_t dest_len, slice_s src) {
+    if(slice_has_err(src)) {
+        return false;
+    }
+
+    if(slice_len(src) > dest_len) {
+        return false;
+    }
+
+    memcpy(dest_data, src.data, slice_len(src));
+
+    return true;
+}
+
+inline bool slice_copy_slice(slice_s dest, slice_s src) {
+    if(slice_has_err(dest) || slice_has_err(src)) {
+        return false;
+    }
+
+    if(slice_len(dest) < slice_len(src)) {
+        return false;
+    }
+
+    memcpy(dest.data, src.data, slice_len(src));
+
+    return true;
+}
+
+
 
 inline static uint16_t slice_get_uint16_le(slice_s input_buf, size_t offset) {
     uint16_t res = 0;
@@ -174,4 +229,3 @@ inline static void slice_set_uin64_le(slice_s output_buf, size_t offset, uint64_
         slice_set_uint8(output_buf, offset + 7, (uint8_t)((val >> 56) & 0xFF));
     }
 }
-

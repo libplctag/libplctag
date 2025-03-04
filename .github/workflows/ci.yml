@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_ubuntu_x64"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -118,6 +118,16 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Array Notation Read/Write
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
+        sleep 2
+        echo "test array notation read/write"
+        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -130,8 +140,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_ubuntu_x86"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -236,6 +246,17 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Array Notation Read/Write
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
+        sleep 2
+        echo "test array notation read/write"
+        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
@@ -247,8 +268,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_macos_x64"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -350,6 +371,17 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Array Notation Read/Write
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
+        sleep 2
+        echo "test array notation read/write"
+        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
@@ -361,8 +393,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_macos_aarch64"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -396,8 +428,8 @@ jobs:
     runs-on: windows-2019
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_windows_x64"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -507,6 +539,20 @@ jobs:
         taskkill /F /IM ab_server.exe
       shell: cmd
 
+    - name: Test Array Notation Read/Write
+      run: |
+        cd ${{ env.DIST }}\Release
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5]
+        timeout /T 5
+        echo "test array notation read/write"
+        .\test_array_notation.exe 127.0.0.1 1,0 TestBigArray 5 2000
+        set test_result=%errorlevel%
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+        exit /b %test_result%
+      shell: cmd
+
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
@@ -518,8 +564,8 @@ jobs:
     runs-on: windows-2019
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_windows_x86"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_windows_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -629,6 +675,20 @@ jobs:
         taskkill /F /IM ab_server.exe
       shell: cmd
 
+    - name: Test Array Notation Read/Write
+      run: |
+        cd ${{ env.DIST }}\Release
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5]
+        timeout /T 5
+        echo "test array notation read/write"
+        .\test_array_notation.exe 127.0.0.1 1,0 TestBigArray 5 2000
+        set test_result=%errorlevel%
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+        exit /b %test_result%
+      shell: cmd
+
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
@@ -640,8 +700,8 @@ jobs:
     runs-on: windows-2019
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_windows_Arm"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_windows_Arm"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -676,8 +736,8 @@ jobs:
     runs-on: windows-2019
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_windows_Arm64"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_windows_Arm64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -712,8 +772,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_linux_arm6hf"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_linux_arm6hf"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -751,8 +811,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_linux_arm7l"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_linux_arm7l"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -790,8 +850,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.3"
-      ARTIFACT: "libplctag_2.6.3_linux_aarch64"
+      VERSION: "2.6.4"
+      ARTIFACT: "libplctag_2.6.4_linux_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}

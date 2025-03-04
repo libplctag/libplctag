@@ -212,7 +212,6 @@ else
     let SUCCESSES++
 fi
 
-
 # start many copies of the emulator.
 PORT_LIST=""
 for i in {1..50}; do
@@ -244,16 +243,24 @@ killall -TERM ab_server > /dev/null 2>&1
 
 
 # echo -n "  Starting AB emulator for ControlLogix tests... "
-$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=5  > ab_emulator.log 2>&1 &
+$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]"  --delay=5  > ab_emulator.log 2>&1 &
 EMULATOR_PID=$!
 if [ $? != 0 ]; then
-    # echo "FAILURE"
     echo "Unable to start AB/ControlLogix emulator!"
     exit 1
-# else
-    # echo "OK"
 fi
 
+
+let TEST++
+echo -n "Test $TEST: indexed tags ... "
+$TEST_DIR/test_indexed_tags > "${TEST}_test_indexed_tags.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 let TEST++
 echo -n "Test $TEST: emulator test callbacks... "
