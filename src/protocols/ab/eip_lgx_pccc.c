@@ -379,7 +379,7 @@ static int check_read_status(ab_tag_p tag)
     rc = check_read_request_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
-        rc_dec(request);
+        tag->req = rc_dec(request);
         return rc;
     }
 
@@ -469,8 +469,8 @@ static int check_read_status(ab_tag_p tag)
         tag->encoded_type_info_size = (int)(type_end - type_start);
         mem_copy(tag->encoded_type_info, type_start, tag->encoded_type_info_size);
 
-        /* have the IO thread take care of the request buffers */
-        ab_tag_abort(tag);
+        // /* have the IO thread take care of the request buffers */
+        // ab_tag_abort(tag);
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
