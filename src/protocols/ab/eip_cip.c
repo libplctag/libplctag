@@ -222,6 +222,11 @@ int tag_tickler(ab_tag_p tag)
     pdebug(DEBUG_SPEW,"Starting.");
 
     if (tag->read_in_progress) {
+        rc = check_request_status(tag);
+        if(rc != PLCTAG_STATUS_OK) {
+            return rc;
+        }
+
         if(tag->use_connected_msg) {
             rc = check_read_status_connected(tag);
         } else {
@@ -241,12 +246,17 @@ int tag_tickler(ab_tag_p tag)
             tag->read_complete = 1;
         }
 
-        pdebug(DEBUG_SPEW,"Done.  Read in progress.");
+        pdebug(DEBUG_SPEW,"Done with status %s.", plc_tag_decode_error(rc));
 
         return rc;
     }
 
     if (tag->write_in_progress) {
+        rc = check_request_status(tag);
+        if(rc != PLCTAG_STATUS_OK) {
+            return rc;
+        }
+
         if(tag->use_connected_msg) {
             rc = check_write_status_connected(tag);
         } else {
@@ -275,7 +285,7 @@ int tag_tickler(ab_tag_p tag)
 
 
 /*
- * tag_read_common_start
+ * tag_read_start
  *
  * This function must be called only from within one thread, or while
  * the tag's mutex is locked.
@@ -297,13 +307,8 @@ int tag_read_start(ab_tag_p tag)
     /* mark the tag read in progress */
     tag->read_in_progress = 1;
 
-    /* i is the index of the first new request */
     if(tag->use_connected_msg) {
-        // if(tag->tag_list) {
-        //     rc = build_tag_list_request_connected(tag);
-        // } else {
-            rc = build_read_request_connected(tag, tag->offset);
-        // }
+        rc = build_read_request_connected(tag, tag->offset);
     } else {
         rc = build_read_request_unconnected(tag, tag->offset);
     }
@@ -325,7 +330,7 @@ int tag_read_start(ab_tag_p tag)
 
 
 /*
- * tag_write_common_start
+ * tag_write_start
  *
  * This must be called from one thread alone, or while the tag mutex is
  * locked.
@@ -422,14 +427,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset)
      * uint16_t # of elements to read
      */
 
-    //embed_start = data;
-
-    /* set up the CIP Read request */
-    // if(tag->plc_type == AB_PLC_OMRON_NJNX) {
-    //     read_cmd = AB_EIP_CMD_CIP_READ;
-    // } else {
-        read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
-    // }
+    read_cmd = AB_EIP_CMD_CIP_READ_FRAG;
 
     *data = read_cmd;
     data++;
@@ -1331,58 +1329,24 @@ static int check_read_status_connected(ab_tag_p tag)
     uint8_t* data;
     uint8_t* data_end;
     int partial_data = 0;
-    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* guard against the request being deleted out from underneath us. */
-    request = rc_inc(tag->req);
-    rc = check_read_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK)  {
-        pdebug(DEBUG_DETAIL, "Read request status is not OK.");
-        rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
+    /* The request is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp*)(request->data);
+    cip_resp = (eip_cip_co_resp*)(tag->req->data);
 
     /* point to the start of the data */
-    data = (request->data) + sizeof(eip_cip_co_resp);
+    data = (tag->req->data) + sizeof(eip_cip_co_resp);
 
     /* point the end of the data */
-    data_end = (request->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
-    /* check the status */
     do {
         ptrdiff_t payload_size = (data_end - data);
 
-        if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        /*
-         * FIXME
-         *
-         * It probably should not be necessary to check for both as setting the type to anything other
-         * than fragmented is error-prone.
-         */
-
+        /* check the status */
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
             && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
@@ -1485,23 +1449,10 @@ static int check_read_status_connected(ab_tag_p tag)
     } while(0);
 
     /* clean up the request */
-    request->abort_request = 1;
-    tag->req = rc_dec(request);
-
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    rc_dec(request);
+    ab_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
-        /* this particular read is done. */
-        tag->read_in_progress = 0;
-
         /* skip if we are doing a pre-write read. */
         if (!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
@@ -1542,57 +1493,23 @@ static int check_read_status_unconnected(ab_tag_p tag)
     uint8_t* data;
     uint8_t* data_end;
     int partial_data = 0;
-    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* guard against the request being deleted out from underneath us. */
-    request = rc_inc(tag->req);
-    rc = check_read_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK)  {
-        pdebug(DEBUG_DETAIL, "Read request status is not OK.");
-        rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
+    /* the request reference is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_uc_resp*)(request->data);
+    cip_resp = (eip_cip_uc_resp*)(tag->req->data);
 
     /* point to the start of the data */
-    data = (request->data) + sizeof(eip_cip_uc_resp);
+    data = (tag->req->data) + sizeof(eip_cip_uc_resp);
 
     /* point the end of the data */
-    data_end = (request->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
+    data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
     /* check the status */
     do {
         ptrdiff_t payload_size = (data_end - data);
-
-        if (le2h16(cip_resp->encap_command) != AB_EIP_UNCONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        /*
-         * TODO
-         *
-         * It probably should not be necessary to check for both as setting the type to anything other
-         * than fragmented is error-prone.
-         */
 
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
             && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK) ) {
@@ -1695,19 +1612,7 @@ static int check_read_status_unconnected(ab_tag_p tag)
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-
-    /* clean up the request */
-    request->abort_request = 1;
-    tag->req = rc_dec(request);
-
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    rc_dec(request);
+    ab_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if (rc == PLCTAG_STATUS_OK) {
@@ -1740,11 +1645,6 @@ static int check_read_status_unconnected(ab_tag_p tag)
         ab_tag_abort(tag);
     }
 
-    /* release the referene to the request. */
-
-    // FIXME - why is this different than the connected case?
-    // rc_dec(request);
-
     pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
@@ -1764,42 +1664,15 @@ static int check_write_status_connected(ab_tag_p tag)
 {
     eip_cip_co_resp* cip_resp;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* guard against the request being deleted out from underneath us. */
-    request = rc_inc(tag->req);
-    rc = check_write_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK)  {
-        pdebug(DEBUG_DETAIL, "Write request status is not OK.");
-        rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
+    /* the request reference is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp*)(request->data);
+    cip_resp = (eip_cip_co_resp*)(tag->req->data);
 
     do {
-        if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if (le2h32(cip_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if (cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE_FRAG | AB_EIP_CMD_CIP_OK)
             && cip_resp->reply_service != (AB_EIP_CMD_CIP_WRITE | AB_EIP_CMD_CIP_OK)
             && cip_resp->reply_service != (AB_EIP_CMD_CIP_RMW | AB_EIP_CMD_CIP_OK)) {
@@ -1816,21 +1689,7 @@ static int check_write_status_connected(ab_tag_p tag)
         }
     } while(0);
 
-    /* clean up the request. */
-    request->abort_request = 1;
-    tag->req = rc_dec(request);
-
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    rc_dec(request);
-
-    /* write is done in one way or another. */
-    tag->write_in_progress = 0;
+    ab_tag_abort_request_only(tag);
 
     if(rc == PLCTAG_STATUS_OK) {
         if(tag->offset < tag->size) {
@@ -1860,28 +1719,13 @@ static int check_write_status_unconnected(ab_tag_p tag)
 {
     eip_cip_uc_resp* cip_resp;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* guard against the request being deleted out from underneath us. */
-    request = rc_inc(tag->req);
-    rc = check_write_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK)  {
-        pdebug(DEBUG_DETAIL, "Write request status is not OK.");
-        rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
+    /* the request reference is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_uc_resp*)(request->data);
+    cip_resp = (eip_cip_uc_resp*)(tag->req->data);
 
     do {
         if (le2h16(cip_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
@@ -1913,21 +1757,7 @@ static int check_write_status_unconnected(ab_tag_p tag)
         }
     } while(0);
 
-    /* clean up the request. */
-    request->abort_request = 1;
-    tag->req = rc_dec(request);
-
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    rc_dec(request);
-
-    /* write is done in one way or another */
-    tag->write_in_progress = 0;
+    ab_tag_abort_request_only(tag);
 
     if(rc == PLCTAG_STATUS_OK) {
         if(tag->offset < tag->size) {
