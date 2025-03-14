@@ -186,6 +186,11 @@ int tag_tickler(ab_tag_p tag)
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    rc = check_request_status(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        return rc;
+    }
+
     if(tag->read_in_progress) {
         pdebug(DEBUG_SPEW, "Read in progress.");
         rc = check_read_status(tag);
@@ -237,7 +242,6 @@ int tag_read_start(ab_tag_p tag)
     int data_per_packet = 0;
     int overhead = 0;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req = NULL;
     uint16_le transfer_offset = h2le16((uint16_t)0);
     uint16_le transfer_size = h2le16((uint16_t)0);
 
@@ -270,17 +274,17 @@ int tag_read_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         tag->read_in_progress = 0;
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
-    pccc = (pccc_dhp_co_req *)(req->data);
+    pccc = (pccc_dhp_co_req *)(tag->req->data);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(*pccc);
+    data = (tag->req->data) + sizeof(*pccc);
 
     embed_start = (uint8_t *)(&(pccc->cpf_conn_seq_num));
 
@@ -332,22 +336,16 @@ int tag_read_start(ab_tag_p tag)
     pdebug(DEBUG_DETAIL, "Total payload length %d.", (int)(unsigned int)(data - embed_start));
 
     /* get ready to add the request to the queue for this session */
-    req->request_size = (int)(data - (req->data));
+    tag->req->request_size = (int)(data - (tag->req->data));
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->session, tag->req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        tag->read_in_progress = 0;
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        req->abort_request = 1;
-        tag->req = rc_dec(req);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! Error %s!", plc_tag_decode_error(rc));
+        ab_tag_abort(tag);
         return rc;
     }
-
-    /* save the request for later */
-    tag->req = req;
-//    tag->status = PLCTAG_STATUS_PENDING;
 
     /* the read is now pending */
     pdebug(DEBUG_INFO, "Done.");
@@ -366,7 +364,6 @@ int tag_write_start(ab_tag_p tag)
     int overhead = 0;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p req;
     uint16_le transfer_offset = h2le16((uint16_t)0);
     uint16_le transfer_size = h2le16((uint16_t)0);
 
@@ -406,7 +403,7 @@ int tag_write_start(ab_tag_p tag)
     }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
 
     if(rc != PLCTAG_STATUS_OK) {
         tag->write_in_progress = 0;
@@ -414,12 +411,12 @@ int tag_write_start(ab_tag_p tag)
         return rc;
     }
 
-    pccc = (pccc_dhp_co_req *)(req->data);
+    pccc = (pccc_dhp_co_req *)(tag->req->data);
 
     embed_start = (uint8_t *)(&pccc->cpf_conn_seq_num);
 
     /* point to the end of the struct */
-    data = (req->data) + sizeof(*pccc);
+    data = (tag->req->data) + sizeof(*pccc);
 
     /* this kind of PCCC function takes an offset and size.  Only if not a bit tag. */
     if(!tag->is_bit) {
@@ -520,22 +517,16 @@ int tag_write_start(ab_tag_p tag)
     //pccc->pccc_transfer_size = h2le16((uint16_t)((tag->size)/2));  /* size in 2-byte words */
 
     /* get ready to add the request to the queue for this session */
-    req->request_size = (int)(data - (req->data));
+    tag->req->request_size = (int)(data - (tag->req->data));
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    rc = session_add_request(tag->session, tag->req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        tag->write_in_progress = 0;
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        req->abort_request = 1;
-        tag->req = rc_dec(req);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! Error %s!", plc_tag_decode_error(rc));
+        ab_tag_abort(tag);
         return rc;
     }
-
-    /* save the request for later */
-    tag->req = req;
-//    tag->status = PLCTAG_STATUS_PENDING;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -554,50 +545,21 @@ static int check_read_status(ab_tag_p tag)
     uint8_t *data;
     uint8_t *data_end;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
+    /* the request reference is valid. */
 
-    /* guard against the request being deleted out from underneath us. */
-    /* FIXME - why do we need this? */
-    request = rc_inc(tag->req);
-
-    rc = check_read_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK)  {
-        pdebug(DEBUG_DETAIL, "Read request status is not OK.");
-        request = rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
-
-    resp = (pccc_dhp_co_resp *)(request->data);
+    resp = (pccc_dhp_co_resp *)(tag->req->data);
 
     /* point to the start of the data */
     data = (uint8_t *)resp + sizeof(*resp);
 
     /* point to the end of the data */
-    data_end = (request->data + le2h16(resp->encap_length) + sizeof(eip_encap));
+    data_end = (tag->req->data + le2h16(resp->encap_length) + sizeof(eip_encap));
 
     /* fake exception */
     do {
-        if(le2h16(resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(resp->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s", resp->pccc_status, pccc_decode_error(&resp->pccc_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -622,20 +584,7 @@ static int check_read_status(ab_tag_p tag)
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* clean up the request. */
-    request->abort_request = 1;
-    tag->req = rc_dec(request);
-
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    rc_dec(request);
-
-    tag->read_in_progress = 0;
+    ab_tag_abort(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -647,43 +596,15 @@ static int check_write_status(ab_tag_p tag)
 {
     pccc_dhp_co_resp *pccc_resp;
     int rc = PLCTAG_STATUS_OK;
-    ab_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR,"Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
+    /* the request reference is valid. */
 
-    /* guard against the request being deleted out from underneath us. */
-    request = rc_inc(tag->req);
-    rc = check_write_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK)  {
-        pdebug(DEBUG_DETAIL, "Write request status is not OK.");
-        rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
-
-    pccc_resp = (pccc_dhp_co_resp *)(request->data);
+    pccc_resp = (pccc_dhp_co_resp *)(tag->req->data);
 
     /* fake exception */
     do {
-        /* check the response status */
-        if( le2h16(pccc_resp->encap_command) != AB_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "EIP unexpected response packet type: %d!", pccc_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(pccc_resp->encap_status) != AB_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(pccc_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(pccc_resp->pccc_status != AB_EIP_OK) {
             pdebug(DEBUG_WARN, "PCCC command failed, response code: %d - %s", pccc_resp->pccc_status, pccc_decode_error(&pccc_resp->pccc_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
@@ -694,20 +615,7 @@ static int check_write_status(ab_tag_p tag)
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    /* clean up the request. */
-    request->abort_request = 1;
-    tag->req = rc_dec(request);
-
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    rc_dec(request);
-
-    tag->write_in_progress = 0;
+    ab_tag_abort(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
 
