@@ -48,6 +48,7 @@ typedef struct ab_request_t *ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 
+extern int ab_tag_abort_request_only(ab_tag_p tag);
 extern int ab_tag_abort(ab_tag_p tag);
 extern int ab_tag_status(ab_tag_p tag);
 
@@ -105,8 +106,7 @@ extern vector_p find_read_group_tags(ab_tag_p tag);
 THREAD_FUNC(request_handler_func);
 
 /* helpers for checking request status. */
-extern int check_read_request_status(ab_tag_p tag, ab_request_p request);
-extern int check_write_request_status(ab_tag_p tag, ab_request_p request);
+extern int check_request_status(ab_tag_p tag);
+// extern int check_write_request_status(ab_tag_p tag);
 
 #define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)
-
