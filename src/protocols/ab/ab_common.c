@@ -1155,7 +1155,7 @@ int check_request_status(ab_tag_p tag)
 
         eip_header = (eip_encap *)(tag->req->data);
 
-        if ((le2h16(eip_header->encap_command) != AB_EIP_CONNECTED_SEND) || (le2h16(eip_header->encap_command) != AB_EIP_UNCONNECTED_SEND)) {
+        if ((le2h16(eip_header->encap_command) != AB_EIP_CONNECTED_SEND) && (le2h16(eip_header->encap_command) != AB_EIP_UNCONNECTED_SEND)) {
             pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", eip_header->encap_command);
             rc = PLCTAG_ERR_BAD_DATA;
             break;
