@@ -1306,12 +1306,15 @@ int udt_tag_tickler(ab_tag_p tag)
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
-    if (tag->read_in_progress) {
-        rc = check_request_status(tag);
-        if(rc != PLCTAG_STATUS_OK) {
-            return rc;
+    rc = check_request_status(tag);
+    if(rc != PLCTAG_STATUS_OK) {
+        if(rc != PLCTAG_STATUS_PENDING) {
+            pdebug(DEBUG_WARN, "Response failed with error %s!", plc_tag_decode_error(rc));
         }
+        return rc;
+    }
 
+    if (tag->read_in_progress) {
         if(tag->udt_get_fields) {
             rc = udt_tag_check_read_fields_status_connected(tag);
         } else {
@@ -1781,8 +1784,6 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag)
 int udt_tag_build_read_fields_request_connected(ab_tag_p tag)
 {
     eip_cip_co_req* cip = NULL;
-    //tag_list_req *list_req = NULL;
-    ab_request_p req = NULL;
     int rc = PLCTAG_STATUS_OK;
     uint8_t *data_start = NULL;
     uint8_t *data = NULL;
@@ -1794,9 +1795,10 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag)
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &req);
+    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
+        ab_tag_abort(tag);
         return rc;
     }
 
@@ -1810,7 +1812,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag)
     total_size = (total_size + 3) & (uint32_t)neg_4;
 
     /* point the request struct at the buffer */
-    cip = (eip_cip_co_req*)(req->data);
+    cip = (eip_cip_co_req*)(tag->req->data);
 
     /* point to the end of the struct */
     data_start = data = (uint8_t*)(cip + 1);
@@ -1877,21 +1879,19 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag)
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
     /* set the size of the request */
-    req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
+    tag->req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
 
-    req->allow_packing = tag->allow_packing;
+    tag->req->allow_packing = tag->allow_packing;
+
+    tag->read_in_progress = 1;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
-
+    rc = session_add_request(tag->session, tag->req);
     if (rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag->req = rc_dec(req);
+        ab_tag_abort(tag);
         return rc;
     }
-
-    /* save the request for later */
-    tag->req = req;
 
     pdebug(DEBUG_INFO, "Done");
 
