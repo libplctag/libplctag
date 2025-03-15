@@ -136,7 +136,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_ERROR);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
@@ -919,5 +919,3 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id)
 
     return PLCTAG_STATUS_OK;
 }
-
-
