@@ -494,8 +494,8 @@ elseif (BUILD_EXAMPLES)
                             test_callback_ex_logix
                             test_callback_ex_modbus
                             test_connection_group
+                            test_emulator_performance
                             test_indexed_tags
-                            test_many_tag_perf
                             test_raw_cip
                             test_reconnect
                             test_shutdown
@@ -530,6 +530,7 @@ elseif (BUILD_EXAMPLES)
                             test_callback
                             test_callback_ex
                             test_connection_group
+                            test_emulator_performance
                             test_indexed_tags
                             test_event_windows
                             test_raw_cip
