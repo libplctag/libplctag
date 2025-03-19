@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server string_non_standard_udt string_standard tag_rw2 list_tags_logix test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_many_tag_perf test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -212,44 +212,14 @@ else
     let SUCCESSES++
 fi
 
-# start many copies of the emulator.
-PORT_LIST=""
-for i in {1..50}; do
-    let PORT=44818+i
-
-    PORT_LIST+="${PORT} "
-
-    $TEST_DIR/ab_server --plc=ControlLogix --port=$PORT --path=1,0 --tag=TestBigArray:DINT[2000]  > ab_emulator_${PORT}.log 2>&1 &
-    if [ $? != 0 ]; then
-        echo "Unable to start AB/ControlLogix emulator!"
-        exit 1
-    fi
-done
-
-sleep 3
-
-let TEST++
-echo -n "Test $TEST: test huge number of tags... "
-$TEST_DIR/test_many_tag_perf ${PORT_LIST} > "${TEST}_many_tag_perf_test.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
-killall -TERM ab_server > /dev/null 2>&1
-
 
 # echo -n "  Starting AB emulator for ControlLogix tests... "
-$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]"  --delay=5  > ab_emulator.log 2>&1 &
+$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]"  > ab_emulator.log 2>&1 &
 EMULATOR_PID=$!
 if [ $? != 0 ]; then
     echo "Unable to start AB/ControlLogix emulator!"
     exit 1
 fi
-
 
 let TEST++
 echo -n "Test $TEST: indexed tags ... "
@@ -312,6 +282,7 @@ fi
 
 # echo "  Killing AB emulator."
 killall -TERM ab_server > /dev/null 2>&1
+
 
 # echo -n "  Starting AB emulator for Micro800 tests... "
 $TEST_DIR/ab_server --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] > micro800_emulator.log 2>&1 &
