@@ -31,14 +31,13 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef __LIB_INIT_H__
-#define __LIB_INIT_H__ 1
-
+#pragma once
 
 #include <util/attr.h>
+#include <inttypes.h>
+#include "tag.h"
+
 extern int initialize_modules(void);
 typedef plc_tag_p (*tag_create_function)(attr attributes, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
 extern tag_create_function find_tag_create_func(attr attributes);
 extern void destroy_modules(void);
-
-#endif
