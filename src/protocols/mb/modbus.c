@@ -34,11 +34,11 @@
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
-#include <limits.h>
-#include <stdlib.h>
-#include <platform.h>
 #include <lib/libplctag.h>
+#include <limits.h>
 #include <mb/modbus.h>
+#include <platform.h>
+#include <stdlib.h>
 #include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
@@ -55,13 +55,13 @@
 #define MODBUS_MBAP_SIZE (6)
 #define MAX_MODBUS_REQUEST_PAYLOAD (246)
 #define MAX_MODBUS_RESPONSE_PAYLOAD (250)
-#define MAX_MODBUS_PDU_PAYLOAD (253)  /* everything after the server address */
+#define MAX_MODBUS_PDU_PAYLOAD (253) /* everything after the server address */
 #define MODBUS_INACTIVITY_TIMEOUT (5000)
-#define SOCKET_READ_TIMEOUT (20) /* read timeout in milliseconds */
-#define SOCKET_WRITE_TIMEOUT (20) /* write timeout in milliseconds */
-#define SOCKET_CONNECT_TIMEOUT (20) /* connect timeout step in milliseconds */
+#define SOCKET_READ_TIMEOUT (20)       /* read timeout in milliseconds */
+#define SOCKET_WRITE_TIMEOUT (20)      /* write timeout in milliseconds */
+#define SOCKET_CONNECT_TIMEOUT (20)    /* connect timeout step in milliseconds */
 #define MODBUS_IDLE_WAIT_TIMEOUT (100) /* idle wait timeout in milliseconds */
-#define MAX_MODBUS_REQUESTS (16) /* per the Modbus specification */
+#define MAX_MODBUS_REQUESTS (16)       /* per the Modbus specification */
 
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
@@ -70,7 +70,6 @@ struct modbus_tag_list_t {
     struct modbus_tag_t *head;
     struct modbus_tag_t *tail;
 };
-
 
 
 struct modbus_plc_t {
@@ -89,9 +88,9 @@ struct modbus_plc_t {
 
     /* State */
     struct {
-        unsigned int terminate:1;
-        unsigned int response_ready:1;
-        unsigned int request_ready:1;
+        unsigned int terminate : 1;
+        unsigned int response_ready : 1;
+        unsigned int request_ready : 1;
         // unsigned int request_in_flight:1;
     } flags;
     uint16_t seq_id;
@@ -99,7 +98,7 @@ struct modbus_plc_t {
     /* thread related state */
     thread_p handler_thread;
     mutex_p mutex;
-    //cond_p wait_cond;
+    // cond_p wait_cond;
     enum {
         PLC_CONNECT_START = 0,
         PLC_CONNECT_WAIT,
@@ -128,7 +127,13 @@ struct modbus_plc_t {
 
 typedef struct modbus_plc_t *modbus_plc_p;
 
-typedef enum { MB_REG_UNKNOWN, MB_REG_COIL, MB_REG_DISCRETE_INPUT, MB_REG_HOLDING_REGISTER, MB_REG_INPUT_REGISTER } modbus_reg_type_t;
+typedef enum {
+    MB_REG_UNKNOWN,
+    MB_REG_COIL,
+    MB_REG_DISCRETE_INPUT,
+    MB_REG_HOLDING_REGISTER,
+    MB_REG_INPUT_REGISTER
+} modbus_reg_type_t;
 
 typedef enum {
     MB_CMD_READ_COIL_MULTI = 0x01,
@@ -140,7 +145,6 @@ typedef enum {
     MB_CMD_WRITE_COIL_MULTI = 0x0F,
     MB_CMD_WRITE_HOLDING_REGISTER_MULTI = 0x10
 } modbug_cmd_t;
-
 
 
 typedef enum {
@@ -180,27 +184,25 @@ struct modbus_tag_t {
 
 
 /* default string types used for Modbus PLCs. */
-tag_byte_order_t modbus_tag_byte_order = {
-    .is_allocated = 0,
+tag_byte_order_t modbus_tag_byte_order = {.is_allocated = 0,
 
-    .int16_order = {1,0},
-    .int32_order = {3,2,1,0},
-    .int64_order = {7,6,5,4,3,2,1,0},
-    .float32_order = {3,2,1,0},
-    .float64_order = {7,6,5,4,3,2,1,0},
+                                          .int16_order = {1, 0},
+                                          .int32_order = {3, 2, 1, 0},
+                                          .int64_order = {7, 6, 5, 4, 3, 2, 1, 0},
+                                          .float32_order = {3, 2, 1, 0},
+                                          .float64_order = {7, 6, 5, 4, 3, 2, 1, 0},
 
-    .str_is_defined = 0, /* FIXME */
-    .str_is_counted = 0,
-    .str_is_fixed_length = 0,
-    .str_is_zero_terminated = 0,
-    .str_is_byte_swapped = 0,
+                                          .str_is_defined = 0, /* FIXME */
+                                          .str_is_counted = 0,
+                                          .str_is_fixed_length = 0,
+                                          .str_is_zero_terminated = 0,
+                                          .str_is_byte_swapped = 0,
 
-    .str_pad_to_multiple_bytes = 0,
-    .str_count_word_bytes = 0,
-    .str_max_capacity = 0,
-    .str_total_length = 0,
-    .str_pad_bytes = 0
-};
+                                          .str_pad_to_multiple_bytes = 0,
+                                          .str_count_word_bytes = 0,
+                                          .str_max_capacity = 0,
+                                          .str_total_length = 0,
+                                          .str_pad_bytes = 0};
 
 
 /* Modbus module globals. */
@@ -254,16 +256,11 @@ static int mb_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default
 static int mb_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
 
 struct tag_vtable_t modbus_vtable = {
-    (tag_vtable_func)mb_abort,
-    (tag_vtable_func)mb_read_start,
-    (tag_vtable_func)mb_tag_status,
-    (tag_vtable_func)mb_tickler,
-    (tag_vtable_func)mb_write_start,
-    (tag_vtable_func)mb_wake_plc,
+    (tag_vtable_func)mb_abort, (tag_vtable_func)mb_read_start, (tag_vtable_func)mb_tag_status, (tag_vtable_func)mb_tickler,
+    (tag_vtable_func)mb_write_start, (tag_vtable_func)mb_wake_plc,
 
     /* data accessors */
-    mb_get_int_attrib,
-    mb_set_int_attrib,
+    mb_get_int_attrib, mb_set_int_attrib,
 
     NULL /* no buffer attribute handler */
 };
@@ -271,8 +268,8 @@ struct tag_vtable_t modbus_vtable = {
 
 /****** main entry point *******/
 
-plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata)
-{
+plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                        void *userdata) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
 
@@ -297,9 +294,7 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     rc = find_or_create_plc(attribs, &(tag->plc));
     if(rc == PLCTAG_STATUS_OK) {
         /* put the tag on the PLC's list. */
-        critical_block(tag->plc->mutex) {
-            push_tag(&(tag->plc->tag_list), tag);
-        }
+        critical_block(tag->plc->mutex) { push_tag(&(tag->plc->tag_list), tag); }
     } else {
         pdebug(DEBUG_WARN, "Unable to create new tag!  Error %s!", plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
@@ -314,12 +309,9 @@ plc_tag_p mb_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 }
 
 
-
-
 /***** helper functions *****/
 
-int create_tag_object(attr attribs, modbus_tag_p *tag)
-{
+int create_tag_object(attr attribs, modbus_tag_p *tag) {
     int rc = PLCTAG_STATUS_OK;
     int data_size = 0;
     int reg_size = 0;
@@ -327,7 +319,7 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
     modbus_reg_type_t reg_type = MB_REG_UNKNOWN;
     int reg_base = 0;
 
-    if (elem_count < 0) {
+    if(elem_count < 0) {
         pdebug(DEBUG_WARN, "Element count should not be a negative value!");
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -347,15 +339,11 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
     switch(reg_type) {
         case MB_REG_COIL:
             /* fall through */
-        case MB_REG_DISCRETE_INPUT:
-            reg_size = 1;
-            break;
+        case MB_REG_DISCRETE_INPUT: reg_size = 1; break;
 
         case MB_REG_HOLDING_REGISTER:
             /* fall through */
-        case MB_REG_INPUT_REGISTER:
-            reg_size = 16;
-            break;
+        case MB_REG_INPUT_REGISTER: reg_size = 16; break;
 
         default:
             pdebug(DEBUG_WARN, "Unsupported register type!");
@@ -370,8 +358,8 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
     pdebug(DEBUG_DETAIL, "Tag data size is %d bytes.", data_size);
 
     /* allocate the tag */
-    *tag = (modbus_tag_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_tag_t)+data_size, modbus_tag_destructor);
-    if(! *tag) {
+    *tag = (modbus_tag_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_tag_t) + data_size, modbus_tag_destructor);
+    if(!*tag) {
         pdebug(DEBUG_WARN, "Unable to allocate Modbus tag!");
         return PLCTAG_ERR_NO_MEM;
     }
@@ -407,10 +395,7 @@ int create_tag_object(attr attribs, modbus_tag_p *tag)
 }
 
 
-
-
-void modbus_tag_destructor(void *tag_arg)
-{
+void modbus_tag_destructor(void *tag_arg) {
     modbus_tag_p tag = (modbus_tag_p)tag_arg;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -436,7 +421,7 @@ void modbus_tag_destructor(void *tag_arg)
             }
         }
 
-        pdebug(DEBUG_DETAIL, "Releasing the reference to the PLC.");
+        pdebug(DEBUG_DETAIL, "rc_dec: Releasing the reference to the PLC.");
         tag->plc = rc_dec(tag->plc);
     }
 
@@ -464,10 +449,7 @@ void modbus_tag_destructor(void *tag_arg)
 }
 
 
-
-
-int find_or_create_plc(attr attribs, modbus_plc_p *plc)
-{
+int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
     const char *server = attr_get_str(attribs, "gateway", NULL);
     int server_id = attr_get_int(attribs, "path", -1);
     int connection_group_id = attr_get_int(attribs, "connection_group_id", 0);
@@ -479,12 +461,14 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 
     /* clamp maximum requests in flight. */
     if(max_requests_in_flight > MAX_MODBUS_REQUESTS) {
-        pdebug(DEBUG_WARN, "max_requests_in_flight set to %d which is higher than the Modbus limit of %d.", max_requests_in_flight, MAX_MODBUS_REQUESTS);
+        pdebug(DEBUG_WARN, "max_requests_in_flight set to %d which is higher than the Modbus limit of %d.",
+               max_requests_in_flight, MAX_MODBUS_REQUESTS);
         max_requests_in_flight = MAX_MODBUS_REQUESTS;
     }
 
     if(max_requests_in_flight < 1) {
-        pdebug(DEBUG_WARN, "max_requests_in_flight must be between 1 and %d, inclusive, was %d.", MAX_MODBUS_REQUESTS, max_requests_in_flight);
+        pdebug(DEBUG_WARN, "max_requests_in_flight must be between 1 and %d, inclusive, was %d.", MAX_MODBUS_REQUESTS,
+               max_requests_in_flight);
         max_requests_in_flight = 1;
     }
 
@@ -497,13 +481,16 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
     critical_block(mb_mutex) {
         modbus_plc_p *walker = &plcs;
 
-        while(*walker && (*walker)->connection_group_id != connection_group_id && (*walker)->server_id != (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
+        while(*walker && (*walker)->connection_group_id != connection_group_id
+              && (*walker)->server_id != (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
             walker = &((*walker)->next);
         }
 
         /* did we find one. */
-        if(*walker && (*walker)->connection_group_id == connection_group_id && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
+        if(*walker && (*walker)->connection_group_id == connection_group_id
+           && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
             pdebug(DEBUG_DETAIL, "Using existing PLC connection.");
+            pdebug(DEBUG_DETAIL, "rc_inc: Acquiring Modbus connection reference.");
             *plc = rc_inc(*walker);
             is_new = 0;
         } else {
@@ -520,7 +507,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 
                 /* copy the server string so that we can find this again. */
                 (*plc)->server = str_dup(server);
-                if(! ((*plc)->server)) {
+                if(!((*plc)->server)) {
                     pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC server string!");
                     rc = PLCTAG_ERR_NO_MEM;
                 } else {
@@ -583,6 +570,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
         pdebug(DEBUG_WARN, "PLC lookup and/or creation failed!");
 
         /* clean up. */
+        pdebug(DEBUG_DETAIL, "rc_dec: Releasing the reference to the PLC.");
         *plc = rc_dec(*plc);
     }
 
@@ -593,8 +581,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc)
 
 
 /* never enter this from within the handler thread itself! */
-void modbus_plc_destructor(void *plc_arg)
-{
+void modbus_plc_destructor(void *plc_arg) {
     modbus_plc_p plc = (modbus_plc_p)plc_arg;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -608,9 +595,7 @@ void modbus_plc_destructor(void *plc_arg)
     critical_block(mb_mutex) {
         modbus_plc_p *walker = &plcs;
 
-        while(*walker && *walker != plc) {
-            walker = &((*walker)->next);
-        }
+        while(*walker && *walker != plc) { walker = &((*walker)->next); }
 
         if(*walker) {
             /* unlink the list. */
@@ -654,25 +639,20 @@ void modbus_plc_destructor(void *plc_arg)
     }
 
     /* check to make sure we have no tags left. */
-    if(plc->tag_list.head) {
-        pdebug(DEBUG_WARN, "There are tags still remaining in the tag list, memory leak possible!");
-    }
+    if(plc->tag_list.head) { pdebug(DEBUG_WARN, "There are tags still remaining in the tag list, memory leak possible!"); }
 
     pdebug(DEBUG_INFO, "Done.");
 }
 
-#define UPDATE_ERR_DELAY() \
-            do { \
-                err_delay = err_delay*2; \
-                if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { \
-                    err_delay = PLC_SOCKET_ERR_MAX_DELAY; \
-                } \
-                err_delay_until = (int64_t)((double)err_delay*((double)rand()/(double)(RAND_MAX))) + time_ms(); \
-            } while(0)
+#define UPDATE_ERR_DELAY()                                                                                  \
+    do {                                                                                                    \
+        err_delay = err_delay * 2;                                                                          \
+        if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { err_delay = PLC_SOCKET_ERR_MAX_DELAY; }                  \
+        err_delay_until = (int64_t)((double)err_delay * ((double)rand() / (double)(RAND_MAX))) + time_ms(); \
+    } while(0)
 
 
-THREAD_FUNC(modbus_plc_handler)
-{
+THREAD_FUNC(modbus_plc_handler) {
     int rc = PLCTAG_STATUS_OK;
     modbus_plc_p plc = (modbus_plc_p)arg;
     int64_t err_delay = PLC_SOCKET_ERR_START_DELAY;
@@ -687,7 +667,7 @@ THREAD_FUNC(modbus_plc_handler)
         THREAD_RETURN(0);
     }
 
-    while(! plc->flags.terminate) {
+    while(!plc->flags.terminate) {
         rc = tickle_all_tags(plc);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error %s tickling tags!", plc_tag_decode_error(rc));
@@ -702,220 +682,217 @@ THREAD_FUNC(modbus_plc_handler)
         }
 
         switch(plc->state) {
-        case PLC_CONNECT_START:
-            pdebug(DEBUG_DETAIL, "in PLC_CONNECT_START state.");
+            case PLC_CONNECT_START:
+                pdebug(DEBUG_DETAIL, "in PLC_CONNECT_START state.");
 
-            /* connect to the PLC */
-            rc = connect_plc(plc);
-            if(rc == PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_DETAIL, "Socket connection process started.  Going to PLC_CONNECT_WAIT state.");
-                plc->state = PLC_CONNECT_WAIT;
-            } else if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Successfully connected to the PLC.  Going to PLC_READY state.");
+                /* connect to the PLC */
+                rc = connect_plc(plc);
+                if(rc == PLCTAG_STATUS_PENDING) {
+                    pdebug(DEBUG_DETAIL, "Socket connection process started.  Going to PLC_CONNECT_WAIT state.");
+                    plc->state = PLC_CONNECT_WAIT;
+                } else if(rc == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_DETAIL, "Successfully connected to the PLC.  Going to PLC_READY state.");
 
-                /* reset err_delay */
-                err_delay = PLC_SOCKET_ERR_START_DELAY;
+                    /* reset err_delay */
+                    err_delay = PLC_SOCKET_ERR_START_DELAY;
 
-                plc->state = PLC_READY;
-            } else {
-                pdebug(DEBUG_WARN, "Error %s received while starting socket connection.", plc_tag_decode_error(rc));
-
-                socket_destroy(&(plc->sock));
-
-                /* exponential increase with jitter. */
-                UPDATE_ERR_DELAY();
-
-                pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %"PRId64"ms.", err_delay);
-
-                plc->state = PLC_ERR_WAIT;
-            }
-            break;
-
-        case PLC_CONNECT_WAIT:
-            rc = socket_connect_tcp_check(plc->sock, SOCKET_CONNECT_TIMEOUT);
-            if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Socket connected, going to state PLC_READY.");
-
-                /* we just connected, keep the connection open for a few seconds. */
-                plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
-
-                /* reset err_delay */
-                err_delay = PLC_SOCKET_ERR_START_DELAY;
-
-                plc->state = PLC_READY;
-            } else if(rc == PLCTAG_ERR_TIMEOUT) {
-                pdebug(DEBUG_DETAIL, "Still waiting for socket to connect.");
-
-                /* do not wait more.   The TCP connection check will wait in select(). */
-            } else {
-                pdebug(DEBUG_WARN, "Error %s received while waiting for socket connection.", plc_tag_decode_error(rc));
-
-                socket_destroy(&(plc->sock));
-
-                /* exponential increase with jitter. */
-                UPDATE_ERR_DELAY();
-
-                pdebug(DEBUG_WARN, "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %"PRId64"ms.", err_delay);
-
-                plc->state = PLC_ERR_WAIT;
-            }
-            break;
-
-        case PLC_READY:
-            pdebug(DEBUG_DETAIL, "in PLC_READY state.");
-
-            /* calculate what events we should be waiting for. */
-            waitable_events = SOCK_EVENT_DEFAULT_MASK | SOCK_EVENT_CAN_READ;
-
-            /* if there is a request queued for sending, send it. */
-            if(plc->flags.request_ready) {
-                waitable_events |= SOCK_EVENT_CAN_WRITE;
-            }
-
-            /* this will wait if nothing wakes it up or until it times out. */
-            sock_events = socket_wait_event(plc->sock, waitable_events, MODBUS_IDLE_WAIT_TIMEOUT);
-
-            /* check for socket errors or disconnects. */
-            if((sock_events & SOCK_EVENT_ERROR) || (sock_events & SOCK_EVENT_DISCONNECT)) {
-                if(sock_events & SOCK_EVENT_DISCONNECT) {
-                    pdebug(DEBUG_WARN, "Unexepected socket disconnect!");
+                    plc->state = PLC_READY;
                 } else {
-                    pdebug(DEBUG_WARN, "Unexpected socket error!");
+                    pdebug(DEBUG_WARN, "Error %s received while starting socket connection.", plc_tag_decode_error(rc));
+
+                    socket_destroy(&(plc->sock));
+
+                    /* exponential increase with jitter. */
+                    UPDATE_ERR_DELAY();
+
+                    pdebug(DEBUG_WARN,
+                           "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
+                           err_delay);
+
+                    plc->state = PLC_ERR_WAIT;
+                }
+                break;
+
+            case PLC_CONNECT_WAIT:
+                rc = socket_connect_tcp_check(plc->sock, SOCKET_CONNECT_TIMEOUT);
+                if(rc == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_DETAIL, "Socket connected, going to state PLC_READY.");
+
+                    /* we just connected, keep the connection open for a few seconds. */
+                    plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+
+                    /* reset err_delay */
+                    err_delay = PLC_SOCKET_ERR_START_DELAY;
+
+                    plc->state = PLC_READY;
+                } else if(rc == PLCTAG_ERR_TIMEOUT) {
+                    pdebug(DEBUG_DETAIL, "Still waiting for socket to connect.");
+
+                    /* do not wait more.   The TCP connection check will wait in select(). */
+                } else {
+                    pdebug(DEBUG_WARN, "Error %s received while waiting for socket connection.", plc_tag_decode_error(rc));
+
+                    socket_destroy(&(plc->sock));
+
+                    /* exponential increase with jitter. */
+                    UPDATE_ERR_DELAY();
+
+                    pdebug(DEBUG_WARN,
+                           "Unable to connect to the PLC, will retry later! Going to PLC_ERR_WAIT state to wait %" PRId64 "ms.",
+                           err_delay);
+
+                    plc->state = PLC_ERR_WAIT;
+                }
+                break;
+
+            case PLC_READY:
+                pdebug(DEBUG_DETAIL, "in PLC_READY state.");
+
+                /* calculate what events we should be waiting for. */
+                waitable_events = SOCK_EVENT_DEFAULT_MASK | SOCK_EVENT_CAN_READ;
+
+                /* if there is a request queued for sending, send it. */
+                if(plc->flags.request_ready) { waitable_events |= SOCK_EVENT_CAN_WRITE; }
+
+                /* this will wait if nothing wakes it up or until it times out. */
+                sock_events = socket_wait_event(plc->sock, waitable_events, MODBUS_IDLE_WAIT_TIMEOUT);
+
+                /* check for socket errors or disconnects. */
+                if((sock_events & SOCK_EVENT_ERROR) || (sock_events & SOCK_EVENT_DISCONNECT)) {
+                    if(sock_events & SOCK_EVENT_DISCONNECT) {
+                        pdebug(DEBUG_WARN, "Unexepected socket disconnect!");
+                    } else {
+                        pdebug(DEBUG_WARN, "Unexpected socket error!");
+                    }
+
+                    pdebug(DEBUG_WARN, "Going to state PLC_CONNECT_START");
+
+                    socket_destroy(&(plc->sock));
+
+                    plc->state = PLC_CONNECT_START;
+                    break;
                 }
 
-                pdebug(DEBUG_WARN, "Going to state PLC_CONNECT_START");
+                /* preference pushing requests to the PLC */
+                if(sock_events & SOCK_EVENT_CAN_WRITE) {
+                    if(plc->flags.request_ready) {
+                        pdebug(DEBUG_DETAIL,
+                               "There is a request ready to send and we can send, going to state PLC_SEND_REQUEST.");
+                        plc->state = PLC_SEND_REQUEST;
+                        break;
+                    } else {
+                        /* clear the buffer indexes just in case */
+                        plc->write_data_len = 0;
+                        plc->write_data_offset = 0;
+                        pdebug(DEBUG_DETAIL, "Request ready state changed while we waited for the socket.");
+                    }
+                }
 
-                socket_destroy(&(plc->sock));
-
-                plc->state = PLC_CONNECT_START;
-                break;
-            }
-
-            /* preference pushing requests to the PLC */
-            if(sock_events & SOCK_EVENT_CAN_WRITE) {
-                if(plc->flags.request_ready) {
-                    pdebug(DEBUG_DETAIL, "There is a request ready to send and we can send, going to state PLC_SEND_REQUEST.");
-                    plc->state = PLC_SEND_REQUEST;
+                if(sock_events & SOCK_EVENT_CAN_READ) {
+                    pdebug(DEBUG_DETAIL, "We can receive a response going to state PLC_RECEIVE_RESPONSE.");
+                    plc->state = PLC_RECEIVE_RESPONSE;
                     break;
-                } else {
-                    /* clear the buffer indexes just in case */
+                }
+
+                if(sock_events & SOCK_EVENT_TIMEOUT) { pdebug(DEBUG_DETAIL, "Timed out waiting for something to happen."); }
+
+                if(sock_events & SOCK_EVENT_WAKE_UP) { pdebug(DEBUG_DETAIL, "Someone woke us up."); }
+
+                break;
+
+            case PLC_SEND_REQUEST:
+                debug_set_tag_id((int)plc->request_tag_id);
+                pdebug(DEBUG_DETAIL, "in PLC_SEND_REQUEST state.");
+
+                rc = send_request(plc);
+                if(rc == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_DETAIL, "Request sent, going to back to state PLC_READY.");
+
+                    plc->flags.request_ready = 0;
                     plc->write_data_len = 0;
                     plc->write_data_offset = 0;
-                    pdebug(DEBUG_DETAIL, "Request ready state changed while we waited for the socket.");
+
+                    plc->state = PLC_READY;
+                } else if(rc == PLCTAG_STATUS_PENDING) {
+                    pdebug(DEBUG_DETAIL, "Not all data written, will try again.");
+                } else {
+                    pdebug(DEBUG_WARN, "Closing socket due to write error %s.", plc_tag_decode_error(rc));
+
+                    socket_destroy(&(plc->sock));
+
+                    /* set up the state. */
+                    plc->flags.response_ready = 0;
+                    plc->flags.request_ready = 0;
+                    plc->read_data_len = 0;
+                    plc->write_data_len = 0;
+                    plc->write_data_offset = 0;
+
+                    /* try to reconnect immediately. */
+                    plc->state = PLC_CONNECT_START;
                 }
-            }
 
-            if(sock_events & SOCK_EVENT_CAN_READ) {
-                pdebug(DEBUG_DETAIL, "We can receive a response going to state PLC_RECEIVE_RESPONSE.");
-                plc->state = PLC_RECEIVE_RESPONSE;
+                /* if we did not send all the packet, we stay in this state and keep trying. */
+
+                debug_set_tag_id(0);
+
                 break;
-            }
 
-            if(sock_events & SOCK_EVENT_TIMEOUT) {
-                pdebug(DEBUG_DETAIL, "Timed out waiting for something to happen.");
-            }
 
-            if(sock_events & SOCK_EVENT_WAKE_UP) {
-                pdebug(DEBUG_DETAIL, "Someone woke us up.");
-            }
+            case PLC_RECEIVE_RESPONSE:
+                pdebug(DEBUG_DETAIL, "in PLC_RECEIVE_RESPONSE state.");
 
-            break;
+                /* get a packet */
+                rc = receive_response(plc);
+                if(rc == PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_DETAIL, "Response ready, going back to PLC_READY state.");
+                    plc->flags.response_ready = 1;
+                    plc->state = PLC_READY;
+                } else if(rc == PLCTAG_STATUS_PENDING) {
+                    pdebug(DEBUG_DETAIL, "Response not complete, continue reading data.");
+                } else {
+                    pdebug(DEBUG_WARN, "Closing socket due to read error %s.", plc_tag_decode_error(rc));
 
-        case PLC_SEND_REQUEST:
-            debug_set_tag_id((int)plc->request_tag_id);
-            pdebug(DEBUG_DETAIL, "in PLC_SEND_REQUEST state.");
+                    socket_destroy(&(plc->sock));
 
-            rc = send_request(plc);
-            if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Request sent, going to back to state PLC_READY.");
+                    /* set up the state. */
+                    plc->flags.response_ready = 0;
+                    plc->flags.request_ready = 0;
+                    plc->read_data_len = 0;
+                    plc->write_data_len = 0;
+                    plc->write_data_offset = 0;
 
-                plc->flags.request_ready = 0;
-                plc->write_data_len = 0;
-                plc->write_data_offset = 0;
+                    /* try to reconnect immediately. */
+                    plc->state = PLC_CONNECT_START;
+                }
 
-                plc->state = PLC_READY;
-            } else if(rc == PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_DETAIL, "Not all data written, will try again.");
-            } else {
-                pdebug(DEBUG_WARN, "Closing socket due to write error %s.", plc_tag_decode_error(rc));
+                /* in all cases we want to cycle through the state machine immediately. */
 
-                socket_destroy(&(plc->sock));
+                break;
 
-                /* set up the state. */
-                plc->flags.response_ready = 0;
-                plc->flags.request_ready = 0;
-                plc->read_data_len = 0;
-                plc->write_data_len = 0;
-                plc->write_data_offset = 0;
+            case PLC_ERR_WAIT:
+                pdebug(DEBUG_DETAIL, "in PLC_ERR_WAIT state.");
 
-                /* try to reconnect immediately. */
+                /* clean up the socket in case we did not earlier */
+                if(plc->sock) { socket_destroy(&(plc->sock)); }
+
+                /* wait until done. */
+                if(err_delay_until > time_ms()) {
+                    pdebug(DEBUG_DETAIL, "Waiting for at least %" PRId64 "ms.", (err_delay_until - time_ms()));
+                    sleep_ms(PLC_SOCKET_ERR_DELAY_WAIT_INCREMENT);
+                } else {
+                    pdebug(DEBUG_DETAIL, "Error wait is over, going to state PLC_CONNECT_START.");
+                    plc->state = PLC_CONNECT_START;
+                }
+                break;
+
+            default:
+                pdebug(DEBUG_WARN, "Unknown state %d!", plc->state);
                 plc->state = PLC_CONNECT_START;
-            }
-
-            /* if we did not send all the packet, we stay in this state and keep trying. */
-
-            debug_set_tag_id(0);
-
-            break;
-
-
-        case PLC_RECEIVE_RESPONSE:
-            pdebug(DEBUG_DETAIL, "in PLC_RECEIVE_RESPONSE state.");
-
-            /* get a packet */
-            rc = receive_response(plc);
-            if(rc == PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_DETAIL, "Response ready, going back to PLC_READY state.");
-                plc->flags.response_ready = 1;
-                plc->state = PLC_READY;
-            } else if(rc == PLCTAG_STATUS_PENDING) {
-                pdebug(DEBUG_DETAIL, "Response not complete, continue reading data.");
-            } else {
-                pdebug(DEBUG_WARN, "Closing socket due to read error %s.", plc_tag_decode_error(rc));
-
-                socket_destroy(&(plc->sock));
-
-                /* set up the state. */
-                plc->flags.response_ready = 0;
-                plc->flags.request_ready = 0;
-                plc->read_data_len = 0;
-                plc->write_data_len = 0;
-                plc->write_data_offset = 0;
-
-                /* try to reconnect immediately. */
-                plc->state = PLC_CONNECT_START;
-            }
-
-            /* in all cases we want to cycle through the state machine immediately. */
-
-            break;
-
-        case PLC_ERR_WAIT:
-            pdebug(DEBUG_DETAIL, "in PLC_ERR_WAIT state.");
-
-            /* clean up the socket in case we did not earlier */
-            if(plc->sock) {
-                socket_destroy(&(plc->sock));
-            }
-
-            /* wait until done. */
-            if(err_delay_until > time_ms()) {
-                pdebug(DEBUG_DETAIL, "Waiting for at least %"PRId64"ms.", (err_delay_until - time_ms()));
-                sleep_ms(PLC_SOCKET_ERR_DELAY_WAIT_INCREMENT);
-            } else {
-                pdebug(DEBUG_DETAIL, "Error wait is over, going to state PLC_CONNECT_START.");
-                plc->state = PLC_CONNECT_START;
-            }
-            break;
-
-        default:
-            pdebug(DEBUG_WARN, "Unknown state %d!", plc->state);
-            plc->state = PLC_CONNECT_START;
-            break;
+                break;
         }
 
         /* wait if needed, could be signalled already. */
-        //cond_wait(plc->wait_cond, MODBUS_IDLE_WAIT_TIMEOUT);
+        // cond_wait(plc->wait_cond, MODBUS_IDLE_WAIT_TIMEOUT);
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -924,11 +901,10 @@ THREAD_FUNC(modbus_plc_handler)
 }
 
 
-void wake_plc_thread(modbus_plc_p plc)
-{
+void wake_plc_thread(modbus_plc_p plc) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(plc ) {
+    if(plc) {
         if(plc->sock) {
             socket_wake(plc->sock);
         } else {
@@ -942,9 +918,7 @@ void wake_plc_thread(modbus_plc_p plc)
 }
 
 
-
-int connect_plc(modbus_plc_p plc)
-{
+int connect_plc(modbus_plc_p plc) {
     int rc = PLCTAG_STATUS_OK;
     char **server_port = NULL;
     char *server = NULL;
@@ -1021,11 +995,10 @@ int connect_plc(modbus_plc_p plc)
 }
 
 
-int tickle_all_tags(modbus_plc_p plc)
-{
+int tickle_all_tags(modbus_plc_p plc) {
     int rc = PLCTAG_STATUS_OK;
-    struct modbus_tag_list_t idle_list = { NULL, NULL };
-    struct modbus_tag_list_t active_list = { NULL, NULL };
+    struct modbus_tag_list_t idle_list = {NULL, NULL};
+    struct modbus_tag_list_t active_list = {NULL, NULL};
     modbus_tag_p tag = NULL;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1042,7 +1015,7 @@ int tickle_all_tags(modbus_plc_p plc)
 
             /* make sure nothing else can modify the tag while we are */
             critical_block(tag->api_mutex) {
-            // if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+                // if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
                 rc = tickle_tag(plc, tag);
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_SPEW, "Pushing tag onto idle list.");
@@ -1083,9 +1056,7 @@ int tickle_all_tags(modbus_plc_p plc)
 }
 
 
-
-int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
-{
+int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     int op = (int)(tag->op);
     int raise_event = 0;
@@ -1126,7 +1097,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                     event = PLCTAG_EVENT_READ_COMPLETED;
                     event_status = rc;
 
-                    //plc_tag_tickler_wake();
+                    // plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
                     rc = PLCTAG_STATUS_OK;
                 }
@@ -1138,9 +1109,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
 
         case TAG_OP_READ_RESPONSE:
             /* cross check the state. */
-            if(plc->state == PLC_CONNECT_START
-            || plc->state == PLC_CONNECT_WAIT
-            || plc->state == PLC_ERR_WAIT) {
+            if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT) {
                 pdebug(DEBUG_WARN, "PLC changed state, restarting request.");
                 tag->op = TAG_OP_READ_REQUEST;
                 break;
@@ -1195,7 +1164,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                         event_status = rc;
 
                         /* tell the world we are done. */
-                        //plc_tag_tickler_wake();
+                        // plc_tag_tickler_wake();
                         plc_tag_generic_wake_tag((plc_tag_p)tag);
 
                         break;
@@ -1232,7 +1201,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                     event = PLCTAG_EVENT_WRITE_COMPLETED;
                     event_status = rc;
 
-                    //plc_tag_tickler_wake();
+                    // plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
 
                     rc = PLCTAG_STATUS_OK;
@@ -1245,9 +1214,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
 
         case TAG_OP_WRITE_RESPONSE:
             /* cross check the state. */
-            if(plc->state == PLC_CONNECT_START
-            || plc->state == PLC_CONNECT_WAIT
-            || plc->state == PLC_ERR_WAIT) {
+            if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT) {
                 pdebug(DEBUG_WARN, "PLC changed state, restarting request.");
                 tag->op = TAG_OP_WRITE_REQUEST;
                 break;
@@ -1272,7 +1239,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                     event_status = rc;
 
                     /* tell the world we are done. */
-                    //plc_tag_tickler_wake();
+                    // plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
 
                     rc = PLCTAG_STATUS_OK;
@@ -1303,7 +1270,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
                     event_status = rc;
 
                     /* tell the world we are done. */
-                    //plc_tag_tickler_wake();
+                    // plc_tag_tickler_wake();
                     plc_tag_generic_wake_tag((plc_tag_p)tag);
 
                     rc = PLCTAG_STATUS_OK;
@@ -1321,7 +1288,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
             tag->status = (int8_t)PLCTAG_ERR_NOT_IMPLEMENTED;
 
             /* tell the world we are done. */
-            //plc_tag_tickler_wake();
+            // plc_tag_tickler_wake();
             plc_tag_generic_wake_tag((plc_tag_p)tag);
 
             rc = PLCTAG_STATUS_OK;
@@ -1345,10 +1312,7 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag)
 }
 
 
-
-
-int find_request_slot(modbus_plc_p plc, modbus_tag_p tag)
-{
+int find_request_slot(modbus_plc_p plc, modbus_tag_p tag) {
     pdebug(DEBUG_SPEW, "Starting.");
 
     if(plc->flags.request_ready) {
@@ -1367,9 +1331,9 @@ int find_request_slot(modbus_plc_p plc, modbus_tag_p tag)
     }
 
     /* search for a slot. */
-    for(int slot=0; slot < plc->max_requests_in_flight; slot++) {
+    for(int slot = 0; slot < plc->max_requests_in_flight; slot++) {
         if(plc->tags_with_requests[slot] == 0) {
-            pdebug(DEBUG_DETAIL, "Found request slot %d for tag %"PRId32".", slot, tag->tag_id);
+            pdebug(DEBUG_DETAIL, "Found request slot %d for tag %" PRId32 ".", slot, tag->tag_id);
             plc->tags_with_requests[slot] = tag->tag_id;
             tag->request_slot = slot;
             return PLCTAG_STATUS_OK;
@@ -1382,31 +1346,26 @@ int find_request_slot(modbus_plc_p plc, modbus_tag_p tag)
 }
 
 
-void clear_request_slot(modbus_plc_p plc, modbus_tag_p tag)
-{
-    pdebug(DEBUG_DETAIL, "Starting for tag %"PRId32".", tag->tag_id);
+void clear_request_slot(modbus_plc_p plc, modbus_tag_p tag) {
+    pdebug(DEBUG_DETAIL, "Starting for tag %" PRId32 ".", tag->tag_id);
 
     /* find the tag in the slots. */
-    for(int slot=0; slot < plc->max_requests_in_flight; slot++) {
+    for(int slot = 0; slot < plc->max_requests_in_flight; slot++) {
         if(plc->tags_with_requests[slot] == tag->tag_id) {
-            pdebug(DEBUG_DETAIL, "Found tag %"PRId32" in slot %d.", tag->tag_id, slot);
+            pdebug(DEBUG_DETAIL, "Found tag %" PRId32 " in slot %d.", tag->tag_id, slot);
 
-            if(slot != tag->request_slot) {
-                pdebug(DEBUG_DETAIL, "Tag was not in expected slot %d!", tag->request_slot);
-            }
+            if(slot != tag->request_slot) { pdebug(DEBUG_DETAIL, "Tag was not in expected slot %d!", tag->request_slot); }
 
             plc->tags_with_requests[slot] = 0;
             tag->request_slot = -1;
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done for tag %"PRId32".", tag->tag_id);
+    pdebug(DEBUG_DETAIL, "Done for tag %" PRId32 ".", tag->tag_id);
 }
 
 
-
-int receive_response(modbus_plc_p plc)
-{
+int receive_response(modbus_plc_p plc) {
     int rc = 0;
     int data_needed = 0;
 
@@ -1424,18 +1383,21 @@ int receive_response(modbus_plc_p plc)
             int packet_size = plc->read_data[5] + (plc->read_data[4] << 8);
             data_needed = (MODBUS_MBAP_SIZE + packet_size) - plc->read_data_len;
 
-            pdebug(DEBUG_DETAIL, "Packet header read, data_needed=%d, packet_size=%d, read_data_len=%d", data_needed, packet_size, plc->read_data_len);
+            pdebug(DEBUG_DETAIL, "Packet header read, data_needed=%d, packet_size=%d, read_data_len=%d", data_needed, packet_size,
+                   plc->read_data_len);
 
             if(data_needed > PLC_READ_DATA_LEN) {
                 pdebug(DEBUG_WARN, "Error, packet size, %d, greater than buffer size, %d!", data_needed, PLC_READ_DATA_LEN);
                 return PLCTAG_ERR_TOO_LARGE;
             } else if(data_needed < 0) {
-                pdebug(DEBUG_WARN, "Read more than a packet!  Expected %d bytes, but got %d bytes!", (MODBUS_MBAP_SIZE + packet_size), plc->read_data_len);
+                pdebug(DEBUG_WARN, "Read more than a packet!  Expected %d bytes, but got %d bytes!",
+                       (MODBUS_MBAP_SIZE + packet_size), plc->read_data_len);
                 return PLCTAG_ERR_TOO_LARGE;
             }
         } else {
             data_needed = MODBUS_MBAP_SIZE - plc->read_data_len;
-            pdebug(DEBUG_DETAIL, "Still reading packet header, data_needed=%d, read_data_len=%d", data_needed, plc->read_data_len);
+            pdebug(DEBUG_DETAIL, "Still reading packet header, data_needed=%d, read_data_len=%d", data_needed,
+                   plc->read_data_len);
         }
 
         if(data_needed == 0) {
@@ -1471,14 +1433,13 @@ int receive_response(modbus_plc_p plc)
         rc = PLCTAG_STATUS_OK;
     } else {
         /* data_needed is greater than zero. */
-        pdebug(DEBUG_DETAIL, "Received partial packet of %d bytes of %d.", plc->read_data_len, (data_needed + plc->read_data_len));
+        pdebug(DEBUG_DETAIL, "Received partial packet of %d bytes of %d.", plc->read_data_len,
+               (data_needed + plc->read_data_len));
         rc = PLCTAG_STATUS_PENDING;
     }
 
     /* if we have some data in the buffer, keep the connection open. */
-    if(plc->read_data_len > 0) {
-        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
-    }
+    if(plc->read_data_len > 0) { plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms(); }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -1486,9 +1447,7 @@ int receive_response(modbus_plc_p plc)
 }
 
 
-
-int send_request(modbus_plc_p plc)
-{
+int send_request(modbus_plc_p plc) {
     int rc = 1;
     int data_left = plc->write_data_len - plc->write_data_offset;
 
@@ -1501,12 +1460,10 @@ int send_request(modbus_plc_p plc)
     }
 
     /* if we have some data in the buffer, keep the connection open. */
-    if(plc->write_data_len > 0) {
-        plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
-    }
+    if(plc->write_data_len > 0) { plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms(); }
 
     /* is there anything to do? */
-    if(! plc->flags.request_ready) {
+    if(!plc->flags.request_ready) {
         pdebug(DEBUG_WARN, "No packet to send!");
         return PLCTAG_ERR_NO_DATA;
     }
@@ -1547,12 +1504,9 @@ int send_request(modbus_plc_p plc)
 }
 
 
-
-
-int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
-{
+int create_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id)); // disallow zero
+    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id));  // disallow zero
     int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
     int base_register = tag->reg_base + (tag->request_num * registers_per_request);
     int register_count = tag->elem_count - (tag->request_num * registers_per_request);
@@ -1565,11 +1519,10 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     pdebug(DEBUG_DETAIL, "register_count = %d", register_count);
 
     /* clamp the number of registers we ask for to what will fit. */
-    if(register_count > registers_per_request) {
-        register_count = registers_per_request;
-    }
+    if(register_count > registers_per_request) { register_count = registers_per_request; }
 
-    pdebug(DEBUG_INFO, "preparing read request for %d registers (of %d total) from base register %d.", register_count, tag->elem_count, base_register);
+    pdebug(DEBUG_INFO, "preparing read request for %d registers (of %d total) from base register %d.", register_count,
+           tag->elem_count, base_register);
 
     /* build the read request.
      *    Byte  Meaning
@@ -1590,36 +1543,47 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     plc->write_data_len = 0;
 
     /* build the request sequence ID */
-    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 8) & 0xFF);
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 0) & 0xFF);
+    plc->write_data_len++;
 
     /* protocol version is always zero */
-    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 0;
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 0;
+    plc->write_data_len++;
 
     /* request packet length */
-    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = 6; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 0;
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 6;
+    plc->write_data_len++;
 
     /* device address */
-    plc->write_data[plc->write_data_len] = plc->server_id; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = plc->server_id;
+    plc->write_data_len++;
 
     /* function code depends on the register type. */
     switch(tag->reg_type) {
         case MB_REG_COIL:
-            plc->write_data[7] = MB_CMD_READ_COIL_MULTI; plc->write_data_len++;
+            plc->write_data[7] = MB_CMD_READ_COIL_MULTI;
+            plc->write_data_len++;
             break;
 
         case MB_REG_DISCRETE_INPUT:
-            plc->write_data[7] = MB_CMD_READ_DISCRETE_INPUT_MULTI; plc->write_data_len++;
+            plc->write_data[7] = MB_CMD_READ_DISCRETE_INPUT_MULTI;
+            plc->write_data_len++;
             break;
 
         case MB_REG_HOLDING_REGISTER:
-            plc->write_data[7] = MB_CMD_READ_HOLDING_REGISTER_MULTI; plc->write_data_len++;
+            plc->write_data[7] = MB_CMD_READ_HOLDING_REGISTER_MULTI;
+            plc->write_data_len++;
             break;
 
         case MB_REG_INPUT_REGISTER:
-            plc->write_data[7] = MB_CMD_READ_INPUT_REGISTER_MULTI; plc->write_data_len++;
+            plc->write_data[7] = MB_CMD_READ_INPUT_REGISTER_MULTI;
+            plc->write_data_len++;
             break;
 
         default:
@@ -1629,12 +1593,16 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
     }
 
     /* register base. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 8) & 0xFF);
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 0) & 0xFF);
+    plc->write_data_len++;
 
     /* number of elements to read. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 8) & 0xFF);
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 0) & 0xFF);
+    plc->write_data_len++;
 
     tag->seq_id = seq_id;
     plc->flags.request_ready = 1;
@@ -1647,8 +1615,6 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
 
     return rc;
 }
-
-
 
 
 /* Read response.
@@ -1666,10 +1632,9 @@ int create_read_request(modbus_plc_p plc, modbus_tag_p tag)
  */
 
 
-int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
-{
+int check_read_response(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] +(uint16_t)(plc->read_data[0] << 8));
+    uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
     int partial_read = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1678,12 +1643,13 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
 
         /* the operation is complete regardless of the outcome. */
-        //tag->flags.operation_complete = 1;
+        // tag->flags.operation_complete = 1;
 
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);
 
-            pdebug(DEBUG_WARN, "Got read response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id, plc_tag_decode_error(rc), plc->read_data_len);
+            pdebug(DEBUG_WARN, "Got read response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id,
+                   plc_tag_decode_error(rc), plc->read_data_len);
         } else {
             int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
             int register_offset = (tag->request_num * registers_per_request);
@@ -1692,7 +1658,8 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
             int copy_size = ((tag->size - byte_offset) < payload_size ? (tag->size - byte_offset) : payload_size);
 
             /* no error. So copy the data. */
-            pdebug(DEBUG_DETAIL, "Got read response %u of length %d with payload of size %d.", (int)(unsigned int)seq_id, plc->read_data_len, payload_size);
+            pdebug(DEBUG_DETAIL, "Got read response %u of length %d with payload of size %d.", (int)(unsigned int)seq_id,
+                   plc->read_data_len, payload_size);
             pdebug(DEBUG_DETAIL, "registers_per_request = %d", registers_per_request);
             pdebug(DEBUG_DETAIL, "register_offset = %d", register_offset);
             pdebug(DEBUG_DETAIL, "byte_offset = %d", byte_offset);
@@ -1744,7 +1711,6 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
 }
 
 
-
 /* build the write request.
  *    Byte  Meaning
  *      0    High byte of request sequence ID.
@@ -1763,10 +1729,9 @@ int check_read_response(modbus_plc_p plc, modbus_tag_p tag)
  *     13... Data bytes.
  */
 
-int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
-{
+int create_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
-    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id)); // disallow zero
+    uint16_t seq_id = (++(plc->seq_id) ? plc->seq_id : ++(plc->seq_id));  // disallow zero
     int registers_per_request = (MAX_MODBUS_REQUEST_PAYLOAD * 8) / tag->elem_size;
     int base_register = tag->reg_base + (tag->request_num * registers_per_request);
     int register_count = tag->elem_count - (tag->request_num * registers_per_request);
@@ -1784,37 +1749,45 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
     pdebug(DEBUG_SPEW, "byte_offset = %d", byte_offset);
 
     /* clamp the number of registers we ask for to what will fit. */
-    if(register_count > registers_per_request) {
-        register_count = registers_per_request;
-    }
+    if(register_count > registers_per_request) { register_count = registers_per_request; }
 
     /* how many bytes, rounded up to the nearest byte. */
     request_payload_size = ((register_count * tag->elem_size) + 7) / 8;
 
-    pdebug(DEBUG_DETAIL, "preparing write request for %d registers (of %d total) from base register %d of payload size %d in bytes.", register_count, tag->elem_count, base_register, request_payload_size);
+    pdebug(DEBUG_DETAIL,
+           "preparing write request for %d registers (of %d total) from base register %d of payload size %d in bytes.",
+           register_count, tag->elem_count, base_register, request_payload_size);
 
     /* FIXME - remove this when we figure out how to push multiple requests. */
     plc->write_data_len = 0;
 
     /* build the request sequence ID */
-    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 8) & 0xFF);
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((seq_id >> 0) & 0xFF);
+    plc->write_data_len++;
 
     /* protocol version is always zero */
-    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = 0; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 0;
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = 0;
+    plc->write_data_len++;
 
     /* request packet length */
-    plc->write_data[plc->write_data_len] = (uint8_t)(((request_payload_size + 7) >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)(((request_payload_size + 7) >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)(((request_payload_size + 7) >> 8) & 0xFF);
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)(((request_payload_size + 7) >> 0) & 0xFF);
+    plc->write_data_len++;
 
     /* device address */
-    plc->write_data[plc->write_data_len] = plc->server_id; plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = plc->server_id;
+    plc->write_data_len++;
 
     /* function code depends on the register type. */
     switch(tag->reg_type) {
         case MB_REG_COIL:
-            plc->write_data[7] = MB_CMD_WRITE_COIL_MULTI; plc->write_data_len++;
+            plc->write_data[7] = MB_CMD_WRITE_COIL_MULTI;
+            plc->write_data_len++;
             break;
 
         case MB_REG_DISCRETE_INPUT:
@@ -1823,7 +1796,8 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
             break;
 
         case MB_REG_HOLDING_REGISTER:
-            plc->write_data[7] = MB_CMD_WRITE_HOLDING_REGISTER_MULTI; plc->write_data_len++;
+            plc->write_data[7] = MB_CMD_WRITE_HOLDING_REGISTER_MULTI;
+            plc->write_data_len++;
             break;
 
         case MB_REG_INPUT_REGISTER:
@@ -1838,15 +1812,20 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
     }
 
     /* register base. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 8) & 0xFF);
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((base_register >> 0) & 0xFF);
+    plc->write_data_len++;
 
     /* number of elements to read. */
-    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 8) & 0xFF); plc->write_data_len++;
-    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 0) & 0xFF); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 8) & 0xFF);
+    plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)((register_count >> 0) & 0xFF);
+    plc->write_data_len++;
 
     /* number of bytes of data to write. */
-    plc->write_data[plc->write_data_len] = (uint8_t)(unsigned int)(request_payload_size); plc->write_data_len++;
+    plc->write_data[plc->write_data_len] = (uint8_t)(unsigned int)(request_payload_size);
+    plc->write_data_len++;
 
     /* copy the tag data. */
     mem_copy(&plc->write_data[plc->write_data_len], &tag->data[byte_offset], request_payload_size);
@@ -1865,9 +1844,6 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
 }
 
 
-
-
-
 /* Write response.
  *    Byte  Meaning
  *      0    High byte of request sequence ID.
@@ -1884,8 +1860,7 @@ int create_write_request(modbus_plc_p plc, modbus_tag_p tag)
  *     11    Low byte of the register count.
  */
 
-int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
-{
+int check_write_response(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t seq_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
     int partial_write = 0;
@@ -1896,15 +1871,16 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
         uint8_t has_error = plc->read_data[7] & (uint8_t)0x80;
 
         /* this is our response, so the operation is complete regardless of the status. */
-        //tag->flags.operation_complete = 1;
+        // tag->flags.operation_complete = 1;
 
         if(has_error) {
             rc = translate_modbus_error(plc->read_data[8]);
 
-            pdebug(DEBUG_WARN, "Got write response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id, plc_tag_decode_error(rc), plc->read_data_len);
+            pdebug(DEBUG_WARN, "Got write response %ud, with error %s, of length %d.", (int)(unsigned int)seq_id,
+                   plc_tag_decode_error(rc), plc->read_data_len);
         } else {
             int registers_per_request = (MAX_MODBUS_RESPONSE_PAYLOAD * 8) / tag->elem_size;
-            int next_register_offset = ((tag->request_num+1) * registers_per_request);
+            int next_register_offset = ((tag->request_num + 1) * registers_per_request);
             int next_byte_offset = (next_register_offset * tag->elem_size) / 8;
 
             /* no error. So copy the data. */
@@ -1956,9 +1932,7 @@ int check_write_response(modbus_plc_p plc, modbus_tag_p tag)
 }
 
 
-
-int translate_modbus_error(uint8_t err_code)
-{
+int translate_modbus_error(uint8_t err_code) {
     int rc = PLCTAG_STATUS_OK;
 
     switch(err_code) {
@@ -2012,16 +1986,13 @@ int translate_modbus_error(uint8_t err_code)
 }
 
 
-
-
-int parse_register_name(attr attribs, modbus_reg_type_t *reg_type, int *reg_base)
-{
+int parse_register_name(attr attribs, modbus_reg_type_t *reg_type, int *reg_base) {
     int rc = PLCTAG_STATUS_OK;
     const char *reg_name = attr_get_str(attribs, "name", NULL);
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    if(!reg_name || str_length(reg_name)<3) {
+    if(!reg_name || str_length(reg_name) < 3) {
         pdebug(DEBUG_WARN, "Incorrect or unsupported register name!");
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -2061,9 +2032,7 @@ int parse_register_name(attr attribs, modbus_reg_type_t *reg_type, int *reg_base
 }
 
 
-
-modbus_tag_p pop_tag(modbus_tag_list_p list)
-{
+modbus_tag_p pop_tag(modbus_tag_list_p list) {
     modbus_tag_p tmp = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -2077,9 +2046,7 @@ modbus_tag_p pop_tag(modbus_tag_list_p list)
     }
 
     /* if we removed the last element, then set the tail to NULL. */
-    if(!list->head) {
-        list->tail = NULL;
-    }
+    if(!list->head) { list->tail = NULL; }
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -2087,9 +2054,7 @@ modbus_tag_p pop_tag(modbus_tag_list_p list)
 }
 
 
-
-void push_tag(modbus_tag_list_p list, modbus_tag_p tag)
-{
+void push_tag(modbus_tag_list_p list, modbus_tag_p tag) {
     pdebug(DEBUG_SPEW, "Starting.");
 
     tag->next = NULL;
@@ -2107,9 +2072,7 @@ void push_tag(modbus_tag_list_p list, modbus_tag_p tag)
 }
 
 
-
-struct modbus_tag_list_t merge_lists(modbus_tag_list_p first, modbus_tag_list_p last)
-{
+struct modbus_tag_list_t merge_lists(modbus_tag_list_p first, modbus_tag_list_p last) {
     struct modbus_tag_list_t result;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -2142,9 +2105,7 @@ struct modbus_tag_list_t merge_lists(modbus_tag_list_p first, modbus_tag_list_p 
     result.head = (first->head ? first->head : last->head);
 
     /* stitch up the tail of the first list. */
-    if(first->tail) {
-        first->tail->next = last->head;
-    }
+    if(first->tail) { first->tail->next = last->head; }
 
     /* set up the tail of the new list */
     result.tail = (last->tail ? last->tail : first->tail);
@@ -2173,9 +2134,7 @@ struct modbus_tag_list_t merge_lists(modbus_tag_list_p first, modbus_tag_list_p 
 }
 
 
-
-int remove_tag(modbus_tag_list_p list, modbus_tag_p tag)
-{
+int remove_tag(modbus_tag_list_p list, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p cur = list->head;
     modbus_tag_p prev = NULL;
@@ -2196,9 +2155,7 @@ int remove_tag(modbus_tag_list_p list, modbus_tag_p tag)
             list->head = tag->next;
         }
 
-        if(list->tail == tag) {
-            list->tail = prev;
-        }
+        if(list->tail == tag) { list->tail = prev; }
 
         rc = PLCTAG_STATUS_OK;
     } else {
@@ -2215,8 +2172,7 @@ int remove_tag(modbus_tag_list_p list, modbus_tag_p tag)
 
 /* These must all be called with the API mutex on the tag held. */
 
-int mb_abort(plc_tag_p p_tag)
-{
+int mb_abort(plc_tag_p p_tag) {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -2250,9 +2206,7 @@ int mb_abort(plc_tag_p p_tag)
 }
 
 
-
-int mb_read_start(plc_tag_p p_tag)
-{
+int mb_read_start(plc_tag_p p_tag) {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -2286,9 +2240,7 @@ int mb_read_start(plc_tag_p p_tag)
 }
 
 
-
-int mb_tag_status(plc_tag_p p_tag)
-{
+int mb_tag_status(plc_tag_p p_tag) {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -2314,20 +2266,15 @@ int mb_tag_status(plc_tag_p p_tag)
 }
 
 
-
 /* not used. */
-int mb_tickler(plc_tag_p p_tag)
-{
+int mb_tickler(plc_tag_p p_tag) {
     (void)p_tag;
 
     return PLCTAG_STATUS_OK;
 }
 
 
-
-
-int mb_write_start(plc_tag_p p_tag)
-{
+int mb_write_start(plc_tag_p p_tag) {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -2361,9 +2308,7 @@ int mb_write_start(plc_tag_p p_tag)
 }
 
 
-
-int mb_wake_plc(plc_tag_p p_tag)
-{
+int mb_wake_plc(plc_tag_p p_tag) {
     modbus_tag_p tag = (modbus_tag_p)p_tag;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -2384,8 +2329,7 @@ int mb_wake_plc(plc_tag_p p_tag)
 
 /****** Data Accessor Functions ******/
 
-int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value)
-{
+int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_value) {
     int res = default_value;
     modbus_tag_p tag = (modbus_tag_p)raw_tag;
 
@@ -2395,11 +2339,11 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 
     /* match the attribute. */
     if(str_cmp_i(attrib_name, "elem_size") == 0) {
-        res = (tag->elem_size + 7)/8; /* return size in bytes! */
+        res = (tag->elem_size + 7) / 8; /* return size in bytes! */
     } else if(str_cmp_i(attrib_name, "elem_count") == 0) {
         res = tag->elem_count;
     } else {
-        pdebug(DEBUG_WARN,"Attribute \"%s\" is not supported.", attrib_name);
+        pdebug(DEBUG_WARN, "Attribute \"%s\" is not supported.", attrib_name);
         tag->status = PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -2407,8 +2351,7 @@ int mb_get_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int default_va
 }
 
 
-int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
-{
+int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value) {
     (void)attrib_name;
     (void)new_value;
 
@@ -2420,13 +2363,9 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 }
 
 
-
-
-
 /****** Library level functions. *******/
 
-void mb_teardown(void)
-{
+void mb_teardown(void) {
     pdebug(DEBUG_INFO, "Starting.");
 
     library_terminating = 1;
@@ -2437,12 +2376,10 @@ void mb_teardown(void)
         while(1) {
             int plcs_remain = 0;
 
-            critical_block(mb_mutex) {
-                plcs_remain = plcs ? 1 : 0;
-            }
+            critical_block(mb_mutex) { plcs_remain = plcs ? 1 : 0; }
 
             if(plcs_remain) {
-                sleep_ms(10); // MAGIC
+                sleep_ms(10);  // MAGIC
             } else {
                 break;
             }
@@ -2462,9 +2399,7 @@ void mb_teardown(void)
 }
 
 
-
-int mb_init()
-{
+int mb_init() {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");

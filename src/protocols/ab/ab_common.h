@@ -48,7 +48,8 @@ typedef struct ab_request_t *ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 
-extern int ab_tag_abort_request_only(ab_tag_p tag);
+extern int tag_abort_request_only(ab_tag_p tag);
+extern int tag_abort_request(ab_tag_p tag);
 extern int ab_tag_abort(ab_tag_p tag);
 extern int ab_tag_status(ab_tag_p tag);
 
@@ -58,42 +59,42 @@ extern int ab_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_val
 
 extern int ab_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 
-extern int ab_get_bit(plc_tag_p tag, int offset_bit);
-extern int ab_set_bit(plc_tag_p tag, int offset_bit, int val);
+// extern int ab_get_bit(plc_tag_p tag, int offset_bit);
+// extern int ab_set_bit(plc_tag_p tag, int offset_bit, int val);
 
-extern uint64_t ab_get_uint64(plc_tag_p tag, int offset);
-extern int ab_set_uint64(plc_tag_p tag, int offset, uint64_t val);
+// extern uint64_t ab_get_uint64(plc_tag_p tag, int offset);
+// extern int ab_set_uint64(plc_tag_p tag, int offset, uint64_t val);
 
-extern int64_t ab_get_int64(plc_tag_p tag, int offset);
-extern int ab_set_int64(plc_tag_p tag, int offset, int64_t val);
-
-
-extern uint32_t ab_get_uint32(plc_tag_p tag, int offset);
-extern int ab_set_uint32(plc_tag_p tag, int offset, uint32_t val);
-
-extern int32_t ab_get_int32(plc_tag_p tag, int offset);
-extern int ab_set_int32(plc_tag_p tag, int offset, int32_t val);
+// extern int64_t ab_get_int64(plc_tag_p tag, int offset);
+// extern int ab_set_int64(plc_tag_p tag, int offset, int64_t val);
 
 
-extern uint16_t ab_get_uint16(plc_tag_p tag, int offset);
-extern int ab_set_uint16(plc_tag_p tag, int offset, uint16_t val);
+// extern uint32_t ab_get_uint32(plc_tag_p tag, int offset);
+// extern int ab_set_uint32(plc_tag_p tag, int offset, uint32_t val);
 
-extern int16_t ab_get_int16(plc_tag_p tag, int offset);
-extern int ab_set_int16(plc_tag_p tag, int offset, int16_t val);
-
-
-extern uint8_t ab_get_uint8(plc_tag_p tag, int offset);
-extern int ab_set_uint8(plc_tag_p tag, int offset, uint8_t val);
-
-extern int8_t ab_get_int8(plc_tag_p tag, int offset);
-extern int ab_set_int8(plc_tag_p tag, int offset, int8_t val);
+// extern int32_t ab_get_int32(plc_tag_p tag, int offset);
+// extern int ab_set_int32(plc_tag_p tag, int offset, int32_t val);
 
 
-extern double ab_get_float64(plc_tag_p tag, int offset);
-extern int ab_set_float64(plc_tag_p tag, int offset, double val);
+// extern uint16_t ab_get_uint16(plc_tag_p tag, int offset);
+// extern int ab_set_uint16(plc_tag_p tag, int offset, uint16_t val);
 
-extern float ab_get_float32(plc_tag_p tag, int offset);
-extern int ab_set_float32(plc_tag_p tag, int offset, float val);
+// extern int16_t ab_get_int16(plc_tag_p tag, int offset);
+// extern int ab_set_int16(plc_tag_p tag, int offset, int16_t val);
+
+
+// extern uint8_t ab_get_uint8(plc_tag_p tag, int offset);
+// extern int ab_set_uint8(plc_tag_p tag, int offset, uint8_t val);
+
+// extern int8_t ab_get_int8(plc_tag_p tag, int offset);
+// extern int ab_set_int8(plc_tag_p tag, int offset, int8_t val);
+
+
+// extern double ab_get_float64(plc_tag_p tag, int offset);
+// extern int ab_set_float64(plc_tag_p tag, int offset, double val);
+
+// extern float ab_get_float32(plc_tag_p tag, int offset);
+// extern int ab_set_float32(plc_tag_p tag, int offset, float val);
 
 
 //int ab_tag_destroy(ab_tag_p p_tag);
