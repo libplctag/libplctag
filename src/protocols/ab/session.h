@@ -91,6 +91,7 @@ struct ab_session_t {
     uint32_t session_handle;
 
     /* Sequence ID for requests. */
+    lock_t session_seq_id_lock;
     uint64_t session_seq_id;
 
     /* list of outstanding requests for this session */
@@ -110,8 +111,8 @@ struct ab_session_t {
 
     thread_p handler_thread;
     volatile int terminating;
-    mutex_p mutex;
-    cond_p wait_cond;
+    mutex_p session_mutex;
+    cond_p session_wait_cond;
 
     /* disconnect handling */
     int auto_disconnect_enabled;
