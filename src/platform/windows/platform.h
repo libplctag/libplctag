@@ -171,6 +171,7 @@ extern int mutex_destroy(mutex_p *m);
 extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
+extern int mutex_is_locked_by_me(mutex_p m);
 
 #if defined(_WIN32) && defined(_MSC_VER)
     /* MinGW on Windows does not need this. */
