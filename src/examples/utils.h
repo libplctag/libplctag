@@ -32,22 +32,23 @@
  ***************************************************************************/
 
 
-#ifndef __EXAMPLE_UTILS_H__
-#define __EXAMPLE_UTILS_H__
+#pragma once
 
-#ifdef _WIN32
+
+#if defined(__unix__)
+    #include <unistd.h>
+    #include <strings.h>
+    #define snprintf_platform snprintf
+    #define sscanf_platform sscanf
+#elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
+    #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
     #define strcasecmp _stricmp
     #define strdup _strdup
-	#define snprintf_platform sprintf_s
-	#define sscanf_platform sscanf_s
+    #define snprintf_platform sprintf_s
+    #define sscanf_platform sscanf_s
 #else
-    #include <unistd.h>
-    #include <strings.h>
-	#define snprintf_platform snprintf
-	#define sscanf_platform sscanf
 #endif
-
 
 #include <stdint.h>
 
@@ -59,10 +60,6 @@ extern "C" {
 extern int util_sleep_ms(int ms);
 extern int64_t util_time_ms(void);
 
-
 #ifdef __cplusplus
 }
 #endif
-
-#endif
-
