@@ -33,8 +33,8 @@
 
 #include <lib/libplctag.h>
 #include <platform.h>
-#include <util/rc.h>
 #include <util/debug.h>
+#include <util/rc.h>
 
 
 //~ #ifndef container_of
@@ -42,23 +42,21 @@
 //~ #endif
 
 
-
-
 /*
  * Handle clean up functions.
  */
 
-//typedef struct cleanup_t *cleanup_p;
+// typedef struct cleanup_t *cleanup_p;
 //
-//struct cleanup_t {
-//    cleanup_p next;
-//    const char *function_name;
-//    int line_num;
-//    int extra_arg_count;
-//    void **extra_args;
-//    rc_cleanup_func cleanup_func;
-//    void *dummy[]; /* force alignment */
-//};
+// struct cleanup_t {
+//     cleanup_p next;
+//     const char *function_name;
+//     int line_num;
+//     int extra_arg_count;
+//     void **extra_args;
+//     rc_cleanup_func cleanup_func;
+//     void *dummy[]; /* force alignment */
+// };
 
 
 /*
@@ -71,7 +69,7 @@ struct refcount_t {
     int count;
     const char *function_name;
     int line_num;
-    //cleanup_p cleaners;
+    // cleanup_p cleaners;
     rc_cleanup_func cleanup_func;
 
     /* FIXME - needed for alignment, this is a hack! */
@@ -90,9 +88,8 @@ struct refcount_t {
 typedef struct refcount_t *refcount_p;
 
 static void refcount_cleanup(refcount_p rc);
-//static cleanup_p cleanup_entry_create(const char *func, int line_num, rc_cleanup_func cleaner, int extra_arg_count, va_list extra_args);
-//static void cleanup_entry_destroy(cleanup_p entry);
-
+// static cleanup_p cleanup_entry_create(const char *func, int line_num, rc_cleanup_func cleaner, int extra_arg_count, va_list
+// extra_args); static void cleanup_entry_destroy(cleanup_p entry);
 
 
 /*
@@ -101,24 +98,23 @@ static void refcount_cleanup(refcount_p rc);
  * Create a reference counted control for the requested data size.  Return a strong
  * reference to the data.
  */
-//void *rc_alloc_impl(const char *func, int line_num, int data_size, int extra_arg_count, rc_cleanup_func cleaner_func, ...)
-void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_func cleaner_func)
-{
+// void *rc_alloc_impl(const char *func, int line_num, int data_size, int extra_arg_count, rc_cleanup_func cleaner_func, ...)
+void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_func cleaner_func) {
     refcount_p rc = NULL;
-    //cleanup_p cleanup = NULL;
-    //va_list extra_args;
+    // cleanup_p cleanup = NULL;
+    // va_list extra_args;
 
-    pdebug(DEBUG_INFO,"Starting, called from %s:%d",func, line_num);
+    pdebug(DEBUG_INFO, "Starting, called from %s:%d", func, line_num);
 
-    pdebug(DEBUG_SPEW,"Allocating %d-byte refcount struct",(int)sizeof(struct refcount_t));
+    pdebug(DEBUG_SPEW, "Allocating %d-byte refcount struct", (int)sizeof(struct refcount_t));
 
     rc = mem_alloc((int)sizeof(struct refcount_t) + data_size);
     if(!rc) {
-        pdebug(DEBUG_WARN,"Unable to allocate refcount struct!");
+        pdebug(DEBUG_WARN, "Unable to allocate refcount struct!");
         return NULL;
     }
 
-    rc->count = 1;  /* start with a reference count. */
+    rc->count = 1; /* start with a reference count. */
     rc->lock = LOCK_INIT;
 
     rc->cleanup_func = cleaner_func;
@@ -132,16 +128,10 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
     /* return the original address if successful otherwise NULL. */
 
     /* DEBUG */
-    pdebug(DEBUG_DETAIL,"Returning memory pointer %p",(char *)(rc + 1));
+    pdebug(DEBUG_DETAIL, "Returning memory pointer %p", (char *)(rc + 1));
 
     return (char *)(rc + 1);
 }
-
-
-
-
-
-
 
 
 /*
@@ -154,16 +144,15 @@ void *rc_alloc_impl(const char *func, int line_num, int data_size, rc_cleanup_fu
  * my_struct->some_field_ref = rc_inc(ref);
  */
 
-void *rc_inc_impl(const char *func, int line_num, void *data)
-{
+void *rc_inc_impl(const char *func, int line_num, void *data) {
     int count = 0;
     refcount_p rc = NULL;
     char *result = NULL;
 
-    pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
+    pdebug(DEBUG_SPEW, "Starting, called from %s:%d for %p", func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_WARN,"Invalid pointer passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_WARN, "Invalid pointer passed from %s:%d!", func, line_num);
         return result;
     }
 
@@ -183,15 +172,15 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
     }
 
     if(!result) {
-        pdebug(DEBUG_WARN,"Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func, line_num);
+        pdebug(DEBUG_WARN, "Invalid ref count (%d) from call at %s line %d!  Unable to take strong reference.", count, func,
+               line_num);
     } else {
-        pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
+        pdebug(DEBUG_SPEW, "Ref count is %d for %p.", count, data);
     }
 
     /* return the result pointer. */
     return result;
 }
-
 
 
 /*
@@ -205,16 +194,15 @@ void *rc_inc_impl(const char *func, int line_num, void *data)
  * and the block itself using mem_free() or the appropriate function;
  */
 
-void *rc_dec_impl(const char *func, int line_num, void *data)
-{
+void *rc_dec_impl(const char *func, int line_num, void *data) {
     int count = 0;
     int invalid = 0;
     refcount_p rc = NULL;
 
-    pdebug(DEBUG_SPEW,"Starting, called from %s:%d for %p",func, line_num, data);
+    pdebug(DEBUG_SPEW, "Starting, called from %s:%d for %p", func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_WARN,"Null reference passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_WARN, "Null reference passed from %s:%d!", func, line_num);
         return NULL;
     }
 
@@ -233,13 +221,13 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
     }
 
     if(invalid) {
-        pdebug(DEBUG_WARN,"Reference has invalid count %d!", count);
+        pdebug(DEBUG_WARN, "Reference has invalid count %d!", count);
     } else {
-        pdebug(DEBUG_SPEW,"Ref count is %d for %p.", count, data);
+        pdebug(DEBUG_SPEW, "Ref count is %d for %p.", count, data);
 
         /* clean up only if count is zero. */
         if(rc && count <= 0) {
-            pdebug(DEBUG_DETAIL,"Calling cleanup functions due to call at %s:%d for %p.", func, line_num, data);
+            pdebug(DEBUG_DETAIL, "Calling cleanup functions due to call at %s:%d for %p.", func, line_num, data);
 
             refcount_cleanup(rc);
         }
@@ -249,21 +237,18 @@ void *rc_dec_impl(const char *func, int line_num, void *data)
 }
 
 
-
-
-void refcount_cleanup(refcount_p rc)
-{
-    pdebug(DEBUG_INFO,"Starting");
+void refcount_cleanup(refcount_p rc) {
+    pdebug(DEBUG_INFO, "Starting");
     if(!rc) {
-        pdebug(DEBUG_WARN,"Refcount is NULL!");
+        pdebug(DEBUG_WARN, "Refcount is NULL!");
         return;
     }
 
     /* call the clean up function */
-    rc->cleanup_func((void *)(rc+1));
+    rc->cleanup_func((void *)(rc + 1));
 
     /* finally done. */
     mem_free(rc);
 
-    pdebug(DEBUG_INFO,"Done.");
+    pdebug(DEBUG_INFO, "Done.");
 }
