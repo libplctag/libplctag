@@ -106,6 +106,7 @@ struct ab_tag_t {
     uint16_t udt_id;
 
     /* requests */
+    int abort_requested;
     int pre_write_read;
     int first_read;
     ab_request_p req;
