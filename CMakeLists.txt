@@ -507,6 +507,7 @@ elseif (BUILD_EXAMPLES)
                             thread_stress
                             toggle_bit
                             toggle_bool
+                            trigger_double_free
                             write_string
                             tag_rw
                             tag_rw2
