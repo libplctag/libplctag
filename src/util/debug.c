@@ -32,17 +32,16 @@
  ***************************************************************************/
 
 #include <inttypes.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <time.h>
-#include <string.h>
-#include <util/debug.h>
-#include <platform.h>
 #include <lib/libplctag.h>
 #include <lib/version.h>
-
+#include <platform.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <util/debug.h>
 
 
 /*
@@ -54,7 +53,7 @@ static int global_debug_level = DEBUG_NONE;
 static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
 static lock_t logger_callback_lock = LOCK_INIT;
-static void (* volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
+static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
 
 
 /*
@@ -69,9 +68,7 @@ static THREAD_LOCAL int32_t tag_id = 0;
 // static lock_t printed_version = LOCK_INIT;
 
 
-
-int set_debug_level(int level)
-{
+int set_debug_level(int level) {
     int old_level = global_debug_level;
 
     global_debug_level = level;
@@ -80,22 +77,13 @@ int set_debug_level(int level)
 }
 
 
-int get_debug_level(void)
-{
-    return global_debug_level;
-}
+int get_debug_level(void) { return global_debug_level; }
 
 
-
-void debug_set_tag_id(int32_t t_id)
-{
-    tag_id = t_id;
-}
+void debug_set_tag_id(int32_t t_id) { tag_id = t_id; }
 
 
-
-static uint32_t get_thread_id()
-{
+static uint32_t get_thread_id() {
     if(!this_thread_num) {
         spin_block(&thread_num_lock) {
             this_thread_num = thread_num;
@@ -146,8 +134,7 @@ static uint32_t get_thread_id()
 
 static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO", "DETAIL", "SPEW"};
 
-extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...)
-{
+extern void pdebug_impl(const char *func, int line_num, int debug_level, const char *templ, ...) {
     va_list va;
     struct tm t;
     time_t epoch;
@@ -156,7 +143,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     char prefix[1000]; /* MAGIC */
     int prefix_size = 0;
     char output[1000];
-    //int output_size = 0;
+    // int output_size = 0;
 
     /* build the prefix */
     // prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
@@ -166,11 +153,11 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
     /* get the time parts */
     epoch_ms = time_ms();
-    epoch = (time_t)(epoch_ms/1000);
+    epoch = (time_t)(epoch_ms / 1000);
     remainder_ms = (int)(epoch_ms % 1000);
 
     /* FIXME - should capture error return! */
-    localtime_r(&epoch,&t);
+    localtime_r(&epoch, &t);
 
     /* print only once */
     /* FIXME - this may not be safe. */
@@ -182,29 +169,20 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     // }
 
     /* build the output string template */
-    prefix_size += snprintf(prefix, sizeof(prefix),"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") %s %s:%d %s\n",
-                                                    t.tm_year+1900,
-                                                    t.tm_mon + 1, /* month is 0-11? */
-                                                    t.tm_mday,
-                                                    t.tm_hour,
-                                                    t.tm_min,
-                                                    t.tm_sec,
-                                                    remainder_ms, 
-                                                    get_thread_id(), 
-                                                    tag_id, 
-                                                    debug_level_name[debug_level], 
-                                                    func, 
-                                                    line_num, 
-                                                    templ);
+    prefix_size +=
+        snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") %s %s:%d %s\n",
+                 t.tm_year + 1900, t.tm_mon + 1, /* month is 0-11? */
+                 t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), tag_id, debug_level_name[debug_level],
+                 func, line_num, templ);
 
     /* make sure it is zero terminated */
-    prefix[sizeof(prefix)-1] = 0;
+    prefix[sizeof(prefix) - 1] = 0;
 
     /* print it out. */
-    va_start(va,templ);
+    va_start(va, templ);
 
     /* FIXME - check the output size */
-    /*output_size = */vsnprintf(output, sizeof(output), prefix, va);
+    /*output_size = */ vsnprintf(output, sizeof(output), prefix, va);
     if(log_callback_func) {
         log_callback_func(tag_id, debug_level, output);
     } else {
@@ -215,24 +193,21 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 }
 
 
-
-
 #define COLUMNS (16)
 
-void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data,int count)
-{
+void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uint8_t *data, int count) {
     int max_row, row, column;
-    char row_buf[(COLUMNS * 3) + 5 + 1]; 
+    char row_buf[(COLUMNS * 3) + 5 + 1];
 
     /* determine the number of rows we will need to print. */
-    max_row = (count  + (COLUMNS - 1))/COLUMNS;
+    max_row = (count + (COLUMNS - 1)) / COLUMNS;
 
     for(row = 0; row < max_row; row++) {
         int offset = (row * COLUMNS);
         int row_offset = 0;
 
         /* print the offset in the packet */
-        row_offset = snprintf(&row_buf[0], sizeof(row_buf),"%05d", offset);
+        row_offset = snprintf(&row_buf[0], sizeof(row_buf), "%05d", offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
@@ -240,7 +215,7 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uin
         }
 
         /* terminate the row string*/
-        row_buf[sizeof(row_buf)-1] = 0; /* just in case */
+        row_buf[sizeof(row_buf) - 1] = 0; /* just in case */
 
         /* output it, finally */
         pdebug_impl(func, line_num, debug_level, row_buf);
@@ -248,10 +223,10 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uin
 }
 
 
-int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debug_level, const char *message))
-{
+int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debug_level, const char *message)) {
     int rc = PLCTAG_STATUS_OK;
 
+    /* FIXME - make this a mutex */
     spin_block(&logger_callback_lock) {
         if(!log_callback_func) {
             log_callback_func = log_callback_func_arg;
@@ -264,8 +239,7 @@ int debug_register_logger(void (*log_callback_func_arg)(int32_t tag_id, int debu
 }
 
 
-int debug_unregister_logger(void)
-{
+int debug_unregister_logger(void) {
     int rc = PLCTAG_STATUS_OK;
 
     spin_block(&logger_callback_lock) {
@@ -278,6 +252,3 @@ int debug_unregister_logger(void)
 
     return rc;
 }
-
-
-
