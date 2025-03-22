@@ -158,6 +158,9 @@ set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 # this is the root libplctag project
 project (libplctag_project)
 
+# we use C11 now
+set(C_STANDARD 11)
+
 # make sure our outputs are going somewhere sane
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
@@ -190,10 +193,6 @@ include_directories("${base_SRC_PATH}")
 include_directories("${platform_SRC_PATH}")
 include_directories("${protocol_SRC_PATH}")
 
-
-SET(C11_SUPPORT False)
-SET(C99_FLAGS "")
-
 # C compiler specific settings
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     # using Clang
@@ -220,8 +219,6 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
         set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     endif()
 
-	set(C11_SUPPORT true)
-	set(C99_FLAGS "-std=c99" )
 
     # check to see if we are building 32-bit or 64-bit
     if(BUILD_32_BIT)
@@ -249,8 +246,6 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 	if(${COMPILER_VERSION} VERSION_GREATER 5.1 OR ${COMPILER_VERSION} VERSION_GREATER 5.1)
 		# The compiler has the C99-c11-compat check.
 		MESSAGE(STATUS "Compiler supports C99/C11 compatibility check." )
-		SET(C11_CHECK "-Wc99-c11-compat" )
-		SET(C11_SUPPORT True)
 	else()
 		MESSAGE(STATUS "Compiler does not support C99/C11 compatibility check." )
 	endif()
@@ -270,7 +265,6 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 
     SET(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     SET(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-	SET(C99_FLAGS "-std=c99" )
     SET(BASE_RELEASE_LINK_FLAGS "")
     SET(BASE_DEBUG_LINK_FLAGS "")
 
@@ -418,7 +412,7 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
 
 # set the compiler flags
 FOREACH( lib_src ${libplctag_SRCS} )
-    set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}")
+    set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}")
 ENDFOREACH()
 
 # shared library
@@ -556,11 +550,11 @@ elseif (BUILD_EXAMPLES)
     endif()
 
     # set the compile flags for the utilities file.
-    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
+    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
 
     # set the compile and link properties for all examples.
     foreach ( example ${example_PROGRAMS} )
-        set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
+        set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
         add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
         target_link_libraries(${example} ${example_LIBRARIES} )
 
@@ -615,7 +609,7 @@ elseif (BUILD_EXAMPLES)
         )
 
         foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-            set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
+            set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
         endforeach()
 
         add_executable(ab_server ${AB_SERVER_FILES})
@@ -636,7 +630,7 @@ elseif (BUILD_EXAMPLES)
     )
 
     foreach(CLI_FILES ${CLI_FILES})
-    set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
+    set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
     endforeach()
 
     add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
