@@ -44,6 +44,7 @@
 #include <time.h>
 #include <util/atomic_int.h>
 #include <util/debug.h>
+#include <util/random_utils.h>
 
 #define MAX_REQUESTS (200)
 
@@ -806,14 +807,14 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     }
 
     /* check for ID set up. This does not need to be thread safe since we just need a random value. */
-    if(connection_id == 0) { connection_id = (uint32_t)rand(); }
+    if(connection_id == 0) { connection_id = (uint32_t)(random_u64(UINT32_MAX) + 1); }
 
     /* fix up the rest of teh fields */
     session->plc_type = plc_type;
     session->use_connected_msg = *use_connected_msg;
     session->failed = 0;
-    session->conn_serial_number = (uint16_t)(uintptr_t)(intptr_t)rand();
-    session->session_seq_id = (uint64_t)rand();
+    session->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
+    session->session_seq_id = (uint64_t)(random_u64(UINT32_MAX) + 1);
     session->is_dhp = is_dhp;
     session->dhp_dest = dhp_dest;
 
@@ -1544,7 +1545,7 @@ int purge_aborted_requests_unsafe(ab_session_p session) {
 
             /* release our hold on it. */
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing request reference.");
-            request = rc_dec(request);
+            rc_dec(request);
 
             /* vector size has changed, back up one. */
             i--;
@@ -2253,19 +2254,12 @@ int recv_eip_response(ab_session_p session, int timeout) {
         } else {
             if(rc == PLCTAG_ERR_TIMEOUT) {
                 pdebug(DEBUG_DETAIL, "Socket not yet ready to read.");
-                rc = 0;
             } else {
                 /* error! */
                 pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
                 return rc;
             }
         }
-
-        // /* did we get all the data? */
-        // if(!session->terminating && session->data_offset < data_needed) {
-        //     /* do not hog the CPU */
-        //     sleep_ms(1);
-        // }
     } while(!session->terminating && session->data_offset < data_needed && timeout_time > time_ms());
 
     if(session->terminating) {

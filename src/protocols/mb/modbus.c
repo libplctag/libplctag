@@ -42,6 +42,7 @@
 #include <util/atomic_int.h>
 #include <util/attr.h>
 #include <util/debug.h>
+#include <util/random_utils.h>
 #include <util/rc.h>
 
 /* data definitions */
@@ -347,7 +348,6 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
 
         default:
             pdebug(DEBUG_WARN, "Unsupported register type!");
-            reg_size = 0;
             return PLCTAG_ERR_BAD_PARAM;
             break;
     }
@@ -644,11 +644,11 @@ void modbus_plc_destructor(void *plc_arg) {
     pdebug(DEBUG_INFO, "Done.");
 }
 
-#define UPDATE_ERR_DELAY()                                                                                  \
-    do {                                                                                                    \
-        err_delay = err_delay * 2;                                                                          \
-        if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { err_delay = PLC_SOCKET_ERR_MAX_DELAY; }                  \
-        err_delay_until = (int64_t)((double)err_delay * ((double)rand() / (double)(RAND_MAX))) + time_ms(); \
+#define UPDATE_ERR_DELAY()                                                                 \
+    do {                                                                                   \
+        err_delay = err_delay * 2;                                                         \
+        if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { err_delay = PLC_SOCKET_ERR_MAX_DELAY; } \
+        err_delay_until = (int64_t)(random_u64(err_delay)) + time_ms();                    \
     } while(0)
 
 
@@ -1475,7 +1475,6 @@ int send_request(modbus_plc_p plc) {
         data_left = plc->write_data_len - plc->write_data_offset;
     } else if(rc == PLCTAG_ERR_TIMEOUT) {
         pdebug(DEBUG_DETAIL, "Done.  Timeout writing to socket.");
-        rc = PLCTAG_STATUS_OK;
     } else {
         pdebug(DEBUG_WARN, "Error, %s, writing to socket!", plc_tag_decode_error(rc));
         return rc;

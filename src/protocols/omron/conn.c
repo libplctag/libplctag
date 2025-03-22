@@ -42,6 +42,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <util/debug.h>
+#include <util/random_utils.h>
 
 #define MAX_REQUESTS (200)
 
@@ -584,14 +585,14 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     }
 
     /* check for ID set up. This does not need to be thread safe since we just need a random value. */
-    if(connection_id == 0) { connection_id = (uint32_t)rand(); }
+    if(connection_id == 0) { connection_id = (uint32_t)random_u64(UINT32_MAX) + 1; }
 
-    /* fix up the rest of teh fields */
+    /* fix up the rest of the fields */
     conn->plc_type = plc_type;
     conn->use_connected_msg = *use_connected_msg;
     conn->failed = 0;
-    conn->conn_serial_number = (uint16_t)(uintptr_t)(intptr_t)rand();
-    conn->conn_seq_id = (uint64_t)rand();
+    conn->conn_serial_number = (uint16_t)(random_u64(UINT16_MAX) + 1);
+    conn->conn_seq_id = (random_u64(UINT32_MAX) + 1);
     conn->is_dhp = is_dhp;
     conn->dhp_dest = dhp_dest;
 
@@ -1372,7 +1373,7 @@ int purge_aborted_requests_unsafe(omron_conn_p conn) {
 
             /* release our hold on it. */
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference request for tag %" PRId32 ".", request->tag_id);
-            request = rc_dec(request);
+            rc_dec(request);
 
             /* vector size has changed, back up one. */
             i--;
@@ -2100,19 +2101,12 @@ int recv_eip_response(omron_conn_p conn, int timeout) {
         } else {
             if(rc == PLCTAG_ERR_TIMEOUT) {
                 pdebug(DEBUG_DETAIL, "Socket not yet ready to read.");
-                rc = 0;
             } else {
                 /* error! */
                 pdebug(DEBUG_WARN, "Error reading socket! rc=%d", rc);
                 return rc;
             }
         }
-
-        // /* did we get all the data? */
-        // if(!conn->terminating && conn->data_offset < data_needed) {
-        //     /* do not hog the CPU */
-        //     sleep_ms(1);
-        // }
     } while(!conn->terminating && conn->data_offset < data_needed && timeout_time > time_ms());
 
     if(conn->terminating) {
