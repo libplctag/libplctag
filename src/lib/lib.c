@@ -50,6 +50,7 @@
 #include <util/debug.h>
 #include <util/hash.h>
 #include <util/hashtable.h>
+#include <util/random_utils.h>
 #include <util/rc.h>
 #include <util/vector.h>
 
@@ -81,6 +82,7 @@ static plc_tag_p lookup_tag(int32_t id);
 static int add_tag_lookup(plc_tag_p tag);
 static int tag_id_inc(int id);
 static THREAD_FUNC(tag_tickler_func);
+static int plc_tag_abort_impl(plc_tag_p tag);
 static int set_tag_byte_order(plc_tag_p tag, attr attribs);
 static int check_byte_order_str(const char *byte_order, int length);
 static int get_string_total_length_unsafe(plc_tag_p tag, int string_start_offset);
@@ -623,6 +625,63 @@ THREAD_FUNC(tag_tickler_func) {
 }
 
 
+/* must be called with a valid tag pointer and the API mutex held!*/
+static int plc_tag_abort_impl(plc_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    critical_block(tag->api_mutex) {
+        tag->read_cache_expire = (uint64_t)0;
+
+        /* this may be synchronous. */
+        if(tag->vtable && tag->vtable->abort) {
+            rc = tag->vtable->abort(tag);
+        } else {
+            pdebug(DEBUG_WARN, "Tag does not have an abort function.");
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
+
+        tag->read_in_flight = 0;
+        tag->read_complete = 0;
+        tag->write_in_flight = 0;
+        tag->write_complete = 0;
+
+        tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
+    }
+
+    /* release the kraken... or tickler */
+    plc_tag_tickler_wake();
+
+    plc_tag_generic_handle_event_callbacks(tag);
+
+    return rc;
+}
+
+
+static int plc_tag_status_impl(plc_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    critical_block(tag->api_mutex) {
+        if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
+
+        if(tag->vtable && tag->vtable->status) {
+            rc = tag->vtable->status(tag);
+        } else {
+            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+        }
+
+        if(rc == PLCTAG_STATUS_OK) {
+            if(tag->read_in_flight || tag->write_in_flight) { rc = PLCTAG_STATUS_PENDING; }
+        }
+    }
+
+    return rc;
+}
+
+
 /**************************************************************************
  ***************************  API Functions  ******************************
  **************************************************************************/
@@ -839,7 +898,7 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
         // int64_t periods = (time_ms() / tag->auto_sync_read_ms);
         // tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
         /* start some time in the future, but with random jitter. */
-        tag->auto_sync_next_read = time_ms() + (rand() % tag->auto_sync_read_ms);
+        tag->auto_sync_next_read = time_ms() + (random_u64((uint64_t)tag->auto_sync_read_ms));
     }
 
     tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
@@ -1289,6 +1348,7 @@ LIB_EXPORT int plc_tag_lock(int32_t id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
+    /* FIXME - there has to be a better way that this! */
     /* we cannot nest the mutexes otherwise we will deadlock. */
     do {
         critical_block(tag->api_mutex) { rc = mutex_try_lock(tag->ext_mutex); }
@@ -1367,30 +1427,7 @@ LIB_EXPORT int plc_tag_abort(int32_t id) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    critical_block(tag->api_mutex) {
-        /* who knows what state the tag data is in.  */
-        tag->read_cache_expire = (uint64_t)0;
-
-        /* this may be synchronous. */
-        if(tag->vtable && tag->vtable->abort) {
-            rc = tag->vtable->abort(tag);
-        } else {
-            pdebug(DEBUG_WARN, "Tag does not have an abort function.");
-            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
-        }
-
-        tag->read_in_flight = 0;
-        tag->read_complete = 0;
-        tag->write_in_flight = 0;
-        tag->write_complete = 0;
-
-        tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
-    }
-
-    /* release the kraken... or tickler */
-    plc_tag_tickler_wake();
-
-    plc_tag_generic_handle_event_callbacks(tag);
+    rc = plc_tag_abort_impl(tag);
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -1431,14 +1468,9 @@ LIB_EXPORT int plc_tag_destroy(int32_t tag_id) {
     /* abort anything in flight */
     pdebug(DEBUG_DETAIL, "Aborting any in-flight operations.");
 
-    critical_block(tag->api_mutex) {
-        if(tag->vtable && tag->vtable->abort) {
-            /* Force a clean up. */
-            tag->vtable->abort(tag);
-        }
+    plc_tag_abort_impl(tag);
 
-        tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK);
-    }
+    critical_block(tag->api_mutex) { tag_raise_event(tag, PLCTAG_EVENT_DESTROYED, PLCTAG_STATUS_OK); }
 
     /* wake the tickler */
     plc_tag_tickler_wake();
@@ -1534,7 +1566,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
 
                 pdebug(DEBUG_WARN, "Response from read command returned error %s!", plc_tag_decode_error(rc));
 
-                if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+                rc = plc_tag_abort_impl(tag);
             }
 
             tag->read_in_flight = 0;
@@ -1567,18 +1599,18 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while waiting for tag read to complete!", plc_tag_decode_error(rc));
-                plc_tag_abort(id);
+                plc_tag_abort_impl(tag);
 
                 break;
             }
 
             /* get the tag status. */
-            rc = plc_tag_status(id);
+            rc = plc_tag_status_impl(tag);
 
             /* check to see if there was an error during tag read. */
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "Error %s while trying to read tag!", plc_tag_decode_error(rc));
-                plc_tag_abort(id);
+                plc_tag_abort_impl(tag);
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
 
@@ -1586,7 +1618,7 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
         critical_block(tag->api_mutex) {
             tag->read_in_flight = 0;
             tag->read_complete = 0;
-            is_done = 1;
+            /* is_done = 1; */
             tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
         }
 
@@ -1637,19 +1669,7 @@ LIB_EXPORT int plc_tag_status(int32_t id) {
         }
     }
 
-    critical_block(tag->api_mutex) {
-        if(tag->vtable && tag->vtable->tickler) { tag->vtable->tickler(tag); }
-
-        if(tag->vtable && tag->vtable->status) {
-            rc = tag->vtable->status(tag);
-        } else {
-            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
-        }
-
-        if(rc == PLCTAG_STATUS_OK) {
-            if(tag->read_in_flight || tag->write_in_flight) { rc = PLCTAG_STATUS_PENDING; }
-        }
-    }
+    rc = plc_tag_status_impl(tag);
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -1766,18 +1786,18 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
             rc = cond_wait(tag->tag_cond_wait, (int)timeout_left);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error %s while waiting for tag write to complete!", plc_tag_decode_error(rc));
-                plc_tag_abort(id);
+                plc_tag_abort_impl(tag);
 
                 break;
             }
 
             /* get the tag status. */
-            rc = plc_tag_status(id);
+            rc = plc_tag_status_impl(tag);
 
             /* check to see if there was an error during tag creation. */
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
                 pdebug(DEBUG_WARN, "Error %s while trying to write tag!", plc_tag_decode_error(rc));
-                plc_tag_abort(id);
+                plc_tag_abort_impl(tag);
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
 
@@ -2091,6 +2111,48 @@ LIB_EXPORT int plc_tag_set_size(int32_t id, int new_size) {
 }
 
 
+static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
+    int res = 0;
+    int real_offset = 0;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    do {
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        /* if this is a single bit, then make sure the offset is the tag bit. */
+        if(tag->is_bit) {
+            real_offset = tag->bit;
+        } else {
+            real_offset = offset_bit;
+        }
+
+        pdebug(DEBUG_SPEW, "selecting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8),
+               tag->data[real_offset / 8]);
+
+        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
+            res = !!(((1 << (real_offset % 8)) & 0xFF) & (tag->data[real_offset / 8]));
+            tag->status = PLCTAG_STATUS_OK;
+            break;
+        } else {
+            pdebug(DEBUG_WARN, "Data offset out of bounds!");
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+    } while(0);
+
+    pdebug(DEBUG_SPEW, "Done.");
+
+    return res;
+}
+
+
 LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
     int res = PLCTAG_ERR_OUT_OF_BOUNDS;
     int real_offset = offset_bit;
@@ -2103,38 +2165,57 @@ LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    /* if this is a single bit, then make sure the offset is the tag bit. */
-    if(tag->is_bit) {
-        real_offset = tag->bit;
-    } else {
-        real_offset = offset_bit;
-    }
-
-    pdebug(DEBUG_SPEW, "selecting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8),
-           tag->data[real_offset / 8]);
-
-    critical_block(tag->api_mutex) {
-        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
-            res = !!(((1 << (real_offset % 8)) & 0xFF) & (tag->data[real_offset / 8]));
-            tag->status = PLCTAG_STATUS_OK;
-        } else {
-            pdebug(DEBUG_WARN, "Data offset out of bounds!");
-            res = PLCTAG_ERR_OUT_OF_BOUNDS;
-            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-        }
-    }
+    critical_block(tag->api_mutex) { res = plc_tag_get_bit_impl(tag, offset_bit); }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
+
+    return res;
+}
+
+static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
+    int res = PLCTAG_STATUS_OK;
+    int real_offset = offset_bit;
+
+    pdebug(DEBUG_SPEW, "Starting.");
+
+    do {
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        /* if this is a single bit, then make sure the offset is the tag bit. */
+        if(tag->is_bit) {
+            real_offset = tag->bit;
+        } else {
+            real_offset = offset_bit;
+        }
+
+        pdebug(DEBUG_SPEW, "Setting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8),
+               tag->data[real_offset / 8]);
+
+        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
+            if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+
+            if(val) {
+                tag->data[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
+            } else {
+                tag->data[real_offset / 8] &= (uint8_t)(~(1 << (real_offset % 8)));
+            }
+
+            tag->status = PLCTAG_STATUS_OK;
+        } else {
+            pdebug(DEBUG_WARN, "Data offset out of bounds!");
+            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+            res = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+    } while(0);
+
+    pdebug(DEBUG_SPEW, "Done.");
 
     return res;
 }
@@ -2152,42 +2233,7 @@ LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    /* if this is a single bit, then make sure the offset is the tag bit. */
-    if(tag->is_bit) {
-        real_offset = tag->bit;
-    } else {
-        real_offset = offset_bit;
-    }
-
-    pdebug(DEBUG_SPEW, "Setting bit %d with offset %d in byte %d (%x).", real_offset, (real_offset % 8), (real_offset / 8),
-           tag->data[real_offset / 8]);
-
-    critical_block(tag->api_mutex) {
-        if((real_offset >= 0) && ((real_offset / 8) < tag->size)) {
-            if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
-
-            if(val) {
-                tag->data[real_offset / 8] |= (uint8_t)(1 << (real_offset % 8));
-            } else {
-                tag->data[real_offset / 8] &= (uint8_t)(~(1 << (real_offset % 8)));
-            }
-
-            tag->status = PLCTAG_STATUS_OK;
-        } else {
-            pdebug(DEBUG_WARN, "Data offset out of bounds!");
-            tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-            res = PLCTAG_ERR_OUT_OF_BOUNDS;
-        }
-    }
+    critical_block(tag->api_mutex) { res = plc_tag_set_bit_impl(tag, offset_bit, val); }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
     rc_dec(tag);
@@ -2207,17 +2253,16 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
                 res = ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0)
                       + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8)
@@ -2232,13 +2277,14 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset) {
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = (unsigned int)rc; }
+            /* make sure the response is good. */
+            if(rc >= 0) { res = (unsigned int)rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2259,17 +2305,16 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2287,13 +2332,14 @@ LIB_EXPORT int plc_tag_set_uint64(int32_t id, int offset, uint64_t val) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2315,38 +2361,39 @@ LIB_EXPORT int64_t plc_tag_get_int64(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
-
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
-            if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
-                res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0)
-                                + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8)
-                                + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16)
-                                + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24)
-                                + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32)
-                                + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40)
-                                + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48)
-                                + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56));
-
-                tag->status = PLCTAG_STATUS_OK;
-            } else {
-                pdebug(DEBUG_WARN, "Data offset out of bounds!");
-                tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-            }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
         }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = rc; }
+        if(!tag->is_bit) {
+            critical_block(tag->api_mutex) {
+                if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
+                    res = (int64_t)(((uint64_t)(tag->data[offset + tag->byte_order->int64_order[0]]) << 0)
+                                    + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[1]]) << 8)
+                                    + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[2]]) << 16)
+                                    + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[3]]) << 24)
+                                    + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[4]]) << 32)
+                                    + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[5]]) << 40)
+                                    + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[6]]) << 48)
+                                    + ((uint64_t)(tag->data[offset + tag->byte_order->int64_order[7]]) << 56));
+
+                    tag->status = PLCTAG_STATUS_OK;
+                } else {
+                    pdebug(DEBUG_WARN, "Data offset out of bounds!");
+                    tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                }
+            }
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
+
+            /* make sure the response is good. */
+            if(rc >= 0) { res = rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2368,17 +2415,15 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int64_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2397,12 +2442,12 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival) {
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2411,6 +2456,7 @@ LIB_EXPORT int plc_tag_set_int64(int32_t id, int offset, int64_t ival) {
 
     return rc;
 }
+
 
 LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
     uint32_t res = UINT32_MAX;
@@ -2423,17 +2469,16 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
                 res = ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0)
                       + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8)
@@ -2445,12 +2490,12 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
             }
-        }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = (unsigned int)rc; }
+            /* make sure the response is good. */
+            if(rc >= 0) { res = (unsigned int)rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2458,7 +2503,6 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
 
     return res;
 }
-
 
 LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
     int rc = PLCTAG_STATUS_OK;
@@ -2471,17 +2515,16 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint32_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2495,13 +2538,14 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2510,7 +2554,6 @@ LIB_EXPORT int plc_tag_set_uint32(int32_t id, int offset, uint32_t val) {
 
     return rc;
 }
-
 
 LIB_EXPORT int32_t plc_tag_get_int32(int32_t id, int offset) {
     int32_t res = INT32_MIN;
@@ -2523,17 +2566,16 @@ LIB_EXPORT int32_t plc_tag_get_int32(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
                 res = (int32_t)(((uint32_t)(tag->data[offset + tag->byte_order->int32_order[0]]) << 0)
                                 + ((uint32_t)(tag->data[offset + tag->byte_order->int32_order[1]]) << 8)
@@ -2545,12 +2587,12 @@ LIB_EXPORT int32_t plc_tag_get_int32(int32_t id, int offset) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
             }
-        }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = (int32_t)rc; }
+            /* make sure the response is good. */
+            if(rc >= 0) { res = (int32_t)rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2558,7 +2600,6 @@ LIB_EXPORT int32_t plc_tag_get_int32(int32_t id, int offset) {
 
     return res;
 }
-
 
 LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
     int rc = PLCTAG_STATUS_OK;
@@ -2572,17 +2613,16 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int32_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2596,13 +2636,14 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2611,7 +2652,6 @@ LIB_EXPORT int plc_tag_set_int32(int32_t id, int offset, int32_t ival) {
 
     return rc;
 }
-
 
 LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset) {
     uint16_t res = UINT16_MAX;
@@ -2624,17 +2664,16 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
                 res = (uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0)
                                  + ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
@@ -2643,13 +2682,14 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset) {
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = (uint16_t)(unsigned int)rc; }
+            /* make sure the response is good. */
+            if(rc >= 0) { res = (uint16_t)(unsigned int)rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2670,17 +2710,16 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint16_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2692,13 +2731,14 @@ LIB_EXPORT int plc_tag_set_uint16(int32_t id, int offset, uint16_t val) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2720,31 +2760,31 @@ LIB_EXPORT int16_t plc_tag_get_int16(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
-                res = (int16_t)(uint16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0)
-                                          + ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
+                res = (int16_t)(((uint16_t)(tag->data[offset + tag->byte_order->int16_order[0]]) << 0)
+                                + ((uint16_t)(tag->data[offset + tag->byte_order->int16_order[1]]) << 8));
                 tag->status = PLCTAG_STATUS_OK;
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = (int16_t)(uint16_t)(unsigned int)rc; }
+            /* make sure the response is good. */
+            if(rc >= 0) { res = (int16_t)(unsigned int)rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2766,17 +2806,16 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int16_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2788,13 +2827,14 @@ LIB_EXPORT int plc_tag_set_int16(int32_t id, int offset, int16_t ival) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2816,30 +2856,30 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
                 res = tag->data[offset];
                 tag->status = PLCTAG_STATUS_OK;
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = (uint8_t)(unsigned int)rc; }
+            /* make sure the response is good. */
+            if(rc >= 0) { res = (uint8_t)(unsigned int)rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2860,17 +2900,16 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2881,13 +2920,14 @@ LIB_EXPORT int plc_tag_set_uint8(int32_t id, int offset, uint8_t val) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2909,30 +2949,30 @@ LIB_EXPORT int8_t plc_tag_get_int8(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(uint8_t)) <= tag->size)) {
                 res = (int8_t)tag->data[offset];
                 tag->status = PLCTAG_STATUS_OK;
             } else {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        int rc = plc_tag_get_bit(id, tag->bit);
+        } else {
+            int rc = plc_tag_get_bit_impl(tag, tag->bit);
 
-        /* make sure the response is good. */
-        if(rc >= 0) { res = (int8_t)(unsigned int)rc; }
+            /* make sure the response is good. */
+            if(rc >= 0) { res = (int8_t)(unsigned int)rc; }
+        }
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -2954,17 +2994,16 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
+    critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
 
-    if(!tag->is_bit) {
-        critical_block(tag->api_mutex) {
+        if(!tag->is_bit) {
             if((offset >= 0) && (offset + ((int)sizeof(int8_t)) <= tag->size)) {
                 if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
 
@@ -2975,13 +3014,14 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival) {
                 pdebug(DEBUG_WARN, "Data offset out of bounds!");
                 tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
                 rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                break;
             }
-        }
-    } else {
-        if(!val) {
-            rc = plc_tag_set_bit(id, 0, 0);
         } else {
-            rc = plc_tag_set_bit(id, 0, 1);
+            if(!val) {
+                rc = plc_tag_set_bit_impl(tag, 0, 0);
+            } else {
+                rc = plc_tag_set_bit_impl(tag, 0, 1);
+            }
         }
     }
 
@@ -2991,11 +3031,8 @@ LIB_EXPORT int plc_tag_set_int8(int32_t id, int offset, int8_t ival) {
     return rc;
 }
 
-
 LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset) {
     double res = DBL_MIN;
-    int rc = PLCTAG_STATUS_OK;
-    uint64_t ures = 0;
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -3005,48 +3042,42 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting float64 value is unsupported on a bit tag!");
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
-
     critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = DBL_MIN;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_WARN, "Getting float64 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            res = DBL_MIN;
+            break;
+        }
+
         if((offset >= 0) && (offset + ((int)sizeof(double)) <= tag->size)) {
-            ures = ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[0]]) << 0)
-                   + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[1]]) << 8)
-                   + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[2]]) << 16)
-                   + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[3]]) << 24)
-                   + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[4]]) << 32)
-                   + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[5]]) << 40)
-                   + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[6]]) << 48)
-                   + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[7]]) << 56);
+            uint64_t ures = ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[0]]) << 0)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[1]]) << 8)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[2]]) << 16)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[3]]) << 24)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[4]]) << 32)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[5]]) << 40)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[6]]) << 48)
+                            + ((uint64_t)(tag->data[offset + tag->byte_order->float64_order[7]]) << 56);
+
+            /* copy the data */
+            mem_copy(&res, &ures, sizeof(res));
 
             tag->status = PLCTAG_STATUS_OK;
-            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
             tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            res = DBL_MIN;
+            break;
         }
-    }
-
-    if(rc == PLCTAG_STATUS_OK) {
-        /* copy the data */
-        mem_copy(&res, &ures, sizeof(res));
-    } else {
-        res = DBL_MIN;
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -3059,7 +3090,6 @@ LIB_EXPORT double plc_tag_get_float64(int32_t id, int offset) {
 LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
-    uint64_t val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -3068,29 +3098,28 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting float64 value is unsupported on a bit tag!");
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    /* copy the data into the uint64 value */
-    mem_copy(&val, &fval, sizeof(val));
-
     critical_block(tag->api_mutex) {
-        if((offset >= 0) && (offset + ((int)sizeof(uint64_t)) <= tag->size)) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_WARN, "Setting float64 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
+        if((offset >= 0) && (offset + ((int)sizeof(double)) <= tag->size)) {
             if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+
+            uint64_t val;
+            /* copy the data into the uint64 value */
+            mem_copy(&val, &fval, sizeof(val));
 
             tag->data[offset + tag->byte_order->float64_order[0]] = (uint8_t)((val >> 0) & 0xFF);
             tag->data[offset + tag->byte_order->float64_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -3106,6 +3135,7 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
             tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
         }
     }
 
@@ -3118,8 +3148,6 @@ LIB_EXPORT int plc_tag_set_float64(int32_t id, int offset, double fval) {
 
 LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset) {
     float res = FLT_MIN;
-    int rc = PLCTAG_STATUS_OK;
-    uint32_t ures = 0;
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -3129,44 +3157,38 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset) {
         return res;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Getting float32 value is unsupported on a bit tag!");
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return res;
-    }
-
     critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            res = FLT_MIN;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_WARN, "Getting float32 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            res = FLT_MIN;
+            break;
+        }
+
         if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
-            ures = (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order->float32_order[0]]) << 0)
-                              + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[1]]) << 8)
-                              + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[2]]) << 16)
-                              + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[3]]) << 24));
+            uint32_t ures = (uint32_t)(((uint32_t)(tag->data[offset + tag->byte_order->float32_order[0]]) << 0)
+                                       + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[1]]) << 8)
+                                       + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[2]]) << 16)
+                                       + ((uint32_t)(tag->data[offset + tag->byte_order->float32_order[3]]) << 24));
+
+            /* copy the data */
+            mem_copy(&res, &ures, sizeof(res));
 
             tag->status = PLCTAG_STATUS_OK;
-            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
             tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
-            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            res = FLT_MIN;
+            break;
         }
-    }
-
-    if(rc == PLCTAG_STATUS_OK) {
-        /* copy the data */
-        mem_copy(&res, &ures, sizeof(res));
-    } else {
-        res = FLT_MIN;
     }
 
     pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
@@ -3179,7 +3201,6 @@ LIB_EXPORT float plc_tag_get_float32(int32_t id, int offset) {
 LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval) {
     int rc = PLCTAG_STATUS_OK;
     plc_tag_p tag = lookup_tag(id);
-    uint32_t val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -3188,29 +3209,28 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval) {
         return PLCTAG_ERR_NOT_FOUND;
     }
 
-    /* is there data? */
-    if(!tag->data) {
-        pdebug(DEBUG_WARN, "Tag has no data!");
-        tag->status = PLCTAG_ERR_NO_DATA;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_NO_DATA;
-    }
-
-    if(tag->is_bit) {
-        pdebug(DEBUG_WARN, "Setting float32 value is unsupported on a bit tag!");
-        tag->status = PLCTAG_ERR_UNSUPPORTED;
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(tag);
-        return PLCTAG_ERR_UNSUPPORTED;
-    }
-
-    /* copy the data into the uint64 value */
-    mem_copy(&val, &fval, sizeof(val));
-
     critical_block(tag->api_mutex) {
+        /* is there data? */
+        if(!tag->data) {
+            pdebug(DEBUG_WARN, "Tag has no data!");
+            tag->status = PLCTAG_ERR_NO_DATA;
+            rc = PLCTAG_ERR_NO_DATA;
+            break;
+        }
+
+        if(tag->is_bit) {
+            pdebug(DEBUG_WARN, "Setting float32 value is unsupported on a bit tag!");
+            tag->status = PLCTAG_ERR_UNSUPPORTED;
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
         if((offset >= 0) && (offset + ((int)sizeof(float)) <= tag->size)) {
             if(tag->auto_sync_write_ms > 0) { tag->tag_is_dirty = 1; }
+
+            uint32_t val;
+            /* copy the data into the uint32 value */
+            mem_copy(&val, &fval, sizeof(val));
 
             tag->data[offset + tag->byte_order->float32_order[0]] = (uint8_t)((val >> 0) & 0xFF);
             tag->data[offset + tag->byte_order->float32_order[1]] = (uint8_t)((val >> 8) & 0xFF);
@@ -3222,6 +3242,7 @@ LIB_EXPORT int plc_tag_set_float32(int32_t id, int offset, float fval) {
             pdebug(DEBUG_WARN, "Data offset out of bounds!");
             tag->status = PLCTAG_ERR_OUT_OF_BOUNDS;
             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
         }
     }
 
