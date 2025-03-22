@@ -34,12 +34,19 @@
 
 #pragma once
 
-
-#if defined(__unix__)
+/* FIXME - centralize this platform setting! */
+#if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
     #include <unistd.h>
     #include <strings.h>
     #define snprintf_platform snprintf
     #define sscanf_platform sscanf
+
+    #ifdef __STDC_NO_THREADS__
+        #include <pthread.h>
+    #else
+        #include <threads.h>
+    #endif
+
 #elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
@@ -48,6 +55,7 @@
     #define snprintf_platform sprintf_s
     #define sscanf_platform sscanf_s
 #else
+    #error "Not a supported platform!"
 #endif
 
 #include <stdint.h>
@@ -59,6 +67,54 @@ extern "C" {
 
 extern int util_sleep_ms(int ms);
 extern int64_t util_time_ms(void);
+
+#ifdef __STDC_NO_THREADS__
+
+/* roll our own */
+
+typedef struct thrd_t thrd_t;
+typedef struct mtx_t mtx_t;
+typedef struct cnd_t cnd_t;
+
+/* threads */
+
+extern int thrd_create(thrd_t *thrd, thrd_start_t func, void *arg_ptr);
+extern thrd_t thrd_current(void);
+extern int thrd_detach(thrd_t thrd);
+extern int thrd_equal(thrd_t first, thrd_t second);
+extern int thrd_exit(int res);
+extern int thrd_join(thrd_t thrd, int *result);
+extern int thrd_sleep(const struct timespec *sleep_duration, struct timespec *remaining_duration);
+extern void thrd_yield(void);
+
+
+/* mutexes */
+
+enum {
+    mtx_plain = 0,
+    mtx_recursive = 1,
+    mtx_timed = 2
+};
+
+extern int mtx_init(mtx_t *mtx, int type);
+extern int mtx_lock(mtx_t *mtx);
+extern int mtx_timedlock(mtx_t *mtx, const struct timespec *timeout_time);
+extern int mtx_trylock(mtx_t *mtx);
+extern int mtx_unlock(mtx_t *mtx);
+extern int mtx_destroy(mtx_t *mtx);
+
+
+/* condition variables */
+
+int cnd_broadcast(cnd_t *cond);
+int cnd_destroy(cnd_t *cond);
+int cnd_init(cnd_t *cond);
+int cnd_signal(cnd_t *cond);
+int cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct timespec *time_point);
+int cnd_wait(cnd_t *cond, mtx_t *mtx);
+
+
+#endif
 
 #ifdef __cplusplus
 }

@@ -31,46 +31,76 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-
 #include "utils.h"
 
+#include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <stdarg.h>
 #include <string.h>
-#include <sys/time.h>
+#include <time.h>
 
 /*
  * This file contains useful utilities for the sample programs.
  */
 
 
+/*
+ * sleep_ms
+ *
+ * Sleep the passed number of milliseconds.
+ */
 
-int util_sleep_ms(int ms)
-{
-    struct timeval tv;
+#if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
+int util_sleep_ms(int ms) {
+    struct timespec ts;
+    int rc;
 
-    tv.tv_sec = ms/1000;
-    tv.tv_usec = (ms % 1000)*1000;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000;
 
-    return select(0,NULL,NULL,NULL, &tv);
+    do { rc = nanosleep(&ts, &ts); } while(rc && errno == EINTR);
+
+    return rc;
 }
+#elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
+int util_sleep_ms(int ms) {
+    Sleep(ms);
+    return 1;
+}
+#else
+    #error "Not a supported platform!"
+#endif
 
 
 /*
  * time_ms
  *
- * Return the current epoch time in milliseconds.
+ * Return current system time in millisecond units.  This is NOT an
+ * Unix epoch time.  Windows uses a different epoch starting 1/1/1601.
  */
-int64_t util_time_ms(void)
-{
-    struct timeval tv;
 
-    gettimeofday(&tv,NULL);
+#if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
+int64_t util_time_ms(void) {
+    struct timespec ts;
 
-    return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
 }
+#elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
+int64_t util_time_ms(void) {
+    FILETIME ft;
+    int64_t res;
 
+    GetSystemTimeAsFileTime(&ft);
 
+    /* calculate time as 100ns increments since Jan 1, 1601. */
+    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
 
+    /* get time in ms */
+    res = res / 10000;
 
+    return res;
+}
+#else
+    #error "Not a supported platform!"
+#endif

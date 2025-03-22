@@ -515,7 +515,7 @@ elseif (BUILD_EXAMPLES)
                             tag_rw2
                             )
 
-        set ( example_PROG_UTIL utils_posix.c )
+        set ( example_PROG_UTIL utils.c )
         set ( example_LIBRARIES ${tool_lib} pthread )
     elseif(WIN32)
         set ( example_PROGRAMS async
@@ -551,7 +551,7 @@ elseif (BUILD_EXAMPLES)
                             tag_rw2
                             )
 
-        set ( example_PROG_UTIL utils_windows.c)
+        set ( example_PROG_UTIL utils.c)
         set ( example_LIBRARIES ${tool_lib} ws2_32 )
     endif()
 
