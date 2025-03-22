@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -72,11 +72,36 @@ extern int64_t util_time_ms(void);
 
 /* roll our own */
 
-typedef struct thrd_t thrd_t;
-typedef struct mtx_t mtx_t;
-typedef struct cnd_t cnd_t;
+#if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
+#include <pthread.h>
+
+typedef pthread_t thrd_t;
+typedef pthread_mutex_t mtx_t;
+typedef pthread_cond_t cnd_t;
+
+#elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
+#define WIN32_LEAN_AND_MEAN
+#include <process.h>
+#include <windows.h>
+
+typedef HANDLE thrd_t;
+typedef CRITICAL_SECTION mtx_t;
+typedef CONDITION_VARIABLE cnd_t;
+
+/* Windows thread-based implementation fo C11 threads */
+
+#else
+    #error "Not a supported platform!"
+#endif
 
 /* threads */
+
+enum {
+    thrd_success = 0,
+    thrd_error = 1
+};
+
+typedef int (*thrd_start_t)(void *);
 
 extern int thrd_create(thrd_t *thrd, thrd_start_t func, void *arg_ptr);
 extern thrd_t thrd_current(void);
@@ -106,15 +131,25 @@ extern int mtx_destroy(mtx_t *mtx);
 
 /* condition variables */
 
-int cnd_broadcast(cnd_t *cond);
-int cnd_destroy(cnd_t *cond);
-int cnd_init(cnd_t *cond);
-int cnd_signal(cnd_t *cond);
-int cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct timespec *time_point);
-int cnd_wait(cnd_t *cond, mtx_t *mtx);
+extern int cnd_broadcast(cnd_t *cond);
+extern int cnd_destroy(cnd_t *cond);
+extern int cnd_init(cnd_t *cond);
+extern int cnd_signal(cnd_t *cond);
+extern int cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct timespec *time_point);
+extern int cnd_wait(cnd_t *cond, mtx_t *mtx);
 
 
 #endif
+
+enum {
+    INTERRUPT_HANDLER_SUCCESS,
+    INTERRUPT_HANDLER_ERROR
+};
+
+/* catch terminate/interrupt signals/events */
+extern int set_interrupt_handler(void (*handler)(void));
+
+
 
 #ifdef __cplusplus
 }
