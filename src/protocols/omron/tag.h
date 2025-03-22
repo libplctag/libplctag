@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -112,6 +112,7 @@ struct omron_tag_t {
     int supports_fragmented_read;
 
     /* flags for operations */
+    int abort_requested;
     int read_in_progress;
     int write_in_progress;
     /*int connect_in_progress;*/
