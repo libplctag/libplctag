@@ -1292,7 +1292,7 @@ static int check_read_status_connected(ab_tag_p tag) {
     data_end = (tag->req->data + le2h16(cip_resp->encap_length) + sizeof(eip_encap));
 
     do {
-        ptrdiff_t payload_size = (data_end - data);
+        ptrdiff_t payload_size = 0;
 
         /* check the status */
         if(cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
@@ -1452,7 +1452,7 @@ static int check_read_status_unconnected(ab_tag_p tag) {
 
     /* check the status */
     do {
-        ptrdiff_t payload_size = (data_end - data);
+        ptrdiff_t payload_size = 0;
 
         if(cip_resp->reply_service != (AB_EIP_CMD_CIP_READ_FRAG | AB_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (AB_EIP_CMD_CIP_READ | AB_EIP_CMD_CIP_OK)) {
