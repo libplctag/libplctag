@@ -850,7 +850,7 @@ int check_tag_name(omron_tag_p tag, const char *name) {
  * @return status of the request.
  */
 
-int check_request_status(omron_tag_p tag) {
+int omron_check_request_status(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     eip_encap *eip_header = NULL;
 
