@@ -470,6 +470,7 @@ int omron_tag_abort(omron_tag_p tag) {
 
     tag->read_in_progress = 0;
     tag->write_in_progress = 0;
+    tag->abort_requested = 0;
     tag->offset = 0;
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -684,151 +685,249 @@ int check_tag_name(omron_tag_p tag, const char *name) {
 }
 
 
+// /**
+//  * @brief Check the status of the read request
+//  *
+//  * This function checks the request itself and updates the
+//  * tag if there are any failures or changes that need to be
+//  * made due to the request status.
+//  *
+//  * The tag and the request must not be deleted out from underneath
+//  * this function.   Ideally both are held with write mutexes.
+//  *
+//  * @return status of the request.
+//  *
+//  */
+
+// int omron_check_read_request_status(omron_tag_p tag, omron_request_p request) {
+//     int rc = PLCTAG_STATUS_OK;
+
+//     pdebug(DEBUG_SPEW, "Starting.");
+
+//     if(!request) {
+//         tag->read_in_progress = 0;
+//         tag->offset = 0;
+
+//         pdebug(DEBUG_WARN, "Read in progress, but no request in flight!");
+
+//         return PLCTAG_ERR_READ;
+//     }
+
+//     /* we now have a valid reference to the request. */
+
+//     /* request can be used by more than one thread at once. */
+//     spin_block(&request->lock) {
+//         if(!request->resp_received) {
+//             rc = PLCTAG_STATUS_PENDING;
+//             break;
+//         }
+
+//         /* check to see if it was an abort on the conn side. */
+//         if(request->status != PLCTAG_STATUS_OK) {
+//             rc = request->status;
+//             request->abort_request = 1;
+
+//             pdebug(DEBUG_WARN, "Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+//             tag->read_in_progress = 0;
+//             tag->offset = 0;
+
+//             /* TODO - why is this here? */
+//             tag->size = tag->elem_count * tag->elem_size;
+
+//             break;
+//         }
+//     }
+
+//     if(rc != PLCTAG_STATUS_OK) {
+//         if(rc_is_error(rc)) {
+//             /* the request is dead, from conn side. */
+//             if(tag->req) {
+//                 /* make absolutely sure that the abort flag is set. */
+//                 spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+
+//                 pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+//                 tag->req = rc_dec(tag->req);
+//             }
+//         }
+
+//         pdebug(DEBUG_DETAIL, "Read not ready with status %s.", plc_tag_decode_error(rc));
+
+//         return rc;
+//     }
+
+//     pdebug(DEBUG_SPEW, "Done.");
+
+//     return rc;
+// }
+
+
+// /**
+//  * @brief Check the status of the write request
+//  *
+//  * This function checks the request itself and updates the
+//  * tag if there are any failures or changes that need to be
+//  * made due to the request status.
+//  *
+//  * The tag and the request must not be deleted out from underneath
+//  * this function.   Ideally both are held with write mutexes.
+//  *
+//  * @return status of the request.
+//  *
+//  */
+
+
+// int omron_check_write_request_status(omron_tag_p tag, omron_request_p request) {
+//     int rc = PLCTAG_STATUS_OK;
+
+//     pdebug(DEBUG_SPEW, "Starting.");
+
+//     if(!request) {
+//         tag->write_in_progress = 0;
+//         tag->offset = 0;
+
+//         pdebug(DEBUG_WARN, "Write in progress, but no request in flight!");
+
+//         return PLCTAG_ERR_WRITE;
+//     }
+
+//     /* we now have a valid reference to the request. */
+
+//     /* request can be used by more than one thread at once. */
+//     spin_block(&request->lock) {
+//         if(!request->resp_received) {
+//             rc = PLCTAG_STATUS_PENDING;
+//             break;
+//         }
+
+//         /* check to see if it was an abort on the conn side. */
+//         if(request->status != PLCTAG_STATUS_OK) {
+//             rc = request->status;
+//             request->abort_request = 1;
+
+//             pdebug(DEBUG_WARN, "Session reported failure of request: %s.", plc_tag_decode_error(rc));
+
+//             tag->write_in_progress = 0;
+//             tag->offset = 0;
+
+//             break;
+//         }
+//     }
+
+//     if(rc != PLCTAG_STATUS_OK) {
+//         if(rc_is_error(rc)) {
+//             /* the request is dead, from conn side. */
+//             if(tag->req) {
+//                 /* make absolutely sure that the abort flag is set. */
+//                 spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+
+//                 pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+//                 tag->req = rc_dec(tag->req);
+//             }
+//         }
+
+//         pdebug(DEBUG_DETAIL, "Write not ready with status %s.", plc_tag_decode_error(rc));
+
+//         return rc;
+//     }
+
+//     pdebug(DEBUG_SPEW, "Done.");
+
+//     return rc;
+// }
+
+
 /**
- * @brief Check the status of the read request
+ * @brief Check the status of the request
  *
  * This function checks the request itself and updates the
  * tag if there are any failures or changes that need to be
  * made due to the request status.
  *
  * The tag and the request must not be deleted out from underneath
- * this function.   Ideally both are held with write mutexes.
+ * this function.   Both must be held with write mutexes.
  *
  * @return status of the request.
- *
  */
 
-int omron_check_read_request_status(omron_tag_p tag, omron_request_p request) {
+int check_request_status(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    eip_encap *eip_header = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!request) {
-        tag->read_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN, "Read in progress, but no request in flight!");
-
-        return PLCTAG_ERR_READ;
-    }
-
-    /* we now have a valid reference to the request. */
-
-    /* request can be used by more than one thread at once. */
-    spin_block(&request->lock) {
-        if(!request->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
+    do {
+        if(!tag) {
+            pdebug(DEBUG_WARN, "Called with null tag pointer!");
+            rc = PLCTAG_ERR_NULL_PTR;
             break;
         }
 
-        /* check to see if it was an abort on the conn side. */
-        if(request->status != PLCTAG_STATUS_OK) {
-            rc = request->status;
-            request->abort_request = 1;
+        if(!tag->req) {
+            if(tag->read_in_progress || tag->write_in_progress) {
+                tag->read_in_progress = 0;
+                tag->write_in_progress = 0;
+                tag->offset = 0;
 
-            pdebug(DEBUG_WARN, "Session reported failure of request: %s.", plc_tag_decode_error(rc));
+                pdebug(DEBUG_WARN, "A request was in progress, but no request in flight!");
+            }
 
-            tag->read_in_progress = 0;
-            tag->offset = 0;
-
-            /* TODO - why is this here? */
-            tag->size = tag->elem_count * tag->elem_size;
-
+            rc = PLCTAG_STATUS_OK;
             break;
         }
-    }
 
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from conn side. */
-            if(tag->req) {
-                /* make absolutely sure that the abort flag is set. */
-                spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+        /* do we have an abort outstanding? */
+        if(tag->abort_requested) {
+            omron_tag_abort(tag);
+            tag->abort_requested = 0;
+            return PLCTAG_ERR_ABORT;
+        }
 
-                pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-                tag->req = rc_dec(tag->req);
+        /* request can be used by more than one thread at once. */
+        spin_block(&tag->req->lock) {
+            if(!tag->req->resp_received) {
+                rc = PLCTAG_STATUS_PENDING;
+                break;
+            }
+
+            /* check to see if it was an abort on the session side. */
+            if(tag->req->status != PLCTAG_STATUS_OK) {
+                rc = tag->req->status;
+                break;
             }
         }
 
-        pdebug(DEBUG_DETAIL, "Read not ready with status %s.", plc_tag_decode_error(rc));
-
-        return rc;
-    }
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return rc;
-}
-
-
-/**
- * @brief Check the status of the write request
- *
- * This function checks the request itself and updates the
- * tag if there are any failures or changes that need to be
- * made due to the request status.
- *
- * The tag and the request must not be deleted out from underneath
- * this function.   Ideally both are held with write mutexes.
- *
- * @return status of the request.
- *
- */
-
-
-int omron_check_write_request_status(omron_tag_p tag, omron_request_p request) {
-    int rc = PLCTAG_STATUS_OK;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    if(!request) {
-        tag->write_in_progress = 0;
-        tag->offset = 0;
-
-        pdebug(DEBUG_WARN, "Write in progress, but no request in flight!");
-
-        return PLCTAG_ERR_WRITE;
-    }
-
-    /* we now have a valid reference to the request. */
-
-    /* request can be used by more than one thread at once. */
-    spin_block(&request->lock) {
-        if(!request->resp_received) {
-            rc = PLCTAG_STATUS_PENDING;
+        /* check the length */
+        if(tag->req->request_size < sizeof(*eip_header)) {
+            pdebug(DEBUG_WARN, "Insufficient data returned for even an EIP header!");
+            rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        /* check to see if it was an abort on the conn side. */
-        if(request->status != PLCTAG_STATUS_OK) {
-            rc = request->status;
-            request->abort_request = 1;
+        eip_header = (eip_encap *)(tag->req->data);
 
-            pdebug(DEBUG_WARN, "Session reported failure of request: %s.", plc_tag_decode_error(rc));
-
-            tag->write_in_progress = 0;
-            tag->offset = 0;
-
+        if((le2h16(eip_header->encap_command) != OMRON_EIP_CONNECTED_SEND)
+           && (le2h16(eip_header->encap_command) != OMRON_EIP_UNCONNECTED_SEND)) {
+            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", eip_header->encap_command);
+            rc = PLCTAG_ERR_BAD_DATA;
             break;
         }
-    }
 
-    if(rc != PLCTAG_STATUS_OK) {
-        if(rc_is_error(rc)) {
-            /* the request is dead, from conn side. */
-            if(tag->req) {
-                /* make absolutely sure that the abort flag is set. */
-                spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
-
-                pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-                tag->req = rc_dec(tag->req);
-            }
+        if(le2h32(eip_header->encap_status) != OMRON_EIP_OK) {
+            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(eip_header->encap_status));
+            rc = PLCTAG_ERR_REMOTE_ERR;
+            break;
         }
+    } while(0);
 
-        pdebug(DEBUG_DETAIL, "Write not ready with status %s.", plc_tag_decode_error(rc));
+    if(rc_is_error(rc)) {
+        /* the request is dead, from session side. */
+        omron_tag_abort(tag);
 
-        return rc;
+        pdebug(DEBUG_INFO, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
+
+    tag->status = rc;
 
     pdebug(DEBUG_SPEW, "Done.");
 

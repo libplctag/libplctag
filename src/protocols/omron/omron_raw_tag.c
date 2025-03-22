@@ -122,12 +122,15 @@ int raw_tag_tickler(omron_tag_p tag) {
 
     pdebug(DEBUG_SPEW, "Starting.");
 
+    rc = omron_check_request_status(tag);
+    if(rc != PLCTAG_STATUS_OK) { return rc; }
+
     if(tag->read_in_progress) {
         pdebug(DEBUG_WARN, "Something started a read on a raw tag.  This is not supported!");
         tag->read_in_progress = 0;
         tag->read_in_flight = 0;
 
-        return rc;
+        return PLCTAG_ERR_UNSUPPORTED;
     }
 
     if(tag->write_in_progress) {
@@ -212,59 +215,13 @@ int raw_tag_write_start(omron_tag_p tag) {
 static int raw_tag_check_write_status_connected(omron_tag_p tag) {
     eip_cip_co_resp *cip_resp;
     int rc = PLCTAG_STATUS_OK;
-    omron_request_p request = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    if(!tag) {
-        pdebug(DEBUG_ERROR, "Null tag pointer passed!");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    /* guard against the request being deleted out from underneath us. */
-    pdebug(DEBUG_DETAIL, "rc_inc: Acquiring reference to the request.");
-    request = rc_inc(tag->req);
-    rc = omron_check_write_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
-        rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
+    /* the request reference is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_co_resp *)(request->data);
-
-    do {
-        if(le2h16(cip_resp->encap_command) != OMRON_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != OMRON_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        /* the client needs to handle the raw CIP response. */
-
-        // if (cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE_FRAG | OMRON_EIP_CMD_CIP_OK)
-        //     && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE | OMRON_EIP_CMD_CIP_OK)
-        //     && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_RMW | OMRON_EIP_CMD_CIP_OK)) {
-        //     pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
-        //     rc = PLCTAG_ERR_BAD_DATA;
-        //     break;
-        // }
-
-        // if (cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-        //     pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, cip.decode_cip_error_short((uint8_t
-        //     *)&cip_resp->status)); pdebug(DEBUG_INFO, cip.decode_cip_error_long((uint8_t *)&cip_resp->status)); rc =
-        //     cip.decode_cip_error_code((uint8_t *)&cip_resp->status); break;
-        // }
-    } while(0);
+    cip_resp = (eip_cip_co_resp *)(tag->req->data);
 
     /* write is done in one way or another. */
     tag->write_in_progress = 0;
@@ -272,7 +229,7 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
     if(rc == PLCTAG_STATUS_OK) {
         /* copy the data into the tag. */
         uint8_t *data_start = (uint8_t *)(&cip_resp->reply_service);
-        uint8_t *data_end = request->data + (request->request_size);
+        uint8_t *data_end = tag->req->data + (tag->req->request_size);
         int data_size = (int)(unsigned int)(data_end - data_start);
         uint8_t *tag_data_buffer = mem_realloc(tag->data, data_size);
 
@@ -292,21 +249,9 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
     }
 
     /* clean up the request. */
-    request->abort_request = 1;
-    pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-    tag->req = rc_dec(request);
+    omron_tag_abort(tag);
 
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    // FIXME !!!!
-    rc_dec(request);
-
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -322,55 +267,13 @@ static int raw_tag_check_write_status_connected(omron_tag_p tag) {
 static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
     eip_cip_uc_resp *cip_resp;
     int rc = PLCTAG_STATUS_OK;
-    omron_request_p request = NULL;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
-    /* guard against the request being deleted out from underneath us. */
-    pdebug(DEBUG_DETAIL, "rc_inc: Acquiring reference to the request.");
-    request = rc_inc(tag->req);
-    rc = omron_check_write_request_status(tag, request);
-    if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_DETAIL, "Write request status is not OK.");
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-        rc_dec(request);
-        return rc;
-    }
-
-    /* the request reference is still valid. */
+    /* the request reference is valid. */
 
     /* point to the data */
-    cip_resp = (eip_cip_uc_resp *)(request->data);
-
-    do {
-        if(le2h16(cip_resp->encap_command) != OMRON_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != OMRON_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
-        /* the client needs to handle the raw CIP response. */
-
-        // if (cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE_FRAG | OMRON_EIP_CMD_CIP_OK)
-        //     && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE | OMRON_EIP_CMD_CIP_OK)
-        //     && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_RMW | OMRON_EIP_CMD_CIP_OK)) {
-        //     pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
-        //     rc = PLCTAG_ERR_BAD_DATA;
-        //     break;
-        // }
-
-        // if (cip_resp->status != OMRON_CIP_STATUS_OK && cip_resp->status != OMRON_CIP_STATUS_FRAG) {
-        //     pdebug(DEBUG_WARN, "CIP read failed with status: 0x%x %s", cip_resp->status, cip.decode_cip_error_short((uint8_t
-        //     *)&cip_resp->status)); pdebug(DEBUG_INFO, cip.decode_cip_error_long((uint8_t *)&cip_resp->status)); rc =
-        //     cip.decode_cip_error_code((uint8_t *)&cip_resp->status); break;
-        // }
-    } while(0);
+    cip_resp = (eip_cip_uc_resp *)(tag->req->data);
 
     /* write is done in one way or another. */
     tag->write_in_progress = 0;
@@ -398,17 +301,7 @@ static int raw_tag_check_write_status_unconnected(omron_tag_p tag) {
     }
 
     /* clean up the request. */
-    request->abort_request = 1;
-    tag->req = rc_dec(request);
-
-    /*
-     * huh?  Yes, we do it a second time because we already had
-     * a reference and got another at the top of this function.
-     * So we need to remove it twice.   Once for the capture above,
-     * and once for the original reference.
-     */
-
-    rc_dec(request);
+    omron_tag_abort(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
 
