@@ -140,9 +140,9 @@ static int check_write_status_connected(ab_tag_p tag);
 static int check_write_status_unconnected(ab_tag_p tag);
 static int calculate_write_data_per_packet(ab_tag_p tag);
 
-static int tag_read_start(ab_tag_p tag);
-static int tag_tickler(ab_tag_p tag);
-static int tag_write_start(ab_tag_p tag);
+static int tag_read_start(plc_tag_p tag_arg);
+static int tag_tickler(plc_tag_p tag_arg);
+static int tag_write_start(plc_tag_p tag_arg);
 
 /* define the exported vtable for this tag type. */
 struct tag_vtable_t eip_cip_vtable = {(tag_vtable_func)tag_abort_request,                              /* shared */
@@ -203,8 +203,9 @@ tag_byte_order_t logix_tag_listing_byte_order = {.is_allocated = 0,
  ************************************************************************/
 
 
-int tag_tickler(ab_tag_p tag) {
+int tag_tickler(plc_tag_p tag_arg) {
     int rc = PLCTAG_STATUS_OK;
+    ab_tag_p tag = (ab_tag_p)tag_arg;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -268,8 +269,9 @@ int tag_tickler(ab_tag_p tag) {
  * The function starts the process of getting tag data from the PLC.
  */
 
-int tag_read_start(ab_tag_p tag) {
+int tag_read_start(plc_tag_p tag_arg) {
     int rc = PLCTAG_STATUS_OK;
+    ab_tag_p tag = (ab_tag_p)tag_arg;
 
     pdebug(DEBUG_INFO, "Starting");
 
@@ -310,8 +312,9 @@ int tag_read_start(ab_tag_p tag) {
  * The routine starts the process of writing to a tag.
  */
 
-int tag_write_start(ab_tag_p tag) {
+int tag_write_start(plc_tag_p tag_arg) {
     int rc = PLCTAG_STATUS_OK;
+    ab_tag_p tag = (ab_tag_p)tag_arg;
 
     pdebug(DEBUG_INFO, "Starting");
 

@@ -485,6 +485,7 @@ elseif (BUILD_EXAMPLES)
                             simple_dual
                             slc500
                             stress_api_lock
+                            stress_rc_mem
                             stress_test
                             string_non_standard_udt
                             string_standard
@@ -508,6 +509,7 @@ elseif (BUILD_EXAMPLES)
                             thread_stress
                             toggle_bit
                             toggle_bool
+                            trigger_double_free
                             write_string
                             tag_rw
                             tag_rw2

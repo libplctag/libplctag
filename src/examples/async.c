@@ -52,7 +52,7 @@
 #define NUM_ELEMS (1000)
 #define DATA_TIMEOUT (5000)
 
-int main()
+int main(void)
 {
     int32_t tag[NUM_TAGS];
     int rc;
