@@ -305,9 +305,7 @@ plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_i
  */
 
 int get_tag_data_type(omron_tag_p tag, attr attribs) {
-    int rc = PLCTAG_STATUS_OK;
     const char *elem_type = NULL;
-    const char *tag_name = NULL;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -347,6 +345,7 @@ int get_tag_data_type(omron_tag_p tag, attr attribs) {
             tag->elem_size = 8;
             tag->elem_type = OMRON_TYPE_FLOAT64;
         } else if(str_cmp_i(elem_type, "string") == 0) {
+            /* FIXME - is this correct? */
             pdebug(DEBUG_DETAIL, "Fount tag element type of string.");
             tag->elem_size = 88;
             tag->elem_type = OMRON_TYPE_STRING;
@@ -608,7 +607,6 @@ int omron_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_val
 int omron_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {
     int rc = PLCTAG_STATUS_OK;
     omron_tag_p tag = (omron_tag_p)raw_tag;
-    int bytes_to_copy = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -898,7 +896,7 @@ int omron_check_request_status(omron_tag_p tag) {
         }
 
         /* check the length */
-        if(tag->req->request_size < sizeof(*eip_header)) {
+        if((size_t)tag->req->request_size < sizeof(*eip_header)) {
             pdebug(DEBUG_WARN, "Insufficient data returned for even an EIP header!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
@@ -927,7 +925,7 @@ int omron_check_request_status(omron_tag_p tag) {
         pdebug(DEBUG_INFO, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
 
-    tag->status = rc;
+    tag->status = (int8_t)rc;
 
     pdebug(DEBUG_SPEW, "Done.");
 

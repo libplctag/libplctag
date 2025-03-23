@@ -177,10 +177,16 @@ int32_t get_tag_instance_counts(int32_t tag, uint16_t *num_instances, uint16_t *
                 uint16_t attrib_count = plc_tag_get_uint16(tag, 4);
                 uint16_t attrib_max_instance_id = plc_tag_get_uint16(tag, 6);
                 uint16_t attrib_max_instance_status = plc_tag_get_uint16(tag, 8);
-                uint16_t attrib_max_instance_val = plc_tag_get_uint32(tag, 10);
+                uint32_t attrib_max_instance_val = plc_tag_get_uint32(tag, 10);
                 uint16_t attrib_num_instances_id = plc_tag_get_uint16(tag, 14);
                 uint16_t attrib_num_instances_status = plc_tag_get_uint16(tag, 16);
-                uint16_t attrib_num_instances_val = plc_tag_get_uint32(tag, 18);
+                uint32_t attrib_num_instances_val = plc_tag_get_uint32(tag, 18);
+
+                (void)attrib_count;
+                (void)attrib_max_instance_id;
+                (void)attrib_max_instance_status;
+                (void)attrib_num_instances_id;
+                (void)attrib_num_instances_status;
 
                 /* 
                  * note that if we had any failure of an attribute retrieval, it 
@@ -189,8 +195,8 @@ int32_t get_tag_instance_counts(int32_t tag, uint16_t *num_instances, uint16_t *
                  * have a status such as 0x14 (not found/does not exist).
                  */
 
-                *num_instances = attrib_num_instances_val;
-                *max_id = attrib_max_instance_val;
+                *num_instances = (uint16_t)attrib_num_instances_val;
+                *max_id = (uint16_t)attrib_max_instance_val;
             } else {
                 printf("ERROR: Insufficient data returned in CIP response to get all attribute values!");
                 rc = PLCTAG_ERR_TOO_SMALL;
@@ -229,6 +235,10 @@ int32_t get_tag_full_info(int32_t tag, uint16_t tag_instance_id, const char **ta
                             0x08, 0x00, // Attr: 3xDINT - tag array dimensions
                             0x07, 0x00, // Attr: DINT Element size in bytes
                         };
+
+    (void)tag_name;
+    (void)tag_type;
+    
 
     do {
             /* plug in the instance ID */
@@ -315,13 +325,11 @@ int main()
 {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
-    int size = 0;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
     uint16_t num_instances = 0;
     uint16_t max_id = 0;
-    uint16_t instance_id = (uint16_t)0;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {

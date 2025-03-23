@@ -464,9 +464,9 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     }
 
     /* how much space do we need? */
-    required_space = tag->size + sizeof(*cip);
+    required_space = (size_t)tag->size + sizeof(*cip);
 
-    if(required_space > tag->req->request_capacity) {
+    if(required_space > (size_t)tag->req->request_capacity) {
         pdebug(DEBUG_WARN, "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space,
                tag->req->request_capacity);
         return PLCTAG_ERR_TOO_LARGE;
@@ -544,9 +544,9 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     }
 
     /* how much space do we need? */
-    required_space = tag->size + sizeof(eip_cip_uc_req) + tag->session->conn_path_size;
+    required_space = (size_t)tag->size + sizeof(eip_cip_uc_req) + (size_t)tag->session->conn_path_size;
 
-    if(required_space > tag->req->request_capacity) {
+    if(required_space > (size_t)tag->req->request_capacity) {
         pdebug(DEBUG_WARN, "Amount to write, %zu bytes, exceeds request capacity %d bytes!", required_space,
                tag->req->request_capacity);
         return PLCTAG_ERR_TOO_LARGE;

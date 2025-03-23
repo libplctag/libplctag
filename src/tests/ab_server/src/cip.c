@@ -500,7 +500,6 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
 
 slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                             plc_s *plc) {
-    slice_s result = {0};
     size_t required_request_payload_size = 0;
     tag_def_s *tag = NULL;
     uint32_t num_indexes = CIP_TAG_MAX_INDEXES;
@@ -661,7 +660,6 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     tag_def_s *tag = NULL;
     uint32_t num_indexes = CIP_TAG_MAX_INDEXES;
     uint32_t indexes[CIP_TAG_MAX_INDEXES] = {0};
-    size_t min_data_element_size = 0;
     size_t parse_offset = 0;
     uint16_t request_element_type = 0;
     uint16_t request_element_count = 0;
@@ -800,7 +798,6 @@ bool parse_tag_path(slice_s tag_path, plc_s *plc, tag_def_s **tag, uint32_t *num
     uint8_t name_len = 0;
     uint8_t segment_marker = 0;
     slice_s tag_name_slice = {0};
-    slice_s tag_path_remainder = {0};
     uint32_t max_indexes = *num_indexes; /* contains the max possible */
 
     /* Check if the tag path is long enough to contain the segment marker and name length */
@@ -1016,7 +1013,6 @@ bool calculate_request_start_and_end_offsets(tag_def_s *tag, uint32_t num_indexe
 
 bool parse_cip_request(slice_s input, uint8_t *cip_service, slice_s *cip_service_path, slice_s *cip_service_payload) {
     size_t offset = 0;
-    size_t path_length = 0;
 
     /* Check if the input slice is long enough to contain the service code and path size */
     if(slice_len(input) < CIP_MIN_REQUEST_SIZE) {

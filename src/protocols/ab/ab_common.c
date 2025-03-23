@@ -531,7 +531,7 @@ int get_tag_data_type(ab_tag_p tag, attr attribs) {
             }
 
             tag->elem_size = file_addr.element_size_bytes;
-            tag->file_type = (int)file_addr.file_type;
+            tag->file_type = file_addr.file_type;
 
             break;
 
@@ -912,7 +912,6 @@ int ab_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 int ab_get_byte_array_attrib(plc_tag_p raw_tag, const char *attrib_name, uint8_t *buffer, int buffer_length) {
     int rc = PLCTAG_STATUS_OK;
     ab_tag_p tag = (ab_tag_p)raw_tag;
-    int bytes_to_copy = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
@@ -1139,7 +1138,7 @@ int check_request_status(ab_tag_p tag) {
         }
 
         /* check the length */
-        if(tag->req->request_size < sizeof(*eip_header)) {
+        if((tag->req->request_size < 0) || (size_t)tag->req->request_size < sizeof(*eip_header)) {
             pdebug(DEBUG_WARN, "Insufficient data returned for even an EIP header!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
@@ -1168,7 +1167,7 @@ int check_request_status(ab_tag_p tag) {
         pdebug(DEBUG_INFO, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
 
-    tag->status = rc;
+    tag->status = (int8_t)rc;
 
     pdebug(DEBUG_SPEW, "Done.");
 

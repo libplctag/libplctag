@@ -138,7 +138,7 @@ inline static bool slice_copy_data_out(uint8_t *dest_data, size_t dest_len, slic
     return true;
 }
 
-inline bool slice_copy_slice(slice_s dest, slice_s src) {
+inline static bool slice_copy_slice(slice_s dest, slice_s src) {
     if(slice_has_err(dest) || slice_has_err(src)) {
         return false;
     }

@@ -49,7 +49,7 @@
  */
 
 
-static int global_debug_level = DEBUG_NONE;
+static volatile int global_debug_level = DEBUG_NONE;
 static lock_t thread_num_lock = LOCK_INIT;
 static volatile uint32_t thread_num = 1;
 static lock_t logger_callback_lock = LOCK_INIT;
@@ -83,7 +83,7 @@ int get_debug_level(void) { return global_debug_level; }
 void debug_set_tag_id(int32_t t_id) { tag_id = t_id; }
 
 
-static uint32_t get_thread_id() {
+static uint32_t get_thread_id(void) {
     if(!this_thread_num) {
         spin_block(&thread_num_lock) {
             this_thread_num = thread_num;
@@ -93,43 +93,6 @@ static uint32_t get_thread_id() {
 
     return this_thread_num;
 }
-
-// static int make_prefix(char *prefix_buf, int prefix_buf_size)
-// {
-//     struct tm t;
-//     time_t epoch;
-//     int64_t epoch_ms;
-//     int remainder_ms;
-//     int rc = PLCTAG_STATUS_OK;
-
-//     /* make sure we have room, MAGIC */
-//     if(prefix_buf_size < 37) {
-//         return PLCTAG_ERR_TOO_SMALL;
-//     }
-
-//     /* build the prefix */
-
-//     /* get the time parts */
-//     epoch_ms = time_ms();
-//     epoch = (time_t)(epoch_ms/1000);
-//     remainder_ms = (int)(epoch_ms % 1000);
-
-//     /* FIXME - should capture error return! */
-//     localtime_r(&epoch,&t);
-
-//     /* create the prefix and format for the file entry. */
-//     rc = snprintf(prefix_buf, (size_t)prefix_buf_size,"%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%d)",
-//                   t.tm_year+1900,t.tm_mon,t.tm_mday,t.tm_hour,t.tm_min,t.tm_sec,remainder_ms, get_thread_id(), tag_id);
-
-//     /* enforce zero string termination */
-//     if(rc > 1 && rc < prefix_buf_size) {
-//         prefix_buf[rc] = 0;
-//     } else {
-//         prefix_buf[prefix_buf_size - 1] = 0;
-//     }
-
-//     return rc;
-// }
 
 
 static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO", "DETAIL", "SPEW"};
@@ -141,15 +104,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     int64_t epoch_ms;
     int remainder_ms;
     char prefix[1000]; /* MAGIC */
-    int prefix_size = 0;
     char output[1000];
-    // int output_size = 0;
-
-    /* build the prefix */
-    // prefix_size = make_prefix(prefix,(int)sizeof(prefix));  /* don't exceed a size that int can express! */
-    // if(prefix_size <= 0) {
-    //     return;
-    // }
 
     /* get the time parts */
     epoch_ms = time_ms();
@@ -159,18 +114,8 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     /* FIXME - should capture error return! */
     localtime_r(&epoch, &t);
 
-    /* print only once */
-    /* FIXME - this may not be safe. */
-    // if(!printed_version && debug_level >= DEBUG_INFO) {
-    //     if(lock_acquire_try((lock_t*)&printed_version)) {
-    //         /* create the output string template */
-    //         fprintf(stderr,"%s INFO libplctag version %s, debug level %d.\n",prefix, VERSION, get_debug_level());
-    //     }
-    // }
-
     /* build the output string template */
-    prefix_size +=
-        snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") %s %s:%d %s\n",
+    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") %s %s:%d %s\n",
                  t.tm_year + 1900, t.tm_mon + 1, /* month is 0-11? */
                  t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), tag_id, debug_level_name[debug_level],
                  func, line_num, templ);

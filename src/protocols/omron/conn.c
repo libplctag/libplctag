@@ -83,14 +83,6 @@
 
 
 /* plc-specific conn constructors */
-static omron_conn_p create_plc5_conn_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
-static omron_conn_p create_slc_conn_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
-static omron_conn_p create_mlgx_conn_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
-static omron_conn_p create_lgx_conn_unsafe(const char *host, const char *path, int *use_connected_msg, int connection_group_id);
-static omron_conn_p create_lgx_pccc_conn_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                                int connection_group_id);
-static omron_conn_p create_micro800_conn_unsafe(const char *host, const char *path, int *use_connected_msg,
-                                                int connection_group_id);
 static omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *path, int *use_connected_msg,
                                                   int connection_group_id);
 
@@ -139,7 +131,7 @@ static volatile mutex_p conn_mutex = NULL;
 static volatile vector_p conns = NULL;
 
 
-int conn_startup() {
+int conn_startup(void) {
     int rc = PLCTAG_STATUS_OK;
 
     if((rc = mutex_create((mutex_p *)&conn_mutex)) != PLCTAG_STATUS_OK) {
@@ -156,7 +148,7 @@ int conn_startup() {
 }
 
 
-void conn_teardown() {
+void conn_teardown(void) {
     pdebug(DEBUG_INFO, "Starting.");
 
     if(conns && conn_mutex) {
@@ -452,7 +444,7 @@ omron_conn_p create_omron_njnx_conn_unsafe(const char *host, const char *path, i
             conn->only_use_old_forward_open = false;
             conn->fo_conn_size = MAX_CIP_OMRON_MSG_SIZE;
             conn->fo_ex_conn_size = MAX_CIP_OMRON_MSG_SIZE_EX;
-            conn->max_payload_size = conn->fo_conn_size;
+            conn->max_payload_size = (uint16_t)conn->fo_conn_size;
         } else {
             pdebug(DEBUG_WARN, "Unable to create *Logix conn!");
         }
@@ -514,7 +506,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     }
 
     /* encode the path */
-    rc = CIP.encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    rc = CIP.encode_path(path, use_connected_msg, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO, "Unable to convert path string to binary path, error %s!", plc_tag_decode_error(rc));
         return NULL;
@@ -540,7 +532,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
 
     /* fix up the data buffer. */
     conn->data_buffer_is_static = data_buffer_is_static;
-    conn->data_capacity = data_buffer_capacity;
+    conn->data_capacity = (uint32_t)(unsigned int)max_payload_capacity;
 
     if(data_buffer_is_static) {
         conn->data = (uint8_t *)(conn) + data_buffer_offset;
@@ -2170,7 +2162,7 @@ int send_forward_open_request(omron_conn_p conn) {
 
     pdebug(DEBUG_DETAIL, "Flag prohibiting use of extended ForwardOpen is %d.", conn->only_use_old_forward_open);
 
-    max_payload = (conn->only_use_old_forward_open ? conn->fo_conn_size : conn->fo_ex_conn_size);
+    max_payload = (conn->only_use_old_forward_open ? (uint16_t)conn->fo_conn_size : (uint16_t)conn->fo_ex_conn_size);
 
     /* set the max payload guess if it is larger than the maximum possible or if it is zero. */
     conn->max_payload_guess =

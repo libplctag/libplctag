@@ -397,7 +397,8 @@ int get_tag_attributes_by_name(int32_t tag, const char *tag_name) {
             /* skip unknown field */
             cursor += 4;
 
-            uint8_t bit_number = plc_tag_get_uint8(tag, cursor);
+            /* bit number is unused for now */
+            // uint8_t bit_number = plc_tag_get_uint8(tag, cursor);
             cursor += 1;
 
             /* skip 3 unknown bytes */
@@ -460,8 +461,8 @@ typedef tag_entry_t *tag_entry_p;
 
 int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_t start_cursor) {
     int32_t rc = PLCTAG_STATUS_OK;
-    uint32_t cursor = start_cursor;
-    uint32_t end_cursor = 0;
+    int cursor = (int)start_cursor;
+    int end_cursor = 0;
 
     do {
         uint32_t instance_id = plc_tag_get_uint32(tag, cursor);
@@ -473,7 +474,7 @@ int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_
         cursor += 2;
 
         /* calculate where we should end, 6 = 2 for length, 4 for ID */
-        end_cursor = start_cursor + 6 + instance_data_len;
+        end_cursor = (int)start_cursor + 6 + (int)instance_data_len;
         // printf("INFO: start cursor %"PRIu32", cursor %"PRIu32", instance data length  %"PRIu16", end cursor %"PRIu32"\n",
         //         start_cursor, cursor, instance_data_len, cursor);
 
@@ -597,11 +598,10 @@ int32_t process_single_instance_data(int32_t tag, tag_entry_p tag_entry, uint32_
 
 int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_instances, bool is_user) {
     int32_t rc = PLCTAG_STATUS_OK;
-    int16_t batch_size = 0;
     int tag_size = 0;
     uint8_t cip_status = 0;
-    int32_t cursor = 0;
-    int32_t new_cursor = 0;
+    int cursor = 0;
+    int new_cursor = 0;
     uint32_t tag_index = 0;
     uint32_t next_instance_id = 1;
 
@@ -682,7 +682,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 
         if(batch_size == 0) {
             printf("INFO: No more tags to enumerate.  Got %" PRIu32 " tags.\n", tag_index);
-            rc = tag_index;
+            rc = (int)tag_index;
             break;
         }
 
@@ -694,7 +694,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
         for(uint32_t batch_index = 0; batch_index < batch_size && batch_index < num_instances; batch_index++) {
             printf("INFO: Processing instance #%" PRIu32 ".\n", tag_index);
 
-            new_cursor = process_single_instance_data(tag, &(tags[tag_index]), cursor);
+            new_cursor = process_single_instance_data(tag, &(tags[tag_index]), (uint32_t)cursor);
             if(new_cursor > 0) {
                 printf("INFO: Processed instance %" PRIu32 ".\n", tag_index);
 
@@ -733,7 +733,6 @@ void usage() {
 char *setup_tag_string(int argc, char **argv) {
     char tag_string[TAG_STRING_SIZE + 1] = {0};
     const char *gateway = NULL;
-    const char *path = NULL;
 
     if(argc < 2) { usage(); }
 
@@ -785,15 +784,12 @@ int main(int argc, char **argv) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
     char *tag_string = NULL;
-    int size = 0;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
     uint16_t num_instances = 0;
     uint16_t max_id = 0;
     tag_entry_p tags = NULL;
-    uint16_t current_tag_entry_index = 0;
-    uint16_t next_instance_id = (uint16_t)1;
 
     printf("WARNING: This code is not complete and still very EXPERIMENTAL!\n");
 

@@ -339,8 +339,9 @@ int tag_write_start(plc_tag_p tag_arg) {
         tag->pre_write_read = 1;
         tag->write_in_progress = 0; /* temporarily mask this off */
 
-        return tag_read_start(tag);
+        return tag_read_start((plc_tag_p)tag);
     }
+    
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to calculate write sizes!");
@@ -1405,7 +1406,7 @@ static int check_read_status_connected(ab_tag_p tag) {
         if(!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
-            rc = tag_read_start(tag);
+            rc = tag_read_start((plc_tag_p)tag);
         } else {
             tag->offset = 0;
 
@@ -1413,7 +1414,7 @@ static int check_read_status_connected(ab_tag_p tag) {
             if(tag->pre_write_read) {
                 pdebug(DEBUG_DETAIL, "Restarting write call now.");
                 tag->pre_write_read = 0;
-                rc = tag_write_start(tag);
+                rc = tag_write_start((plc_tag_p)tag);
             }
         }
     }
@@ -1566,7 +1567,7 @@ static int check_read_status_unconnected(ab_tag_p tag) {
         if(!tag->pre_write_read && partial_data) {
             /* call read start again to get the next piece */
             pdebug(DEBUG_DETAIL, "calling tag_read_start() to get the next chunk.");
-            rc = tag_read_start(tag);
+            rc = tag_read_start((plc_tag_p)tag);
         } else {
             tag->offset = 0;
 
@@ -1574,7 +1575,7 @@ static int check_read_status_unconnected(ab_tag_p tag) {
             if(tag->pre_write_read) {
                 pdebug(DEBUG_DETAIL, "Restarting write call now.");
                 tag->pre_write_read = 0;
-                rc = tag_write_start(tag);
+                rc = tag_write_start((plc_tag_p)tag);
             }
         }
     }
@@ -1636,7 +1637,7 @@ static int check_write_status_connected(ab_tag_p tag) {
         if(tag->offset < tag->size) {
 
             pdebug(DEBUG_DETAIL, "Write not complete, triggering next round.");
-            rc = tag_write_start(tag);
+            rc = tag_write_start((plc_tag_p)tag);
         } else {
             /* only clear this if we are done. */
             tag->offset = 0;
@@ -1701,7 +1702,7 @@ static int check_write_status_unconnected(ab_tag_p tag) {
         if(tag->offset < tag->size) {
 
             pdebug(DEBUG_DETAIL, "Write not complete, triggering next round.");
-            rc = tag_write_start(tag);
+            rc = tag_write_start((plc_tag_p)tag);
         } else {
             /* only clear this if we are done. */
             tag->offset = 0;

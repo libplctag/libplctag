@@ -151,8 +151,8 @@ struct ab_request_t {
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);
 uint64_t session_get_new_seq_id(ab_session_p sess);
 
-extern int session_startup();
-extern void session_teardown();
+extern int session_startup(void);
+extern void session_teardown(void);
 
 extern int session_find_or_create(ab_session_p *session, attr attribs);
 extern int session_get_max_payload(ab_session_p session);

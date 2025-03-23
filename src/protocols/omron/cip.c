@@ -47,7 +47,7 @@
 
 
 
-static int encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
+static int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
 static int encode_tag_name(omron_tag_p tag, const char *name);
 static int lookup_encoded_type_size(uint8_t type_byte, int *type_size);
 static int lookup_data_element_size(uint8_t type_byte, int *element_size);
@@ -80,7 +80,7 @@ static int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t 
 
 
 
-int encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest)
+int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest)
 {
     size_t path_len = 0;
     size_t conn_path_index = 0;
@@ -89,7 +89,7 @@ int encode_path(const char *path, int *needs_connection, plc_type_t plc_type, ui
     uint8_t dhp_src_node = 0;
     uint8_t dhp_dest_node = 0;
     // uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
-    size_t max_conn_path_size = (*tmp_conn_path_size) - MAX_IP_ADDR_SEG_LEN;
+    size_t max_conn_path_size = (size_t)(*tmp_conn_path_size) - (size_t)MAX_IP_ADDR_SEG_LEN;
 
     pdebug(DEBUG_DETAIL, "Starting");
 
@@ -134,49 +134,23 @@ int encode_path(const char *path, int *needs_connection, plc_type_t plc_type, ui
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    // if(*is_dhp && (plc_type == OMRON_PLC_PLC5 || plc_type == OMRON_PLC_SLC || plc_type == OMRON_PLC_MLGX)) {
-    //     /* DH+ bridging always needs a connection. */
-    //     *needs_connection = 1;
+    if(*needs_connection) {
+        pdebug(DEBUG_DETAIL, "PLC needs connection, adding path to the router object.");
 
-    //     /* add the special PCCC/DH+ routing on the end. */
-    //     tmp_conn_path[conn_path_index + 0] = 0x20;
-    //     tmp_conn_path[conn_path_index + 1] = 0xA6;
-    //     tmp_conn_path[conn_path_index + 2] = 0x24;
-    //     tmp_conn_path[conn_path_index + 3] = dhp_port;
-    //     tmp_conn_path[conn_path_index + 4] = 0x2C;
-    //     tmp_conn_path[conn_path_index + 5] = 0x01;
-    //     conn_path_index += 6;
+        /*
+            * we do a generic path to the router
+            * object in the PLC.  But only if the PLC is
+            * one that needs a connection.  For instance a
+            * Micro850 needs to work in connected mode.
+            */
+        tmp_conn_path[conn_path_index + 0] = 0x20;
+        tmp_conn_path[conn_path_index + 1] = 0x02;
+        tmp_conn_path[conn_path_index + 2] = 0x24;
+        tmp_conn_path[conn_path_index + 3] = 0x01;
+        conn_path_index += 4;
+    }
 
-    //     *dhp_dest = (uint16_t)dhp_dest_node;
-    // } else if(!*is_dhp) {
-        if(*needs_connection) {
-            pdebug(DEBUG_DETAIL, "PLC needs connection, adding path to the router object.");
-
-            /*
-             * we do a generic path to the router
-             * object in the PLC.  But only if the PLC is
-             * one that needs a connection.  For instance a
-             * Micro850 needs to work in connected mode.
-             */
-            tmp_conn_path[conn_path_index + 0] = 0x20;
-            tmp_conn_path[conn_path_index + 1] = 0x02;
-            tmp_conn_path[conn_path_index + 2] = 0x24;
-            tmp_conn_path[conn_path_index + 3] = 0x01;
-            conn_path_index += 4;
-        }
-
-        *dhp_dest = 0;
-    // } else {
-    //     /*
-    //      *we had the special DH+ format and it was
-    //      * either not last or not a PLC5/SLC.  That
-    //      * is an error.
-    //      */
-
-    //     *dhp_dest = 0;
-
-    //     return PLCTAG_ERR_BAD_PARAM;
-    // }
+    *dhp_dest = 0;
 
     /*
      * zero pad the path to a multiple of 16-bit

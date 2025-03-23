@@ -322,6 +322,8 @@ int build_read_request_connected(omron_tag_p tag, int byte_offset) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t read_cmd = OMRON_EIP_CMD_CIP_READ;
 
+    (void)byte_offset;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     /* get a request buffer */
@@ -429,6 +431,8 @@ int build_read_request_unconnected(omron_tag_p tag, int byte_offset) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t read_cmd = OMRON_EIP_CMD_CIP_READ;
     uint16_le tmp_uint16_le;
+
+    (void)byte_offset;
 
     pdebug(DEBUG_INFO, "Starting.");
 

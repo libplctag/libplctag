@@ -60,7 +60,7 @@ typedef struct {
 
     } services;
 
-    int32_t (*encode_path)(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
+    int32_t (*encode_path)(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
     int32_t (*encode_tag_name)(omron_tag_p tag,const char *name);
     int32_t (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
     int32_t (*lookup_data_element_size)(uint8_t type_byte, int *element_size);

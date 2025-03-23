@@ -67,7 +67,7 @@ int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type
     uint8_t dhp_src_node = 0;
     uint8_t dhp_dest_node = 0;
     // uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
-    size_t max_conn_path_size = (*tmp_conn_path_size) - MAX_IP_ADDR_SEG_LEN;
+    size_t max_conn_path_size = (size_t)(*tmp_conn_path_size) - MAX_IP_ADDR_SEG_LEN;
 
     pdebug(DEBUG_DETAIL, "Starting");
 

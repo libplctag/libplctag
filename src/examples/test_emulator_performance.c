@@ -73,12 +73,9 @@ struct {
 
 static void tag_callback(int32_t tag_id, int event, int status, void *index_arg);
 
-int main(int argc, char **argv) {
-    int32_t *tags = NULL;
-    int *statuses = NULL;
+int main(void) {
     int64_t test_interval_start = 0;
     int64_t test_interval_end = 0;
-    int64_t total_ms = 0;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -143,8 +140,10 @@ int main(int argc, char **argv) {
 
 
 void tag_callback(int32_t tag_id, int event, int status, void *index_arg) {
-    int32_t index = (intptr_t)index_arg;
+    int32_t index = (int32_t)(intptr_t)index_arg;
     int rc = PLCTAG_STATUS_OK;
+
+    (void)status;
 
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
