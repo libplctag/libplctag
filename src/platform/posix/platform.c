@@ -2113,7 +2113,7 @@ int sleep_ms(int ms) {
     wait_time.tv_nsec = ((long)ms % 1000) * 1000000; /* convert to nanoseconds */
 
     do {
-        int rc = nanosleep(&wait_time, &remainder);
+        rc = nanosleep(&wait_time, &remainder);
         if(rc < 0 && errno == EINTR) {
             /* we were interrupted, keep going. */
             wait_time = remainder;

@@ -816,7 +816,6 @@ int main(int argc, char **argv) {
         tag = plc_tag_create(tag_string, DATA_TIMEOUT);
         if(tag < 0) {
             printf("ERROR: %s: Could not create tag!\n", plc_tag_decode_error(tag));
-            rc = tag;
             break;
         }
 
