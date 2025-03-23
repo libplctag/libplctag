@@ -150,6 +150,9 @@ enum {
 extern int set_interrupt_handler(void (*handler)(void));
 
 
+#define RANDOM_U64_ERROR (UINT64_MAX)
+extern uint64_t util_random_u64(uint64_t upper_bound);
+
 
 #ifdef __cplusplus
 }
