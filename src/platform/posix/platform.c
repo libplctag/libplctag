@@ -701,7 +701,7 @@ int mutex_destroy(mutex_p *m) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if((*m)->locking_thread != NULL) { pdebug(DEBUG_WARN, "Destroying tag that is still locked!"); }
+    if((*m)->locking_thread != 0) { pdebug(DEBUG_WARN, "Destroying tag that is still locked!"); }
 
     if(pthread_mutex_destroy(&((*m)->p_mutex))) {
         pdebug(DEBUG_WARN, "error while attempting to destroy mutex.");
@@ -823,7 +823,7 @@ int thread_join(thread_p t) {
  * Detach the thread.  You cannot call thread_join on a detached thread!
  */
 
-extern int thread_detach() {
+extern int thread_detach(void) {
     pthread_detach(pthread_self());
 
     return PLCTAG_STATUS_OK;
@@ -1941,8 +1941,6 @@ int socket_close(sock_p s) {
 
 
 int socket_destroy(sock_p *s) {
-    int rc = PLCTAG_STATUS_OK;
-
     pdebug(DEBUG_INFO, "Starting.");
 
     if(!s || !*s) {
@@ -1954,7 +1952,6 @@ int socket_destroy(sock_p *s) {
     if((*s)->wake_read_fd != INVALID_SOCKET) {
         if(close((*s)->wake_read_fd)) {
             pdebug(DEBUG_WARN, "Error closing read wake socket!");
-            rc = PLCTAG_ERR_CLOSE;
         }
 
         (*s)->wake_read_fd = INVALID_SOCKET;
@@ -1963,7 +1960,6 @@ int socket_destroy(sock_p *s) {
     if((*s)->wake_write_fd != INVALID_SOCKET) {
         if(close((*s)->wake_write_fd)) {
             pdebug(DEBUG_WARN, "Error closing write wake socket!");
-            rc = PLCTAG_ERR_CLOSE;
         }
 
         (*s)->wake_write_fd = INVALID_SOCKET;

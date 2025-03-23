@@ -154,8 +154,8 @@ struct omron_request_t {
 uint64_t conn_get_new_seq_id_unsafe(omron_conn_p sess);
 uint64_t conn_get_new_seq_id(omron_conn_p sess);
 
-extern int conn_startup();
-extern void conn_teardown();
+extern int conn_startup(void);
+extern void conn_teardown(void);
 
 extern int conn_find_or_create(omron_conn_p *conn, attr attribs);
 extern int conn_get_max_payload(omron_conn_p conn);

@@ -97,7 +97,7 @@ attr_entry find_entry(attr a, const char *name)
  *
  * Create a new attr structure and return a pointer to it.
  */
-extern attr attr_create()
+extern attr attr_create(void)
 {
     return (attr)mem_alloc(sizeof(struct attr_t));
 }

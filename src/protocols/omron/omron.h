@@ -39,5 +39,5 @@
 #include <util/attr.h>
 
 void omron_teardown(void);
-int omron_init();
+int omron_init(void);
 plc_tag_p omron_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
