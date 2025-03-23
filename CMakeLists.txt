@@ -471,7 +471,7 @@ elseif (BUILD_EXAMPLES)
                             data_dumper
                             list_tags_logix
                             list_tags_micro8x0
-                            list_tags_omron
+                            list_tags_omron_incomplete
                             multithread
                             multithread_cached_read
                             multithread_plc5
@@ -494,6 +494,7 @@ elseif (BUILD_EXAMPLES)
                             test_callback_ex_modbus
                             test_connection_group
                             test_emulator_performance
+                            test_event
                             test_indexed_tags
                             test_raw_cip
                             test_reconnect
@@ -507,7 +508,7 @@ elseif (BUILD_EXAMPLES)
                             toggle_bool
                             trigger_double_free
                             write_string
-                            tag_rw
+                            tag_rw_deprecated
                             tag_rw2
                             )
 
@@ -518,7 +519,7 @@ elseif (BUILD_EXAMPLES)
                             async_stress
                             list_tags_logix
                             list_tags_micro8x0
-                            list_tags_omron
+                            list_tags_omron_incomplete
                             multithread
                             plc5
                             simple
@@ -531,8 +532,8 @@ elseif (BUILD_EXAMPLES)
                             test_callback_ex
                             test_connection_group
                             test_emulator_performance
+                            test_event
                             test_indexed_tags
-                            test_event_windows
                             test_raw_cip
                             test_shutdown
                             test_special
@@ -543,7 +544,7 @@ elseif (BUILD_EXAMPLES)
                             toggle_bit
                             toggle_bool
                             write_string
-                            tag_rw
+                            tag_rw_deprecated
                             tag_rw2
                             )
 
