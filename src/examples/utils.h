@@ -65,7 +65,10 @@
 extern "C" {
 #endif
 
-extern int util_sleep_ms(int ms);
+/* use the C11 routines for sleeping */
+// extern int util_sleep_ms(int ms);
+
+
 extern int64_t util_time_ms(void);
 
 #ifdef __STDC_NO_THREADS__
@@ -94,8 +97,11 @@ typedef CONDITION_VARIABLE cnd_t;
     #error "Not a supported platform!"
 #endif
 
+/* C11 thread, mutex and condition variable API definitions taken from the C11 spec */
+
 /* threads */
 
+/* the C11 spec does not say what these values are, so we guess! */
 enum {
     thrd_success = 0,
     thrd_error = 1
@@ -140,6 +146,13 @@ extern int cnd_wait(cnd_t *cond, mtx_t *mtx);
 
 
 #endif
+
+/* helpful versions of the C11 theads API, struct timespec is useful but not particularly friendly */
+
+extern int thrd_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms);
+extern int mtx_timedlock_ms(mtx_t *mtx, const uint32_t timeout_duration_ms, uint32_t *remaining_duration_ms);
+extern int cnd_timedwait_ms(cnd_t *cond, mtx_t *mtx, const uint32_t timeout_duration_ms, uint32_t *remaining_duration_ms);
+
 
 enum {
     INTERRUPT_HANDLER_SUCCESS,
