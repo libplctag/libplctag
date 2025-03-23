@@ -61,10 +61,10 @@
 
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) \
     || defined(__DragonFly__)
-    #define BSD_OS_TYPE
-    #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
-        #define _DARWIN_C_SOURCE _POSIX_C_SOURCE
-    #endif
+#    define BSD_OS_TYPE
+#    if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#        define _DARWIN_C_SOURCE _POSIX_C_SOURCE
+#    endif
 #endif
 
 
@@ -1118,7 +1118,7 @@ int cond_destroy(cond_p *c) {
 
 
 #ifndef INVALID_SOCKET
-    #define INVALID_SOCKET (-1)
+#    define INVALID_SOCKET (-1)
 #endif
 
 struct sock_t {
@@ -1379,7 +1379,6 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
             pdebug(DEBUG_DETAIL, "Socket is probably connected.");
-            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "select() returned but socket is not connected!");
             return PLCTAG_ERR_BAD_REPLY;
@@ -1425,10 +1424,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     if(rc == 0) {
         /* sock_err has the error. */
         switch(sock_err) {
-            case 0:
-                pdebug(DEBUG_DETAIL, "No error, socket is connected.");
-                rc = PLCTAG_STATUS_OK;
-                break;
+            case 0: pdebug(DEBUG_DETAIL, "No error, socket is connected."); break;
 
             case EBADF:
                 pdebug(DEBUG_WARN, "Socket fd is not valid!");
@@ -1547,7 +1543,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             char buf[32];
 
             /* empty the socket. */
-            while((bytes_read = (int)read(sock->wake_read_fd, &buf[0], sizeof(buf))) > 0) {}
+            while((int)read(sock->wake_read_fd, &buf[0], sizeof(buf)) > 0) {}
 
             pdebug(DEBUG_DETAIL, "Socket woken up.");
             result |= (events & SOCK_EVENT_WAKE_UP);
@@ -1950,17 +1946,13 @@ int socket_destroy(sock_p *s) {
 
     /* close the wake sockets */
     if((*s)->wake_read_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_read_fd)) {
-            pdebug(DEBUG_WARN, "Error closing read wake socket!");
-        }
+        if(close((*s)->wake_read_fd)) { pdebug(DEBUG_WARN, "Error closing read wake socket!"); }
 
         (*s)->wake_read_fd = INVALID_SOCKET;
     }
 
     if((*s)->wake_write_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_write_fd)) {
-            pdebug(DEBUG_WARN, "Error closing write wake socket!");
-        }
+        if(close((*s)->wake_write_fd)) { pdebug(DEBUG_WARN, "Error closing write wake socket!"); }
 
         (*s)->wake_write_fd = INVALID_SOCKET;
     }
