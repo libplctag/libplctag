@@ -898,7 +898,7 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
         // int64_t periods = (time_ms() / tag->auto_sync_read_ms);
         // tag->auto_sync_next_read = (periods + 1) * tag->auto_sync_read_ms;
         /* start some time in the future, but with random jitter. */
-        tag->auto_sync_next_read = time_ms() + (random_u64((uint64_t)tag->auto_sync_read_ms));
+        tag->auto_sync_next_read = time_ms() + (int64_t)(random_u64((uint64_t)tag->auto_sync_read_ms));
     }
 
     tag->auto_sync_write_ms = attr_get_int(attribs, "auto_sync_write_ms", 0);
@@ -912,7 +912,7 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
     }
 
     /* See if we are allowed to resize fields */
-    tag->allow_field_resize = (uint8_t)attr_get_int(attribs, "allow_field_resize", 0);
+    tag->allow_field_resize = (uint8_t)(attr_get_int(attribs, "allow_field_resize", 0) ? 1 : 0);
 
     /* set up the tag byte order if there are any overrides. */
     rc = set_tag_byte_order(tag, attribs);
@@ -1140,17 +1140,26 @@ LIB_EXPORT void plc_tag_shutdown(void) {
  * Also see plc_tag_register_callback_ex.
  */
 
+
+ /* there needs to be a better way to make the cast clean than this! */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+
+
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
 
     rc = plc_tag_register_callback_ex(tag_id, (tag_extended_callback_func)callback_func, NULL);
-
+    
     pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
+
+#pragma GCC diagnostic pop
+
 
 
 /*
@@ -2155,7 +2164,6 @@ static int plc_tag_get_bit_impl(plc_tag_p tag, int offset_bit) {
 
 LIB_EXPORT int plc_tag_get_bit(int32_t id, int offset_bit) {
     int res = PLCTAG_ERR_OUT_OF_BOUNDS;
-    int real_offset = offset_bit;
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -2223,7 +2231,6 @@ static int plc_tag_set_bit_impl(plc_tag_p tag, int offset_bit, int val) {
 
 LIB_EXPORT int plc_tag_set_bit(int32_t id, int offset_bit, int val) {
     int res = PLCTAG_STATUS_OK;
-    int real_offset = offset_bit;
     plc_tag_p tag = lookup_tag(id);
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -2258,7 +2265,7 @@ LIB_EXPORT uint64_t plc_tag_get_uint64(int32_t id, int offset) {
         if(!tag->data) {
             pdebug(DEBUG_WARN, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
-            res = PLCTAG_ERR_NO_DATA;
+            res = UINT64_MAX;
             break;
         }
 
@@ -2474,7 +2481,7 @@ LIB_EXPORT uint32_t plc_tag_get_uint32(int32_t id, int offset) {
         if(!tag->data) {
             pdebug(DEBUG_WARN, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
-            res = PLCTAG_ERR_NO_DATA;
+            res = UINT32_MAX;
             break;
         }
 
@@ -2669,7 +2676,7 @@ LIB_EXPORT uint16_t plc_tag_get_uint16(int32_t id, int offset) {
         if(!tag->data) {
             pdebug(DEBUG_WARN, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
-            res = PLCTAG_ERR_NO_DATA;
+            res = UINT16_MAX;
             break;
         }
 
@@ -2861,7 +2868,7 @@ LIB_EXPORT uint8_t plc_tag_get_uint8(int32_t id, int offset) {
         if(!tag->data) {
             pdebug(DEBUG_WARN, "Tag has no data!");
             tag->status = PLCTAG_ERR_NO_DATA;
-            res = PLCTAG_ERR_NO_DATA;
+            res = UINT8_MAX;
             break;
         }
 
@@ -3312,7 +3319,7 @@ LIB_EXPORT int plc_tag_get_string(int32_t tag_id, int string_start_offset, char 
                     (((size_t)(unsigned int)i) ^ (tag->byte_order->str_is_byte_swapped)) /* byte swap if necessary */
                     + (size_t)(unsigned int)string_start_offset + (size_t)(unsigned int)(tag->byte_order->str_count_word_bytes);
 
-                if(char_index < tag->size) {
+                if(char_index < (size_t)tag->size) {
                     buffer[i] = (char)tag->data[char_index];
                 } else {
                     pdebug(DEBUG_WARN, "Out of bounds index, %zu, generated!", char_index);
@@ -3381,7 +3388,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         return PLCTAG_ERR_UNSUPPORTED;
     }
 
-    string_length = str_length(string_val);
+    string_length = (unsigned int)str_length(string_val);
 
     /* will the string fit in the space on the PLC?  If we have a max capacity we check. */
     if(tag->byte_order->str_max_capacity && string_length > tag->byte_order->str_max_capacity) {
@@ -3396,7 +3403,6 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
     /* we may be changing things, so take the mutex */
     critical_block(tag->api_mutex) {
-        unsigned int string_last_offset = 0;
         int old_string_size_in_buffer = 0;
         int new_string_size_in_buffer = 0;
 
@@ -3430,7 +3436,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
         /* zero out the string data in the buffer. */
         pdebug(DEBUG_DETAIL, "Zeroing out the string data in the buffer.");
-        for(unsigned int i = string_start_offset; i < (string_start_offset + new_string_size_in_buffer) && i < tag->size; i++) {
+        for(unsigned int i = (unsigned int)string_start_offset; i < (unsigned int)(string_start_offset + new_string_size_in_buffer) && i < (unsigned int)tag->size; i++) {
             tag->data[i] = 0;
         }
 
@@ -3541,7 +3547,7 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
         if(tag->byte_order->str_is_zero_terminated) {
             pdebug(DEBUG_DETAIL, "Setting the nul termination byte.");
 
-            if(string_data_start_offset + string_length < tag->size) {
+            if(string_data_start_offset + string_length < (unsigned int)tag->size) {
                 tag->data[string_data_start_offset + string_length] = (uint8_t)0;
             } else {
                 pdebug(DEBUG_WARN, "Index of nul termination byte, %u, is outside of the tag data of %u bytes!",
@@ -4388,7 +4394,8 @@ int get_string_length_unsafe(plc_tag_p tag, int offset) {
 
 
 int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
-    int string_size_in_buffer = 0;
+    int rc = PLCTAG_STATUS_OK;
+    unsigned int string_size_in_buffer = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -4406,19 +4413,19 @@ int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
                 pdebug(
                     DEBUG_WARN,
                     "Unsupported configuration.  You must set the total string length if you set the flag for string is fixed size!");
-                string_size_in_buffer = PLCTAG_ERR_BAD_CONFIG;
+                rc = PLCTAG_ERR_BAD_CONFIG;
                 break;
             }
         }
 
         /* add the incoming string size. */
-        string_size_in_buffer = string_length;
+        string_size_in_buffer = (unsigned int)string_length;
         pdebug(DEBUG_DETAIL, "String size in buffer is at least %u after the incoming string length %u.", string_size_in_buffer,
                string_length);
 
         /* OK the string will fit, now lets add the count word if any. */
         if(tag->byte_order->str_count_word_bytes) {
-            string_size_in_buffer += (int)(tag->byte_order->str_count_word_bytes);
+            string_size_in_buffer += tag->byte_order->str_count_word_bytes;
             pdebug(DEBUG_DETAIL, "String size in buffer is %u after adding count word size, %u.", string_size_in_buffer,
                    tag->byte_order->str_count_word_bytes);
         }
@@ -4449,14 +4456,14 @@ int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
 
     } while(0);
 
-    if(string_size_in_buffer >= 0) {
+    if(rc == PLCTAG_STATUS_OK) {
         pdebug(DEBUG_DETAIL, "Done with size %d.", string_size_in_buffer);
+        return (int)string_size_in_buffer;
     } else {
         pdebug(DEBUG_WARN, "Error %s found while calculating the new string size in the tag buffer.",
-               plc_tag_decode_error(string_size_in_buffer));
+               plc_tag_decode_error(rc));
+               return rc;
     }
-
-    return string_size_in_buffer;
 }
 
 

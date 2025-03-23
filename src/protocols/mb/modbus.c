@@ -648,7 +648,7 @@ void modbus_plc_destructor(void *plc_arg) {
     do {                                                                                   \
         err_delay = err_delay * 2;                                                         \
         if(err_delay > PLC_SOCKET_ERR_MAX_DELAY) { err_delay = PLC_SOCKET_ERR_MAX_DELAY; } \
-        err_delay_until = (int64_t)(random_u64(err_delay)) + time_ms();                    \
+        err_delay_until = (int64_t)random_u64((uint64_t)err_delay) + time_ms();                    \
     } while(0)
 
 
@@ -2398,7 +2398,7 @@ void mb_teardown(void) {
 }
 
 
-int mb_init() {
+int mb_init(void) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
