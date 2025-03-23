@@ -37,24 +37,52 @@
 
 
 /* FIXME - move this all over into a compatibility/platform check header */
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || (__linux__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
     #include <stdlib.h>
-    #define USE_ARC4RANDOM
-#elif defined(_WIN32) || defined(_WIN64)
-    #include <wincrypt.h>
-    #include <windows.h>
-    #define USE_BCRYPTGENRANDOM
-#else
-    #error "Platform does not support good random function!"
-#endif
 
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
-#ifdef USE_ARC4RANDOM
     arc4random_buf(&random_number, sizeof(random_number));
     random_number %= upper_bound;
-#else /* defined(USE_BCRYPTGENRANDOM) */
+
+    return random_number;
+}
+
+#elif defined(__linux__)
+#include <stdlib.h>
+#include <sys/random.h>
+
+
+uint64_t random_u64(uint64_t upper_bound) {
+    uint64_t random_number = 0;
+
+    if (upper_bound == 0) {
+        return 0;
+    }
+
+    if (getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
+        /* not enough entropy, do it the hard way. */
+        srand((unsigned int)((uint64_t)time(NULL) ^ random_number));
+        for (size_t i = 0; i < sizeof(random_number); ++i) {
+            ((uint8_t*)&random_number)[i] ^= (uint8_t)(rand() % 256);
+        }
+    }
+
+    random_number %= upper_bound;
+
+    return random_number;
+}
+
+
+#elif defined(_WIN32) || defined(_WIN64)
+    #include <wincrypt.h>
+    #include <windows.h>
+
+
+uint64_t random_u64(uint64_t upper_bound) {
+    uint64_t random_number = 0;
+
     if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
         pdebug(DEBUG_WARN, "BCryptGenRandom failed, returning error");
         return RANDOM_U64_ERROR;
@@ -64,7 +92,13 @@ uint64_t random_u64(uint64_t upper_bound) {
         return 0;
     }
     random_number %= upper_bound;
-#endif
 
     return random_number;
 }
+    
+
+
+#else
+    #error "Platform does not support good random function!"
+#endif
+
