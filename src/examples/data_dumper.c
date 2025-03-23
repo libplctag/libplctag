@@ -70,7 +70,7 @@ struct {
 int num_tags = 0;
 
 
-volatile sig_atomic_t terminate = 0;
+volatile int terminate = 0;
 
 
 int is_comment(const char *line) {
@@ -172,6 +172,7 @@ int process_line(const char *line) {
             if(parts[i] == NULL) {
                 fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
                 free(parts);
+                parts = NULL;
                 rc = PLCTAG_ERR_BAD_CONFIG;
                 break;
             }
@@ -207,7 +208,10 @@ int process_line(const char *line) {
         }
     } while(0);
 
-    if(parts) { free(parts); }
+    if(parts) {
+        free(parts);
+        parts = NULL;
+    }
 
     if(rc != PLCTAG_STATUS_OK) {
         free(tags[num_tags].name);
@@ -438,11 +442,7 @@ int start_reads() {
 }
 
 
-void SIGINT_handler(int not_used) {
-    (void)not_used;
-
-    terminate = 1;
-}
+void interrupt_handler(void) { terminate = 1; }
 
 void usage(void) {
     fprintf(stderr, "Usage: data_dumper <config file>\n");
@@ -471,9 +471,9 @@ int main(int argc, char **argv) {
     }
 
     /* set up signal handler first. */
-    act.sa_handler = SIGINT_handler;
-    sigaction(SIGINT, &act, NULL);
+    set_interrupt_handler(interrupt_handler);
 
+    /* clear the array of tags. */
     memset(&tags, 0, sizeof(tags));
 
     if(argc < 2) {
@@ -489,7 +489,7 @@ int main(int argc, char **argv) {
     }
 
     /* wait for all tags to be ready */
-    while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { util_sleep_ms(1); }
+    while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { thrd_sleep_ms(10, NULL); }
 
     if(rc != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Error waiting for tags to finish being set up, %s!\n", plc_tag_decode_error(rc));
@@ -509,7 +509,7 @@ int main(int argc, char **argv) {
             /* reads kicked off successfully */
 
             /* wait for the reads to complete */
-            while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { util_sleep_ms(1); }
+            while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { thrd_sleep_ms(10, NULL); }
 
             end = util_time_ms();
 
@@ -528,10 +528,10 @@ int main(int argc, char **argv) {
 
         if(rc != PLCTAG_STATUS_OK) {
             /* delay a long delay to let the library reconnect. */
-            util_sleep_ms(RECONNECT_DELAY_MS);
+            thrd_sleep_ms(RECONNECT_DELAY_MS, NULL);
         } else {
             /* delay a tiny bit. */
-            util_sleep_ms(1);
+            thrd_sleep_ms(10, NULL);
         }
     }
 

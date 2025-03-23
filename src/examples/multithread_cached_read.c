@@ -110,7 +110,7 @@ int thread_func(void *data) {
                 plc_tag_decode_error(rc), (int)(end - start));
 
         /* this is really too low */
-        util_sleep_ms(10);
+        thrd_sleep_ms(10, NULL);
     }
 
     return 0;
@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
     }
 
     /* wait until ^C */
-    while(!done) { util_sleep_ms(100); }
+    while(!done) { thrd_sleep_ms(100, NULL); }
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) { thrd_join(thread[thread_id], NULL); }
 

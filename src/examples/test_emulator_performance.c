@@ -45,9 +45,9 @@
 #include <stdlib.h>
 #include <string.h>
 #if defined(WIN32) || defined(_WIN32)
-    #include <Windows.h>
+#    include <Windows.h>
 #else
-    #include <signal.h>
+#    include <signal.h>
 #endif
 #include "../lib/libplctag.h"
 #include "utils.h"
@@ -112,7 +112,7 @@ int main(void) {
         }
 
         /* wait for the iteration cycle time */
-        while(util_time_ms() < test_interval_end && !failed) { util_sleep_ms(100); }
+        while(util_time_ms() < test_interval_end && !failed) { thrd_sleep_ms(100, NULL); }
 
         if(!failed) {
             /* calculate statistics */

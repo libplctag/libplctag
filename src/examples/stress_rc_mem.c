@@ -32,25 +32,23 @@
  ***************************************************************************/
 
 
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <stdint.h>
-#include <string.h>
-#include <sys/time.h>
-#include <signal.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
-#include <threads.h> 
-#include <inttypes.h>  
+#include <inttypes.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+#include <unistd.h>
 
- 
-/* 
+
+/*
     The purpose of this program is to stress the ref count system and make sure
     that there are no leaks and no use-after-free problems.
 */
-
 
 
 static volatile int terminate = 0;
@@ -59,14 +57,12 @@ static void signal_handler(int signum);
 static int thread_func(void *arg);
 
 
-
 #define NUM_THREADS 10
 
 
-int main(void)
-{   
+int main(void) {
     thrd_t threads[NUM_THREADS] = {0};
-    
+
     /* Set up the signal handler */
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -74,12 +70,12 @@ int main(void)
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
 
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
+    if(sigaction(SIGINT, &sa, NULL) == -1) {
         perror("Error setting up SIGINT signal handler");
         return 1;
     }
 
-    if (sigaction(SIGTERM, &sa, NULL) == -1) {
+    if(sigaction(SIGTERM, &sa, NULL) == -1) {
         perror("Error setting up SIGTERM signal handler");
         return 1;
     }
@@ -89,7 +85,7 @@ int main(void)
     plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
 
     /* create 10 threads to run thread_func() */
-    for(int task_id=0; task_id < NUM_THREADS; task_id++) {
+    for(int task_id = 0; task_id < NUM_THREADS; task_id++) {
         int rc = thrd_create(&threads[task_id], thread_func, (void *)(intptr_t)task_id);
         if(rc != thrd_success) {
             fprintf(stderr, "Error creating thread %d\n", task_id);
@@ -98,22 +94,17 @@ int main(void)
     }
 
     /* wait while we test */
-    while(!terminate){
-        util_sleep_ms(100);
-    }
-    
-    for(int task_id=0; task_id < NUM_THREADS; task_id++) {
-        thrd_join(threads[task_id], NULL);
-    }
+    while(!terminate) { thrd_sleep_ms(100, NULL); }
 
-    return 0;   
+    for(int task_id = 0; task_id < NUM_THREADS; task_id++) { thrd_join(threads[task_id], NULL); }
+
+    return 0;
 }
-
 
 
 /* a signal handling function that sets terminate to 1. */
 void signal_handler(int signum) {
-    if (signum == SIGINT || signum == SIGTERM) {
+    if(signum == SIGINT || signum == SIGTERM) {
         terminate = 1;
         // fprintf(stderr, "Termination signal received. Exiting...\n");
     }
@@ -131,7 +122,8 @@ int thread_func(void *arg) {
     int32_t tag = 0;
     char tag_str[250] = {0};
 
-    snprintf(tag_str, sizeof(tag_str), "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestTag&connection_group_id=%d", task_id);
+    snprintf(tag_str, sizeof(tag_str),
+             "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestTag&connection_group_id=%d", task_id);
 
     while(!terminate) {
         fprintf(stderr, "Task %d creating tag\n", task_id);
@@ -140,16 +132,16 @@ int thread_func(void *arg) {
         if(tag < 0) {
             fprintf(stderr, "Task %d tag creation failed with error %s\n", task_id, plc_tag_decode_error(tag));
 
-            util_sleep_ms(100);
+            thrd_sleep_ms(100, NULL);
             continue;
         }
 
         fprintf(stderr, "Task %d reading tag %" PRId32 "\n", task_id, tag);
-        
+
         do {
             rc = plc_tag_read(tag, 5000);
-            if(rc == PLCTAG_STATUS_OK) {  
-                util_sleep_ms(10);
+            if(rc == PLCTAG_STATUS_OK) {
+                thrd_sleep_ms(10, NULL);
             } else {
                 fprintf(stderr, "Task %d read failed with error %s\n", task_id, plc_tag_decode_error(rc));
             }
@@ -158,11 +150,8 @@ int thread_func(void *arg) {
         fprintf(stderr, "Task %d destroying tag %" PRId32 "\n", task_id, tag);
         plc_tag_destroy(tag);
 
-        util_sleep_ms(10);
+        thrd_sleep_ms(10, NULL);
     }
 
     return 0;
 }
-
-
-

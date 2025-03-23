@@ -32,19 +32,20 @@
  ***************************************************************************/
 
 
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <stdint.h>
-#include <inttypes.h>
-#include <sys/time.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
+#include <inttypes.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 
-#define REQUIRED_VERSION 2,4,7
-#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
+#define REQUIRED_VERSION 2, 4, 7
+#define TAG_ATTRIBS \
+    "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
@@ -58,8 +59,7 @@ static volatile int write_start_count = 0;
 static volatile int write_complete_count = 0;
 
 
-void *reader_function(void *tag_arg)
-{
+void *reader_function(void *tag_arg) {
     int32_t tag = (int32_t)(intptr_t)tag_arg;
     int64_t start_time = util_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
@@ -68,55 +68,49 @@ void *reader_function(void *tag_arg)
     while(run_until > util_time_ms()) {
         int32_t val = plc_tag_get_int32(tag, 0);
 
-        fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val, util_time_ms()-start_time);
+        fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val,
+                util_time_ms() - start_time);
 
-        util_sleep_ms(READ_SLEEP_MS);
+        thrd_sleep_ms(READ_SLEEP_MS, NULL);
     }
 
     return NULL;
 }
 
 
-void *writer_function(void *tag_arg)
-{
+void *writer_function(void *tag_arg) {
     int32_t tag = (int32_t)(intptr_t)tag_arg;
     int64_t start_time = util_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    util_sleep_ms(WRITE_SLEEP_MS);
+    thrd_sleep_ms(WRITE_SLEEP_MS, NULL);
 
     while(run_until > util_time_ms()) {
         int32_t val = plc_tag_get_int32(tag, 0);
-        int32_t new_val = ((val+1) > 499) ? 0 : (val+1);
+        int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
 
         /* write the value */
         plc_tag_set_int32(tag, 0, new_val);
 
-        fprintf(stderr, "WRITER: Iteration %d, wrote value: %d at time %" PRId64 "\n", iteration++, new_val, util_time_ms()-start_time);
+        fprintf(stderr, "WRITER: Iteration %d, wrote value: %d at time %" PRId64 "\n", iteration++, new_val,
+                util_time_ms() - start_time);
 
-        util_sleep_ms(WRITE_SLEEP_MS);
+        thrd_sleep_ms(WRITE_SLEEP_MS, NULL);
     }
 
     return NULL;
 }
 
 
-void tag_callback(int32_t tag_id, int event, int status)
-{
+void tag_callback(int32_t tag_id, int event, int status) {
     /* handle the events. */
     switch(event) {
-        case PLCTAG_EVENT_ABORTED:
-            fprintf(stderr, "Tag %d automatic operation was aborted!\n", tag_id);
-            break;
+        case PLCTAG_EVENT_ABORTED: fprintf(stderr, "Tag %d automatic operation was aborted!\n", tag_id); break;
 
-        case PLCTAG_EVENT_CREATED:
-            fprintf(stderr, "Tag was creation finished.\n");
-            break;
+        case PLCTAG_EVENT_CREATED: fprintf(stderr, "Tag was creation finished.\n"); break;
 
-        case PLCTAG_EVENT_DESTROYED:
-            fprintf(stderr, "Tag was destroyed.\n");
-            break;
+        case PLCTAG_EVENT_DESTROYED: fprintf(stderr, "Tag was destroyed.\n"); break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
             read_complete_count++;
@@ -139,18 +133,12 @@ void tag_callback(int32_t tag_id, int event, int status)
 
             break;
 
-        default:
-            fprintf(stderr, "Unexpected event %d on tag %d!\n", event, tag_id);
-            break;
-
+        default: fprintf(stderr, "Unexpected event %d on tag %d!\n", event, tag_id); break;
     }
 }
 
 
-
-
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
     int32_t tag = 0;
     pthread_t read_thread, write_thread;
@@ -204,18 +192,22 @@ int main(int argc, char **argv)
     plc_tag_destroy(tag);
 
     /* check the results. */
-    fprintf(stderr, "Total reads triggered %d, finished %d, and total expected %d.\n", read_start_count, read_complete_count, RUN_PERIOD/READ_PERIOD_MS);
-    fprintf(stderr, "Total writes triggered %d, finished %d, and total expected %d.\n", write_start_count, write_complete_count, RUN_PERIOD/WRITE_SLEEP_MS);
+    fprintf(stderr, "Total reads triggered %d, finished %d, and total expected %d.\n", read_start_count, read_complete_count,
+            RUN_PERIOD / READ_PERIOD_MS);
+    fprintf(stderr, "Total writes triggered %d, finished %d, and total expected %d.\n", write_start_count, write_complete_count,
+            RUN_PERIOD / WRITE_SLEEP_MS);
 
     rc = 0;
 
-    if(abs((RUN_PERIOD/READ_PERIOD_MS) - read_start_count) > 3) {
-        fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_start_count, (RUN_PERIOD/READ_PERIOD_MS));
+    if(abs((RUN_PERIOD / READ_PERIOD_MS) - read_start_count) > 3) {
+        fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_start_count,
+                (RUN_PERIOD / READ_PERIOD_MS));
         rc = 1;
     }
 
-    if(abs((RUN_PERIOD/WRITE_SLEEP_MS) - write_start_count) > 3) {
-        fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_start_count, (RUN_PERIOD/WRITE_SLEEP_MS));
+    if(abs((RUN_PERIOD / WRITE_SLEEP_MS) - write_start_count) > 3) {
+        fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_start_count,
+                (RUN_PERIOD / WRITE_SLEEP_MS));
         rc = 1;
     }
 

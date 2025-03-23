@@ -44,38 +44,6 @@
 
 
 /*
- * util_sleep_ms
- *
- * Sleep the passed number of milliseconds.
- */
-
-#if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
-
-#    include <errno.h>
-
-int util_sleep_ms(int ms) {
-    struct timespec ts;
-    int rc;
-
-    ts.tv_sec = ms / 1000;
-    ts.tv_nsec = (ms % 1000) * 1000000;
-
-    do { rc = nanosleep(&ts, &ts); } while(rc && errno == EINTR);
-
-    return rc;
-}
-
-#elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
-int util_sleep_ms(int ms) {
-    Sleep(ms);
-    return 1;
-}
-#else
-#    error "Not a supported platform!"
-#endif
-
-
-/*
  * util_time_ms
  *
  * Return current system time in millisecond units.  This is NOT an
@@ -129,6 +97,7 @@ int thrd_create(thrd_t *thrd, int (*func)(void *), void *arg_ptr) {
     pthread_attr_t attr;
     int rc;
 
+    /* FIXME - do we need to set reentrant here too? */
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
@@ -217,7 +186,7 @@ int mtx_timedlock(mtx_t *mtx, const struct timespec *abs_timeout_time) {
         }
 
         if(mtx_trylock(mtx) == thrd_success) { return thrd_success; }
-        util_sleep_ms(10);
+        thrd_sleep_ms(10, NULL);
     }
 }
 #        endif
@@ -296,6 +265,7 @@ void thrd_yield(void) { SwitchToThread(); }
 /* mutexes */
 
 int mtx_init(mtx_t *mtx, int type) {
+    (void)type; /* FIXME - double check that Windows does not have something here? */
     InitializeCriticalSection(mtx);
     return thrd_success;
 }
@@ -315,7 +285,7 @@ int mtx_timedlock(mtx_t *mtx, const struct timespec *abs_timeout_time) {
         if(GetTickCount() - start_time >= ms) {
             return thrd_error;  // Timeout
         }
-        Sleep(1);
+        Sleep(5); /* FIXME - should this just be yield? */
     }
 }
 
@@ -328,7 +298,7 @@ int mtx_trylock(mtx_t *mtx) {
 }
 
 int mtx_unlock(mtx_t *mtx) {
-    LeaveCriticalSection(mtx);
+    LeaveCriticalSection(mtx); /* FIXME- what happens if the mutex was not locked? */
     return thrd_success;
 }
 
@@ -369,7 +339,7 @@ int cnd_timedwait(cnd_t *cond, mtx_t *mtx, const struct timespec *abs_timeout_ti
 }
 
 int cnd_wait(cnd_t *cond, mtx_t *mtx) {
-    SleepConditionVariableCS(cond, mtx, INFINITE);
+    SleepConditionVariableCS(cond, mtx, INFINITE); /* Can this be interrupted? */
     return thrd_success;
 }
 
@@ -381,9 +351,88 @@ int cnd_wait(cnd_t *cond, mtx_t *mtx) {
 
 #endif /* __STDC_NO_THREADS__ */
 
+
+/* our helper functions for C11 waits */
+int thrd_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {
+    int rc = thrd_success;
+    int64_t start_time = util_time_ms();
+    int64_t end_time = 0;
+    struct timespec ts;
+
+    ts.tv_sec = sleep_duration_ms / 1000;
+    ts.tv_nsec = (sleep_duration_ms % 1000) * 1000000;
+
+    rc = thrd_sleep(&ts, NULL);
+
+    end_time = util_time_ms();
+
+    if(remaining_duration_ms) {
+        if(end_time <= start_time + sleep_duration_ms) {
+            *remaining_duration_ms = (uint32_t)0;
+        } else {
+            *remaining_duration_ms = (uint32_t)(end_time - start_time);
+        }
+    }
+
+    return rc;
+}
+
+
+int mtx_timedlock_ms(mtx_t *mtx, const uint32_t timeout_duration_ms, uint32_t *remaining_duration_ms) {
+    int rc = thrd_success;
+    int64_t start_time = util_time_ms();
+    int64_t end_time = 0;
+    struct timespec ts;
+
+    ts.tv_sec = (long)(timeout_duration_ms / 1000);
+    ts.tv_nsec = (long)((timeout_duration_ms % 1000) * 1000000);
+
+    rc = mtx_timedlock(mtx, &ts);
+
+    end_time = util_time_ms();
+
+    if(remaining_duration_ms) {
+        if(end_time <= start_time + timeout_duration_ms) {
+            *remaining_duration_ms = (uint32_t)0;
+        } else {
+            *remaining_duration_ms = (uint32_t)(end_time - start_time);
+        }
+    }
+
+    return rc;
+}
+
+
+int cnd_timedwait_ms(cnd_t *cond, mtx_t *mtx, const uint32_t timeout_duration_ms, uint32_t *remaining_duration_ms) {
+    int rc = thrd_success;
+    int64_t start_time = util_time_ms();
+    int64_t end_time = 0;
+    struct timespec ts;
+
+    if(timeout_duration_ms == 0) { return thrd_error; }
+
+    ts.tv_sec = (long)(timeout_duration_ms / 1000);
+    ts.tv_nsec = (long)((timeout_duration_ms % 1000) * 1000000);
+
+    rc = cnd_timedwait(cond, mtx, &ts);
+
+    end_time = util_time_ms();
+
+    if(remaining_duration_ms) {
+        if(end_time <= start_time + timeout_duration_ms) {
+            *remaining_duration_ms = (uint32_t)0;
+        } else {
+            *remaining_duration_ms = (uint32_t)(end_time - start_time);
+        }
+    }
+
+    return rc;
+}
+
+
 #if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
 
-#include <signal.h>
+#    include <signal.h>
 
 static void (*interrupt_handler)(void) = NULL;
 
@@ -451,11 +500,9 @@ int set_interrupt_handler(void (*handler)(void)) {
 #endif
 
 
-
-
 /* FIXME - move this all over into a compatibility/platform check header */
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-    #include <stdlib.h>
+#    include <stdlib.h>
 
 uint64_t util_random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
@@ -467,23 +514,19 @@ uint64_t util_random_u64(uint64_t upper_bound) {
 }
 
 #elif defined(__linux__)
-#include <stdlib.h>
-#include <sys/random.h>
+#    include <stdlib.h>
+#    include <sys/random.h>
 
 
 uint64_t util_random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
-    if (upper_bound == 0) {
-        return 0;
-    }
+    if(upper_bound == 0) { return 0; }
 
-    if (getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
+    if(getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
         /* not enough entropy, do it the hard way. */
         srand((unsigned int)((uint64_t)time(NULL) ^ random_number));
-        for (size_t i = 0; i < sizeof(random_number); ++i) {
-            ((uint8_t*)&random_number)[i] ^= (uint8_t)(rand() % 256);
-        }
+        for(size_t i = 0; i < sizeof(random_number); ++i) { ((uint8_t *)&random_number)[i] ^= (uint8_t)(rand() % 256); }
     }
 
     random_number %= upper_bound;
@@ -493,8 +536,8 @@ uint64_t util_random_u64(uint64_t upper_bound) {
 
 
 #elif defined(_WIN32) || defined(_WIN64)
-    #include <wincrypt.h>
-    #include <windows.h>
+#    include <wincrypt.h>
+#    include <windows.h>
 
 
 uint64_t util_random_u64(uint64_t upper_bound) {
@@ -512,8 +555,7 @@ uint64_t util_random_u64(uint64_t upper_bound) {
 
     return random_number;
 }
-    
+
 #else
 #    error "Unsupported platform!"
 #endif
-

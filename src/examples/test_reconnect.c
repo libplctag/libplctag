@@ -32,24 +32,23 @@
  ***************************************************************************/
 
 
-#include <stdio.h>
-#include <stdlib.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-#define REQUIRED_VERSION 2,1,10
+#define REQUIRED_VERSION 2, 1, 10
 
-//#define TAG_PATH "protocol=ab-eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray&debug=4"
+// #define TAG_PATH "protocol=ab-eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray&debug=4"
 #define TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:5020&path=0&elem_count=1&name=hr0"
-//#define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_size=2&elem_count=1&name=N7:0&debug=4"
+// #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_size=2&elem_count=1&name=N7:0&debug=4"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 2
-//#define ELEM_SIZE 2
+// #define ELEM_SIZE 2
 #define DATA_TIMEOUT 5000
 
 
-int create_tag()
-{
+int create_tag() {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
 
@@ -58,63 +57,58 @@ int create_tag()
 
     /* everything OK? */
     if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
-        exit( -tag);
+        fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        exit(-tag);
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        exit( -rc);
+        exit(-rc);
     }
 
     return tag;
 }
 
 
-void update_tag(int32_t tag)
-{
+void update_tag(int32_t tag) {
     int rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        exit( -rc);
+        exit(-rc);
     }
 
     /* print out the data */
-    for(int i=0; i < ELEM_COUNT; i++) {
+    for(int i = 0; i < ELEM_COUNT; i++) {
         // fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
-       fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int16(tag,(i*ELEM_SIZE)));
+        fprintf(stderr, "data[%d]=%d\n", i, plc_tag_get_int16(tag, (i * ELEM_SIZE)));
     }
 
     /* now test a write */
-    for(int i=0; i < ELEM_COUNT; i++) {
+    for(int i = 0; i < ELEM_COUNT; i++) {
         // int32_t val = plc_tag_get_int32(tag,(i*ELEM_SIZE));
-        int16_t val = plc_tag_get_int16(tag, (i*ELEM_SIZE));
+        int16_t val = plc_tag_get_int16(tag, (i * ELEM_SIZE));
 
-        val = (int16_t)((int16_t)val+(int16_t)1);
+        val = (int16_t)((int16_t)val + (int16_t)1);
 
-        fprintf(stderr,"Setting element %d to %d\n",i,val);
+        fprintf(stderr, "Setting element %d to %d\n", i, val);
 
         // plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
-       plc_tag_set_int16(tag,(i*ELEM_SIZE),val);
+        plc_tag_set_int16(tag, (i * ELEM_SIZE), val);
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        exit( -rc);
+        exit(-rc);
     }
 }
 
 
-
-
-
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int32_t tag = 0;
     int wait_time_sec = 0;
 
@@ -128,7 +122,7 @@ int main(int argc, char **argv)
     if(argc == 2) {
         wait_time_sec = atoi(argv[1]);
     } else {
-        fprintf(stderr,"Usage: test_reconnect <number of seconds to pause>\n");
+        fprintf(stderr, "Usage: test_reconnect <number of seconds to pause>\n");
         return 1;
     }
 
@@ -140,8 +134,8 @@ int main(int argc, char **argv)
     /* update the data */
     update_tag(tag);
 
-    fprintf(stderr, "Waiting for %dms.\n",(wait_time_sec*1000));
-    util_sleep_ms(wait_time_sec * 1000);
+    fprintf(stderr, "Waiting for %dms.\n", (wait_time_sec * 1000));
+    thrd_sleep_ms(wait_time_sec * 1000, NULL);
 
     /* update the data again */
     update_tag(tag);
@@ -151,5 +145,3 @@ int main(int argc, char **argv)
 
     return 0;
 }
-
-

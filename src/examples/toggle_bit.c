@@ -32,12 +32,12 @@
  ***************************************************************************/
 
 
-#include <stdio.h>
-#include <stdlib.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2, 1, 0
 
 /*
  * the name TestDINTArray[3].17 picks a specific bit out of the TestDINTArray tag element 3.  This is a bit-valued tag
@@ -51,9 +51,7 @@
  */
 
 
-
-int main()
-{
+int main() {
     int32_t tag = 0;
     int rc;
     int b;
@@ -69,18 +67,16 @@ int main()
 
     /* everything OK? */
     if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
 
         return 0;
     }
 
     /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(100);
-    }
+    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) { thrd_sleep_ms(100, NULL); }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+        fprintf(stderr, "Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
         return 0;
     }
 
@@ -88,7 +84,7 @@ int main()
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
 
@@ -96,7 +92,7 @@ int main()
      * Read the bit value.   For a bit tag like this, always use offset of zero.
      */
     b = plc_tag_get_bit(tag, 0);
-    fprintf(stderr,"Before bool = %d\n", b);
+    fprintf(stderr, "Before bool = %d\n", b);
 
     plc_tag_set_bit(tag, 0, (b ? 0 : 1));
 
@@ -108,7 +104,7 @@ int main()
     rc = plc_tag_write(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
 
@@ -117,18 +113,16 @@ int main()
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
 
     /* print out the data */
     b = plc_tag_get_bit(tag, 0);
-    fprintf(stderr,"After bool = %d\n", b);
+    fprintf(stderr, "After bool = %d\n", b);
 
     /* we are done */
     plc_tag_destroy(tag);
 
     return 0;
 }
-
-

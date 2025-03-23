@@ -240,10 +240,7 @@ int main(int argc, char **argv) {
                 }
             }
 
-            if(need_sleep) {
-                need_sleep = 0;
-                util_sleep_ms(10); /* give the background thread time to process the abort. */
-            }
+            if(need_sleep) { thrd_sleep_ms(10, NULL); /* give the background thread time to process the abort. */ }
         }
 
         end = util_time_ms();
@@ -259,7 +256,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
 
         /* test */
-        // util_sleep_ms(5);
+        // thrd_sleep_ms(5);
 
         iteration++;
     }
@@ -333,7 +330,7 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
         /* anything left to do? */
         if(tags_pending > 0) {
             /* yes, there is, delay a bit. */
-            util_sleep_ms(1);
+            thrd_sleep_ms(10, NULL);
         }
     } while(tags_pending > 0 && end_timeout > util_time_ms() && !done);
 

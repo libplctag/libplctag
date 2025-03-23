@@ -31,15 +31,15 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <stdint.h>
-#include <sys/time.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/time.h>
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2, 1, 0
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&plc=PLC5&elem_size=4&elem_count=1&name=F8:10"
 #define ELEM_COUNT 1
@@ -66,8 +66,7 @@ volatile int done = 0;
  * Thread function.  Just read until killed.
  */
 
-void *thread_func(void *data)
-{
+void *thread_func(void *data) {
     int tid = (int)(intptr_t)data;
     int rc;
     float value;
@@ -91,7 +90,7 @@ void *thread_func(void *data)
             if(rc != PLCTAG_STATUS_OK) {
                 value = 1001;
             } else {
-                value =  plc_tag_get_float32(tag,0);
+                value = plc_tag_get_float32(tag, 0);
 
                 /* increment the value */
                 value = (float)(value > 500.0 ? 0.0 : value + 1.5);
@@ -109,18 +108,18 @@ void *thread_func(void *data)
 
         end = util_time_ms();
 
-        fprintf(stderr,"Thread %d got result %f with return code %s in %dms\n",tid,value,plc_tag_decode_error(rc),(int)(end-start));
+        fprintf(stderr, "Thread %d got result %f with return code %s in %dms\n", tid, value, plc_tag_decode_error(rc),
+                (int)(end - start));
 
         /* no short sleeps, this is a PLC5 */
-        util_sleep_ms(10);
+        thrd_sleep_ms(10, NULL);
     }
 
     return NULL;
 }
 
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
     pthread_t thread[MAX_THREADS];
     int num_threads;
@@ -133,14 +132,15 @@ int main(int argc, char **argv)
     }
 
     if(argc != 2) {
-        fprintf(stderr,"ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n",argc);
+        fprintf(stderr, "ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n", argc);
         return 0;
     }
 
-    num_threads = (int)strtol(argv[1],NULL, 10);
+    num_threads = (int)strtol(argv[1], NULL, 10);
 
     if(num_threads < 1 || num_threads > MAX_THREADS) {
-        fprintf(stderr,"ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",num_threads, argv[1]);
+        fprintf(stderr, "ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",
+                num_threads, argv[1]);
         return 0;
     }
 
@@ -149,34 +149,30 @@ int main(int argc, char **argv)
 
     /* everything OK? */
     if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 0;
     }
 
     /* create the read threads */
 
-    fprintf(stderr,"Creating %d threads.\n",num_threads);
+    fprintf(stderr, "Creating %d threads.\n", num_threads);
 
-    for(thread_id=0; thread_id < num_threads; thread_id++) {
+    for(thread_id = 0; thread_id < num_threads; thread_id++) {
         pthread_create(&thread[thread_id], NULL, thread_func, (void *)(intptr_t)thread_id);
     }
 
-    /* wait until ^C */
-    while(1) {
-        util_sleep_ms(100);
-    }
+    /* FIXME - set up interrupt handler */
+    while(1) { thrd_sleep_ms(100, NULL); }
 
     done = 1;
 
-    for(thread_id = 0; thread_id < num_threads; thread_id++) {
-        pthread_join(thread[thread_id], NULL);
-    }
+    for(thread_id = 0; thread_id < num_threads; thread_id++) { pthread_join(thread[thread_id], NULL); }
 
     plc_tag_destroy(tag);
 

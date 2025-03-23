@@ -103,7 +103,7 @@ int main(void) {
                 if(rc != PLCTAG_STATUS_OK) { done = 0; }
             }
 
-            if(!done) { util_sleep_ms(1); }
+            if(!done) { thrd_sleep_ms(10, NULL); }
         } while(timeout > util_time_ms() && !done);
 
         if(!done) {
@@ -133,7 +133,7 @@ int main(void) {
                 if(rc != PLCTAG_STATUS_OK) { done = 0; }
             }
 
-            if(!done) { util_sleep_ms(1); }
+            if(!done) { thrd_sleep_ms(10, NULL); }
         } while(timeout > util_time_ms() && !done);
 
         if(!done) {

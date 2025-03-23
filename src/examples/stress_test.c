@@ -90,7 +90,7 @@ static int wait_ms(int timeout_ms) {
     int64_t timeout = 0;
 
     timeout = util_time_ms() + timeout_ms;
-    while(!done && timeout > util_time_ms()) { util_sleep_ms(5); }
+    while(!done && timeout > util_time_ms()) { thrd_sleep_ms(5, NULL); }
 
     if(!done) {
         return PLCTAG_STATUS_OK;
@@ -146,7 +146,7 @@ static void *test_cip(void *data) {
     int start_index = (tid - 1) * num_elems;
 
     /* a hack to allow threads to start. */
-    util_sleep_ms(tid);
+    thrd_sleep_ms(tid, NULL);
 
     log = open_log(tid);
 
@@ -209,7 +209,7 @@ static void *test_cip(void *data) {
         } else {
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems,
                     (int)(end - start));
-            util_sleep_ms(1);
+            thrd_sleep_ms(10, NULL);
         }
 
         iteration++;
@@ -293,7 +293,7 @@ int main(int argc, char **argv) {
     start_time = util_time_ms();
     end_time = start_time + (int64_t)(seconds * 1000);
 
-    while(!done && util_time_ms() < end_time) { util_sleep_ms(100); }
+    while(!done && util_time_ms() < end_time) { thrd_sleep_ms(100, NULL); }
 
     success = !done;
 
