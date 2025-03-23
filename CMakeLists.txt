@@ -200,8 +200,8 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     SET(STR_OP_OVERFLOW_ON "")
     SET(STR_OP_OVERFLOW_OFF "")
 
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
+    set(BASE_RELEASE_FLAGS "-Os -DNDEBUG -std=c11 -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
+    set(BASE_DEBUG_FLAGS "-g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
 
@@ -215,8 +215,8 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
         set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D_DARWIN_C_SOURCE")
         set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -D_DARWIN_C_SOURCE")
     else()
-        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D__USE_POSIX=1 -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L")
+        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -D__USE_POSIX=1 -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L")
     endif()
 
 
@@ -263,8 +263,8 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
         SET(STR_OP_OVERFLOW_OFF "")
     endif()
 
-    SET(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    SET(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    SET(BASE_RELEASE_FLAGS "-Os -DNDEBUG -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    SET(BASE_DEBUG_FLAGS "-g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     SET(BASE_RELEASE_LINK_FLAGS "")
     SET(BASE_DEBUG_LINK_FLAGS "")
 
@@ -301,7 +301,9 @@ else()
     set(BASE_LINK_FLAGS "${BASE_RELEASE_LINK_FLAGS}")
 endif()
 
-#MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
+message("BASE_RELEASE_FLAGS = ${BASE_RELEASE_FLAGS}")
+message("BASE_DEBUG_FLAGS = ${BASE_DEBUG_FLAGS}")
+
 
 if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # check MSVC version, only newer versions than 2012 support C99 things we need
