@@ -163,15 +163,11 @@ extern char *str_concat_impl(int num_args, ...);
 /* mutex functions/defs */
 typedef struct mutex_t *mutex_p;
 extern int mutex_create(mutex_p *m);
-// extern int mutex_lock(mutex_p m);
-// extern int mutex_try_lock(mutex_p m);
-// extern int mutex_unlock(mutex_p m);
 extern int mutex_destroy(mutex_p *m);
 
 extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_try_lock_impl(const char *func, int line_num, mutex_p m);
 extern int mutex_unlock_impl(const char *func, int line_num, mutex_p m);
-extern int mutex_is_locked_by_me(mutex_p m);
 
 #if defined(_WIN32) && defined(_MSC_VER)
     /* MinGW on Windows does not need this. */

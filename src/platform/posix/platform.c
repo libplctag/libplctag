@@ -571,7 +571,6 @@ char *str_concat_impl(int num_args, ...) {
 
 struct mutex_t {
     pthread_mutex_t p_mutex;
-    pthread_t locking_thread;
     int initialized;
 };
 
@@ -626,10 +625,6 @@ int mutex_lock_impl(const char *func, int line, mutex_p m) {
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
-    m->locking_thread = pthread_self();
-
-    // pdebug(DEBUG_SPEW,"Done.");
-
     return PLCTAG_STATUS_OK;
 }
 
@@ -649,8 +644,6 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
-    m->locking_thread = pthread_self();
-
     /*pdebug(DEBUG_DETAIL,"Done.");*/
 
     return PLCTAG_STATUS_OK;
@@ -667,29 +660,14 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m) {
 
     if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
 
-    if(m->locking_thread != pthread_self()) { pdebug(DEBUG_WARN, "Mutex locked by different thread!"); }
-
     if(pthread_mutex_unlock(&(m->p_mutex))) {
         pdebug(DEBUG_WARN, "error unlocking mutex.");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    m->locking_thread = 0;
-
     // pdebug(DEBUG_SPEW,"Done.");
 
     return PLCTAG_STATUS_OK;
-}
-
-
-int mutex_is_locked_by_me(mutex_p m) {
-    if(!m) { return PLCTAG_ERR_NULL_PTR; }
-
-    if(m->locking_thread == pthread_self()) {
-        return PLCTAG_STATUS_OK;
-    } else {
-        return PLCTAG_ERR_NOT_FOUND;
-    }
 }
 
 
@@ -700,8 +678,6 @@ int mutex_destroy(mutex_p *m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
-
-    if((*m)->locking_thread != 0) { pdebug(DEBUG_WARN, "Destroying tag that is still locked!"); }
 
     if(pthread_mutex_destroy(&((*m)->p_mutex))) {
         pdebug(DEBUG_WARN, "error while attempting to destroy mutex.");
@@ -1539,7 +1515,6 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     } else if(num_sockets > 0) {
         /* was there a wake up? */
         if(FD_ISSET(sock->wake_read_fd, &read_set)) {
-            int bytes_read = 0;
             char buf[32];
 
             /* empty the socket. */

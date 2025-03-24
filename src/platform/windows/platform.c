@@ -642,7 +642,6 @@ char *str_concat_impl(int num_args, ...) {
 
 struct mutex_t {
     HANDLE h_mutex;
-    HANDLE h_locking_thread;
     int initialized;
 };
 
@@ -748,26 +747,6 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m) {
     // pdebug("Done.");
 
     return PLCTAG_STATUS_OK;
-}
-
-
-int mutex_is_locked_by_me(mutex_p m) {
-    DWORD dwWaitResult = 0;
-
-    if(!m) {
-        pdebug(DEBUG_WARN, "null mutex pointer.");
-        return PLCTAG_ERR_NULL_PTR;
-    }
-
-    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    if(m->h_locking_thread == GetCurrentThread()) {
-        return PLCTAG_STATUS_OK
-    } else {
-        return PLCTAG_ERR_NOT_FOUND;
-    }
-
-    return 0;
 }
 
 
