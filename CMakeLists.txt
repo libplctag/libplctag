@@ -194,19 +194,23 @@ include_directories("${platform_SRC_PATH}")
 include_directories("${protocol_SRC_PATH}")
 
 # C compiler specific settings
-if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
     # using Clang
 
     SET(STR_OP_OVERFLOW_ON "")
     SET(STR_OP_OVERFLOW_OFF "")
 
-    set(BASE_RELEASE_FLAGS "-Os -DNDEBUG -std=c11 -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "-g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
+    set(BASE_RELEASE_FLAGS "-Os -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
+    set(BASE_DEBUG_FLAGS "-g -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
 
     if(USE_SANITIZERS)
-        SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=leak -fsanitize=undefined")
+        if(APPLE)
+            SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=undefined")
+        else()
+            SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=leak -fsanitize=undefined")
+        endif()
         STRING(APPEND BASE_DEBUG_FLAGS ${SANITIZERS_FLAGS})
         STRING(APPEND BASE_DEBUG_LINK_FLAGS ${SANITIZERS_FLAGS})
     endif()
@@ -324,8 +328,7 @@ if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     set(STATIC_COMPILE_FLAGS "")
     set(STATIC_LINK_FLAGS "")
 else()
-    #set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99 -Wc++-compat ")
-    set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99")
+    set(BASE_C_FLAGS "${BASE_FLAGS} -std=c11")
     set(STATIC_COMPILE_FLAGS "")
     set(STATIC_LINK_FLAGS "-static")
 endif()
@@ -462,92 +465,59 @@ endif()
 if(ANDROID_BUILD)
     MESSAGE("Building for Android.")
 elseif (BUILD_EXAMPLES)
-    if (UNIX)
-        # example programs
-        set ( example_PROGRAMS async
-                            async_stress
-                            barcode_test
-                            busy_test
-                            data_dumper
-                            list_tags_logix
-                            list_tags_micro8x0
-                            list_tags_omron_incomplete
-                            multithread
-                            multithread_cached_read
-                            multithread_plc5
-                            multithread_plc5_dhp
-                            plc5
-                            simple
-                            simple_dual
-                            slc500
-                            stress_api_lock
-                            stress_rc_mem
-                            stress_test
-                            string_non_standard_udt
-                            string_standard
-                            test_alternate_tag_listing
-                            test_array_notation
-                            test_auto_sync
-                            test_callback
-                            test_callback_ex
-                            test_callback_ex_logix
-                            test_callback_ex_modbus
-                            test_connection_group
-                            test_emulator_performance
-                            test_event
-                            test_indexed_tags
-                            test_raw_cip
-                            test_reconnect
-                            test_shutdown
-                            test_special
-                            test_string
-                            test_tag_attributes
-                            test_tag_type_attribute
-                            thread_stress
-                            toggle_bit
-                            toggle_bool
-                            trigger_double_free
-                            write_string
-                            tag_rw_deprecated
-                            tag_rw2
-                            )
+    set( example_PROGRAMS
+        async
+        async_stress
+        barcode_test
+        busy_test
+        data_dumper
+        list_tags_logix
+        list_tags_micro8x0
+        list_tags_omron_incomplete
+        multithread
+        multithread_cached_read
+        multithread_plc5
+        multithread_plc5_dhp
+        plc5
+        simple
+        simple_dual
+        slc500
+        stress_api_lock
+        stress_rc_mem
+        stress_test
+        string_non_standard_udt
+        string_standard
+        test_alternate_tag_listing
+        test_array_notation
+        test_auto_sync
+        test_callback
+        test_callback_ex
+        test_callback_ex_logix
+        test_callback_ex_modbus
+        test_connection_group
+        test_emulator_performance
+        test_event
+        test_indexed_tags
+        test_raw_cip
+        test_reconnect
+        test_shutdown
+        test_special
+        test_string
+        test_tag_attributes
+        test_tag_type_attribute
+        thread_stress
+        toggle_bit
+        toggle_bool
+        trigger_double_free
+        write_string
+        tag_rw_deprecated
+        tag_rw2
+    )
 
+    if (UNIX)
         set ( example_PROG_UTIL utils.c )
         set ( example_LIBRARIES ${tool_lib} pthread )
     elseif(WIN32)
-        set ( example_PROGRAMS async
-                            async_stress
-                            list_tags_logix
-                            list_tags_micro8x0
-                            list_tags_omron_incomplete
-                            multithread
-                            plc5
-                            simple
-                            simple_dual
-                            slc500
-                            string_non_standard_udt
-                            string_standard
-                            test_array_notation
-                            test_callback
-                            test_callback_ex
-                            test_connection_group
-                            test_emulator_performance
-                            test_event
-                            test_indexed_tags
-                            test_raw_cip
-                            test_shutdown
-                            test_special
-                            test_string
-                            test_tag_attributes
-                            test_tag_type_attribute
-                            thread_stress
-                            toggle_bit
-                            toggle_bool
-                            write_string
-                            tag_rw_deprecated
-                            tag_rw2
-                            )
-
         set ( example_PROG_UTIL utils.c)
         set ( example_LIBRARIES ${tool_lib} ws2_32 )
     endif()
@@ -583,46 +553,43 @@ elseif (BUILD_EXAMPLES)
     # build the GitHub Actions config file
     CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
 
-    # build the simulator for testing.
-    # if(UNIX)
-        set(AB_SERVER_FILES ${test_SRC_PATH}/ab_server/src/cip.c
-                            ${test_SRC_PATH}/ab_server/src/cip.h
-                            ${test_SRC_PATH}/ab_server/src/compat.h
-                            ${test_SRC_PATH}/ab_server/src/cpf.c
-                            ${test_SRC_PATH}/ab_server/src/cpf.h
-                            ${test_SRC_PATH}/ab_server/src/eip.c
-                            ${test_SRC_PATH}/ab_server/src/eip.h
-                            ${test_SRC_PATH}/ab_server/src/main.c
-                            ${test_SRC_PATH}/ab_server/src/memory.c
-                            ${test_SRC_PATH}/ab_server/src/memory.h
-                            ${test_SRC_PATH}/ab_server/src/mutex.c
-                            ${test_SRC_PATH}/ab_server/src/mutex.h
-                            ${test_SRC_PATH}/ab_server/src/pccc.c
-                            ${test_SRC_PATH}/ab_server/src/pccc.h
-                            ${test_SRC_PATH}/ab_server/src/plc.h
-                            ${test_SRC_PATH}/ab_server/src/slice.h
-                            ${test_SRC_PATH}/ab_server/src/socket.c
-                            ${test_SRC_PATH}/ab_server/src/socket.h
-                            ${test_SRC_PATH}/ab_server/src/tcp_server.c
-                            ${test_SRC_PATH}/ab_server/src/tcp_server.h
-                            ${test_SRC_PATH}/ab_server/src/thread.c
-                            ${test_SRC_PATH}/ab_server/src/thread.h
-                            ${test_SRC_PATH}/ab_server/src/utils.c
-                            ${test_SRC_PATH}/ab_server/src/utils.h
-        )
+    set(AB_SERVER_FILES ${test_SRC_PATH}/ab_server/src/cip.c
+                        ${test_SRC_PATH}/ab_server/src/cip.h
+                        ${test_SRC_PATH}/ab_server/src/compat.h
+                        ${test_SRC_PATH}/ab_server/src/cpf.c
+                        ${test_SRC_PATH}/ab_server/src/cpf.h
+                        ${test_SRC_PATH}/ab_server/src/eip.c
+                        ${test_SRC_PATH}/ab_server/src/eip.h
+                        ${test_SRC_PATH}/ab_server/src/main.c
+                        ${test_SRC_PATH}/ab_server/src/memory.c
+                        ${test_SRC_PATH}/ab_server/src/memory.h
+                        ${test_SRC_PATH}/ab_server/src/mutex.c
+                        ${test_SRC_PATH}/ab_server/src/mutex.h
+                        ${test_SRC_PATH}/ab_server/src/pccc.c
+                        ${test_SRC_PATH}/ab_server/src/pccc.h
+                        ${test_SRC_PATH}/ab_server/src/plc.h
+                        ${test_SRC_PATH}/ab_server/src/slice.h
+                        ${test_SRC_PATH}/ab_server/src/socket.c
+                        ${test_SRC_PATH}/ab_server/src/socket.h
+                        ${test_SRC_PATH}/ab_server/src/tcp_server.c
+                        ${test_SRC_PATH}/ab_server/src/tcp_server.h
+                        ${test_SRC_PATH}/ab_server/src/thread.c
+                        ${test_SRC_PATH}/ab_server/src/thread.h
+                        ${test_SRC_PATH}/ab_server/src/utils.c
+                        ${test_SRC_PATH}/ab_server/src/utils.h
+    )
 
-        foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-            set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
-        endforeach()
+    foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
+        set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
+    endforeach()
 
-        add_executable(ab_server ${AB_SERVER_FILES})
+    add_executable(ab_server ${AB_SERVER_FILES})
 
-        target_link_libraries(ab_server ${example_LIBRARIES} )
+    target_link_libraries(ab_server ${example_LIBRARIES} )
 
-        if(BASE_LINK_FLAGS)
-            set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-        endif()
-    # endif()
+    if(BASE_LINK_FLAGS)
+        set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+    endif()
 
     # build the cli.
     set(CLI_FILES ${cli_SRC_PATH}/cli.c
