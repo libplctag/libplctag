@@ -116,7 +116,7 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
 }
 
 
-int main() {
+int main(void) {
     int32_t tag1 = 0;
     int32_t tag2 = 0;
     int rc = PLCTAG_STATUS_OK;

@@ -35,18 +35,18 @@
 #include "compat.h"
 
 #if IS_WINDOWS
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
-    #include <process.h>
-    #include <handleapi.h>
-    #include <processthreadsapi.h>
-    #include <synchapi.h>
+#    define WIN32_LEAN_AND_MEAN
+#    include <handleapi.h>
+#    include <process.h>
+#    include <processthreadsapi.h>
+#    include <synchapi.h>
+#    include <windows.h>
 #else
-    #include <pthread.h>
+#    include <pthread.h>
 #endif
 
-#include "thread.h"
 #include "memory.h"
+#include "thread.h"
 #include "utils.h"
 
 
@@ -69,8 +69,7 @@ struct thread_t {
  * TODO - use the stacksize!
  */
 
-extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg)
-{
+extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg) {
     info("DETAIL: Starting.");
 
     info("DETAIL: Warning: ignoring stacksize (%d) parameter.", stacksize);
@@ -82,25 +81,24 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
 
     *t = (thread_p)mem_alloc(sizeof(struct thread_t));
 
-    if(! *t) {
+    if(!*t) {
         error("ERROR: Failed to allocate memory for thread.");
         return THREAD_ERR_NULL_PTR;
     }
 
     /* create a thread. */
 #if IS_WINDOWS
-    (*t)->h_thread = CreateThread(
-                         NULL,                   /* default security attributes */
-                         0,                      /* use default stack size      */
-                         func,                   /* thread function             */
-                         arg,                    /* argument to thread function */
-                         0,                      /* use default creation flags  */
-                         NULL);                  /* do not need thread ID       */
+    (*t)->h_thread = CreateThread(NULL,  /* default security attributes */
+                                  0,     /* use default stack size      */
+                                  func,  /* thread function             */
+                                  arg,   /* argument to thread function */
+                                  0,     /* use default creation flags  */
+                                  NULL); /* do not need thread ID       */
 
     if(!(*t)->h_thread) {
         info("WARN: error creating thread.");
         mem_free(*t);
-        *t=NULL;
+        *t = NULL;
 
         return THREAD_ERR_THREAD_CREATE;
     }
@@ -126,12 +124,11 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
  * Stop the current thread.  Does not take arguments.  Note: the thread
  * ends completely and this function does not return!
  */
-void thread_stop(void)
-{
+void thread_stop(void) {
 #if IS_WINDOWS
     ExitThread((DWORD)0);
 #else
-    pthread_exit((void*)0);
+    pthread_exit((void *)0);
 #endif
 }
 
@@ -142,18 +139,17 @@ void thread_stop(void)
  * Kill another thread.
  */
 
-void thread_kill(thread_p t)
-{
+void thread_kill(thread_p t) {
     if(t) {
 #if IS_WINDOWS
         TerminateThread(t->h_thread, (DWORD)0);
 #else
-    #ifdef __ANDROID__
+#    ifdef __ANDROID__
         pthread_kill(t->p_thread, 0);
-    #else
+#    else
         pthread_cancel(t->p_thread);
-    #endif /* __ANDROID__ */
-#endif /* IS_WINDOWS */
+#    endif /* __ANDROID__ */
+#endif     /* IS_WINDOWS */
     }
 }
 
@@ -163,8 +159,7 @@ void thread_kill(thread_p t)
  * Wait for the argument thread to stop and then continue.
  */
 
-int thread_join(thread_p t)
-{
+int thread_join(thread_p t) {
 #if !defined(IS_WINDOWS)
     void *unused;
 #endif
@@ -180,7 +175,7 @@ int thread_join(thread_p t)
     /* FIXME - check for uninitialized threads */
     if(WaitForSingleObject(t->h_thread, (DWORD)INFINITE)) {
 #else
-    if(pthread_join(t->p_thread,&unused)) {
+    if(pthread_join(t->p_thread, &unused)) {
 #endif
         error("ERROR: Error joining thread.");
         return THREAD_ERR_THREAD_JOIN;
@@ -198,8 +193,7 @@ int thread_join(thread_p t)
  * Detach the thread.  You cannot call thread_join on a detached thread!
  */
 
-extern int thread_detach()
-{
+extern int thread_detach(void) {
 #if IS_WINDOWS
     /* FIXME - it does not look like you can do this on Windows??? */
 #else
@@ -210,18 +204,16 @@ extern int thread_detach()
 }
 
 
-
 /*
  * thread_destroy
  *
  * This gets rid of the resources of a thread struct.  The thread in
  * question must be dead first!
  */
-extern int thread_destroy(thread_p *t)
-{
+extern int thread_destroy(thread_p *t) {
     info("DETAIL: Starting.");
 
-    if(!t || ! *t) {
+    if(!t || !*t) {
         info("WARN: null thread pointer.");
         return THREAD_ERR_NULL_PTR;
     }

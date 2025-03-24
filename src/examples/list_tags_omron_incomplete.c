@@ -722,7 +722,7 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
 }
 
 
-void usage() {
+void usage(void) {
     printf("Usage: list_tags_omron <PLC IP> [--debug]\n"
            "\t\tExample: list_tags_omron 10.1.2.3\n"
            "\tAdding the optional --debug flag will turn on some debugging in the library.\n");

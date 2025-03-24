@@ -51,7 +51,7 @@
 #define NUM_ELEMS (10)
 #define DATA_TIMEOUT (1000)
 
-int main() {
+int main(void) {
     int32_t tag[NUM_TAGS];
     int rc;
     int i;

@@ -170,10 +170,8 @@ int mtx_timedlock(mtx_t *mtx, const struct timespec *abs_timeout_time) {
 /* Why, Apple?  Why? */
 
 int mtx_timedlock(mtx_t *mtx, const struct timespec *abs_timeout_time) {
-    struct timespec current_time;
     int64_t current_time_ms;
     int64_t timeout_time_ms;
-    int rc;
 
     if(mtx_trylock(mtx) == thrd_success) { return thrd_success; }
 
@@ -189,6 +187,7 @@ int mtx_timedlock(mtx_t *mtx, const struct timespec *abs_timeout_time) {
         thrd_sleep_ms(10, NULL);
     }
 }
+
 #        endif
 
 int mtx_trylock(mtx_t *mtx) { return pthread_mutex_trylock(mtx) == 0 ? thrd_success : thrd_error; }

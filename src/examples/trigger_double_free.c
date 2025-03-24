@@ -9,14 +9,14 @@
 #define STR_IMPL_(x) #x      // stringify argument
 #define STR(x) STR_IMPL_(x)  // indirection to expand argument macros
 
-#define TABLE_SIZE 4
+#define TABLE_SIZE 10
 #define TABLE_SIZE2 1
 #define DATA_TIMEOUT 5000
-#define TRY_TIMES 20
+#define TRY_TIMES 100
 #define TIME_BETW_OP 100
 #define TIME_BETW_TAG 0
 #define PLC5000_PATH1 "protocol=ab-eip&elem_count=" STR(TABLE_SIZE) "&gateway=10.206.1.40&path=1,5&cpu=logixpccc&name=N7:0"
-#define PLC5000_PATH2 "protocol=ab-eip&elem_count=" STR(TABLE_SIZE) "&gateway=10.206.1.40&path=1,5&cpu=logixpccc&name=N7:4"
+#define PLC5000_PATH2 "protocol=ab-eip&elem_count=" STR(TABLE_SIZE) "&gateway=10.206.1.40&path=1,5&cpu=logixpccc&name=N7:10"
 
 static void FATAL(const char *format, ...) {
     va_list args;
@@ -71,7 +71,7 @@ void ConcurrentRead(const char *tagPath1, const char *tagPath2) {
     return;
 }
 
-int main() {
+int main(void) {
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         printf("Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);

@@ -48,7 +48,7 @@
 #define DATA_TIMEOUT 5000
 
 
-int create_tag() {
+int create_tag(void) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
 
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
     update_tag(tag);
 
     fprintf(stderr, "Waiting for %dms.\n", (wait_time_sec * 1000));
-    thrd_sleep_ms(wait_time_sec * 1000, NULL);
+    thrd_sleep_ms((uint32_t)wait_time_sec * 1000, NULL);
 
     /* update the data again */
     update_tag(tag);

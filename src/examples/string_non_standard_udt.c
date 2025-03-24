@@ -32,11 +32,11 @@
  ***************************************************************************/
 
 
+#include "../lib/libplctag.h"
+#include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
 /*
 
@@ -77,15 +77,15 @@ We add these to the tag string that was constructed by the tag listing program:
 */
 
 
-#define REQUIRED_VERSION 2,2,0
+#define REQUIRED_VERSION 2, 2, 0
 
-static const char *tag_string = "protocol=ab-eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_size=20&elem_count=228&name=CB_Rpt&str_count_word_bytes=4&str_is_byte_swapped=0&str_is_counted=1&str_is_fixed_length=1&str_is_zero_terminated=0&str_max_capacity=16&str_pad_bytes=0&str_total_length=20";
+static const char *tag_string =
+    "protocol=ab-eip&gateway=10.206.1.39&path=1,0&plc=ControlLogix&elem_size=20&elem_count=228&name=CB_Rpt&str_count_word_bytes=4&str_is_byte_swapped=0&str_is_counted=1&str_is_fixed_length=1&str_is_zero_terminated=0&str_max_capacity=16&str_pad_bytes=0&str_total_length=20";
 
 #define DATA_TIMEOUT 5000
 
 
-int main()
-{
+int main(void) {
     int32_t tag = 0;
     int rc;
     int str_num = 1;
@@ -97,10 +97,8 @@ int main()
         return 1;
     }
 
-    fprintf(stderr, "Using library version %d.%d.%d.\n",
-                                            plc_tag_get_int_attribute(0, "version_major", -1),
-                                            plc_tag_get_int_attribute(0, "version_minor", -1),
-                                            plc_tag_get_int_attribute(0, "version_patch", -1));
+    fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
+            plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* turn off debugging output. */
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
@@ -109,7 +107,7 @@ int main()
 
     /* everything OK? */
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error creating tag! Error %s\n", plc_tag_decode_error(rc));
+        fprintf(stderr, "Error creating tag! Error %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
     }
@@ -117,7 +115,7 @@ int main()
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data for tag! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
+        fprintf(stderr, "ERROR: Unable to read the data for tag! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
     }
@@ -165,5 +163,3 @@ int main()
 
     return 0;
 }
-
-

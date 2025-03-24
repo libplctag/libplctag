@@ -35,7 +35,6 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 #include <ctype.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -283,7 +282,7 @@ int read_config(const char *config_filename) {
 }
 
 
-FILE *check_log_file() {
+FILE *check_log_file(void) {
     static int log_year = 0;
     static int log_month = 0;
     static int log_day = 0;
@@ -346,7 +345,7 @@ int make_prefix(char *prefix_buf, int prefix_buf_size) {
 }
 
 
-int log_data() {
+int log_data(void) {
     FILE *log = check_log_file();
     char timestamp_buf[128];
     int rc = PLCTAG_STATUS_OK;
@@ -391,7 +390,7 @@ int log_data() {
 
 
 /* loop while any tag is still in PLCTAG_STATUS_PENDING status */
-int check_tags() {
+int check_tags(void) {
     int rc = PLCTAG_STATUS_OK;
 
     for(int t = 0; t < num_tags; t++) {
@@ -404,7 +403,7 @@ int check_tags() {
 }
 
 
-void destroy_tags() {
+void destroy_tags(void) {
     for(int t = 0; t < num_tags; t++) {
         if(tags[t].name) {
             free((char *)tags[t].name);
@@ -414,7 +413,7 @@ void destroy_tags() {
 }
 
 
-int start_reads() {
+int start_reads(void) {
     int64_t now = util_time_ms();
     int rc = PLCTAG_STATUS_OK;
 
@@ -462,7 +461,6 @@ void usage(void) {
 
 int main(int argc, char **argv) {
     int rc;
-    struct sigaction act;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {

@@ -32,26 +32,27 @@
  ***************************************************************************/
 
 
-#include <stdio.h>
-#include <stdlib.h>
 #include "../lib/libplctag.h"
 #include "utils.h"
+#include <stdio.h>
+#include <stdlib.h>
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2, 1, 0
 
 #define TAG_CREATE_TIMEOUT (100)
 
-int test_version(void)
-{
+int test_version(void) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
-    char ver[16] = {0,};
+    char ver[16] = {
+        0,
+    };
 
-    fprintf(stderr,"Testing version tag.\n");
+    fprintf(stderr, "Testing version tag.\n");
 
     tag = plc_tag_create("make=system&family=library&name=version&debug=4", TAG_CREATE_TIMEOUT);
     if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return tag;
     }
 
@@ -64,7 +65,7 @@ int test_version(void)
         return rc;
     }
 
-    fprintf(stderr,"Library version %s\n", ver);
+    fprintf(stderr, "Library version %s\n", ver);
 
     plc_tag_destroy(tag);
 
@@ -72,18 +73,16 @@ int test_version(void)
 }
 
 
-
-int test_debug(void)
-{
+int test_debug(void) {
     int rc = PLCTAG_STATUS_OK;
     int32_t tag = 0;
     uint32_t old_debug, new_debug;
 
-    fprintf(stderr,"Testing debug tag.\n");
+    fprintf(stderr, "Testing debug tag.\n");
 
     tag = plc_tag_create("make=system&family=library&name=debug&debug=4", TAG_CREATE_TIMEOUT);
     if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return tag;
     }
 
@@ -93,13 +92,13 @@ int test_debug(void)
         return rc;
     }
 
-    old_debug = plc_tag_get_uint32(tag,0);
+    old_debug = plc_tag_get_uint32(tag, 0);
 
-    fprintf(stderr,"Current debug level is %d\n",old_debug);
+    fprintf(stderr, "Current debug level is %d\n", old_debug);
 
     new_debug = (old_debug == 3 ? 4 : 3);
 
-    fprintf(stderr,"Changing debug level to %d\n", new_debug);
+    fprintf(stderr, "Changing debug level to %d\n", new_debug);
 
     plc_tag_set_uint32(tag, 0, new_debug);
 
@@ -117,13 +116,13 @@ int test_debug(void)
         return rc;
     }
 
-    new_debug = plc_tag_get_uint32(tag,0);
+    new_debug = plc_tag_get_uint32(tag, 0);
 
     if(old_debug == 3) {
         if(new_debug == 4) {
             fprintf(stderr, "New debug level is correctly 4.\n.");
         } else {
-            fprintf(stderr,"New debug level is %d but should be 4.\n", new_debug);
+            fprintf(stderr, "New debug level is %d but should be 4.\n", new_debug);
             plc_tag_destroy(tag);
             return PLCTAG_ERR_BAD_REPLY;
         }
@@ -131,13 +130,13 @@ int test_debug(void)
         if(new_debug == 3) {
             fprintf(stderr, "New debug level is correctly 3.\n.");
         } else {
-            fprintf(stderr,"New debug level is %d but should be 3.\n", new_debug);
+            fprintf(stderr, "New debug level is %d but should be 3.\n", new_debug);
             plc_tag_destroy(tag);
             return PLCTAG_ERR_BAD_DATA;
         }
     }
 
-    fprintf(stderr,"Changing debug level back to %d\n", old_debug);
+    fprintf(stderr, "Changing debug level back to %d\n", old_debug);
 
     plc_tag_set_uint32(tag, 0, old_debug);
 
@@ -155,7 +154,7 @@ int test_debug(void)
         return rc;
     }
 
-    new_debug = plc_tag_get_uint32(tag,0);
+    new_debug = plc_tag_get_uint32(tag, 0);
 
     if(old_debug == new_debug) {
         fprintf(stderr, "Correctly set debug level back to old value %d.\n", old_debug);
@@ -171,11 +170,7 @@ int test_debug(void)
 }
 
 
-
-
-
-int main()
-{
+int main(void) {
     int rc = PLCTAG_STATUS_OK;
 
     /* check the library version. */
@@ -198,5 +193,3 @@ int main()
 
     return 0;
 }
-
-

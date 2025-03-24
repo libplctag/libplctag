@@ -329,7 +329,7 @@ int32_t get_all_tags(int32_t tag, uint16_t tag_instance_id) {
 }
 
 
-int main() {
+int main(void) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);

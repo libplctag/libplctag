@@ -44,10 +44,6 @@
 
 typedef int32_t DINT;
 
-/* this is the WRONG way to do cross-thread communication! */
-static volatile int event_order_problem = 0;
-
-
 void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     static int create_seen = 0; /* this is HORRIBLY unsafe for threading! */
     DINT **data_ptr = (DINT **)userdata;

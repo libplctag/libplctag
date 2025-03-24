@@ -47,7 +47,7 @@
  */
 
 
-int main() {
+int main(void) {
     int32_t tag = 0;
     int rc;
     int b;

@@ -146,7 +146,7 @@ static void *test_cip(void *data) {
     int start_index = (tid - 1) * num_elems;
 
     /* a hack to allow threads to start. */
-    thrd_sleep_ms(tid, NULL);
+    thrd_sleep_ms((uint32_t)tid, NULL);
 
     log = open_log(tid);
 

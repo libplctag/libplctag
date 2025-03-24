@@ -31,6 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include "utils.h"
+#include "compat.h"
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -40,56 +42,34 @@
 
 
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || (__linux__)
-    #define USE_ARC4RANDOM
-    #define PLATFORM_POSIX
+#    define USE_ARC4RANDOM
+#    define PLATFORM_POSIX
 
-    #include <arpa/inet.h>
-    #include <netdb.h>
-    #include <netinet/in.h>
-    #include <stdlib.h>
-    #include <sys/socket.h>
-    #include <sys/time.h>
-    #include <sys/types.h>
-    #include <unistd.h>
+#    include <arpa/inet.h>
+#    include <netdb.h>
+#    include <netinet/in.h>
+#    include <stdlib.h>
+#    include <sys/socket.h>
+#    include <sys/time.h>
+#    include <sys/types.h>
+#    include <unistd.h>
 
 #elif defined(_WIN32) || defined(_WIN64)
-    #define USE_BCRYPTGENRANDOM
-    #define PLATFORM_WINDOWS
+#    define USE_BCRYPTGENRANDOM
+#    define PLATFORM_WINDOWS
 
-    #define _WINSOCKAPI_
-    #include <Winsock2.h>
-    #include <Ws2tcpip.h>
-    #include <io.h>
-    #include <strsafe.h>
-    #include <tchar.h>
-    #include <wincrypt.h>
-    #include <windows.h>
+#    define _WINSOCKAPI_
+#    include <Winsock2.h>
+#    include <Ws2tcpip.h>
+#    include <io.h>
+#    include <strsafe.h>
+#    include <tchar.h>
+#    include <wincrypt.h>
+#    include <windows.h>
 
 #else
-    #error "Platform does not support good random function!"
+#    error "Platform does not support good random function!"
 #endif
-
-
-#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
-    #define _WINSOCKAPI_
-    #include <Winsock2.h>
-    #include <Ws2tcpip.h>
-    #include <io.h>
-    #include <strsafe.h>
-    #include <tchar.h>
-    #include <windows.h>
-#else
-    /* assume it is POSIX of some sort... */
-    #include <arpa/inet.h>
-    #include <netdb.h>
-    #include <netinet/in.h>
-    #include <sys/socket.h>
-    #include <sys/time.h>
-    #include <sys/types.h>
-    #include <unistd.h>
-#endif
-
-#include "utils.h"
 
 
 /*
@@ -244,7 +224,7 @@ void slice_dump(slice_s s) {
 
 /* FIXME - move this all over into a compatibility/platform check header */
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-    #include <stdlib.h>
+#    include <stdlib.h>
 
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
@@ -256,23 +236,19 @@ uint64_t random_u64(uint64_t upper_bound) {
 }
 
 #elif defined(__linux__)
-#include <stdlib.h>
-#include <sys/random.h>
+#    include <stdlib.h>
+#    include <sys/random.h>
 
 
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
-    if (upper_bound == 0) {
-        return 0;
-    }
+    if(upper_bound == 0) { return 0; }
 
-    if (getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
+    if(getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
         /* not enough entropy, do it the hard way. */
         srand((unsigned int)((uint64_t)time(NULL) ^ random_number));
-        for (size_t i = 0; i < sizeof(random_number); ++i) {
-            ((uint8_t*)&random_number)[i] ^= (uint8_t)(rand() % 256);
-        }
+        for(size_t i = 0; i < sizeof(random_number); ++i) { ((uint8_t *)&random_number)[i] ^= (uint8_t)(rand() % 256); }
     }
 
     random_number %= upper_bound;
@@ -281,8 +257,8 @@ uint64_t random_u64(uint64_t upper_bound) {
 }
 
 #elif defined(_WIN32) || defined(_WIN64)
-    #include <wincrypt.h>
-    #include <windows.h>
+#    include <wincrypt.h>
+#    include <windows.h>
 
 
 uint64_t random_u64(uint64_t upper_bound) {
@@ -300,7 +276,7 @@ uint64_t random_u64(uint64_t upper_bound) {
 
     return random_number;
 }
-    
-#else 
-#error "Platform not supported!"
+
+#else
+#    error "Platform not supported!"
 #endif

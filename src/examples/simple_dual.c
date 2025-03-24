@@ -55,7 +55,7 @@
 #define DATA_TIMEOUT 1000
 
 
-int main() {
+int main(void) {
     int32_t tag1 = 0;
     int32_t tag2 = 0;
     int rc1, rc2;

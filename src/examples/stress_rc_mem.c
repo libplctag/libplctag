@@ -53,7 +53,7 @@
 
 static volatile int terminate = 0;
 
-static void signal_handler(int signum);
+static void interrupt_handler(void);
 static int thread_func(void *arg);
 
 
@@ -62,27 +62,16 @@ static int thread_func(void *arg);
 
 int main(void) {
     thrd_t threads[NUM_THREADS] = {0};
+    int64_t end_time = util_time_ms() + (10 * 1000);
 
     /* Set up the signal handler */
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
+    set_interrupt_handler(interrupt_handler);
 
-    if(sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("Error setting up SIGINT signal handler");
-        return 1;
-    }
+    fprintf(stderr, "Interrupt handlers set up.\n");
+    fprintf(stderr, "Waiting until time %" PRId64 "ms.\n", end_time);
+    fprintf(stderr, "Use ^C or send a SIGTERM to terminate early.\n");
 
-    if(sigaction(SIGTERM, &sa, NULL) == -1) {
-        perror("Error setting up SIGTERM signal handler");
-        return 1;
-    }
-
-    fprintf(stderr, "Signal handlers set up. Press Ctrl+C or send SIGTERM to terminate.\n");
-
-    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     /* create 10 threads to run thread_func() */
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) {
@@ -94,7 +83,12 @@ int main(void) {
     }
 
     /* wait while we test */
-    while(!terminate) { thrd_sleep_ms(100, NULL); }
+    while(!terminate && ((end_time - util_time_ms()) > 0)) {
+        thrd_sleep_ms(1000, NULL);
+        fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - util_time_ms()));
+    }
+
+    terminate = 1;
 
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) { thrd_join(threads[task_id], NULL); }
 
@@ -103,12 +97,7 @@ int main(void) {
 
 
 /* a signal handling function that sets terminate to 1. */
-void signal_handler(int signum) {
-    if(signum == SIGINT || signum == SIGTERM) {
-        terminate = 1;
-        // fprintf(stderr, "Termination signal received. Exiting...\n");
-    }
-}
+void interrupt_handler(void) { terminate = 1; }
 
 
 /*
@@ -123,7 +112,7 @@ int thread_func(void *arg) {
     char tag_str[250] = {0};
 
     snprintf(tag_str, sizeof(tag_str),
-             "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestTag&connection_group_id=%d", task_id);
+             "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray&connection_group_id=%d", task_id);
 
     while(!terminate) {
         fprintf(stderr, "Task %d creating tag\n", task_id);

@@ -62,7 +62,7 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
 NO_RETURN extern void thread_stop(void);
 extern void thread_kill(thread_p t);
 extern int thread_join(thread_p t);
-extern int thread_detach();
+extern int thread_detach(void);
 extern int thread_destroy(thread_p *t);
 
 #if IS_WINDOWS
