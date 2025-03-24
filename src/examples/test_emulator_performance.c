@@ -40,43 +40,33 @@
  */
 
 
+#include "../lib/libplctag.h"
+#include "utils.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if defined(WIN32) || defined(_WIN32)
-#    include <Windows.h>
-#else
-#    include <signal.h>
-#endif
-#include "../lib/libplctag.h"
-#include "utils.h"
 
 
-#define REQUIRED_VERSION 2, 4, 0
+#define REQUIRED_VERSION 2, 6, 4
 
-#define NUM_TAGS (100000)
+#define MAX_CONNECTION_GROUPS (5)
 
-#define TAG_OP_TIMEOUT_MS (200)
-#define MAX_TEST_TIME_MS (10000)
-#define MAX_CONNECTION_GROUPS (100)
+#define TAG_OP_TIMEOUT_MS (1000)
+#define TEST_TIME_MS (5000)
 
-#define DEFAULT_TAG_PATH \
+
+#define TEST_TAG_PATH_TEMPLATE \
     "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1&name=TestBigArray&connection_group_id=%d"
 
-static volatile int failed = 0;
+static volatile int terminate = 0;
 
-struct {
-    int32_t tag_handle;
-    int32_t iteration_count;
-} tag_info[NUM_TAGS] = {0};
+void handle_interrupt(void) { terminate = 1; }
 
-static void tag_callback(int32_t tag_id, int event, int status, void *index_arg);
+static void run_test(size_t num_connection_groups);
+static int test_func(void *arg);
 
 int main(void) {
-    int64_t test_interval_start = 0;
-    int64_t test_interval_end = 0;
-
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
@@ -85,107 +75,92 @@ int main(void) {
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
+    set_interrupt_handler(handle_interrupt);
+
+    fprintf(stderr, "Starting tests...\n\n");
+
     /* increase the connection group count each time */
-    for(int connection_group_count = 1; connection_group_count < MAX_CONNECTION_GROUPS && !failed; connection_group_count += 10) {
-        /* calculate our test interval */
-        test_interval_start = util_time_ms();
-        test_interval_end = test_interval_start + MAX_TEST_TIME_MS;
-
-
-        /* create the tags */
-        for(int tag_index = 0; tag_index < NUM_TAGS && !failed; tag_index++) {
-            char buf[250] = {0};
-            int32_t tag_id_or_status = PLCTAG_STATUS_OK;
-
-            snprintf(buf, sizeof(buf), DEFAULT_TAG_PATH, connection_group_count);
-
-            tag_id_or_status = plc_tag_create_ex(buf, tag_callback, (void *)(intptr_t)tag_index, 0);
-
-            if(tag_id_or_status < 0) {
-                fprintf(stderr, "ERROR: Error %s creating tag %d with connection group ID %d!\n",
-                        plc_tag_decode_error(tag_id_or_status), tag_index, connection_group_count);
-                failed = 1;
-            } else {
-                tag_info[tag_index].tag_handle = tag_id_or_status;
-                tag_info[tag_index].iteration_count = 0;
-            }
-        }
-
-        /* wait for the iteration cycle time */
-        while(util_time_ms() < test_interval_end && !failed) { thrd_sleep_ms(100, NULL); }
-
-        if(!failed) {
-            /* calculate statistics */
-            int64_t total_iterations = 0;
-            int64_t total_ms = util_time_ms() - test_interval_start;
-
-            for(int tag_index = 0; tag_index < NUM_TAGS; tag_index++) { total_iterations += tag_info[tag_index].iteration_count; }
-
-            fprintf(stderr,
-                    "Test %d connection groups for %" PRId64 "ms: read %" PRId64 " iterations with an average of %" PRId64
-                    "ms per iteration per tag.\n",
-                    connection_group_count, total_ms, total_iterations, total_ms / NUM_TAGS);
-        } else {
-            fprintf(stderr, "FAILED on connection group count %d!\n", connection_group_count);
-        }
+    for(size_t connection_group_count = 0; connection_group_count <= MAX_CONNECTION_GROUPS && !terminate;
+        connection_group_count += 10) {
+        run_test((connection_group_count == 0) ? 1 : connection_group_count);
     }
 
-    /* clean up tags */
-    for(int tag_index = 0; tag_index < NUM_TAGS; tag_index++) {
-        if(tag_info[tag_index].tag_handle != 0) { plc_tag_destroy(tag_info[tag_index].tag_handle); }
+    if(terminate) {
+        fprintf(stderr, "\nTests aborted by user!\n");
+    } else {
+        fprintf(stderr, "\nTests complete.\n");
     }
 
     return 0;
 }
 
 
-void tag_callback(int32_t tag_id, int event, int status, void *index_arg) {
-    int32_t index = (int32_t)(intptr_t)index_arg;
-    int rc = PLCTAG_STATUS_OK;
+static volatile int end_test_run = 0;
 
-    (void)status;
 
-    switch(event) {
-        case PLCTAG_EVENT_ABORTED:
-            fprintf(stderr, "Tag %" PRId32 " aborted!\n", tag_id);
-            failed = 1;
-            break;
+void run_test(size_t group_count) {
+    size_t total_iterations = 0;
+    thrd_t threads[MAX_CONNECTION_GROUPS] = {0};
+    int64_t start_time_ms = util_time_ms();
+    int64_t end_time_ms = start_time_ms + TEST_TIME_MS;
 
-        case PLCTAG_EVENT_CREATED:
-            /* start reading the tag now. */
-            rc = plc_tag_read(tag_id, 0);
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                fprintf(stderr, "ERROR: Error %s trying to start tag read!\n", plc_tag_decode_error(rc));
-                failed = 1;
-            }
-            break;
+    end_test_run = 0;
 
-        case PLCTAG_EVENT_DESTROYED: fprintf(stderr, "Tag %d being destroyed.\n", tag_id); break;
+    fprintf(stderr, "Test %zu connection groups/thread for %dms... ", group_count, TEST_TIME_MS);
 
-        case PLCTAG_EVENT_READ_COMPLETED:
-            tag_info[index].iteration_count += 1;
-            rc = plc_tag_read(tag_id, 0);
-            if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-                fprintf(stderr, "ERROR: Error %s trying to start tag read!\n", plc_tag_decode_error(rc));
-                failed = 1;
-            }
-            break;
-
-        case PLCTAG_EVENT_READ_STARTED: break;
-
-        case PLCTAG_EVENT_WRITE_COMPLETED:
-            fprintf(stderr, "ERROR: Tag %d had write completed event raised!\n", tag_id);
-            failed = 1;
-            break;
-
-        case PLCTAG_EVENT_WRITE_STARTED:
-            fprintf(stderr, "ERROR: Tag %d had write started event raised!\n", tag_id);
-            failed = 1;
-            break;
-
-        default:
-            fprintf(stderr, "ERROR! Unknown event %d!\n", event);
-            failed = 1;
-            break;
+    for(size_t thread_id = 0; thread_id < group_count; thread_id++) {
+        /* create the threads that run the test. */
+        thrd_create(&threads[thread_id], test_func, (void *)(uintptr_t)thread_id);
     }
+
+    /* wait for the test to end. */
+    while(end_time_ms > util_time_ms() && !terminate) { thrd_sleep_ms(100, NULL); }
+
+    end_test_run = 1;
+
+    /* join with the threads and add up the iterations. */
+    for(size_t thread_index = 0; thread_index < group_count; thread_index++) {
+        int result = 0;
+
+        thrd_join(threads[thread_index], &result);
+        total_iterations += (size_t)result;
+    }
+
+    fprintf(stderr, "%zu total iterations.\n", total_iterations);
+}
+
+
+int test_func(void *arg) {
+    int thread_id = (int)(intptr_t)arg;
+    int iteration_count = 0;
+
+    while(!end_test_run) {
+        char tag_str[250] = {0};
+        int32_t tag = 0;
+        int rc = PLCTAG_STATUS_OK;
+
+        /* make the tag string */
+        snprintf(tag_str, sizeof(tag_str), TEST_TAG_PATH_TEMPLATE, (int)(size_t)thread_id);
+
+        /* create the tag */
+        tag = plc_tag_create(tag_str, TAG_OP_TIMEOUT_MS);
+        if(tag < 0) {
+            fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+            continue;
+        }
+
+        /* read as fast as we can */
+        while(!end_test_run) {
+            rc = plc_tag_read(tag, TAG_OP_TIMEOUT_MS);
+            if(rc != PLCTAG_STATUS_OK) {
+                fprintf(stderr, "ERROR: Unable to read the data! Got error code %s\n", plc_tag_decode_error(rc));
+                break;
+            }
+            iteration_count++;
+        }
+
+        plc_tag_destroy(tag);
+    }
+
+    return iteration_count;
 }

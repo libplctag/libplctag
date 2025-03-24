@@ -120,7 +120,7 @@ int thrd_exit(int res) {
 }
 
 int thrd_join(thrd_t thrd, int *result) {
-    void *res;
+    void *res = NULL;
     int rc = pthread_join(thrd, &res);
     if(rc == 0 && result) { *result = (int)(intptr_t)res; }
     return rc == 0 ? thrd_success : thrd_error;

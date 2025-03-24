@@ -1120,7 +1120,8 @@ int check_request_status(ab_tag_p tag) {
         if(tag->abort_requested) {
             tag_abort_request(tag);
             tag->abort_requested = 0;
-            return PLCTAG_ERR_ABORT;
+            rc = PLCTAG_ERR_ABORT;
+            break;
         }
 
         /* request can be used by more than one thread at once. */
@@ -1146,17 +1147,28 @@ int check_request_status(ab_tag_p tag) {
 
         eip_header = (eip_encap *)(tag->req->data);
 
-        if((le2h16(eip_header->encap_command) != AB_EIP_CONNECTED_SEND)
-           && (le2h16(eip_header->encap_command) != AB_EIP_UNCONNECTED_SEND)) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", eip_header->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
         if(le2h32(eip_header->encap_status) != AB_EIP_OK) {
             pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(eip_header->encap_status));
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
+        }
+
+        // if((le2h16(eip_header->encap_command) != AB_EIP_CONNECTED_SEND)
+        //    && (le2h16(eip_header->encap_command) != AB_EIP_UNCONNECTED_SEND)) {
+        //     pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %04" PRIx16 "!", le2h16(eip_header->encap_command));
+        //     pdebug_dump_bytes(DEBUG_WARN, tag->req->data, tag->req->request_size);
+
+        //     rc = PLCTAG_ERR_BAD_DATA;
+        //     break;
+        // }
+
+        switch(le2h16(eip_header->encap_command)) {
+            case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_WARN, "Received a connected send EIP packet."); break;
+            case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_WARN, "Received an unconnected send EIP packet."); break;
+            default:
+                pdebug(DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
+                rc = PLCTAG_ERR_BAD_DATA;
+                break;
         }
     } while(0);
 
