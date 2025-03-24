@@ -118,7 +118,7 @@ int parse_args(int argc, char *argv[]) {
     return 0;
 }
 
-void print_request() {
+void print_request(void) {
     pdebug(DEBUG_INFO, "Running with params:");
     pdebug(DEBUG_INFO, "Protocol: %s", cli_request.protocol);
     pdebug(DEBUG_INFO, "IP: %s", cli_request.ip);
@@ -402,7 +402,7 @@ void add_tag(int tag_handle, tag_t tag) {
     HASH_ADD_INT(tags, tag_handle, t);
 }
 
-int check_tags() {
+int check_tags(void) {
     int rc = PLCTAG_STATUS_OK;
     struct tags *t;
 
@@ -418,7 +418,7 @@ int check_tags() {
     return rc;
 }
 
-int process_tags() {
+int process_tags(void) {
     char *line = NULL;
     size_t line_len = 0;
     char *tag_path = (char *)malloc(1024);
