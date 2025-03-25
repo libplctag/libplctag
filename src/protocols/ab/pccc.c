@@ -928,7 +928,7 @@ int parse_pccc_subelem_num(const char **str, pccc_addr_t *address) {
     return PLCTAG_STATUS_OK;
 }
 
-
+// NOLINTNEXTLINE
 struct {
     pccc_file_t file_type;
     const char *field_name;
