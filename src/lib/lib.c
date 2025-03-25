@@ -45,7 +45,7 @@
 #include <mb/modbus.h>
 #include <platform.h>
 #include <stdlib.h>
-#include <util/atomic_int.h>
+#include <util/atomic_utils.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/hash.h>
@@ -67,7 +67,7 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
 static volatile hashtable_p tags = NULL;
 static mutex_p tag_lookup_mutex = NULL;
 
-static atomic_int library_terminating = {0};
+static atomic_bool library_terminating = false;
 static thread_p tag_tickler_thread = NULL;
 static cond_p tag_tickler_wait = NULL;
 #define TAG_TICKLER_TIMEOUT_MS (100)
@@ -134,7 +134,7 @@ int lib_init(void) {
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    atomic_set(&library_terminating, 0);
+    atomic_set_bool(&library_terminating, false);
 
     pdebug(DEBUG_INFO, "Setting up global library data.");
 
@@ -165,7 +165,7 @@ int lib_init(void) {
 void lib_teardown(void) {
     pdebug(DEBUG_INFO, "Tearing down library.");
 
-    atomic_set(&library_terminating, 1);
+    atomic_set_bool(&library_terminating, 1);
 
     if(tag_tickler_wait) {
         pdebug(DEBUG_INFO, "Signaling tag tickler condition var.");
@@ -197,7 +197,7 @@ void lib_teardown(void) {
         tags = NULL;
     }
 
-    atomic_set(&library_terminating, 0);
+    atomic_set_bool(&library_terminating, false);
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -266,6 +266,26 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
         debug_set_tag_id(tag->tag_id);
 
         pdebug(DEBUG_DETAIL, "Tickling tag %d.", tag->tag_id);
+
+        /* first check for aborts */
+        if(atomic_get_bool(&tag->abort_requested)) {
+            if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
+
+            pdebug(DEBUG_DETAIL, "Aborting ongoing operation if any!");
+
+            tag->read_complete = 0;
+            tag->read_in_flight = 0;
+            tag->write_complete = 0;
+            tag->write_in_flight = 0;
+
+            /* clear the flag so we do not do this again. */
+            atomic_set_bool(&tag->abort_requested, false);
+
+            tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
+
+            /* do not do anything else. */
+            return;
+        }
 
         /* if this tag has automatic writes, then there are many things we should check */
         if(tag->auto_sync_write_ms > 0) {
@@ -493,7 +513,7 @@ THREAD_FUNC(tag_tickler_func) {
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    while(!atomic_get(&library_terminating)) {
+    while(!atomic_get_bool(&library_terminating)) {
         int max_index = 0;
         int64_t timeout_wait_ms = TAG_TICKLER_TIMEOUT_MS;
 
@@ -631,12 +651,33 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    /*
+     * flag an abort request before we wait on the mutex.
+     * Otherwise we will wait until any long running operation
+     * completes (such as a plc_tag_read() call with a wait).
+     */
+
+    atomic_set_bool(&tag->abort_requested, true);
+
+    /* if the tag does not use a tickler, then wake the PLC thread */
+    if(tag->vtable && tag->vtable->wake_plc) { rc = tag->vtable->wake_plc(tag); }
+
+    /* wake the tag tickler */
+    plc_tag_tickler_wake();
+
+    /*
+     * this blocks until we get the mutex by which time any
+     * long running operation is done.
+     */
     critical_block(tag->api_mutex) {
         tag->read_cache_expire = (uint64_t)0;
 
-        /* this may be synchronous. */
-        if(tag->vtable && tag->vtable->abort) {
+        /* Is the abort flag still set? This may be synchronous. */
+        if(atomic_get_bool(&tag->abort_requested) && tag->vtable && tag->vtable->abort) {
             rc = tag->vtable->abort(tag);
+
+            /* release the kraken... or tickler */
+            plc_tag_tickler_wake();
         } else {
             pdebug(DEBUG_WARN, "Tag does not have an abort function.");
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
@@ -649,9 +690,6 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
 
         tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
     }
-
-    /* release the kraken... or tickler */
-    plc_tag_tickler_wake();
 
     plc_tag_generic_handle_event_callbacks(tag);
 
@@ -810,7 +848,7 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
     pdebug(DEBUG_INFO, "Starting");
 
     /* check to see if the library is terminating. */
-    if(atomic_get(&library_terminating)) {
+    if(atomic_get_bool(&library_terminating)) {
         pdebug(DEBUG_WARN, "The plctag library is in the process of shutting down!");
         return PLCTAG_ERR_NOT_ALLOWED;
     }
@@ -1053,7 +1091,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     pdebug(DEBUG_INFO, "Starting.");
 
     /* terminate anything waiting on the library and prevent any tags from being created. */
-    atomic_set(&library_terminating, 1);
+    atomic_set_bool(&library_terminating, true);
 
     /* close all tags. */
     pdebug(DEBUG_DETAIL, "Closing all tags.");
@@ -1095,7 +1133,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     destroy_modules();
 
     /* Clear the termination flag in case we want to start up again. */
-    atomic_set(&library_terminating, 0);
+    atomic_set_bool(&library_terminating, false);
 
     pdebug(DEBUG_INFO, "Done.");
 }
