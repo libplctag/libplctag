@@ -37,12 +37,9 @@
 
 #include <lib/libplctag.h>
 #include <platform.h>
+#include <util/atomic_utils.h>
 #include <util/attr.h>
 #include <util/debug.h>
-
-// #define PLCTAG_CANARY (0xACA7CAFE)
-// #define PLCTAG_DATA_LITTLE_ENDIAN   (0)
-// #define PLCTAG_DATA_BIG_ENDIAN      (1)
 
 
 typedef struct plc_tag_t *plc_tag_p;
@@ -111,50 +108,54 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
  * The base type only has a vtable for operations.
  */
 
-#define TAG_BASE_STRUCT uint8_t is_bit:1; \
-                        uint8_t tag_is_dirty:1; \
-                        uint8_t read_in_flight:1; \
-                        uint8_t read_complete:1; \
-                        uint8_t write_in_flight:1; \
-                        uint8_t write_complete:1; \
-                        uint8_t skip_tickler:1; \
-                        uint8_t had_created_event:1; \
-                        uint8_t event_creation_complete:1; \
-                        uint8_t event_deletion_started:1; \
-                        uint8_t event_operation_aborted:1; \
-                        uint8_t event_read_started: 1; \
-                        uint8_t event_read_complete_enable: 1; \
-                        uint8_t event_read_complete: 1; \
-                        uint8_t event_write_started: 1; \
-                        uint8_t event_write_complete_enable: 1; \
-                        uint8_t event_write_complete: 1; \
-                        uint8_t allow_field_resize:1; \
+ /* NB: sorted by decreasing size and then alphabetically */
+
+#define TAG_BASE_STRUCT int64_t auto_sync_next_read; \
+                        int64_t auto_sync_next_write; \
+                        int64_t read_cache_expire; \
+                        int64_t read_cache_ms; \
+                        uint8_t *data; \
+                        tag_byte_order_t *byte_order; \
+                        cond_p tag_cond_wait; \
+                        mutex_p api_mutex; \
+                        mutex_p ext_mutex; \
+                        tag_extended_callback_func callback; \
+                        tag_vtable_p vtable; \
+                        void *userdata; \
+                        int32_t auto_sync_read_ms; \
+                        int32_t auto_sync_write_ms; \
+                        int32_t size; \
+                        int32_t tag_id; \
+                        int connection_group_id; \
+                        int bit; \
+                        atomic_bool abort_requested; \
                         int8_t event_creation_complete_status; \
                         int8_t event_deletion_started_status; \
                         int8_t event_operation_aborted_status; \
-                        int8_t event_read_started_status; \
                         int8_t event_read_complete_status; \
-                        int8_t event_write_started_status; \
+                        int8_t event_read_started_status; \
                         int8_t event_write_complete_status; \
+                        int8_t event_write_started_status; \
                         int8_t status; \
-                        int bit; \
-                        int connection_group_id; \
-                        int32_t size; \
-                        int32_t tag_id; \
-                        int32_t auto_sync_read_ms; \
-                        int32_t auto_sync_write_ms; \
-                        uint8_t *data; \
-                        tag_byte_order_t *byte_order; \
-                        mutex_p ext_mutex; \
-                        mutex_p api_mutex; \
-                        cond_p tag_cond_wait; \
-                        tag_vtable_p vtable; \
-                        tag_extended_callback_func callback; \
-                        void *userdata; \
-                        int64_t read_cache_expire; \
-                        int64_t read_cache_ms; \
-                        int64_t auto_sync_next_read; \
-                        int64_t auto_sync_next_write
+                        uint8_t allow_field_resize:1; \
+                        uint8_t event_creation_complete:1; \
+                        uint8_t event_deletion_started:1; \
+                        uint8_t event_operation_aborted:1; \
+                        uint8_t event_read_complete:1; \
+                        uint8_t event_read_complete_enable:1; \
+                        uint8_t event_read_started:1; \
+                        uint8_t event_write_complete:1; \
+                        uint8_t event_write_complete_enable:1; \
+                        uint8_t event_write_started:1; \
+                        uint8_t had_created_event:1; \
+                        uint8_t is_bit:1; \
+                        uint8_t read_complete:1; \
+                        uint8_t read_in_flight:1; \
+                        uint8_t skip_tickler:1; \
+                        uint8_t tag_is_dirty:1; \
+                        uint8_t write_complete:1; \
+                        uint8_t write_in_flight:1
+
 
 
 
