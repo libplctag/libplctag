@@ -42,7 +42,7 @@
 #include <platform.h>
 #include <stdlib.h>
 #include <time.h>
-#include <util/atomic_int.h>
+#include <util/atomic_utils.h>
 #include <util/debug.h>
 #include <util/random_utils.h>
 
@@ -143,13 +143,13 @@ static int session_request_increase_buffer(ab_request_p request, int new_capacit
 
 static volatile mutex_p session_mutex = NULL;
 static volatile vector_p sessions = NULL;
-static atomic_int library_shutting_down = ATOMIC_INT_STATIC_INIT;
+static atomic_bool library_shutting_down = 0; /* can I do this? */
 
 
 int session_startup(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    atomic_set(&library_shutting_down, 0);
+    atomic_set_bool(&library_shutting_down, 0);
 
     if((rc = mutex_create((mutex_p *)&session_mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
@@ -194,7 +194,7 @@ void session_teardown(void) {
     /* flag the whole library shutting down. */
     pdebug(DEBUG_INFO, "Setting library shutdown flag.");
 
-    atomic_set(&library_shutting_down, 1);
+    atomic_set_bool(&library_shutting_down, 1);
 
     if(sessions && session_mutex) {
         pdebug(DEBUG_DETAIL, "Waiting for sessions to terminate.");
@@ -224,7 +224,7 @@ void session_teardown(void) {
         session_mutex = NULL;
     }
 
-    atomic_set(&library_shutting_down, 0);
+    atomic_set_bool(&library_shutting_down, 0);
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -1201,7 +1201,7 @@ THREAD_FUNC(session_handler) {
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
-    while(!session->terminating && !atomic_get(&library_shutting_down)) {
+    while(!session->terminating && !atomic_get_bool(&library_shutting_down)) {
         /* how long should we wait if nothing wakes us? */
         wait_until_time = time_ms() + SESSION_IDLE_WAIT_TIME;
 
