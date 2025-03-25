@@ -107,6 +107,13 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
                 session->server_done = &done;   /* reference to a flag that any thread can raise (and all must monitor) */
 
                 /* spawn new thread to handle the connection */
+
+// /* DEBUG */
+// fprintf(stderr, "tcp_server.c:112 Creating new thread for socket %d.\n", client_fd);
+// fflush(stderr);
+// /* DEBUG */
+
+
                 if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) == THREAD_STATUS_OK) {
                     thread_created = true;
                 } else {
@@ -147,13 +154,16 @@ void tcp_server_destroy(tcp_server_p server) {
 
 THREAD_FUNC(conn_handler) {
     client_session_p session = arg;
-    uint8_t buf[4200];                                   /* CIP only allows 4002 for the CIP request, but there is overhead. */
-    tcp_server_p server = (tcp_server_p)session->server; /* need to cast for C++ */
+    uint8_t buf[65536 + 128];                                   /* Rockwell supports up to 64k (Micro800) */
+    tcp_server_p server = (tcp_server_p)session->server;        /* need to cast for C++ */
     slice_s tmp_input = {0};
     slice_s tmp_output = {0};
     int rc = TCP_SERVER_DONE;
 
     info("Got new client connection, going into processing loop.");
+
+    /* no one will join this thread, so clean ourselves up. */
+    thread_detach();
 
     session->buffer = slice_make(buf, sizeof(buf));
     tmp_input = session->buffer;
@@ -214,6 +224,13 @@ THREAD_FUNC(conn_handler) {
             && (*(session->server_done) != true)); /* make sure another thread hasn't killed the server */
 
     /* done with the socket */
+
+
+// /* DEBUG */
+// fprintf(stderr, "tcp_server.c:227 Closing client socket %d.\n", session->client_fd);
+// fflush(stderr);
+// /* DEBUG */
+
     socket_close(session->client_fd);
 
     /* see tcp_server_start() where these are malloc'ed for us */
