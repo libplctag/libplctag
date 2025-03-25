@@ -20,28 +20,48 @@ cli_request_t cli_request = {
 };
 
 void usage(void) {
+    // NOLINTNEXTLINE
     fprintf(stdout, "Usage:\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\tLIBPLCTAG CLI.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\tThis is a command-line interface to access tags/registers, in PLCs supported by libplctag.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tcli {--read | --write | --watch} {-protocol} {-ip} {-path} {-plc}\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t\t[-debug] [-interval] [-attributes] [-offline]\n");
 
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tCLI Action (Required):\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\t--read\t\t- Perform a one-shot READ operation.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t--write\t\t- Perform a one-shot WRITE operation.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t--watch\t\t- Perform a continuous WATCH operation at the specified interval.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-h | --help\t- Prints the Usage details.\n");
 
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tLIBPLCTAG Parameters (Required):\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\t-protocol\t- type of plc protocol. (default: ab_eip)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-ip\t\t- network address for the host PLC. (default: 127.0.0.1)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-path\t\t- routing path for the Tags. (default: 1,0)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-plc\t\t- type of the PLC. (default: controllogix)\n");
 
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tLIBPLCTAG Parameters (Optional):\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\t-debug\t\t- logging output level. (default: 1)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-interval\t- interval in ms for WATCH operation. (default: 500)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-attributes\t- additional attributes. (default: '')\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-offline\t- operation mode. (default: false)\n");
 
     fflush(stdout);
@@ -436,6 +456,7 @@ int process_tags(void) {
 
         switch(cli_request.operation) {
             case WATCH:
+                // NOLINTNEXTLINE
                 sprintf(tag_path, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol, cli_request.ip, cli_request.path,
                         cli_request.plc, cli_request.debug_level, cli_request.interval, tag.path, cli_request.attributes);
                 break;
@@ -935,3 +956,4 @@ int main(int argc, char *argv[]) {
     pdebug(DEBUG_INFO, "DONE.");
     exit(0);
 }
+// NOLINTNEXTLINE

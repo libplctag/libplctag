@@ -80,8 +80,8 @@ struct tags {
 
 void usage(void);
 int parse_args(int argc, char *argv[]);
-void print_request();
-int process_tags();
+void print_request(void);
+int process_tags(void);
 int is_comment(const char *line);
 void trim_line(char *line);
 tag_line_parts_t split_string(const char *str, const char *sep);
