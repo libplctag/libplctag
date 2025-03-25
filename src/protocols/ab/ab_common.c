@@ -1141,6 +1141,11 @@ int check_request_status(ab_tag_p tag) {
             }
         }
 
+        /* if we failed above, punt out of the do/while loop. */
+        if(rc != PLCTAG_STATUS_OK) {
+            break;
+        }
+
         /* check the length */
         if((tag->req->request_size < 0) || (size_t)tag->req->request_size < sizeof(*eip_header)) {
             pdebug(DEBUG_WARN, "Insufficient data returned for even an EIP header!");
@@ -1157,10 +1162,13 @@ int check_request_status(ab_tag_p tag) {
         }
 
         switch(le2h16(eip_header->encap_command)) {
-            case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_WARN, "Received a connected send EIP packet."); break;
-            case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_WARN, "Received an unconnected send EIP packet."); break;
+            case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_SPEW, "Received a connected send EIP packet."); break;
+            case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_SPEW, "Received an unconnected send EIP packet."); break;
             default:
+                pdebug(DEBUG_WARN, "Request pointer %p, header pointer %p.", tag->req, eip_header);
                 pdebug(DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
+                pdebug_dump_bytes(DEBUG_WARN, tag->req->data, tag->req->request_size);
+                
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
         }
