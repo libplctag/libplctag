@@ -181,12 +181,16 @@ set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
 set ( cli_SRC_PATH "${base_SRC_PATH}/contrib/cli" )
 
 # OS-specific files for the platform code.
-if (UNIX)
+if (UNIX OR APPLE)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/posix" )
 elseif (WIN32)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
+else()
+    message("No platform code path set!")
+    return()
 endif()
 
+message("Using ${platform_SRC_PATH}/platform.h and ${platform_SRC_PATH}/platform.c for platform-specific code.")
 
 # where to find include files.
 include_directories("${base_SRC_PATH}")
@@ -394,8 +398,8 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${protocol_SRC_PATH}/system/system.c"
                      "${protocol_SRC_PATH}/system/system.h"
                      "${protocol_SRC_PATH}/system/tag.h"
-                     "${util_SRC_PATH}/atomic_int.c"
-                     "${util_SRC_PATH}/atomic_int.h"
+                     "${util_SRC_PATH}/atomic_utils.c"
+                     "${util_SRC_PATH}/atomic_utils.h"
                      "${util_SRC_PATH}/attr.c"
                      "${util_SRC_PATH}/attr.h"
                      "${util_SRC_PATH}/byteorder.h"

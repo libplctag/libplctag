@@ -31,73 +31,56 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <util/atomic_int.h>
-#include <util/debug.h>
+#pragma once
+
+#include <platform.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 
-void atomic_init(atomic_int *a, int new_val) {
-    a->lock = LOCK_INIT;
-    a->val = new_val;
-}
+#define ATOMIC_INT_STATIC_INIT {0}
+
+#if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 11)
+
+typedef volatile bool atomic_bool;
+typedef volatile int32_t atomic_int32_t;
+typedef volatile int64_t atomic_int64_t;
+
+#else
+
+#include <stdatomic.h>
+
+typedef _Atomic(bool) atomic_bool;
+typedef _Atomic(int32_t) atomic_int32_t;
+typedef _Atomic(int64_t) atomic_int64_t;
+
+#endif
+
+extern void atomic_init_bool(atomic_bool *a, bool new_val);
+extern bool atomic_get_bool(atomic_bool *a);
+extern bool atomic_set_bool(atomic_bool *a, bool new_val);
+extern bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val);
+
+extern void atomic_init_int32(atomic_int32_t *a, int32_t new_val);
+extern int32_t atomic_get_int32(atomic_int32_t *a);
+extern int32_t atomic_set_int32(atomic_int32_t *a, int32_t new_val);
+extern int32_t atomic_add_int32(atomic_int32_t *a, int32_t other);
+extern int32_t atomic_compare_and_set_int32(atomic_int32_t *a, int32_t old_val, int32_t new_val);
+
+extern void atomic_init_int64(atomic_int64_t *a, int64_t new_val);
+extern int64_t atomic_get_int64(atomic_int64_t *a);
+extern int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
+extern int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
+extern int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
 
 
-int atomic_get(atomic_int *a) {
-    int val = 0;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    spin_block(&a->lock) { val = a->val; }
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return val;
-}
 
 
-int atomic_set(atomic_int *a, int new_val) {
-    int old_val = 0;
 
-    pdebug(DEBUG_SPEW, "Starting.");
+// typedef struct { lock_t lock; volatile int val; } atomic_int;
 
-    spin_block(&a->lock) {
-        old_val = a->val;
-        a->val = new_val;
-    }
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return old_val;
-}
-
-
-int atomic_add(atomic_int *a, int other) {
-    int old_val = 0;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    spin_block(&a->lock) {
-        old_val = a->val;
-        a->val += other;
-    }
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return old_val;
-}
-
-
-int atomic_compare_and_set(atomic_int *a, int old_val, int new_val) {
-    int ret_val = 0;
-
-    pdebug(DEBUG_SPEW, "Starting.");
-
-    spin_block(&a->lock) {
-        ret_val = a->val;
-
-        if(ret_val == old_val) { a->val = new_val; }
-    }
-
-    pdebug(DEBUG_SPEW, "Done.");
-
-    return ret_val;
-}
+// extern void atomic_init(atomic_int *a, int new_val);
+// extern int atomic_get(atomic_int *a);
+// extern int atomic_set(atomic_int *a, int new_val);
+// extern int atomic_add(atomic_int *a, int other);
+// extern int atomic_compare_and_set(atomic_int *a, int old_val, int new_val);
