@@ -47,7 +47,7 @@ static int tag_status(ab_tag_p tag);
 static int tag_tickler(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
 
-struct tag_vtable_t slc_vtable = {(tag_vtable_func)tag_abort_request, /* shared */
+struct tag_vtable_t slc_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
                                   (tag_vtable_func)tag_read_start, (tag_vtable_func)tag_status, (tag_vtable_func)tag_tickler,
                                   (tag_vtable_func)tag_write_start, (tag_vtable_func)NULL, /* wake_plc */
 
@@ -308,7 +308,7 @@ int tag_read_start(ab_tag_p tag) {
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
 
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
 
         return rc;
     }
@@ -393,7 +393,7 @@ static int check_read_status(ab_tag_p tag) {
     } while(0);
 
     /* clean up the request. */
-    tag_abort_request(tag);
+    ab_tag_abort_request(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -534,7 +534,7 @@ int tag_write_start(ab_tag_p tag) {
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
 
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
 
         return rc;
     }
@@ -592,7 +592,7 @@ static int check_write_status(ab_tag_p tag) {
     } while(0);
 
     /* clean up the request. */
-    tag_abort_request(tag);
+    ab_tag_abort_request(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
 

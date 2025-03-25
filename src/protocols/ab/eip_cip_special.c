@@ -158,9 +158,9 @@ static int udt_tag_build_read_fields_request_connected(ab_tag_p tag);
 
 
 /* define the vtable for raw tag type. */
-struct tag_vtable_t raw_tag_vtable = {(tag_vtable_func)tag_abort_request, /* shared */
-                                      (tag_vtable_func)NULL,              /* read */
-                                      (tag_vtable_func)ab_tag_status,     /* shared */
+struct tag_vtable_t raw_tag_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
+                                      (tag_vtable_func)NULL,                 /* read */
+                                      (tag_vtable_func)ab_tag_status,        /* shared */
                                       (tag_vtable_func)raw_tag_tickler, (tag_vtable_func)raw_tag_write_start,
                                       (tag_vtable_func)NULL, /* wake_plc */
 
@@ -170,7 +170,7 @@ struct tag_vtable_t raw_tag_vtable = {(tag_vtable_func)tag_abort_request, /* sha
                                       ab_get_byte_array_attrib};
 
 /* define the vtable for listing tag type. */
-struct tag_vtable_t listing_tag_vtable = {(tag_vtable_func)tag_abort_request,                                      /* shared */
+struct tag_vtable_t listing_tag_vtable = {(tag_vtable_func)ab_tag_abort_request,                                   /* shared */
                                           (tag_vtable_func)listing_tag_read_start, (tag_vtable_func)ab_tag_status, /* shared */
                                           (tag_vtable_func)listing_tag_tickler, (tag_vtable_func)NULL,             /* write */
                                           (tag_vtable_func)NULL,                                                   /* wake_plc */
@@ -182,7 +182,7 @@ struct tag_vtable_t listing_tag_vtable = {(tag_vtable_func)tag_abort_request,   
 
 
 /* define the vtable for udt tag type. */
-struct tag_vtable_t udt_tag_vtable = {(tag_vtable_func)tag_abort_request,                                  /* shared */
+struct tag_vtable_t udt_tag_vtable = {(tag_vtable_func)ab_tag_abort_request,                               /* shared */
                                       (tag_vtable_func)udt_tag_read_start, (tag_vtable_func)ab_tag_status, /* shared */
                                       (tag_vtable_func)udt_tag_tickler, (tag_vtable_func)NULL,             /* write */
                                       (tag_vtable_func)NULL,                                               /* wake_plc */
@@ -275,7 +275,7 @@ int raw_tag_tickler(ab_tag_p tag) {
     if(tag->read_in_progress) {
         pdebug(DEBUG_WARN, "Something started a read on a raw tag.  This is not supported!");
 
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
 
         /* fire the event anyway */
         tag->read_complete = 1;
@@ -398,7 +398,7 @@ int raw_tag_check_write_status_connected(ab_tag_p tag) {
     }
 
     /* clean up regardless */
-    tag_abort_request(tag);
+    ab_tag_abort_request(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -440,7 +440,7 @@ int raw_tag_check_write_status_unconnected(ab_tag_p tag) {
     }
 
     /* clean up the request. */
-    tag_abort_request(tag);
+    ab_tag_abort_request(tag);
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -517,7 +517,7 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! Error %s", plc_tag_decode_error(rc));
 
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_INFO, "Done");
@@ -639,7 +639,7 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
     rc = session_add_request(tag->session, tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! Error %s", plc_tag_decode_error(rc));
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -804,7 +804,7 @@ int listing_tag_tickler(ab_tag_p tag) {
     if(tag->write_in_progress) {
         pdebug(DEBUG_WARN, "Something started a write on a listing tag.   This is not supported!");
 
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
 
         /* fire the event anyway. */
         tag->write_complete = 1;
@@ -941,7 +941,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
     } while(0);
 
     /* clean up the request as we are done with it. */
-    tag_abort_request_only(tag);
+    ab_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -976,7 +976,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
         tag->next_id = 0;
 
         /* clean up everything in case we left something dangling. */
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -1106,7 +1106,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -1222,7 +1222,7 @@ int udt_tag_tickler(ab_tag_p tag) {
     if(tag->write_in_progress) {
         pdebug(DEBUG_WARN, "Something started a write on a UDT tag.   This is not supported!");
 
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
 
         /* fire the event anyway. */
         tag->write_complete = 1;
@@ -1376,7 +1376,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
     } while(0);
 
     /* the old request is done */
-    tag_abort_request(tag);
+    ab_tag_abort_request(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -1410,7 +1410,7 @@ int udt_tag_check_read_metadata_status_connected(ab_tag_p tag) {
         tag->udt_get_fields = 0;
 
         /* clean up everything in case we managed to create a request before failing. */
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -1534,7 +1534,7 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -1632,7 +1632,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
     } while(0);
 
     /* get rid of the old request. we are done with it. */
-    tag_abort_request_only(tag);
+    ab_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -1667,7 +1667,7 @@ int udt_tag_check_read_fields_status_connected(ab_tag_p tag) {
         tag->udt_get_fields = 0;
 
         /* clean up everything. */
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -1692,7 +1692,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     rc = session_create_request(tag->session, tag->tag_id, &tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -1785,7 +1785,7 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     rc = session_add_request(tag->session, tag->req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 

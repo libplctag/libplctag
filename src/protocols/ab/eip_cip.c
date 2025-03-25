@@ -145,7 +145,7 @@ static int tag_tickler(plc_tag_p tag_arg);
 static int tag_write_start(plc_tag_p tag_arg);
 
 /* define the exported vtable for this tag type. */
-struct tag_vtable_t eip_cip_vtable = {(tag_vtable_func)tag_abort_request,                              /* shared */
+struct tag_vtable_t eip_cip_vtable = {(tag_vtable_func)ab_tag_abort_request,                           /* shared */
                                       (tag_vtable_func)tag_read_start, (tag_vtable_func)ab_tag_status, /* shared */
                                       (tag_vtable_func)tag_tickler, (tag_vtable_func)tag_write_start,
                                       (tag_vtable_func)NULL, /* wake_plc */
@@ -445,7 +445,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -582,7 +582,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -734,7 +734,7 @@ int build_write_bit_request_connected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -922,7 +922,7 @@ int build_write_bit_request_unconnected(ab_tag_p tag) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -1069,7 +1069,7 @@ int build_write_request_connected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -1253,7 +1253,7 @@ int build_write_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
         return rc;
     }
 
@@ -1398,7 +1398,7 @@ static int check_read_status_connected(ab_tag_p tag) {
     } while(0);
 
     /* clean up the request */
-    tag_abort_request_only(tag);
+    ab_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -1425,7 +1425,7 @@ static int check_read_status_connected(ab_tag_p tag) {
         pdebug(DEBUG_WARN, "Error received!");
 
         /* clean up everything. */
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -1556,7 +1556,7 @@ static int check_read_status_unconnected(ab_tag_p tag) {
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
-    tag_abort_request_only(tag);
+    ab_tag_abort_request_only(tag);
 
     /* are we actually done? */
     if(rc == PLCTAG_STATUS_OK) {
@@ -1586,7 +1586,7 @@ static int check_read_status_unconnected(ab_tag_p tag) {
         pdebug(DEBUG_WARN, "Error received!");
 
         /* clean up everything. */
-        tag_abort_request(tag);
+        ab_tag_abort_request(tag);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -1631,7 +1631,7 @@ static int check_write_status_connected(ab_tag_p tag) {
         }
     } while(0);
 
-    tag_abort_request_only(tag);
+    ab_tag_abort_request_only(tag);
 
     if(rc == PLCTAG_STATUS_OK) {
         if(tag->offset < tag->size) {
@@ -1696,7 +1696,7 @@ static int check_write_status_unconnected(ab_tag_p tag) {
         }
     } while(0);
 
-    tag_abort_request_only(tag);
+    ab_tag_abort_request_only(tag);
 
     if(rc == PLCTAG_STATUS_OK) {
         if(tag->offset < tag->size) {
