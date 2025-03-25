@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -40,4 +40,3 @@
 /* SLC */
 extern struct tag_vtable_t slc_vtable;
 extern tag_byte_order_t slc_tag_byte_order;
-

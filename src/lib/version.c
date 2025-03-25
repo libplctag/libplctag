@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,8 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stdint.h>
 #include "version.h"
+#include <stdint.h>
 
 /*
  * The library version in various ways.
@@ -41,7 +41,7 @@
  * checking them against a dynamically linked library.
  */
 
-const char *VERSION=LIB_VER_STRING;
+const char *VERSION = LIB_VER_STRING;
 const uint64_t version_major = LIB_VER_MAJOR;
 const uint64_t version_minor = LIB_VER_MINOR;
 const uint64_t version_patch = LIB_VER_PATCH;

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -44,7 +44,7 @@
  * Note that it will readjust its size if enough entries are made.
  */
 
-#define MAX_ITERATIONS  (10)
+#define MAX_ITERATIONS (10)
 #define MAX_INCREMENT (10000)
 
 struct hashtable_entry_t {
@@ -62,26 +62,25 @@ struct hashtable_t {
 
 typedef struct hashtable_entry_t *hashtable_entry_p;
 
-//static int next_highest_prime(int x);
+// static int next_highest_prime(int x);
 static int find_key(hashtable_p table, int64_t key);
 static int find_empty(hashtable_p table, int64_t key);
 static int expand_table(hashtable_p table);
 
 
-hashtable_p hashtable_create(int initial_capacity)
-{
+hashtable_p hashtable_create(int initial_capacity) {
     hashtable_p tab = NULL;
 
-    pdebug(DEBUG_INFO,"Starting");
+    pdebug(DEBUG_INFO, "Starting");
 
     if(initial_capacity <= 0) {
-        pdebug(DEBUG_WARN,"Size is less than or equal to zero!");
+        pdebug(DEBUG_WARN, "Size is less than or equal to zero!");
         return NULL;
     }
 
     tab = mem_alloc(sizeof(struct hashtable_t));
     if(!tab) {
-        pdebug(DEBUG_ERROR,"Unable to allocate memory for hash table!");
+        pdebug(DEBUG_ERROR, "Unable to allocate memory for hash table!");
         return NULL;
     }
 
@@ -91,52 +90,50 @@ hashtable_p hashtable_create(int initial_capacity)
 
     tab->entries = mem_alloc(initial_capacity * (int)sizeof(struct hashtable_entry_t));
     if(!tab->entries) {
-        pdebug(DEBUG_ERROR,"Unable to allocate entry array!");
+        pdebug(DEBUG_ERROR, "Unable to allocate entry array!");
         hashtable_destroy(tab);
         return NULL;
     }
 
-    pdebug(DEBUG_INFO,"Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return tab;
 }
 
 
-void *hashtable_get(hashtable_p table, int64_t key)
-{
+void *hashtable_get(hashtable_p table, int64_t key) {
     int index = 0;
     void *result = NULL;
 
-    pdebug(DEBUG_SPEW,"Starting");
+    pdebug(DEBUG_SPEW, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_WARN,"Hashtable pointer null or invalid.");
+        pdebug(DEBUG_WARN, "Hashtable pointer null or invalid.");
         return NULL;
     }
 
     index = find_key(table, key);
     if(index != PLCTAG_ERR_NOT_FOUND) {
         result = table->entries[index].data;
-        pdebug(DEBUG_SPEW,"found data %p", result);
+        pdebug(DEBUG_SPEW, "found data %p", result);
     } else {
         pdebug(DEBUG_SPEW, "key not found!");
     }
 
-    pdebug(DEBUG_SPEW,"Done");
+    pdebug(DEBUG_SPEW, "Done");
 
     return result;
 }
 
 
-int hashtable_put(hashtable_p table, int64_t key, void  *data)
-{
+int hashtable_put(hashtable_p table, int64_t key, void *data) {
     int rc = PLCTAG_STATUS_OK;
     int index = 0;
 
-    pdebug(DEBUG_SPEW,"Starting");
+    pdebug(DEBUG_SPEW, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_WARN,"Hashtable pointer null or invalid.");
+        pdebug(DEBUG_WARN, "Hashtable pointer null or invalid.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -164,10 +161,9 @@ int hashtable_put(hashtable_p table, int64_t key, void  *data)
 }
 
 
-void *hashtable_get_index(hashtable_p table, int index)
-{
+void *hashtable_get_index(hashtable_p table, int index) {
     if(!table) {
-        pdebug(DEBUG_WARN,"Hashtable pointer null or invalid");
+        pdebug(DEBUG_WARN, "Hashtable pointer null or invalid");
         return NULL;
     }
 
@@ -180,11 +176,9 @@ void *hashtable_get_index(hashtable_p table, int index)
 }
 
 
-
-int hashtable_capacity(hashtable_p table)
-{
+int hashtable_capacity(hashtable_p table) {
     if(!table) {
-        pdebug(DEBUG_WARN,"Hashtable pointer null or invalid");
+        pdebug(DEBUG_WARN, "Hashtable pointer null or invalid");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -192,11 +186,9 @@ int hashtable_capacity(hashtable_p table)
 }
 
 
-
-int hashtable_entries(hashtable_p table)
-{
+int hashtable_entries(hashtable_p table) {
     if(!table) {
-        pdebug(DEBUG_WARN,"Hashtable pointer null or invalid");
+        pdebug(DEBUG_WARN, "Hashtable pointer null or invalid");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -204,41 +196,34 @@ int hashtable_entries(hashtable_p table)
 }
 
 
-
-int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table, int64_t key, void *data, void *context), void *context_arg)
-{
+int hashtable_on_each(hashtable_p table, int (*callback_func)(hashtable_p table, int64_t key, void *data, void *context),
+                      void *context_arg) {
     int rc = PLCTAG_STATUS_OK;
 
-    if(!table) {
-        pdebug(DEBUG_WARN,"Hashtable pointer null or invalid");
-    }
+    if(!table) { pdebug(DEBUG_WARN, "Hashtable pointer null or invalid"); }
 
-    for(int i=0; i < table->total_entries && rc == PLCTAG_STATUS_OK; i++) {
-        if(table->entries[i].data) {
-            rc = callback_func(table, table->entries[i].key, table->entries[i].data, context_arg);
-        }
+    for(int i = 0; i < table->total_entries && rc == PLCTAG_STATUS_OK; i++) {
+        if(table->entries[i].data) { rc = callback_func(table, table->entries[i].key, table->entries[i].data, context_arg); }
     }
 
     return rc;
 }
 
 
-
-void *hashtable_remove(hashtable_p table, int64_t key)
-{
+void *hashtable_remove(hashtable_p table, int64_t key) {
     int index = 0;
     void *result = NULL;
 
-    pdebug(DEBUG_DETAIL,"Starting");
+    pdebug(DEBUG_DETAIL, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_WARN,"Hashtable pointer null or invalid.");
+        pdebug(DEBUG_WARN, "Hashtable pointer null or invalid.");
         return result;
     }
 
     index = find_key(table, key);
     if(index == PLCTAG_ERR_NOT_FOUND) {
-        pdebug(DEBUG_SPEW,"Not found.");
+        pdebug(DEBUG_SPEW, "Not found.");
         return result;
     }
 
@@ -247,20 +232,17 @@ void *hashtable_remove(hashtable_p table, int64_t key)
     table->entries[index].data = NULL;
     table->used_entries--;
 
-    pdebug(DEBUG_DETAIL,"Done");
+    pdebug(DEBUG_DETAIL, "Done");
 
     return result;
 }
 
 
-
-
-int hashtable_destroy(hashtable_p table)
-{
-    pdebug(DEBUG_INFO,"Starting");
+int hashtable_destroy(hashtable_p table) {
+    pdebug(DEBUG_INFO, "Starting");
 
     if(!table) {
-        pdebug(DEBUG_WARN,"Called with null pointer!");
+        pdebug(DEBUG_WARN, "Called with null pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -269,13 +251,10 @@ int hashtable_destroy(hashtable_p table)
 
     mem_free(table);
 
-    pdebug(DEBUG_INFO,"Done");
+    pdebug(DEBUG_INFO, "Done");
 
     return PLCTAG_STATUS_OK;
 }
-
-
-
 
 
 /***********************************************************************
@@ -283,11 +262,10 @@ int hashtable_destroy(hashtable_p table)
  **********************************************************************/
 
 
-#define KEY_TO_INDEX(t, k) (uint32_t)((hash((uint8_t*)&k, sizeof(k), t->hash_salt)) % (uint32_t)(t->total_entries))
+#define KEY_TO_INDEX(t, k) (uint32_t)((hash((uint8_t *)&k, sizeof(k), t->hash_salt)) % (uint32_t)(t->total_entries))
 
 
-int find_key(hashtable_p table, int64_t key)
-{
+int find_key(hashtable_p table, int64_t key) {
     uint32_t initial_index = KEY_TO_INDEX(table, key);
     int index = 0;
     int iteration = 0;
@@ -301,20 +279,18 @@ int find_key(hashtable_p table, int64_t key)
      * of a removed entry and there could still be entries past that point
      * that are for the initial slot.
      */
-    for(iteration=0; iteration < MAX_ITERATIONS; iteration++) {
+    for(iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
         index = ((int)initial_index + iteration) % table->total_entries;
 
-        if(table->entries[index].key == key) {
-            break;
-        }
+        if(table->entries[index].key == key) { break; }
     }
 
     if(iteration >= MAX_ITERATIONS) {
         /* FIXME - does not work on Windows. */
-        //pdebug(DEBUG_SPEW, "Key %ld not found.", key);
+        // pdebug(DEBUG_SPEW, "Key %ld not found.", key);
         return PLCTAG_ERR_NOT_FOUND;
     } else {
-        //pdebug(DEBUG_SPEW, "Key %d found at index %d.", (int)table->entries[index].key, index);
+        // pdebug(DEBUG_SPEW, "Key %d found at index %d.", (int)table->entries[index].key, index);
     }
 
     pdebug(DEBUG_SPEW, "Done.");
@@ -323,10 +299,7 @@ int find_key(hashtable_p table, int64_t key)
 }
 
 
-
-
-int find_empty(hashtable_p table, int64_t key)
-{
+int find_empty(hashtable_p table, int64_t key) {
     uint32_t initial_index = KEY_TO_INDEX(table, key);
     int index = 0;
     int iteration = 0;
@@ -334,17 +307,15 @@ int find_empty(hashtable_p table, int64_t key)
     pdebug(DEBUG_SPEW, "Starting.");
 
     /* search for the hash value. */
-    for(iteration=0; iteration < MAX_ITERATIONS; iteration++) {
+    for(iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
         index = ((int)initial_index + iteration) % table->total_entries;
 
         pdebug(DEBUG_SPEW, "Trying index %d for key %ld.", index, key);
-        if(table->entries[index].data == NULL) {
-            break;
-        }
+        if(table->entries[index].data == NULL) { break; }
     }
 
     if(iteration >= MAX_ITERATIONS) {
-        pdebug(DEBUG_SPEW,"No empty entry found in %d iterations!", MAX_ITERATIONS);
+        pdebug(DEBUG_SPEW, "No empty entry found in %d iterations!", MAX_ITERATIONS);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
@@ -354,10 +325,7 @@ int find_empty(hashtable_p table, int64_t key)
 }
 
 
-
-
-int expand_table(hashtable_p table)
-{
+int expand_table(hashtable_p table) {
     struct hashtable_t new_table;
     int total_entries = table->total_entries;
     int index = PLCTAG_ERR_NOT_FOUND;
@@ -383,7 +351,7 @@ int expand_table(hashtable_p table)
         }
 
         /* copy the old entries.  Only copy ones that are used. */
-        for(int i=0; i < table->total_entries; i++) {
+        for(int i = 0; i < table->total_entries; i++) {
             if(table->entries[i].data) {
                 index = find_empty(&new_table, table->entries[i].key);
                 if(index == PLCTAG_ERR_NOT_FOUND) {

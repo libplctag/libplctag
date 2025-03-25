@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -35,23 +35,18 @@
 #include <util/debug.h>
 
 
-void atomic_init(atomic_int *a, int new_val)
-{
+void atomic_init(atomic_int *a, int new_val) {
     a->lock = LOCK_INIT;
     a->val = new_val;
 }
 
 
-
-int atomic_get(atomic_int *a)
-{
+int atomic_get(atomic_int *a) {
     int val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
 
-    spin_block(&a->lock) {
-        val = a->val;
-    }
+    spin_block(&a->lock) { val = a->val; }
 
     pdebug(DEBUG_SPEW, "Done.");
 
@@ -59,9 +54,7 @@ int atomic_get(atomic_int *a)
 }
 
 
-
-int atomic_set(atomic_int *a, int new_val)
-{
+int atomic_set(atomic_int *a, int new_val) {
     int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -77,9 +70,7 @@ int atomic_set(atomic_int *a, int new_val)
 }
 
 
-
-int atomic_add(atomic_int *a, int other)
-{
+int atomic_add(atomic_int *a, int other) {
     int old_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -95,8 +86,7 @@ int atomic_add(atomic_int *a, int other)
 }
 
 
-int atomic_compare_and_set(atomic_int *a, int old_val, int new_val)
-{
+int atomic_compare_and_set(atomic_int *a, int old_val, int new_val) {
     int ret_val = 0;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -104,14 +94,10 @@ int atomic_compare_and_set(atomic_int *a, int old_val, int new_val)
     spin_block(&a->lock) {
         ret_val = a->val;
 
-        if(ret_val == old_val) {
-            a->val = new_val;
-        }
+        if(ret_val == old_val) { a->val = new_val; }
     }
 
     pdebug(DEBUG_SPEW, "Done.");
 
     return ret_val;
 }
-
-

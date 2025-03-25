@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -116,9 +116,9 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
 
     /* build the output string template */
     snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") %s %s:%d %s\n",
-                 t.tm_year + 1900, t.tm_mon + 1, /* month is 0-11? */
-                 t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), tag_id, debug_level_name[debug_level],
-                 func, line_num, templ);
+             t.tm_year + 1900, t.tm_mon + 1, /* month is 0-11? */
+             t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), tag_id, debug_level_name[debug_level], func,
+             line_num, templ);
 
     /* make sure it is zero terminated */
     prefix[sizeof(prefix) - 1] = 0;

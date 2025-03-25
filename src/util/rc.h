@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -45,4 +45,3 @@ extern void *rc_inc_impl(const char *func, int line_num, void *ref);
 
 #define rc_dec(ref) rc_dec_impl(__func__, __LINE__, ref)
 extern void *rc_dec_impl(const char *func, int line_num, void *ref);
-

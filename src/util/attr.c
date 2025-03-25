@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -38,13 +38,11 @@
  *      Author: Kyle Hayes
  */
 
-#include <util/attr.h>
 #include <platform.h>
 #include <stdio.h>
 #include <string.h>
+#include <util/attr.h>
 #include <util/debug.h>
-
-
 
 
 struct attr_entry_t {
@@ -58,9 +56,6 @@ struct attr_t {
 };
 
 
-
-
-
 /*
  * find_entry
  *
@@ -68,22 +63,17 @@ struct attr_t {
  * passed name.
  */
 
-attr_entry find_entry(attr a, const char *name)
-{
+attr_entry find_entry(attr a, const char *name) {
     attr_entry e;
 
-    if(!a)
-        return NULL;
+    if(!a) { return NULL; }
 
     e = a->head;
 
-    if(!e)
-        return NULL;
+    if(!e) { return NULL; }
 
     while(e) {
-        if(str_cmp(e->name, name) == 0) {
-            return e;
-        }
+        if(str_cmp(e->name, name) == 0) { return e; }
 
         e = e->next;
     }
@@ -97,17 +87,7 @@ attr_entry find_entry(attr a, const char *name)
  *
  * Create a new attr structure and return a pointer to it.
  */
-extern attr attr_create(void)
-{
-    return (attr)mem_alloc(sizeof(struct attr_t));
-}
-
-
-
-
-
-
-
+extern attr attr_create(void) { return (attr)mem_alloc(sizeof(struct attr_t)); }
 
 
 /*
@@ -121,8 +101,7 @@ extern attr attr_create(void)
  * You cannot, currently, have an "=" or "&" character in the value for an
  * attribute.
  */
-extern attr attr_create_from_str(const char *attr_str)
-{
+extern attr attr_create_from_str(const char *attr_str) {
     attr res = NULL;
     char **kv_pairs = NULL;
 
@@ -173,28 +152,26 @@ extern attr attr_create_from_str(const char *attr_str)
         pdebug(DEBUG_DETAIL, "Key-value pair before trimming \"%s\":\"%s\".", key, value);
 
         /* skip leading spaces in the key */
-        while(*key == ' ') {
-            key++;
-        }
+        while(*key == ' ') { key++; }
 
         /* zero out all trailing spaces in the key */
-        for(int i=str_length(key) - 1; i > 0 && key[i] == ' '; i--) {
-            key[i] = (char)0;
-        }
+        for(int i = str_length(key) - 1; i > 0 && key[i] == ' '; i--) { key[i] = (char)0; }
 
         pdebug(DEBUG_DETAIL, "Key-value pair after trimming \"%s\":\"%s\".", key, value);
 
         /* check the string lengths */
 
         if(str_length(key) <= 0) {
-            pdebug(DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Key must not be zero length!", attr_str, *kv_pair);
+            pdebug(DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Key must not be zero length!",
+                   attr_str, *kv_pair);
             mem_free(kv_pairs);
             attr_destroy(res);
             return NULL;
         }
 
         if(str_length(value) <= 0) {
-            pdebug(DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Value must not be zero length!", attr_str, *kv_pair);
+            pdebug(DEBUG_WARN, "Attribute string \"%s\" has invalid key-value pair near \"%s\"!  Value must not be zero length!",
+                   attr_str, *kv_pair);
             mem_free(kv_pairs);
             attr_destroy(res);
             return NULL;
@@ -209,9 +186,7 @@ extern attr attr_create_from_str(const char *attr_str)
         }
     }
 
-    if(kv_pairs) {
-        mem_free(kv_pairs);
-    }
+    if(kv_pairs) { mem_free(kv_pairs); }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -219,21 +194,15 @@ extern attr attr_create_from_str(const char *attr_str)
 }
 
 
-
-
-
 /*
  * attr_set
  *
  * Set/create a new string attribute
  */
-extern int attr_set_str(attr attrs, const char *name, const char *val)
-{
+extern int attr_set_str(attr attrs, const char *name, const char *val) {
     attr_entry e;
 
-    if(!attrs) {
-        return 1;
-    }
+    if(!attrs) { return 1; }
 
     /* does the entry exist? */
     e = find_entry(attrs, name);
@@ -245,9 +214,7 @@ extern int attr_set_str(attr attrs, const char *name, const char *val)
      */
     if(e) {
         /* we had a match, free any existing value */
-        if(e->val) {
-            mem_free(e->val);
-        }
+        if(e->val) { mem_free(e->val); }
 
         /* set up the new value */
         e->val = str_dup(val);
@@ -288,9 +255,7 @@ extern int attr_set_str(attr attrs, const char *name, const char *val)
 }
 
 
-
-extern int attr_set_int(attr attrs, const char *name, int val)
-{
+extern int attr_set_int(attr attrs, const char *name, int val) {
     char buf[64];
 
     snprintf_platform(buf, sizeof buf, "%d", val);
@@ -299,9 +264,7 @@ extern int attr_set_int(attr attrs, const char *name, int val)
 }
 
 
-
-extern int attr_set_float(attr attrs, const char *name, float val)
-{
+extern int attr_set_float(attr attrs, const char *name, float val) {
     char buf[64];
 
     snprintf_platform(buf, sizeof buf, "%f", val);
@@ -310,22 +273,16 @@ extern int attr_set_float(attr attrs, const char *name, float val)
 }
 
 
-
-
-
 /*
  * attr_get
  *
  * Walk the list of attrs and return the value found with the passed name.
  * If the name is not found, return the passed default value.
  */
-extern const char *attr_get_str(attr attrs, const char *name, const char *def)
-{
+extern const char *attr_get_str(attr attrs, const char *name, const char *def) {
     attr_entry e;
 
-    if(!attrs) {
-        return def;
-    }
+    if(!attrs) { return def; }
 
     e = find_entry(attrs, name);
 
@@ -338,16 +295,13 @@ extern const char *attr_get_str(attr attrs, const char *name, const char *def)
 }
 
 
-extern int attr_get_int(attr attrs, const char *name, int def)
-{
+extern int attr_get_int(attr attrs, const char *name, int def) {
     int res;
     int rc;
 
-    const char *str_val = attr_get_str(attrs,name, NULL);
+    const char *str_val = attr_get_str(attrs, name, NULL);
 
-    if(!str_val) {
-        return def;
-    }
+    if(!str_val) { return def; }
 
     rc = str_to_int(str_val, &res);
 
@@ -360,16 +314,13 @@ extern int attr_get_int(attr attrs, const char *name, int def)
 }
 
 
-extern float attr_get_float(attr attrs, const char *name, float def)
-{
+extern float attr_get_float(attr attrs, const char *name, float def) {
     float res;
     int rc;
 
-    const char *str_val = attr_get_str(attrs,name, NULL);
+    const char *str_val = attr_get_str(attrs, name, NULL);
 
-    if(!str_val) {
-        return def;
-    }
+    if(!str_val) { return def; }
 
     rc = str_to_float(str_val, &res);
 
@@ -382,26 +333,21 @@ extern float attr_get_float(attr attrs, const char *name, float def)
 }
 
 
-extern int attr_remove(attr attrs, const char *name)
-{
+extern int attr_remove(attr attrs, const char *name) {
     attr_entry e, p;
 
-    if(!attrs)
-        return 0;
+    if(!attrs) { return 0; }
 
     e = attrs->head;
 
     /* no such entry, return */
-    if(!e)
-        return 0;
+    if(!e) { return 0; }
 
     /* loop to find the entry */
     p = NULL;
 
     while(e) {
-        if(str_cmp(e->name, name) == 0) {
-            break;
-        }
+        if(str_cmp(e->name, name) == 0) { break; }
 
         p = e;
         e = e->next;
@@ -415,13 +361,9 @@ extern int attr_remove(attr attrs, const char *name)
             p->next = e->next;
         }
 
-        if(e->name) {
-            mem_free(e->name);
-        }
+        if(e->name) { mem_free(e->name); }
 
-        if(e->val) {
-            mem_free(e->val);
-        }
+        if(e->val) { mem_free(e->val); }
 
         mem_free(e);
     } /* else not found */
@@ -435,24 +377,18 @@ extern int attr_remove(attr attrs, const char *name)
  *
  * Destroy and free all memory for an attribute list.
  */
-extern void attr_destroy(attr a)
-{
+extern void attr_destroy(attr a) {
     attr_entry e, p;
 
-    if(!a)
-        return;
+    if(!a) { return; }
 
     e = a->head;
 
     /* walk down the entry list and free as we go. */
     while(e) {
-        if(e->name) {
-            mem_free(e->name);
-        }
+        if(e->name) { mem_free(e->name); }
 
-        if(e->val) {
-            mem_free(e->val);
-        }
+        if(e->val) { mem_free(e->val); }
 
         p = e;
         e = e->next;

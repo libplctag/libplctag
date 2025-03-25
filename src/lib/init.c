@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,19 +31,17 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stdlib.h>
+#include <ab/ab.h>
+#include <lib/init.h>
 #include <lib/libplctag.h>
 #include <lib/tag.h>
-#include <platform.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <ab/ab.h>
 #include <mb/modbus.h>
 #include <omron/omron.h>
+#include <platform.h>
+#include <stdlib.h>
 #include <system/system.h>
-#include <lib/init.h>
-
-
+#include <util/attr.h>
+#include <util/debug.h>
 
 
 /*
@@ -64,8 +62,7 @@ struct {
     {"ab-eip", NULL, NULL, NULL, ab_tag_create},
     {"ab_eip", NULL, NULL, NULL, ab_tag_create},
     {"modbus-tcp", NULL, NULL, NULL, mb_tag_create},
-    {"modbus_tcp", NULL, NULL, NULL, mb_tag_create}
-};
+    {"modbus_tcp", NULL, NULL, NULL, mb_tag_create}};
 
 static lock_t library_initialization_lock = LOCK_INIT;
 static volatile int library_initialized = 0;
@@ -84,28 +81,27 @@ static volatile mutex_p lib_mutex = NULL;
  * model will be used.
  */
 
-tag_create_function find_tag_create_func(attr attributes)
-{
+tag_create_function find_tag_create_func(attr attributes) {
     int i = 0;
     const char *protocol = attr_get_str(attributes, "protocol", NULL);
     const char *make = attr_get_str(attributes, "make", attr_get_str(attributes, "manufacturer", NULL));
     const char *family = attr_get_str(attributes, "family", NULL);
     const char *model = attr_get_str(attributes, "model", NULL);
-    int num_entries = (sizeof(tag_type_map)/sizeof(tag_type_map[0]));
+    int num_entries = (sizeof(tag_type_map) / sizeof(tag_type_map[0]));
 
     /* if protocol is set, then use it to match. */
     if(protocol && str_length(protocol) > 0) {
-        for(i=0; i < num_entries; i++) {
+        for(i = 0; i < num_entries; i++) {
             if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0) {
-                pdebug(DEBUG_INFO,"Matched protocol=%s", protocol);
+                pdebug(DEBUG_INFO, "Matched protocol=%s", protocol);
                 return tag_type_map[i].tag_constructor;
             }
         }
     } else {
         /* match make/family/model */
-        for(i=0; i < num_entries; i++) {
+        for(i = 0; i < num_entries; i++) {
             if(tag_type_map[i].make && make && str_cmp_i(tag_type_map[i].make, make) == 0) {
-                pdebug(DEBUG_INFO,"Matched make=%s",make);
+                pdebug(DEBUG_INFO, "Matched make=%s", make);
                 if(tag_type_map[i].family) {
                     if(family && str_cmp_i(tag_type_map[i].family, family) == 0) {
                         pdebug(DEBUG_INFO, "Matched make=%s family=%s", make, family);
@@ -141,8 +137,7 @@ tag_create_function find_tag_create_func(attr attributes)
  * torn down at the end.
  */
 
-void destroy_modules(void)
-{
+void destroy_modules(void) {
     ab_teardown();
 
     mb_teardown();
@@ -165,7 +160,6 @@ void destroy_modules(void)
 }
 
 
-
 /*
  * initialize_modules() is called the first time any kind of tag is
  * created.  It will be called before the tag creation routines are
@@ -173,8 +167,7 @@ void destroy_modules(void)
  */
 
 
-int initialize_modules(void)
-{
+int initialize_modules(void) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -198,32 +191,26 @@ int initialize_modules(void)
         return rc;
     } else {
         /*
-        * guard library initialization with a mutex.
-        *
-        * This prevents busy waiting as would happen with just a spin lock.
-        */
+         * guard library initialization with a mutex.
+         *
+         * This prevents busy waiting as would happen with just a spin lock.
+         */
         critical_block(lib_mutex) {
             if(!library_initialized) {
                 /* initialize a random seed value. */
                 srand((unsigned int)time_ms());
 
-                pdebug(DEBUG_INFO,"Initializing library modules.");
+                pdebug(DEBUG_INFO, "Initializing library modules.");
                 rc = lib_init();
 
-                pdebug(DEBUG_INFO,"Initializing AB module.");
-                if(rc == PLCTAG_STATUS_OK) {
-                    rc = ab_init();
-                }
+                pdebug(DEBUG_INFO, "Initializing AB module.");
+                if(rc == PLCTAG_STATUS_OK) { rc = ab_init(); }
 
-                pdebug(DEBUG_INFO,"Initializing Modbus module.");
-                if(rc == PLCTAG_STATUS_OK) {
-                    rc = mb_init();
-                }
+                pdebug(DEBUG_INFO, "Initializing Modbus module.");
+                if(rc == PLCTAG_STATUS_OK) { rc = mb_init(); }
 
-                pdebug(DEBUG_INFO,"Initializing Omron module.");
-                if(rc == PLCTAG_STATUS_OK) {
-                    rc = omron_init();
-                }
+                pdebug(DEBUG_INFO, "Initializing Omron module.");
+                if(rc == PLCTAG_STATUS_OK) { rc = omron_init(); }
 
                 /* hook the destructor */
                 atexit(plc_tag_shutdown);
@@ -231,7 +218,7 @@ int initialize_modules(void)
                 /* do this last */
                 library_initialized = 1;
 
-                pdebug(DEBUG_INFO,"Done initializing library modules.");
+                pdebug(DEBUG_INFO, "Done initializing library modules.");
             }
         }
     }

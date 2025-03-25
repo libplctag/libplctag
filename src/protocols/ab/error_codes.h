@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -39,4 +39,3 @@ extern const char *decode_cip_error_long(uint8_t *data);
 extern int decode_cip_error_code(uint8_t *data);
 
 #endif
-

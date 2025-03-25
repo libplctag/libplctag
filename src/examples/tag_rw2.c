@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,20 +32,32 @@
  ***************************************************************************/
 
 
+#include "utils.h"
 #include <ctype.h>
 #include <inttypes.h>
+#include <lib/libplctag.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <stdarg.h>
 #include <string.h>
-#include <lib/libplctag.h>
-#include "utils.h"
+#include <time.h>
 
 typedef enum {
-    TYPE_BIT, TYPE_I8, TYPE_U8, TYPE_I16, TYPE_U16, TYPE_I32, TYPE_U32, TYPE_I64, TYPE_U64,
-    TYPE_F32, TYPE_F64, TYPE_STRING, TYPE_META, TYPE_RAW
+    TYPE_BIT,
+    TYPE_I8,
+    TYPE_U8,
+    TYPE_I16,
+    TYPE_U16,
+    TYPE_I32,
+    TYPE_U32,
+    TYPE_I64,
+    TYPE_U64,
+    TYPE_F32,
+    TYPE_F64,
+    TYPE_STRING,
+    TYPE_META,
+    TYPE_RAW
 } element_type_t;
 
 struct run_args {
@@ -71,7 +83,7 @@ struct run_args {
     } write_vals;
 };
 
-#define REQUIRED_VERSION 2,2,1
+#define REQUIRED_VERSION 2, 2, 1
 #define DEFAULT_TIMEOUT (5000)
 
 
@@ -84,8 +96,7 @@ static void cleanup(struct run_args *args);
 static void update_values(struct run_args *args);
 
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
     struct run_args args;
 
@@ -99,18 +110,14 @@ int main(int argc, char **argv)
     }
 
     /* output the version we are using. */
-    printf("Library version %d.%d.%d.\n",
-                            plc_tag_get_int_attribute(0, "version_major", 0),
-                            plc_tag_get_int_attribute(0, "version_minor", 0),
-                            plc_tag_get_int_attribute(0, "version_patch", 0));
+    printf("Library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", 0),
+           plc_tag_get_int_attribute(0, "version_minor", 0), plc_tag_get_int_attribute(0, "version_patch", 0));
 
     /* parse the argument list. */
     parse_args(argc, argv, &args);
 
     /* set the debug level if it was set in the command line parameters. */
-    if(args.debug > 0) {
-        plc_tag_set_debug_level(args.debug);
-    }
+    if(args.debug > 0) { plc_tag_set_debug_level(args.debug); }
 
     /* set up a scope to fake local exceptions. */
     do {
@@ -173,46 +180,44 @@ int main(int argc, char **argv)
 }
 
 
-
-void usage(void)
-{
-    printf( "Usage:\n "
-            "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--timeout=<timeout>] [--debug=<debug>] \n"
-            "\n"
-            "  <type>    - type is one of 'bit', 'uint8', 'sint8', 'uint16', 'sint16', \n "
-            "              'uint32', 'sint32', 'real32', 'real64', 'string' or 'metadata'.  \n"
-            "              The type is the type of the data to be read/written to the named tag.\n"
-            "              The types starting with 'u' are unsigned and with 's' are signed.\n"
-            "              For floating point, use 'real32' or 'real64'.  The 'metadata' type\n"
-            "              returns information about the raw (device) tag type data, the size of\n"
-            "              a single element and the number of elements that were requested, not the\n"
-            "              actual size of the tag in the device!\n"
-            "\n"
-            "  <tag string> - The path to the device containing the named data.  This value may need to\n"
-            "              be quoted.   Use double quotes on Windows and single quotes on Unix-like systems.\n"
-            "\n"
-			"  <vals>    - The value(s) to write.  Must be formatted appropriately\n"
-			"              for the data type.  Multiple values are comma separated. Optional.\n"
-            "\n"
-            "  <timeout> - Set the timeout to this number of milliseconds.  Default is 5000.  Optional.\n"
-            "\n"
-			"  <debug>   - Set the debug level.   Values 1-5.\n"
-			"              1 - output debug info only on fatal errors.\n"
-			"              2 - output debug info for warnings and errors.\n"
-			"              3 - output debug info for informative messages, warnings and errors.\n"
-			"              4 - output debug info for detailed status messages, informative messages, warnings and errors.\n"
-			"              5 - turn on all debugging output.  Not recommended.\n"
-			"              This field is optional.\n"
-			"\n"
-            "Example: tag_rw2 --type=uint32 '--tag=protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=ControlLogix&elem_count=2&name=pcomm_test_dint_array' --debug=4 --write=12,34 --timeout=1000\n"
-            "Note: Use double quotes \"\" for the attribute string in Windows.\n");
+void usage(void) {
+    printf(
+        "Usage:\n "
+        "tag_rw2 --type=<type> --tag=<tag string> [--write=<vals>] [--timeout=<timeout>] [--debug=<debug>] \n"
+        "\n"
+        "  <type>    - type is one of 'bit', 'uint8', 'sint8', 'uint16', 'sint16', \n "
+        "              'uint32', 'sint32', 'real32', 'real64', 'string' or 'metadata'.  \n"
+        "              The type is the type of the data to be read/written to the named tag.\n"
+        "              The types starting with 'u' are unsigned and with 's' are signed.\n"
+        "              For floating point, use 'real32' or 'real64'.  The 'metadata' type\n"
+        "              returns information about the raw (device) tag type data, the size of\n"
+        "              a single element and the number of elements that were requested, not the\n"
+        "              actual size of the tag in the device!\n"
+        "\n"
+        "  <tag string> - The path to the device containing the named data.  This value may need to\n"
+        "              be quoted.   Use double quotes on Windows and single quotes on Unix-like systems.\n"
+        "\n"
+        "  <vals>    - The value(s) to write.  Must be formatted appropriately\n"
+        "              for the data type.  Multiple values are comma separated. Optional.\n"
+        "\n"
+        "  <timeout> - Set the timeout to this number of milliseconds.  Default is 5000.  Optional.\n"
+        "\n"
+        "  <debug>   - Set the debug level.   Values 1-5.\n"
+        "              1 - output debug info only on fatal errors.\n"
+        "              2 - output debug info for warnings and errors.\n"
+        "              3 - output debug info for informative messages, warnings and errors.\n"
+        "              4 - output debug info for detailed status messages, informative messages, warnings and errors.\n"
+        "              5 - turn on all debugging output.  Not recommended.\n"
+        "              This field is optional.\n"
+        "\n"
+        "Example: tag_rw2 --type=uint32 '--tag=protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=ControlLogix&elem_count=2&name=pcomm_test_dint_array' --debug=4 --write=12,34 --timeout=1000\n"
+        "Note: Use double quotes \"\" for the attribute string in Windows.\n");
 
     exit(1);
 }
 
 
-void parse_args(int argc, char **argv, struct run_args *args)
-{
+void parse_args(int argc, char **argv, struct run_args *args) {
     int i = 0;
     bool has_type = false;
     bool has_tag = false;
@@ -227,7 +232,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
         /* DEBUG */
         printf("Processing argument %d \"%s\".\n", i, argv[i]);
 
-        if(strncmp(argv[i],"--type=", 7) == 0) {
+        if(strncmp(argv[i], "--type=", 7) == 0) {
             /* type argument. */
 
             if(has_type) {
@@ -239,7 +244,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
             has_type = true;
 
             parse_type(&(argv[i][7]), args);
-        } else if(strncmp(argv[i],"--tag=", 6) == 0) {
+        } else if(strncmp(argv[i], "--tag=", 6) == 0) {
             if(has_tag) {
                 printf("ERROR: Only one tag argument may be present!\n");
                 cleanup(args);
@@ -249,7 +254,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
             args->tag_string = &(argv[i][6]);
 
             has_tag = true;
-        } else if(strncmp(argv[i],"--debug=", 8) == 0) {
+        } else if(strncmp(argv[i], "--debug=", 8) == 0) {
             if(has_debug) {
                 printf("ERROR: Only one debug argument may be present!\n");
                 cleanup(args);
@@ -259,7 +264,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
             args->debug = atoi(&(argv[i][8]));
 
             has_debug = true;
-        } else if(strncmp(argv[i],"--timeout=", 10) == 0) {
+        } else if(strncmp(argv[i], "--timeout=", 10) == 0) {
             if(has_timeout) {
                 printf("ERROR: Only one timeout argument may be present!\n");
                 cleanup(args);
@@ -275,7 +280,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
             }
 
             has_timeout = true;
-        } else if(strncmp(argv[i],"--write=", 8) == 0) {
+        } else if(strncmp(argv[i], "--write=", 8) == 0) {
             if(has_write_vals) {
                 printf("ERROR: Only one write value(s) argument may be present!\n");
                 cleanup(args);
@@ -303,13 +308,9 @@ void parse_args(int argc, char **argv, struct run_args *args)
         usage();
     }
 
-    if(!has_debug) {
-        args->debug = 0;
-    }
+    if(!has_debug) { args->debug = 0; }
 
-    if(!has_timeout) {
-        args->timeout = DEFAULT_TIMEOUT;
-    }
+    if(!has_timeout) { args->timeout = DEFAULT_TIMEOUT; }
 
     /* handle any write arguments */
     if(has_write_vals) {
@@ -327,9 +328,7 @@ void parse_args(int argc, char **argv, struct run_args *args)
 }
 
 
-
-void parse_type(char *type_str, struct run_args *args)
-{
+void parse_type(char *type_str, struct run_args *args) {
     if(strcasecmp(type_str, "bit") == 0) {
         args->element_type = TYPE_BIT;
     } else if(strcasecmp(type_str, "sint8") == 0) {
@@ -370,8 +369,7 @@ void parse_type(char *type_str, struct run_args *args)
 }
 
 
-void parse_write_vals(char *write_vals, struct run_args *args)
-{
+void parse_write_vals(char *write_vals, struct run_args *args) {
     int num_vals = 0;
     int len = 0;
     int val_start = -1;
@@ -405,9 +403,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             tmp_vals[i] = 0; /* terminate that value string */
         } else {
             /* see if we have noted the first part of the string. */
-            if(val_start == -1) {
-                val_start = i;
-            }
+            if(val_start == -1) { val_start = i; }
         }
     }
 
@@ -430,7 +426,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -453,9 +449,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -470,7 +464,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -483,9 +477,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -500,7 +492,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -513,9 +505,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -530,7 +520,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -543,9 +533,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -560,7 +548,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -573,9 +561,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -590,7 +576,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -603,9 +589,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -620,7 +604,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -633,9 +617,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -650,7 +632,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -663,9 +645,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -680,7 +660,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -693,9 +673,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -710,7 +688,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
 
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -723,9 +701,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -741,7 +717,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             /* go through the strings. */
             val_start = -1;
             elem_index = 0;
-            for(int i=0; i < len; i++) {
+            for(int i = 0; i < len; i++) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
@@ -754,9 +730,7 @@ void parse_write_vals(char *write_vals, struct run_args *args)
                     elem_index++;
                 }
 
-                if(tmp_vals[i] == 0) {
-                    val_start = -1;
-                }
+                if(tmp_vals[i] == 0) { val_start = -1; }
             }
 
             break;
@@ -775,14 +749,11 @@ void parse_write_vals(char *write_vals, struct run_args *args)
             break;
     }
 
-    if(tmp_vals) {
-        free(tmp_vals);
-    }
+    if(tmp_vals) { free(tmp_vals); }
 }
 
 
-static int filter_printable_u8_data(uint8_t val)
-{
+static int filter_printable_u8_data(uint8_t val) {
     if(val >= 0x20 && val <= 0x7E) {
         return (int)val;
     } else {
@@ -791,8 +762,7 @@ static int filter_printable_u8_data(uint8_t val)
 }
 
 
-void dump_values(struct run_args *args)
-{
+void dump_values(struct run_args *args) {
     int item_index = 0;
     int offset = 0;
     int32_t tag = args->tag;
@@ -820,42 +790,50 @@ void dump_values(struct run_args *args)
                 case TYPE_RAW:
                 case TYPE_U8:
                     tmp_u8 = plc_tag_get_uint8(tag, offset);
-                    printf("data[%d]=%" PRIu8 " (0x%02" PRIx8 ") '%c'\n", item_index, tmp_u8, tmp_u8, filter_printable_u8_data(tmp_u8));
+                    printf("data[%d]=%" PRIu8 " (0x%02" PRIx8 ") '%c'\n", item_index, tmp_u8, tmp_u8,
+                           filter_printable_u8_data(tmp_u8));
                     offset += 1;
                     break;
 
                 case TYPE_U16:
-                    printf("data[%d]=%" PRIu16 " (0x%04" PRIx16 ")\n", item_index, plc_tag_get_uint16(tag, offset),plc_tag_get_uint16(tag, offset));
+                    printf("data[%d]=%" PRIu16 " (0x%04" PRIx16 ")\n", item_index, plc_tag_get_uint16(tag, offset),
+                           plc_tag_get_uint16(tag, offset));
                     offset += 2;
                     break;
 
                 case TYPE_U32:
-                    printf("data[%d]=%" PRIu32 " (0x%08" PRIx32 ")\n",item_index, plc_tag_get_uint32(tag, offset), plc_tag_get_uint32(tag, offset));
+                    printf("data[%d]=%" PRIu32 " (0x%08" PRIx32 ")\n", item_index, plc_tag_get_uint32(tag, offset),
+                           plc_tag_get_uint32(tag, offset));
                     offset += 4;
                     break;
 
                 case TYPE_U64:
-                    printf("data[%d]=%" PRIu64 " (0x%016" PRIx64 ")\n", item_index, plc_tag_get_uint64(tag, offset),plc_tag_get_uint64(tag, offset));
+                    printf("data[%d]=%" PRIu64 " (0x%016" PRIx64 ")\n", item_index, plc_tag_get_uint64(tag, offset),
+                           plc_tag_get_uint64(tag, offset));
                     offset += 8;
                     break;
 
                 case TYPE_I8:
-                    printf("data[%d]=%" PRId8 " (0x02%" PRIx8 ")\n", item_index, plc_tag_get_int8(tag, offset),plc_tag_get_int8(tag, offset));
+                    printf("data[%d]=%" PRId8 " (0x02%" PRIx8 ")\n", item_index, plc_tag_get_int8(tag, offset),
+                           plc_tag_get_int8(tag, offset));
                     offset += 1;
                     break;
 
                 case TYPE_I16:
-                    printf("data[%d]=%" PRId16 " (0x%04" PRIx16 ")\n", item_index, plc_tag_get_int16(tag, offset),plc_tag_get_int16(tag, offset));
+                    printf("data[%d]=%" PRId16 " (0x%04" PRIx16 ")\n", item_index, plc_tag_get_int16(tag, offset),
+                           plc_tag_get_int16(tag, offset));
                     offset += 2;
                     break;
 
                 case TYPE_I32:
-                    printf("data[%d]=%" PRId32 " (0x%08" PRIx32 ")\n", item_index, plc_tag_get_int32(tag, offset),plc_tag_get_int32(tag, offset));
+                    printf("data[%d]=%" PRId32 " (0x%08" PRIx32 ")\n", item_index, plc_tag_get_int32(tag, offset),
+                           plc_tag_get_int32(tag, offset));
                     offset += 4;
                     break;
 
                 case TYPE_I64:
-                    printf("data[%d]=%" PRId64 " (0x%016" PRIx64 ")\n", item_index, plc_tag_get_int64(tag, offset),plc_tag_get_int64(tag, offset));
+                    printf("data[%d]=%" PRId64 " (0x%016" PRIx64 ")\n", item_index, plc_tag_get_int64(tag, offset),
+                           plc_tag_get_int64(tag, offset));
                     offset += 8;
                     break;
 
@@ -869,60 +847,58 @@ void dump_values(struct run_args *args)
                     offset += 8;
                     break;
 
-                case TYPE_STRING:
-                    {
-                        int str_len = plc_tag_get_string_length(tag, offset);
-                        char *str = NULL;
-                        int rc = PLCTAG_STATUS_OK;
+                case TYPE_STRING: {
+                    int str_len = plc_tag_get_string_length(tag, offset);
+                    char *str = NULL;
+                    int rc = PLCTAG_STATUS_OK;
 
-                        if(str_len > 0) {
-                            str = calloc((size_t)(unsigned int)(str_len+1), sizeof(char));
-                            if(!str) {
-                                printf("ERROR: Unable to allocate temporary buffer to output string!\n");
-                                cleanup(args);
-                                exit(1);
-                            }
-
-                            rc = plc_tag_get_string(tag, offset, str, str_len);
-                            if(rc != PLCTAG_STATUS_OK) {
-                                printf("ERROR: Unable to get string %d, error: %s!\n", item_index, plc_tag_decode_error(rc));
-                                cleanup(args);
-                                exit(1);
-                            }
-
-                            printf("data[%d]=\"%s\"\n", item_index, str);
-
-                            free(str);
-                        } else if(str_len == 0) {
-                            printf("data[%d]=\"\"\n", item_index);
-                        } else {
-                            printf("Error getting string length for item %d!  Got error value %s!", item_index, plc_tag_decode_error(str_len));
+                    if(str_len > 0) {
+                        str = calloc((size_t)(unsigned int)(str_len + 1), sizeof(char));
+                        if(!str) {
+                            printf("ERROR: Unable to allocate temporary buffer to output string!\n");
+                            cleanup(args);
+                            exit(1);
                         }
+
+                        rc = plc_tag_get_string(tag, offset, str, str_len);
+                        if(rc != PLCTAG_STATUS_OK) {
+                            printf("ERROR: Unable to get string %d, error: %s!\n", item_index, plc_tag_decode_error(rc));
+                            cleanup(args);
+                            exit(1);
+                        }
+
+                        printf("data[%d]=\"%s\"\n", item_index, str);
+
+                        free(str);
+                    } else if(str_len == 0) {
+                        printf("data[%d]=\"\"\n", item_index);
+                    } else {
+                        printf("Error getting string length for item %d!  Got error value %s!", item_index,
+                               plc_tag_decode_error(str_len));
                     }
+                }
 
                     offset += plc_tag_get_string_total_length(tag, offset);
 
                     break;
 
-                case TYPE_META:
-                    {
-                        int element_size = plc_tag_get_int_attribute(tag, "elem_size", 0);
-                        int element_count = plc_tag_get_int_attribute(tag, "elem_count", 0);
-                        uint8_t tag_type_data[32];
-                        int type_data_size = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", &tag_type_data[0], (int)(unsigned int)sizeof(tag_type_data));
+                case TYPE_META: {
+                    int element_size = plc_tag_get_int_attribute(tag, "elem_size", 0);
+                    int element_count = plc_tag_get_int_attribute(tag, "elem_count", 0);
+                    uint8_t tag_type_data[32];
+                    int type_data_size = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", &tag_type_data[0],
+                                                                          (int)(unsigned int)sizeof(tag_type_data));
 
-                        if(type_data_size < 0) {
-                            printf("ERROR: error %s getting tag type information!\n", plc_tag_decode_error(type_data_size));
-                            cleanup(args);
-                            exit(1);
-                        }
-
-                        printf("Tag raw type data: ");
-                        for(int i=0; i < type_data_size; i++) {
-                            printf(" 0x%02x", tag_type_data[i]);
-                        }
-                        printf("\nTag element size: %d\nTag element count: %d\n", element_size, element_count);
+                    if(type_data_size < 0) {
+                        printf("ERROR: error %s getting tag type information!\n", plc_tag_decode_error(type_data_size));
+                        cleanup(args);
+                        exit(1);
                     }
+
+                    printf("Tag raw type data: ");
+                    for(int i = 0; i < type_data_size; i++) { printf(" 0x%02x", tag_type_data[i]); }
+                    printf("\nTag element size: %d\nTag element count: %d\n", element_size, element_count);
+                }
 
                     /* skip the whole tag. */
                     offset += plc_tag_get_size(tag);
@@ -942,14 +918,13 @@ void dump_values(struct run_args *args)
 }
 
 
-void cleanup(struct run_args *args)
-{
+void cleanup(struct run_args *args) {
     plc_tag_destroy(args->tag);
     args->tag = 0;
 
     if(args->write_val_count > 0) {
         if(args->element_type == TYPE_STRING && args->write_vals.string) {
-            for(int i=0; i < args->write_val_count; i++) {
+            for(int i = 0; i < args->write_val_count; i++) {
                 free(args->write_vals.string[i]);
                 args->write_vals.string[i] = NULL;
             }
@@ -968,9 +943,7 @@ void cleanup(struct run_args *args)
 }
 
 
-
-void update_values(struct run_args *args)
-{
+void update_values(struct run_args *args) {
     int item_index = 0;
     int offset = 0;
     int rc = PLCTAG_STATUS_OK;
@@ -1094,28 +1067,28 @@ void update_values(struct run_args *args)
                     offset += 8;
                     break;
 
-                case TYPE_STRING:
-                    {
-                        int str_len = (int)(unsigned int)strlen(args->write_vals.string[item_index]);
-                        int str_capacity = plc_tag_get_string_capacity(tag, offset);
+                case TYPE_STRING: {
+                    int str_len = (int)(unsigned int)strlen(args->write_vals.string[item_index]);
+                    int str_capacity = plc_tag_get_string_capacity(tag, offset);
 
-                        /* clamp the length. */
-                        if(str_len > str_capacity) {
-                            printf("Warning: truncating string %d, \"%s\", to fit fixed string capacity!\n", item_index, args->write_vals.string[item_index]);
-                            str_len = str_capacity;
+                    /* clamp the length. */
+                    if(str_len > str_capacity) {
+                        printf("Warning: truncating string %d, \"%s\", to fit fixed string capacity!\n", item_index,
+                               args->write_vals.string[item_index]);
+                        str_len = str_capacity;
 
-                            /* zero terminate it at the new shorter length */
-                            args->write_vals.string[item_index][str_len] = 0;
-                        }
-
-                        /* set the string. */
-                        rc = plc_tag_set_string(tag, offset, args->write_vals.string[item_index]);
-                        if(rc != PLCTAG_STATUS_OK) {
-                            printf("Error while setting the string %d, error: %s!\n", item_index, plc_tag_decode_error(rc));
-                            cleanup(args);
-                            exit(1);
-                        }
+                        /* zero terminate it at the new shorter length */
+                        args->write_vals.string[item_index][str_len] = 0;
                     }
+
+                    /* set the string. */
+                    rc = plc_tag_set_string(tag, offset, args->write_vals.string[item_index]);
+                    if(rc != PLCTAG_STATUS_OK) {
+                        printf("Error while setting the string %d, error: %s!\n", item_index, plc_tag_decode_error(rc));
+                        cleanup(args);
+                        exit(1);
+                    }
+                }
 
                     offset += plc_tag_get_string_total_length(tag, offset);
 

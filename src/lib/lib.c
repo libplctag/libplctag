@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -93,8 +93,8 @@ static int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_
 
 
 #ifdef LIPLCTAGDLL_EXPORTS
-    #if defined(_WIN32) || (defined(_WIN64)
-        #include <process.h>
+#    if defined(_WIN32) || (defined(_WIN64)
+#        include <process.h>
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     switch(fdwReason) {
         case DLL_PROCESS_ATTACH:
@@ -121,7 +121,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 
     return TRUE;
 }
-    #endif
+#    endif
 #endif
 
 /*
@@ -1141,7 +1141,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
  */
 
 
- /* there needs to be a better way to make the cast clean than this! */
+/* there needs to be a better way to make the cast clean than this! */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 
@@ -1152,14 +1152,13 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callb
     pdebug(DEBUG_INFO, "Starting.");
 
     rc = plc_tag_register_callback_ex(tag_id, (tag_extended_callback_func)callback_func, NULL);
-    
+
     pdebug(DEBUG_INFO, "Done.");
 
     return rc;
 }
 
 #pragma GCC diagnostic pop
-
 
 
 /*
@@ -3436,7 +3435,8 @@ LIB_EXPORT int plc_tag_set_string(int32_t tag_id, int string_start_offset, const
 
         /* zero out the string data in the buffer. */
         pdebug(DEBUG_DETAIL, "Zeroing out the string data in the buffer.");
-        for(unsigned int i = (unsigned int)string_start_offset; i < (unsigned int)(string_start_offset + new_string_size_in_buffer) && i < (unsigned int)tag->size; i++) {
+        for(unsigned int i = (unsigned int)string_start_offset;
+            i < (unsigned int)(string_start_offset + new_string_size_in_buffer) && i < (unsigned int)tag->size; i++) {
             tag->data[i] = 0;
         }
 
@@ -4460,9 +4460,8 @@ int get_new_string_total_length_unsafe(plc_tag_p tag, const char *string_val) {
         pdebug(DEBUG_DETAIL, "Done with size %d.", string_size_in_buffer);
         return (int)string_size_in_buffer;
     } else {
-        pdebug(DEBUG_WARN, "Error %s found while calculating the new string size in the tag buffer.",
-               plc_tag_decode_error(rc));
-               return rc;
+        pdebug(DEBUG_WARN, "Error %s found while calculating the new string size in the tag buffer.", plc_tag_decode_error(rc));
+        return rc;
     }
 }
 

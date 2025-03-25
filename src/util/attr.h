@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -48,5 +48,3 @@ extern int attr_get_int(attr attrs, const char *name, int def);
 extern float attr_get_float(attr attrs, const char *name, float def);
 extern int attr_remove(attr attrs, const char *name);
 extern void attr_destroy(attr attrs);
-
-

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -43,4 +43,3 @@ extern void *vector_get(vector_p vec, int index);
 extern int vector_on_each(vector_p vec, int (*callback_func)(vector_p vec, int index, void **data, int arg_count, void **args), int num_args, ...);
 extern void *vector_remove(vector_p vec, int index);
 extern int vector_destroy(vector_p vec);
-

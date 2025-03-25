@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2021 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -44,4 +44,3 @@ extern tag_byte_order_t listing_tag_logix_byte_order;
 extern int setup_raw_tag(ab_tag_p tag);
 extern int setup_tag_listing_tag(ab_tag_p tag, const char *name);
 extern int setup_udt_tag(ab_tag_p tag, const char *name);
-

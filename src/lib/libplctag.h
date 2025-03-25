@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -201,7 +201,7 @@ LIB_EXPORT int32_t plc_tag_create(const char *attrib_str, int timeout);
  * plc_tag_create_ex
  *
  * As for plc_tag_create with the addition of a callback and user-supplied data pointer.
- * 
+ *
  * The callback will be set as early as possible in the callback process.  This allows sending
  * of early creation time events to user code.
  */
