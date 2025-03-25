@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2024 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -737,6 +737,7 @@ char *setup_tag_string(int argc, char **argv) {
     if(argc < 2) { usage(); }
 
     if(!argv[1] || strlen(argv[1]) == 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Hostname or IP address must not be zero length!\n");
         usage();
     }
