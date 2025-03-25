@@ -48,8 +48,8 @@ typedef struct ab_request_t *ab_request_p;
 #define AB_REQUEST_NULL ((ab_request_p)NULL)
 
 
-extern int tag_abort_request_only(ab_tag_p tag);
-extern int tag_abort_request(ab_tag_p tag);
+extern int ab_tag_abort_request_only(ab_tag_p tag);
+extern int ab_tag_abort_request(ab_tag_p tag);
 extern int ab_tag_abort(ab_tag_p tag);
 extern int ab_tag_status(ab_tag_p tag);
 

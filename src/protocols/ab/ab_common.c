@@ -688,12 +688,12 @@ int default_write(plc_tag_p tag) {
 }
 
 /*
- * tag_abort_request_only
+ * ab_tag_abort_request_only
  *
  * clean up the tag state for the request but not the offset.
  */
 
-int tag_abort_request_only(ab_tag_p tag) {
+int ab_tag_abort_request_only(ab_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag) {
@@ -718,20 +718,20 @@ int tag_abort_request_only(ab_tag_p tag) {
 }
 
 /*
- * tag_abort_request
+ * ab_tag_abort_request
  *
  * This does the work of stopping any inflight requests.
  * This is not thread-safe.  It must be called from a function
  * that locks the tag's mutex or only from a single thread.
  */
 
-int tag_abort_request(ab_tag_p tag) {
+int ab_tag_abort_request(ab_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag) {
         tag->offset = 0;
 
-        tag_abort_request_only(tag);
+        ab_tag_abort_request_only(tag);
     } else {
         pdebug(DEBUG_DETAIL, "Called with a null tag pointer.");
     }
@@ -750,7 +750,9 @@ int ab_tag_abort(ab_tag_p tag) {
             spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
         }
 
-        tag->abort_requested = 1;
+        /* do a real abort */
+        ab_tag_abort_request(tag);
+
         tag->status = PLCTAG_ERR_ABORT;
         return tag->status;
     } else {
@@ -1103,6 +1105,14 @@ int check_request_status(ab_tag_p tag) {
             break;
         }
 
+        /* do we have an abort outstanding? */
+        if(atomic_get_bool(&tag->abort_requested)) {
+            ab_tag_abort_request(tag);
+            atomic_set_bool(&tag->abort_requested, false);
+            rc = PLCTAG_ERR_ABORT;
+            break;
+        }
+
         if(!tag->req) {
             if(tag->read_in_progress || tag->write_in_progress) {
                 tag->read_in_progress = 0;
@@ -1116,13 +1126,6 @@ int check_request_status(ab_tag_p tag) {
             break;
         }
 
-        /* do we have an abort outstanding? */
-        if(tag->abort_requested) {
-            tag_abort_request(tag);
-            tag->abort_requested = 0;
-            rc = PLCTAG_ERR_ABORT;
-            break;
-        }
 
         /* request can be used by more than one thread at once. */
         spin_block(&tag->req->lock) {
@@ -1152,15 +1155,6 @@ int check_request_status(ab_tag_p tag) {
             rc = PLCTAG_ERR_REMOTE_ERR;
             break;
         }
-
-        // if((le2h16(eip_header->encap_command) != AB_EIP_CONNECTED_SEND)
-        //    && (le2h16(eip_header->encap_command) != AB_EIP_UNCONNECTED_SEND)) {
-        //     pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %04" PRIx16 "!", le2h16(eip_header->encap_command));
-        //     pdebug_dump_bytes(DEBUG_WARN, tag->req->data, tag->req->request_size);
-
-        //     rc = PLCTAG_ERR_BAD_DATA;
-        //     break;
-        // }
 
         switch(le2h16(eip_header->encap_command)) {
             case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_WARN, "Received a connected send EIP packet."); break;
