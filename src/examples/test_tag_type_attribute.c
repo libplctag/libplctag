@@ -57,6 +57,7 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
+        rc = PLCTAG_STATUS_OK;
     }
 
     /* test null pointer */
@@ -69,6 +70,7 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
+        rc = PLCTAG_STATUS_OK;
     }
 
     /* test zero length buffer */
@@ -81,6 +83,7 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
+        rc = PLCTAG_STATUS_OK;
     }
 
     /* test exact buffer length */
@@ -90,11 +93,13 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         printf("ERROR: got error %s (%d) trying to get the attribute byte array!\n", plc_tag_decode_error(type_size), type_size);
         return PLCTAG_ERR_BAD_REPLY;
     }
+
     if((type_size != 2) && (type_size != 4)) {
         printf("ERROR: expected type byte array copied length to be 2 or 4 bytes, but got %d!\n", type_size);
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
+        rc = PLCTAG_STATUS_OK;
     }
 
     /* check the type size that comes back when the data is copied */
@@ -106,11 +111,13 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
+        rc = PLCTAG_STATUS_OK;
     }
 
     printf("\tRetrieved tag %s native type bytes: ", tag_name);
     for(int i = 0; i < type_size; i++) { printf(" %02x", (int)(unsigned int)type_buffer[i]); }
     printf("\n");
+
 
     return rc;
 }
