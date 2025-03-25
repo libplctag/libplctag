@@ -69,6 +69,7 @@ void usage(void) {
 
 int parse_args(int argc, char *argv[]) {
     if(argc < 2) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: invalid number of arguments.\n");
         fflush(stderr);
         return -1;
@@ -87,7 +88,9 @@ int parse_args(int argc, char *argv[]) {
         usage();
         exit(0);
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: invalid PLC operation.\n");
+        // NOLINTNEXTLINE
         fprintf(stderr, "INFO: Use one of --read, --write, --watch.\n");
         fflush(stderr);
         return -1;
@@ -112,8 +115,10 @@ int parse_args(int argc, char *argv[]) {
         } else if(!strcmp(param, "-plc")) {
             cli_request.plc = val;
         } else if(!strcmp(param, "-debug")) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &cli_request.debug_level);
         } else if(!strcmp(param, "-interval")) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &cli_request.interval);
         } else if(!strcmp(param, "-attributes")) {
             cli_request.attributes = val;
@@ -123,12 +128,16 @@ int parse_args(int argc, char *argv[]) {
             } else if(!strcmp(val, "false")) {
                 cli_request.offline = false;
             } else {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "ERROR: invalid parameter value for offline.");
+                // NOLINTNEXTLINE
                 fprintf(stderr, "INFO: Supported values 'true' or 'false'.");
                 fflush(stderr);
             }
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: invalid PLC parameter: %s.\n", param);
+            // NOLINTNEXTLINE
             fprintf(stderr, "INFO: Supported params -protocol, -ip, -path, -plc, -debug, -interval, -attributes, -offline.\n");
             fflush(stderr);
             return -1;
@@ -213,6 +222,7 @@ tag_line_parts_t split_string(const char *str, const char *sep) {
     tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count + 1);
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
+    // NOLINTNEXTLINE
     strncpy((char *)tmp, str, (size_t)(size - ((char *)tmp - (char *)res)));
 
     /* set up the pointers */
@@ -229,6 +239,7 @@ tag_line_parts_t split_string(const char *str, const char *sep) {
         }
 
         /* zero out the separator chars */
+        // NOLINTNEXTLINE
         memset((char *)sub, 0, strlen(sep));
 
         /* point past the separator (now zero) */
@@ -348,8 +359,10 @@ int process_line(const char *line, tag_t *tag) {
         } else if(!strcmp("value", param)) {
             write_val = val;
         } else if(!strcmp("bit", param)) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &tag->bit);
         } else if(!strcmp("offset", param)) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &tag->offset);
         } else if(!strcmp("path", param)) {
             tag->path = strdup(val);
@@ -364,34 +377,64 @@ int process_line(const char *line, tag_t *tag) {
     pdebug(DEBUG_INFO, "Parsing tag type now...");
     if(!strcmp("uint64", type)) {
         tag->type = t_UINT64;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNu64, &tag->write_val.UINT64_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNu64, &tag->write_val.UINT64_val);
+        }
     } else if(!strcmp("int64", type)) {
         tag->type = t_INT64;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNi64, &tag->write_val.INT64_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNi64, &tag->write_val.INT64_val);
+        }
     } else if(!strcmp("uint32", type)) {
         tag->type = t_UINT32;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNu32, &tag->write_val.UINT32_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNu32, &tag->write_val.UINT32_val);
+        }
     } else if(!strcmp("int32", type)) {
         tag->type = t_INT32;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNi32, &tag->write_val.INT32_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNi32, &tag->write_val.INT32_val);
+        }
     } else if(!strcmp("uint16", type)) {
         tag->type = t_UINT16;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNu16, &tag->write_val.UINT16_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNu16, &tag->write_val.UINT16_val);
+        }
     } else if(!strcmp("int16", type)) {
         tag->type = t_INT16;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNi16, &tag->write_val.INT16_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNi16, &tag->write_val.INT16_val);
+        }
     } else if(!strcmp("uint8", type)) {
         tag->type = t_UINT8;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNu8, &tag->write_val.UINT8_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNu8, &tag->write_val.UINT8_val);
+        }
     } else if(!strcmp("int8", type)) {
         tag->type = t_INT8;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%" SCNi8, &tag->write_val.INT8_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%" SCNi8, &tag->write_val.INT8_val);
+        }
     } else if(!strcmp("float64", type)) {
         tag->type = t_FLOAT64;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%lf", &tag->write_val.FLOAT64_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%lf", &tag->write_val.FLOAT64_val);
+        }
     } else if(!strcmp("float32", type)) {
         tag->type = t_FLOAT32;
-        if(cli_request.operation == WRITE) { sscanf(write_val, "%f", &tag->write_val.FLOAT32_val); }
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
+            sscanf(write_val, "%f", &tag->write_val.FLOAT32_val);
+        }
     } else if(!strcmp("bool", type)) {
         tag->type = t_BOOL;
         if(cli_request.operation == WRITE) {
@@ -419,6 +462,7 @@ void add_tag(int tag_handle, tag_t tag) {
     t = malloc(sizeof(struct tags));
     t->tag_handle = tag_handle;
     t->tag = tag;
+    // NOLINTNEXTLINE
     HASH_ADD_INT(tags, tag_handle, t);
 }
 
@@ -461,6 +505,7 @@ int process_tags(void) {
                         cli_request.plc, cli_request.debug_level, cli_request.interval, tag.path, cli_request.attributes);
                 break;
             default:
+                // NOLINTNEXTLINE
                 sprintf(tag_path, TAG_PATH, cli_request.protocol, cli_request.ip, cli_request.path, cli_request.plc,
                         cli_request.debug_level, tag.path, cli_request.attributes);
                 break;
@@ -491,12 +536,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.UINT64_val = plc_tag_get_uint64(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.UINT64_val = tag->val.UINT64_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu64 "}\n", tag->key, tag->val.UINT64_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.UINT64_val != tag->last_val.UINT64_val) {
                 tag->last_val.UINT64_val = tag->val.UINT64_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu64 "}\n", tag->key, tag->val.UINT64_val);
                 fflush(stdout);
             }
@@ -505,12 +552,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.INT64_val = plc_tag_get_int64(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.INT64_val = tag->val.INT64_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi64 "}\n", tag->key, tag->val.INT64_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.INT64_val != tag->last_val.INT64_val) {
                 tag->last_val.INT64_val = tag->val.INT64_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi64 "}\n", tag->key, tag->val.INT64_val);
                 fflush(stdout);
             }
@@ -519,12 +568,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.UINT32_val = plc_tag_get_uint32(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.UINT32_val = tag->val.UINT32_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu32 "}\n", tag->key, tag->val.UINT32_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.UINT32_val != tag->last_val.UINT32_val) {
                 tag->last_val.UINT32_val = tag->val.UINT32_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu32 "}\n", tag->key, tag->val.UINT32_val);
                 fflush(stdout);
             }
@@ -533,12 +584,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.INT32_val = plc_tag_get_int32(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.INT32_val = tag->val.INT32_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi32 "}\n", tag->key, tag->val.INT32_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.INT32_val != tag->last_val.INT32_val) {
                 tag->last_val.INT32_val = tag->val.INT32_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi32 "}\n", tag->key, tag->val.INT32_val);
                 fflush(stdout);
             }
@@ -547,12 +600,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.UINT16_val = plc_tag_get_uint16(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.UINT16_val = tag->val.UINT16_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu16 "}\n", tag->key, tag->val.UINT16_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.UINT16_val != tag->last_val.UINT16_val) {
                 tag->last_val.UINT16_val = tag->val.UINT16_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu16 "}\n", tag->key, tag->val.UINT16_val);
                 fflush(stdout);
             }
@@ -561,12 +616,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.INT16_val = plc_tag_get_int16(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.INT16_val = tag->val.INT16_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi16 "}\n", tag->key, tag->val.INT16_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.INT16_val != tag->last_val.INT16_val) {
                 tag->last_val.INT16_val = tag->val.INT16_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi16 "}\n", tag->key, tag->val.UINT16_val);
                 fflush(stdout);
             }
@@ -575,12 +632,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.UINT8_val = plc_tag_get_uint8(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.UINT8_val = tag->val.UINT8_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu8 "}\n", tag->key, tag->val.UINT8_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.UINT8_val != tag->last_val.UINT8_val) {
                 tag->last_val.UINT8_val = tag->val.UINT8_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIu8 "}\n", tag->key, tag->val.UINT8_val);
                 fflush(stdout);
             }
@@ -589,12 +648,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.INT8_val = plc_tag_get_int8(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.INT8_val = tag->val.INT8_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi8 "}\n", tag->key, tag->val.INT8_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.INT8_val != tag->last_val.INT8_val) {
                 tag->last_val.INT8_val = tag->val.INT8_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%" PRIi8 "}\n", tag->key, tag->val.INT8_val);
                 fflush(stdout);
             }
@@ -603,12 +664,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.FLOAT64_val = plc_tag_get_float64(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.FLOAT64_val != tag->last_val.FLOAT64_val) {
                 tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
                 fflush(stdout);
             }
@@ -617,12 +680,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             tag->val.FLOAT32_val = plc_tag_get_float32(tag_handle, tag->offset);
             if(!tag->watch) {
                 tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
                 fflush(stdout);
                 break;
             }
             if(tag->val.FLOAT32_val != tag->last_val.FLOAT32_val) {
                 tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
                 fflush(stdout);
             }
@@ -635,12 +700,14 @@ int get_tag(int32_t tag_handle, tag_t *tag) {
             }
             if(!tag->watch) {
                 tag->last_val.BOOL_val = tag->val.BOOL_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%s}\n", tag->key, btoa(tag->val.BOOL_val));
                 fflush(stdout);
                 break;
             }
             if(tag->val.BOOL_val != tag->last_val.BOOL_val) {
                 tag->last_val.BOOL_val = tag->val.BOOL_val;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%s}\n", tag->key, btoa(tag->val.BOOL_val));
                 fflush(stdout);
             }
@@ -880,10 +947,12 @@ int do_offline(void) {
 
     switch(cli_request.operation) {
         case READ:
+            // NOLINTNEXTLINE
             fprintf(stdout, "{}\n");
             fflush(stdout);
             break;
         case WRITE:
+            // NOLINTNEXTLINE
             fprintf(stdout, "{}\n");
             fflush(stdout);
             break;
@@ -891,6 +960,7 @@ int do_offline(void) {
             while(true) {
                 ++val;
                 val = val % 10;
+                // NOLINTNEXTLINE
                 fprintf(stdout, "{\"%s\":%d}\n", t->tag.key, val);
                 fflush(stdout);
                 thrd_sleep_ms(2000, NULL);
@@ -904,6 +974,7 @@ int do_offline(void) {
 
 int main(int argc, char *argv[]) {
     if(parse_args(argc, argv) == -1) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: invalid arguments.\n");
         fflush(stderr);
         usage();
