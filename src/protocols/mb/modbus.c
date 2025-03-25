@@ -39,7 +39,7 @@
 #include <mb/modbus.h>
 #include <platform.h>
 #include <stdlib.h>
-#include <util/atomic_int.h>
+#include <util/atomic_utils.h>
 #include <util/attr.h>
 #include <util/debug.h>
 #include <util/random_utils.h>
