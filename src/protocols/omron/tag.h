@@ -112,7 +112,7 @@ struct omron_tag_t {
     int supports_fragmented_read;
 
     /* flags for operations */
-    int abort_requested;
+    // int abort_requested;
     int read_in_progress;
     int write_in_progress;
     /*int connect_in_progress;*/

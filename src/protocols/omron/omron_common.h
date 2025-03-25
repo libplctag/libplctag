@@ -51,12 +51,13 @@ typedef struct omron_request_t *omron_request_p;
 extern int omron_tag_abort(omron_tag_p tag);
 extern int omron_tag_status(omron_tag_p tag);
 
+extern int omron_tag_abort_request(omron_tag_p tag);
+extern int omron_tag_abort_request_only(omron_tag_p tag);
 
 extern int omron_get_int_attrib(plc_tag_p tag, const char *attrib_name, int default_value);
 extern int omron_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_value);
 
 extern int omron_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
-
 
 THREAD_FUNC(request_handler_func);
 
