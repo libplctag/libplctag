@@ -1623,18 +1623,6 @@ static int check_write_status_connected(omron_tag_p tag) {
     cip_resp = (eip_cip_co_resp *)(tag->req->data);
 
     do {
-        if(le2h16(cip_resp->encap_command) != OMRON_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != OMRON_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE | OMRON_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_RMW | OMRON_EIP_CMD_CIP_OK)) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
@@ -1652,7 +1640,7 @@ static int check_write_status_connected(omron_tag_p tag) {
     } while(0);
 
     /* clean up the request. */
-    omron_tag_abort(tag);
+    omron_tag_abort_only(tag);
 
     /* write is done in one way or another. */
     tag->write_in_progress = 0;
@@ -1691,18 +1679,6 @@ static int check_write_status_unconnected(omron_tag_p tag) {
     cip_resp = (eip_cip_uc_resp *)(tag->req->data);
 
     do {
-        if(le2h16(cip_resp->encap_command) != OMRON_EIP_CONNECTED_SEND) {
-            pdebug(DEBUG_WARN, "Unexpected EIP packet type received: %d!", cip_resp->encap_command);
-            rc = PLCTAG_ERR_BAD_DATA;
-            break;
-        }
-
-        if(le2h32(cip_resp->encap_status) != OMRON_EIP_OK) {
-            pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(cip_resp->encap_status));
-            rc = PLCTAG_ERR_REMOTE_ERR;
-            break;
-        }
-
         if(cip_resp->reply_service != (OMRON_EIP_CMD_CIP_WRITE | OMRON_EIP_CMD_CIP_OK)
            && cip_resp->reply_service != (OMRON_EIP_CMD_CIP_RMW | OMRON_EIP_CMD_CIP_OK)) {
             pdebug(DEBUG_WARN, "CIP response reply service unexpected: %d", cip_resp->reply_service);
@@ -1721,7 +1697,7 @@ static int check_write_status_unconnected(omron_tag_p tag) {
     } while(0);
 
     /* clean up the request. */
-    omron_tag_abort(tag);
+    omron_tag_abort_only(tag);
 
     /* write is done in one way or another */
     tag->write_in_progress = 0;
