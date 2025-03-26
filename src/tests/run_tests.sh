@@ -319,7 +319,7 @@ if [ $? != 0 ]; then
     # echo "FAILURE"
     echo "Unable to start AB/Omron emulator!"
     exit 1
-# elsels 
+# else 
     # echo "OK"
 fi
 
