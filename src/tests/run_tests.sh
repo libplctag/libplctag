@@ -130,7 +130,7 @@ else
 fi
 
 let TEST++
-echo -n "Test $TEST: basic PLC-5 tag read/write... "
+echo -n "Test $TEST: basic PLC5 tag read/write... "
 $TEST_DIR/tag_rw2 --type=uint8 '--tag=protocol=ab-eip&gateway=10.206.1.38&plc=plc5&elem_count=1&elem_size=2&name=B3:0/10' --debug=4 --write=0 > "${TEST}_plc5.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -308,7 +308,7 @@ else
 fi
 
 
-# echo "  Killing Omron emulator."
+# echo "  Killing Micro800 emulator."
 killall -TERM ab_server > /dev/null 2>&1
 
 
