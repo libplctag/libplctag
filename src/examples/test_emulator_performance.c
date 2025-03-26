@@ -50,8 +50,11 @@
 
 #define REQUIRED_VERSION 2, 6, 4
 
-#define MAX_CONNECTION_GROUPS (5)
+#define MAX_THREADS (70)
+#define THREAD_INC (10)
 
+
+#define TAG_CREATE_TIMEOUT_MS (5000)
 #define TAG_OP_TIMEOUT_MS (1000)
 #define TEST_TIME_MS (5000)
 
@@ -63,7 +66,7 @@ static volatile int terminate = 0;
 
 void handle_interrupt(void) { terminate = 1; }
 
-static void run_test(size_t num_connection_groups);
+static void run_test(size_t num_threads);
 static int test_func(void *arg);
 
 int main(void) {
@@ -80,9 +83,9 @@ int main(void) {
     fprintf(stderr, "Starting tests...\n\n");
 
     /* increase the connection group count each time */
-    for(size_t connection_group_count = 0; connection_group_count <= MAX_CONNECTION_GROUPS && !terminate;
-        connection_group_count += 10) {
-        run_test((connection_group_count == 0) ? 1 : connection_group_count);
+    for(size_t thread_count = 0; thread_count <= MAX_THREADS && !terminate;
+        thread_count += THREAD_INC) {
+        run_test((thread_count == 0) ? 1 : thread_count);
     }
 
     if(terminate) {
@@ -98,17 +101,18 @@ int main(void) {
 static volatile int end_test_run = 0;
 
 
-void run_test(size_t group_count) {
+void run_test(size_t thread_count) {
     size_t total_iterations = 0;
-    thrd_t threads[MAX_CONNECTION_GROUPS] = {0};
+    thrd_t threads[MAX_THREADS] = {0};
     int64_t start_time_ms = util_time_ms();
     int64_t end_time_ms = start_time_ms + TEST_TIME_MS;
+    int64_t total_test_run_time = 0;
 
     end_test_run = 0;
 
-    fprintf(stderr, "Test %zu connection groups/thread for %dms... ", group_count, TEST_TIME_MS);
+    fprintf(stderr, "Test %zu threads for %dms... \n", thread_count, TEST_TIME_MS);
 
-    for(size_t thread_id = 0; thread_id < group_count; thread_id++) {
+    for(size_t thread_id = 0; thread_id < thread_count; thread_id++) {
         /* create the threads that run the test. */
         thrd_create(&threads[thread_id], test_func, (void *)(uintptr_t)thread_id);
     }
@@ -119,48 +123,76 @@ void run_test(size_t group_count) {
     end_test_run = 1;
 
     /* join with the threads and add up the iterations. */
-    for(size_t thread_index = 0; thread_index < group_count; thread_index++) {
+    for(size_t thread_index = 0; thread_index < thread_count; thread_index++) {
         int result = 0;
 
         thrd_join(threads[thread_index], &result);
+
         total_iterations += (size_t)result;
     }
 
-    fprintf(stderr, "%zu total iterations.\n", total_iterations);
+    total_test_run_time = util_time_ms() - start_time_ms;
+    
+
+    fprintf(stderr, "Test %zu threads ran for %" PRId64 "ms and completed with %zu total iterations per millisecond.\n", thread_count, total_test_run_time, total_iterations/total_test_run_time);
 }
 
 
 int test_func(void *arg) {
     int thread_id = (int)(intptr_t)arg;
     int iteration_count = 0;
+    int64_t longest_read = 0;
 
     while(!end_test_run) {
         char tag_str[250] = {0};
         int32_t tag = 0;
         int rc = PLCTAG_STATUS_OK;
+        int64_t start_ms = 0;
+        int64_t end_ms = 0;
 
         /* make the tag string */
         snprintf(tag_str, sizeof(tag_str), TEST_TAG_PATH_TEMPLATE, (int)(size_t)thread_id);
 
         /* create the tag */
-        tag = plc_tag_create(tag_str, TAG_OP_TIMEOUT_MS);
+        start_ms = util_time_ms();
+        tag = plc_tag_create(tag_str, TAG_CREATE_TIMEOUT_MS);
+        end_ms = util_time_ms();
+
+        fprintf(stderr, "Thread %d: tag creation took %" PRId64 "ms\n", thread_id, end_ms - start_ms);
+        fflush(stderr);
+
         if(tag < 0) {
-            fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+            fprintf(stderr, "ERROR %s: Thread %d could not create tag!\n", plc_tag_decode_error(tag), thread_id);
             continue;
         }
 
         /* read as fast as we can */
         while(!end_test_run) {
+            start_ms = util_time_ms();
             rc = plc_tag_read(tag, TAG_OP_TIMEOUT_MS);
+            end_ms = util_time_ms();
+
+            if(end_ms - start_ms > longest_read) {
+                longest_read = end_ms - start_ms;
+            }
+
+            iteration_count++;
+
+            // fprintf(stderr, "Thread %d: interation %d tag read took %" PRId64 "ms\n", thread_id, iteration_count, end_ms - start_ms);
+            // fflush(stderr);
+            
             if(rc != PLCTAG_STATUS_OK) {
-                fprintf(stderr, "ERROR: Unable to read the data! Got error code %s\n", plc_tag_decode_error(rc));
+                fprintf(stderr, "ERROR %s: Thread %d unable to read the data!\n", plc_tag_decode_error(rc), thread_id);
                 break;
             }
-            iteration_count++;
         }
 
+        /* destroy the tag */
         plc_tag_destroy(tag);
     }
 
+    fprintf(stderr, "Thread %d: longest read was %" PRId64 "ms\n", thread_id, longest_read);
+    fflush(stderr);
+    
     return iteration_count;
 }

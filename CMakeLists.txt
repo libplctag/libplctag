@@ -205,7 +205,7 @@ if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleCl
     SET(STR_OP_OVERFLOW_OFF "")
 
     set(BASE_RELEASE_FLAGS "-Os -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "-g -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
+    set(BASE_DEBUG_FLAGS " -O0-g -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
 
@@ -272,7 +272,7 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     endif()
 
     SET(BASE_RELEASE_FLAGS "-Os -DNDEBUG -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    SET(BASE_DEBUG_FLAGS "-g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    SET(BASE_DEBUG_FLAGS " -O0 -g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     SET(BASE_RELEASE_LINK_FLAGS "")
     SET(BASE_DEBUG_LINK_FLAGS "")
 
