@@ -38,15 +38,17 @@
 #include <stdint.h>
 
 
-#define ATOMIC_INT_STATIC_INIT {0}
 
 #if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 11)
+
+#define ATOMIC_INT_STATIC_INIT {0}
 
 typedef volatile bool atomic_bool;
 typedef volatile int32_t atomic_int32_t;
 typedef volatile int64_t atomic_int64_t;
 
-#else
+
+#else /* C11 atomics are supported. */
 
 #include <stdatomic.h>
 
@@ -72,15 +74,3 @@ extern int64_t atomic_get_int64(atomic_int64_t *a);
 extern int64_t atomic_set_int64(atomic_int64_t *a, int64_t new_val);
 extern int64_t atomic_add_int64(atomic_int64_t *a, int64_t other);
 extern int64_t atomic_compare_and_set_int64(atomic_int64_t *a, int64_t old_val, int64_t new_val);
-
-
-
-
-
-// typedef struct { lock_t lock; volatile int val; } atomic_int;
-
-// extern void atomic_init(atomic_int *a, int new_val);
-// extern int atomic_get(atomic_int *a);
-// extern int atomic_set(atomic_int *a, int new_val);
-// extern int atomic_add(atomic_int *a, int other);
-// extern int atomic_compare_and_set(atomic_int *a, int old_val, int new_val);
