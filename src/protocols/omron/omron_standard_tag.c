@@ -1640,7 +1640,7 @@ static int check_write_status_connected(omron_tag_p tag) {
     } while(0);
 
     /* clean up the request. */
-    omron_tag_abort_only(tag);
+    omron_tag_abort_request_only(tag);
 
     /* write is done in one way or another. */
     tag->write_in_progress = 0;
@@ -1697,7 +1697,7 @@ static int check_write_status_unconnected(omron_tag_p tag) {
     } while(0);
 
     /* clean up the request. */
-    omron_tag_abort_only(tag);
+    omron_tag_abort_request_only(tag);
 
     /* write is done in one way or another */
     tag->write_in_progress = 0;
