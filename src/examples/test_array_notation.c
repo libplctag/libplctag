@@ -44,6 +44,7 @@
 #define MAX_NUM_INDEXES 100
 
 static void usage(void) {
+    // NOLINTNEXTLINE
     fprintf(stderr,
             "Usage: test_array_notation <PLC IP> <PLC path> <tag name> <count> [timeout]\n"
             "  <PLC IP>   - IP address or hostname of the PLC (e.g., '127.0.0.1')\n"
@@ -59,16 +60,19 @@ static void usage(void) {
 static char *setup_tag_string(const char *gateway, const char *path, const char *tag_name, int index) {
     char *tag_string = (char *)calloc(1, 256);
     if(!tag_string) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Memory allocation failed!\n");
         exit(1);
     }
 
     if(strlen(gateway) == 0 || strlen(path) == 0 || strlen(tag_name) == 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Gateway IP, PLC path, and tag name must not be empty!\n");
         free(tag_string);
         usage();
     }
 
+    // NOLINTNEXTLINE
     snprintf(tag_string, 256, TAG_STRING_TEMPLATE, gateway, path, tag_name, index);
     return tag_string;
 }
@@ -76,12 +80,14 @@ static char *setup_tag_string(const char *gateway, const char *path, const char 
 static int write_value(const char *tag_string, int32_t value, int timeout) {
     int32_t tag = plc_tag_create(tag_string, timeout);
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR creating tag %s: %s\n", tag_string, plc_tag_decode_error(tag));
         return tag;
     }
 
     int rc = plc_tag_status(tag);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR setting up tag %s: %s\n", tag_string, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
@@ -91,11 +97,13 @@ static int write_value(const char *tag_string, int32_t value, int timeout) {
     rc = plc_tag_write(tag, timeout);
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR writing value %d to %s: %s\n", value, tag_string, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Wrote value %d to %s\n", value, tag_string);
     plc_tag_destroy(tag);
     return PLCTAG_STATUS_OK;
@@ -104,6 +112,7 @@ static int write_value(const char *tag_string, int32_t value, int timeout) {
 static int32_t read_value(const char *tag_string, int timeout, int *status) {
     int32_t tag = plc_tag_create(tag_string, timeout);
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR creating tag %s: %s\n", tag_string, plc_tag_decode_error(tag));
         *status = tag;
         return 0;
@@ -111,6 +120,7 @@ static int32_t read_value(const char *tag_string, int timeout, int *status) {
 
     int rc = plc_tag_read(tag, timeout);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR reading from %s: %s\n", tag_string, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         *status = rc;
@@ -118,6 +128,7 @@ static int32_t read_value(const char *tag_string, int timeout, int *status) {
     }
 
     int32_t value = plc_tag_get_int32(tag, 0);
+    // NOLINTNEXTLINE
     fprintf(stderr, "Read value %d from %s\n", value, tag_string);
 
     plc_tag_destroy(tag);
@@ -137,6 +148,7 @@ int main(int argc, char **argv) {
 
     /* check the library version */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Required library version %d.%d.%d not available!\n", REQUIRED_VERSION);
         return 1;
     }
@@ -148,6 +160,7 @@ int main(int argc, char **argv) {
     /* get number of indexes to test */
     num_indexes = atoi(argv[4]);
     if(num_indexes <= 0 || num_indexes > MAX_NUM_INDEXES) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Number of indexes must be between 1 and %d!\n", MAX_NUM_INDEXES);
         usage();
     }
@@ -156,6 +169,7 @@ int main(int argc, char **argv) {
     if(argc > 5) {
         timeout = atoi(argv[5]);
         if(timeout <= 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Timeout must be a positive integer!\n");
             usage();
         }
@@ -164,6 +178,7 @@ int main(int argc, char **argv) {
     /* allocate test values array */
     test_values = (int32_t *)calloc((size_t)num_indexes, sizeof(int32_t));
     if(!test_values) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Failed to allocate memory for test values!\n");
         return 1;
     }
@@ -173,6 +188,7 @@ int main(int argc, char **argv) {
         test_values[i] = (i + 1) * 1111;  // 1111, 2222, 3333, etc.
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Testing array notation for tag %s (%d indexes)...\n", tag_name, num_indexes);
 
     /* write values to each index */
@@ -182,6 +198,7 @@ int main(int argc, char **argv) {
         free(tag_string);
 
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Failed to write to index %d\n", i);
             all_passed = 0;
             goto cleanup;
@@ -192,6 +209,7 @@ int main(int argc, char **argv) {
     thrd_sleep_ms(100, NULL);
 
     /* read back and verify all values */
+    // NOLINTNEXTLINE
     fprintf(stderr, "\nReading back all values to verify array indexing behavior...\n");
     for(i = 0; i < num_indexes; i++) {
         char *tag_string = setup_tag_string(gateway, path, tag_name, i);
@@ -205,9 +223,11 @@ int main(int argc, char **argv) {
         }
 
         if(read_result != test_values[i]) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Array index mismatch at [%d]: wrote %d, read %d\n", i, test_values[i], read_result);
             all_passed = 0;
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Array index [%d] matches expected value\n", i);
         }
     }
@@ -215,6 +235,8 @@ int main(int argc, char **argv) {
 cleanup:
     free(test_values);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "\nArray notation test %s\n", all_passed ? "PASSED" : "FAILED");
+
     return all_passed ? 0 : 1;
 }

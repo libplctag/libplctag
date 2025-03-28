@@ -100,6 +100,7 @@ void tag_callback(int32_t tag_id, int event, int status) {
 
 
 void log_callback(int32_t tag_id, int debug_level, const char *message) {
+    // NOLINTNEXTLINE
     fprintf(stderr, "Log message of level %d for tag %d: %s", debug_level, tag_id, message);
 }
 

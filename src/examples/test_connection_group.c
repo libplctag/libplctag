@@ -39,21 +39,12 @@
  */
 
 
+#include "../lib/libplctag.h"
+#include "utils.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if defined(WIN32) || defined(_WIN32)
-#    include <Windows.h>
-#else
-#    include <pthread.h>
-#    include <signal.h>
-#    include <stdint.h>
-#    include <string.h>
-#    include <sys/time.h>
-#endif
-#include "../lib/libplctag.h"
-#include "utils.h"
 
 #define REQUIRED_VERSION 2, 4, 1
 
@@ -66,6 +57,7 @@
 
 
 void usage(void) {
+    // NOLINTNEXTLINE
     printf(
         "Usage:\n "
         "thread_stress <num tags> <path>\n"
@@ -77,61 +69,9 @@ void usage(void) {
     exit(PLCTAG_ERR_BAD_PARAM);
 }
 
-
-#ifdef _WIN32
 volatile int go = 0;
 
-/* straight from MS' web site :-) */
-BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
-    switch(fdwCtrlType) {
-            // Handle the CTRL-C signal.
-        case CTRL_C_EVENT:
-            go = 0;
-            return TRUE;
-
-            // CTRL-CLOSE: confirm that the user wants to exit.
-        case CTRL_CLOSE_EVENT:
-            go = 0;
-            return TRUE;
-
-            // Pass other signals to the next handler.
-        case CTRL_BREAK_EVENT: go = 0; return FALSE;
-
-        case CTRL_LOGOFF_EVENT: go = 0; return FALSE;
-
-        case CTRL_SHUTDOWN_EVENT: go = 0; return FALSE;
-
-        default: return FALSE;
-    }
-}
-
-
-void setup_break_handler(void) {
-    if(!SetConsoleCtrlHandler(CtrlHandler, TRUE)) {
-        printf("\nERROR: Could not set control handler!\n");
-        usage();
-    }
-}
-
-#else
-volatile sig_atomic_t go = 0;
-
-void SIGINT_handler(int not_used) {
-    (void)not_used;
-
-    go = 0;
-}
-
-void setup_break_handler(void) {
-    struct sigaction act;
-
-    /* set up signal handler. */
-    memset(&act, 0, sizeof(act));
-    act.sa_handler = SIGINT_handler;
-    sigaction(SIGINT, &act, NULL);
-}
-
-#endif
+void interrupt_handler(void) { go = 0; }
 
 
 /*
@@ -142,23 +82,18 @@ void setup_break_handler(void) {
  */
 
 typedef struct {
-    int tid;
+    int64_t max_io_time;
+    int64_t min_io_time;
+    int64_t total_io_time;
     int32_t tag;
     int group;
-    int status;
     int iteration;
-    int64_t total_io_time;
-    int64_t min_io_time;
-    int64_t max_io_time;
+    int status;
+    int tid;
 } thread_args;
 
 
-#if defined(WIN32) || defined(_WIN32)
-DWORD __stdcall test_runner(LPVOID data)
-#else
-void *test_runner(void *data)
-#endif
-{
+int test_runner(void *data) {
     thread_args *args = (thread_args *)data;
     int tid = args->tid;
     int32_t tag = args->tag;
@@ -189,6 +124,7 @@ void *test_runner(void *data)
 
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "!!! Thread %d, iteration %d, read failed after %" PRId64 "ms  with error %s\n", tid, *iteration,
                     (int64_t)(util_time_ms() - start), plc_tag_decode_error(rc));
             break;
@@ -203,27 +139,20 @@ void *test_runner(void *data)
         if(io_time < *min_io_time) { *min_io_time = io_time; }
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "*** Thread %d terminating after %d iterations and an average of %dms per iteration.\n", tid, *iteration,
             (int)(*total_io_time / (*iteration)));
 
     fflush(stderr);
 
-#if defined(WIN32) || defined(_WIN32)
-    return (DWORD)0;
-#else
-    return NULL;
-#endif
+    return 0;
 }
 
 
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-#if defined(WIN32) || defined(_WIN32)
-    HANDLE thread[MAX_THREADS];
-#else
-    pthread_t thread[MAX_THREADS];
-#endif
+    thrd_t thread[MAX_THREADS];
     int num_threads = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
@@ -237,13 +166,15 @@ int main(int argc, char **argv) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
     /* set up handler for ^C etc. */
-    setup_break_handler();
+    set_interrupt_handler(interrupt_handler);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
 
     if(argc == 3) {
@@ -256,21 +187,25 @@ int main(int argc, char **argv) {
     }
 
     if(num_threads > MAX_THREADS) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Too many threads.  A maximum of %d threads are supported.\n", MAX_THREADS);
         usage();
     }
 
     if(!tag_string || strlen(tag_string) < 10) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "You must provide a valid tag string.\n");
         usage();
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "--- starting run with %d threads using tag string \"%s\".\n", num_threads, tag_string);
 
     /* create the test tags */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
         int32_t tag = 0;
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating test tag %d.\n", tid);
 
         if(tid != 0) {
@@ -282,25 +217,31 @@ int main(int argc, char **argv) {
             char *new_tag_string = (char *)calloc(1, new_string_size);
 
             if(new_tag_string) {
+                // NOLINTNEXTLINE
                 int size = snprintf(new_tag_string, new_string_size, "%s%s", tag_string, conn_grp_string);
 
                 if((size + 1) == (int)(unsigned int)new_string_size) {
                     tag = plc_tag_create(new_tag_string, TAG_CREATE_TIMEOUT);
                 } else {
+                    // NOLINTNEXTLINE
                     fprintf(stderr, "New string: \"%s\".\n", new_tag_string);
+                    // NOLINTNEXTLINE
                     fprintf(stderr, "string size %d, printed size %d.\n", (int)(unsigned int)new_string_size, size);
+                    // NOLINTNEXTLINE
                     fprintf(stderr, "Unable to copy new attribute to tag string!\n");
                     tag = PLCTAG_ERR_CREATE;
                 }
 
                 free(new_tag_string);
             } else {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unable to allocate new tag string!\n");
                 tag = PLCTAG_ERR_NO_MEM;
             }
         }
 
         if(tag < 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "!!! Failed to create tag for thread %d with error %s!\n", tid, plc_tag_decode_error(tag));
             usage();
         }
@@ -315,19 +256,9 @@ int main(int argc, char **argv) {
     }
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating test thread %d.\n", args[tid].tid);
-
-#if defined(WIN32) || defined(_WIN32)
-        thread[tid] = CreateThread(NULL,               /* default security attributes */
-                                   0,                  /* use default stack size      */
-                                   test_runner,        /* thread function             */
-                                   (LPVOID)&args[tid], /* argument to thread function */
-                                   (DWORD)0,           /* use default creation flags  */
-                                   (LPDWORD)NULL       /* do not need thread ID       */
-        );
-#else
-        pthread_create(&thread[tid], NULL, test_runner, (void *)&args[tid]);
-#endif
+        thrd_create(&thread[tid], test_runner, (void *)&args[tid]);
     }
 
     /* wait for threads to create and start. */
@@ -349,13 +280,7 @@ int main(int argc, char **argv) {
     /* wait for the threads to stop. */
     thrd_sleep_ms(100, NULL);
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
-#if defined(WIN32) || defined(_WIN32)
-        WaitForSingleObject(thread[tid], (DWORD)INFINITE);
-#else
-        pthread_join(thread[tid], NULL);
-#endif
-    }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thrd_join(thread[tid], NULL); }
 
     /* close the tags but get the group first. */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
@@ -368,16 +293,12 @@ int main(int argc, char **argv) {
         if(args[tid].status != PLCTAG_STATUS_OK) { success = 0; }
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "--- All test threads terminated after running %" PRId64 "ms.\n", total_run_time);
-
-    if(!success) {
-        fprintf(stderr, "*** Test FAILED!\n");
-    } else {
-        fprintf(stderr, "*** Test SUCCEEDED!\n");
-    }
 
     /* print out statistics. */
     for(int tid = 0; tid < num_threads; tid++) {
+        // NOLINTNEXTLINE
         fprintf(stderr,
                 "--- Thread %d in group %d ran %d iterations with a total io time of %" PRId64 "ms and min/avg/max of %" PRId64
                 "ms/%" PRId64 "ms/%" PRId64 "ms.\n",
@@ -385,5 +306,13 @@ int main(int argc, char **argv) {
                 args[tid].total_io_time / args[tid].iteration, args[tid].max_io_time);
     }
 
-    return 0;
+    if(!success) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "*** Test FAILED!\n");
+        return 1;
+    } else {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "*** Test SUCCEEDED!\n");
+        return 0;
+    }
 }

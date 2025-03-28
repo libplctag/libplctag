@@ -93,10 +93,12 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         return 1;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
             plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
 
@@ -107,6 +109,7 @@ int main(void) {
 
     /* everything OK? */
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error creating tag! Error %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
@@ -115,6 +118,7 @@ int main(void) {
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data for tag! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
@@ -134,6 +138,7 @@ int main(void) {
 
         str = (char *)malloc((size_t)(unsigned int)str_buf_size);
         if(!str) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unable to allocate memory for the string %d of the tag!\n", str_num);
             plc_tag_destroy(tag);
             return PLCTAG_ERR_NO_MEM;
@@ -142,12 +147,14 @@ int main(void) {
         /* read the string into the buffer */
         rc = plc_tag_get_string(tag, offset, str, str_buf_size);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unable to get string %d of tag, got error %s!\n", str_num, plc_tag_decode_error(rc));
             free(str);
             plc_tag_destroy(tag);
             return rc;
         }
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "tag string %d (%u chars) = '%s'\n", str_num, (unsigned int)strlen(str), str);
 
         free(str);

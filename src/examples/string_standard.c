@@ -77,10 +77,12 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         return 1;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
             plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
 
@@ -93,6 +95,7 @@ int main(void) {
 
         /* everything OK? */
         if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error creating tag %d! Error %s\n", i, plc_tag_decode_error(rc));
             plc_tag_destroy(tag);
             return rc;
@@ -101,6 +104,7 @@ int main(void) {
         /* get the data */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Unable to read the data for tag %d! Got error code %d: %s\n", i, rc,
                     plc_tag_decode_error(rc));
             plc_tag_destroy(tag);
@@ -116,6 +120,7 @@ int main(void) {
 
             str = malloc((size_t)(unsigned int)str_cap);
             if(!str) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unable to allocate memory for the string %d of tag %d!\n", str_num, i);
                 plc_tag_destroy(tag);
                 return PLCTAG_ERR_NO_MEM;
@@ -123,12 +128,14 @@ int main(void) {
 
             rc = plc_tag_get_string(tag, offset, str, str_cap);
             if(rc != PLCTAG_STATUS_OK) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unable to get string %d of tag %d, got error %s!\n", str_num, i, plc_tag_decode_error(rc));
                 free(str);
                 plc_tag_destroy(tag);
                 return rc;
             }
 
+            // NOLINTNEXTLINE
             fprintf(stderr, "tag %d string %d (%u chars) = '%s'\n", i, str_num, (unsigned int)strlen(str), str);
 
             free(str);

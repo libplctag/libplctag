@@ -97,6 +97,7 @@ int32_t test_1_dim_tag_read_individual(void) {
         int32_t correct_val = (Test_Array_1_DIM_ELEMENT_COUNT - 1) - i;
         int32_t actual_val = -1;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_1_DIM, i);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -131,6 +132,7 @@ int32_t test_1_dim_tag_write_individual(void) {
         char tag_path[TAG_PATH_MAX];
         int32_t correct_val = (Test_Array_1_DIM_ELEMENT_COUNT - 1) - i;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_1_DIM, i);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -255,6 +257,7 @@ int32_t test_2_dim_tag_read_individual(void) {
         int32_t correct_val = 1000 + (10 * z) + y;
         int32_t actual_val = -1;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_2_DIM, z, y);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -292,6 +295,7 @@ int32_t test_2_dim_tag_write_individual(void) {
         int y = i % Y_DIM;
         int32_t correct_val = 1000 + (10 * z) + y;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_2_DIM, z, y);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -422,6 +426,7 @@ int32_t test_3_dim_tag_read_individual(void) {
         int correct_val = 10000 + (100 * z) + (10 * y) + x;
         int32_t actual_val = -1;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_3_DIM, z, y, x);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -460,6 +465,7 @@ int32_t test_3_dim_tag_write_individual(void) {
         int x = i % X_DIM;
         int correct_val = 10000 + (100 * z) + (10 * y) + x;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_3_DIM, z, y, x);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);

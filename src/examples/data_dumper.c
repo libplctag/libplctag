@@ -116,6 +116,7 @@ char **split_string(const char *str, const char *sep) {
     tmp = (char *)res + (sizeof(char *) * (size_t)(sub_str_count + 1));
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
+    // NOLINTNEXTLINE
     strcpy((char *)tmp, str);
 
     /* set up the pointers */
@@ -132,6 +133,7 @@ char **split_string(const char *str, const char *sep) {
         }
 
         /* zero out the separator chars */
+        // NOLINTNEXTLINE
         memset((char *)sub, 0, strlen(sep));
 
         /* point past the separator (now zero) */
@@ -160,6 +162,7 @@ int process_line(const char *line) {
     do {
         parts = split_string(line, "\t");
         if(!parts) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Splitting string failed for string %s!", line);
             rc = PLCTAG_ERR_BAD_CONFIG;
             break;
@@ -169,6 +172,7 @@ int process_line(const char *line) {
         /* make sure we got 4 pieces. */
         for(int i = 0; i < 4; i++) {
             if(parts[i] == NULL) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Line does not contain enough parts. Line: %s\n", line);
                 free(parts);
                 parts = NULL;
@@ -191,6 +195,7 @@ int process_line(const char *line) {
         } else if(strcasecmp("real", parts[1]) == 0) {
             tags[num_tags].data_type = REAL;
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unknown data type for %s!\n", parts[1]);
             rc = PLCTAG_ERR_BAD_CONFIG;
             break;
@@ -201,6 +206,7 @@ int process_line(const char *line) {
         tags[num_tags].tag_id = plc_tag_create(parts[3], 0); /* create async */
 
         if(tags[num_tags].tag_id < 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error, %s, creating tag %s with string %s!\n", plc_tag_decode_error(tags[num_tags].tag_id),
                     tags[num_tags].name, parts[3]);
             rc = tags[num_tags].tag_id;
@@ -252,6 +258,7 @@ int read_config(const char *config_filename) {
     /* open the config file */
     config = fopen(config_filename, "r");
     if(!config) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to open config file %s!\n", config_filename);
         return PLCTAG_ERR_NOT_FOUND;
     }
@@ -268,6 +275,7 @@ int read_config(const char *config_filename) {
         if(strlen(line) < 25 || is_comment(line)) { continue; }
 
         if((rc = process_line(line)) != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error, %s, processing config file on line %d!\n", plc_tag_decode_error(rc), line_num);
             fclose(config);
             return rc;
@@ -300,6 +308,7 @@ FILE *check_log_file(void) {
         log_month = tm_struct->tm_mon;
         log_day = tm_struct->tm_mday;
 
+        // NOLINTNEXTLINE
         snprintf(log_file_name, sizeof(log_file_name), "log-%04d-%02d-%02d.log", 1900 + log_year, log_month, log_day);
         if(log) { fclose(log); }
 
@@ -331,6 +340,7 @@ int make_prefix(char *prefix_buf, int prefix_buf_size) {
     localtime_r(&epoch, &t);
 
     /* create the prefix and format for the file entry. */
+    // NOLINTNEXTLINE
     rc = snprintf(prefix_buf, (size_t)prefix_buf_size, "%04d-%02d-%02d %02d:%02d:%02d.%03d", t.tm_year + 1900, t.tm_mon,
                   t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms);
 
@@ -351,12 +361,14 @@ int log_data(void) {
     int rc = PLCTAG_STATUS_OK;
 
     if(!log) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error opening log file!\n");
         return PLCTAG_ERR_OPEN;
     }
 
     rc = make_prefix(timestamp_buf, sizeof(timestamp_buf));
     if(rc < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to make prefix, error %s!\n", plc_tag_decode_error(rc));
         return rc;
     }
@@ -365,18 +377,32 @@ int log_data(void) {
         /* skip if this tag is not being read. */
         if(!tags[tag].reading) { continue; }
 
+        // NOLINTNEXTLINE
         fprintf(log, "%s,%s", timestamp_buf, tags[tag].name);
 
         switch(tags[tag].data_type) {
-            case DINT: fprintf(log, ",%d\n", plc_tag_get_int32(tags[tag].tag_id, 0)); break;
+            case DINT:
+                // NOLINTNEXTLINE
+                fprintf(log, ",%d\n", plc_tag_get_int32(tags[tag].tag_id, 0));
+                break;
 
-            case INT: fprintf(log, ",%d\n", plc_tag_get_int16(tags[tag].tag_id, 0)); break;
+            case INT:
+                // NOLINTNEXTLINE
+                fprintf(log, ",%d\n", plc_tag_get_int16(tags[tag].tag_id, 0));
+                break;
 
-            case SINT: fprintf(log, ",%d\n", plc_tag_get_int8(tags[tag].tag_id, 0)); break;
+            case SINT:
+                // NOLINTNEXTLINE
+                fprintf(log, ",%d\n", plc_tag_get_int8(tags[tag].tag_id, 0));
+                break;
 
-            case REAL: fprintf(log, ",%f\n", plc_tag_get_float32(tags[tag].tag_id, 0)); break;
+            case REAL:
+                // NOLINTNEXTLINE
+                fprintf(log, ",%f\n", plc_tag_get_float32(tags[tag].tag_id, 0));
+                break;
 
             default:
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unknown datatype (%d) for tag %d!\n", tags[tag].data_type, tag);
                 return PLCTAG_ERR_BAD_CONFIG;
                 break;
@@ -427,6 +453,7 @@ int start_reads(void) {
 
             rc = plc_tag_read(tags[t].tag_id, 0);
             if(rc != PLCTAG_STATUS_PENDING) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unable to start reading tag %s!\n", plc_tag_decode_error(rc));
                 destroy_tags();
                 return rc;
@@ -444,15 +471,25 @@ int start_reads(void) {
 void interrupt_handler(void) { terminate = 1; }
 
 void usage(void) {
+    // NOLINTNEXTLINE
     fprintf(stderr, "Usage: data_dumper <config file>\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "The config file must contain tab-delimited rows in the following format:\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "\t<name>\\t<type>\\t<rpi>\\t<tag string>\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "\t<name> = a name used when outputting the data.\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "\t<type> = The type of the tag.  One of 'dint', 'int', 'sint', 'real'.\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "\t<rpi> = The number of milliseconds between reads of the tag.\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "\t<tag string> = The tag attribute string for this tag.  E.g.:\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "\t\tprotocol=ab-eip&gateway=10.206.1.40&path=1,4&cpu=lgx&elem_size=4&elem_count=10&name=TestDINTArray[0]\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "Example:\n");
+    // NOLINTNEXTLINE
     fprintf(
         stderr,
         "TestData\tdint\t100\tprotocol=ab-eip&gateway=10.206.1.40&path=1,4&cpu=lgx&elem_size=4&elem_count=10&name=TestDINTArray[0]\n");
@@ -464,6 +501,7 @@ int main(int argc, char **argv) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -472,6 +510,7 @@ int main(int argc, char **argv) {
     set_interrupt_handler(interrupt_handler);
 
     /* clear the array of tags. */
+    // NOLINTNEXTLINE
     memset(&tags, 0, sizeof(tags));
 
     if(argc < 2) {
@@ -481,6 +520,7 @@ int main(int argc, char **argv) {
     }
 
     if((rc = read_config(argv[1])) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to read config or set up tags. %s!\n", plc_tag_decode_error(rc));
         destroy_tags();
         return 1;
@@ -490,6 +530,7 @@ int main(int argc, char **argv) {
     while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { thrd_sleep_ms(10, NULL); }
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error waiting for tags to finish being set up, %s!\n", plc_tag_decode_error(rc));
         destroy_tags();
         return 1;

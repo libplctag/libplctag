@@ -66,6 +66,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
         case PLCTAG_EVENT_READ_COMPLETED:
             if(!create_seen) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Tag read operation completed before create was complete!\n");
                 plc_tag_destroy(tag_id);
                 exit(1);
@@ -84,6 +85,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
         case PLCTAG_EVENT_READ_STARTED:
             if(!create_seen) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Tag read operation started before create was complete!\n");
                 plc_tag_destroy(tag_id);
                 exit(1);
@@ -117,6 +119,7 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = timeout_ms + util_time_ms();
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "wait_for_ok() starting.\n");
 
     do {
@@ -130,11 +133,13 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
     } while(rc == PLCTAG_STATUS_PENDING);
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "wait_for_ok(): Error %s returned on tag operation.!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         exit(1);
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "wait_for_ok() done.\n");
 }
 

@@ -34,7 +34,6 @@
 
 #include "../lib/libplctag.h"
 #include "utils.h"
-#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,13 +66,16 @@ static int open_tag(const char *tag_str) {
 
     /* everything OK? */
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return PLCTAG_ERR_CREATE;
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "INFO: Tag created with status %s\n", plc_tag_decode_error(plc_tag_status(tag)));
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error %s setting up tag internal state.\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
@@ -83,7 +85,7 @@ static int open_tag(const char *tag_str) {
 }
 
 
-void *test_tag(void *data) {
+int test_tag(void *data) {
     int tid = (int)(intptr_t)data;
     int iteration = 1;
 
@@ -102,6 +104,7 @@ void *test_tag(void *data) {
         end = util_time_ms();
 
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Test %d, terminating test, read resulted in error %s\n", tid, plc_tag_decode_error(rc));
             done = 1;
         } else {
@@ -117,9 +120,11 @@ void *test_tag(void *data) {
             rc = plc_tag_write(tag, DATA_TIMEOUT);
 
             if(rc != PLCTAG_STATUS_OK) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Test %d, terminating test, write resulted in error %s\n", tid, plc_tag_decode_error(rc));
                 done = 1;
             } else {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Test %d, iteration %d, got result %d with return code %s in %dms\n", tid, iteration, value,
                         plc_tag_decode_error(rc), (int)(end - start));
             }
@@ -128,16 +133,17 @@ void *test_tag(void *data) {
         iteration++;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Test %d terminating.\n", tid);
 
-    return NULL;
+    return 0;
 }
 
 
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    pthread_t threads[MAX_THREADS];
+    thrd_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int64_t seconds = 30; /* default 30 seconds */
@@ -145,6 +151,7 @@ int main(int argc, char **argv) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -152,20 +159,23 @@ int main(int argc, char **argv) {
     if(argc == 2) {
         num_threads = atoi(argv[1]);
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Usage: stress_api_lock <num threads>\n");
         return 0;
     }
 
     tag = open_tag(TAG_PATH);
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to create tag! %s\n", plc_tag_decode_error(tag));
         return 1;
     }
 
     /* create the test threads */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
-        pthread_create(&threads[tid], NULL, &test_tag, (void *)(intptr_t)tid);
+        thrd_create(&threads[tid], test_tag, (void *)(intptr_t)tid);
     }
 
     start_time = util_time_ms();
@@ -174,15 +184,18 @@ int main(int argc, char **argv) {
     while(!done && util_time_ms() < end_time) { thrd_sleep_ms(100, NULL); }
 
     if(done) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Test FAILED!\n");
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Test SUCCEEDED!\n");
     }
 
     done = 1;
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thrd_join(threads[tid], NULL); }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "All test threads terminated.\n");
 
     plc_tag_destroy(tag);

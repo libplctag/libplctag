@@ -119,6 +119,7 @@ inline static bool slice_copy_data_in(slice_s dest, uint8_t *src_data, size_t sr
         return false;
     }
 
+    // NOLINTNEXTLINE
     memcpy(dest.data, src_data, src_len);
 
     return true;
@@ -133,6 +134,7 @@ inline static bool slice_copy_data_out(uint8_t *dest_data, size_t dest_len, slic
         return false;
     }
 
+    // NOLINTNEXTLINE
     memcpy(dest_data, src.data, slice_len(src));
 
     return true;
@@ -147,6 +149,7 @@ inline static bool slice_copy_slice(slice_s dest, slice_s src) {
         return false;
     }
 
+    // NOLINTNEXTLINE
     memcpy(dest.data, src.data, slice_len(src));
 
     return true;

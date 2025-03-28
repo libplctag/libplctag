@@ -67,6 +67,7 @@ int test_string(const char *tag_string) {
 
         /* everything OK? */
         if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error %s creating tag!\n", plc_tag_decode_error(rc));
             break;
         }
@@ -74,6 +75,7 @@ int test_string(const char *tag_string) {
         /* get the data */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error %s trying to read tag!\n", plc_tag_decode_error(rc));
             break;
         }
@@ -82,6 +84,7 @@ int test_string(const char *tag_string) {
         str_cap = plc_tag_get_string_length(tag, offset) + 1; /* +1 for the zero termination. */
         str = (char *)malloc((size_t)(unsigned int)str_cap);
         if(!str) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unable to allocate memory for the string!\n");
             rc = PLCTAG_ERR_NO_MEM;
             break;
@@ -89,10 +92,12 @@ int test_string(const char *tag_string) {
 
         rc = plc_tag_get_string(tag, offset, str, str_cap);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error %s getting string value!\n", plc_tag_decode_error(rc));
             break;
         }
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "tag string data = '%s'\n", str);
 
         free(str);
@@ -101,12 +106,14 @@ int test_string(const char *tag_string) {
         str_cap = plc_tag_get_string_capacity(tag, offset) + 10;
         str = (char *)malloc((size_t)(unsigned int)str_cap);
         if(!str) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unable to allocate memory for the string write test!\n");
             rc = PLCTAG_ERR_NO_MEM;
             break;
         }
 
         /* clear out the string memory */
+        // NOLINTNEXTLINE
         memset(str, 0, (unsigned int)str_cap);
 
         /* try to write a shorter string but with a long capacity. */
@@ -117,8 +124,10 @@ int test_string(const char *tag_string) {
         /* try to set the string. */
         rc = plc_tag_set_string(tag, offset, str);
         if(rc == PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Setting the tiny string succeeded.\n");
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
             break;
         }
@@ -129,8 +138,10 @@ int test_string(const char *tag_string) {
         /* try to set the string. */
         rc = plc_tag_set_string(tag, offset, str);
         if(rc == PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Setting the small string succeeded.\n");
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Got error %s setting string!\n", plc_tag_decode_error(rc));
             break;
         }
@@ -141,9 +152,11 @@ int test_string(const char *tag_string) {
         /* try to set the string. */
         rc = plc_tag_set_string(tag, offset, str);
         if(rc == PLCTAG_ERR_TOO_LARGE) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Correctly got error %s setting string!\n", plc_tag_decode_error(rc));
             rc = PLCTAG_STATUS_OK;
         } else {
+            // NOLINTNEXTLINE
             fprintf(
                 stderr,
                 "Should have error PLCTAG_ERR_TOO_LARGE but got %s trying to set string value with capacity longer than actual!\n",
@@ -165,10 +178,12 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         return 1;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
             plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
 
@@ -178,6 +193,7 @@ int main(void) {
     /* we expect a failure here. */
     rc = test_string(tag_string1);
     if(rc != PLCTAG_ERR_NOT_ALLOWED) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unexpected failure error %s!", plc_tag_decode_error(rc));
         return 1;
     }
@@ -185,6 +201,7 @@ int main(void) {
     /* We expect success here */
     rc = test_string(tag_string2);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unexpected failure %s!", plc_tag_decode_error(rc));
         return 1;
     }

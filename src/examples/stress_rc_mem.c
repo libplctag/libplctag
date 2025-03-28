@@ -35,7 +35,6 @@
 #include "../lib/libplctag.h"
 #include "utils.h"
 #include <inttypes.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -67,8 +66,11 @@ int main(void) {
     /* Set up the signal handler */
     set_interrupt_handler(interrupt_handler);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Interrupt handlers set up.\n");
+    // NOLINTNEXTLINE
     fprintf(stderr, "Waiting until time %" PRId64 "ms.\n", end_time);
+    // NOLINTNEXTLINE
     fprintf(stderr, "Use ^C or send a SIGTERM to terminate early.\n");
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
@@ -77,14 +79,16 @@ int main(void) {
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) {
         int rc = thrd_create(&threads[task_id], thread_func, (void *)(intptr_t)task_id);
         if(rc != thrd_success) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error creating thread %d\n", task_id);
-            return 1;
+            return -1;
         }
     }
 
     /* wait while we test */
-    while(!terminate && ((end_time - util_time_ms()) > 0)) {
+    while(!terminate && (end_time > util_time_ms())) {
         thrd_sleep_ms(1000, NULL);
+        // NOLINTNEXTLINE
         fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - util_time_ms()));
     }
 
@@ -111,35 +115,38 @@ int thread_func(void *arg) {
     int32_t tag = 0;
     char tag_str[250] = {0};
 
+    // NOLINTNEXTLINE
     snprintf(tag_str, sizeof(tag_str),
              "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray&connection_group_id=%d", task_id);
 
     while(!terminate) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Task %d creating tag\n", task_id);
 
         tag = plc_tag_create(tag_str, 5000);
         if(tag < 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Task %d tag creation failed with error %s\n", task_id, plc_tag_decode_error(tag));
 
             thrd_sleep_ms(100, NULL);
             continue;
         }
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Task %d reading tag %" PRId32 "\n", task_id, tag);
 
         do {
             rc = plc_tag_read(tag, 5000);
-            if(rc == PLCTAG_STATUS_OK) {
-                thrd_sleep_ms(10, NULL);
-            } else {
+            if(rc != PLCTAG_STATUS_OK) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Task %d read failed with error %s\n", task_id, plc_tag_decode_error(rc));
             }
         } while(rc == PLCTAG_STATUS_OK && !terminate);
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Task %d destroying tag %" PRId32 "\n", task_id, tag);
-        plc_tag_destroy(tag);
 
-        thrd_sleep_ms(10, NULL);
+        plc_tag_destroy(tag);
     }
 
     return 0;

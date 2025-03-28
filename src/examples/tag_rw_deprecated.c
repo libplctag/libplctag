@@ -236,6 +236,7 @@ int main(int argc, char **argv) {
             case PLC_LIB_BIT:
                 /* fall through */
             case PLC_LIB_UINT8:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNu8 "", &u_val8) != 1) {
                     printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
                     usage();
@@ -245,6 +246,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_UINT16:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNu16 "", &u_val16) != 1) {
                     printf("ERROR: bad format for unsigned 16-bit integer for write value.\n");
                     usage();
@@ -254,6 +256,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_UINT32:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNu32 "", &u_val32) != 1) {
                     printf("ERROR: bad format for unsigned 32-bit integer for write value.\n");
                     usage();
@@ -263,6 +266,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_UINT64:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNu64 "", &u_val64) != 1) {
                     printf("ERROR: bad format for unsigned 64-bit integer for write value.\n");
                     usage();
@@ -272,6 +276,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_SINT8:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNd8 "", &i_val8) != 1) {
                     printf("ERROR: bad format for signed 8-bit integer for write value.\n");
                     usage();
@@ -281,6 +286,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_SINT16:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNd16 "", &i_val16) != 1) {
                     printf("ERROR: bad format for signed 16-bit integer for write value.\n");
                     usage();
@@ -290,6 +296,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_SINT32:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNd32 "", &i_val32) != 1) {
                     printf("ERROR: bad format for signed 32-bit integer for write value.\n");
                     usage();
@@ -299,6 +306,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_SINT64:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%" SCNd64 "", &i_val64) != 1) {
                     printf("ERROR: bad format for signed 64-bit integer for write value.\n");
                     usage();
@@ -308,6 +316,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_REAL32:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%f", &f_val32) != 1) {
                     printf("ERROR: bad format for 32-bit floating point for write value.\n");
                     usage();
@@ -317,6 +326,7 @@ int main(int argc, char **argv) {
                 break;
 
             case PLC_LIB_REAL64:
+                // NOLINTNEXTLINE
                 if(sscanf_platform(write_str, "%lf", &f_val64) != 1) {
                     printf("ERROR: bad format for 64-bit floating point for write value.\n");
                     usage();
@@ -438,27 +448,27 @@ int main(int argc, char **argv) {
             }
         } else {
             switch(data_type) {
-                case PLC_LIB_BIT: rc = plc_tag_set_bit(tag, 0, (int)u_val8); break;
+                case PLC_LIB_BIT: plc_tag_set_bit(tag, 0, (int)u_val8); break;
 
-                case PLC_LIB_UINT8: rc = plc_tag_set_uint8(tag, 0, u_val8); break;
+                case PLC_LIB_UINT8: plc_tag_set_uint8(tag, 0, u_val8); break;
 
-                case PLC_LIB_UINT16: rc = plc_tag_set_uint16(tag, 0, u_val16); break;
+                case PLC_LIB_UINT16: plc_tag_set_uint16(tag, 0, u_val16); break;
 
-                case PLC_LIB_UINT32: rc = plc_tag_set_uint32(tag, 0, u_val32); break;
+                case PLC_LIB_UINT32: plc_tag_set_uint32(tag, 0, u_val32); break;
 
-                case PLC_LIB_UINT64: rc = plc_tag_set_uint64(tag, 0, u_val64); break;
+                case PLC_LIB_UINT64: plc_tag_set_uint64(tag, 0, u_val64); break;
 
-                case PLC_LIB_SINT8: rc = plc_tag_set_int8(tag, 0, i_val8); break;
+                case PLC_LIB_SINT8: plc_tag_set_int8(tag, 0, i_val8); break;
 
-                case PLC_LIB_SINT16: rc = plc_tag_set_int16(tag, 0, i_val16); break;
+                case PLC_LIB_SINT16: plc_tag_set_int16(tag, 0, i_val16); break;
 
-                case PLC_LIB_SINT32: rc = plc_tag_set_int32(tag, 0, i_val32); break;
+                case PLC_LIB_SINT32: plc_tag_set_int32(tag, 0, i_val32); break;
 
-                case PLC_LIB_SINT64: rc = plc_tag_set_int64(tag, 0, i_val64); break;
+                case PLC_LIB_SINT64: plc_tag_set_int64(tag, 0, i_val64); break;
 
-                case PLC_LIB_REAL32: rc = plc_tag_set_float32(tag, 0, f_val32); break;
+                case PLC_LIB_REAL32: plc_tag_set_float32(tag, 0, f_val32); break;
 
-                case PLC_LIB_REAL64: rc = plc_tag_set_float64(tag, 0, f_val64); break;
+                case PLC_LIB_REAL64: plc_tag_set_float64(tag, 0, f_val64); break;
             }
 
             /* write the data */

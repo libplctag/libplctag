@@ -135,6 +135,7 @@ extern void mem_set(void *dest, int c, int size) {
         return;
     }
 
+    // NOLINTNEXTLINE
     memset(dest, c, (size_t)(ssize_t)size);
 }
 
@@ -165,6 +166,7 @@ extern void mem_copy(void *dest, void *src, int size) {
         return;
     }
 
+    // NOLINTNEXTLINE
     memcpy(dest, src, (size_t)(unsigned int)size);
 }
 
@@ -195,6 +197,7 @@ extern void mem_move(void *dest, void *src, int size) {
         return;
     }
 
+    // NOLINTNEXTLINE
     memmove(dest, src, (size_t)(unsigned int)size);
 }
 
@@ -386,7 +389,9 @@ extern int str_copy(char *dst, int dst_size, const char *src) {
         return PLCTAG_ERR_TOO_SMALL;
     }
 
+    // NOLINTNEXTLINE
     strncpy(dst, src, (size_t)(unsigned int)dst_size);
+
     return PLCTAG_STATUS_OK;
 }
 
@@ -1278,7 +1283,9 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     i = 0;
     done = 0;
 
+    // NOLINTNEXTLINE
     memset((void *)&gw_addr, 0, sizeof(gw_addr));
+
     gw_addr.sin_family = AF_INET;
     gw_addr.sin_port = htons((uint16_t)port);
 

@@ -57,7 +57,6 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
-        rc = PLCTAG_STATUS_OK;
     }
 
     /* test null pointer */
@@ -70,7 +69,6 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
-        rc = PLCTAG_STATUS_OK;
     }
 
     /* test zero length buffer */
@@ -83,7 +81,6 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
-        rc = PLCTAG_STATUS_OK;
     }
 
     /* test exact buffer length */
@@ -99,7 +96,6 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
-        rc = PLCTAG_STATUS_OK;
     }
 
     /* check the type size that comes back when the data is copied */
@@ -111,7 +107,6 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
-        rc = PLCTAG_STATUS_OK;
     }
 
     printf("\tRetrieved tag %s native type bytes: ", tag_name);
@@ -130,6 +125,7 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -143,6 +139,7 @@ int main(void) {
 
         /* everything OK? */
         if(tag1 < 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR %s: Could not create tag TestBigSINTArray!\n", plc_tag_decode_error(tag1));
             break;
         }
@@ -150,6 +147,7 @@ int main(void) {
         /* get the data */
         rc = plc_tag_read(tag1, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Unable to read the data for TestBigSINTArray! Got error code %d: %s\n", rc,
                     plc_tag_decode_error(rc));
             break;
@@ -158,6 +156,7 @@ int main(void) {
         tag2 = plc_tag_create(
             "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1&name=TestManyBOOLFields", DATA_TIMEOUT);
         if(tag2 < 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR %s: Could not create tag TestManyBOOLFields!\n", plc_tag_decode_error(tag2));
             break;
         }
@@ -165,6 +164,7 @@ int main(void) {
         /* get the data */
         rc = plc_tag_read(tag2, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Unable to read the data for TestManyBOOLFields! Got error code %d: %s\n", rc,
                     plc_tag_decode_error(rc));
             break;
@@ -172,6 +172,7 @@ int main(void) {
 
         rc = test_tag_buffer_errors("TestBigSINTArray", tag1);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: testing for tag buffer errors with a large SINT array failed %s!\n",
                     plc_tag_decode_error(rc));
             break;
@@ -179,6 +180,7 @@ int main(void) {
 
         rc = test_tag_buffer_errors("TestManyBOOLFields", tag2);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: testing for tag buffer errors with a large BOOL array failed %s!\n",
                     plc_tag_decode_error(rc));
             break;

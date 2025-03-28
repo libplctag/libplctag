@@ -68,6 +68,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
         case PLCTAG_EVENT_READ_COMPLETED:
             if(!create_seen) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Tag read operation completed before create was complete!\n");
                 plc_tag_destroy(tag_id);
                 exit(1);
@@ -86,6 +87,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
         case PLCTAG_EVENT_READ_STARTED:
             if(!create_seen) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Tag read operation started before create was complete!\n");
                 plc_tag_destroy(tag_id);
                 exit(1);
@@ -116,6 +118,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
 
 void log_callback(int32_t tag_id, int debug_level, const char *message) {
+    // NOLINTNEXTLINE
     fprintf(stderr, "Log message of level %d for tag %d: %s", debug_level, tag_id, message);
 }
 

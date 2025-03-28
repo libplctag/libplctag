@@ -75,6 +75,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *arg) {
 
     if(event != PLCTAG_EVENT_READ_COMPLETED) { return; }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "callback tag(%d), tag id(%d), event(%d), status(%d)\n", tid, tag_id, event, status);
 
     mtx_lock(&states[tid].mutex);
@@ -94,7 +95,10 @@ int thread_func(void *data) {
     char buf[250] = {
         0,
     };
+
+    // NOLINTNEXTLINE
     snprintf(buf, sizeof(buf), TAG_PATH, tid);
+
     /* create the tag */
     int tag = plc_tag_create(buf, 0);
     states[tid].tag = tag;
@@ -106,6 +110,7 @@ int thread_func(void *data) {
 
     /* everything OK? */
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
@@ -116,6 +121,7 @@ int thread_func(void *data) {
     }
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         mtx_destroy(&states[tid].mutex);
@@ -135,6 +141,7 @@ int thread_func(void *data) {
 
         do {
             rc = plc_tag_read(tag, 0);
+            // NOLINTNEXTLINE
             if(rc < 0) { fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc)); }
             if(rc == PLCTAG_STATUS_PENDING) {
                 mtx_lock(&states[tid].mutex);
@@ -142,6 +149,7 @@ int thread_func(void *data) {
                 mtx_unlock(&states[tid].mutex);
 
                 if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+                    // NOLINTNEXTLINE
                     fprintf(stderr, "something is wrong for tag(%d), status(%s)\n", tag, plc_tag_decode_error(rc));
                     plc_tag_destroy(tag);
                     mtx_destroy(&states[tid].mutex);
@@ -154,6 +162,7 @@ int thread_func(void *data) {
 
         end = util_time_ms();
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Thread %d got result %d with return code %s in %" PRId64 "ms\n", tid, value, plc_tag_decode_error(rc),
                 (end - start));
 
@@ -176,15 +185,18 @@ int main(int argc, char **argv) {
     /* set up handler for ^C etc. */
     set_interrupt_handler(interrupt_handler);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
     if(argc != 2) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n", argc);
         return 0;
     }
@@ -194,12 +206,14 @@ int main(int argc, char **argv) {
     num_threads = (int)strtol(argv[1], NULL, 10);
 
     if(num_threads < 1 || num_threads > MAX_THREADS) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",
                 num_threads, argv[1]);
         return 0;
     }
 
     /* create the read threads */
+    // NOLINTNEXTLINE
     fprintf(stderr, "Creating %d threads.\n", num_threads);
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {

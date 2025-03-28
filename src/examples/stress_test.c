@@ -34,7 +34,6 @@
 
 #include "../lib/libplctag.h"
 #include "utils.h"
-#include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,7 +42,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define REQUIRED_VERSION 2, 1, 0
+#define REQUIRED_VERSION 2, 6, 4
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[%d]&debug=3"
 
@@ -75,7 +74,8 @@ static FILE *open_log(int tid) {
         0,
     };
 
-    snprintf(buf, sizeof(buf), "test-%d.log", tid);
+    // NOLINTNEXTLINE
+    snprintf(buf, sizeof(buf), "stress-test-%d.log", tid);
 
     return fopen(buf, "w");
 }
@@ -109,8 +109,10 @@ static int32_t open_tag(FILE *log, int tid, int num_elems) {
     };
     int32_t tag = 0;
 
+    // NOLINTNEXTLINE
     snprintf(buf, sizeof(buf), tag_str, num_elems, (tid - 1) * num_elems);
 
+    // NOLINTNEXTLINE
     fprintf(log, "--- Test %d, Creating tag (%d, %d) with string %s\n", tid, tid, num_elems, buf);
 
     /* create the tag */
@@ -118,11 +120,13 @@ static int32_t open_tag(FILE *log, int tid, int num_elems) {
 
     /* everything OK? */
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(log, "!!! Test %d, could not create tag. error %s!\n", tid, plc_tag_decode_error(tag));
         return tag;
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(log, "!!! Test %d, error %s setting up tag internal state.\n", tid, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return rc;
@@ -132,7 +136,7 @@ static int32_t open_tag(FILE *log, int tid, int num_elems) {
 }
 
 
-static void *test_cip(void *data) {
+static int test_cip(void *data) {
     thread_args *args = (thread_args *)data;
     int tid = args->tid;
     int num_elems = args->num_elems;
@@ -150,7 +154,9 @@ static void *test_cip(void *data) {
 
     log = open_log(tid);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, start_index);
+    // NOLINTNEXTLINE
     fprintf(log, "--- Test %d updating %d elements starting at index %d.\n", tid, num_elems, start_index);
 
     while(!done) {
@@ -164,6 +170,7 @@ static void *test_cip(void *data) {
 
             tag = open_tag(log, tid, num_elems);
             if(tag < 0) {
+                // NOLINTNEXTLINE
                 fprintf(log, "!!! Test %d, iteration %d, Error (%s) creating tag!  Retrying in %dms.", tid, iteration,
                         plc_tag_decode_error(tag), RETRY_TIMEOUT);
             }
@@ -175,6 +182,7 @@ static void *test_cip(void *data) {
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
             if(rc != PLCTAG_STATUS_OK) {
+                // NOLINTNEXTLINE
                 fprintf(log, "!!! Test %d, iteration %d, read failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
                 break;
             }
@@ -192,6 +200,7 @@ static void *test_cip(void *data) {
             /* write the value */
             rc = plc_tag_write(tag, DATA_TIMEOUT);
             if(rc != PLCTAG_STATUS_OK) {
+                // NOLINTNEXTLINE
                 fprintf(log, "!!! Test %d, iteration %d, write failed with error %s\n", tid, iteration, plc_tag_decode_error(rc));
                 break;
             }
@@ -202,11 +211,13 @@ static void *test_cip(void *data) {
         total_io_time += (end - start);
 
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(log, "!!! Test %d, iteration %d, error %s, will retry in %dms.\n", tid, iteration, plc_tag_decode_error(rc),
                     RETRY_TIMEOUT);
 
             wait_ms(RETRY_TIMEOUT);
         } else {
+            // NOLINTNEXTLINE
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems,
                     (int)(end - start));
             thrd_sleep_ms(10, NULL);
@@ -217,25 +228,23 @@ static void *test_cip(void *data) {
 
     if(tag > 0) { plc_tag_destroy(tag); }
 
+    // NOLINTNEXTLINE
     fprintf(log, "*** Test %d terminating after %d iterations and an average of %dms per iteration.\n", tid, iteration,
             (int)(total_io_time / iteration));
 
     close_log(log);
 
-    return NULL;
+    return 0;
 }
 
 
-void sigpipe_handler(int unused) {
-    (void)unused;
-    done = 1;
-}
+static void interrupt_handler(void) { done = 1; }
 
 
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    pthread_t threads[MAX_THREADS];
+    thrd_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int num_threads = 0;
@@ -243,40 +252,39 @@ int main(int argc, char **argv) {
     int num_elems = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
-    struct sigaction sigpipe;
 
-    memset(&sigpipe, 0, sizeof(sigpipe));
-
-    sigpipe.sa_handler = sigpipe_handler;
+    set_interrupt_handler(interrupt_handler);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
-
-    /* catch broken pipe signals */
-    sigaction(SIGPIPE, &sigpipe, NULL);
 
     if(argc == 4) {
         num_threads = atoi(argv[1]);
         num_elems = atoi(argv[2]);
         seconds = atoi(argv[3]);
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Usage: stress_test <num threads> <elements per thread> <seconds to run>\n");
         return 1;
     }
 
     if(num_threads > MAX_THREADS) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Too many threads.  A maximum of %d threads are supported.\n", MAX_THREADS);
         return 1;
     }
 
     if(num_threads * num_elems > 1000) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "#threads * #elems must be less than 1000.\n");
         return 1;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "--- starting run with %d threads each handling %d elements running for %d seconds\n", num_threads, num_elems,
             seconds);
 
@@ -285,9 +293,10 @@ int main(int argc, char **argv) {
         args[tid].tid = num_threads - tid;
         args[tid].num_elems = num_elems;
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating serial test thread %d with %d elements.\n", args[tid].tid, args[tid].num_elems);
 
-        pthread_create(&threads[tid], NULL, &test_cip, &args[tid]);
+        thrd_create(&threads[tid], test_cip, &args[tid]);
     }
 
     start_time = util_time_ms();
@@ -301,11 +310,14 @@ int main(int argc, char **argv) {
 
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(threads[tid], NULL); }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "--- All test threads terminated.\n");
 
     if(!success) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "*** Test FAILED!\n");
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "*** Test SUCCEEDED!\n");
     }
 

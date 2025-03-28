@@ -128,6 +128,7 @@ void setup_break_handler(void) {
     struct sigaction act;
 
     /* set up signal handler. */
+    // NOLINTNEXTLINE
     memset(&act, 0, sizeof(act));
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
@@ -146,6 +147,7 @@ int main(int argc, const char **argv) {
     debug_off();
 
     /* clear out context to make sure we do not get gremlins */
+    // NOLINTNEXTLINE
     memset(&plc, 0, sizeof(plc));
 
     /* set the random seed. */
@@ -165,6 +167,7 @@ int main(int argc, const char **argv) {
 
 
 void usage(void) {
+    // NOLINTNEXTLINE
     fprintf(stderr, "Usage: ab_server --plc=<plc_type> [--path=<path>] [--port=<port>] --tag=<tag>\n"
                     "   <plc type> = one of the CIP PLCs: \"ControlLogix\", \"Micro800\" or \"Omron\",\n"
                     "                or one of the PCCC PLCs: \"PLC/5\", \"SLC500\" or \"Micrologix\".\n"
@@ -215,12 +218,14 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     for(int i = 0; i < argc; i++) {
         if(strncmp(argv[i], "--plc=", 6) == 0) {
             if(has_plc) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "PLC type can only be specified once!\n");
                 usage();
                 return;
             }
 
             if(str_cmp_i(&(argv[i][6]), "ControlLogix") == 0) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Selecting ControlLogix simulator.\n");
                 plc->plc_type = PLC_CONTROL_LOGIX;
                 plc->path[0] = (uint8_t)0x00; /* filled in later. */
@@ -235,6 +240,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = true;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Micro800") == 0) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Selecting Micro8xx simulator.\n");
                 plc->plc_type = PLC_MICRO800;
                 plc->path[0] = (uint8_t)0x20;
@@ -247,6 +253,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Omron") == 0) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Selecting Omron NJ/NX simulator.\n");
                 plc->plc_type = PLC_OMRON;
                 plc->path[0] = (uint8_t)0x12;  /* Extended segment, port A */
@@ -271,6 +278,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "PLC/5") == 0) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Selecting PLC/5 simulator.\n");
                 plc->plc_type = PLC_PLC5;
                 plc->path[0] = (uint8_t)0x20;
@@ -283,6 +291,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "SLC500") == 0) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Selecting SLC 500 simulator.\n");
                 plc->plc_type = PLC_SLC;
                 plc->path[0] = (uint8_t)0x20;
@@ -295,6 +304,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else if(str_cmp_i(&(argv[i][6]), "Micrologix") == 0) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Selecting Micrologix simulator.\n");
                 plc->plc_type = PLC_MICROLOGIX;
                 plc->path[0] = (uint8_t)0x20;
@@ -307,6 +317,7 @@ void process_args(int argc, const char **argv, plc_s *plc) {
                 needs_path = false;
                 has_plc = true;
             } else {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unsupported PLC type %s!\n", &(argv[i][6]));
                 usage();
             }
@@ -346,16 +357,19 @@ void process_args(int argc, const char **argv, plc_s *plc) {
     }
 
     if(needs_path && !has_path) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "This PLC type requires a path argument.\n");
         usage();
     }
 
     if(!has_plc) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "You must pass a --plc= argument!\n");
         usage();
     }
 
     if(!has_tag) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "You must define at least one tag.\n");
         usage();
     }
@@ -365,12 +379,14 @@ void process_args(int argc, const char **argv, plc_s *plc) {
 void parse_path(const char *path_str, plc_s *plc) {
     int tmp_path[2];
 
+    // NOLINTNEXTLINE
     if(str_scanf(path_str, "%d,%d", &tmp_path[0], &tmp_path[1]) == 2) {
         plc->path[0] = (uint8_t)tmp_path[0];
         plc->path[1] = (uint8_t)tmp_path[1];
 
         info("Processed path %d,%d.", plc->path[0], plc->path[1]);
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error processing path \"%s\"!  Path must be two numbers separated by a comma.\n", path_str);
         usage();
     }
@@ -416,6 +432,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     start = 0;
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
     if(!len) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -444,6 +461,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
             tag->elem_size = 4;
             tag->data_file_num = 19;
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unknown data file %s, unable to create tag!", data_file_name);
             usage();
         }
@@ -453,6 +471,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
 
     /* get the array size delimiter. */
     if(tag_str[start] != '[') {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after data file in \"%s\"!\n",
                 tag_str);
         usage();
@@ -463,6 +482,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     /* get the size field */
     len = strspn(tag_str + start, "0123456789");
     if(!len) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot match array size in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -473,6 +493,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ']') {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after size in \"%s\"!\n",
                 tag_str);
         usage();
@@ -484,14 +505,17 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[2] = 1;
 
     /* match the size. */
+    // NOLINTNEXTLINE
     num_dims = str_scanf(size_str, "%zu", &tag->dimensions[0]);
     if(num_dims != 1) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag size in \"%s\"!\n", tag_str);
         usage();
     }
 
     /* check the size. */
     if(tag->dimensions[0] <= 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "The array size must least 1 and may not be negative!\n");
         usage();
     } else {
@@ -502,6 +526,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     /* copy the tag name */
     tag->name = strdup(data_file_name);
     if(!tag->name) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate a copy of the data file \"%s\"!\n", data_file_name);
         usage();
     }
@@ -510,6 +535,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate tag data buffer!\n");
         free(tag->name);
     }
@@ -564,6 +590,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     start = 0;
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
     if(!len) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot find tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -574,6 +601,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ':') {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot find colon after tag name in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -583,6 +611,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* get the type field */
     len = strspn(tag_str + start, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
     if(!len) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot match tag type in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -593,6 +622,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != '[') {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot find starting square bracket after tag type in \"%s\"!\n",
                 tag_str);
         usage();
@@ -603,6 +633,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* get the dimension field */
     len = strspn(tag_str + start, "0123456789,");
     if(!len) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot match dimension in \"%s\"!\n", tag_str);
         usage();
     } else {
@@ -613,6 +644,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     if(tag_str[start] != ']') {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to parse tag definition string, cannot find ending square bracket after tag type in \"%s\"!\n",
                 tag_str);
         usage();
@@ -644,6 +676,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         tag->tag_type = TAG_CIP_TYPE_BOOL;
         tag->elem_size = 1;
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unsupported tag type \"%s\"!", type_str);
         usage();
     }
@@ -653,14 +686,17 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     tag->dimensions[1] = 0;
     tag->dimensions[2] = 0;
 
+    // NOLINTNEXTLINE
     num_dims = str_scanf(dim_str, "%zu,%zu,%zu,%*u", &tag->dimensions[0], &tag->dimensions[1], &tag->dimensions[2]);
     if(num_dims < 1 || num_dims > 3) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Tag dimensions must have at least one dimension non-zero and no more than three dimensions.");
         usage();
     }
 
     /* check the dimensions. */
     if(tag->dimensions[0] <= 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "The first tag dimension must be at least 1 and may not be negative!\n");
         usage();
     } else {
@@ -685,6 +721,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     /* copy the tag name */
     tag->name = strdup(tag_name);
     if(!tag->name) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate a copy of the tag name \"%s\"!\n", tag_name);
         usage();
     }
@@ -693,6 +730,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate tag data buffer!\n");
         free(tag->name);
     }

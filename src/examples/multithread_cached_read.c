@@ -106,6 +106,7 @@ int thread_func(void *data) {
 
         end = util_time_ms();
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "%" PRId64 " Thread %d got result %d with return code %s in %dms\n", util_time_ms(), tid, value,
                 plc_tag_decode_error(rc), (int)(end - start));
 
@@ -125,11 +126,13 @@ int main(int argc, char **argv) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
     if(argc != 2) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n", argc);
         return 0;
     }
@@ -137,6 +140,7 @@ int main(int argc, char **argv) {
     num_threads = (int)strtol(argv[1], NULL, 10);
 
     if(num_threads < 1 || num_threads > MAX_THREADS) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",
                 num_threads, argv[1]);
         return 0;
@@ -150,17 +154,20 @@ int main(int argc, char **argv) {
 
     /* everything OK? */
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 0;
     }
 
     /* create the read threads */
+    // NOLINTNEXTLINE
     fprintf(stderr, "Creating %d threads.\n", num_threads);
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {

@@ -51,6 +51,7 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -60,11 +61,13 @@ int main(void) {
 
     /* everything OK? */
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error setting up tag internal state.  Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
         plc_tag_destroy(tag);
         return 0;
@@ -73,13 +76,17 @@ int main(void) {
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 0;
     }
 
     /* print out the data */
-    for(i = 0; i < ELEM_COUNT; i++) { fprintf(stderr, "data[%d]=%d\n", i, plc_tag_get_int16(tag, (i * ELEM_SIZE))); }
+    for(i = 0; i < ELEM_COUNT; i++) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "data[%d]=%d\n", i, plc_tag_get_int16(tag, (i * ELEM_SIZE)));
+    }
 
     /* now test a write */
     for(i = 0; i < ELEM_COUNT; i++) {
@@ -87,6 +94,7 @@ int main(void) {
 
         val++;
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Setting element %d to %d\n", i, val);
 
         plc_tag_set_int16(tag, (i * ELEM_SIZE), val);
@@ -94,6 +102,7 @@ int main(void) {
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 0;
@@ -103,13 +112,17 @@ int main(void) {
     /* get the data again*/
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 0;
     }
 
     /* print out the data */
-    for(i = 0; i < ELEM_COUNT; i++) { fprintf(stderr, "data[%d]=%d\n", i, plc_tag_get_int16(tag, (i * ELEM_SIZE))); }
+    for(i = 0; i < ELEM_COUNT; i++) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "data[%d]=%d\n", i, plc_tag_get_int16(tag, (i * ELEM_SIZE)));
+    }
 
     /* we are done */
     plc_tag_destroy(tag);

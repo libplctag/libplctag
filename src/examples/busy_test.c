@@ -63,10 +63,12 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
             plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
 
@@ -78,13 +80,19 @@ int main(void) {
         char tmp_tag_path[256] = {
             0,
         };
+
+        // NOLINTNEXTLINE
         snprintf_platform(tmp_tag_path, sizeof tmp_tag_path, TAG_ATTRIBS, num_elems_per_tag, i);
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Attempting to create tag with attribute string '%s'\n", tmp_tag_path);
 
         tag[i] = plc_tag_create(tmp_tag_path, 0);
 
-        if(tag[i] < 0) { fprintf(stderr, "Error %s: could not create tag %d\n", plc_tag_decode_error(tag[i]), i); }
+        if(tag[i] < 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Error %s: could not create tag %d\n", plc_tag_decode_error(tag[i]), i);
+        }
     }
 
     /* wait for all the tags to complete creation. */
@@ -100,6 +108,7 @@ int main(void) {
     } while(timeout > util_time_ms() && !done);
 
     if(!done) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Timeout waiting for tags to be ready!\n");
 
         for(i = 0; i < NUM_TAGS; i++) { plc_tag_destroy(tag[i]); }
@@ -113,6 +122,7 @@ int main(void) {
     for(i = 0; i < NUM_TAGS; i++) {
         rc = plc_tag_read(tag[i], 0);
         if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
 
             return 0;
@@ -121,6 +131,7 @@ int main(void) {
         /* try to read again without aborting.  Should get a PLCTAG_ERR_BUSY error. */
         rc = plc_tag_read(tag[i], 0);
         if(rc != PLCTAG_ERR_BUSY) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: Expected PLCTAG_ERR_BUSY, got error code %d: %s\n", rc, plc_tag_decode_error(rc));
 
             return 0;
@@ -140,6 +151,7 @@ int main(void) {
     } while(timeout > util_time_ms() && !done);
 
     if(!done) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Timeout waiting for tags to finish reading!\n");
 
         for(i = 0; i < NUM_TAGS; i++) { plc_tag_destroy(tag[i]); }
@@ -152,6 +164,7 @@ int main(void) {
     /* get any data we can */
     for(i = 0; i < NUM_TAGS; i++) {
         /* read complete! */
+        // NOLINTNEXTLINE
         fprintf(stderr, "Tag %d data[0]=%d\n", i, plc_tag_get_int32(tag[i], 0));
     }
 
@@ -159,6 +172,7 @@ int main(void) {
     /* we are done */
     for(i = 0; i < NUM_TAGS; i++) { plc_tag_destroy(tag[i]); }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Read %d tags in %dms\n", NUM_TAGS, (int)(end - start));
 
     return 0;

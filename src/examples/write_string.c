@@ -71,6 +71,7 @@ int dump_strings(int32_t tag) {
         char *str_data = malloc((size_t)(unsigned int)str_cap);
 
         if(!str_data) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unable to allocate buffer for string data!\n");
             return PLCTAG_ERR_NO_MEM;
         }
@@ -80,8 +81,10 @@ int dump_strings(int32_t tag) {
         /* get the string length */
         rc = plc_tag_get_string(tag, offset, str_data, str_cap);
         if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error getting string %d!  Got error status %s.\n", str_number, plc_tag_decode_error(rc));
         } else {
+            // NOLINTNEXTLINE
             printf("String [%d] = \"%s\"\n", str_number, str_data);
         }
 
@@ -100,6 +103,7 @@ void update_string(int32_t tag, int str_number, char *str) {
 
     rc = plc_tag_set_string(tag, str_total_length * str_number, str);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error setting string %d, error %s!\n", str_number, plc_tag_decode_error(rc));
         return;
     }
@@ -114,10 +118,12 @@ int main(void) {
 
     /* check library API version */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
             plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
 
@@ -129,6 +135,7 @@ int main(void) {
 
     /* create the tag. */
     if((tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT)) < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
@@ -136,6 +143,7 @@ int main(void) {
     /* get the data */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stdout, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
@@ -149,6 +157,7 @@ int main(void) {
 
     /* update the string. */
     for(int i = 0; i < string_count; i++) {
+        // NOLINTNEXTLINE
         snprintf_platform(str, sizeof(str), "string value for element %d is %d.", i, (int)(rand() % 1000));
         update_string(tag, i, str);
     }
@@ -156,6 +165,7 @@ int main(void) {
     /* write the data */
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stdout, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
@@ -163,6 +173,7 @@ int main(void) {
     /* get the data again */
     rc = plc_tag_read(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stdout, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }

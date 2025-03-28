@@ -93,14 +93,18 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
 
         if(client_fd >= 0) {
             bool thread_created = false;
+
             /* The client thread is responsible for freeing these */
             /* TODO: A malloc'ed blob inside a malloc'ed blob is too much. Simplify. */
             // FIXME - combine the allocations and use calloc or memset to get zeroed memory
             struct client_session *session = malloc(sizeof(struct client_session));
+            // NOLINTNEXTLINE
             memset(session, 0, sizeof(*session));
+
             session->server_context = malloc(server->context_size);
             if(session && session->server_context) {
                 /* Make a copy of the server context so the thread can use it without threading concerns. */
+                // NOLINTNEXTLINE
                 memcpy(session->server_context, server->context, server->context_size);
                 session->client_fd = client_fd; /* copy of a temporary value - no thread safety concerns */
                 session->server = server;       /* reference to a long-lived struct, which has values and the original context */
@@ -108,10 +112,10 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
 
                 /* spawn new thread to handle the connection */
 
-// /* DEBUG */
-// fprintf(stderr, "tcp_server.c:112 Creating new thread for socket %d.\n", client_fd);
-// fflush(stderr);
-// /* DEBUG */
+                // /* DEBUG */
+                // fprintf(stderr, "tcp_server.c:112 Creating new thread for socket %d.\n", client_fd);
+                // fflush(stderr);
+                // /* DEBUG */
 
 
                 if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) == THREAD_STATUS_OK) {
@@ -154,8 +158,8 @@ void tcp_server_destroy(tcp_server_p server) {
 
 THREAD_FUNC(conn_handler) {
     client_session_p session = arg;
-    uint8_t buf[65536 + 128];                                   /* Rockwell supports up to 64k (Micro800) */
-    tcp_server_p server = (tcp_server_p)session->server;        /* need to cast for C++ */
+    uint8_t buf[65536 + 128];                            /* Rockwell supports up to 64k (Micro800) */
+    tcp_server_p server = (tcp_server_p)session->server; /* need to cast for C++ */
     slice_s tmp_input = {0};
     slice_s tmp_output = {0};
     int rc = TCP_SERVER_DONE;
@@ -226,10 +230,10 @@ THREAD_FUNC(conn_handler) {
     /* done with the socket */
 
 
-// /* DEBUG */
-// fprintf(stderr, "tcp_server.c:227 Closing client socket %d.\n", session->client_fd);
-// fflush(stderr);
-// /* DEBUG */
+    // /* DEBUG */
+    // fprintf(stderr, "tcp_server.c:227 Closing client socket %d.\n", session->client_fd);
+    // fflush(stderr);
+    // /* DEBUG */
 
     socket_close(session->client_fd);
 

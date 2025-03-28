@@ -64,6 +64,7 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -75,13 +76,16 @@ int main(void) {
                 0,
             };
 
+            // NOLINTNEXTLINE
             snprintf_platform(tmp_tag_path, sizeof tmp_tag_path, TAG_ATTRIBS, num_elems_per_tag, i);
 
+            // NOLINTNEXTLINE
             fprintf(stderr, "Attempting to create tag with attribute string '%s'\n", tmp_tag_path);
 
             tag[i] = plc_tag_create(tmp_tag_path, 0);
 
             if(tag[i] < 0) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Error %s: could not create tag %d\n", plc_tag_decode_error(tag[i]), i);
                 tag[i] = 0;
                 failed = 1;
@@ -107,6 +111,7 @@ int main(void) {
         } while(timeout > util_time_ms() && !done);
 
         if(!done) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Timeout waiting for tags to be ready!\n");
             rc = PLCTAG_ERR_TIMEOUT;
             break;
@@ -119,6 +124,7 @@ int main(void) {
             rc = plc_tag_read(tag[i], 0);
 
             if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
                 break;
             }
@@ -137,6 +143,7 @@ int main(void) {
         } while(timeout > util_time_ms() && !done);
 
         if(!done) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Timeout waiting for tags to finish reading!\n");
             rc = PLCTAG_ERR_TIMEOUT;
             break;
@@ -147,6 +154,7 @@ int main(void) {
         /* get any data we can */
         for(i = 0; i < NUM_TAGS; i++) {
             /* read complete! */
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d data[0]=%d\n", i, plc_tag_get_int32(tag[i], 0));
         }
     } while(0);
@@ -158,8 +166,10 @@ int main(void) {
     }
 
     if(rc == PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Read %d tags in %dms\n", NUM_TAGS, (int)(end - start));
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error found: %s\n", plc_tag_decode_error(rc));
     }
 

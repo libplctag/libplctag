@@ -99,6 +99,7 @@ extern void mem_set(void *dest, int c, int size) {
         return;
     }
 
+    // NOLINTNEXTLINE
     memset(dest, c, (size_t)(ssize_t)size);
 }
 
@@ -129,6 +130,7 @@ extern void mem_copy(void *dest, void *src, int size) {
         return;
     }
 
+    // NOLINTNEXTLINE
     memcpy(dest, src, (size_t)(unsigned int)size);
 }
 
@@ -159,6 +161,7 @@ extern void mem_move(void *dest, void *src, int size) {
         return;
     }
 
+    // NOLINTNEXTLINE
     memmove(dest, src, (size_t)(unsigned int)size);
 }
 

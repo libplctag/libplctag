@@ -115,6 +115,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     localtime_r(&epoch, &t);
 
     /* build the output string template */
+    // NOLINTNEXTLINE
     snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") %s %s:%d %s\n",
              t.tm_year + 1900, t.tm_mon + 1, /* month is 0-11? */
              t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), tag_id, debug_level_name[debug_level], func,
@@ -127,6 +128,7 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, const c
     va_start(va, templ);
 
     /* FIXME - check the output size */
+    // NOLINTNEXTLINE
     /*output_size = */ vsnprintf(output, sizeof(output), prefix, va);
     if(log_callback_func) {
         log_callback_func(tag_id, debug_level, output);
@@ -152,10 +154,12 @@ void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_level, uin
         int row_offset = 0;
 
         /* print the offset in the packet */
+        // NOLINTNEXTLINE
         row_offset = snprintf(&row_buf[0], sizeof(row_buf), "%05d", offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < count && row_offset < (int)sizeof(row_buf); column++) {
             offset = (row * COLUMNS) + column;
+            // NOLINTNEXTLINE
             row_offset += snprintf(&row_buf[row_offset], sizeof(row_buf) - (size_t)row_offset, " %02x", data[offset]);
         }
 

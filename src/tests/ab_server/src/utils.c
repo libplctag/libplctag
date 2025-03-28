@@ -160,10 +160,12 @@ void error_impl(const char *func, int line, const char *templ, ...) {
     va_list va;
 
     /* print it out. */
+    // NOLINTNEXTLINE
     fprintf(stderr, "ERROR %s:%d ", func, line);
     va_start(va, templ);
     vfprintf(stderr, templ, va);
     va_end(va);
+    // NOLINTNEXTLINE
     fprintf(stderr, "\n");
 
     exit(1);
@@ -176,10 +178,12 @@ void info_impl(const char *func, int line, const char *templ, ...) {
     if(!debug_is_on) { return; }
 
     /* print it out. */
+    // NOLINTNEXTLINE
     fprintf(stderr, "INFO %s:%d ", func, line);
     va_start(va, templ);
     vfprintf(stderr, templ, va);
     va_end(va);
+    // NOLINTNEXTLINE
     fprintf(stderr, "\n");
 }
 
@@ -200,12 +204,14 @@ void slice_dump(slice_s s) {
         size_t row_offset;
 
         /* print the prefix and address */
+        // NOLINTNEXTLINE
         row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf), "%03zu", offset);
 
         for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < slice_len(s) && row_offset < (int)sizeof(row_buf);
             column++) {
             offset = (row * COLUMNS) + column;
             row_offset +=
+                // NOLINTNEXTLINE
                 (size_t)snprintf(&row_buf[row_offset], sizeof(row_buf) - row_offset, " %02x", slice_get_uint8(s, offset));
         }
 
@@ -218,6 +224,7 @@ void slice_dump(slice_s s) {
         }
 
         /* output it, finally */
+        // NOLINTNEXTLINE
         fprintf(stderr, "%s\n", row_buf);
     }
 }

@@ -58,6 +58,7 @@ int main(void) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -67,6 +68,7 @@ int main(void) {
 
     /* everything OK? */
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
 
         return 0;
@@ -76,6 +78,7 @@ int main(void) {
     while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) { thrd_sleep_ms(100, NULL); }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
         return 0;
     }
@@ -84,6 +87,7 @@ int main(void) {
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
@@ -92,6 +96,7 @@ int main(void) {
      * Read the bit value.   For a bit tag like this, always use offset of zero.
      */
     b = plc_tag_get_bit(tag, 0);
+    // NOLINTNEXTLINE
     fprintf(stderr, "Before bool = %d\n", b);
 
     plc_tag_set_bit(tag, 0, (b ? 0 : 1));
@@ -104,6 +109,7 @@ int main(void) {
     rc = plc_tag_write(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
@@ -113,12 +119,14 @@ int main(void) {
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
 
     /* print out the data */
     b = plc_tag_get_bit(tag, 0);
+    // NOLINTNEXTLINE
     fprintf(stderr, "After bool = %d\n", b);
 
     /* we are done */

@@ -338,6 +338,7 @@ int get_tag_attributes_by_name(int32_t tag, const char *tag_name) {
         req_index++;
 
         /* copy the string */
+        // NOLINTNEXTLINE
         strcpy((char *)(&request[req_index]), tag_name);
         req_index += *string_byte_len;
 
@@ -772,6 +773,7 @@ char *setup_tag_string(int argc, char **argv) {
     }
 
     /* build the tag string. */
+    // NOLINTNEXTLINE
     snprintf(tag_string, TAG_STRING_SIZE, TAG_STRING_TEMPLATE, gateway);
 
     /* FIXME - check size! */

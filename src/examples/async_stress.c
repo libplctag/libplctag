@@ -123,6 +123,7 @@ void setup_break_handler(void) {
     struct sigaction act;
 
     /* set up signal handler. */
+    // NOLINTNEXTLINE
     memset(&act, 0, sizeof(act));
     act.sa_handler = SIGINT_handler;
     sigaction(SIGINT, &act, NULL);
@@ -150,6 +151,7 @@ int main(int argc, char **argv) {
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -158,6 +160,7 @@ int main(int argc, char **argv) {
 
     /* check the command line arguments */
     if(argc != 3) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Must have number of tags and tag path!\n");
         usage();
     }
@@ -165,18 +168,21 @@ int main(int argc, char **argv) {
     num_tags = atoi(argv[1]);
 
     if(num_tags <= 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Number of tags must be greater than zero!\n");
         usage();
     }
 
     tags = calloc(sizeof(*tags), (size_t)(unsigned int)num_tags);
     if(!tags) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error allocating tags array!\n");
         exit(PLCTAG_ERR_NO_MEM);
     }
 
     statuses = calloc(sizeof(*statuses), (size_t)(unsigned int)num_tags);
     if(!statuses) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error allocating status array!\n");
         free(tags);
         exit(PLCTAG_ERR_NO_MEM);
@@ -185,6 +191,7 @@ int main(int argc, char **argv) {
     /* set up handler for ^C etc. */
     setup_break_handler();
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
 
     start = util_time_ms();
@@ -195,6 +202,7 @@ int main(int argc, char **argv) {
         statuses[i] = plc_tag_status(tags[i]);
 
         if(tags[i] < 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error %s: could not create tag %d\n", plc_tag_decode_error(tags[i]), i);
             done = 1;
         }
@@ -205,6 +213,7 @@ int main(int argc, char **argv) {
         if(rc != PLCTAG_STATUS_OK) {
             for(int i = 0; i < num_tags; i++) {
                 if(statuses[i] != PLCTAG_STATUS_OK) {
+                    // NOLINTNEXTLINE
                     fprintf(stderr, "Creation of tag %d failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
                 }
 
@@ -217,6 +226,7 @@ int main(int argc, char **argv) {
 
     end = util_time_ms();
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Creation of %d tags took %dms.\n", num_tags, (int)(end - start));
 
     /* read in a loop until ^C pressed */
@@ -230,9 +240,11 @@ int main(int argc, char **argv) {
             for(int i = 0; i < num_tags; i++) {
                 if(statuses[i] != PLCTAG_STATUS_OK) {
                     if(statuses[i] != PLCTAG_ERR_TIMEOUT) {
+                        // NOLINTNEXTLINE
                         fprintf(stderr, "Tag %d read failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
                         done = 1;
                     } else {
+                        // NOLINTNEXTLINE
                         fprintf(stderr, "Tag %d read failed with a timeout, will retry.\n", i);
                         plc_tag_abort(tags[i]);
                         need_sleep = 1;
@@ -253,6 +265,7 @@ int main(int argc, char **argv) {
 
         if(min_ms > (end - start)) { min_ms = end - start; }
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Read of %d tags took %dms.\n", num_tags, (int)(end - start));
 
         /* test */
@@ -261,6 +274,7 @@ int main(int argc, char **argv) {
         iteration++;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Program terminated!\n");
 
     /* we are done */
@@ -269,6 +283,7 @@ int main(int argc, char **argv) {
     free(tags);
     free(statuses);
 
+    // NOLINTNEXTLINE
     fprintf(stderr,
             "--- Ran %" PRId64 " iterations with a total io time of %" PRId64 "ms and min/avg/max of %" PRId64 "ms/%" PRId64
             "ms/%" PRId64 "ms.\n",
@@ -280,6 +295,7 @@ int main(int argc, char **argv) {
 
 int read_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
     if(timeout_ms <= 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Timeout to read_tags() must be greater than zero!\n");
 
         return PLCTAG_ERR_BAD_PARAM;
@@ -291,6 +307,7 @@ int read_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
 
         /* if any failed, we need to abort the request. */
         if(statuses[i] != PLCTAG_STATUS_OK && statuses[i] != PLCTAG_STATUS_PENDING) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "1 Calling plc_tag_abort() on tag %d!\n", i);
             plc_tag_abort(tags[i]);
         }
@@ -319,8 +336,10 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
                 } else if(statuses[i] != PLCTAG_STATUS_OK) {
                     /* not good, some sort of error! */
 
+                    // NOLINTNEXTLINE
                     fprintf(stderr, "Tag %d failed with status %s!\n", i, plc_tag_decode_error(statuses[i]));
 
+                    // NOLINTNEXTLINE
                     fprintf(stderr, "2 Calling plc_tag_abort() on tag %d!\n", i);
                     plc_tag_abort(tags[i]);
                 }
@@ -341,6 +360,7 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
         for(int i = 0; i < num_tags; i++) {
             if(statuses[i] == PLCTAG_STATUS_PENDING) {
                 /* we timed out, so abort and mark the status. */
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Timed out, calling plc_tag_abort() on tag %d!\n", i);
                 plc_tag_abort(tags[i]);
 
