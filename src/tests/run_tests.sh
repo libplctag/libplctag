@@ -17,7 +17,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -319,7 +319,7 @@ if [ $? != 0 ]; then
     # echo "FAILURE"
     echo "Unable to start AB/Omron emulator!"
     exit 1
-# else 
+# else
     # echo "OK"
 fi
 
@@ -338,8 +338,10 @@ fi
 # echo "  Killing Omron emulator."
 killall -TERM ab_server > /dev/null 2>&1
 
+
+
 # echo -n "  Starting Modbus emulator... "
-$SCRIPT_DIR/modbus_server.py > modbus_emulator.log 2>&1 &
+$SCRIPT_DIR/modbus_server > modbus_emulator.log 2>&1 &
 MODBUS_PID=$!
 if [ $? != 0 ]; then
     # echo "FAILURE"
@@ -399,7 +401,7 @@ else
 fi
 
 # echo "  Killing Modbus emulator."
-kill -TERM $MODBUS_PID > /dev/null 2>&1
+killall -TERM modbus_server > /dev/null 2>&1
 
 echo ""
 echo "$TEST tests."
