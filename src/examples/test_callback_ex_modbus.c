@@ -103,7 +103,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
                 int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
                 int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
 
-                for(int i = 0; i < elem_count; i++) { plc_tag_set_int16(tag_id, (i * elem_size), data[i]); }
+                for(int i = 0; i < elem_count; i++) { plc_tag_set_int16(tag_id, (i * elem_size), data[i] + 1); }
             }
 
             printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
@@ -144,7 +144,7 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
 }
 
 
-int main(int argc, const char **argv) {
+int main(void) {
     int32_t tag = 0;
     int rc;
     int i;
@@ -154,9 +154,6 @@ int main(int argc, const char **argv) {
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
     TAG_ELEMENT *tag_element_array = NULL;
-
-    (void)argc;
-    (void)argv;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {

@@ -129,6 +129,17 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Modbus
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/modbus_server &
+        sleep 2
+        echo "test Modbus calbacks and read/write"
+        ${{ env.DIST }}/test_callback_ex_modbus
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
