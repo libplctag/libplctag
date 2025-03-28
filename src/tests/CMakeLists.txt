@@ -79,6 +79,7 @@ set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/modbus_server/modbus_ser
 message("C flags  = ${BASE_C_FLAGS} ${LIBMODBUS_CFLAGS}")
 
 # set the link flags
+message("BASE_LINK_FLAGS = ${BASE_LINK_FLAGS}")
 set_target_properties(modbus_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
 
 # Link modbus_server
