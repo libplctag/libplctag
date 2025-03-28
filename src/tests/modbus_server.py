@@ -12,21 +12,23 @@ twisted is just not feasible. What follows is an example of its use:
 # import the various server implementations
 # --------------------------------------------------------------------------- #
 from pymodbus.server import StartTcpServer
-#from pymodbus.server.sync import StartTlsServer
-#from pymodbus.server.sync import StartUdpServer
-#from pymodbus.server.sync import StartSerialServer
+# from pymodbus.server.sync import StartTlsServer
+# from pymodbus.server.sync import StartUdpServer
+# from pymodbus.server.sync import StartSerialServer
 
 from pymodbus.device import ModbusDeviceIdentification
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusSparseDataBlock
 from pymodbus.datastore import ModbusSlaveContext, ModbusServerContext
 
-from pymodbus.transaction import ModbusRtuFramer, ModbusBinaryFramer
+# Import from the correct submodules
+from pymodbus.framer.rtu import ModbusRtuFramer
+from pymodbus.framer.binary import ModbusBinaryFramer
 # --------------------------------------------------------------------------- #
 # configure the service logging
 # --------------------------------------------------------------------------- #
 import logging
-FORMAT = ('%(asctime)-15s %(threadName)-15s'
-          ' %(levelname)-8s %(module)-15s:%(lineno)-8s %(message)s')
+
+FORMAT = '%(asctime)-15s %(threadName)-15s %(levelname)-8s %(module)-15s:%(lineno)-8s %(message)s'
 logging.basicConfig(format=FORMAT)
 log = logging.getLogger()
 log.setLevel(logging.DEBUG)
@@ -88,10 +90,12 @@ def run_server():
     #     store = ModbusSlaveContext(..., zero_mode=True)
     # ----------------------------------------------------------------------- #
     store = ModbusSlaveContext(
-        di=ModbusSequentialDataBlock(0, [17]*1000),
-        co=ModbusSequentialDataBlock(0, [17]*1000),
-        hr=ModbusSequentialDataBlock(0, [17]*1000),
-        ir=ModbusSequentialDataBlock(0, [17]*1000))
+        di=ModbusSequentialDataBlock(0, [17] * 1000),
+        co=ModbusSequentialDataBlock(0, [17] * 1000),
+        hr=ModbusSequentialDataBlock(0, [17] * 1000),
+        ir=ModbusSequentialDataBlock(0, [17] * 1000),
+        zero_mode=True,
+    )
 
     context = ModbusServerContext(slaves=store, single=True)
 
@@ -141,5 +145,5 @@ def run_server():
 
 
 if __name__ == "__main__":
-    print("Starting server on port 5020.");
+    print("Starting server on port 5020.")
     run_server()
