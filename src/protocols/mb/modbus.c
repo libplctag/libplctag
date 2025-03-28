@@ -478,7 +478,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
 
     if(server_id < 0 || server_id > 255) {
         pdebug(DEBUG_WARN, "Server ID, %d, out of bounds or missing!", server_id);
-        return PLCTAG_ERR_OUT_OF_BOUNDS;
+        return PLCTAG_ERR_BAD_PARAM;
     }
 
     /* see if we can find a matching server. */
