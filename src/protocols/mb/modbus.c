@@ -1379,6 +1379,16 @@ int find_request_slot(modbus_plc_p plc, modbus_tag_p tag) {
 void clear_request_slot(modbus_plc_p plc, modbus_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting for tag %" PRId32 ".", tag->tag_id);
 
+    if(!plc) {
+        pdebug(DEBUG_INFO, "Connection pointer is NULL!");
+        return;
+    }
+
+    if(!tag) {
+        pdebug(DEBUG_INFO, "Tag pointer is NULL!");
+        return;
+    }
+
     /* find the tag in the slots. */
     for(int slot = 0; slot < plc->max_requests_in_flight; slot++) {
         if(plc->tags_with_requests[slot] == tag->tag_id) {
