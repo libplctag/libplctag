@@ -72,6 +72,7 @@ static int test_func(void *arg);
 int main(void) {
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -80,17 +81,19 @@ int main(void) {
 
     set_interrupt_handler(handle_interrupt);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Starting tests...\n\n");
 
     /* increase the connection group count each time */
-    for(size_t thread_count = 0; thread_count <= MAX_THREADS && !terminate;
-        thread_count += THREAD_INC) {
+    for(size_t thread_count = 0; thread_count <= MAX_THREADS && !terminate; thread_count += THREAD_INC) {
         run_test((thread_count == 0) ? 1 : thread_count);
     }
 
     if(terminate) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "\nTests aborted by user!\n");
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "\nTests complete.\n");
     }
 
@@ -110,6 +113,7 @@ void run_test(size_t thread_count) {
 
     end_test_run = 0;
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Test %zu threads for %dms... \n", thread_count, TEST_TIME_MS);
 
     for(size_t thread_id = 0; thread_id < thread_count; thread_id++) {
@@ -132,9 +136,10 @@ void run_test(size_t thread_count) {
     }
 
     total_test_run_time = util_time_ms() - start_time_ms;
-    
 
-    fprintf(stderr, "Test %zu threads ran for %" PRId64 "ms and completed with %zu total iterations per millisecond.\n", thread_count, total_test_run_time, total_iterations/total_test_run_time);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Test %zu threads ran for %" PRId64 "ms and completed with %zu total iterations per millisecond.\n",
+            thread_count, total_test_run_time, (size_t)(total_iterations / (size_t)(uint64_t)total_test_run_time));
 }
 
 
@@ -151,6 +156,7 @@ int test_func(void *arg) {
         int64_t end_ms = 0;
 
         /* make the tag string */
+        // NOLINTNEXTLINE
         snprintf(tag_str, sizeof(tag_str), TEST_TAG_PATH_TEMPLATE, (int)(size_t)thread_id);
 
         /* create the tag */
@@ -158,10 +164,12 @@ int test_func(void *arg) {
         tag = plc_tag_create(tag_str, TAG_CREATE_TIMEOUT_MS);
         end_ms = util_time_ms();
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Thread %d: tag creation took %" PRId64 "ms\n", thread_id, end_ms - start_ms);
         fflush(stderr);
 
         if(tag < 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR %s: Thread %d could not create tag!\n", plc_tag_decode_error(tag), thread_id);
             continue;
         }
@@ -172,16 +180,15 @@ int test_func(void *arg) {
             rc = plc_tag_read(tag, TAG_OP_TIMEOUT_MS);
             end_ms = util_time_ms();
 
-            if(end_ms - start_ms > longest_read) {
-                longest_read = end_ms - start_ms;
-            }
+            if(end_ms - start_ms > longest_read) { longest_read = end_ms - start_ms; }
 
             iteration_count++;
 
-            // fprintf(stderr, "Thread %d: interation %d tag read took %" PRId64 "ms\n", thread_id, iteration_count, end_ms - start_ms);
-            // fflush(stderr);
-            
+            // fprintf(stderr, "Thread %d: interation %d tag read took %" PRId64 "ms\n", thread_id, iteration_count, end_ms -
+            // start_ms); fflush(stderr);
+
             if(rc != PLCTAG_STATUS_OK) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "ERROR %s: Thread %d unable to read the data!\n", plc_tag_decode_error(rc), thread_id);
                 break;
             }
@@ -191,8 +198,9 @@ int test_func(void *arg) {
         plc_tag_destroy(tag);
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Thread %d: longest read was %" PRId64 "ms\n", thread_id, longest_read);
     fflush(stderr);
-    
+
     return iteration_count;
 }
