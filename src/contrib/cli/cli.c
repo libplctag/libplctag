@@ -501,13 +501,13 @@ int process_tags(void) {
         switch(cli_request.operation) {
             case WATCH:
                 // NOLINTNEXTLINE
-                sprintf(tag_path, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol, cli_request.ip, cli_request.path,
-                        cli_request.plc, cli_request.debug_level, cli_request.interval, tag.path, cli_request.attributes);
+                snprintf(tag_path, 1024, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol, cli_request.ip, cli_request.path,
+                         cli_request.plc, cli_request.debug_level, cli_request.interval, tag.path, cli_request.attributes);
                 break;
             default:
                 // NOLINTNEXTLINE
-                sprintf(tag_path, TAG_PATH, cli_request.protocol, cli_request.ip, cli_request.path, cli_request.plc,
-                        cli_request.debug_level, tag.path, cli_request.attributes);
+                snprintf(tag_path, 1024, TAG_PATH, cli_request.protocol, cli_request.ip, cli_request.path, cli_request.plc,
+                         cli_request.debug_level, tag.path, cli_request.attributes);
                 break;
         }
 
