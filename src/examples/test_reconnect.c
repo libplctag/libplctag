@@ -57,11 +57,13 @@ int create_tag(void) {
 
     /* everything OK? */
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         exit(-tag);
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error setting up tag internal state. Error %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         exit(-rc);
@@ -75,6 +77,7 @@ void update_tag(int32_t tag) {
     int rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         exit(-rc);
@@ -83,6 +86,7 @@ void update_tag(int32_t tag) {
     /* print out the data */
     for(int i = 0; i < ELEM_COUNT; i++) {
         // fprintf(stderr,"data[%d]=%d\n",i,plc_tag_get_int32(tag,(i*ELEM_SIZE)));
+        // NOLINTNEXTLINE
         fprintf(stderr, "data[%d]=%d\n", i, plc_tag_get_int16(tag, (i * ELEM_SIZE)));
     }
 
@@ -93,6 +97,7 @@ void update_tag(int32_t tag) {
 
         val = (int16_t)((int16_t)val + (int16_t)1);
 
+        // NOLINTNEXTLINE
         fprintf(stderr, "Setting element %d to %d\n", i, val);
 
         // plc_tag_set_int32(tag,(i*ELEM_SIZE),val);
@@ -101,6 +106,7 @@ void update_tag(int32_t tag) {
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         exit(-rc);
@@ -114,6 +120,7 @@ int main(int argc, char **argv) {
 
     /* check library API version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -122,6 +129,7 @@ int main(int argc, char **argv) {
     if(argc == 2) {
         wait_time_sec = atoi(argv[1]);
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Usage: test_reconnect <number of seconds to pause>\n");
         return 1;
     }
@@ -134,6 +142,7 @@ int main(int argc, char **argv) {
     /* update the data */
     update_tag(tag);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for %dms.\n", (wait_time_sec * 1000));
     thrd_sleep_ms((uint32_t)wait_time_sec * 1000, NULL);
 
