@@ -638,10 +638,10 @@ int32_t get_instance_data_fast(int32_t tag, tag_entry_p tags, uint16_t num_insta
         }
 
         /* patch up the next instance ID */
-        request[8] = (next_instance_id & 0xFF);
-        request[9] = ((next_instance_id >> 8) & 0xFF);
-        request[10] = ((next_instance_id >> 16) & 0xFF);
-        request[11] = ((next_instance_id >> 24) & 0xFF);
+        request[8] = (uint8_t)(next_instance_id & 0xFF);
+        request[9] = (uint8_t)((next_instance_id >> 8) & 0xFF);
+        request[10] = (uint8_t)((next_instance_id >> 16) & 0xFF);
+        request[11] = (uint8_t)((next_instance_id >> 24) & 0xFF);
 
         rc = send_tag_data(tag, request, sizeof(request));
         if(rc != PLCTAG_STATUS_OK) { break; }
