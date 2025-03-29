@@ -308,7 +308,7 @@ int main(int argc, char **argv) {
 
     done = 1;
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thrd_join(threads[tid], NULL); }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "--- All test threads terminated.\n");
