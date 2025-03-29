@@ -851,7 +851,6 @@ int get_udt_definition(char *tag_string_base, uint16_t udt_id) {
     name_str = calloc((size_t)(name_len + 1), (size_t)1);
     if(!name_str) {
         // NOLINTNEXTLINE
-        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate UDT name string!\n");
         usage();
     }

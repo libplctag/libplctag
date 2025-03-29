@@ -64,10 +64,12 @@ int main(void) {
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
         // NOLINTNEXTLINE
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
+    // NOLINTNEXTLINE
     // NOLINTNEXTLINE
     fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
             plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
@@ -84,6 +86,7 @@ int main(void) {
         // NOLINTNEXTLINE
         snprintf_platform(tmp_tag_path, sizeof tmp_tag_path, TAG_ATTRIBS, num_elems_per_tag, i);
 
+        // NOLINTNEXTLINE
         // NOLINTNEXTLINE
         fprintf(stderr, "Attempting to create tag with attribute string '%s'\n", tmp_tag_path);
 
