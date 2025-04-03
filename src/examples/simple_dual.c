@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -95,7 +95,7 @@ int main(void) {
     }
 
     /* brute force wait for tags to finish setting up */
-    thrd_sleep_ms(DATA_TIMEOUT, NULL);
+    system_sleep_ms(DATA_TIMEOUT, NULL);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);
@@ -137,7 +137,7 @@ int main(void) {
     }
 
     /* let the reads complete */
-    thrd_sleep_ms(DATA_TIMEOUT, NULL);
+    system_sleep_ms(DATA_TIMEOUT, NULL);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);

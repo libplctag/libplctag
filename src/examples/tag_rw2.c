@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 
-#include "utils.h"
+#include "compat_utils.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <lib/libplctag.h>

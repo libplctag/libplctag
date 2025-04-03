@@ -40,7 +40,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -55,7 +55,7 @@ int main(void) {
     int32_t tag[NUM_TAGS];
     int rc;
     int i;
-    int64_t timeout = DATA_TIMEOUT + util_time_ms();
+    int64_t timeout = DATA_TIMEOUT + system_time_ms();
     int done = 0;
     int64_t start = 0;
     int64_t end = 0;
@@ -104,8 +104,8 @@ int main(void) {
             if(rc != PLCTAG_STATUS_OK) { done = 0; }
         }
 
-        if(!done) { thrd_sleep_ms(10, NULL); }
-    } while(timeout > util_time_ms() && !done);
+        if(!done) { system_sleep_ms(10, NULL); }
+    } while(timeout > system_time_ms() && !done);
 
     if(!done) {
         // NOLINTNEXTLINE
@@ -116,7 +116,7 @@ int main(void) {
         return 1;
     }
 
-    start = util_time_ms();
+    start = system_time_ms();
 
     /* get the data */
     for(i = 0; i < NUM_TAGS; i++) {
@@ -147,8 +147,8 @@ int main(void) {
             if(rc != PLCTAG_STATUS_OK) { done = 0; }
         }
 
-        if(!done) { thrd_sleep_ms(10, NULL); }
-    } while(timeout > util_time_ms() && !done);
+        if(!done) { system_sleep_ms(10, NULL); }
+    } while(timeout > system_time_ms() && !done);
 
     if(!done) {
         // NOLINTNEXTLINE
@@ -159,7 +159,7 @@ int main(void) {
         return 1;
     }
 
-    end = util_time_ms();
+    end = system_time_ms();
 
     /* get any data we can */
     for(i = 0; i < NUM_TAGS; i++) {

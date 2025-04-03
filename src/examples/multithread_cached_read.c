@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -71,7 +71,7 @@ void handle_done(void) { done = 1; }
  * Thread function.  Just read until killed.
  */
 
-int thread_func(void *data) {
+void *thread_func(void *data) {
     int tid = (int)(intptr_t)data;
     int rc;
     int value;
@@ -81,7 +81,7 @@ int thread_func(void *data) {
         int64_t end;
 
         /* capture the starting time */
-        start = util_time_ms();
+        start = system_time_ms();
 
         /* use do/while to allow easy exit without return */
         do {
@@ -104,14 +104,14 @@ int thread_func(void *data) {
             plc_tag_unlock(tag);
         } while(0);
 
-        end = util_time_ms();
+        end = system_time_ms();
 
         // NOLINTNEXTLINE
-        fprintf(stderr, "%" PRId64 " Thread %d got result %d with return code %s in %dms\n", util_time_ms(), tid, value,
+        fprintf(stderr, "%" PRId64 " Thread %d got result %d with return code %s in %dms\n", system_time_ms(), tid, value,
                 plc_tag_decode_error(rc), (int)(end - start));
 
         /* this is really too low */
-        thrd_sleep_ms(10, NULL);
+        system_sleep_ms(10, NULL);
     }
 
     return 0;
@@ -120,7 +120,7 @@ int thread_func(void *data) {
 
 int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
-    thrd_t thread[MAX_THREADS];
+    pthread_t thread[MAX_THREADS];
     int num_threads;
     int thread_id = 0;
 
@@ -171,13 +171,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Creating %d threads.\n", num_threads);
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {
-        thrd_create(&thread[thread_id], thread_func, (void *)(intptr_t)thread_id);
+        pthread_create(&thread[thread_id], NULL, thread_func, (void *)(intptr_t)thread_id);
     }
 
     /* wait until ^C */
-    while(!done) { thrd_sleep_ms(100, NULL); }
+    while(!done) { system_sleep_ms(100, NULL); }
 
-    for(thread_id = 0; thread_id < num_threads; thread_id++) { thrd_join(thread[thread_id], NULL); }
+    for(thread_id = 0; thread_id < num_threads; thread_id++) { pthread_join(thread[thread_id], NULL); }
 
     plc_tag_destroy(tag);
 

@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,13 +55,13 @@ static volatile int read_complete_count = 0;
 static volatile int write_start_count = 0;
 static volatile int write_complete_count = 0;
 
-int reader_function(void *tag_arg) {
+void *reader_function(void *tag_arg) {
     int32_t tag_id = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = util_time_ms();
+    int64_t start_time = system_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    while(run_until > util_time_ms()) {
+    while(run_until > system_time_ms()) {
         int status = plc_tag_status(tag_id);
         int32_t val = plc_tag_get_int32(tag_id, 0);
 
@@ -73,24 +73,24 @@ int reader_function(void *tag_arg) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "READER: Tag %" PRId32 " iteration %d, got value: %d at time %" PRId64 "\n", tag_id, iteration++, val,
-                util_time_ms() - start_time);
+                system_time_ms() - start_time);
 
-        thrd_sleep_ms(READ_SLEEP_MS, NULL);
+        system_sleep_ms(READ_SLEEP_MS, NULL);
     }
 
     return 0;
 }
 
 
-int writer_function(void *tag_arg) {
+void *writer_function(void *tag_arg) {
     int32_t tag_id = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = util_time_ms();
+    int64_t start_time = system_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    thrd_sleep_ms(WRITE_SLEEP_MS, NULL);
+    system_sleep_ms(WRITE_SLEEP_MS, NULL);
 
-    while(run_until > util_time_ms()) {
+    while(run_until > system_time_ms()) {
         int32_t val = plc_tag_get_int32(tag_id, 0);
         int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
         int status = plc_tag_status(tag_id);
@@ -106,9 +106,9 @@ int writer_function(void *tag_arg) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "WRITER: Tag %" PRId32 " iteration %d, wrote value: %d at time %" PRId64 "\n", tag_id, iteration++,
-                new_val, util_time_ms() - start_time);
+                new_val, system_time_ms() - start_time);
 
-        thrd_sleep_ms(WRITE_SLEEP_MS, NULL);
+        system_sleep_ms(WRITE_SLEEP_MS, NULL);
     }
 
     return 0;
@@ -178,8 +178,8 @@ void tag_callback(int32_t tag_id, int event, int status, void *not_used) {
 int main(void) {
     int rc = PLCTAG_STATUS_OK;
     char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL) + 10] = {0};
-    thrd_t read_threads[NUM_TAGS];
-    thrd_t write_threads[NUM_TAGS];
+    pthread_t read_threads[NUM_TAGS];
+    pthread_t write_threads[NUM_TAGS];
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
@@ -215,12 +215,12 @@ int main(void) {
 
         /* create read and write thread for this tag. */
         /* FIXME - check error returns! */
-        thrd_create(&read_threads[i], reader_function, (void *)(intptr_t)tag_id);
-        thrd_create(&write_threads[i], writer_function, (void *)(intptr_t)tag_id);
+        pthread_create(&read_threads[i], NULL, reader_function, (void *)(intptr_t)tag_id);
+        pthread_create(&write_threads[i], NULL, writer_function, (void *)(intptr_t)tag_id);
     }
 
     /* let everything run for a while */
-    thrd_sleep_ms(RUN_PERIOD / 2, NULL);
+    system_sleep_ms(RUN_PERIOD / 2, NULL);
 
     /* forcible shut down the entire library. */
     // NOLINTNEXTLINE
@@ -231,8 +231,8 @@ int main(void) {
     fprintf(stderr, "Waiting for threads to quit.\n");
 
     for(int i = 0; i < NUM_TAGS; i++) {
-        thrd_join(read_threads[i], NULL);
-        thrd_join(write_threads[i], NULL);
+        pthread_join(read_threads[i], NULL);
+        pthread_join(write_threads[i], NULL);
     }
 
     // NOLINTNEXTLINE

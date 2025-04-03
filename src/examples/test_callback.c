@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -262,9 +262,9 @@ int main(void) {
 
     /* test a timeout. */
     printf("Testing timeout behavior.\n");
-    start = util_time_ms();
+    start = system_time_ms();
     rc = plc_tag_read(tag, 1);
-    end = util_time_ms();
+    end = system_time_ms();
 
     if(rc != PLCTAG_ERR_TIMEOUT) {
         printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end - start));

@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>

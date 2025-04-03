@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -131,7 +131,7 @@ int main(void) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
     /* set up the RNG */
-    srand((unsigned int)(uint64_t)util_time_ms());
+    srand((unsigned int)(uint64_t)system_time_ms());
 
     /* create the tag. */
     if((tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT)) < 0) {
