@@ -1180,9 +1180,10 @@ LIB_EXPORT void plc_tag_shutdown(void) {
 
 
 /* there needs to be a better way to make the cast clean than this! */
+#ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
-
+#endif
 
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func) {
     int rc = PLCTAG_STATUS_OK;
@@ -1196,8 +1197,9 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callb
     return rc;
 }
 
+#ifndef _MSC_VER
 #pragma GCC diagnostic pop
-
+#endif
 
 /*
  * plc_tag_register_callback_ex

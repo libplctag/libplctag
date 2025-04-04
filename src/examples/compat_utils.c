@@ -33,7 +33,6 @@
 
 #include "compat_utils.h"
 
-#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -149,11 +148,15 @@ int64_t system_time_ms(void) {
 
 
 int system_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {
-    DWORD ms = (DWORD)(sleep_duration->tv_sec * 1000 + sleep_duration->tv_nsec / 1000000);
-    Sleep(ms);
-    if(remaining_duration) {
-        remaining_duration->tv_sec = 0;
-        remaining_duration->tv_nsec = 0;
+    int64_t start_time_ms = system_time_ms() + sleep_duration_ms;
+    int64_t end_time_ms = start_time_ms + sleep_duration_ms;
+    
+    Sleep(sleep_duration_ms);
+    
+    if(remaining_duration_ms) {
+        int64_t remaining_ms = end_time_ms - system_time_ms();
+
+        *remaining_duration_ms = (remaining_ms < 0) ? 0 : (uint32_t)remaining_ms;
     }
 
     return 0;
@@ -166,7 +169,7 @@ static void interrupt_handler_wrapper(void) {
 }
 
 
-/* straight from MS' web site :-) */
+/* straight from MS' web site */
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
     switch(fdwCtrlType) {
             /* ^C. */
@@ -196,15 +199,14 @@ int set_interrupt_handler(void (*handler)(void)) {
     /* FIXME - this can fail! */
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
-    return thrd_success;
+    return 0;
 }
 
 
 /* threads */
-int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, typeof(void *(void *)) *start_routine,
-                   void *restrict arg) {
-    *thrd = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))func, arg_ptr, 0, NULL);
-    return *thrd ? 0 : -1;
+int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *), void *restrict arg) {
+    *thread = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))start_routine, arg, 0, NULL);
+    return *thread ? 0 : -1;
 }
 
 
@@ -216,22 +218,56 @@ int pthread_detach(pthread_t thread) {
 
 
 void pthread_exit(void *retval) {
-    _endthreadex(retval);
+    unsigned int temp_return_val = 0;
+
+    if(retval) {
+        temp_return_val = *((unsigned int *)retval);
+    }
+
+    _endthreadex(temp_return_val);
+}
+
+
+int pthread_join(pthread_t thread, void **retval) {
+    if(!thread) { return -1; }
+
+    if(WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) {
+        return -1;
+    }
+
+    if(retval) {
+        DWORD temp_ret_val = 0;
+        GetExitCodeThread(thread, (LPDWORD)&temp_ret_val);
+        *retval = (void *)(intptr_t)temp_ret_val;
+    } 
+
+    CloseHandle(thread);
 
     return 0;
 }
 
 
-int pthread_join(pthread_t thread, void **retval) { /* need Windows implementation */ return 0; }
+
+pthread_t pthread_self(void) {
+    return (pthread_t)GetCurrentThread();
+}
 
 
-pthread_t pthread_self(void) { /* need Windows implementation */ return 0; }
+int pthread_once(pthread_once_t *once_control, void (*init_routine)(void)) {
+    if(!once_control) { return -1; }
+
+    if(InterlockedCompareExchange((volatile long *)once_control, 1, 0) == 0) {
+        init_routine();
+    }
+
+    return 0;
+}
 
 
-int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
+void system_yield(void) {
+    SwitchToThread();
+}
 
-
-void system_yield(void) { /* need Windows implementation */ }
 
 /* mutexes*/
 /*
@@ -266,12 +302,12 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 }
 
 
-int pthread_mutex_timedlock(pthread_mutex_t *restrict mutex, const struct timespec *restrict abstime) {
+int pthread_mutex_timedlock(pthread_mutex_t *restrict mutex, const struct timespec *restrict abs_timeout_time) {
     DWORD ms = (DWORD)(abs_timeout_time->tv_sec * 1000 + abs_timeout_time->tv_nsec / 1000000);
     DWORD start_time = GetTickCount();
 
     while(1) {
-        if(TryEnterCriticalSection(mtx)) { return 0; }
+        if(TryEnterCriticalSection(mutex)) { return 0; }
 
         if(GetTickCount() - start_time >= ms) {
             return -1;  // Timeout
@@ -324,9 +360,21 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
     return 0;
 }
 
-int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime) {
-    DWORD ms = (DWORD)(abs_timeout_time->tv_sec * 1000 + abs_timeout_time->tv_nsec / 1000000);
-    if(SleepConditionVariableCS(cond, mutex, ms)) {
+int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abs_timeout_time) {
+    int64_t start_time_ms = system_time_ms();
+    int64_t end_time_ms = start_time_ms + (int64_t)(abs_timeout_time->tv_sec * 1000 + abs_timeout_time->tv_nsec / 1000000);
+
+    int64_t delta_ms = end_time_ms - start_time_ms;
+
+    if(delta_ms > LONG_MAX) {
+        delta_ms = LONG_MAX;
+    }
+
+    if(delta_ms < 0) {
+        delta_ms = 0;
+    }
+    
+    if(SleepConditionVariableCS(cond, mutex, (DWORD)delta_ms)) {
         return 0;
     } else {
         return -1;

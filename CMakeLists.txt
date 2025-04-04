@@ -289,14 +289,15 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
         set(BASE_RELEASE_LINK_FLAGS "${BASE_RELEASE_LINK_FLAGS} -m32")
         set(BASE_DEBUG_LINK_FLAGS "${BASE_DEBUG_LINK_FLAGS} -m32")
     endif()
-elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
-    # using Intel C/C++
-    MESSAGE("Intel C compiler not supported!")
-    RETURN()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
-    set(BASE_RELEASE_FLAGS "/O2 /Ob2 /DNDEBUG /W3 /std:c11 /MT")
-    set(BASE_DEBUG_FLAGS "/Zi /Ob0 /Od /W3 /std:c11 /MTd")
+    set(BASE_RELEASE_FLAGS "/O2 /Ob2 /DNDEBUG /W3 /MT")
+    set(BASE_DEBUG_FLAGS "/Zi /Ob0 /Od /W3 /MTd")
+    set(BASE_C_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} /std:c11")
+    set(BASE_C_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} /std:c11")
+    set(BASE_CXX_RELEASE_FLAGS "${BASE_RELEASE_FLAGS}")
+    set(BASE_CXX_DEBUG_FLAGS "${BASE_DEBUG_FLAGS}")
+    
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
     # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
 
@@ -307,6 +308,9 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
         STRING(APPEND BASE_DEBUG_LINK_FLAGS ${SANITIZERS_FLAGS})
     endif()
 
+else()
+    message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
+    return()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -321,8 +325,10 @@ message("BASE_RELEASE_FLAGS = ${BASE_RELEASE_FLAGS}")
 message("BASE_DEBUG_FLAGS = ${BASE_DEBUG_FLAGS}")
 
 # set the CMAKE vars
-set(CMAKE_C_FLAGS_DEBUG "${BASE_DEBUG_FLAGS}")
-set(CMAKE_C_FLAGS_RELEASE "${BASE_RELEASE_FLAGS}")
+set(CMAKE_C_FLAGS_DEBUG "${BASE_C_DEBUG_FLAGS}")
+set(CMAKE_C_FLAGS_RELEASE "${BASE_C_RELEASE_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG "${BASE_DEBUG_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELEASE "${BASE_RELEASE_FLAGS}")
 
 message("CMAKE_C_FLAGS_DEBUG = ${CMAKE_C_FLAGS_DEBUG}")
 message("CMAKE_C_FLAGS_RELEASE = ${CMAKE_C_FLAGS_RELEASE}")
@@ -447,6 +453,13 @@ add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 # set various properties on them
 set_target_properties(plctag_dyn PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
 
+# set compile options such that they work when building on Windows with MSVC's build system.
+target_compile_options(plctag_dyn
+  PRIVATE
+    $<$<CONFIG:Debug>:"${BASE_C_DEBUG_FLAGS}"> # Debug flags
+    $<$<NOT:$<CONFIG:Debug>>:"${BASE_C_RELEASE_FLAGS}"> # Release flags
+)
+
 if(BASE_LINK_FLAGS)
     set_target_properties(plctag_dyn PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
 endif()
@@ -454,18 +467,39 @@ endif()
 if(UNIX)
 	# static library
 	add_library(plctag_static STATIC ${libplctag_SRCS} )
-    set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-	set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
 
-	set(tool_lib "plctag_static")
+    if(BASE_LINK_FLAGS)
+        set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+    endif()
+
+    set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
+
+    target_compile_options(plctag_static
+    PRIVATE
+        $<$<CONFIG:Debug>:${BASE_C_DEBUG_FLAGS}>
+        $<$<NOT:$<CONFIG:Debug>>:${BASE_C_RELEASE_FLAGS}>
+    )
+    
+    set(tool_lib "plctag_static")
 elseif(WIN32)
-    # static library
+	# static library
 	add_library(plctag_static STATIC ${libplctag_SRCS} )
-	set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-	set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
 
-    target_compile_definitions(plctag_dyn PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)
-	set(tool_lib "plctag_dyn")
+    if(BASE_LINK_FLAGS)
+        set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+    endif()
+
+    set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
+
+    target_compile_options(plctag_static
+    PRIVATE
+        $<$<CONFIG:Debug>:${BASE_C_DEBUG_FLAGS}>
+        $<$<NOT:$<CONFIG:Debug>>:${BASE_C_RELEASE_FLAGS}>
+    )
+
+    target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)    
+
+    set(tool_lib "plctag_static")
 endif()
 
 # make sure we link with the threading library.
@@ -492,44 +526,6 @@ else()
 
     # build the tests
     add_subdirectory("${CMAKE_SOURCE_DIR}/src/tests")
-
-    # set(AB_SERVER_FILES ${test_SRC_PATH}/ab_server/src/cip.c
-    #                     ${test_SRC_PATH}/ab_server/src/cip.h
-    #                     ${test_SRC_PATH}/ab_server/src/compat.h
-    #                     ${test_SRC_PATH}/ab_server/src/cpf.c
-    #                     ${test_SRC_PATH}/ab_server/src/cpf.h
-    #                     ${test_SRC_PATH}/ab_server/src/eip.c
-    #                     ${test_SRC_PATH}/ab_server/src/eip.h
-    #                     ${test_SRC_PATH}/ab_server/src/main.c
-    #                     ${test_SRC_PATH}/ab_server/src/memory.c
-    #                     ${test_SRC_PATH}/ab_server/src/memory.h
-    #                     ${test_SRC_PATH}/ab_server/src/mutex.c
-    #                     ${test_SRC_PATH}/ab_server/src/mutex.h
-    #                     ${test_SRC_PATH}/ab_server/src/pccc.c
-    #                     ${test_SRC_PATH}/ab_server/src/pccc.h
-    #                     ${test_SRC_PATH}/ab_server/src/plc.h
-    #                     ${test_SRC_PATH}/ab_server/src/slice.h
-    #                     ${test_SRC_PATH}/ab_server/src/socket.c
-    #                     ${test_SRC_PATH}/ab_server/src/socket.h
-    #                     ${test_SRC_PATH}/ab_server/src/tcp_server.c
-    #                     ${test_SRC_PATH}/ab_server/src/tcp_server.h
-    #                     ${test_SRC_PATH}/ab_server/src/thread.c
-    #                     ${test_SRC_PATH}/ab_server/src/thread.h
-    #                     ${test_SRC_PATH}/ab_server/src/utils.c
-    #                     ${test_SRC_PATH}/ab_server/src/utils.h
-    # )
-
-    # foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-    #     set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
-    # endforeach()
-
-    # add_executable(ab_server ${AB_SERVER_FILES})
-
-    # target_link_libraries(ab_server ${example_LIBRARIES} )
-
-    # if(BASE_LINK_FLAGS)
-    #     set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-    # endif()
 
     # build the cli.
     set(CLI_FILES ${cli_SRC_PATH}/cli.c
@@ -584,4 +580,4 @@ macro(print_all_variables)
 endmacro()
 
 # Debugging
-print_all_variables()
+# print_all_variables()

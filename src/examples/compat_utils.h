@@ -65,13 +65,12 @@ typedef volatile long pthread_once_t;
 typedef CRITICAL_SECTION pthread_mutex_t;
 typedef CONDITION_VARIABLE pthread_cond_t;
 
-typedef struct pthreads_attr_t pthreads_attr_t;
-typedef struct pthreads_mutexattr_t pthreads_mutexattr_t;
-typedef struct pthreads_condattr_t pthreads_condattr_t;
+typedef struct pthread_attr_t pthread_attr_t;
+typedef struct pthread_mutexattr_t pthread_mutexattr_t;
+typedef struct pthread_condattr_t pthread_condattr_t;
 
 /* threads */
-extern int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, typeof(void *(void *)) *start_routine,
-                          void *restrict arg);
+extern int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *), void *restrict arg);
 extern int pthread_detach(pthread_t thread);
 extern void pthread_exit(void *retval); /* no return */
 extern int pthread_join(pthread_t thread, void **retval);
@@ -79,7 +78,7 @@ extern pthread_t pthread_self(void);
 
 extern int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
 
-extern int system_yield(void);
+extern void system_yield(void);
 
 
 /* mutexes*/
