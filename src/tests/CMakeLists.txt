@@ -57,22 +57,14 @@ if(BASE_LINK_FLAGS)
 endif()
 
 # Add modbus_server executable
-
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
-
-if(LIBMODBUS_FOUND)
-    message("LIBMODBUS_INCLUDE_DIRS = ${LIBMODBUS_INCLUDE_DIRS}")
-    message("LIBMODBUS_LIBRARIES = ${LIBMODBUS_LIBRARIES}")
-    message("LIBMODBUS_CFLAGS = ${LIBMODBUS_CFLAGS}")
-    message("LIBMODBUS_LDFLAGS = ${LIBMODBUS_LDFLAGS}")
-else()
-    message("libmodbus package not found!")
-    return()
-endif()
-
-# Add modbus_server executable
 add_executable(modbus_server ${CMAKE_CURRENT_SOURCE_DIR}/modbus_server/modbus_server.c)
+
+if(NOT WIN32)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
+else()
+    # Manually specify paths or use find_package
+endif()
 
 # Set compile flags for modbus_server (ensure C11 and static linking)
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/modbus_server/modbus_server.c PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS} ${LIBMODBUS_CFLAGS}")
@@ -91,7 +83,7 @@ macro(print_all_modbus_variables)
     message(STATUS "print_all_modbus_variables------------------------------------------{")
     get_cmake_property(_variableNames VARIABLES)
     foreach (_variableName ${_variableNames})
-        string(REGEX MATCH "^LIBMODBUS.*" MATCHED_STR "${_variableName}")
+        string(REGEX MATCH "^libmodbus.*" MATCHED_STR "${_variableName}")
         if(MATCHED_STR)
             message(STATUS "${_variableName}=${${_variableName}}")
         endif()

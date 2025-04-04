@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,8 +58,8 @@ thread when a tag is ready to read.
 typedef struct {
     int tid;
     int32_t tag;
-    cnd_t read_event;
-    mtx_t mutex;
+    pthread_cond_t read_event;
+    pthread_mutex_t mutex;
 } tag_state;
 
 
@@ -78,9 +78,9 @@ void tag_callback(int32_t tag_id, int event, int status, void *arg) {
     // NOLINTNEXTLINE
     fprintf(stderr, "callback tag(%d), tag id(%d), event(%d), status(%d)\n", tid, tag_id, event, status);
 
-    mtx_lock(&states[tid].mutex);
-    cnd_signal(&states[tid].read_event);
-    mtx_unlock(&states[tid].mutex);
+    pthread_mutex_lock(&states[tid].mutex);
+    pthread_cond_signal(&states[tid].read_event);
+    pthread_mutex_unlock(&states[tid].mutex);
 }
 
 
@@ -88,7 +88,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *arg) {
  * Thread function.  Just read until killed.
  */
 
-int thread_func(void *data) {
+void *thread_func(void *data) {
     int rc = PLCTAG_STATUS_OK;
     int tid = (int)(intptr_t)data;
     int value;
@@ -105,8 +105,8 @@ int thread_func(void *data) {
     states[tid].tid = tid;
 
     /* should check result! */
-    mtx_init((mtx_t *)&states[tid].mutex, mtx_plain);
-    cnd_init(&states[tid].read_event);
+    pthread_mutex_init((pthread_mutex_t *)&states[tid].mutex, NULL);
+    pthread_cond_init(&states[tid].read_event, NULL);
 
     /* everything OK? */
     if(tag < 0) {
@@ -117,15 +117,15 @@ int thread_func(void *data) {
 
     while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING) {
         if(done) { break; }
-        thrd_yield();
+        system_yield();
     }
 
     if(rc != PLCTAG_STATUS_OK) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        mtx_destroy(&states[tid].mutex);
-        cnd_destroy(&states[tid].read_event);
+        pthread_mutex_destroy(&states[tid].mutex);
+        pthread_cond_destroy(&states[tid].read_event);
         return 0;
     }
 
@@ -137,48 +137,49 @@ int thread_func(void *data) {
         int64_t end;
 
         /* capture the starting time */
-        start = util_time_ms();
+        start = system_time_ms();
 
         do {
             rc = plc_tag_read(tag, 0);
             // NOLINTNEXTLINE
             if(rc < 0) { fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc)); }
             if(rc == PLCTAG_STATUS_PENDING) {
-                mtx_lock(&states[tid].mutex);
-                cnd_wait(&states[tid].read_event, &states[tid].mutex);
-                mtx_unlock(&states[tid].mutex);
+                pthread_mutex_lock(&states[tid].mutex);
+                pthread_cond_wait(&states[tid].read_event, &states[tid].mutex);
+                pthread_mutex_unlock(&states[tid].mutex);
 
                 if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
                     // NOLINTNEXTLINE
                     fprintf(stderr, "something is wrong for tag(%d), status(%s)\n", tag, plc_tag_decode_error(rc));
                     plc_tag_destroy(tag);
-                    mtx_destroy(&states[tid].mutex);
-                    cnd_destroy(&states[tid].read_event);
+                    pthread_mutex_destroy(&states[tid].mutex);
+                    pthread_cond_destroy(&states[tid].read_event);
                     return 0;
                 }
             }
             value = plc_tag_get_int32(tag, 0);
         } while(0);
 
-        end = util_time_ms();
+        end = system_time_ms();
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Thread %d got result %d with return code %s in %" PRId64 "ms\n", tid, value, plc_tag_decode_error(rc),
                 (end - start));
 
-        thrd_yield();
+        system_yield();
     }
 
     plc_tag_destroy(tag);
-    mtx_destroy(&states[tid].mutex);
-    cnd_destroy(&states[tid].read_event);
+
+    pthread_mutex_destroy(&states[tid].mutex);
+    pthread_cond_destroy(&states[tid].read_event);
 
     return 0;
 }
 
 int main(int argc, char **argv) {
 
-    thrd_t thread[MAX_THREADS];
+    pthread_t thread[MAX_THREADS];
 
     int thread_id = 0;
 
@@ -217,13 +218,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Creating %d threads.\n", num_threads);
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {
-        thrd_create(&thread[thread_id], thread_func, (void *)(intptr_t)thread_id);
+        pthread_create(&thread[thread_id], NULL, thread_func, (void *)(intptr_t)thread_id);
     }
 
     /* wait until ^C */
-    while(!done) { thrd_sleep_ms(100, NULL); }
+    while(!done) { system_sleep_ms(100, NULL); }
 
-    for(thread_id = 0; thread_id < num_threads; thread_id++) { thrd_join(thread[thread_id], NULL); }
+    for(thread_id = 0; thread_id < num_threads; thread_id++) { pthread_join(thread[thread_id], NULL); }
 
     return 0;
 }

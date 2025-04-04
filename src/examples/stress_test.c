@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -89,8 +89,8 @@ static void close_log(FILE *log) {
 static int wait_ms(int timeout_ms) {
     int64_t timeout = 0;
 
-    timeout = util_time_ms() + timeout_ms;
-    while(!done && timeout > util_time_ms()) { thrd_sleep_ms(5, NULL); }
+    timeout = system_time_ms() + timeout_ms;
+    while(!done && timeout > system_time_ms()) { system_sleep_ms(5, NULL); }
 
     if(!done) {
         return PLCTAG_STATUS_OK;
@@ -136,7 +136,7 @@ static int32_t open_tag(FILE *log, int tid, int num_elems) {
 }
 
 
-static int test_cip(void *data) {
+static void *test_cip(void *data) {
     thread_args *args = (thread_args *)data;
     int tid = args->tid;
     int num_elems = args->num_elems;
@@ -150,7 +150,7 @@ static int test_cip(void *data) {
     int start_index = (tid - 1) * num_elems;
 
     /* a hack to allow threads to start. */
-    thrd_sleep_ms((uint32_t)tid, NULL);
+    system_sleep_ms((uint32_t)tid, NULL);
 
     log = open_log(tid);
 
@@ -177,7 +177,7 @@ static int test_cip(void *data) {
         }
 
         /* capture the starting time */
-        start = util_time_ms();
+        start = system_time_ms();
 
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -206,7 +206,7 @@ static int test_cip(void *data) {
             }
         } while(0);
 
-        end = util_time_ms();
+        end = system_time_ms();
 
         total_io_time += (end - start);
 
@@ -220,7 +220,7 @@ static int test_cip(void *data) {
             // NOLINTNEXTLINE
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems,
                     (int)(end - start));
-            thrd_sleep_ms(10, NULL);
+            system_sleep_ms(10, NULL);
         }
 
         iteration++;
@@ -244,7 +244,7 @@ static void interrupt_handler(void) { done = 1; }
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    thrd_t threads[MAX_THREADS];
+    pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int num_threads = 0;
@@ -296,19 +296,19 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating serial test thread %d with %d elements.\n", args[tid].tid, args[tid].num_elems);
 
-        thrd_create(&threads[tid], test_cip, &args[tid]);
+        pthread_create(&threads[tid], NULL, test_cip, &args[tid]);
     }
 
-    start_time = util_time_ms();
+    start_time = system_time_ms();
     end_time = start_time + (int64_t)(seconds * 1000);
 
-    while(!done && util_time_ms() < end_time) { thrd_sleep_ms(100, NULL); }
+    while(!done && system_time_ms() < end_time) { system_sleep_ms(100, NULL); }
 
     success = !done;
 
     done = 1;
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thrd_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(threads[tid], NULL); }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "--- All test threads terminated.\n");

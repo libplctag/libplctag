@@ -35,7 +35,7 @@
 /* need this for strdup */
 #define POSIX_C_SOURCE 200809L
 
-#include "utils.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <lib/libplctag.h>
 #include <lib/version.h>

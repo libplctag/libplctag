@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
     }
 
     /* small delay to ensure writes complete */
-    thrd_sleep_ms(100, NULL);
+    system_sleep_ms(100, NULL);
 
     /* read back and verify all values */
     // NOLINTNEXTLINE

@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../lib/libplctag.h"
+#include "compat_utils.h"
 
 #define REQUIRED_VERSION 2,1,0
 

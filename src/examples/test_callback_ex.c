@@ -32,12 +32,12 @@
  ***************************************************************************/
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#define REQUIRED_VERSION 2, 5, 0
+#define REQUIRED_VERSION 2, 6, 4
 
 #define TAG_PATH "protocol=ab-eip&gateway=127.0.0.1&path=1,0&cpu=LGX&elem_count=10&name=TestBigArray"
 #define DATA_TIMEOUT 5000
@@ -252,9 +252,9 @@ int main(int argc, const char **argv) {
 
         /* test a timeout. */
         printf("Testing timeout behavior.\n");
-        start = util_time_ms();
+        start = system_time_ms();
         rc = plc_tag_read(tag, 1); /* This might not work against the emulator.  It is too fast! */
-        end = util_time_ms();
+        end = system_time_ms();
 
         if(rc != PLCTAG_ERR_TIMEOUT) {
             printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end - start));

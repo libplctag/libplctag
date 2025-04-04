@@ -41,7 +41,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,7 +92,7 @@ typedef struct {
 } thread_args;
 
 
-int test_runner(void *data) {
+void *test_runner(void *data) {
     thread_args *args = (thread_args *)data;
     int tid = args->tid;
     int32_t tag = args->tag;
@@ -110,7 +110,7 @@ int test_runner(void *data) {
     *min_io_time = 1000000000L;
 
     /* wait until all threads ready. */
-    while(!go) { thrd_sleep_ms(10, NULL); }
+    while(!go) { system_sleep_ms(10, NULL); }
 
     while(go) {
         int64_t start = 0;
@@ -119,17 +119,17 @@ int test_runner(void *data) {
         (*iteration)++;
 
         /* capture the starting time */
-        start = util_time_ms();
+        start = system_time_ms();
 
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
             // NOLINTNEXTLINE
             fprintf(stderr, "!!! Thread %d, iteration %d, read failed after %" PRId64 "ms  with error %s\n", tid, *iteration,
-                    (int64_t)(util_time_ms() - start), plc_tag_decode_error(rc));
+                    (int64_t)(system_time_ms() - start), plc_tag_decode_error(rc));
             break;
         }
 
-        io_time = util_time_ms() - start;
+        io_time = system_time_ms() - start;
 
         *total_io_time += io_time;
 
@@ -151,7 +151,7 @@ int test_runner(void *data) {
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    thrd_t thread[MAX_THREADS];
+    pthread_t thread[MAX_THREADS];
     int num_threads = 0;
     int success = 0;
     thread_args args[MAX_THREADS];
@@ -229,29 +229,29 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating test thread %d.\n", args[tid].tid);
 
-        thrd_create(&thread[tid], test_runner, (void *)&args[tid]);
+        pthread_create(&thread[tid], NULL, test_runner, (void *)&args[tid]);
     }
 
     /* wait for threads to create and start. */
-    thrd_sleep_ms(100, NULL);
+    system_sleep_ms(100, NULL);
 
     /* launch the threads */
     go = 1;
 
-    start = util_time_ms();
+    start = system_time_ms();
 
-    while(go && (--count_down) > 0) { thrd_sleep_ms(100, NULL); }
+    while(go && (--count_down) > 0) { system_sleep_ms(100, NULL); }
 
     go = 0;
 
-    total_run_time = util_time_ms() - start;
+    total_run_time = system_time_ms() - start;
 
     success = 1;
 
     /* FIXME - wait for the threads to stop. */
-    thrd_sleep_ms(100, NULL);
+    system_sleep_ms(100, NULL);
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thrd_join(thread[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(thread[tid], NULL); }
 
     /* close the tags. */
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { plc_tag_destroy(args[tid].tag); }

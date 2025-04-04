@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -71,7 +71,7 @@ int main(void) {
     }
 
     /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) { thrd_sleep_ms(100, NULL); }
+    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) { system_sleep_ms(100, NULL); }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
         // NOLINTNEXTLINE

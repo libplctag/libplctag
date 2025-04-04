@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <signal.h>
 #include <stdint.h>
@@ -53,15 +53,15 @@
 static volatile int terminate = 0;
 
 static void interrupt_handler(void);
-static int thread_func(void *arg);
+static void *thread_func(void *arg);
 
 
 #define NUM_THREADS 10
 
 
 int main(void) {
-    thrd_t threads[NUM_THREADS] = {0};
-    int64_t end_time = util_time_ms() + (10 * 1000);
+    pthread_t threads[NUM_THREADS] = {0};
+    int64_t end_time = system_time_ms() + (10 * 1000);
 
     /* Set up the signal handler */
     set_interrupt_handler(interrupt_handler);
@@ -77,8 +77,8 @@ int main(void) {
 
     /* create 10 threads to run thread_func() */
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) {
-        int rc = thrd_create(&threads[task_id], thread_func, (void *)(intptr_t)task_id);
-        if(rc != thrd_success) {
+        int rc = pthread_create(&threads[task_id], NULL, thread_func, (void *)(intptr_t)task_id);
+        if(rc != 0) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Error creating thread %d\n", task_id);
             return -1;
@@ -86,15 +86,15 @@ int main(void) {
     }
 
     /* wait while we test */
-    while(!terminate && (end_time > util_time_ms())) {
-        thrd_sleep_ms(1000, NULL);
+    while(!terminate && (end_time > system_time_ms())) {
+        system_sleep_ms(1000, NULL);
         // NOLINTNEXTLINE
-        fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - util_time_ms()));
+        fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - system_time_ms()));
     }
 
     terminate = 1;
 
-    for(int task_id = 0; task_id < NUM_THREADS; task_id++) { thrd_join(threads[task_id], NULL); }
+    for(int task_id = 0; task_id < NUM_THREADS; task_id++) { pthread_join(threads[task_id], NULL); }
 
     return 0;
 }
@@ -109,7 +109,7 @@ void interrupt_handler(void) { terminate = 1; }
     If any error occurs, it closes the tag handle and opens a new one.
 */
 
-int thread_func(void *arg) {
+void *thread_func(void *arg) {
     int task_id = (int)(intptr_t)arg;
     int rc;
     int32_t tag = 0;
@@ -128,7 +128,7 @@ int thread_func(void *arg) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Task %d tag creation failed with error %s\n", task_id, plc_tag_decode_error(tag));
 
-            thrd_sleep_ms(100, NULL);
+            system_sleep_ms(100, NULL);
             continue;
         }
 

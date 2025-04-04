@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -117,7 +117,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
 void wait_for_ok(int32_t tag, int32_t timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
-    int64_t timeout_time = timeout_ms + util_time_ms();
+    int64_t timeout_time = timeout_ms + system_time_ms();
 
     // NOLINTNEXTLINE
     fprintf(stderr, "wait_for_ok() starting.\n");
@@ -126,9 +126,9 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
         rc = plc_tag_status(tag);
 
         if(rc == PLCTAG_STATUS_PENDING) {
-            thrd_sleep_ms(20, NULL);
+            system_sleep_ms(20, NULL);
 
-            if(timeout_time < util_time_ms()) { rc = PLCTAG_ERR_TIMEOUT; }
+            if(timeout_time < system_time_ms()) { rc = PLCTAG_ERR_TIMEOUT; }
         }
     } while(rc == PLCTAG_STATUS_PENDING);
 

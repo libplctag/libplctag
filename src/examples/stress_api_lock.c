@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,7 +85,7 @@ static int open_tag(const char *tag_str) {
 }
 
 
-int test_tag(void *data) {
+void *test_tag(void *data) {
     int tid = (int)(intptr_t)data;
     int iteration = 1;
 
@@ -96,12 +96,12 @@ int test_tag(void *data) {
         int64_t end = 0;
 
         /* capture the starting time */
-        start = util_time_ms();
+        start = system_time_ms();
 
         /* read the tag */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
 
-        end = util_time_ms();
+        end = system_time_ms();
 
         if(rc != PLCTAG_STATUS_OK) {
             // NOLINTNEXTLINE
@@ -143,7 +143,7 @@ int test_tag(void *data) {
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    thrd_t threads[MAX_THREADS];
+    pthread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int64_t seconds = 30; /* default 30 seconds */
@@ -175,13 +175,13 @@ int main(int argc, char **argv) {
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
-        thrd_create(&threads[tid], test_tag, (void *)(intptr_t)tid);
+        pthread_create(&threads[tid], NULL, test_tag, (void *)(intptr_t)tid);
     }
 
-    start_time = util_time_ms();
+    start_time = system_time_ms();
     end_time = start_time + (seconds * 1000);
 
-    while(!done && util_time_ms() < end_time) { thrd_sleep_ms(100, NULL); }
+    while(!done && system_time_ms() < end_time) { system_sleep_ms(100, NULL); }
 
     if(done) {
         // NOLINTNEXTLINE
@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
 
     done = 1;
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { thrd_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(threads[tid], NULL); }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "All test threads terminated.\n");

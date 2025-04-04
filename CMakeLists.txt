@@ -482,97 +482,13 @@ if (WIN32)
     target_link_libraries(plctag_static ws2_32 bcrypt)
 endif()
 
-# add the examples and tests
+# add the examples and tests unless Android
 if(ANDROID_BUILD)
-    MESSAGE("Building for Android.")
+    MESSAGE("Not building examples for Android.")
 elseif (BUILD_EXAMPLES)
-    set( example_PROGRAMS
-        async
-        async_stress
-        barcode_test
-        busy_test
-        data_dumper
-        list_tags_logix
-        list_tags_micro8x0
-        list_tags_omron_incomplete
-        multithread
-        multithread_cached_read
-        multithread_plc5
-        multithread_plc5_dhp
-        plc5
-        simple
-        simple_dual
-        slc500
-        stress_api_lock
-        stress_rc_mem
-        stress_test
-        string_non_standard_udt
-        string_standard
-        test_alternate_tag_listing
-        test_array_notation
-        test_auto_sync
-        test_callback
-        test_callback_ex
-        test_callback_ex_logix
-        test_callback_ex_modbus
-        test_connection_group
-        test_emulator_performance
-        test_event
-        test_indexed_tags
-        test_raw_cip
-        test_reconnect
-        test_shutdown
-        test_special
-        test_string
-        test_tag_attributes
-        test_tag_type_attribute
-        thread_stress
-        toggle_bit
-        toggle_bool
-        trigger_double_free
-        write_string
-        tag_rw_deprecated
-        tag_rw2
-    )
-
-    if (UNIX)
-        set ( example_PROG_UTIL utils.c )
-        set ( example_LIBRARIES ${tool_lib} pthread )
-    elseif(WIN32)
-        set ( example_PROG_UTIL utils.c)
-        set ( example_LIBRARIES ${tool_lib} ws2_32 )
-    endif()
-
-    # set the compile flags for the utilities file.
-    # set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
-
-    # set the compile and link properties for all examples.
-    foreach ( example ${example_PROGRAMS} )
-        set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
-        add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-        target_link_libraries(${example} ${example_LIBRARIES} )
-
-        if(BASE_LINK_FLAGS)
-            set_target_properties(${example} PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-        endif()
-    endforeach(example)
-
-    # simple.cpp is different because it is C++
-    set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS "${BASE_CXX_FLAGS}")
-    add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-
-    target_link_libraries (simple_cpp ${example_LIBRARIES} )
-
-    if(BASE_LINK_FLAGS)
-        message("BASE_LINK_FLAGS=${BASE_LINK_FLAGS}")
-        set_target_properties(simple_cpp PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-    endif()
-
-    # Generate files from templates
-    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
-
-    # build the GitHub Actions config file
-    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
+    add_subdirectory("${CMAKE_SOURCE_DIR}/src/examples")
+else()
+    message("Not building examples.")
 
     # build the tests
     add_subdirectory("${CMAKE_SOURCE_DIR}/src/tests")
@@ -634,24 +550,20 @@ elseif (BUILD_EXAMPLES)
     if(BASE_LINK_FLAGS)
     set_target_properties(cli PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
     endif()
-
-    # make sure the .h file is in the output directory
-    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
 endif(ANDROID_BUILD)
 
-# add the cli
-if(ANDROID_BUILD)
-    MESSAGE("Building for Android.")
-endif(ANDROID_BUILD)
+# Generate files from templates
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
+
+# build the GitHub Actions config file
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
+
+# make sure the .h file is in the output directory
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
 
 # for installation
-if(UNIX)
 	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
 	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
-elseif(WIN32)
-	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
-	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
-endif()
 
 if(ANDROID_BUILD)
     message("Skipping package config and header file copy for Android build.")
