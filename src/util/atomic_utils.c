@@ -46,7 +46,8 @@
 #if defined(__STDC_NO_ATOMICS__) || !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 11)
 
 #    ifdef _WIN32
-#        include <Windows.h>
+#       define WIN32_LEAN_AND_MEAN
+#       include <Windows.h>
 #    endif
 
 void atomic_init_bool(atomic_bool *a, bool new_val) { *a = new_val; }
@@ -61,7 +62,8 @@ bool atomic_set_bool(atomic_bool *a, bool new_val) {
 
 bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val) {
 #    ifdef _WIN32
-    return InterlockedCompareExchange8((char *)a, new_val, old_val) == old_val;
+    /* Windows does not have a native single byte atomic */
+    return InterlockedCompareExchange16(a, new_val, old_val) == old_val;
 #    else
     bool expected = old_val;
     return __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);

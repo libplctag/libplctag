@@ -43,7 +43,11 @@
 
 #define ATOMIC_INT_STATIC_INIT {0}
 
+#ifdef WIN32
+typedef volatile uint16_t atomic_bool;
+#else
 typedef volatile bool atomic_bool;
+#endif
 typedef volatile int32_t atomic_int32_t;
 typedef volatile int64_t atomic_int64_t;
 

@@ -48,6 +48,7 @@ extern "C"
 
 #define _WINSOCKAPI_
 #include <windows.h>
+
 #include <tchar.h>
 #include <strsafe.h>
 #include <io.h>
@@ -55,7 +56,6 @@ extern "C"
 #include <Ws2tcpip.h>
 #include <string.h>
 #include <stdlib.h>
-#include <winnt.h>
 #include <errno.h>
 #include <math.h>
 #include <process.h>

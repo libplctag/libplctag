@@ -38,6 +38,8 @@
 #include <platform.h>
 
 #define _WINSOCKAPI_
+#include <Windows.h>
+
 #include <Winsock2.h>
 #include <Ws2tcpip.h>
 #include <errno.h>
@@ -51,8 +53,6 @@
 #include <tchar.h>
 #include <time.h>
 #include <timeapi.h>
-#include <windows.h>
-#include <winnt.h>
 
 #include <lib/libplctag.h>
 #include <util/debug.h>
@@ -694,8 +694,6 @@ int mutex_lock_impl(const char *func, int line, mutex_p m) {
     /* FIXME - This will potentially hang forever! */
     while(dwWaitResult != WAIT_OBJECT_0) { dwWaitResult = WaitForSingleObject(m->h_mutex, INFINITE); }
 
-    m->h_locking_thread = GetCurrentThread();
-
     return PLCTAG_STATUS_OK;
 }
 
@@ -715,9 +713,6 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
     dwWaitResult = WaitForSingleObject(m->h_mutex, 0);
     if(dwWaitResult == WAIT_OBJECT_0) {
         /* we got the lock */
-
-        m->h_locking_thread = GetCurrentThread();
-
         return PLCTAG_STATUS_OK;
     } else {
         return PLCTAG_ERR_MUTEX_LOCK;
@@ -734,10 +729,6 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m) {
     }
 
     if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
-
-    if(m->h_locking_thread != GetCurrentThread()) { pdebug(DEBUG_WARN, "Mutex locked by a different thread!"); }
-
-    m->h_locking_thread = NULL;
 
     if(!ReleaseMutex(m->h_mutex)) {
         /*pdebug("error unlocking mutex.");*/
@@ -757,8 +748,6 @@ int mutex_destroy(mutex_p *m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
-
-    if((*m)->h_locking_thread != NULL) { pdebug(DEBUG_WARN, "Destroying mutex that is still locked!"); }
 
     CloseHandle((*m)->h_mutex);
 

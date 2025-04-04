@@ -295,10 +295,18 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
     RETURN()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /W3")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /W3")
+    set(BASE_RELEASE_FLAGS "/O2 /Ob2 /DNDEBUG /W3 /std:c11 /MT")
+    set(BASE_DEBUG_FLAGS "/Zi /Ob0 /Od /W3 /std:c11 /MTd")
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
     # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
+
+
+    if(USE_SANITIZERS)
+        SET(SANITIZERS_FLAGS " /RTCu")
+        STRING(APPEND BASE_DEBUG_FLAGS ${SANITIZERS_FLAGS})
+        STRING(APPEND BASE_DEBUG_LINK_FLAGS ${SANITIZERS_FLAGS})
+    endif()
+
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -311,6 +319,15 @@ endif()
 
 message("BASE_RELEASE_FLAGS = ${BASE_RELEASE_FLAGS}")
 message("BASE_DEBUG_FLAGS = ${BASE_DEBUG_FLAGS}")
+
+# set the CMAKE vars
+set(CMAKE_C_FLAGS_DEBUG "${BASE_DEBUG_FLAGS}")
+set(CMAKE_C_FLAGS_RELEASE "${BASE_RELEASE_FLAGS}")
+
+message("CMAKE_C_FLAGS_DEBUG = ${CMAKE_C_FLAGS_DEBUG}")
+message("CMAKE_C_FLAGS_RELEASE = ${CMAKE_C_FLAGS_RELEASE}")
+message("CMAKE_CXX_FLAGS_DEBUG = ${CMAKE_CXX_FLAGS_DEBUG}")
+message("CMAKE_CXX_FLAGS_RELEASE = ${CMAKE_CXX_FLAGS_RELEASE}")
 
 
 if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
@@ -420,9 +437,9 @@ set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
                      "${platform_SRC_PATH}/platform.h" )
 
 # set the compiler flags
-FOREACH( lib_src ${libplctag_SRCS} )
-    set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}")
-ENDFOREACH()
+# FOREACH( lib_src ${libplctag_SRCS} )
+#     set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}")
+# ENDFOREACH()
 
 # shared library
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
@@ -440,7 +457,7 @@ if(UNIX)
     set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
 	set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
 
-	set(tool_lib "plctag_dyn")
+	set(tool_lib "plctag_static")
 elseif(WIN32)
     # static library
 	add_library(plctag_static STATIC ${libplctag_SRCS} )
@@ -461,8 +478,8 @@ endif()
 
 # Windows needs to link the library to the WINSOCK library
 if (WIN32)
-    target_link_libraries(plctag_dyn ws2_32)
-    target_link_libraries(plctag_static ws2_32)
+    target_link_libraries(plctag_dyn ws2_32 bcrypt)
+    target_link_libraries(plctag_static ws2_32 bcrypt)
 endif()
 
 # add the examples and tests
@@ -527,7 +544,7 @@ elseif (BUILD_EXAMPLES)
     endif()
 
     # set the compile flags for the utilities file.
-    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
+    # set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
 
     # set the compile and link properties for all examples.
     foreach ( example ${example_PROGRAMS} )
@@ -655,4 +672,4 @@ macro(print_all_variables)
 endmacro()
 
 # Debugging
-# print_all_variables()
+print_all_variables()

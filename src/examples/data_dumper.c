@@ -38,12 +38,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
-#include <sys/time.h>
 #include <time.h>
-#include <unistd.h>
 
-#define REQUIRED_VERSION 2, 1, 0
+#define REQUIRED_VERSION 2, 6, 4
 
 #define MAX_TAGS 5000
 #define RECONNECT_DELAY_MS 5000
