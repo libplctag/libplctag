@@ -40,8 +40,8 @@
 #include <platform.h>
 #include <stdlib.h>
 #include <system/system.h>
-#include <util/attr.h>
-#include <util/debug.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
 
 
 /*

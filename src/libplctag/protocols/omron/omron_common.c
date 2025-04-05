@@ -46,10 +46,10 @@
 #include <omron/omron_standard_tag.h>
 #include <omron/tag.h>
 #include <platform.h>
-#include <util/atomic_utils.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <util/vector.h>
+#include <utils/atomic_utils.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/vector.h>
 
 
 /*

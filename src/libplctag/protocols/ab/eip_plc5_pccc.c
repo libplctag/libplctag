@@ -41,7 +41,7 @@
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <stdint.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 /* PCCC */

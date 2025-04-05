@@ -36,7 +36,7 @@
 #include <ab/defs.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <util/vector.h>
+#include <utils/vector.h>
 
 typedef struct ab_tag_t *ab_tag_p;
 #define AB_TAG_NULL ((ab_tag_p)NULL)

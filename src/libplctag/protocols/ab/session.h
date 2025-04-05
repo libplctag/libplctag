@@ -38,8 +38,8 @@
 
 #include <ab/ab_common.h>
 #include <ab/defs.h>
-#include <util/rc.h>
-#include <util/vector.h>
+#include <utils/rc.h>
+#include <utils/vector.h>
 
 /* #define MAX_SESSION_HOST    (128) */
 

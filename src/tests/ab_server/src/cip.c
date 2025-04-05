@@ -40,7 +40,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <util/random_utils.h>
+#include <utils/random_utils.h>
 
 
 /* tag commands */

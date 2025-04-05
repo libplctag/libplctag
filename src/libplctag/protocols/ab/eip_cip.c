@@ -42,9 +42,9 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <platform.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <util/vector.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/vector.h>
 
 
 /* tag listing packet format is as follows for controller tags:

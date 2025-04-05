@@ -38,8 +38,8 @@
 
 #include <omron/omron_common.h>
 #include <omron/defs.h>
-#include <util/rc.h>
-#include <util/vector.h>
+#include <utils/rc.h>
+#include <utils/vector.h>
 
 /* #define MAX_CONN_HOST    (128) */
 

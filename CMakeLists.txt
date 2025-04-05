@@ -243,7 +243,7 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 		MESSAGE(STATUS "COMPILER_VERSION=" ${COMPILER_VERSION})
 	endif()
 
-	if(${COMPILER_VERSION} VERSION_GREATER 5.1 OR ${COMPILER_VERSION} VERSION_GREATER 5.1)
+	if(${COMPILER_VERSION} VERSION_GREATER 5.1)
 		# The compiler has the C99-c11-compat check.
 		MESSAGE(STATUS "Compiler supports C99/C11 compatibility check." )
 	else()
@@ -288,6 +288,8 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     set(CMAKE_CXX_FLAGS_RELEASE_INIT "/O2 /Ob2 /DNDEBUG /W3 /MT -D_CRT_SECURE_NO_WARNINGS")
     set(CMAKE_CXX_FLAGS_DEBUG_INIT "/Zi /Ob0 /Od /W3 /MDd -D_CRT_SECURE_NO_WARNINGS")
 
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+
     set(EXTRA_LINKER_LIBS ws2_32 bcrypt)
 
     if(USE_SANITIZERS)
@@ -313,103 +315,17 @@ message("CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT = ${CMAKE_STATIC_LINKER_FLAGS_RE
 
 message("EXTRA_LINKER_LIBS = ${EXTRA_LINKER_LIBS}")
 
-# generate version file from CMake info.
-CONFIGURE_FILE("${lib_SRC_PATH}/version.h.in" "${lib_SRC_PATH}/version.h" @ONLY)
+add_subdirectory("${CMAKE_SOURCE_DIR}/src/libplctag")
 
-# set up the library sources
-set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
-                     "${lib_SRC_PATH}/init.h"
-                     "${lib_SRC_PATH}/libplctag.h"
-                     "${lib_SRC_PATH}/lib.c"
-                     "${lib_SRC_PATH}/tag.h"
-                     "${lib_SRC_PATH}/version.h"
-                     "${lib_SRC_PATH}/version.c"
-                     "${ab_SRC_PATH}/ab.h"
-                     "${ab_SRC_PATH}/ab_common.c"
-                     "${ab_SRC_PATH}/ab_common.h"
-                     "${ab_SRC_PATH}/cip.c"
-                     "${ab_SRC_PATH}/cip.h"
-                     "${ab_SRC_PATH}/defs.h"
-                     "${ab_SRC_PATH}/eip_cip.c"
-                     "${ab_SRC_PATH}/eip_cip.h"
-                     "${ab_SRC_PATH}/eip_cip_special.c"
-                     "${ab_SRC_PATH}/eip_cip_special.h"
-                     "${ab_SRC_PATH}/eip_lgx_pccc.c"
-                     "${ab_SRC_PATH}/eip_lgx_pccc.h"
-                     "${ab_SRC_PATH}/eip_plc5_dhp.c"
-                     "${ab_SRC_PATH}/eip_plc5_dhp.h"
-                     "${ab_SRC_PATH}/eip_plc5_pccc.c"
-                     "${ab_SRC_PATH}/eip_plc5_pccc.h"
-                     "${ab_SRC_PATH}/eip_slc_dhp.c"
-                     "${ab_SRC_PATH}/eip_slc_dhp.h"
-                     "${ab_SRC_PATH}/eip_slc_pccc.c"
-                     "${ab_SRC_PATH}/eip_slc_pccc.h"
-                     "${ab_SRC_PATH}/error_codes.c"
-                     "${ab_SRC_PATH}/error_codes.h"
-                     "${ab_SRC_PATH}/pccc.c"
-                     "${ab_SRC_PATH}/pccc.h"
-                     "${ab_SRC_PATH}/session.c"
-                     "${ab_SRC_PATH}/session.h"
-                     "${ab_SRC_PATH}/tag.h"
-                     "${protocol_SRC_PATH}/omron/omron.h"
-                     "${protocol_SRC_PATH}/omron/omron_common.c"
-                     "${protocol_SRC_PATH}/omron/omron_common.h"
-                     "${protocol_SRC_PATH}/omron/cip.c"
-                     "${protocol_SRC_PATH}/omron/cip.h"
-                     "${protocol_SRC_PATH}/omron/conn.c"
-                     "${protocol_SRC_PATH}/omron/conn.h"
-                     "${protocol_SRC_PATH}/omron/defs.h"
-                     "${protocol_SRC_PATH}/omron/omron_raw_tag.c"
-                     "${protocol_SRC_PATH}/omron/omron_raw_tag.h"
-                     "${protocol_SRC_PATH}/omron/omron_standard_tag.c"
-                     "${protocol_SRC_PATH}/omron/omron_standard_tag.h"
-                     "${protocol_SRC_PATH}/omron/tag.h"
-                     "${mb_SRC_PATH}/modbus.c"
-                     "${mb_SRC_PATH}/modbus.h"
-                     "${protocol_SRC_PATH}/system/system.c"
-                     "${protocol_SRC_PATH}/system/system.h"
-                     "${protocol_SRC_PATH}/system/tag.h"
-                     "${util_SRC_PATH}/atomic_utils.c"
-                     "${util_SRC_PATH}/atomic_utils.h"
-                     "${util_SRC_PATH}/attr.c"
-                     "${util_SRC_PATH}/attr.h"
-                     "${util_SRC_PATH}/byteorder.h"
-                     "${util_SRC_PATH}/debug.c"
-                     "${util_SRC_PATH}/debug.h"
-                     "${util_SRC_PATH}/hash.c"
-                     "${util_SRC_PATH}/hash.h"
-                     "${util_SRC_PATH}/hashtable.c"
-                     "${util_SRC_PATH}/hashtable.h"
-                     "${util_SRC_PATH}/macros.h"
-                     "${util_SRC_PATH}/random_utils.c"
-                     "${util_SRC_PATH}/random_utils.h"
-                     "${util_SRC_PATH}/rc.c"
-                     "${util_SRC_PATH}/rc.h"
-                     "${util_SRC_PATH}/vector.c"
-                     "${util_SRC_PATH}/vector.h"
-                     "${platform_SRC_PATH}/platform.c"
-                     "${platform_SRC_PATH}/platform.h" )
-
-# shared library
-add_library(plctag_dyn SHARED ${libplctag_SRCS} )
-target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
-set_target_properties(plctag_dyn PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
-
-# static library
-add_library(plctag_static STATIC ${libplctag_SRCS} )
-target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
-set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
-target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)    
+if(BUILD_EXAMPLES)
+    message("Building examples.")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/src/examples")
+endif(BUILD_EXAMPLES)
 
 #if(BUILD_TESTS)
 #    message("Building tests.")
 #    add_subdirectory("${CMAKE_SOURCE_DIR}/src/tests")
 #endif(BUILD_TESTS)
-
-# if(BUILD_EXAMPLES)
-#     message("Building examples.")
-#     add_subdirectory("${CMAKE_SOURCE_DIR}/src/examples")
-# endif(BUILD_EXAMPLES)
 
 
 #    set(CLI_FILES ${cli_SRC_PATH}/cli.c
@@ -437,21 +353,8 @@ CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIR
 # build the GitHub Actions config file
 CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
 
-# make sure the .h file is in the output directory
-CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/src/libplctag/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
 
 # for installation
-	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
-	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
-
-if(ANDROID_BUILD)
-    message("Skipping package config and header file copy for Android build.")
-else()
-    install(FILES "${CMAKE_SOURCE_DIR}/src/libplctag/lib/libplctag.h" DESTINATION include)
-    if(EXISTS "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc")
-        install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
-    endif()
-endif(ANDROID_BUILD)
 
 macro(print_all_variables)
     message(STATUS "print_all_variables------------------------------------------{")

@@ -42,7 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 static int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp,

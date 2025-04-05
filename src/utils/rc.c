@@ -33,8 +33,8 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
-#include <util/debug.h>
-#include <util/rc.h>
+#include <utils/debug.h>
+#include <utils/rc.h>
 
 
 //~ #ifndef container_of

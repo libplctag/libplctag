@@ -46,7 +46,7 @@ extern "C"
 #include <ab/session.h>
 #include <ab/tag.h>
 #include <libplctag/lib/libplctag.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 START_PACK typedef struct {

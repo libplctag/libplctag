@@ -45,14 +45,14 @@
 #include <mb/modbus.h>
 #include <platform.h>
 #include <stdlib.h>
-#include <util/atomic_utils.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <util/hash.h>
-#include <util/hashtable.h>
-#include <util/random_utils.h>
-#include <util/rc.h>
-#include <util/vector.h>
+#include <utils/atomic_utils.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/hash.h>
+#include <utils/hashtable.h>
+#include <utils/random_utils.h>
+#include <utils/rc.h>
+#include <utils/vector.h>
 
 
 #define INITIAL_TAG_TABLE_SIZE (201)

@@ -56,7 +56,7 @@
 #include <unistd.h>
 
 #include <libplctag/lib/libplctag.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) \

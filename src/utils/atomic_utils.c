@@ -31,8 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <util/atomic_utils.h>
-#include <util/debug.h>
+#include <utils/atomic_utils.h>
+#include <utils/debug.h>
 
 /* This is all cobbled together from many Internet sources such as
  * GitHub, StackExchange, Microsoft's site etc.

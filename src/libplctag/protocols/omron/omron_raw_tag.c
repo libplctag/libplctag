@@ -43,9 +43,9 @@
 #include <omron/omron_standard_tag.h> /* for the Logix decode types. */
 #include <omron/tag.h>
 #include <platform.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <util/vector.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/vector.h>
 
 /* raw tag functions */
 // static int raw_tag_read_start(omron_tag_p tag);

@@ -42,9 +42,9 @@
 #include <platform.h>
 #include <stdlib.h>
 #include <time.h>
-#include <util/atomic_utils.h>
-#include <util/debug.h>
-#include <util/random_utils.h>
+#include <utils/atomic_utils.h>
+#include <utils/debug.h>
+#include <utils/random_utils.h>
 
 #define MAX_REQUESTS (200)
 

@@ -41,8 +41,8 @@
 #include <platform.h>
 #include <stdio.h>
 #include <string.h>
-#include <util/attr.h>
-#include <util/debug.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
 
 
 struct attr_entry_t {

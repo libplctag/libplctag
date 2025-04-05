@@ -37,7 +37,7 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <util/attr.h>
+#include <utils/attr.h>
 
 void ab_teardown(void);
 int ab_init(void);

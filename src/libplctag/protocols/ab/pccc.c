@@ -41,7 +41,7 @@
 #include <limits.h>
 #include <platform.h>
 #include <string.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 // static int parse_pccc_logical_address(const char *name, pccc_file_t address->file_type, int *file_num, int *elem_num, int

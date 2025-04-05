@@ -36,7 +36,7 @@
 #include <omron/defs.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <util/vector.h>
+#include <utils/vector.h>
 
 typedef struct omron_tag_t *omron_tag_p;
 #define OMRON_TAG_NULL ((omron_tag_p)NULL)

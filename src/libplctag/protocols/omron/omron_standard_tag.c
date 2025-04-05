@@ -42,9 +42,9 @@
 #include <omron/omron_standard_tag.h>
 #include <omron/tag.h>
 #include <platform.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <util/vector.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/vector.h>
 
 
 static int build_read_request_connected(omron_tag_p tag, int byte_offset);

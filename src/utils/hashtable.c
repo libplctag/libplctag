@@ -33,10 +33,10 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
-#include <util/debug.h>
-#include <util/hash.h>
-#include <util/hashtable.h>
-#include <util/vector.h>
+#include <utils/debug.h>
+#include <utils/hash.h>
+#include <utils/hashtable.h>
+#include <utils/vector.h>
 
 /*
  * This implements a simple linear probing hash table.

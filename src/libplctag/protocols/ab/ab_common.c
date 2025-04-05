@@ -53,9 +53,9 @@
 #include <limits.h>
 #include <omron/omron.h>
 #include <platform.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <util/vector.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/vector.h>
 
 
 /*

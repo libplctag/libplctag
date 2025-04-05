@@ -33,9 +33,9 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
-#include <util/debug.h>
-#include <util/rc.h>
-#include <util/vector.h>
+#include <utils/debug.h>
+#include <utils/rc.h>
+#include <utils/vector.h>
 
 struct vector_t {
     int len;

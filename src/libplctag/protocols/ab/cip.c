@@ -42,7 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 static int skip_whitespace(const char *name, int *name_index);

@@ -37,9 +37,9 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
-#include <util/atomic_utils.h>
-#include <util/attr.h>
-#include <util/debug.h>
+#include <utils/atomic_utils.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
 
 
 typedef struct plc_tag_t *plc_tag_p;

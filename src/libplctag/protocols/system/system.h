@@ -34,8 +34,8 @@
 #ifndef __PROTOCOL_SYSTEM_H__
 #define __PROTOCOL_SYSTEM_H__ 1
 
-#include <util/attr.h>
-#include <util/debug.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
 #include <platform.h>
 #include <libplctag/lib/tag.h>
 

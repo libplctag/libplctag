@@ -55,7 +55,7 @@
 #include <timeapi.h>
 
 #include <libplctag/lib/libplctag.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 /*#ifdef __cplusplus

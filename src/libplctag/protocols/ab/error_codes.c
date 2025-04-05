@@ -35,7 +35,7 @@
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
 #include <stdint.h>
-#include <util/debug.h>
+#include <utils/debug.h>
 
 
 struct error_code_entry {

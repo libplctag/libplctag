@@ -38,9 +38,9 @@
 #include <libplctag/lib/version.h>
 #include <platform.h>
 #include <system/tag.h>
-#include <util/attr.h>
-#include <util/debug.h>
-#include <util/rc.h>
+#include <utils/attr.h>
+#include <utils/debug.h>
+#include <utils/rc.h>
 
 
 static void system_tag_destroy(plc_tag_p tag);

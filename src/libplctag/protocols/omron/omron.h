@@ -36,7 +36,7 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <util/attr.h>
+#include <utils/attr.h>
 
 void omron_teardown(void);
 int omron_init(void);
