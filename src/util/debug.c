@@ -32,8 +32,8 @@
  ***************************************************************************/
 
 #include <inttypes.h>
-#include <lib/libplctag.h>
-#include <lib/version.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/version.h>
 #include <platform.h>
 #include <stdarg.h>
 #include <stdint.h>

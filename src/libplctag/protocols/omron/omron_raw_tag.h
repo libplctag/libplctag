@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <lib/tag.h>
+#include <libplctag/lib/tag.h>
 #include <omron/omron_common.h>
 
 // /* tag creation helper */

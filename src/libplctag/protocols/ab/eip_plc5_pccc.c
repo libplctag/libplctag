@@ -39,7 +39,7 @@
 #include <ab/session.h>
 #include <ab/tag.h>
 #include <inttypes.h>
-#include <lib/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdint.h>
 #include <util/debug.h>
 

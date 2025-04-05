@@ -45,7 +45,7 @@ extern "C"
 #include <ab/pccc.h>
 #include <ab/session.h>
 #include <ab/tag.h>
-#include <lib/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <util/debug.h>
 
 

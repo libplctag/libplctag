@@ -55,7 +55,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <lib/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <util/debug.h>
 
 

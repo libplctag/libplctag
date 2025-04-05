@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include <ab/error_codes.h>
-#include <lib/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <platform.h>
 #include <stdint.h>
 #include <util/debug.h>

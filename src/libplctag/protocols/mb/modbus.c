@@ -34,7 +34,7 @@
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
-#include <lib/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <limits.h>
 #include <mb/modbus.h>
 #include <platform.h>

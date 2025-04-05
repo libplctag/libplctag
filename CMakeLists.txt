@@ -406,10 +406,10 @@ target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)
 #    add_subdirectory("${CMAKE_SOURCE_DIR}/src/tests")
 #endif(BUILD_TESTS)
 
-if(BUILD_EXAMPLES)
-    message("Building examples.")
-    add_subdirectory("${CMAKE_SOURCE_DIR}/src/examples")
-endif(BUILD_EXAMPLES)
+# if(BUILD_EXAMPLES)
+#     message("Building examples.")
+#     add_subdirectory("${CMAKE_SOURCE_DIR}/src/examples")
+# endif(BUILD_EXAMPLES)
 
 
 #    set(CLI_FILES ${cli_SRC_PATH}/cli.c

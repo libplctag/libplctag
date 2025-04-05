@@ -39,8 +39,8 @@
 #define MAX_TAG_TYPE_INFO   (64)
 
 /* they are used in some of these includes */
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <ab/ab_common.h>
 #include <ab/session.h>
 #include <ab/pccc.h>

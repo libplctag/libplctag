@@ -34,8 +34,8 @@
 #pragma once
 
 #include <omron/defs.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <util/vector.h>
 
 typedef struct omron_tag_t *omron_tag_p;

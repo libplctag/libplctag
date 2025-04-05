@@ -36,8 +36,8 @@
 #include <ab/tag.h>
 #include <ctype.h>
 #include <float.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <limits.h>
 #include <platform.h>
 #include <string.h>

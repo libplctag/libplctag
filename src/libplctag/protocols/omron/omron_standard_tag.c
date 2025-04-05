@@ -33,8 +33,8 @@
 
 #include <ctype.h>
 #include <inttypes.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <omron/cip.h>
 #include <omron/conn.h>
 #include <omron/defs.h>

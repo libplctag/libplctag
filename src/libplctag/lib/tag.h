@@ -35,7 +35,7 @@
 #pragma once
 
 
-#include <lib/libplctag.h>
+#include <libplctag/lib/libplctag.h>
 #include <platform.h>
 #include <util/atomic_utils.h>
 #include <util/attr.h>

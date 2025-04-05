@@ -34,8 +34,8 @@
 #pragma once
 
 
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <util/attr.h>
 
 void omron_teardown(void);

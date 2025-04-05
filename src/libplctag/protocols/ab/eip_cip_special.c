@@ -41,8 +41,8 @@
 #include <ab/tag.h>
 #include <ctype.h>
 #include <inttypes.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <platform.h>
 #include <util/attr.h>
 #include <util/debug.h>

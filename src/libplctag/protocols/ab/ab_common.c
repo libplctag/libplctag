@@ -48,8 +48,8 @@
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <limits.h>
 #include <omron/omron.h>
 #include <platform.h>

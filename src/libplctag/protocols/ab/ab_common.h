@@ -34,8 +34,8 @@
 #pragma once
 
 #include <ab/defs.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <util/vector.h>
 
 typedef struct ab_tag_t *ab_tag_p;

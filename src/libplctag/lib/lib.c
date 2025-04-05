@@ -37,10 +37,10 @@
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
-#include <lib/init.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
-#include <lib/version.h>
+#include <libplctag/lib/init.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
+#include <libplctag/lib/version.h>
 #include <limits.h>
 #include <mb/modbus.h>
 #include <platform.h>

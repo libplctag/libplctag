@@ -32,9 +32,9 @@
  ***************************************************************************/
 
 #include <ab/ab.h>
-#include <lib/init.h>
-#include <lib/libplctag.h>
-#include <lib/tag.h>
+#include <libplctag/lib/init.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/tag.h>
 #include <mb/modbus.h>
 #include <omron/omron.h>
 #include <platform.h>

@@ -37,8 +37,8 @@
 
 #include "compat_utils.h"
 #include <inttypes.h>
-#include <lib/libplctag.h>
-#include <lib/version.h>
+#include <libplctag/lib/libplctag.h>
+#include <libplctag/lib/version.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
