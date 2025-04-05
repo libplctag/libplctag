@@ -74,63 +74,11 @@ void usage(void) {
     exit(PLCTAG_ERR_BAD_PARAM);
 }
 
+static volatile int done = 0;
 
-#ifdef _WIN32
-volatile int done = 0;
-
-/* straight from MS' web site :-) */
-BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
-    switch(fdwCtrlType) {
-            // Handle the CTRL-C signal.
-        case CTRL_C_EVENT:
-            done = 1;
-            return TRUE;
-
-            // CTRL-CLOSE: confirm that the user wants to exit.
-        case CTRL_CLOSE_EVENT:
-            done = 1;
-            return TRUE;
-
-            // Pass other signals to the next handler.
-        case CTRL_BREAK_EVENT: done = 1; return FALSE;
-
-        case CTRL_LOGOFF_EVENT: done = 1; return FALSE;
-
-        case CTRL_SHUTDOWN_EVENT: done = 1; return FALSE;
-
-        default: return FALSE;
-    }
-}
-
-
-void setup_break_handler(void) {
-    if(!SetConsoleCtrlHandler(CtrlHandler, TRUE)) {
-        printf("\nERROR: Could not set control handler!\n");
-        usage();
-    }
-}
-
-#else
-volatile sig_atomic_t done = 0;
-
-void SIGINT_handler(int not_used) {
-    (void)not_used;
-
+static interrupt_handler(void) {
     done = 1;
 }
-
-void setup_break_handler(void) {
-    struct sigaction act;
-
-    /* set up signal handler. */
-    // NOLINTNEXTLINE
-    memset(&act, 0, sizeof(act));
-    act.sa_handler = SIGINT_handler;
-    sigaction(SIGINT, &act, NULL);
-}
-
-#endif
-
 
 static int read_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
 static int wait_for_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
@@ -189,7 +137,7 @@ int main(int argc, char **argv) {
     }
 
     /* set up handler for ^C etc. */
-    setup_break_handler();
+    set_interrupt_handler(interrupt_handler);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
