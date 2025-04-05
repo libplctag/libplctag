@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,17 +31,16 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include "../../lib/libplctag.h"
+#include "../../util/debug.h"
+#include "../../util/hashtable.h"
 #include <assert.h>
 #include <stdio.h>
-#include "../../lib/libplctag.h"
-#include "../../util/hashtable.h"
-#include "../../util/debug.h"
 
 #define START_CAPACITY (10)
 #define INSERT_ENTRIES (50)
 
-int main(int argc, const char **argv)
-{
+int main(int argc, const char **argv) {
     hashtable_p table = NULL;
     int size = START_CAPACITY;
     float best_utilization = 0.0;
@@ -50,12 +49,12 @@ int main(int argc, const char **argv)
     (void)argc;
     (void)argv;
 
-    pdebug(DEBUG_INFO,"Starting hashtable tests.");
+    pdebug(DEBUG_INFO, "Starting hashtable tests.");
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_SPEW);
 
     /* create a hashtable */
-    pdebug(DEBUG_INFO,"Creating hashtable with at least capacity %d.", START_CAPACITY);
+    pdebug(DEBUG_INFO, "Creating hashtable with at least capacity %d.", START_CAPACITY);
     table = hashtable_create(START_CAPACITY);
     assert(table != NULL);
     assert(hashtable_capacity(table) >= START_CAPACITY);
@@ -64,23 +63,22 @@ int main(int argc, const char **argv)
     size = hashtable_capacity(table);
 
     /* insert tests. */
-    for(int i=1; i <= INSERT_ENTRIES; i++) {
-        int rc = hashtable_put(table, i, (void*)(intptr_t)i);
+    for(int i = 1; i <= INSERT_ENTRIES; i++) {
+        int rc = hashtable_put(table, i, (void *)(intptr_t)i);
         assert(rc == PLCTAG_STATUS_OK);
 
         if(hashtable_capacity(table) != size) {
-            pdebug(DEBUG_INFO, "Hashtable expanded from %d entries to %d entries after inserting %d entries.", size, hashtable_capacity(table), hashtable_entries(table));
+            pdebug(DEBUG_INFO, "Hashtable expanded from %d entries to %d entries after inserting %d entries.", size,
+                   hashtable_capacity(table), hashtable_entries(table));
             size = hashtable_capacity(table);
         }
     }
 
-    tmp_utilization = (float)(hashtable_entries(table))/(float)(hashtable_capacity(table));
+    tmp_utilization = (float)(hashtable_entries(table)) / (float)(hashtable_capacity(table));
 
-    pdebug(DEBUG_INFO, "Current table utilization %f%%", tmp_utilization*100.0);
+    pdebug(DEBUG_INFO, "Current table utilization %f%%", tmp_utilization * 100.0);
 
-    if(tmp_utilization > best_utilization) {
-        best_utilization = tmp_utilization;
-    }
+    if(tmp_utilization > best_utilization) { best_utilization = tmp_utilization; }
 
     assert(hashtable_entries(table) == INSERT_ENTRIES);
     pdebug(DEBUG_INFO, "Hash table has correct number of used entries, %d.", hashtable_entries(table));
@@ -89,7 +87,7 @@ int main(int argc, const char **argv)
 
     /* retrieval tests. */
     pdebug(DEBUG_INFO, "Running retrieval tests.");
-    for(int i=INSERT_ENTRIES; i > 0; i--) {
+    for(int i = INSERT_ENTRIES; i > 0; i--) {
         void *res = hashtable_get(table, i);
         assert(res != NULL);
 
@@ -98,8 +96,8 @@ int main(int argc, const char **argv)
 
     /* insert + delete tests. */
     pdebug(DEBUG_INFO, "Running combined insert and delete tests.");
-    for(int i=INSERT_ENTRIES+1; i < (INSERT_ENTRIES*2); i++) {
-        int rc = hashtable_put(table, i, (void*)(intptr_t)i);
+    for(int i = INSERT_ENTRIES + 1; i < (INSERT_ENTRIES * 2); i++) {
+        int rc = hashtable_put(table, i, (void *)(intptr_t)i);
         void *res = NULL;
 
         assert(rc == PLCTAG_STATUS_OK);
@@ -111,18 +109,15 @@ int main(int argc, const char **argv)
     assert(hashtable_entries(table) == INSERT_ENTRIES);
     pdebug(DEBUG_INFO, "Hash table has correct number of used entries, %d.", hashtable_entries(table));
 
-    tmp_utilization = (float)(hashtable_entries(table))/(float)(hashtable_capacity(table));
+    tmp_utilization = (float)(hashtable_entries(table)) / (float)(hashtable_capacity(table));
 
-    pdebug(DEBUG_INFO, "Current table utilization %f%%", tmp_utilization*100.0);
+    pdebug(DEBUG_INFO, "Current table utilization %f%%", tmp_utilization * 100.0);
 
-    if(tmp_utilization > best_utilization) {
-        best_utilization = tmp_utilization;
-    }
+    if(tmp_utilization > best_utilization) { best_utilization = tmp_utilization; }
 
-    pdebug(DEBUG_INFO, "Best table utilization %f%%", best_utilization*100.0);
+    pdebug(DEBUG_INFO, "Best table utilization %f%%", best_utilization * 100.0);
 
     hashtable_destroy(table);
 
     pdebug(DEBUG_INFO, "Done.");
 }
-

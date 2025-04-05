@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,15 +32,15 @@
  ***************************************************************************/
 
 
+#include "../lib/libplctag.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <stdint.h>
-#include "../lib/libplctag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2, 1, 0
 
 #define TIMEOUT_MS (15000) /* a loooooong timeout */
 
@@ -48,16 +48,19 @@
 #define BARCODE_PROCESSED "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=lgx&elem_size=1&elem_count=1&name=barcode_processed"
 #define BARCODE "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=lgx&elem_size=88&elem_count=1&name=barcode"
 
-#define TRY(f) if((rc = (f)) != PLCTAG_STATUS_OK) { printf("ERROR: " #f " failed with error %s!\n", plc_tag_decode_error(rc)); break; }
+#define TRY(f)                                                                     \
+    if((rc = (f)) != PLCTAG_STATUS_OK) {                                           \
+        printf("ERROR: " #f " failed with error %s!\n", plc_tag_decode_error(rc)); \
+        break;                                                                     \
+    }
 
 static int wait_for_new_barcode(void);
 static int read_barcode(void);
 static int mark_barcode_processed(void);
 
-int main(int argc, const char **argv)
-{
+int main(int argc, const char **argv) {
     int rc = PLCTAG_STATUS_OK;
-    int64_t last_read = util_time_ms();
+    int64_t last_read = system_time_ms();
     int64_t first_read = last_read;
 
     (void)argc;
@@ -65,6 +68,7 @@ int main(int argc, const char **argv)
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -81,7 +85,7 @@ int main(int argc, const char **argv)
 
         TRY(mark_barcode_processed())
 
-        new_time = util_time_ms();
+        new_time = system_time_ms();
 
         diff_time = new_time - last_read;
         total_time = new_time - first_read;
@@ -95,8 +99,7 @@ int main(int argc, const char **argv)
 }
 
 
-int wait_for_new_barcode(void)
-{
+int wait_for_new_barcode(void) {
     static int32_t new_barcode_tag = 0;
     int rc = PLCTAG_STATUS_PENDING;
 
@@ -109,7 +112,6 @@ int wait_for_new_barcode(void)
         }
     }
 
-    rc = PLCTAG_STATUS_PENDING;
     do {
         uint8_t flag_val = 0;
 
@@ -122,7 +124,7 @@ int wait_for_new_barcode(void)
                 rc = PLCTAG_STATUS_OK;
             } else {
                 rc = PLCTAG_STATUS_PENDING;
-                util_sleep_ms(4000);
+                system_sleep_ms(4000, NULL);
             }
         }
     } while(rc == PLCTAG_STATUS_PENDING);
@@ -131,12 +133,12 @@ int wait_for_new_barcode(void)
 }
 
 
-
-int read_barcode(void)
-{
+int read_barcode(void) {
     static int32_t barcode_tag = 0;
     int rc = PLCTAG_STATUS_OK;
-    char barcode_buf[85] = {0,};
+    char barcode_buf[85] = {
+        0,
+    };
 
     if(barcode_tag <= 0) {
         barcode_tag = plc_tag_create(BARCODE, TIMEOUT_MS);
@@ -167,9 +169,7 @@ int read_barcode(void)
 }
 
 
-
-int mark_barcode_processed(void)
-{
+int mark_barcode_processed(void) {
     static int32_t barcode_processed_tag = 0;
     int rc = PLCTAG_STATUS_OK;
 

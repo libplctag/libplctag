@@ -29,6 +29,23 @@
 #   Free Software Foundation, Inc.,
 #   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+set(CMAKE_VERBOSE_MAKEFILE On)
+
+cmake_minimum_required (VERSION 3.10)
+cmake_policy(SET CMP0054 NEW)
+
+
+# this is the root libplctag project
+project (libplctag_project)
+
+# we use C11 now
+set(C_STANDARD 11)
+
+# make sure our outputs are going somewhere sane
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
+
 
 # the project version
 set (libplctag_VERSION_MAJOR 2)
@@ -38,33 +55,22 @@ set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
-cmake_minimum_required (VERSION 2.8...3.19)
 
-# prevent expansion of quoted things that could be variables in if()
-if(${CMAKE_VERSION} VERSION_GREATER 3.1)
-    cmake_policy(SET CMP0054 NEW)
-endif()
+# build examples flag
+set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
+set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
+
+set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
+
+
 
 # set a variable based on Android use
-if(ANDROID_ABI)
+if(ANDROID_ABI OR ANDROID)
     message("Building on Android.")
     set(ANDROID_BUILD 1)
 else()
     message("Not building on Android.")
     set(ANDROID_BUILD 0)
-endif()
-
-# Check more Android flags
-if(ANDROID_BUILD)
-    message("No need to check more variables for Android, already building Android.")
-else()
-    if(ANDROID)
-        message("Building on Android.")
-        set(ANDROID_BUILD 1)
-    else()
-        message("Not building on Android.")
-        set(ANDROID_BUILD 0)
-    endif()
 endif()
 
 
@@ -140,12 +146,8 @@ if (${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
 endif()
 
-# build examples flag
-set(BUILD_EXAMPLES 1 CACHE BOOL "Build examples or not")
 
-set(USE_SANITIZERS 1 CACHE BOOL "Build with google sanitizers or not")
-
-message("Building with sanitizers: ${USE_SANITIZERS}")
+message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 
 # set flags for MacOSX
 if (APPLE)
@@ -155,78 +157,73 @@ endif (APPLE)
 # default setting for 32-bit builds
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 
-# this is the root libplctag project
-project (libplctag_project)
-
-# make sure our outputs are going somewhere sane
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 
 # we need threads
 find_package(Threads REQUIRED)
 
 # set the main paths.
-set ( base_SRC_PATH "${PROJECT_SOURCE_DIR}/src" )
-set ( lib_SRC_PATH "${base_SRC_PATH}/lib" )
-set ( protocol_SRC_PATH "${base_SRC_PATH}/protocols" )
+set ( base_SRC_PATH "${CMAKE_SOURCE_DIR}/src" )
+set ( lib_SRC_PATH "${CMAKE_SOURCE_DIR}/src/libplctag/lib" )
+set ( protocol_SRC_PATH "${CMAKE_SOURCE_DIR}/src/libplctag/protocols" )
 set ( ab_SRC_PATH "${protocol_SRC_PATH}/ab" )
 set ( mb_SRC_PATH "${protocol_SRC_PATH}/mb" )
-set ( util_SRC_PATH "${base_SRC_PATH}/util" )
-set ( example_SRC_PATH "${base_SRC_PATH}/examples" )
-set ( test_SRC_PATH "${base_SRC_PATH}/tests" )
-set ( cli_SRC_PATH "${base_SRC_PATH}/contrib/cli" )
+set ( util_SRC_PATH "${CMAKE_SOURCE_DIR}/src/util" )
+set ( example_SRC_PATH "${base_SRC_PATH}/src/examples" )
+set ( test_SRC_PATH "${base_SRC_PATH}/src/tests" )
+set ( cli_SRC_PATH "${base_SRC_PATH}/src/contrib/cli" )
 
 # OS-specific files for the platform code.
-if (UNIX)
+if (UNIX OR APPLE)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/posix" )
 elseif (WIN32)
     set ( platform_SRC_PATH "${base_SRC_PATH}/platform/windows" )
+else()
+    message("No platform code path set!")
+    return()
 endif()
 
+message("Using ${platform_SRC_PATH}/platform.h and ${platform_SRC_PATH}/platform.c for platform-specific code.")
 
 # where to find include files.
 include_directories("${base_SRC_PATH}")
 include_directories("${platform_SRC_PATH}")
 include_directories("${protocol_SRC_PATH}")
 
-
-SET(C11_SUPPORT False)
-SET(C99_FLAGS "")
-
 # C compiler specific settings
-if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
     # using Clang
 
     SET(STR_OP_OVERFLOW_ON "")
     SET(STR_OP_OVERFLOW_OFF "")
 
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Os -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
+    set(CMAKE_C_FLAGS_RELEASE_INIT "-Os -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF}")
+    set(CMAKE_C_FLAGS_DEBUG_INIT " -O0 -g -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${STR_OP_OVERFLOW_ON}")
     set(BASE_RELEASE_LINK_FLAGS "")
     set(BASE_DEBUG_LINK_FLAGS "")
 
     if(USE_SANITIZERS)
-        SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=leak -fsanitize=undefined")
-        STRING(APPEND BASE_DEBUG_FLAGS ${SANITIZERS_FLAGS})
+        if(APPLE)
+            SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=undefined")
+        else()
+            SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=leak -fsanitize=undefined")
+        endif()
+        STRING(APPEND CMAKE_C_FLAGS_DEBUG_INIT ${SANITIZERS_FLAGS})
         STRING(APPEND BASE_DEBUG_LINK_FLAGS ${SANITIZERS_FLAGS})
     endif()
 
     if(APPLE)
-        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D_DARWIN_C_SOURCE")
-        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -D_DARWIN_C_SOURCE")
+        set(CMAKE_C_FLAGS_RELEASE_INIT "${CMAKE_C_FLAGS_RELEASE_INIT} -D_DARWIN_C_SOURCE")
+        set(CMAKE_C_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} -D_DARWIN_C_SOURCE")
     else()
-        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+        set(CMAKE_C_FLAGS_RELEASE_INIT "${CMAKE_C_FLAGS_RELEASE_INIT} -D__USE_POSIX=1 -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L")
+        set(CMAKE_C_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} -D__USE_POSIX=1 -D_XOPEN_SOURCE=700 -D_POSIX_C_SOURCE=200809L")
     endif()
 
-	set(C11_SUPPORT true)
-	set(C99_FLAGS "-std=c99" )
 
     # check to see if we are building 32-bit or 64-bit
     if(BUILD_32_BIT)
-        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -m32")
-        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -m32")
+        set(CMAKE_C_FLAGS_RELEASE_INIT "${CMAKE_C_FLAGS_RELEASE_INIT} -m32")
+        set(CMAKE_C_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} -m32")
         set(BASE_RELEASE_LINK_FLAGS "${BASE_RELEASE_LINK_FLAGS} -m32")
         set(BASE_DEBUG_LINK_FLAGS "${BASE_DEBUG_LINK_FLAGS} -m32")
     endif()
@@ -246,11 +243,9 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 		MESSAGE(STATUS "COMPILER_VERSION=" ${COMPILER_VERSION})
 	endif()
 
-	if(${COMPILER_VERSION} VERSION_GREATER 5.1 OR ${COMPILER_VERSION} VERSION_GREATER 5.1)
+	if(${COMPILER_VERSION} VERSION_GREATER 5.1)
 		# The compiler has the C99-c11-compat check.
 		MESSAGE(STATUS "Compiler supports C99/C11 compatibility check." )
-		SET(C11_CHECK "-Wc99-c11-compat" )
-		SET(C11_SUPPORT True)
 	else()
 		MESSAGE(STATUS "Compiler does not support C99/C11 compatibility check." )
 	endif()
@@ -268,406 +263,98 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
         SET(STR_OP_OVERFLOW_OFF "")
     endif()
 
-    SET(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    SET(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} -g -Wall -pedantic -Wextra -Wconversion -fms-extensions -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-	SET(C99_FLAGS "-std=c99" )
+    SET(CMAKE_C_FLAGS_RELEASE_INIT " -Os -DNDEBUG -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    SET(CMAKE_C_FLAGS_DEBUG_INIT "  -O0  -g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     SET(BASE_RELEASE_LINK_FLAGS "")
     SET(BASE_DEBUG_LINK_FLAGS "")
 
     if(USE_SANITIZERS)
         SET(SANITIZERS_FLAGS " -fsanitize=address -fsanitize=leak -fsanitize=undefined")
-        STRING(APPEND BASE_DEBUG_FLAGS ${SANITIZERS_FLAGS})
+        STRING(APPEND CMAKE_C_FLAGS_DEBUG_INIT ${SANITIZERS_FLAGS})
         STRING(APPEND BASE_DEBUG_LINK_FLAGS ${SANITIZERS_FLAGS})
     endif()
 
     # check to see if we are building 32-bit or 64-bit
     if(BUILD_32_BIT)
-        set(BASE_RELEASE_FLAGS "${BASE_RELEASE_FLAGS} -m32")
-        set(BASE_DEBUG_FLAGS "${BASE_DEBUG_FLAGS} -m32")
+        set(CMAKE_C_FLAGS_RELEASE_INIT "${CMAKE_C_FLAGS_RELEASE_INIT} -m32")
+        set(CMAKE_C_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} -m32")
         set(BASE_RELEASE_LINK_FLAGS "${BASE_RELEASE_LINK_FLAGS} -m32")
         set(BASE_DEBUG_LINK_FLAGS "${BASE_DEBUG_LINK_FLAGS} -m32")
     endif()
-elseif (CMAKE_C_COMPILER_ID STREQUAL "Intel")
-    # using Intel C/C++
-    MESSAGE("Intel C compiler not supported!")
-    RETURN()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
-    set(BASE_RELEASE_FLAGS "${CMAKE_C_FLAGS} /W3")
-    set(BASE_DEBUG_FLAGS "${CMAKE_C_FLAGS} /W3")
+    set(CMAKE_C_FLAGS_RELEASE_INIT "/O2 /Ob2 /DNDEBUG /W3 /MT /c /std:c11 -D_CRT_SECURE_NO_WARNINGS")
+    set(CMAKE_C_FLAGS_DEBUG_INIT "/Zi /Ob0 /Od /W3 /MDd /c /std:c11 -D_CRT_SECURE_NO_WARNINGS")
+    set(CMAKE_CXX_FLAGS_RELEASE_INIT "/O2 /Ob2 /DNDEBUG /W3 /MT -D_CRT_SECURE_NO_WARNINGS")
+    set(CMAKE_CXX_FLAGS_DEBUG_INIT "/Zi /Ob0 /Od /W3 /MDd -D_CRT_SECURE_NO_WARNINGS")
+
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    # /MD$<$<STREQUAL:$<CONFIGURATION>,Debug>:d>
-endif()
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(BASE_FLAGS "${BASE_DEBUG_FLAGS}")
-    set(BASE_LINK_FLAGS "${BASE_DEBUG_LINK_FLAGS}")
+    set(EXTRA_LINKER_LIBS ws2_32 bcrypt)
+
+    if(USE_SANITIZERS)
+        set(CMAKE_C_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} /RTCu")
+        set(CMAKE_CXX_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} /RTCu")
+
+        set(CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT "${CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT} /RTCu")
+        set(CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT "${CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT} /RTCu")
+    endif()
+
 else()
-    set(BASE_FLAGS "${BASE_RELEASE_FLAGS}")
-    set(BASE_LINK_FLAGS "${BASE_RELEASE_LINK_FLAGS}")
+    message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
+    return()
 endif()
 
-#MESSAGE("BASE_FLAGS=${BASE_FLAGS}")
+message("CMAKE_C_FLAGS_RELEASE_INIT = ${CMAKE_C_FLAGS_RELEASE_INIT}")
+message("CMAKE_C_FLAGS_DEBUG_INIT = ${CMAKE_C_FLAGS_DEBUG_INIT}")
+message("CMAKE_CXX_FLAGS_RELEASE_INIT = ${CMAKE_C_FLAGS_RELEASE_INIT}")
+message("CMAKE_CXX_FLAGS_DEBUG_INIT = ${CMAKE_C_FLAGS_DEBUG_INIT}")
 
-if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-    # check MSVC version, only newer versions than 2012 support C99 things we need
-    if((${MSVC_VERSION} EQUAL 1800) OR (${MSVC_VERSION} LESS 1800))
-        message("MSVC cannot handle C99, compiling code as C++")
-        set(BASE_C_FLAGS "${BASE_FLAGS}")
-    else()
-        message("MSVC can handle C99, compiling code as C")
-        set(BASE_C_FLAGS "${BASE_FLAGS} /c")
-    endif()
+message("CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT = ${CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT}")
+message("CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT = ${CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT}")
 
-    # set static compilation and linking flags
-    # skipped on Windows for now
+message("EXTRA_LINKER_LIBS = ${EXTRA_LINKER_LIBS}")
 
-    #set(STATIC_COMPILE_FLAGS "/MT")
-    #set(STATIC_LINK_FLAGS "/MT:UCRT /INCREMENTAL:NO /NODEFAULTLIB:MSVCCRT")
+add_subdirectory("${CMAKE_SOURCE_DIR}/src/libplctag")
 
-    set(STATIC_COMPILE_FLAGS "")
-    set(STATIC_LINK_FLAGS "")
-else()
-    #set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99 -Wc++-compat ")
-    set(BASE_C_FLAGS "${BASE_FLAGS} -std=c99")
-    set(STATIC_COMPILE_FLAGS "")
-    set(STATIC_LINK_FLAGS "-static")
-endif()
+if(BUILD_EXAMPLES)
+    message("Building examples.")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/src/examples")
+endif(BUILD_EXAMPLES)
 
-set(BASE_CXX_FLAGS "${BASE_FLAGS}")
+#if(BUILD_TESTS)
+#    message("Building tests.")
+#    add_subdirectory("${CMAKE_SOURCE_DIR}/src/tests")
+#endif(BUILD_TESTS)
 
-MESSAGE("BASE_C_FLAGS=${BASE_C_FLAGS}")
-MESSAGE("BASE_CXX_FLAGS=${BASE_CXX_FLAGS}")
 
-# generate version file from CMake info.
-CONFIGURE_FILE("${lib_SRC_PATH}/version.h.in" "${lib_SRC_PATH}/version.h" @ONLY)
+#    set(CLI_FILES ${cli_SRC_PATH}/cli.c
+#        ${cli_SRC_PATH}/cli.h
+#        ${cli_SRC_PATH}/getline.h
+#        ${cli_SRC_PATH}/uthash.h
+#        ${libplctag_SRCS}
+#    )
 
-# set up the library sources
-set ( libplctag_SRCS "${lib_SRC_PATH}/init.c"
-                     "${lib_SRC_PATH}/init.h"
-                     "${lib_SRC_PATH}/libplctag.h"
-                     "${lib_SRC_PATH}/lib.c"
-                     "${lib_SRC_PATH}/tag.h"
-                     "${lib_SRC_PATH}/version.h"
-                     "${lib_SRC_PATH}/version.c"
-                     "${ab_SRC_PATH}/ab.h"
-                     "${ab_SRC_PATH}/ab_common.c"
-                     "${ab_SRC_PATH}/ab_common.h"
-                     "${ab_SRC_PATH}/cip.c"
-                     "${ab_SRC_PATH}/cip.h"
-                     "${ab_SRC_PATH}/defs.h"
-                     "${ab_SRC_PATH}/eip_cip.c"
-                     "${ab_SRC_PATH}/eip_cip.h"
-                     "${ab_SRC_PATH}/eip_cip_special.c"
-                     "${ab_SRC_PATH}/eip_cip_special.h"
-                     "${ab_SRC_PATH}/eip_lgx_pccc.c"
-                     "${ab_SRC_PATH}/eip_lgx_pccc.h"
-                     "${ab_SRC_PATH}/eip_plc5_dhp.c"
-                     "${ab_SRC_PATH}/eip_plc5_dhp.h"
-                     "${ab_SRC_PATH}/eip_plc5_pccc.c"
-                     "${ab_SRC_PATH}/eip_plc5_pccc.h"
-                     "${ab_SRC_PATH}/eip_slc_dhp.c"
-                     "${ab_SRC_PATH}/eip_slc_dhp.h"
-                     "${ab_SRC_PATH}/eip_slc_pccc.c"
-                     "${ab_SRC_PATH}/eip_slc_pccc.h"
-                     "${ab_SRC_PATH}/error_codes.c"
-                     "${ab_SRC_PATH}/error_codes.h"
-                     "${ab_SRC_PATH}/pccc.c"
-                     "${ab_SRC_PATH}/pccc.h"
-                     "${ab_SRC_PATH}/session.c"
-                     "${ab_SRC_PATH}/session.h"
-                     "${ab_SRC_PATH}/tag.h"
-                     "${protocol_SRC_PATH}/omron/omron.h"
-                     "${protocol_SRC_PATH}/omron/omron_common.c"
-                     "${protocol_SRC_PATH}/omron/omron_common.h"
-                     "${protocol_SRC_PATH}/omron/cip.c"
-                     "${protocol_SRC_PATH}/omron/cip.h"
-                     "${protocol_SRC_PATH}/omron/conn.c"
-                     "${protocol_SRC_PATH}/omron/conn.h"
-                     "${protocol_SRC_PATH}/omron/defs.h"
-                     "${protocol_SRC_PATH}/omron/omron_raw_tag.c"
-                     "${protocol_SRC_PATH}/omron/omron_raw_tag.h"
-                     "${protocol_SRC_PATH}/omron/omron_standard_tag.c"
-                     "${protocol_SRC_PATH}/omron/omron_standard_tag.h"
-                     "${protocol_SRC_PATH}/omron/tag.h"
-                     "${mb_SRC_PATH}/modbus.c"
-                     "${mb_SRC_PATH}/modbus.h"
-                     "${protocol_SRC_PATH}/system/system.c"
-                     "${protocol_SRC_PATH}/system/system.h"
-                     "${protocol_SRC_PATH}/system/tag.h"
-                     "${util_SRC_PATH}/atomic_int.c"
-                     "${util_SRC_PATH}/atomic_int.h"
-                     "${util_SRC_PATH}/attr.c"
-                     "${util_SRC_PATH}/attr.h"
-                     "${util_SRC_PATH}/byteorder.h"
-                     "${util_SRC_PATH}/debug.c"
-                     "${util_SRC_PATH}/debug.h"
-                     "${util_SRC_PATH}/hash.c"
-                     "${util_SRC_PATH}/hash.h"
-                     "${util_SRC_PATH}/hashtable.c"
-                     "${util_SRC_PATH}/hashtable.h"
-                     "${util_SRC_PATH}/macros.h"
-                     "${util_SRC_PATH}/rc.c"
-                     "${util_SRC_PATH}/rc.h"
-                     "${util_SRC_PATH}/vector.c"
-                     "${util_SRC_PATH}/vector.h"
-                     "${platform_SRC_PATH}/platform.c"
-                     "${platform_SRC_PATH}/platform.h" )
+#    foreach(CLI_FILES ${CLI_FILES})
+#    set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}" )
+#    endforeach()
 
-# set the compiler flags
-FOREACH( lib_src ${libplctag_SRCS} )
-    set_source_files_properties(${lib_src} PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}")
-ENDFOREACH()
+#    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
 
-# shared library
-add_library(plctag_dyn SHARED ${libplctag_SRCS} )
+#    target_link_libraries(cli ${example_LIBRARIES} )
 
-# set various properties on them
-set_target_properties(plctag_dyn PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
+#    if(BASE_LINK_FLAGS)
+#    set_target_properties(cli PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
+#    endif()
 
-if(BASE_LINK_FLAGS)
-    set_target_properties(plctag_dyn PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-endif()
+# Generate files from templates
+CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
-if(UNIX)
-	# static library
-	add_library(plctag_static STATIC ${libplctag_SRCS} )
-    set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-	set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
+# build the GitHub Actions config file
+CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
 
-	set(tool_lib "plctag_dyn")
-elseif(WIN32)
-    # static library
-	add_library(plctag_static STATIC ${libplctag_SRCS} )
-	set_target_properties(plctag_static PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-	set_target_properties(plctag_static PROPERTIES VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
-
-    target_compile_definitions(plctag_dyn PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)
-	set(tool_lib "plctag_dyn")
-endif()
-
-# make sure we link with the threading library.
-if (UNIX)
-    if(CMAKE_THREAD_LIBS_INIT)
-      target_link_libraries(plctag_dyn "${CMAKE_THREAD_LIBS_INIT}")
-      target_link_libraries(plctag_static "${CMAKE_THREAD_LIBS_INIT}")
-    endif()
-endif()
-
-# Windows needs to link the library to the WINSOCK library
-if (WIN32)
-    target_link_libraries(plctag_dyn ws2_32)
-    target_link_libraries(plctag_static ws2_32)
-endif()
-
-# add the examples and tests
-if(ANDROID_BUILD)
-    MESSAGE("Building for Android.")
-elseif (BUILD_EXAMPLES)
-    if (UNIX)
-        # example programs
-        set ( example_PROGRAMS async
-                            async_stress
-                            barcode_test
-                            busy_test
-                            data_dumper
-                            list_tags_logix
-                            list_tags_micro8x0
-                            list_tags_omron
-                            multithread
-                            multithread_cached_read
-                            multithread_plc5
-                            multithread_plc5_dhp
-                            plc5
-                            simple
-                            simple_dual
-                            slc500
-                            stress_api_lock
-                            stress_test
-                            string_non_standard_udt
-                            string_standard
-                            test_alternate_tag_listing
-                            test_array_notation
-                            test_auto_sync
-                            test_callback
-                            test_callback_ex
-                            test_callback_ex_logix
-                            test_callback_ex_modbus
-                            test_connection_group
-                            test_indexed_tags
-                            test_many_tag_perf
-                            test_raw_cip
-                            test_reconnect
-                            test_shutdown
-                            test_special
-                            test_string
-                            test_tag_attributes
-                            test_tag_type_attribute
-                            thread_stress
-                            toggle_bit
-                            toggle_bool
-                            write_string
-                            tag_rw
-                            tag_rw2
-                            )
-
-        set ( example_PROG_UTIL utils_posix.c )
-        set ( example_LIBRARIES ${tool_lib} pthread )
-    elseif(WIN32)
-        set ( example_PROGRAMS async
-                            async_stress
-                            list_tags_logix
-                            list_tags_micro8x0
-                            list_tags_omron
-                            multithread
-                            plc5
-                            simple
-                            simple_dual
-                            slc500
-                            string_non_standard_udt
-                            string_standard
-                            test_array_notation
-                            test_callback
-                            test_callback_ex
-                            test_connection_group
-                            test_indexed_tags
-                            test_event_windows
-                            test_raw_cip
-                            test_shutdown
-                            test_special
-                            test_string
-                            test_tag_attributes
-                            test_tag_type_attribute
-                            thread_stress
-                            toggle_bit
-                            toggle_bool
-                            write_string
-                            tag_rw
-                            tag_rw2
-                            )
-
-        set ( example_PROG_UTIL utils_windows.c)
-        set ( example_LIBRARIES ${tool_lib} ws2_32 )
-    endif()
-
-    # set the compile flags for the utilities file.
-    set_source_files_properties("${example_SRC_PATH}/${example_PROG_UTIL}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
-
-    # set the compile and link properties for all examples.
-    foreach ( example ${example_PROGRAMS} )
-        set_source_files_properties("${example_SRC_PATH}/${example}.c" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
-        add_executable( ${example} "${example_SRC_PATH}/${example}.c" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-        target_link_libraries(${example} ${example_LIBRARIES} )
-
-        if(BASE_LINK_FLAGS)
-            set_target_properties(${example} PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-        endif()
-    endforeach(example)
-
-    # simple.cpp is different because it is C++
-    set_source_files_properties("${example_SRC_PATH}/simple_cpp.cpp" PROPERTIES COMPILE_FLAGS "${BASE_CXX_FLAGS}")
-    add_executable (simple_cpp "${example_SRC_PATH}/simple_cpp.cpp" "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-
-    target_link_libraries (simple_cpp ${example_LIBRARIES} )
-
-    if(BASE_LINK_FLAGS)
-        message("BASE_LINK_FLAGS=${BASE_LINK_FLAGS}")
-        set_target_properties(simple_cpp PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-    endif()
-
-    # Generate files from templates
-    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
-
-    # build the GitHub Actions config file
-    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
-
-    # build the simulator for testing.
-    # if(UNIX)
-        set(AB_SERVER_FILES ${test_SRC_PATH}/ab_server/src/cip.c
-                            ${test_SRC_PATH}/ab_server/src/cip.h
-                            ${test_SRC_PATH}/ab_server/src/compat.h
-                            ${test_SRC_PATH}/ab_server/src/cpf.c
-                            ${test_SRC_PATH}/ab_server/src/cpf.h
-                            ${test_SRC_PATH}/ab_server/src/eip.c
-                            ${test_SRC_PATH}/ab_server/src/eip.h
-                            ${test_SRC_PATH}/ab_server/src/main.c
-                            ${test_SRC_PATH}/ab_server/src/memory.c
-                            ${test_SRC_PATH}/ab_server/src/memory.h
-                            ${test_SRC_PATH}/ab_server/src/mutex.c
-                            ${test_SRC_PATH}/ab_server/src/mutex.h
-                            ${test_SRC_PATH}/ab_server/src/pccc.c
-                            ${test_SRC_PATH}/ab_server/src/pccc.h
-                            ${test_SRC_PATH}/ab_server/src/plc.h
-                            ${test_SRC_PATH}/ab_server/src/slice.h
-                            ${test_SRC_PATH}/ab_server/src/socket.c
-                            ${test_SRC_PATH}/ab_server/src/socket.h
-                            ${test_SRC_PATH}/ab_server/src/tcp_server.c
-                            ${test_SRC_PATH}/ab_server/src/tcp_server.h
-                            ${test_SRC_PATH}/ab_server/src/thread.c
-                            ${test_SRC_PATH}/ab_server/src/thread.h
-                            ${test_SRC_PATH}/ab_server/src/utils.c
-                            ${test_SRC_PATH}/ab_server/src/utils.h
-        )
-
-        foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-            set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS} ${C11_CHECK}" )
-        endforeach()
-
-        add_executable(ab_server ${AB_SERVER_FILES})
-
-        target_link_libraries(ab_server ${example_LIBRARIES} )
-
-        if(BASE_LINK_FLAGS)
-            set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-        endif()
-    # endif()
-
-    # build the cli.
-    set(CLI_FILES ${cli_SRC_PATH}/cli.c
-        ${cli_SRC_PATH}/cli.h
-        ${cli_SRC_PATH}/getline.h
-        ${cli_SRC_PATH}/uthash.h
-        ${libplctag_SRCS}
-    )
-
-    foreach(CLI_FILES ${CLI_FILES})
-    set_source_files_properties("${CLI_FILES}" PROPERTIES COMPILE_FLAGS "${C99_FLAGS} ${BASE_C_FLAGS}" )
-    endforeach()
-
-    add_executable(cli ${CLI_FILES} "${example_SRC_PATH}/${example_PROG_UTIL}" "${example_SRC_PATH}/utils.h" )
-
-    target_link_libraries(cli ${example_LIBRARIES} )
-
-    if(BASE_LINK_FLAGS)
-    set_target_properties(cli PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-    endif()
-
-    # make sure the .h file is in the output directory
-    CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/src/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
-endif(ANDROID_BUILD)
-
-# add the cli
-if(ANDROID_BUILD)
-    MESSAGE("Building for Android.")
-endif(ANDROID_BUILD)
 
 # for installation
-if(UNIX)
-	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
-	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
-elseif(WIN32)
-	install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
-	install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
-endif()
-
-if(ANDROID_BUILD)
-    message("Skipping package config and header file copy for Android build.")
-else()
-    install(FILES "${lib_SRC_PATH}/libplctag.h" DESTINATION include)
-    if(EXISTS "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc")
-        install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
-    endif()
-endif(ANDROID_BUILD)
 
 macro(print_all_variables)
     message(STATUS "print_all_variables------------------------------------------{")

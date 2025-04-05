@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,10 +32,10 @@
  ***************************************************************************/
 
 
+#include "../lib/libplctag.h"
+#include "compat_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
 /*
  * This tests the use of simultaneous connected (DH+ to a PLC) and unconnected messages (to an LGX).  The first
@@ -43,7 +43,7 @@
  * unconnected packet format.
  */
 
-#define REQUIRED_VERSION 2,1,19
+#define REQUIRED_VERSION 2, 1, 19
 
 // #define TAG_PATH1 "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=10&name=TestDINTArray&debug=1"
 // #define TAG_PATH2 "protocol=ab_eip&gateway=10.206.1.39&path=1,2,A:27:1&cpu=plc5&elem_count=4&elem_size=4&name=F8:0&debug=1"
@@ -55,17 +55,17 @@
 #define DATA_TIMEOUT 1000
 
 
-int main()
-{
+int main(void) {
     int32_t tag1 = 0;
     int32_t tag2 = 0;
-    int rc1,rc2;
+    int rc1, rc2;
     int i;
     int elem_size = 0;
     int elem_count = 0;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -79,34 +79,38 @@ int main()
 
     /* everything OK? */
     if(plc_tag_status(tag1) != PLCTAG_STATUS_OK && plc_tag_status(tag1) != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR, %s: Could not create tag 1!\n", plc_tag_decode_error(plc_tag_status(tag1)));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR, %s: Could not create tag 1!\n", plc_tag_decode_error(plc_tag_status(tag1)));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return plc_tag_status(tag1);
     }
 
     if(plc_tag_status(tag2) != PLCTAG_STATUS_OK && plc_tag_status(tag2) != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR, %s: Could not create tag 2!\n", plc_tag_decode_error(plc_tag_status(tag2)));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR, %s: Could not create tag 2!\n", plc_tag_decode_error(plc_tag_status(tag2)));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return plc_tag_status(tag2);
     }
 
     /* brute force wait for tags to finish setting up */
-    util_sleep_ms(DATA_TIMEOUT);
+    system_sleep_ms(DATA_TIMEOUT, NULL);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);
 
     if(rc1 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag 1 internal state. %s\n", plc_tag_decode_error(rc1));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error setting up tag 1 internal state. %s\n", plc_tag_decode_error(rc1));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return rc1;
     }
 
     if(rc2 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag 2 internal state. %s\n", plc_tag_decode_error(rc2));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error setting up tag 2 internal state. %s\n", plc_tag_decode_error(rc2));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return rc2;
@@ -117,34 +121,38 @@ int main()
     rc1 = plc_tag_read(tag1, 0);
 
     if(rc1 != PLCTAG_STATUS_OK && rc1 != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR: Unable to start reading the tag 1 data! Got error code %d: %s\n",rc1, plc_tag_decode_error(rc1));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Unable to start reading the tag 1 data! Got error code %d: %s\n", rc1, plc_tag_decode_error(rc1));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return rc1;
     }
 
     if(rc2 != PLCTAG_STATUS_OK && rc2 != PLCTAG_STATUS_PENDING) {
-        fprintf(stderr,"ERROR: Unable to start reading the tag 2 data! Got error code %d: %s\n",rc2, plc_tag_decode_error(rc2));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Unable to start reading the tag 2 data! Got error code %d: %s\n", rc2, plc_tag_decode_error(rc2));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return rc2;
     }
 
     /* let the reads complete */
-    util_sleep_ms(DATA_TIMEOUT);
+    system_sleep_ms(DATA_TIMEOUT, NULL);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);
 
     if(rc1 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the tag 1 data! Got error code %d: %s\n",rc1, plc_tag_decode_error(rc1));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Unable to read the tag 1 data! Got error code %d: %s\n", rc1, plc_tag_decode_error(rc1));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return rc1;
     }
 
     if(rc2 != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the tag 2 data! Got error code %d: %s\n",rc2, plc_tag_decode_error(rc2));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Unable to read the tag 2 data! Got error code %d: %s\n", rc2, plc_tag_decode_error(rc2));
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return rc2;
@@ -154,30 +162,34 @@ int main()
     /* print out the data for tag 1 */
     elem_count = plc_tag_get_int_attribute(tag1, "elem_count", 0);
     if(elem_count == 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Tag element count is zero!\n");
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return PLCTAG_ERR_NO_DATA;
     }
 
-    elem_size = plc_tag_get_size(tag1)/elem_count;
+    elem_size = plc_tag_get_size(tag1) / elem_count;
 
-    for(i=0; i < elem_count; i++) {
+    for(i = 0; i < elem_count; i++) {
         switch(elem_size) {
             case 1:
-                fprintf(stderr,"tag 1 data[%d]=%d\n",i,plc_tag_get_int8(tag1,(i*1)));
+                // NOLINTNEXTLINE
+                fprintf(stderr, "tag 1 data[%d]=%d\n", i, plc_tag_get_int8(tag1, (i * 1)));
                 break;
 
             case 2:
-                fprintf(stderr,"tag 1 data[%d]=%d\n",i,plc_tag_get_int16(tag1,(i*2)));
+                // NOLINTNEXTLINE
+                fprintf(stderr, "tag 1 data[%d]=%d\n", i, plc_tag_get_int16(tag1, (i * 2)));
                 break;
 
             case 4:
-                fprintf(stderr,"tag 1 data[%d]=%f\n",i,plc_tag_get_float32(tag1,(i*4)));
+                // NOLINTNEXTLINE
+                fprintf(stderr, "tag 1 data[%d]=%f\n", i, plc_tag_get_float32(tag1, (i * 4)));
                 break;
 
             default:
-                fprintf(stderr, "Unsupported size %d!", elem_size);
+                // NOLINTNEXTLINE
                 plc_tag_destroy(tag1);
                 plc_tag_destroy(tag2);
                 return PLCTAG_ERR_NO_DATA;
@@ -188,29 +200,31 @@ int main()
     /* print out the data for tag 2 */
     elem_count = plc_tag_get_int_attribute(tag2, "elem_count", 0);
     if(elem_count == 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Tag element count is zero!\n");
         plc_tag_destroy(tag1);
         plc_tag_destroy(tag2);
         return PLCTAG_ERR_NO_DATA;
     }
 
-    elem_size = plc_tag_get_size(tag2)/elem_count;
+    elem_size = plc_tag_get_size(tag2) / elem_count;
 
-    for(i=0; i < elem_count; i++) {
+    for(i = 0; i < elem_count; i++) {
         switch(elem_size) {
-            case 1:
-                fprintf(stderr,"tag 2 data[%d]=%d\n",i,plc_tag_get_int8(tag2,(i*1)));
+            case 1:  // NOLINTNEXTLINE
+                fprintf(stderr, "tag 2 data[%d]=%d\n", i, plc_tag_get_int8(tag2, (i * 1)));
                 break;
 
-            case 2:
-                fprintf(stderr,"tag 2 data[%d]=%d\n",i,plc_tag_get_int16(tag2,(i*2)));
+            case 2:  // NOLINTNEXTLINE
+                fprintf(stderr, "tag 2 data[%d]=%d\n", i, plc_tag_get_int16(tag2, (i * 2)));
                 break;
 
-            case 4:
-                fprintf(stderr,"tag 2 data[%d]=%f\n",i,plc_tag_get_float32(tag2,(i*4)));
+            case 4:  // NOLINTNEXTLINE
+                fprintf(stderr, "tag 2 data[%d]=%f\n", i, plc_tag_get_float32(tag2, (i * 4)));
                 break;
 
             default:
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unsupported size %d!", elem_size);
                 plc_tag_destroy(tag1);
                 plc_tag_destroy(tag2);

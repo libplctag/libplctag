@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2022 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -33,7 +33,7 @@
 
 
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,76 +47,64 @@ typedef int32_t DINT;
 
 static volatile DINT *TestDINTArray = NULL;
 
-void tag_callback(int32_t tag_id, int event, int status)
-{
+void tag_callback(int32_t tag_id, int event, int status) {
     /* handle the events. */
     switch(event) {
-    case PLCTAG_EVENT_ABORTED:
-        printf("Tag operation was aborted with status %s!\n", plc_tag_decode_error(status));
-        break;
+        case PLCTAG_EVENT_ABORTED: printf("Tag operation was aborted with status %s!\n", plc_tag_decode_error(status)); break;
 
-    case PLCTAG_EVENT_CREATED:
-        printf("Tag created with status %s.\n", plc_tag_decode_error(status));
-        break;
+        case PLCTAG_EVENT_CREATED: printf("Tag created with status %s.\n", plc_tag_decode_error(status)); break;
 
-    case PLCTAG_EVENT_DESTROYED:
-        if(TestDINTArray) {
-            free((void *)TestDINTArray);
-            TestDINTArray = NULL;
-        }
-        printf("Tag was destroyed with status %s.\n", plc_tag_decode_error(status));
-        break;
-
-    case PLCTAG_EVENT_READ_COMPLETED:
-        if(status == PLCTAG_STATUS_OK && TestDINTArray) {
-            int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
-            int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
-
-            for(int i = 0; i < elem_count; i++) {
-                TestDINTArray[i] = plc_tag_get_int32(tag_id, (i * elem_size));
+        case PLCTAG_EVENT_DESTROYED:
+            if(TestDINTArray) {
+                free((void *)TestDINTArray);
+                TestDINTArray = NULL;
             }
-        }
+            printf("Tag was destroyed with status %s.\n", plc_tag_decode_error(status));
+            break;
 
-        printf("Tag read operation completed with status %s.\n", plc_tag_decode_error(status));
+        case PLCTAG_EVENT_READ_COMPLETED:
+            if(status == PLCTAG_STATUS_OK && TestDINTArray) {
+                int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
+                int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
 
-        break;
-
-    case PLCTAG_EVENT_READ_STARTED:
-        printf("Tag read operation started with status %s.\n", plc_tag_decode_error(status));
-        break;
-
-    case PLCTAG_EVENT_WRITE_COMPLETED:
-        printf("Tag write operation completed with status %s!\n", plc_tag_decode_error(status));
-        break;
-
-    case PLCTAG_EVENT_WRITE_STARTED:
-        if(status == PLCTAG_STATUS_OK && TestDINTArray) {
-            int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
-            int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
-
-            for(int i = 0; i < elem_count; i++) {
-                plc_tag_set_int32(tag_id, (i * elem_size), TestDINTArray[i]);
+                for(int i = 0; i < elem_count; i++) { TestDINTArray[i] = plc_tag_get_int32(tag_id, (i * elem_size)); }
             }
-        }
 
-        printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
+            printf("Tag read operation completed with status %s.\n", plc_tag_decode_error(status));
 
-        break;
+            break;
 
-    default:
-        printf("Unexpected event %d!\n", event);
-        break;
+        case PLCTAG_EVENT_READ_STARTED:
+            printf("Tag read operation started with status %s.\n", plc_tag_decode_error(status));
+            break;
+
+        case PLCTAG_EVENT_WRITE_COMPLETED:
+            printf("Tag write operation completed with status %s!\n", plc_tag_decode_error(status));
+            break;
+
+        case PLCTAG_EVENT_WRITE_STARTED:
+            if(status == PLCTAG_STATUS_OK && TestDINTArray) {
+                int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
+                int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
+
+                for(int i = 0; i < elem_count; i++) { plc_tag_set_int32(tag_id, (i * elem_size), TestDINTArray[i]); }
+            }
+
+            printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
+
+            break;
+
+        default: printf("Unexpected event %d!\n", event); break;
     }
 }
 
 
-void log_callback(int32_t tag_id, int debug_level, const char *message)
-{
+void log_callback(int32_t tag_id, int debug_level, const char *message) {
+    // NOLINTNEXTLINE
     fprintf(stderr, "Log message of level %d for tag %d: %s", debug_level, tag_id, message);
 }
 
-int main()
-{
+int main(void) {
     int32_t tag = 0;
     int rc;
     int i;
@@ -130,7 +118,8 @@ int main()
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major, version_minor, version_patch);
+        printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
+               version_minor, version_patch);
         return 1;
     }
 
@@ -243,14 +232,10 @@ int main()
     }
 
     /* print out the data */
-    for(i = 0; i < elem_count; i++) {
-        printf("data[%d]=%d\n", i, TestDINTArray[i]);
-    }
+    for(i = 0; i < elem_count; i++) { printf("data[%d]=%d\n", i, TestDINTArray[i]); }
 
     /* now test a write */
-    for(i = 0; i < elem_count; i++) {
-        TestDINTArray[i]++;
-    }
+    for(i = 0; i < elem_count; i++) { TestDINTArray[i]++; }
 
     printf("Turn off logging.\n");
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
@@ -273,15 +258,13 @@ int main()
     }
 
     /* print out the data */
-    for(i = 0; i < elem_count; i++) {
-        printf("data[%d]=%d\n", i, TestDINTArray[i]);
-    }
+    for(i = 0; i < elem_count; i++) { printf("data[%d]=%d\n", i, TestDINTArray[i]); }
 
     /* test a timeout. */
     printf("Testing timeout behavior.\n");
-    start = util_time_ms();
+    start = system_time_ms();
     rc = plc_tag_read(tag, 1);
-    end = util_time_ms();
+    end = system_time_ms();
 
     if(rc != PLCTAG_ERR_TIMEOUT) {
         printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end - start));

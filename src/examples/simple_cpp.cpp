@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -34,7 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
 
 #define REQUIRED_VERSION 2,1,0
 
@@ -129,5 +129,3 @@ int main()
 
     return 0;
 }
-
-

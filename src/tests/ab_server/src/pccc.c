@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,23 +31,23 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <inttypes.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include "pccc.h"
 #include "cip.h"
 #include "eip.h"
-#include "pccc.h"
 #include "plc.h"
 #include "slice.h"
 #include "utils.h"
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdlib.h>
 
-const uint8_t PCCC_PREFIX[] = { 0x0f, 0x00 };
-const uint8_t PLC5_READ[] = { 0x01 };
-const uint8_t PLC5_WRITE[] = { 0x00 };
-const uint8_t SLC_READ[] = { 0xa2 };
-const uint8_t SLC_WRITE[] = { 0xaa };
+const uint8_t PCCC_PREFIX[] = {0x0f, 0x00};
+const uint8_t PLC5_READ[] = {0x01};
+const uint8_t PLC5_WRITE[] = {0x00};
+const uint8_t SLC_READ[] = {0xa2};
+const uint8_t SLC_WRITE[] = {0xaa};
 
-const uint8_t PCCC_RESP_PREFIX[] = { 0xcb, 0x00, 0x00, 0x00, 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21 };
+const uint8_t PCCC_RESP_PREFIX[] = {0xcb, 0x00, 0x00, 0x00, 0x07, 0x3d, 0xf3, 0x45, 0x43, 0x50, 0x21};
 
 const uint8_t PCCC_ERR_ADDR_NOT_USABLE = (int8_t)0x06;
 const uint8_t PCCC_ERR_FILE_IS_WRONG_SIZE = (int8_t)0x07;
@@ -64,8 +64,7 @@ static slice_s handle_slc_write_request(slice_s input, slice_s output, plc_s *pl
 static slice_s make_pccc_error(slice_s output, uint8_t err_code, plc_s *plc);
 
 
-slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc)
-{
+slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc) {
     slice_s pccc_input;
     slice_s pccc_output;
     info("Got packet:");
@@ -77,13 +76,11 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc)
     }
 
     /* split off the PCCC packet. */
-    pccc_input = slice_from_slice(input, 13, slice_len(input)-13);
-    pccc_output = slice_from_slice(output, sizeof(PCCC_RESP_PREFIX), slice_len(output)-sizeof(PCCC_RESP_PREFIX));
+    pccc_input = slice_from_slice(input, 13, slice_len(input) - 13);
+    pccc_output = slice_from_slice(output, sizeof(PCCC_RESP_PREFIX), slice_len(output) - sizeof(PCCC_RESP_PREFIX));
 
     /* copy the response prefix. */
-    for(size_t i=0; i < sizeof(PCCC_RESP_PREFIX); i++) {
-        slice_set_uint8(output, i, PCCC_RESP_PREFIX[i]);
-    }
+    for(size_t i = 0; i < sizeof(PCCC_RESP_PREFIX); i++) { slice_set_uint8(output, i, PCCC_RESP_PREFIX[i]); }
 
     info("PCCC packet:");
     slice_dump(pccc_input);
@@ -102,9 +99,11 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc)
             pccc_output = handle_plc5_read_request(pccc_command, pccc_output, plc);
         } else if(plc->plc_type == PLC_PLC5 && slice_match_data_prefix(pccc_command, PLC5_WRITE, sizeof(PLC5_WRITE))) {
             pccc_output = handle_plc5_write_request(pccc_command, pccc_output, plc);
-        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX) && slice_match_data_prefix(pccc_command, SLC_READ, sizeof(SLC_READ))) {
+        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX)
+                  && slice_match_data_prefix(pccc_command, SLC_READ, sizeof(SLC_READ))) {
             pccc_output = handle_slc_read_request(pccc_command, pccc_output, plc);
-        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX) && slice_match_data_prefix(pccc_command, SLC_WRITE, sizeof(SLC_WRITE))) {
+        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX)
+                  && slice_match_data_prefix(pccc_command, SLC_WRITE, sizeof(SLC_WRITE))) {
             pccc_output = handle_slc_write_request(pccc_command, pccc_output, plc);
         } else {
             info("Unsupported PCCC command!");
@@ -124,8 +123,7 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc)
 }
 
 
-slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
-{
+slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc) {
     uint16_t offset = 0;
     size_t start_byte_offset = 0;
     uint16_t transfer_size = 0;
@@ -158,9 +156,7 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
     data_file_element = slice_get_uint8(input, 7);
 
     /* find the tag. */
-    while(tag && tag->data_file_num != data_file_num) {
-        tag = tag->next_tag;
-    }
+    while(tag && tag->data_file_num != data_file_num) { tag = tag->next_tag; }
 
     if(!tag) {
         info("Unable to find tag with data file %u!", data_file_num);
@@ -184,11 +180,13 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
 
     /* check the amount of data requested. */
     if((end_byte_offset - start_byte_offset) > 240) {
-        info("Request asks for too much data, %u bytes, for response packet!", (unsigned int)(end_byte_offset - start_byte_offset));
+        info("Request asks for too much data, %u bytes, for response packet!",
+             (unsigned int)(end_byte_offset - start_byte_offset));
         return make_pccc_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
-    info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size, transfer_size * tag->elem_size);
+    info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
+         transfer_size * tag->elem_size);
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
@@ -206,8 +204,7 @@ slice_s handle_plc5_read_request(slice_s input, slice_s output, plc_s *plc)
 }
 
 
-slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc)
-{
+slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc) {
     uint16_t offset = 0;
     size_t start_byte_offset = 0;
     uint16_t transfer_size = 0;
@@ -242,9 +239,7 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc)
     data_file_element = slice_get_uint8(input, 7);
 
     /* find the tag. */
-    while(tag && tag->data_file_num != data_file_num) {
-        tag = tag->next_tag;
-    }
+    while(tag && tag->data_file_num != data_file_num) { tag = tag->next_tag; }
 
     if(!tag) {
         info("Unable to find tag with data file %u!", data_file_num);
@@ -274,7 +269,8 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc)
     data_len = slice_len(input) - 8;
 
     if(data_len != (transfer_size * tag->elem_size)) {
-        info("Data in packet is not the same length, %u, as the requested transfer, %d!", data_len, (transfer_size * tag->elem_size));
+        info("Data in packet is not the same length, %u, as the requested transfer, %d!", data_len,
+             (transfer_size * tag->elem_size));
         return make_pccc_error(output, PCCC_ERR_FILE_IS_WRONG_SIZE, plc);
     }
 
@@ -284,7 +280,8 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc)
         tag->data[start_byte_offset + i] = slice_get_uint8(input, data_start_byte_offset + i);
     }
 
-    info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size, transfer_size * tag->elem_size);
+    info("Transfer size %u, tag elem size %u, bytes to transfer %d.", transfer_size, tag->elem_size,
+         transfer_size * tag->elem_size);
 
     /* build the response. */
     slice_set_uint8(output, 0, 0x4f);
@@ -295,8 +292,7 @@ slice_s handle_plc5_write_request(slice_s input, slice_s output, plc_s *plc)
 }
 
 
-slice_s handle_slc_read_request(slice_s input, slice_s output, plc_s *plc)
-{
+slice_s handle_slc_read_request(slice_s input, slice_s output, plc_s *plc) {
     size_t start_byte_offset = 0;
     uint8_t transfer_size = 0;
     size_t end_byte_offset = 0;
@@ -331,9 +327,7 @@ slice_s handle_slc_read_request(slice_s input, slice_s output, plc_s *plc)
     }
 
     /* find the tag. */
-    while(tag && tag->data_file_num != data_file_num) {
-        tag = tag->next_tag;
-    }
+    while(tag && tag->data_file_num != data_file_num) { tag = tag->next_tag; }
 
     if(!tag) {
         info("Unable to find tag with data file %u!", data_file_num);
@@ -386,9 +380,7 @@ slice_s handle_slc_read_request(slice_s input, slice_s output, plc_s *plc)
 }
 
 
-
-slice_s handle_slc_write_request(slice_s input, slice_s output, plc_s *plc)
-{
+slice_s handle_slc_write_request(slice_s input, slice_s output, plc_s *plc) {
     size_t start_byte_offset = 0;
     uint8_t transfer_size = 0;
     size_t end_byte_offset = 0;
@@ -426,9 +418,7 @@ slice_s handle_slc_write_request(slice_s input, slice_s output, plc_s *plc)
     }
 
     /* find the tag. */
-    while(tag && tag->data_file_num != data_file_num) {
-        tag = tag->next_tag;
-    }
+    while(tag && tag->data_file_num != data_file_num) { tag = tag->next_tag; }
 
     if(!tag) {
         info("Unable to find tag with data file %u!", data_file_num);
@@ -490,10 +480,7 @@ slice_s handle_slc_write_request(slice_s input, slice_s output, plc_s *plc)
 }
 
 
-
-
-slice_s make_pccc_error(slice_s output, uint8_t err_code, plc_s *plc)
-{
+slice_s make_pccc_error(slice_s output, uint8_t err_code, plc_s *plc) {
     // 4f f0 3c 96 06
     slice_s err_resp = slice_from_slice(output, 0, 5);
 

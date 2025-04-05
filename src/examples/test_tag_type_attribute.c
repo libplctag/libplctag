@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2024 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,18 +32,17 @@
  ***************************************************************************/
 
 
+#include "../lib/libplctag.h"
+#include "compat_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
-#define REQUIRED_VERSION 2,6,0
+#define REQUIRED_VERSION 2, 6, 0
 
 /* test against a DINT array. */
 #define DATA_TIMEOUT 5000
 
-int test_tag_buffer_errors(const char *tag_name, int32_t tag)
-{
+int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
     int rc = PLCTAG_STATUS_OK;
     uint8_t type_buffer[32];
     int type_size = 0;
@@ -64,7 +63,9 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag)
     printf("\tTest with NULL buffer pointer: ");
     rc = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", NULL, sizeof(type_buffer));
     if(rc != PLCTAG_ERR_BAD_PARAM) {
-        printf("ERROR: getting type info with a NULL buffer pointer does not return PLCTAG_ERR_BAD_PARAM but instead returns %s!\n", plc_tag_decode_error(rc));
+        printf(
+            "ERROR: getting type info with a NULL buffer pointer does not return PLCTAG_ERR_BAD_PARAM but instead returns %s!\n",
+            plc_tag_decode_error(rc));
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
@@ -74,7 +75,9 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag)
     printf("\tTest with zero buffer length: ");
     rc = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", &(type_buffer[0]), 0);
     if(rc != PLCTAG_ERR_BAD_PARAM) {
-        printf("ERROR: getting type info with a zero length buffer does not return PLCTAG_ERR_BAD_PARAM but instead returns %s!\n", plc_tag_decode_error(rc));
+        printf(
+            "ERROR: getting type info with a zero length buffer does not return PLCTAG_ERR_BAD_PARAM but instead returns %s!\n",
+            plc_tag_decode_error(rc));
         return PLCTAG_ERR_BAD_REPLY;
     } else {
         printf("PASSED\n");
@@ -87,6 +90,7 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag)
         printf("ERROR: got error %s (%d) trying to get the attribute byte array!\n", plc_tag_decode_error(type_size), type_size);
         return PLCTAG_ERR_BAD_REPLY;
     }
+
     if((type_size != 2) && (type_size != 4)) {
         printf("ERROR: expected type byte array copied length to be 2 or 4 bytes, but got %d!\n", type_size);
         return PLCTAG_ERR_BAD_REPLY;
@@ -96,7 +100,8 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag)
 
     /* check the type size that comes back when the data is copied */
     printf("\tTest type array size after copy: ");
-    type_size = plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", &(type_buffer[0]), (int)(unsigned int)sizeof(type_buffer));
+    type_size =
+        plc_tag_get_byte_array_attribute(tag, "raw_tag_type_bytes", &(type_buffer[0]), (int)(unsigned int)sizeof(type_buffer));
     if((type_size != 2) && (type_size != 4)) {
         printf("ERROR: expected type byte array copied length to be 2 or 4 bytes, but got %d!\n", type_size);
         return PLCTAG_ERR_BAD_REPLY;
@@ -105,71 +110,85 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag)
     }
 
     printf("\tRetrieved tag %s native type bytes: ", tag_name);
-    for(int i=0; i < type_size; i++) {
-        printf(" %02x", (int)(unsigned int)type_buffer[i]);
-    }
+    for(int i = 0; i < type_size; i++) { printf(" %02x", (int)(unsigned int)type_buffer[i]); }
     printf("\n");
+
 
     return rc;
 }
 
 
-int main()
-{
+int main(void) {
     int32_t tag1 = 0;
-    int32_t tag2 = 0;    
-    int rc;
+    int32_t tag2 = 0;
+    int rc = PLCTAG_STATUS_OK;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
-    /* create the tag */
-    tag1 = plc_tag_create("protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1&name=TestBigSINTArray", DATA_TIMEOUT);
+    do {
+        /* create the tag */
+        tag1 = plc_tag_create("protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1&name=TestBigSINTArray",
+                              DATA_TIMEOUT);
 
-    /* everything OK? */
-    if(tag1 < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag TestBigSINTArray!\n", plc_tag_decode_error(tag1));
-        return 1;
-    }
+        /* everything OK? */
+        if(tag1 < 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR %s: Could not create tag TestBigSINTArray!\n", plc_tag_decode_error(tag1));
+            break;
+        }
 
-    /* get the data */
-    rc = plc_tag_read(tag1, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data for TestBigSINTArray! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-        plc_tag_destroy(tag1);
-        return 1;
-    }
+        /* get the data */
+        rc = plc_tag_read(tag1, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: Unable to read the data for TestBigSINTArray! Got error code %d: %s\n", rc,
+                    plc_tag_decode_error(rc));
+            break;
+        }
 
-    tag2 = plc_tag_create("protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1&name=TestManyBOOLFields", DATA_TIMEOUT);
+        tag2 = plc_tag_create(
+            "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1&name=TestManyBOOLFields", DATA_TIMEOUT);
+        if(tag2 < 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR %s: Could not create tag TestManyBOOLFields!\n", plc_tag_decode_error(tag2));
+            break;
+        }
 
-    /* everything OK? */
-    if(tag2 < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag TestManyBOOLFields!\n", plc_tag_decode_error(tag2));
-        plc_tag_destroy(tag1);
-        return 1;
-    }
+        /* get the data */
+        rc = plc_tag_read(tag2, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: Unable to read the data for TestManyBOOLFields! Got error code %d: %s\n", rc,
+                    plc_tag_decode_error(rc));
+            break;
+        }
 
-    /* get the data */
-    rc = plc_tag_read(tag2, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data for TestManyBOOLFields! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
-        plc_tag_destroy(tag1);
-        plc_tag_destroy(tag2);
-        return 1;
-    }
+        rc = test_tag_buffer_errors("TestBigSINTArray", tag1);
+        if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: testing for tag buffer errors with a large SINT array failed %s!\n",
+                    plc_tag_decode_error(rc));
+            break;
+        }
 
-    rc = test_tag_buffer_errors("TestBigSINTArray", tag1);
-    rc = test_tag_buffer_errors("TestManyBOOLFields", tag2);
+        rc = test_tag_buffer_errors("TestManyBOOLFields", tag2);
+        if(rc != PLCTAG_STATUS_OK) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: testing for tag buffer errors with a large BOOL array failed %s!\n",
+                    plc_tag_decode_error(rc));
+            break;
+        }
+    } while(0);
 
-    plc_tag_destroy(tag1);
-    plc_tag_destroy(tag2);
+    if(tag1 > 0) { plc_tag_destroy(tag1); }
+    if(tag2 > 0) { plc_tag_destroy(tag2); }
 
-    return 0;
+    return rc;
 }
-
-
