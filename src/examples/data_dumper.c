@@ -46,7 +46,7 @@
 #define RECONNECT_DELAY_MS 5000
 
 
-typedef enum { UNKNOWN = 0, DINT, INT, SINT, REAL } data_type_t;
+typedef enum { UNKNOWN = 0, i32_type, i16_type, i8_type, f32_type } data_type_t;
 
 struct {
     char *name;
@@ -184,13 +184,13 @@ int process_line(const char *line) {
         tags[num_tags].name = strdup(parts[0]);
 
         if(strcasecmp("dint", parts[1]) == 0) {
-            tags[num_tags].data_type = DINT;
+            tags[num_tags].data_type = i32_type;
         } else if(strcasecmp("int", parts[1]) == 0) {
-            tags[num_tags].data_type = INT;
+            tags[num_tags].data_type = i16_type;
         } else if(strcasecmp("sint", parts[1]) == 0) {
-            tags[num_tags].data_type = SINT;
+            tags[num_tags].data_type = i8_type;
         } else if(strcasecmp("real", parts[1]) == 0) {
-            tags[num_tags].data_type = REAL;
+            tags[num_tags].data_type = f32_type;
         } else {
             // NOLINTNEXTLINE
             fprintf(stderr, "Unknown data type for %s!\n", parts[1]);
@@ -378,22 +378,22 @@ int log_data(void) {
         fprintf(log, "%s,%s", timestamp_buf, tags[tag].name);
 
         switch(tags[tag].data_type) {
-            case DINT:
+            case i32_type:
                 // NOLINTNEXTLINE
                 fprintf(log, ",%d\n", plc_tag_get_int32(tags[tag].tag_id, 0));
                 break;
 
-            case INT:
+            case i16_type:
                 // NOLINTNEXTLINE
                 fprintf(log, ",%d\n", plc_tag_get_int16(tags[tag].tag_id, 0));
                 break;
 
-            case SINT:
+            case i8_type:
                 // NOLINTNEXTLINE
                 fprintf(log, ",%d\n", plc_tag_get_int8(tags[tag].tag_id, 0));
                 break;
 
-            case REAL:
+            case f32_type:
                 // NOLINTNEXTLINE
                 fprintf(log, ",%f\n", plc_tag_get_float32(tags[tag].tag_id, 0));
                 break;

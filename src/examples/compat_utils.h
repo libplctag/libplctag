@@ -53,6 +53,7 @@ extern "C" {
 #    define WIN32_LEAN_AND_MEAN
 #    include <windows.h>
 
+#    define localtime_r(a, b) localtime_s((b), (a))
 #    define strcasecmp _stricmp
 #    define strdup _strdup
 #    define snprintf_platform sprintf_s
@@ -70,7 +71,7 @@ typedef struct pthread_mutexattr_t pthread_mutexattr_t;
 typedef struct pthread_condattr_t pthread_condattr_t;
 
 /* threads */
-extern int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *), void *restrict arg);
+extern int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg);
 extern int pthread_detach(pthread_t thread);
 extern void pthread_exit(void *retval); /* no return */
 extern int pthread_join(pthread_t thread, void **retval);
@@ -88,7 +89,7 @@ extern void system_yield(void);
 extern int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr);
 extern int pthread_mutex_destroy(pthread_mutex_t *mutex);
 extern int pthread_mutex_lock(pthread_mutex_t *mutex);
-extern int pthread_mutex_timedlock(pthread_mutex_t *restrict mutex, const struct timespec *restrict abstime);
+extern int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime);
 extern int pthread_mutex_trylock(pthread_mutex_t *mutex);
 extern int pthread_mutex_unlock(pthread_mutex_t *mutex);
 

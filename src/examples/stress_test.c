@@ -39,8 +39,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
-#include <unistd.h>
 
 #define REQUIRED_VERSION 2, 6, 4
 
