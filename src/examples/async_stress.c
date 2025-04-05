@@ -40,17 +40,12 @@
  */
 
 
+#include "../lib/libplctag.h"
+#include "compat_utils.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if defined(WIN32) || defined(_WIN32)
-    #include <Windows.h>
-#else
-    #include <signal.h>
-#endif
-#include "../lib/libplctag.h"
-#include "compat_utils.h"
 
 
 #define REQUIRED_VERSION 2, 4, 0
@@ -76,9 +71,7 @@ void usage(void) {
 
 static volatile int done = 0;
 
-static interrupt_handler(void) {
-    done = 1;
-}
+static void interrupt_handler(void) { done = 1; }
 
 static int read_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
 static int wait_for_tags(int32_t *tags, int32_t *statuses, int num_tags, int timeout_ms);
