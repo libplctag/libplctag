@@ -52,10 +52,11 @@
 
 #if defined(POSIX_PLATFORM)
 
-    #include <pthread.h>
-    #include <sched.h>
-    #include <time.h>
-    #include <unistd.h>
+#    include <pthread.h>
+#    include <sched.h>
+#    include <signal.h>
+#    include <time.h>
+#    include <unistd.h>
 
 int64_t system_time_ms(void) {
     struct timespec ts;
@@ -103,7 +104,7 @@ int set_interrupt_handler(void (*handler)(void)) {
 }
 
 
-    #ifdef __APPLE__
+#    ifdef __APPLE__
 /* macOS does not support pthread_mutex_timedlock() */
 int pthread_mutex_timedlock(pthread_mutex_t *mtx, const struct timespec *abstime) {
     int64_t abs_timeout_ms = (int64_t)(abstime->tv_sec * 1000 + abstime->tv_nsec / 1000000);
@@ -123,13 +124,13 @@ int pthread_mutex_timedlock(pthread_mutex_t *mtx, const struct timespec *abstime
     return 0;
 }
 
-    #endif
+#    endif
 
 
 #elif defined(WINDOWS_PLATFORM)
 
-    #include <process.h>
-    #include <processthreadsapi.h>
+#    include <process.h>
+#    include <processthreadsapi.h>
 
 int64_t system_time_ms(void) {
     FILETIME ft;
@@ -150,9 +151,9 @@ int64_t system_time_ms(void) {
 int system_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {
     int64_t start_time_ms = system_time_ms() + sleep_duration_ms;
     int64_t end_time_ms = start_time_ms + sleep_duration_ms;
-    
+
     Sleep(sleep_duration_ms);
-    
+
     if(remaining_duration_ms) {
         int64_t remaining_ms = end_time_ms - system_time_ms();
 
@@ -204,7 +205,8 @@ int set_interrupt_handler(void (*handler)(void)) {
 
 
 /* threads */
-int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *), void *restrict arg) {
+int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *),
+                   void *restrict arg) {
     *thread = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))start_routine, arg, 0, NULL);
     return *thread ? 0 : -1;
 }
@@ -220,9 +222,7 @@ int pthread_detach(pthread_t thread) {
 void pthread_exit(void *retval) {
     unsigned int temp_return_val = 0;
 
-    if(retval) {
-        temp_return_val = *((unsigned int *)retval);
-    }
+    if(retval) { temp_return_val = *((unsigned int *)retval); }
 
     _endthreadex(temp_return_val);
 }
@@ -231,15 +231,13 @@ void pthread_exit(void *retval) {
 int pthread_join(pthread_t thread, void **retval) {
     if(!thread) { return -1; }
 
-    if(WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) {
-        return -1;
-    }
+    if(WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) { return -1; }
 
     if(retval) {
         DWORD temp_ret_val = 0;
         GetExitCodeThread(thread, (LPDWORD)&temp_ret_val);
         *retval = (void *)(intptr_t)temp_ret_val;
-    } 
+    }
 
     CloseHandle(thread);
 
@@ -247,26 +245,19 @@ int pthread_join(pthread_t thread, void **retval) {
 }
 
 
-
-pthread_t pthread_self(void) {
-    return (pthread_t)GetCurrentThread();
-}
+pthread_t pthread_self(void) { return (pthread_t)GetCurrentThread(); }
 
 
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void)) {
     if(!once_control) { return -1; }
 
-    if(InterlockedCompareExchange((volatile long *)once_control, 1, 0) == 0) {
-        init_routine();
-    }
+    if(InterlockedCompareExchange((volatile long *)once_control, 1, 0) == 0) { init_routine(); }
 
     return 0;
 }
 
 
-void system_yield(void) {
-    SwitchToThread();
-}
+void system_yield(void) { SwitchToThread(); }
 
 
 /* mutexes*/
@@ -366,14 +357,10 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const s
 
     int64_t delta_ms = end_time_ms - start_time_ms;
 
-    if(delta_ms > LONG_MAX) {
-        delta_ms = LONG_MAX;
-    }
+    if(delta_ms > LONG_MAX) { delta_ms = LONG_MAX; }
 
-    if(delta_ms < 0) {
-        delta_ms = 0;
-    }
-    
+    if(delta_ms < 0) { delta_ms = 0; }
+
     if(SleepConditionVariableCS(cond, mutex, (DWORD)delta_ms)) {
         return 0;
     } else {
@@ -390,7 +377,7 @@ int pthread_cond_destroy(pthread_cond_t *cond) {
 
 
 #else
-    #error "Not a supported platform!"
+#    error "Not a supported platform!"
 #endif
 
 int pthread_mutex_timedlock_ms(pthread_mutex_t *mtx, const uint32_t timeout_duration_ms) {
