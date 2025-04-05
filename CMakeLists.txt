@@ -59,6 +59,7 @@ set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${li
 # build examples flag
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
+set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
 
@@ -154,8 +155,6 @@ if (APPLE)
     set(CMAKE_MACOSX_RPATH ON)
 endif (APPLE)
 
-# default setting for 32-bit builds
-set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 
 
 # we need threads
@@ -182,7 +181,6 @@ else()
     return()
 endif()
 
-message("Using ${platform_SRC_PATH}/platform.h and ${platform_SRC_PATH}/platform.c for platform-specific code.")
 
 # where to find include files.
 include_directories("${base_SRC_PATH}")
@@ -263,8 +261,8 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
         SET(STR_OP_OVERFLOW_OFF "")
     endif()
 
-    SET(CMAKE_C_FLAGS_RELEASE_INIT " -Os -DNDEBUG -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
-    SET(CMAKE_C_FLAGS_DEBUG_INIT "  -O0  -g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    SET(CMAKE_C_FLAGS_RELEASE " -Os -DNDEBUG -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_OFF} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
+    SET(CMAKE_C_FLAGS_DEBUG "  -O0  -g -std=c11 -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${STR_OP_OVERFLOW_ON} -D_XOPEN_SOURCE=700 -D__USE_POSIX=1 -D_POSIX_C_SOURCE=200809L")
     SET(BASE_RELEASE_LINK_FLAGS "")
     SET(BASE_DEBUG_LINK_FLAGS "")
 
@@ -276,28 +274,28 @@ elseif (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 
     # check to see if we are building 32-bit or 64-bit
     if(BUILD_32_BIT)
-        set(CMAKE_C_FLAGS_RELEASE_INIT "${CMAKE_C_FLAGS_RELEASE_INIT} -m32")
-        set(CMAKE_C_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} -m32")
+        set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -m32")
+        set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -m32")
         set(BASE_RELEASE_LINK_FLAGS "${BASE_RELEASE_LINK_FLAGS} -m32")
         set(BASE_DEBUG_LINK_FLAGS "${BASE_DEBUG_LINK_FLAGS} -m32")
     endif()
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     # using Visual Studio C/C++
-    set(CMAKE_C_FLAGS_RELEASE_INIT "/O2 /Ob2 /DNDEBUG /W3 /MT /c /std:c11 -D_CRT_SECURE_NO_WARNINGS")
-    set(CMAKE_C_FLAGS_DEBUG_INIT "/Zi /Ob0 /Od /W3 /MDd /c /std:c11 -D_CRT_SECURE_NO_WARNINGS")
-    set(CMAKE_CXX_FLAGS_RELEASE_INIT "/O2 /Ob2 /DNDEBUG /W3 /MT -D_CRT_SECURE_NO_WARNINGS")
-    set(CMAKE_CXX_FLAGS_DEBUG_INIT "/Zi /Ob0 /Od /W3 /MDd -D_CRT_SECURE_NO_WARNINGS")
+    set(CMAKE_C_FLAGS_RELEASE "/O2 /Ob2 /DNDEBUG /W3 /MT /c /std:c11 -D_CRT_SECURE_NO_WARNINGS")
+    set(CMAKE_C_FLAGS_DEBUG "/Zi /Ob0 /Od /W3 /MDd /c /std:c11 -D_CRT_SECURE_NO_WARNINGS")
+    set(CMAKE_CXX_FLAGS_RELEASE "/O2 /Ob2 /DNDEBUG /W3 /MT -D_CRT_SECURE_NO_WARNINGS")
+    set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Ob0 /Od /W3 /MDd -D_CRT_SECURE_NO_WARNINGS")
 
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 
     set(EXTRA_LINKER_LIBS ws2_32 bcrypt)
 
     if(USE_SANITIZERS)
-        set(CMAKE_C_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} /RTCu")
-        set(CMAKE_CXX_FLAGS_DEBUG_INIT "${CMAKE_C_FLAGS_DEBUG_INIT} /RTCu")
+        set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /RTCu")
+        set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /RTCu")
 
-        set(CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT "${CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT} /RTCu")
-        set(CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT "${CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT} /RTCu")
+        set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /RTCu")
+        set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /RTCu")
     endif()
 
 else()
@@ -305,13 +303,13 @@ else()
     return()
 endif()
 
-message("CMAKE_C_FLAGS_RELEASE_INIT = ${CMAKE_C_FLAGS_RELEASE_INIT}")
-message("CMAKE_C_FLAGS_DEBUG_INIT = ${CMAKE_C_FLAGS_DEBUG_INIT}")
-message("CMAKE_CXX_FLAGS_RELEASE_INIT = ${CMAKE_C_FLAGS_RELEASE_INIT}")
-message("CMAKE_CXX_FLAGS_DEBUG_INIT = ${CMAKE_C_FLAGS_DEBUG_INIT}")
+message("CMAKE_C_FLAGS_RELEASE = ${CMAKE_C_FLAGS_RELEASE}")
+message("CMAKE_C_FLAGS_DEBUG = ${CMAKE_C_FLAGS_DEBUG}")
+message("CMAKE_CXX_FLAGS_RELEASE = ${CMAKE_C_FLAGS_RELEASE}")
+message("CMAKE_CXX_FLAGS_DEBUG = ${CMAKE_C_FLAGS_DEBUG}")
 
-message("CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT = ${CMAKE_SHARED_LINKER_FLAGS_RELEASE_INIT}")
-message("CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT = ${CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT}")
+message("CMAKE_SHARED_LINKER_FLAGS_RELEASE = ${CMAKE_SHARED_LINKER_FLAGS_RELEASE}")
+message("CMAKE_STATIC_LINKER_FLAGS_RELEASE = ${CMAKE_STATIC_LINKER_FLAGS_RELEASE}")
 
 message("EXTRA_LINKER_LIBS = ${EXTRA_LINKER_LIBS}")
 
