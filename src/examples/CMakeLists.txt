@@ -59,5 +59,5 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     add_executable(${example} "${CMAKE_SOURCE_DIR}/src/examples/${example}.${FILE_EXTENSION}" "${CMAKE_SOURCE_DIR}/src/examples/compat_utils.c")
 
-    target_link_libraries(${example} libplctag_static ${EXTRA_LINKER_LIBS})
+    target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
 endforeach()
