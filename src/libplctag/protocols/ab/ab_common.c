@@ -31,27 +31,27 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <ab/ab.h>
-#include <ab/ab_common.h>
-#include <ab/cip.h>
-#include <ab/defs.h>
-#include <ab/eip_cip.h>
-#include <ab/eip_cip_special.h>
-#include <ab/eip_lgx_pccc.h>
-#include <ab/eip_plc5_dhp.h>
-#include <ab/eip_plc5_pccc.h>
-#include <ab/eip_slc_dhp.h>
-#include <ab/eip_slc_pccc.h>
-#include <ab/pccc.h>
-#include <ab/session.h>
-#include <ab/tag.h>
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/ab/ab.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/cip.h>
+#include <libplctag/protocols/ab/defs.h>
+#include <libplctag/protocols/ab/eip_cip.h>
+#include <libplctag/protocols/ab/eip_cip_special.h>
+#include <libplctag/protocols/ab/eip_lgx_pccc.h>
+#include <libplctag/protocols/ab/eip_plc5_dhp.h>
+#include <libplctag/protocols/ab/eip_plc5_pccc.h>
+#include <libplctag/protocols/ab/eip_slc_dhp.h>
+#include <libplctag/protocols/ab/eip_slc_pccc.h>
+#include <libplctag/protocols/ab/pccc.h>
+#include <libplctag/protocols/ab/session.h>
+#include <libplctag/protocols/ab/tag.h>
+#include <libplctag/protocols/omron/omron.h>
 #include <limits.h>
-#include <omron/omron.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
@@ -1142,9 +1142,7 @@ int check_request_status(ab_tag_p tag) {
         }
 
         /* if we failed above, punt out of the do/while loop. */
-        if(rc != PLCTAG_STATUS_OK) {
-            break;
-        }
+        if(rc != PLCTAG_STATUS_OK) { break; }
 
         /* check the length */
         if((tag->req->request_size < 0) || (size_t)tag->req->request_size < sizeof(*eip_header)) {
@@ -1168,7 +1166,7 @@ int check_request_status(ab_tag_p tag) {
                 pdebug(DEBUG_WARN, "Request pointer %p, header pointer %p.", tag->req, eip_header);
                 pdebug(DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
                 pdebug_dump_bytes(DEBUG_WARN, tag->req->data, tag->req->request_size);
-                
+
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
         }

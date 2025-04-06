@@ -32,9 +32,9 @@
  ***************************************************************************/
 
 
-#include "../lib/libplctag.h"
 #include "compat_utils.h"
 #include <inttypes.h>
+#include <libplctag/lib/libplctag.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>

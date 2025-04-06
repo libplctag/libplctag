@@ -33,9 +33,9 @@
 
 #pragma once
 
-#include <ab/defs.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/ab/defs.h>
 #include <utils/vector.h>
 
 typedef struct ab_tag_t *ab_tag_p;
@@ -97,7 +97,7 @@ extern int ab_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint
 // extern int ab_set_float32(plc_tag_p tag, int offset, float val);
 
 
-//int ab_tag_destroy(ab_tag_p p_tag);
+// int ab_tag_destroy(ab_tag_p p_tag);
 extern plc_type_t get_plc_type(attr attribs);
 extern int check_cpu(ab_tag_p tag, attr attribs);
 extern int check_tag_name(ab_tag_p tag, const char *name);

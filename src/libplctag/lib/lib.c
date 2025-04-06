@@ -33,7 +33,6 @@
 
 #define LIBPLCTAGDLL_EXPORTS 1
 
-#include <ab/ab.h>
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
@@ -41,8 +40,9 @@
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/version.h>
+#include <libplctag/protocols/ab/ab.h>
+#include <libplctag/protocols/mb/modbus.h>
 #include <limits.h>
-#include <mb/modbus.h>
 #include <platform.h>
 #include <stdlib.h>
 #include <utils/atomic_utils.h>
@@ -1181,8 +1181,8 @@ LIB_EXPORT void plc_tag_shutdown(void) {
 
 /* there needs to be a better way to make the cast clean than this! */
 #ifndef _MSC_VER
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
 
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callback_func) {
@@ -1198,7 +1198,7 @@ LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, tag_callback_func callb
 }
 
 #ifndef _MSC_VER
-#pragma GCC diagnostic pop
+#    pragma GCC diagnostic pop
 #endif
 
 /*

@@ -35,13 +35,13 @@
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <omron/cip.h>
-#include <omron/conn.h>
-#include <omron/defs.h>
-#include <omron/omron_common.h>
-#include <omron/omron_raw_tag.h>
-#include <omron/omron_standard_tag.h> /* for the Logix decode types. */
-#include <omron/tag.h>
+#include <libplctag/protocols/omron/cip.h>
+#include <libplctag/protocols/omron/conn.h>
+#include <libplctag/protocols/omron/defs.h>
+#include <libplctag/protocols/omron/omron_common.h>
+#include <libplctag/protocols/omron/omron_raw_tag.h>
+#include <libplctag/protocols/omron/omron_standard_tag.h> /* for the Logix decode types. */
+#include <libplctag/protocols/omron/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>

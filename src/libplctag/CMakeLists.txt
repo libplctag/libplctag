@@ -74,8 +74,8 @@ set ( libplctag_SRCS "${CMAKE_SOURCE_DIR}/src/libplctag/lib/init.c"
                      "${CMAKE_SOURCE_DIR}/src/utils/rc.h"
                      "${CMAKE_SOURCE_DIR}/src/utils/vector.c"
                      "${CMAKE_SOURCE_DIR}/src/utils/vector.h"
-                     "${platform_SRC_PATH}/platform.c"
-                     "${platform_SRC_PATH}/platform.h" )
+                     "${PLATFORM_SHIM_PATH}/platform.c"
+                     "${PLATFORM_SHIM_PATH}/platform.h" )
 
 # shared library
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )

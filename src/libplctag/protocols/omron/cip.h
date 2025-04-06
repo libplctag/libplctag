@@ -34,8 +34,8 @@
 #pragma once
 
 #include <libplctag/lib/libplctag.h>
-#include <omron/omron_common.h>
-#include <omron/defs.h>
+#include <libplctag/protocols/omron/defs.h>
+#include <libplctag/protocols/omron/omron_common.h>
 
 
 /* fake up some generics */
@@ -60,8 +60,9 @@ typedef struct {
 
     } services;
 
-    int32_t (*encode_path)(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
-    int32_t (*encode_tag_name)(omron_tag_p tag,const char *name);
+    int32_t (*encode_path)(const char *path, int *needs_connection, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp,
+                           uint16_t *dhp_dest);
+    int32_t (*encode_tag_name)(omron_tag_p tag, const char *name);
     int32_t (*lookup_encoded_type_size)(uint8_t type_byte, int *type_size);
     int32_t (*lookup_data_element_size)(uint8_t type_byte, int *element_size);
 
@@ -69,7 +70,8 @@ typedef struct {
     const char *(*decode_cip_error_long)(uint8_t *data);
     int (*decode_cip_error_code)(uint8_t *data);
 
-    //int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const char **short_desc, const char **long_desc);
+    // int (*decode_error)(uint8_t *buf, uint32_t buf_size, uint16_le *extended_status, uint32_le *extended_status_size, const
+    // char **short_desc, const char **long_desc);
 } cip_generic_t;
 
 extern cip_generic_t CIP;

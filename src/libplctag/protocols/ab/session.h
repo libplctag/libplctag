@@ -36,8 +36,8 @@
 
 #include <stdbool.h>
 
-#include <ab/ab_common.h>
-#include <ab/defs.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/defs.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
 
@@ -45,17 +45,17 @@
 
 #define SESSION_DEFAULT_TIMEOUT (2000)
 
-#define MAX_PACKET_SIZE_EX  (44 + 4002)
+#define MAX_PACKET_SIZE_EX (44 + 4002)
 
-#define SESSION_MIN_REQUESTS    (10)
-#define SESSION_INC_REQUESTS    (10)
+#define SESSION_MIN_REQUESTS (10)
+#define SESSION_INC_REQUESTS (10)
 
-#define MAX_CONN_PATH       (260)   /* 256 plus padding. */
+#define MAX_CONN_PATH (260) /* 256 plus padding. */
 #define MAX_IP_ADDR_SEG_LEN (16)
 
 
 struct ab_session_t {
-//    int status;
+    //    int status;
     int failed;
     int on_list;
 
@@ -68,7 +68,7 @@ struct ab_session_t {
     /* connection variables. */
     bool use_connected_msg;
     bool only_use_old_forward_open;
-    int fo_conn_size; /* old FO max connection size */
+    int fo_conn_size;    /* old FO max connection size */
     int fo_ex_conn_size; /* extended FO max connection size */
     uint16_t max_payload_guess;
     uint16_t max_payload_size;
@@ -145,7 +145,6 @@ struct ab_request_t {
     int request_capacity;
     uint8_t *data;
 };
-
 
 
 uint64_t session_get_new_seq_id_unsafe(ab_session_p sess);

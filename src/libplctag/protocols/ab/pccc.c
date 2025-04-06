@@ -31,13 +31,13 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <ab/ab_common.h>
-#include <ab/pccc.h>
-#include <ab/tag.h>
 #include <ctype.h>
 #include <float.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/pccc.h>
+#include <libplctag/protocols/ab/tag.h>
 #include <limits.h>
 #include <platform.h>
 #include <string.h>

@@ -35,8 +35,8 @@
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/protocols/mb/modbus.h>
 #include <limits.h>
-#include <mb/modbus.h>
 #include <platform.h>
 #include <stdlib.h>
 #include <utils/atomic_utils.h>

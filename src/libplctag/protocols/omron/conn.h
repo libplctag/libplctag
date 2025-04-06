@@ -36,8 +36,8 @@
 
 #include <stdbool.h>
 
-#include <omron/omron_common.h>
-#include <omron/defs.h>
+#include <libplctag/protocols/omron/defs.h>
+#include <libplctag/protocols/omron/omron_common.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
 
@@ -45,17 +45,17 @@
 
 #define CONN_DEFAULT_TIMEOUT (2000)
 
-#define MAX_PACKET_SIZE_EX  (44 + 4002)
+#define MAX_PACKET_SIZE_EX (44 + 4002)
 
-#define CONN_MIN_REQUESTS    (10)
-#define CONN_INC_REQUESTS    (10)
+#define CONN_MIN_REQUESTS (10)
+#define CONN_INC_REQUESTS (10)
 
-#define MAX_CONN_PATH       (260)   /* 256 plus padding. */
+#define MAX_CONN_PATH (260) /* 256 plus padding. */
 #define MAX_IP_ADDR_SEG_LEN (16)
 
 
 struct omron_conn_t {
-//    int status;
+    //    int status;
     int failed;
     int on_list;
 
@@ -68,7 +68,7 @@ struct omron_conn_t {
     /* connection variables. */
     bool use_connected_msg;
     bool only_use_old_forward_open;
-    int fo_conn_size; /* old FO max connection size */
+    int fo_conn_size;    /* old FO max connection size */
     int fo_ex_conn_size; /* extended FO max connection size */
     uint16_t max_payload_guess;
     uint16_t max_payload_size;
@@ -144,11 +144,10 @@ struct omron_request_t {
     int request_capacity;
     int response_size; /* size of data we expect to be returned by this request */
 
-    int first_read; /* whether this tag is being read for the first time and its size is therefor unknown*/
+    int first_read;               /* whether this tag is being read for the first time and its size is therefor unknown*/
     int supports_fragmented_read; /* if fragmented read is supported then we do not need to worry about the response*/
     uint8_t *data;
 };
-
 
 
 uint64_t conn_get_new_seq_id_unsafe(omron_conn_p sess);

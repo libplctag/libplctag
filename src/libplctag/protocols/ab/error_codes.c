@@ -31,8 +31,8 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <ab/error_codes.h>
 #include <libplctag/lib/libplctag.h>
+#include <libplctag/protocols/ab/error_codes.h>
 #include <platform.h>
 #include <stdint.h>
 #include <utils/debug.h>

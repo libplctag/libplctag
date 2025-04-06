@@ -34,7 +34,7 @@
 #pragma once
 
 #include <libplctag/lib/tag.h>
-#include <omron/omron_common.h>
+#include <libplctag/protocols/omron/omron_common.h>
 
 // /* tag creation helper */
 extern int omron_setup_raw_tag(omron_tag_p tag);

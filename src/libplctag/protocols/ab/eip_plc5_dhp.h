@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <ab/ab_common.h>
+#include <libplctag/protocols/ab/ab_common.h>
 
 /* PCCC with DH+ last hop */
 extern struct tag_vtable_t eip_plc5_dhp_vtable;

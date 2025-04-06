@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include <omron/omron_common.h>
+#include <libplctag/protocols/omron/omron_common.h>
 
 extern struct tag_vtable_t omron_standard_tag_vtable;
 extern tag_byte_order_t omron_njnx_tag_byte_order;

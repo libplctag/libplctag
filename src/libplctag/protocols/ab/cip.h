@@ -35,15 +35,16 @@
 #define __LIBPLCTAG_AB_CIP_H__
 
 #include <libplctag/lib/libplctag.h>
-#include <ab/ab_common.h>
-#include <ab/defs.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/defs.h>
 
 
-//int cip_encode_path(ab_tag_p tag, const char *path);
-extern int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path, int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
+// int cip_encode_path(ab_tag_p tag, const char *path);
+extern int cip_encode_path(const char *path, int *needs_connection, plc_type_t plc_type, uint8_t *tmp_conn_path,
+                           int *tmp_conn_path_size, int *is_dhp, uint16_t *dhp_dest);
 
 //~ char *cip_decode_status(int status);
-extern int cip_encode_tag_name(ab_tag_p tag,const char *name);
+extern int cip_encode_tag_name(ab_tag_p tag, const char *name);
 
 /* look up the type size in bytes based on the first byte */
 extern int cip_lookup_encoded_type_size(uint8_t type_byte, int *type_size);

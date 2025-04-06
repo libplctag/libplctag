@@ -31,16 +31,16 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <ab/ab_common.h>
-#include <ab/cip.h>
-#include <ab/defs.h>
-#include <ab/eip_cip.h>
-#include <ab/error_codes.h>
-#include <ab/session.h>
-#include <ab/tag.h>
 #include <ctype.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/cip.h>
+#include <libplctag/protocols/ab/defs.h>
+#include <libplctag/protocols/ab/eip_cip.h>
+#include <libplctag/protocols/ab/error_codes.h>
+#include <libplctag/protocols/ab/session.h>
+#include <libplctag/protocols/ab/tag.h>
 #include <platform.h>
 #include <utils/attr.h>
 #include <utils/debug.h>

@@ -1,0 +1,5 @@
+
+SET(CMAKE_C_COMPILER gcc.exe)
+SET(CMAKE_C_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
+SET(CMAKE_CXX_COMPILER g++.exe)
+SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")

@@ -35,15 +35,15 @@
 #define __PLCTAG_AB_TAG_H__ 1
 
 /* do these first */
-#define MAX_TAG_NAME        (260)
-#define MAX_TAG_TYPE_INFO   (64)
+#define MAX_TAG_NAME (260)
+#define MAX_TAG_TYPE_INFO (64)
 
 /* they are used in some of these includes */
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <ab/ab_common.h>
-#include <ab/session.h>
-#include <ab/pccc.h>
+#include <libplctag/protocols/ab/ab_common.h>
+#include <libplctag/protocols/ab/pccc.h>
+#include <libplctag/protocols/ab/session.h>
 
 typedef enum {
     AB_TYPE_BOOL,
@@ -59,9 +59,9 @@ typedef enum {
     AB_TYPE_STRING,
     AB_TYPE_SHORT_STRING,
     AB_TYPE_TIMER,
-    AB_TYPE_TAG_ENTRY,  /* not a real AB type, but a pseudo type for AB's internal tag entry. */
-    AB_TYPE_TAG_UDT,    /* as above, but for UDTs. */
-    AB_TYPE_TAG_RAW     /* raw CIP tag */
+    AB_TYPE_TAG_ENTRY, /* not a real AB type, but a pseudo type for AB's internal tag entry. */
+    AB_TYPE_TAG_UDT,   /* as above, but for UDTs. */
+    AB_TYPE_TAG_RAW    /* raw CIP tag */
 } elem_type_t;
 
 
@@ -80,7 +80,7 @@ struct ab_tag_t {
     uint8_t encoded_name[MAX_TAG_NAME];
     int encoded_name_size;
 
-//    const char *read_group;
+    //    const char *read_group;
 
     /* storage for the encoded type. */
     uint8_t encoded_type_info[MAX_TAG_TYPE_INFO];
@@ -119,8 +119,6 @@ struct ab_tag_t {
     int write_in_progress;
     /*int connect_in_progress;*/
 };
-
-
 
 
 #endif

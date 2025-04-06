@@ -1,5 +1,5 @@
-#include "../lib/libplctag.h"
 #include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

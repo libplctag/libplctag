@@ -34,13 +34,13 @@
 #pragma once
 
 #include <libplctag/lib/tag.h>
-#include <ab/ab_common.h>
+#include <libplctag/protocols/ab/ab_common.h>
 
 extern struct tag_vtable_t eip_cip_raw_tag_vtable;
 extern tag_byte_order_t listing_tag_logix_byte_order;
 
 /* tag creation helpers */
-//extern int setup_special_cip_tag(ab_tag_p tag, const char *name);
+// extern int setup_special_cip_tag(ab_tag_p tag, const char *name);
 extern int setup_raw_tag(ab_tag_p tag);
 extern int setup_tag_listing_tag(ab_tag_p tag, const char *name);
 extern int setup_udt_tag(ab_tag_p tag, const char *name);

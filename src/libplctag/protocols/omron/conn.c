@@ -32,12 +32,12 @@
  ***************************************************************************/
 
 #include <inttypes.h>
+#include <libplctag/protocols/omron/cip.h>
+#include <libplctag/protocols/omron/conn.h>
+#include <libplctag/protocols/omron/defs.h>
+#include <libplctag/protocols/omron/omron_common.h>
+#include <libplctag/protocols/omron/tag.h>
 #include <limits.h>
-#include <omron/cip.h>
-#include <omron/conn.h>
-#include <omron/defs.h>
-#include <omron/omron_common.h>
-#include <omron/tag.h>
 #include <platform.h>
 #include <stdlib.h>
 #include <time.h>

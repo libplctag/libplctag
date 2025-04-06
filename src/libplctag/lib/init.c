@@ -31,15 +31,15 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <ab/ab.h>
 #include <libplctag/lib/init.h>
 #include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
-#include <mb/modbus.h>
-#include <omron/omron.h>
+#include <libplctag/protocols/ab/ab.h>
+#include <libplctag/protocols/mb/modbus.h>
+#include <libplctag/protocols/omron/omron.h>
+#include <libplctag/protocols/system/system.h>
 #include <platform.h>
 #include <stdlib.h>
-#include <system/system.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
 

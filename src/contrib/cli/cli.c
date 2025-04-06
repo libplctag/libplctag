@@ -1,10 +1,10 @@
 #include "./cli.h"
 #include "../examples/utils.h"
-#include "../lib/libplctag.h"
 #include "../util/debug.h"
 #include "./getline.h"
 #include <ctype.h>
 #include <inttypes.h>
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
