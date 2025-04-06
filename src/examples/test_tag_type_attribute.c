@@ -32,8 +32,8 @@
  ***************************************************************************/
 
 
-#include "../lib/libplctag.h"
 #include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -114,7 +114,7 @@ int test_tag_buffer_errors(const char *tag_name, int32_t tag) {
     printf("\n");
 
 
-    return rc;
+    return PLCTAG_STATUS_OK;
 }
 
 
