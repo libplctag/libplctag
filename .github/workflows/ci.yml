@@ -34,7 +34,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose 
@@ -122,10 +122,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" &
         sleep 2
         echo "test array notation read/write"
-        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
+        ${{ env.DIST }}/test_indexed_tags
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -135,7 +135,7 @@ jobs:
         echo "start up simulator..."
         ${{ env.DIST }}/modbus_server &
         sleep 2
-        echo "test Modbus calbacks and read/write"
+        echo "test Modbus callbacks and read/write"
         ${{ env.DIST }}/test_callback_ex_modbus
         echo "shut down server."
         killall ab_server -INT &> /dev/null
@@ -295,7 +295,7 @@ jobs:
         ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
-      run: brew update; brew install libmodbus
+      run: brew update; brew install
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
