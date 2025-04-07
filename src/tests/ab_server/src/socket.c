@@ -94,11 +94,13 @@ int socket_open_tcp_client(const char *remote_host, const char *remote_port) {
     }
 
 #ifdef SO_NOSIGPIPE
+    int sock_opt = 1;
+
     /* On *BSD and macOS, set the socket option to prevent SIGPIPE. */
     rc = setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt));
     if(rc) {
         socket_close(sock);
-        info("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
+        info("ERROR: Setting SO_NOSIGPIPE on socket failed: %s\n", gai_strerror(rc));
         return SOCKET_ERR_SETOPT;
     }
 #endif
