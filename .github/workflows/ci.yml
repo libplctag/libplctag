@@ -294,9 +294,6 @@ jobs:
       with:
         ref: ${{ env.BRANCH }}
 
-    - name: Set up build environment
-      run: brew update; brew install
-
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
