@@ -34,7 +34,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
@@ -173,7 +173,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
@@ -295,13 +295,13 @@ jobs:
         ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
-      run: brew update; brew install libmodbus5
+      run: brew update; brew install libmodbus
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
@@ -426,7 +426,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
@@ -461,7 +461,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64  -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
@@ -597,7 +597,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
@@ -733,7 +733,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
@@ -769,7 +769,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --config Release
@@ -808,7 +808,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
@@ -847,7 +847,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
@@ -886,7 +886,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build .
