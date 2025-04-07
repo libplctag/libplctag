@@ -33,8 +33,8 @@ set(CMAKE_C_FLAGS_DEBUG " -O0 -g -Wall -pedantic -Wextra -Wconversion -fno-stric
 set(CMAKE_CXX_FLAGS_RELEASE "-Os -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${EXTRA_COMPILE_FLAGS_RELEASE}")
 set(CMAKE_CXX_FLAGS_DEBUG " -O0 -g -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${EXTRA_COMPILE_FLAGS_DEBUG}")
 
-set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "")
-set(CMAKE_STATIC_LINKER_FLAGS_RELEASE " -static")
+# set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "")
+# set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "")
 
 set(EXTRA_LINKER_LIBS pthread)
 
