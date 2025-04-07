@@ -37,7 +37,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build --verbose . 
 
     - name: Test Basic Functions
       run: |

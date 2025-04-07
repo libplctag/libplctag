@@ -77,6 +77,22 @@ set ( libplctag_SRCS "${CMAKE_SOURCE_DIR}/src/libplctag/lib/init.c"
                      "${PLATFORM_SHIM_PATH}/platform.c"
                      "${PLATFORM_SHIM_PATH}/platform.h" )
 
+
+macro(print_all_ar_variables)
+    message(STATUS "print_all_ar_variables------------------------------------------{")
+    get_cmake_property(_variableNames VARIABLES)
+    foreach (_variableName ${_variableNames})
+        string(REGEX MATCH "^CMAKE_AR.*" MATCHED_STR "${_variableName}")
+        if(MATCHED_STR)
+            message(STATUS "${_variableName}=${${_variableName}}")
+        endif()
+    endforeach()
+    message(STATUS "print_all_modbus_variables------------------------------------------}")
+endmacro()
+
+# Debugging
+print_all_ar_variables()
+
 # shared library
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
@@ -100,3 +116,6 @@ install(FILES "${CMAKE_SOURCE_DIR}/src/libplctag/lib/libplctag.h" DESTINATION in
 if(EXISTS "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc")
     install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
 endif()
+
+
+
