@@ -138,7 +138,7 @@ jobs:
         echo "test Modbus callbacks and read/write"
         ${{ env.DIST }}/test_callback_ex_modbus
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall modbus_server -TERM &> /dev/null
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
