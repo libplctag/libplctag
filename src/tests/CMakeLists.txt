@@ -49,7 +49,7 @@ if(BASE_LINK_FLAGS)
 #     set_target_properties(ab_server PROPERTIES LINK_FLAGS "-static")
 endif()
 
-if(UNIX)
+if(UNIX AND BUILD_MODBUS_EMULATOR)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
 
