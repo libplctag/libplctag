@@ -74,7 +74,7 @@ if(UNIX AND BUILD_MODBUS_EMULATOR)
     endmacro()
 
     # Debugging
-    print_all_modbus_variables()
+    # print_all_modbus_variables()
 else()
     message("Not building Modbus test server.")
 endif()
