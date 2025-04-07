@@ -42,7 +42,7 @@
 
 #define REQUIRED_VERSION 2, 5, 5
 #define TAG_ATTRIBS_TMPL \
-    "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"
+    "protocol=ab_eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
@@ -54,6 +54,91 @@ static volatile int read_start_count = 0;
 static volatile int read_complete_count = 0;
 static volatile int write_start_count = 0;
 static volatile int write_complete_count = 0;
+
+
+static void *reader_function(void *tag_arg);
+static void *writer_function(void *tag_arg);
+static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
+
+
+#define NUM_TAGS (10)
+
+
+int main(void) {
+    int rc = PLCTAG_STATUS_OK;
+    char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL) + 10] = {0};
+    pthread_t read_threads[NUM_TAGS];
+    pthread_t write_threads[NUM_TAGS];
+    int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
+    int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
+    int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
+
+    /* check the library version. */
+    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Available library version is %d.%d.%d.\n", version_major, version_minor, version_patch);
+        exit(1);
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+
+    /* create all the tags. */
+    fprintf(stderr, "Creating tag handles ");
+
+    for(int i = 0; i < NUM_TAGS; i++) {
+        int32_t tag_id = PLCTAG_ERR_CREATE;
+
+        // NOLINTNEXTLINE
+        snprintf(tag_attr_str, sizeof(tag_attr_str), TAG_ATTRIBS_TMPL, (int32_t)i);
+        tag_id = plc_tag_create_ex(tag_attr_str, tag_callback, NULL, DATA_TIMEOUT);
+
+        if(tag_id <= 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Error %s trying to create tag %d!\n", plc_tag_decode_error(tag_id), i);
+            plc_tag_shutdown();
+            return 1;
+        }
+
+        /* create read and write thread for this tag. */
+        /* FIXME - check error returns! */
+        pthread_create(&read_threads[i], NULL, reader_function, (void *)(intptr_t)tag_id);
+        pthread_create(&write_threads[i], NULL, writer_function, (void *)(intptr_t)tag_id);
+
+        fprintf(stderr, ".");
+    }
+
+    fprintf(stderr, "\nWaiting for threads to stabilize %dms.\n", RUN_PERIOD / 2);
+
+    /* let everything run for a while */
+    system_sleep_ms(RUN_PERIOD / 2, NULL);
+
+    /* forcible shut down the entire library. */
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Forcing library shutdown.\n");
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
+
+    plc_tag_shutdown();
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Waiting for threads to quit.\n");
+
+    for(int i = 0; i < NUM_TAGS; i++) {
+        pthread_join(read_threads[i], NULL);
+        pthread_join(write_threads[i], NULL);
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Done.\n");
+
+    return rc;
+}
+
 
 void *reader_function(void *tag_arg) {
     int32_t tag_id = (int32_t)(intptr_t)tag_arg;
@@ -77,6 +162,9 @@ void *reader_function(void *tag_arg) {
 
         system_sleep_ms(READ_SLEEP_MS, NULL);
     }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Reader thread for tag ID %" PRId32 " exiting.\n", tag_id);
 
     return 0;
 }
@@ -110,6 +198,9 @@ void *writer_function(void *tag_arg) {
 
         system_sleep_ms(WRITE_SLEEP_MS, NULL);
     }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Writer thread for tag ID %" PRId32 " exiting.\n", tag_id);
 
     return 0;
 }
@@ -169,74 +260,4 @@ void tag_callback(int32_t tag_id, int event, int status, void *not_used) {
             fprintf(stderr, "Tag %" PRId32 " unexpected event %d!\n", tag_id, event);
             break;
     }
-}
-
-
-#define NUM_TAGS (10)
-
-
-int main(void) {
-    int rc = PLCTAG_STATUS_OK;
-    char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL) + 10] = {0};
-    pthread_t read_threads[NUM_TAGS];
-    pthread_t write_threads[NUM_TAGS];
-    int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
-    int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
-    int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
-
-    /* check the library version. */
-    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Available library version is %d.%d.%d.\n", version_major, version_minor, version_patch);
-        exit(1);
-    }
-
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
-
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
-
-    /* create all the tags. */
-    for(int i = 0; i < NUM_TAGS; i++) {
-        int32_t tag_id = PLCTAG_ERR_CREATE;
-
-        // NOLINTNEXTLINE
-        snprintf(tag_attr_str, sizeof(tag_attr_str), TAG_ATTRIBS_TMPL, (int32_t)i);
-        tag_id = plc_tag_create_ex(tag_attr_str, tag_callback, NULL, DATA_TIMEOUT);
-
-        if(tag_id <= 0) {
-            // NOLINTNEXTLINE
-            fprintf(stderr, "Error %s trying to create tag %d!\n", plc_tag_decode_error(tag_id), i);
-            plc_tag_shutdown();
-            return 1;
-        }
-
-        /* create read and write thread for this tag. */
-        /* FIXME - check error returns! */
-        pthread_create(&read_threads[i], NULL, reader_function, (void *)(intptr_t)tag_id);
-        pthread_create(&write_threads[i], NULL, writer_function, (void *)(intptr_t)tag_id);
-    }
-
-    /* let everything run for a while */
-    system_sleep_ms(RUN_PERIOD / 2, NULL);
-
-    /* forcible shut down the entire library. */
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Forcing library shutdown.\n");
-    plc_tag_shutdown();
-
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Waiting for threads to quit.\n");
-
-    for(int i = 0; i < NUM_TAGS; i++) {
-        pthread_join(read_threads[i], NULL);
-        pthread_join(write_threads[i], NULL);
-    }
-
-    // NOLINTNEXTLINE
-    fprintf(stderr, "Done.\n");
-
-    return rc;
 }

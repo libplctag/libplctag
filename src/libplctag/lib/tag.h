@@ -71,14 +71,14 @@ typedef struct tag_vtable_t *tag_vtable_p;
 
 struct tag_byte_order_s {
     /* set if we allocated this specifically for the tag. */
-    unsigned int is_allocated:1;
+    unsigned int is_allocated : 1;
 
     /* string type and ordering. */
-    unsigned int str_is_defined:1;
-    unsigned int str_is_counted:1;
-    unsigned int str_is_fixed_length:1;
-    unsigned int str_is_zero_terminated:1;
-    unsigned int str_is_byte_swapped:1;
+    unsigned int str_is_defined : 1;
+    unsigned int str_is_counted : 1;
+    unsigned int str_is_fixed_length : 1;
+    unsigned int str_is_zero_terminated : 1;
+    unsigned int str_is_byte_swapped : 1;
 
     unsigned int str_pad_to_multiple_bytes;
     unsigned int str_count_word_bytes;
@@ -108,55 +108,54 @@ typedef void (*tag_extended_callback_func)(int32_t tag_id, int event, int status
  * The base type only has a vtable for operations.
  */
 
- /* NB: sorted by decreasing size and then alphabetically */
+/* NB: sorted by decreasing size and then alphabetically */
 
-#define TAG_BASE_STRUCT int64_t auto_sync_next_read; \
-                        int64_t auto_sync_next_write; \
-                        int64_t read_cache_expire; \
-                        int64_t read_cache_ms; \
-                        uint8_t *data; \
-                        tag_byte_order_t *byte_order; \
-                        cond_p tag_cond_wait; \
-                        mutex_p api_mutex; \
-                        mutex_p ext_mutex; \
-                        tag_extended_callback_func callback; \
-                        tag_vtable_p vtable; \
-                        void *userdata; \
-                        int32_t auto_sync_read_ms; \
-                        int32_t auto_sync_write_ms; \
-                        int32_t size; \
-                        int32_t tag_id; \
-                        int connection_group_id; \
-                        int bit; \
-                        atomic_bool abort_requested; \
-                        int8_t event_creation_complete_status; \
-                        int8_t event_deletion_started_status; \
-                        int8_t event_operation_aborted_status; \
-                        int8_t event_read_complete_status; \
-                        int8_t event_read_started_status; \
-                        int8_t event_write_complete_status; \
-                        int8_t event_write_started_status; \
-                        int8_t status; \
-                        uint8_t allow_field_resize:1; \
-                        uint8_t event_creation_complete:1; \
-                        uint8_t event_deletion_started:1; \
-                        uint8_t event_operation_aborted:1; \
-                        uint8_t event_read_complete:1; \
-                        uint8_t event_read_complete_enable:1; \
-                        uint8_t event_read_started:1; \
-                        uint8_t event_write_complete:1; \
-                        uint8_t event_write_complete_enable:1; \
-                        uint8_t event_write_started:1; \
-                        uint8_t had_created_event:1; \
-                        uint8_t is_bit:1; \
-                        uint8_t read_complete:1; \
-                        uint8_t read_in_flight:1; \
-                        uint8_t skip_tickler:1; \
-                        uint8_t tag_is_dirty:1; \
-                        uint8_t write_complete:1; \
-                        uint8_t write_in_flight:1
-
-
+#define TAG_BASE_STRUCT                      \
+    int64_t auto_sync_next_read;             \
+    int64_t auto_sync_next_write;            \
+    int64_t read_cache_expire;               \
+    int64_t read_cache_ms;                   \
+    uint8_t *data;                           \
+    tag_byte_order_t *byte_order;            \
+    cond_p tag_cond_wait;                    \
+    mutex_p api_mutex;                       \
+    mutex_p ext_mutex;                       \
+    tag_extended_callback_func callback;     \
+    tag_vtable_p vtable;                     \
+    void *userdata;                          \
+    int32_t auto_sync_read_ms;               \
+    int32_t auto_sync_write_ms;              \
+    int32_t size;                            \
+    int32_t tag_id;                          \
+    int connection_group_id;                 \
+    int bit;                                 \
+    atomic_bool abort_requested;             \
+    int8_t event_creation_complete_status;   \
+    int8_t event_deletion_started_status;    \
+    int8_t event_operation_aborted_status;   \
+    int8_t event_read_complete_status;       \
+    int8_t event_read_started_status;        \
+    int8_t event_write_complete_status;      \
+    int8_t event_write_started_status;       \
+    int8_t status;                           \
+    uint8_t allow_field_resize : 1;          \
+    uint8_t event_creation_complete : 1;     \
+    uint8_t event_deletion_started : 1;      \
+    uint8_t event_operation_aborted : 1;     \
+    uint8_t event_read_complete : 1;         \
+    uint8_t event_read_complete_enable : 1;  \
+    uint8_t event_read_started : 1;          \
+    uint8_t event_write_complete : 1;        \
+    uint8_t event_write_complete_enable : 1; \
+    uint8_t event_write_started : 1;         \
+    uint8_t had_created_event : 1;           \
+    uint8_t is_bit : 1;                      \
+    uint8_t read_complete : 1;               \
+    uint8_t read_in_flight : 1;              \
+    uint8_t skip_tickler : 1;                \
+    uint8_t tag_is_dirty : 1;                \
+    uint8_t write_complete : 1;              \
+    uint8_t write_in_flight : 1
 
 
 struct plc_tag_t {
@@ -167,24 +166,26 @@ struct plc_tag_t {
 
 
 /* the following may need to be used where the tag is already mapped or is not yet mapped */
+
+extern atomic_bool library_terminating;
+
 extern int lib_init(void);
 extern void lib_teardown(void);
 extern void plc_tag_generic_tickler(plc_tag_p tag);
 #define plc_tag_generic_raise_event(t, e, s) plc_tag_generic_raise_event_impl(__func__, __LINE__, t, e, s)
 extern int plc_tag_generic_raise_event_impl(const char *func, int line_num, plc_tag_p tag, int8_t event_val, int8_t status);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
-#define plc_tag_tickler_wake()  plc_tag_tickler_wake_impl(__func__, __LINE__)
+#define plc_tag_tickler_wake() plc_tag_tickler_wake_impl(__func__, __LINE__)
 extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
 #define plc_tag_generic_wake_tag(tag) plc_tag_generic_wake_tag_impl(__func__, __LINE__, tag)
 extern int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag);
-extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes, void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata), void *userdata);
+extern int plc_tag_generic_init_tag(plc_tag_p tag, attr attributes,
+                                    void (*tag_callback_func)(int32_t tag_id, int event, int status, void *userdata),
+                                    void *userdata);
 
-static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
-{
+static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status) {
     /* do not stack up events if there is no callback. */
-    if(!tag->callback) {
-        return;
-    }
+    if(!tag->callback) { return; }
 
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
@@ -266,8 +267,6 @@ static inline void tag_raise_event(plc_tag_p tag, int event, int8_t status)
             pdebug(DEBUG_DETAIL, "Enabled PLCTAG_EVENT_WRITE_COMPLETE.");
             break;
 
-        default:
-            pdebug(DEBUG_WARN, "Unsupported event %d!");
-            break;
+        default: pdebug(DEBUG_WARN, "Unsupported event %d!"); break;
     }
 }

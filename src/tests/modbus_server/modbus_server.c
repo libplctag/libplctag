@@ -5,7 +5,7 @@
  */
 
 /*
- * This server is directly cloned from the main GitHub libmodbus repo.ACCESSX_MAX_TABLESIZE
+ * KRH: This server is directly cloned from the main GitHub libmodbus repo.
  *
  * Only minor changes were done to quiet clang-tidy and change the default port.
  */

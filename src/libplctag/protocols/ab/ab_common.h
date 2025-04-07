@@ -104,7 +104,7 @@ extern int check_tag_name(ab_tag_p tag, const char *name);
 extern int check_mutex(int debug);
 extern vector_p find_read_group_tags(ab_tag_p tag);
 
-THREAD_FUNC(request_handler_func);
+// THREAD_FUNC(request_handler_func);
 
 /* helpers for checking request status. */
 extern int check_request_status(ab_tag_p tag);

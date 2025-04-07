@@ -67,7 +67,8 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
 static volatile hashtable_p tags = NULL;
 static mutex_p tag_lookup_mutex = NULL;
 
-static atomic_bool library_terminating = false;
+atomic_bool library_terminating = false;
+
 static thread_p tag_tickler_thread = NULL;
 static cond_p tag_tickler_wait = NULL;
 #define TAG_TICKLER_TIMEOUT_MS (100)
@@ -165,7 +166,7 @@ int lib_init(void) {
 void lib_teardown(void) {
     pdebug(DEBUG_INFO, "Tearing down library.");
 
-    atomic_set_bool(&library_terminating, 1);
+    atomic_set_bool(&library_terminating, true);
 
     if(tag_tickler_wait) {
         pdebug(DEBUG_INFO, "Signaling tag tickler condition var.");
@@ -1094,7 +1095,7 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     atomic_set_bool(&library_terminating, true);
 
     /* close all tags. */
-    pdebug(DEBUG_DETAIL, "Closing all tags.");
+    pdebug(DEBUG_INFO, "Closing all tags.");
 
     critical_block(tag_lookup_mutex) { tag_table_entries = hashtable_capacity(tags); }
 
@@ -1119,16 +1120,16 @@ LIB_EXPORT void plc_tag_shutdown(void) {
         /* do this outside the mutex. */
         if(tag) {
             debug_set_tag_id(tag->tag_id);
-            pdebug(DEBUG_DETAIL, "Destroying tag %" PRId32 ".", tag->tag_id);
+            pdebug(DEBUG_INFO, "Destroying tag %" PRId32 ".", tag->tag_id);
             plc_tag_destroy(tag->tag_id);
-            pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+            pdebug(DEBUG_INFO, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
             rc_dec(tag);
         }
     }
 
-    pdebug(DEBUG_DETAIL, "All tags closed.");
+    pdebug(DEBUG_INFO, "All tags closed.");
 
-    pdebug(DEBUG_DETAIL, "Cleaning up library resources.");
+    pdebug(DEBUG_INFO, "Cleaning up library resources.");
 
     destroy_modules();
 

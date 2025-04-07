@@ -41,6 +41,7 @@
 #include <platform.h>
 #include <stdlib.h>
 #include <time.h>
+#include <utils/atomic_utils.h>
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 
@@ -854,7 +855,6 @@ void conn_destroy(void *conn_arg) {
         }
     }
 
-
     /* this needs to be handled in the mutex to prevent double frees due to queued requests. */
     critical_block(conn->mutex) {
         /* close off the connection if is one. This helps the PLC clean up. */
@@ -982,37 +982,6 @@ int conn_add_request(omron_conn_p conn, omron_request_p req) {
 }
 
 
-// /*
-//  * conn_remove_request_unsafe
-//  *
-//  * You must hold the mutex before calling this!
-//  */
-// int conn_remove_request_unsafe(omron_conn_p conn, omron_request_p req) {
-//     int rc = PLCTAG_STATUS_OK;
-//     //    omron_request_p cur, prev;
-
-//     pdebug(DEBUG_INFO, "Starting.");
-
-//     if(conn == NULL || req == NULL) { return rc; }
-
-//     for(int i = 0; i < vector_length(conn->requests); i++) {
-//         if(vector_get(conn->requests, i) == req) {
-//             vector_remove(conn->requests, i);
-//             break;
-//         }
-//     }
-
-//     /* release the request refcount */
-//     rc_dec(req);
-
-//     cond_signal(conn->wait_cond);
-
-//     pdebug(DEBUG_INFO, "Done.");
-
-//     return rc;
-// }
-
-
 /*****************************************************************
  **************** Connection handling functions *********************
  ****************************************************************/
@@ -1046,7 +1015,7 @@ THREAD_FUNC(conn_handler) {
 
     pdebug(DEBUG_INFO, "Starting thread for conn %p", conn);
 
-    while(!conn->terminating) {
+    while(!conn->terminating && !atomic_get_bool(&library_terminating)) {
         /* how long should we wait if nothing wakes us? */
         wait_until_time = time_ms() + CONN_IDLE_WAIT_TIME;
 

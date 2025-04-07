@@ -59,11 +59,9 @@ extern int omron_set_int_attrib(plc_tag_p tag, const char *attrib_name, int new_
 
 extern int omron_get_byte_array_attrib(plc_tag_p tag, const char *attrib_name, uint8_t *buffer, int buffer_length);
 
-THREAD_FUNC(request_handler_func);
+// THREAD_FUNC(request_handler_func);
 
 /* helpers for checking request status. */
-// extern int omron_check_read_request_status(omron_tag_p tag, omron_request_p request);
-// extern int omron_check_write_request_status(omron_tag_p tag, omron_request_p request);
 extern int omron_check_request_status(omron_tag_p tag);
 
 #define rc_is_error(rc) (rc < PLCTAG_STATUS_OK)

@@ -68,8 +68,10 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
                                size_t context_size) {
     tcp_server_p server = calloc(1, sizeof(*server));
 
+    (void)host;
+
     if(server) {
-        server->sock_fd = socket_open(host, port);
+        server->sock_fd = socket_open_tcp_server(port);
 
         if(server->sock_fd < 0) { error("ERROR: Unable to open TCP socket, error code %d!", server->sock_fd); }
 

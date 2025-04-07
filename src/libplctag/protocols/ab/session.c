@@ -143,13 +143,10 @@ static int session_request_increase_buffer(ab_request_p request, int new_capacit
 
 static volatile mutex_p session_mutex = NULL;
 static volatile vector_p sessions = NULL;
-static atomic_bool library_shutting_down = 0; /* can I do this? */
 
 
 int session_startup(void) {
     int rc = PLCTAG_STATUS_OK;
-
-    atomic_set_bool(&library_shutting_down, 0);
 
     if((rc = mutex_create((mutex_p *)&session_mutex)) != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to create session mutex %s!", plc_tag_decode_error(rc));
@@ -194,8 +191,6 @@ void session_teardown(void) {
     /* flag the whole library shutting down. */
     pdebug(DEBUG_INFO, "Setting library shutdown flag.");
 
-    atomic_set_bool(&library_shutting_down, 1);
-
     if(sessions && session_mutex) {
         pdebug(DEBUG_DETAIL, "Waiting for sessions to terminate.");
 
@@ -223,8 +218,6 @@ void session_teardown(void) {
         mutex_destroy((mutex_p *)&session_mutex);
         session_mutex = NULL;
     }
-
-    atomic_set_bool(&library_shutting_down, 0);
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -1201,7 +1194,7 @@ THREAD_FUNC(session_handler) {
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
-    while(!session->terminating && !atomic_get_bool(&library_shutting_down)) {
+    while(!session->terminating && !atomic_get_bool(&library_terminating)) {
         /* how long should we wait if nothing wakes us? */
         wait_until_time = time_ms() + SESSION_IDLE_WAIT_TIME;
 
@@ -1482,7 +1475,6 @@ THREAD_FUNC(session_handler) {
     /*
      * One last time before we exit.
      */
-    pdebug(DEBUG_DETAIL, "Critical block.");
     critical_block(session->session_mutex) { purge_aborted_requests_unsafe(session); }
 
     THREAD_RETURN(0);

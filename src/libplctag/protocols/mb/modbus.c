@@ -209,7 +209,6 @@ tag_byte_order_t modbus_tag_byte_order = {.is_allocated = 0,
 /* Modbus module globals. */
 mutex_p mb_mutex = NULL;
 modbus_plc_p plcs = NULL;
-volatile int library_terminating = 0;
 
 
 /* helper functions */
@@ -671,7 +670,7 @@ THREAD_FUNC(modbus_plc_handler) {
         THREAD_RETURN(0);
     }
 
-    while(!plc->flags.terminate) {
+    while(!plc->flags.terminate && !atomic_get_bool(&library_terminating)) {
         rc = tickle_all_tags(plc);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error %s tickling tags!", plc_tag_decode_error(rc));
@@ -2406,8 +2405,6 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 
 void mb_teardown(void) {
     pdebug(DEBUG_INFO, "Starting.");
-
-    library_terminating = 1;
 
     if(mb_mutex) {
         pdebug(DEBUG_DETAIL, "Waiting for all Modbus PLCs to terminate.");
