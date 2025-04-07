@@ -39,12 +39,9 @@
 
 #define REQUIRED_VERSION 2, 1, 10
 
-// #define TAG_PATH "protocol=ab-eip&gateway=10.206.1.39&path=1,5&cpu=LGX&elem_size=4&elem_count=1&name=TestBigArray&debug=4"
 #define TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:5020&path=0&elem_count=1&name=hr0"
-// #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.38&cpu=PLC5&elem_size=2&elem_count=1&name=N7:0&debug=4"
 #define ELEM_COUNT 1
 #define ELEM_SIZE 2
-// #define ELEM_SIZE 2
 #define DATA_TIMEOUT 5000
 
 
