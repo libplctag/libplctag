@@ -37,7 +37,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build --verbose . 
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose 
 
     - name: Test Basic Functions
       run: |
@@ -176,7 +176,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Test Basic Functions
       run: |
@@ -304,7 +304,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Test Basic Functions
       run: |
@@ -429,7 +429,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -464,7 +464,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64  -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Test Basic Functions
       run: |
@@ -600,7 +600,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Test Basic Functions
       run: |
@@ -736,7 +736,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -772,7 +772,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -811,7 +811,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -850,7 +850,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -889,7 +889,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
