@@ -28,7 +28,7 @@ jobs:
         ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
-      run: sudo apt update; sudo apt install build-essential cmake libmodbus5
+      run: sudo apt update; sudo apt install build-essential cmake libmodbus5 libmodbus-dev
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
