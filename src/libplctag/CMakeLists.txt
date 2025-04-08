@@ -103,6 +103,10 @@ add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
 set_target_properties(plctag_dyn PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
 
+if(PLATFORM_WINDOWS)
+    target_compile_definitions(plctag_dyn PUBLIC -D_CRT_SECURE_NO_WARNINGS)
+endif(PLATFORM_WINDOWS)
+
 # install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
 
 # static library
@@ -110,6 +114,10 @@ add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
 target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)    
+
+if(PLATFORM_WINDOWS)
+    target_compile_definitions(plctag_static PUBLIC -D_CRT_SECURE_NO_WARNINGS)
+endif(PLATFORM_WINDOWS)
 
 # make sure the .h file is in the output directory
 CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/src/libplctag/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
