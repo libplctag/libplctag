@@ -30,24 +30,7 @@ set(AB_SERVER_FILES
 
 # Add ab_server executable
 add_executable(ab_server ${AB_SERVER_FILES})
-
-message("BASE_C_FLAGS = ${BASE_C_FLAGS}")
-message("CMAKE_C_FLAGS_DEBUG = ${CMAKE_C_FLAGS_DEBUG}")
-
-# Set compile flags for ab_server (ensure C11 and static linking)
-foreach(AB_SERVER_FILE ${AB_SERVER_FILES})
-    set_source_files_properties("${AB_SERVER_FILE}" PROPERTIES COMPILE_FLAGS "${BASE_C_FLAGS}")
-endforeach()
-
-# set the include files for the ab_server
-target_include_directories(ab_server PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ab_server")
-
-# Set link flags for ab_server
-if(BASE_LINK_FLAGS)
-    set_target_properties(ab_server PROPERTIES LINK_FLAGS "${BASE_LINK_FLAGS}")
-# else()
-#     set_target_properties(ab_server PROPERTIES LINK_FLAGS "-static")
-endif()
+target_link_libraries(ab_server ${EXTRA_LINKER_LIBS})
 
 if(UNIX AND BUILD_MODBUS_EMULATOR)
     find_package(PkgConfig REQUIRED)
