@@ -29,7 +29,9 @@
 #   Free Software Foundation, Inc.,
 #   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
+# make really sure we output the command lines used to build the project
 set(CMAKE_VERBOSE_MAKEFILE On)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 cmake_minimum_required (VERSION 3.10)
 cmake_policy(SET CMP0054 NEW)
