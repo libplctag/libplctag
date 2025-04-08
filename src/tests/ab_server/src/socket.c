@@ -35,9 +35,15 @@
 
 #if IS_WINDOWS
 #    define WIN32_LEAN_AND_MEAN
-#    include <windows.h>
+
+#    define _WINSOCKAPI_
+
 #    include <winsock2.h>
+
+#    include <windows.h>
+
 #    include <ws2tcpip.h>
+
 #else
 #    include <arpa/inet.h>
 #    include <errno.h>
@@ -48,6 +54,8 @@
 #    include <sys/types.h>
 #    include <unistd.h>
 #endif
+
+
 #include "slice.h"
 #include "socket.h"
 #include "utils.h"

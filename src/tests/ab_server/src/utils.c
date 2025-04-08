@@ -60,12 +60,15 @@
 
 #    define _WINSOCKAPI_
 #    include <Winsock2.h>
+
+#    include <Windows.h>
+
 #    include <Ws2tcpip.h>
+
 #    include <io.h>
 #    include <strsafe.h>
 #    include <tchar.h>
 #    include <wincrypt.h>
-#    include <windows.h>
 
 #else
 #    error "Platform does not support good random function!"
@@ -263,10 +266,7 @@ uint64_t random_u64(uint64_t upper_bound) {
     return random_number;
 }
 
-#elif defined(_WIN32) || defined(_WIN64)
-#    include <wincrypt.h>
-#    include <windows.h>
-
+#elif defined(USE_BCRYPTGENRANDOM)
 
 uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;

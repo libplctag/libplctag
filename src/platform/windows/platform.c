@@ -37,11 +37,14 @@
 
 #include <platform.h>
 
+/* KEEP THE SPACES BETWEEN THE INCLUDES.  The order is required! */
 #define _WINSOCKAPI_
+#include <Winsock2.h>
+
 #include <Windows.h>
 
-#include <Winsock2.h>
 #include <Ws2tcpip.h>
+
 #include <errno.h>
 #include <io.h>
 #include <math.h>

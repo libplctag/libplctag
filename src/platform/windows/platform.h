@@ -46,14 +46,18 @@ extern "C"
 #endif
 */
 
+/* KEEP THE SPACES BETWEEN LINES!  The order is required! */
 #define _WINSOCKAPI_
+#include <Winsock2.h>
+
 #include <windows.h>
+
+#include <Ws2tcpip.h>
+
 
 #include <tchar.h>
 #include <strsafe.h>
 #include <io.h>
-#include <Winsock2.h>
-#include <Ws2tcpip.h>
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -62,16 +66,8 @@ extern "C"
 #include <time.h>
 #include <stdio.h>
 
-/*#include <WinSock2.h>*/
-/*#include <Ws2tcpip.h>*/
-/*#include <sys/types.h>*/
 #include <stdint.h>
-/*#include <io.h>*/
-/*#include <stdlib.h>*/
 #include <malloc.h>
-
-//#include "libplctag_lib.h"
-
 
 
 /* WinSock does not define this or support signals */
