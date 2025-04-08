@@ -272,11 +272,9 @@ uint64_t random_u64(uint64_t upper_bound) {
     uint64_t random_number = 0;
 
     if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
-        pdebug(DEBUG_WARN, "BCryptGenRandom failed, returning error");
         return RANDOM_U64_ERROR;
     }
     if(upper_bound == 0) {
-        pdebug(DEBUG_WARN, "upper_bound is zero, returning 0");
         return 0;
     }
     random_number %= upper_bound;
