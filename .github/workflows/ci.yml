@@ -786,6 +786,10 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.3.1
 
+    - name: Install ARM Windows SDK (if missing)
+      run: |
+        choco install windows-sdk-10-version-2004-all -y
+
     - name: Configure and Build with MSVC for ARM
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
