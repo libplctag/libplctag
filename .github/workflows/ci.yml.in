@@ -37,7 +37,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose 
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Test Basic Functions
       run: |
@@ -458,7 +458,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64  -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -A x64  -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
