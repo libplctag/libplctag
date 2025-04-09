@@ -7,6 +7,7 @@ on:
     branches: [ release, prerelease, split_omron ]
 
 jobs:
+
   ubuntu_x64:
 
     runs-on: ubuntu-latest
@@ -747,24 +748,24 @@ jobs:
       with:
         arch: ARM64
 
-  - name: Check Environment
-    run: |
-      echo "--- PATH ---"
-      echo $Env:PATH
-      echo "--- Compiler Check ---"
-      where cl.exe
-      where gcc.exe
-    shell: pwsh
+    - name: Check Environment
+      run: |
+        echo "--- PATH ---"
+        echo $Env:PATH
+        echo "--- Compiler Check ---"
+        where cl.exe
+        where gcc.exe
+      shell: pwsh
 
-  - name: Configure CMake
-    run: |
-      cd ${{ env.BUILD }}
-      cmake .. -G "Ninja" `
-        -DCMAKE_C_COMPILER=cl.exe `
-        -DCMAKE_CXX_COMPILER=cl.exe `
-        -DCMAKE_BUILD_TYPE=Release `
-        -DCMAKE_VERBOSE_MAKEFILE=On
-    shell: pwsh
+    - name: Configure CMake
+      run: |
+        cd ${{ env.BUILD }}
+        cmake .. -G "Ninja" `
+          -DCMAKE_C_COMPILER=cl.exe `
+          -DCMAKE_CXX_COMPILER=cl.exe `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_VERBOSE_MAKEFILE=On
+      shell: pwsh
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
