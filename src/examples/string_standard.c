@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,11 +32,11 @@
  ***************************************************************************/
 
 
+#include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
 /*
 
@@ -60,18 +60,16 @@ the standard STRING type.   If you are not, this code WILL NOT WORK.
 */
 
 
-#define REQUIRED_VERSION 2,2,0
+#define REQUIRED_VERSION 2, 2, 0
 
 static const char *tag_strings[] = {
     "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_size=88&elem_count=11&name=barcodes",
-    "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_count=2&name=ST18:0"
-};
+    "protocol=ab_eip&gateway=10.206.1.38&plc=plc5&elem_count=2&name=ST18:0"};
 
 #define DATA_TIMEOUT 5000
 
 
-int main()
-{
+int main(void) {
     int32_t tag = 0;
     int rc;
     int str_num = 1;
@@ -79,25 +77,26 @@ int main()
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         return 1;
     }
 
-    fprintf(stderr, "Using library version %d.%d.%d.\n",
-                                            plc_tag_get_int_attribute(0, "version_major", -1),
-                                            plc_tag_get_int_attribute(0, "version_minor", -1),
-                                            plc_tag_get_int_attribute(0, "version_patch", -1));
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Using library version %d.%d.%d.\n", plc_tag_get_int_attribute(0, "version_major", -1),
+            plc_tag_get_int_attribute(0, "version_minor", -1), plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* turn off debugging output. */
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
     /* loop over the tag strings. */
-    for(int i=0; i < (int)(unsigned int)(sizeof(tag_strings)/sizeof(tag_strings[0])); i++) {
+    for(int i = 0; i < (int)(unsigned int)(sizeof(tag_strings) / sizeof(tag_strings[0])); i++) {
         tag = plc_tag_create(tag_strings[i], DATA_TIMEOUT);
 
         /* everything OK? */
         if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"Error creating tag %d! Error %s\n", i, plc_tag_decode_error(rc));
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Error creating tag %d! Error %s\n", i, plc_tag_decode_error(rc));
             plc_tag_destroy(tag);
             return rc;
         }
@@ -105,7 +104,9 @@ int main()
         /* get the data */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
-            fprintf(stderr,"ERROR: Unable to read the data for tag %d! Got error code %d: %s\n", i, rc, plc_tag_decode_error(rc));
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: Unable to read the data for tag %d! Got error code %d: %s\n", i, rc,
+                    plc_tag_decode_error(rc));
             plc_tag_destroy(tag);
             return rc;
         }
@@ -119,6 +120,7 @@ int main()
 
             str = malloc((size_t)(unsigned int)str_cap);
             if(!str) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unable to allocate memory for the string %d of tag %d!\n", str_num, i);
                 plc_tag_destroy(tag);
                 return PLCTAG_ERR_NO_MEM;
@@ -126,12 +128,14 @@ int main()
 
             rc = plc_tag_get_string(tag, offset, str, str_cap);
             if(rc != PLCTAG_STATUS_OK) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Unable to get string %d of tag %d, got error %s!\n", str_num, i, plc_tag_decode_error(rc));
                 free(str);
                 plc_tag_destroy(tag);
                 return rc;
             }
 
+            // NOLINTNEXTLINE
             fprintf(stderr, "tag %d string %d (%u chars) = '%s'\n", i, str_num, (unsigned int)strlen(str), str);
 
             free(str);
@@ -147,5 +151,3 @@ int main()
 
     return 0;
 }
-
-

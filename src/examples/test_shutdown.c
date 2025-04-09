@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2021 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,26 +32,17 @@
  ***************************************************************************/
 
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
+#include "compat_utils.h"
 #include <inttypes.h>
-#if defined(WIN32) || defined(_WIN32)
-#include <Windows.h>
-#else
-#include <pthread.h>
-#include <stdint.h>
+#include <libplctag/lib/libplctag.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
-#include <signal.h>
-#endif
-#include "../lib/libplctag.h"
-#include "utils.h"
 
 
-
-#define REQUIRED_VERSION 2,5,5
-#define TAG_ATTRIBS_TMPL "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"
+#define REQUIRED_VERSION 2, 5, 5
+#define TAG_ATTRIBS_TMPL \
+    "protocol=ab_eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
@@ -65,167 +56,49 @@ static volatile int write_start_count = 0;
 static volatile int write_complete_count = 0;
 
 
-#if defined(WIN32) || defined(_WIN32)
-DWORD __stdcall reader_function(void* tag_arg)
-#else
-void* reader_function(void* tag_arg)
-#endif
-{
-    int32_t tag_id = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = util_time_ms();
-    int64_t run_until = start_time + RUN_PERIOD;
-    int iteration = 1;
-
-    while(run_until > util_time_ms()) {
-        int status = plc_tag_status(tag_id);
-        int32_t val = plc_tag_get_int32(tag_id, 0);
-
-        if(status < 0) {
-            fprintf(stderr, "Tag %" PRId32 " has error status %s, terminating!\n", tag_id, plc_tag_decode_error(status));
-            break;
-        }
-
-        fprintf(stderr, "READER: Tag %" PRId32 " iteration %d, got value: %d at time %" PRId64 "\n", tag_id, iteration++, val, util_time_ms()-start_time);
-
-        util_sleep_ms(READ_SLEEP_MS);
-    }
-
-#if defined(WIN32) || defined(_WIN32)
-    return (DWORD)0;
-#else
-    return NULL;
-#endif
-}
-
-
-#if defined(WIN32) || defined(_WIN32)
-DWORD __stdcall writer_function(void* tag_arg)
-#else
-void* writer_function(void* tag_arg)
-#endif
-{
-    int32_t tag_id = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = util_time_ms();
-    int64_t run_until = start_time + RUN_PERIOD;
-    int iteration = 1;
-
-    util_sleep_ms(WRITE_SLEEP_MS);
-
-    while(run_until > util_time_ms()) {
-        int32_t val = plc_tag_get_int32(tag_id, 0);
-        int32_t new_val = ((val+1) > 499) ? 0 : (val+1);
-        int status = plc_tag_status(tag_id);
-
-        if(status < 0) {
-            fprintf(stderr, "Tag %" PRId32 " has error status %s, terminating!\n", tag_id, plc_tag_decode_error(status));
-            break;
-        }
-
-        /* write the value */
-        plc_tag_set_int32(tag_id, 0, new_val);
-
-        fprintf(stderr, "WRITER: Tag %" PRId32 " iteration %d, wrote value: %d at time %" PRId64 "\n", tag_id, iteration++, new_val, util_time_ms()-start_time);
-
-        util_sleep_ms(WRITE_SLEEP_MS);
-    }
-
-#if defined(WIN32) || defined(_WIN32)
-    return (DWORD)0;
-#else
-    return NULL;
-#endif
-}
-
-
-void tag_callback(int32_t tag_id, int event, int status, void *not_used)
-{
-    (void)not_used;
-
-    /* handle the events. */
-    switch(event) {
-        case PLCTAG_EVENT_CREATED:
-            fprintf(stderr,"Tag %" PRId32 " created.\n", tag_id);
-            break;
-        
-        case PLCTAG_EVENT_ABORTED:
-            fprintf(stderr, "Tag %" PRId32 " automatic operation was aborted!\n", tag_id);
-            break;
-
-        case PLCTAG_EVENT_DESTROYED:
-            fprintf(stderr, "Tag %" PRId32 " was destroyed.\n", tag_id);
-            break;
-
-        case PLCTAG_EVENT_READ_COMPLETED:
-            read_complete_count++;
-            fprintf(stderr, "Tag %" PRId32 " automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
-            break;
-
-        case PLCTAG_EVENT_READ_STARTED:
-            read_start_count++;
-            fprintf(stderr, "Tag %" PRId32 " automatic read operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
-            break;
-
-        case PLCTAG_EVENT_WRITE_COMPLETED:
-            write_complete_count++;
-            fprintf(stderr, "Tag %" PRId32 " automatic write operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
-            break;
-
-        case PLCTAG_EVENT_WRITE_STARTED:
-            write_start_count++;
-            fprintf(stderr, "Tag %" PRId32 " automatic write operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
-
-            break;
-
-        default:
-            fprintf(stderr, "Tag %" PRId32 " unexpected event %d!\n", tag_id, event);
-            break;
-
-    }
-}
-
+static void *reader_function(void *tag_arg);
+static void *writer_function(void *tag_arg);
+static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
 
 
 #define NUM_TAGS (10)
 
 
-int main(int argc, char **argv)
-{
+int main(void) {
     int rc = PLCTAG_STATUS_OK;
-    char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL)+10] = {0};
-    // int32_t tags[NUM_TAGS] = {0};
-#if defined(WIN32) || defined(_WIN32)
-    HANDLE read_threads[NUM_TAGS];
-    HANDLE write_threads[NUM_TAGS];
-#else
+    char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL) + 10] = {0};
     pthread_t read_threads[NUM_TAGS];
     pthread_t write_threads[NUM_TAGS];
-#endif
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
 
-    (void)argc;
-    (void)argv;
-
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
+        // NOLINTNEXTLINE
         fprintf(stderr, "Available library version is %d.%d.%d.\n", version_major, version_minor, version_patch);
         exit(1);
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     /* create all the tags. */
-    for(int i=0; i<NUM_TAGS; i++) {
+    fprintf(stderr, "Creating tag handles ");
+
+    for(int i = 0; i < NUM_TAGS; i++) {
         int32_t tag_id = PLCTAG_ERR_CREATE;
 
+        // NOLINTNEXTLINE
         snprintf(tag_attr_str, sizeof(tag_attr_str), TAG_ATTRIBS_TMPL, (int32_t)i);
         tag_id = plc_tag_create_ex(tag_attr_str, tag_callback, NULL, DATA_TIMEOUT);
 
         if(tag_id <= 0) {
+            // NOLINTNEXTLINE
             fprintf(stderr, "Error %s trying to create tag %d!\n", plc_tag_decode_error(tag_id), i);
             plc_tag_shutdown();
             return 1;
@@ -233,60 +106,158 @@ int main(int argc, char **argv)
 
         /* create read and write thread for this tag. */
         /* FIXME - check error returns! */
-#if defined(WIN32) || defined(_WIN32)
-        read_threads[i] = CreateThread(NULL,                       /* default security attributes */
-            0,                          /* use default stack size      */
-            reader_function,            /* thread function             */
-            (LPVOID)(intptr_t)tag_id,   /* argument to thread function */
-            (DWORD)0,                   /* use default creation flags  */
-            (LPDWORD)NULL               /* do not need thread ID       */
-        );
-#else
-        pthread_create(&read_threads[i], NULL, reader_function, (void*)(intptr_t)tag_id);
-#endif
+        pthread_create(&read_threads[i], NULL, reader_function, (void *)(intptr_t)tag_id);
+        pthread_create(&write_threads[i], NULL, writer_function, (void *)(intptr_t)tag_id);
 
-#if defined(WIN32) || defined(_WIN32)
-        write_threads[i] = CreateThread(NULL,                       /* default security attributes */
-            0,                          /* use default stack size      */
-            writer_function,            /* thread function             */
-            (LPVOID)(intptr_t)tag_id,   /* argument to thread function */
-            (DWORD)0,                   /* use default creation flags  */
-            (LPDWORD)NULL               /* do not need thread ID       */
-        );
-#else
-        pthread_create(&write_threads[i], NULL, writer_function, (void*)(intptr_t)tag_id);
-#endif
+        fprintf(stderr, ".");
     }
+
+    fprintf(stderr, "\nWaiting for threads to stabilize %dms.\n", RUN_PERIOD / 2);
 
     /* let everything run for a while */
-    util_sleep_ms(RUN_PERIOD/2);
+    system_sleep_ms(RUN_PERIOD / 2, NULL);
 
     /* forcible shut down the entire library. */
+    // NOLINTNEXTLINE
     fprintf(stderr, "Forcing library shutdown.\n");
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
+
     plc_tag_shutdown();
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for threads to quit.\n");
 
-    for(int i=0; i<NUM_TAGS; i++) {
-#if defined(WIN32) || defined(_WIN32)
-        if (read_threads[i] != 0) {
-            WaitForSingleObject(read_threads[i], (DWORD)INFINITE);
-        }
-#else
+    for(int i = 0; i < NUM_TAGS; i++) {
         pthread_join(read_threads[i], NULL);
-#endif
-
-#if defined(WIN32) || defined(_WIN32)
-        if (write_threads[i] != 0) {
-            WaitForSingleObject(write_threads[i], (DWORD)INFINITE);
-        }
-#else
         pthread_join(write_threads[i], NULL);
-#endif
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Done.\n");
 
     return rc;
 }
 
+
+void *reader_function(void *tag_arg) {
+    int32_t tag_id = (int32_t)(intptr_t)tag_arg;
+    int64_t start_time = system_time_ms();
+    int64_t run_until = start_time + RUN_PERIOD;
+    int iteration = 1;
+
+    while(run_until > system_time_ms()) {
+        int status = plc_tag_status(tag_id);
+        int32_t val = plc_tag_get_int32(tag_id, 0);
+
+        if(status < 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " has error status %s, terminating!\n", tag_id, plc_tag_decode_error(status));
+            break;
+        }
+
+        // NOLINTNEXTLINE
+        fprintf(stderr, "READER: Tag %" PRId32 " iteration %d, got value: %d at time %" PRId64 "\n", tag_id, iteration++, val,
+                system_time_ms() - start_time);
+
+        system_sleep_ms(READ_SLEEP_MS, NULL);
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Reader thread for tag ID %" PRId32 " exiting.\n", tag_id);
+
+    return 0;
+}
+
+
+void *writer_function(void *tag_arg) {
+    int32_t tag_id = (int32_t)(intptr_t)tag_arg;
+    int64_t start_time = system_time_ms();
+    int64_t run_until = start_time + RUN_PERIOD;
+    int iteration = 1;
+
+    system_sleep_ms(WRITE_SLEEP_MS, NULL);
+
+    while(run_until > system_time_ms()) {
+        int32_t val = plc_tag_get_int32(tag_id, 0);
+        int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
+        int status = plc_tag_status(tag_id);
+
+        if(status < 0) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " has error status %s, terminating!\n", tag_id, plc_tag_decode_error(status));
+            break;
+        }
+
+        /* write the value */
+        plc_tag_set_int32(tag_id, 0, new_val);
+
+        // NOLINTNEXTLINE
+        fprintf(stderr, "WRITER: Tag %" PRId32 " iteration %d, wrote value: %d at time %" PRId64 "\n", tag_id, iteration++,
+                new_val, system_time_ms() - start_time);
+
+        system_sleep_ms(WRITE_SLEEP_MS, NULL);
+    }
+
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Writer thread for tag ID %" PRId32 " exiting.\n", tag_id);
+
+    return 0;
+}
+
+
+void tag_callback(int32_t tag_id, int event, int status, void *not_used) {
+    (void)not_used;
+
+    /* handle the events. */
+    switch(event) {
+        case PLCTAG_EVENT_CREATED:
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " created.\n", tag_id);
+            break;
+
+        case PLCTAG_EVENT_ABORTED:
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " automatic operation was aborted!\n", tag_id);
+            break;
+
+        case PLCTAG_EVENT_DESTROYED:
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " was destroyed.\n", tag_id);
+            break;
+
+        case PLCTAG_EVENT_READ_COMPLETED:
+            read_complete_count++;
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " automatic read operation completed with status %s.\n", tag_id,
+                    plc_tag_decode_error(status));
+            break;
+
+        case PLCTAG_EVENT_READ_STARTED:
+            read_start_count++;
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " automatic read operation started with status %s.\n", tag_id,
+                    plc_tag_decode_error(status));
+            break;
+
+        case PLCTAG_EVENT_WRITE_COMPLETED:
+            write_complete_count++;
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " automatic write operation completed with status %s.\n", tag_id,
+                    plc_tag_decode_error(status));
+            break;
+
+        case PLCTAG_EVENT_WRITE_STARTED:
+            write_start_count++;
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " automatic write operation started with status %s.\n", tag_id,
+                    plc_tag_decode_error(status));
+
+            break;
+
+        default:
+            // NOLINTNEXTLINE
+            fprintf(stderr, "Tag %" PRId32 " unexpected event %d!\n", tag_id, event);
+            break;
+    }
+}

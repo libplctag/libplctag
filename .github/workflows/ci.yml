@@ -28,16 +28,16 @@ jobs:
         ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
-      run: sudo apt update; sudo apt install build-essential cmake
+      run: sudo apt update; sudo apt install build-essential cmake libmodbus5 libmodbus-dev
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose 
 
     - name: Test Basic Functions
       run: |
@@ -70,7 +70,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=Omron '--tag=TestDINTArray:DINT[10]' --debug  &
         sleep 2
         echo "test getting a tag on an Omron NJ/NX."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -81,7 +81,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug  &
         sleep 2
         echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -92,7 +92,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -103,7 +103,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
         sleep 2
         echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -114,7 +114,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
         echo "test getting a large tag."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -122,12 +122,23 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" &
         sleep 2
         echo "test array notation read/write"
-        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
+        ${{ env.DIST }}/test_indexed_tags
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
+    - name: Test Modbus
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/modbus_server &
+        sleep 2
+        echo "test Modbus callbacks and read/write"
+        ${{ env.DIST }}/test_callback_ex_modbus
+        echo "shut down server."
+        killall modbus_server -TERM &> /dev/null
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -162,10 +173,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Test Basic Functions
       run: |
@@ -187,7 +198,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
         sleep 2
         echo "test getting a tag on a Micro800."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -198,7 +209,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
         sleep 2
         echo "test getting a tag on an Omron NJ/NX."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -209,7 +220,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
         sleep 2
         echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -220,7 +231,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
         sleep 2
         echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -231,7 +242,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 &
         sleep 2
         echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -242,7 +253,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
         echo "test getting a large tag."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -287,10 +298,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Test Basic Functions
       run: |
@@ -312,7 +323,7 @@ jobs:
         ${{ env.DIST }}/ab_server --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] &
         sleep 2
         echo "test getting a tag on a Micro800."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -323,7 +334,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
         sleep 2
         echo "test getting a tag on an Omron NJ/NX."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -334,7 +345,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -345,7 +356,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw -t sint16 -p 'protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -356,7 +367,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
         sleep 2
         echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' -d 2
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -367,7 +378,7 @@ jobs:
         ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
         sleep 2
         echo "test getting a large tag."
-        ${{ env.DIST }}/tag_rw -t sint32 -p 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -412,10 +423,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -447,10 +458,10 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A x64  -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Test Basic Functions
       run: |
@@ -473,7 +484,7 @@ jobs:
         start /b .\ab_server.exe --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
         echo "test getting a tag on a Micro800."
-        .\tag_rw.exe -t sint32 -p "protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -485,7 +496,7 @@ jobs:
         start /b .\ab_server.exe --plc=Omron --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
         echo "test getting a tag on an Omron NJ/NX."
-        .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -497,7 +508,7 @@ jobs:
         start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] --debug
         timeout /T 5
         echo "test getting a tag on a PLC/5."
-        .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0" -d 2
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -509,7 +520,7 @@ jobs:
         start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] --debug
         timeout /T 5
         echo "test getting a tag on a SLC 500."
-        .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0" -d 2
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -522,7 +533,7 @@ jobs:
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug
         timeout /T 5
         echo "test getting a tag with connection failures."
-        .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -534,7 +545,7 @@ jobs:
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
         timeout /T 5
         echo "test getting a large tag."
-        .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -583,10 +594,10 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Test Basic Functions
       run: |
@@ -609,7 +620,7 @@ jobs:
         start /b .\ab_server.exe --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
         echo "test getting a tag on a Micro800."
-        .\tag_rw.exe -t sint32 -p "protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -621,7 +632,7 @@ jobs:
         start /b .\ab_server.exe --plc=Omron --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
         echo "test getting a tag on an Omron NJ/NX."
-        .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -633,7 +644,7 @@ jobs:
         start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] --debug
         timeout /T 5
         echo "test getting a tag on a PLC/5."
-        .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0" -d 2
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -645,7 +656,7 @@ jobs:
         start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] --debug
         timeout /T 5
         echo "test getting a tag on a SLC 500."
-        .\tag_rw.exe -t sint16 -p "protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0" -d 2
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -658,7 +669,7 @@ jobs:
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug
         timeout /T 5
         echo "test getting a tag with connection failures."
-        .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -670,7 +681,7 @@ jobs:
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
         timeout /T 5
         echo "test getting a large tag."
-        .\tag_rw.exe -t sint32 -p "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray" -d 2
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray" --debug=2
         echo "shut down server."
         taskkill /F /IM ab_server.exe
       shell: cmd
@@ -719,10 +730,10 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -755,10 +766,10 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -794,10 +805,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -833,10 +844,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -872,10 +883,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build .
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4

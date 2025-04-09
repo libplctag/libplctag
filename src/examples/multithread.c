@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,20 +31,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-#if defined(WIN32) || defined(_WIN32)
-#include <Windows.h>
-#else
-#include <pthread.h>
-#include <signal.h>
-#endif
-#include "../lib/libplctag.h"
-#include "utils.h"
+#include <string.h>
 
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2, 1, 0
 
 #define TAG_PATH "protocol=ab_eip&gateway=10.206.1.39&path=1,0&cpu=LGX&elem_size=4&elem_count=1&name=TestDINTArray[0]"
 #define ELEM_COUNT 1
@@ -60,95 +54,20 @@
  * access.
  */
 
-
-
-#if defined(WIN32) || defined(_WIN32)
 volatile int done = 0;
 
-/* straight from MS' web site :-) */
-BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
-{
-    switch (fdwCtrlType)
-    {
-        // Handle the CTRL-C signal.
-    case CTRL_C_EVENT:
-        done = 1;
-        return TRUE;
-
-        // CTRL-CLOSE: confirm that the user wants to exit.
-    case CTRL_CLOSE_EVENT:
-        done = 1;
-        return TRUE;
-
-        // Pass other signals to the next handler.
-    case CTRL_BREAK_EVENT:
-        done = 1;
-        return FALSE;
-
-    case CTRL_LOGOFF_EVENT:
-        done = 1;
-        return FALSE;
-
-    case CTRL_SHUTDOWN_EVENT:
-        done = 1;
-        return FALSE;
-
-    default:
-        return FALSE;
-    }
-}
-
-
-void setup_break_handler(void)
-{
-    if (!SetConsoleCtrlHandler(CtrlHandler, TRUE))
-    {
-        printf("\nERROR: Could not set control handler!\n");
-    }
-}
-
-#else
-volatile sig_atomic_t done = 0;
-
-void SIGINT_handler(int not_used)
-{
-    (void)not_used;
-
-    done = 1;
-}
-
-void setup_break_handler(void)
-{
-    struct sigaction act;
-
-    /* set up signal handler. */
-    memset(&act, 0, sizeof(act));
-    act.sa_handler = SIGINT_handler;
-    sigaction(SIGINT, &act, NULL);
-}
-
-#endif
-
-
-
-
+void interrupt_handler(void) { done = 1; }
 
 
 /* global to cheat on passing it to threads. */
 volatile int32_t tag;
 
 
-
 /*
  * Thread function.  Just read until killed.
  */
 
-#if defined(WIN32) || defined(_WIN32)
-DWORD __stdcall thread_func(LPVOID data)
-#else
-void *thread_func(void *data)
-#endif
-{
+void *thread_func(void *data) {
     int tid = (int)(intptr_t)data;
     int rc;
     int value;
@@ -158,7 +77,7 @@ void *thread_func(void *data)
         int64_t end;
 
         /* capture the starting time */
-        start = util_time_ms();
+        start = system_time_ms();
 
         /* use do/while to allow easy exit without return */
         do {
@@ -174,11 +93,12 @@ void *thread_func(void *data)
             if(rc != PLCTAG_STATUS_OK) {
                 value = 1001;
             } else {
-                value = (int)plc_tag_get_int32(tag,0);
+                value = (int)plc_tag_get_int32(tag, 0);
 
                 /* increment the value */
                 value = (value > 500 ? 0 : value + 1);
 
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Thread %d setting tag to value %d.\n", tid, value);
 
                 /* yes, we should be checking this return value too... */
@@ -192,57 +112,55 @@ void *thread_func(void *data)
             plc_tag_unlock(tag);
 
             /* give up the CPU */
-            util_sleep_ms(10);
+            system_sleep_ms(10, NULL);
         } while(0);
 
-        end = util_time_ms();
+        end = system_time_ms();
 
-        fprintf(stderr,"Thread %d got result %d with return code %s in %dms\n",tid,value,plc_tag_decode_error(rc),(int)(end-start));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Thread %d got result %d with return code %s in %dms\n", tid, value, plc_tag_decode_error(rc),
+                (int)(end - start));
 
-        util_sleep_ms(1);
+        system_sleep_ms(10, NULL);
     }
 
-#if defined(WIN32) || defined(_WIN32)
-    return (DWORD)0;
-#else
-    return NULL;
-#endif
+    return 0;
 }
 
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int rc = PLCTAG_STATUS_OK;
-#if defined(WIN32) || defined(_WIN32)
-    HANDLE thread[MAX_THREADS];
-#else
     pthread_t thread[MAX_THREADS];
-#endif
     int num_threads;
     int thread_id = 0;
 
-    /* set up handler for ^C etc. */
-    setup_break_handler();
+    /* Set up the signal handler */
+    set_interrupt_handler(interrupt_handler);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
 
     if(argc != 2) {
-        fprintf(stderr,"ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n",argc);
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Must provide number of threads to run (between 1 and 300) argc=%d!\n", argc);
         return 0;
     }
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
-    num_threads = (int)strtol(argv[1],NULL, 10);
+    num_threads = (int)strtol(argv[1], NULL, 10);
 
     if(num_threads < 1 || num_threads > MAX_THREADS) {
-        fprintf(stderr,"ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",num_threads, argv[1]);
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: %d (%s) is not a valid number. Must provide number of threads to run (between 1 and 300)!\n",
+                num_threads, argv[1]);
         return 0;
     }
 
@@ -251,45 +169,30 @@ int main(int argc, char **argv)
 
     /* everything OK? */
     if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
         return 0;
     }
 
     if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 0;
     }
 
     /* create the read threads */
-    fprintf(stderr,"Creating %d threads.\n",num_threads);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Creating %d threads.\n", num_threads);
 
-    for(thread_id=0; thread_id < num_threads; thread_id++) {
-#if defined(WIN32) || defined(_WIN32)
-        thread[thread_id] = CreateThread(
-                                        NULL,                       /* default security attributes */
-                                        0,                          /* use default stack size      */
-                                        thread_func,                /* thread function             */
-                                        (void *)(intptr_t)thread_id,/* argument to thread function */
-                                        (DWORD)0,                   /* use default creation flags  */
-                                        (LPDWORD)NULL);              /* do not need thread ID       */
-#else
+    for(thread_id = 0; thread_id < num_threads; thread_id++) {
         pthread_create(&thread[thread_id], NULL, thread_func, (void *)(intptr_t)thread_id);
-#endif
     }
 
     /* wait until ^C */
-    while(!done) {
-        util_sleep_ms(100);
-    }
+    while(!done) { system_sleep_ms(100, NULL); }
 
-    for(thread_id = 0; thread_id < num_threads; thread_id++) {
-#if defined(WIN32) || defined(_WIN32)
-        WaitForSingleObject(thread[thread_id], (DWORD)INFINITE);
-#else
-        pthread_join(thread[thread_id], NULL);
-#endif
-    }
+    for(thread_id = 0; thread_id < num_threads; thread_id++) { pthread_join(thread[thread_id], NULL); }
 
     plc_tag_destroy(tag);
 

@@ -36,20 +36,22 @@
 #include "slice.h"
 
 typedef enum {
-    SOCKET_STATUS_OK    = -1,
-    SOCKET_ERR_STARTUP  = -2,
-    SOCKET_ERR_OPEN     = -3,
-    SOCKET_ERR_CREATE   = -4,
-    SOCKET_ERR_BIND     = -5,
-    SOCKET_ERR_LISTEN   = -6,
-    SOCKET_ERR_SETOPT   = -7,
-    SOCKET_ERR_READ     = -8,
-    SOCKET_ERR_WRITE    = -9,
-    SOCKET_ERR_SELECT   = -10,
-    SOCKET_ERR_ACCEPT   = -11
+    SOCKET_STATUS_OK = -1,
+    SOCKET_ERR_STARTUP = -2,
+    SOCKET_ERR_OPEN = -3,
+    SOCKET_ERR_CREATE = -4,
+    SOCKET_ERR_BIND = -5,
+    SOCKET_ERR_LISTEN = -6,
+    SOCKET_ERR_SETOPT = -7,
+    SOCKET_ERR_CONNECT = -8,
+    SOCKET_ERR_READ = -9,
+    SOCKET_ERR_WRITE = -10,
+    SOCKET_ERR_SELECT = -11,
+    SOCKET_ERR_ACCEPT = -12
 } socket_err_t;
 
-extern int socket_open(const char *host, const char *port);
+extern int socket_open_tcp_client(const char *remote_host, const char *remote_port);
+extern int socket_open_tcp_server(const char *listening_port);
 extern void socket_close(int sock);
 extern int socket_accept(int sock);
 extern slice_s socket_read(int sock, slice_s in_buf);

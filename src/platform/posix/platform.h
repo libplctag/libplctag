@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -106,9 +106,6 @@ extern char *str_concat_impl(int num_args, ...);
 /* mutex functions/defs */
 typedef struct mutex_t *mutex_p;
 extern int mutex_create(mutex_p *m);
-// extern int mutex_lock(mutex_p m);
-// extern int mutex_try_lock(mutex_p m);
-// extern int mutex_unlock(mutex_p m);
 extern int mutex_destroy(mutex_p *m);
 
 extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);
@@ -153,7 +150,7 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
 extern void thread_stop(void) __attribute__((noreturn));
 extern void thread_kill(thread_p t);
 extern int thread_join(thread_p t);
-extern int thread_detach();
+extern int thread_detach(void);
 extern int thread_destroy(thread_p *t);
 
 #define THREAD_FUNC(func) void *func(void *arg)

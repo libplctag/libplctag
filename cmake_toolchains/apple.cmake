@@ -1,0 +1,4 @@
+
+set(CMAKE_MACOSX_RPATH ON)
+
+set(PLATFORM_SHIM_PATH "${CMAKE_SOURCE_DIR}/src/platform/posix" )

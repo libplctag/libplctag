@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,33 +31,48 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include "utils.h"
+#include "compat.h"
+#include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <stdarg.h>
 #include <string.h>
-#include <errno.h>
+#include <time.h>
 
-#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
-    #define _WINSOCKAPI_
-    #include <windows.h>
-    #include <tchar.h>
-    #include <strsafe.h>
-    #include <io.h>
-    #include <Winsock2.h>
-    #include <Ws2tcpip.h>
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || (__linux__)
+#    define USE_ARC4RANDOM
+#    define PLATFORM_POSIX
+
+#    include <arpa/inet.h>
+#    include <netdb.h>
+#    include <netinet/in.h>
+#    include <stdlib.h>
+#    include <sys/socket.h>
+#    include <sys/time.h>
+#    include <sys/types.h>
+#    include <unistd.h>
+
+#elif defined(_WIN32) || defined(_WIN64)
+#    define USE_BCRYPTGENRANDOM
+#    define PLATFORM_WINDOWS
+
+#    define _WINSOCKAPI_
+#    include <Winsock2.h>
+
+#    include <Windows.h>
+
+#    include <Ws2tcpip.h>
+
+#    include <io.h>
+#    include <strsafe.h>
+#    include <tchar.h>
+#    include <wincrypt.h>
+
 #else
-    /* assume it is POSIX of some sort... */
-    #include <sys/time.h>
-    #include <sys/types.h>
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <arpa/inet.h>
-    #include <unistd.h>
-    #include <netdb.h>
+#    error "Platform does not support good random function!"
 #endif
-
-#include "utils.h"
 
 
 /*
@@ -65,24 +80,22 @@
  */
 
 
-#ifdef IS_WINDOWS
+#ifdef PLATFORM_WINDOWS
 
-int util_sleep_ms(int ms)
-{
+int util_sleep_ms(int ms) {
     Sleep(ms);
     return 1;
 }
 
 #else
 
-int util_sleep_ms(int ms)
-{
+int util_sleep_ms(int ms) {
     struct timeval tv;
 
-    tv.tv_sec = ms/1000;
-    tv.tv_usec = (ms % 1000)*1000;
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
 
-    return select(0,NULL,NULL,NULL, &tv);
+    return select(0, NULL, NULL, NULL, &tv);
 }
 
 #endif
@@ -94,9 +107,8 @@ int util_sleep_ms(int ms)
  * Return the current epoch time in milliseconds.
  */
 
-#ifdef IS_WINDOWS
-int64_t util_time_ms(void)
-{
+#ifdef PLATFORM_WINDOWS
+int64_t util_time_ms(void) {
     FILETIME ft;
     int64_t res;
 
@@ -109,30 +121,28 @@ int64_t util_time_ms(void)
 
     res = res / 10000;
 
-    return  res;
+    return res;
 }
 
 #else
 
 
-int64_t util_time_ms(void)
-{
+int64_t util_time_ms(void) {
     struct timeval tv;
 
-    gettimeofday(&tv,NULL);
+    gettimeofday(&tv, NULL);
 
-    return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
+    return ((int64_t)tv.tv_sec * 1000) + ((int64_t)tv.tv_usec / 1000);
 }
 
-#endif 
+#endif
 
 
 /*
  * string helpers
  */
 
-int match_chars(const char* source, int start_index, const char* chars)
-{
+int match_chars(const char *source, int start_index, const char *chars) {
     return (int)(unsigned int)strspn(source + start_index, chars);
 }
 
@@ -144,75 +154,68 @@ int match_chars(const char* source, int start_index, const char* chars)
 static bool debug_is_on = false;
 
 
-void debug_on(void)
-{
-    debug_is_on = true;
-}
+void debug_on(void) { debug_is_on = true; }
 
-void debug_off(void)
-{
-    debug_is_on = false;
-}
+void debug_off(void) { debug_is_on = false; }
 
 
-
-void error_impl(const char *func, int line, const char *templ, ...)
-{
+void error_impl(const char *func, int line, const char *templ, ...) {
     va_list va;
 
     /* print it out. */
+    // NOLINTNEXTLINE
     fprintf(stderr, "ERROR %s:%d ", func, line);
-    va_start(va,templ);
-    vfprintf(stderr,templ,va);
+    va_start(va, templ);
+    vfprintf(stderr, templ, va);
     va_end(va);
-    fprintf(stderr,"\n");
+    // NOLINTNEXTLINE
+    fprintf(stderr, "\n");
 
     exit(1);
 }
 
 
-
-void info_impl(const char *func, int line, const char *templ, ...)
-{
+void info_impl(const char *func, int line, const char *templ, ...) {
     va_list va;
 
-    if(!debug_is_on) {
-        return;
-    }
+    if(!debug_is_on) { return; }
 
     /* print it out. */
+    // NOLINTNEXTLINE
     fprintf(stderr, "INFO %s:%d ", func, line);
-    va_start(va,templ);
-    vfprintf(stderr,templ,va);
+    va_start(va, templ);
+    vfprintf(stderr, templ, va);
     va_end(va);
-    fprintf(stderr,"\n");
+    // NOLINTNEXTLINE
+    fprintf(stderr, "\n");
 }
 
 
 #define COLUMNS (size_t)(10)
 
-void slice_dump(slice_s s)
-{
+void slice_dump(slice_s s) {
     size_t max_row, row, column;
     char row_buf[300]; /* MAGIC */
 
-    if(!debug_is_on) {
-        return;
-    }
+    if(!debug_is_on) { return; }
 
     /* determine the number of rows we will need to print. */
-    max_row = (slice_len(s)  + (COLUMNS - 1))/COLUMNS;
+    max_row = (slice_len(s) + (COLUMNS - 1)) / COLUMNS;
 
     for(row = 0; row < max_row; row++) {
         size_t offset = (row * COLUMNS);
         size_t row_offset;
 
         /* print the prefix and address */
-        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf),"%03zu", offset);
+        // NOLINTNEXTLINE
+        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf), "%03zu", offset);
 
-        for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < slice_len(s) && row_offset < (int)sizeof(row_buf); column++) {
+        for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < slice_len(s) && row_offset < (int)sizeof(row_buf);
+            column++) {
             offset = (row * COLUMNS) + column;
-            row_offset += (size_t)snprintf(&row_buf[row_offset], sizeof(row_buf) - row_offset, " %02x", slice_get_uint8(s, offset));
+            row_offset +=
+                // NOLINTNEXTLINE
+                (size_t)snprintf(&row_buf[row_offset], sizeof(row_buf) - row_offset, " %02x", slice_get_uint8(s, offset));
         }
 
         /* zero terminate */
@@ -220,12 +223,65 @@ void slice_dump(slice_s s)
             row_buf[row_offset] = (char)0;
         } else {
             /* this might truncate the string, but it is safe. */
-            row_buf[sizeof(row_buf)-1] = (char)0;
+            row_buf[sizeof(row_buf) - 1] = (char)0;
         }
 
         /* output it, finally */
-        fprintf(stderr,"%s\n", row_buf);
+        // NOLINTNEXTLINE
+        fprintf(stderr, "%s\n", row_buf);
     }
 }
 
+/* FIXME - move this all over into a compatibility/platform check header */
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#    include <stdlib.h>
 
+uint64_t random_u64(uint64_t upper_bound) {
+    uint64_t random_number = 0;
+
+    arc4random_buf(&random_number, sizeof(random_number));
+    random_number %= upper_bound;
+
+    return random_number;
+}
+
+#elif defined(__linux__)
+#    include <stdlib.h>
+#    include <sys/random.h>
+
+
+uint64_t random_u64(uint64_t upper_bound) {
+    uint64_t random_number = 0;
+
+    if(upper_bound == 0) { return 0; }
+
+    if(getrandom(&random_number, sizeof(random_number), GRND_NONBLOCK) < (ssize_t)sizeof(random_number)) {
+        /* not enough entropy, do it the hard way. */
+        srand((unsigned int)((uint64_t)time(NULL) ^ random_number));
+        for(size_t i = 0; i < sizeof(random_number); ++i) { ((uint8_t *)&random_number)[i] ^= (uint8_t)(rand() % 256); }
+    }
+
+    random_number %= upper_bound;
+
+    return random_number;
+}
+
+#elif defined(USE_BCRYPTGENRANDOM)
+
+uint64_t random_u64(uint64_t upper_bound) {
+    uint64_t random_number = 0;
+
+    if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
+        return RANDOM_U64_ERROR;
+    }
+    if(upper_bound == 0) {
+        return 0;
+    }
+    random_number %= upper_bound;
+
+    return random_number;
+}
+
+#else
+#    error "Platform not supported!"
+#endif

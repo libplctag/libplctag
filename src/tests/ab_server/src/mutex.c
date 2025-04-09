@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *   Author Heath Raftery                                                  *
  *                                                                         *
@@ -35,18 +35,19 @@
 #include "compat.h"
 
 #if IS_WINDOWS
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
-    #include <process.h>
-    #include <handleapi.h>
-    #include <processthreadsapi.h>
-    #include <synchapi.h>
+#    define WIN32_LEAN_AND_MEAN
+#    include <windows.h>
+
+#    include <handleapi.h>
+#    include <process.h>
+#    include <processthreadsapi.h>
+#    include <synchapi.h>
 #else
-    #include <pthread.h>
+#    include <pthread.h>
 #endif
 
-#include "mutex.h"
 #include "memory.h"
+#include "mutex.h"
 #include "utils.h"
 
 
@@ -59,8 +60,7 @@ struct mutex_t {
     int initialized;
 };
 
-int mutex_create(mutex_p *m)
-{
+int mutex_create(mutex_p *m) {
 
 #if !defined(IS_WINDOWS)
     pthread_mutexattr_t mutex_attribs;
@@ -68,23 +68,20 @@ int mutex_create(mutex_p *m)
 
     info("DETAIL: Starting.");
 
-    if(*m) {
-        info("WARN: Called with non-NULL pointer!");
-    }
+    if(*m) { info("WARN: Called with non-NULL pointer!"); }
 
     *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
 
-    if(! *m) {
+    if(!*m) {
         error("ERROR: null mutex pointer.");
         return MUTEX_ERR_NULL_PTR;
     }
 
 #if IS_WINDOWS
     /* set up the mutex */
-    (*m)->h_mutex = CreateMutex(
-                        NULL,                   /* default security attributes  */
-                        FALSE,                  /* initially not owned          */
-                        NULL);                  /* unnamed mutex                */
+    (*m)->h_mutex = CreateMutex(NULL,  /* default security attributes  */
+                                FALSE, /* initially not owned          */
+                                NULL); /* unnamed mutex                */
 
     if(!(*m)->h_mutex) {
 #else
@@ -92,7 +89,7 @@ int mutex_create(mutex_p *m)
     pthread_mutexattr_init(&mutex_attribs);
     pthread_mutexattr_settype(&mutex_attribs, PTHREAD_MUTEX_RECURSIVE);
 
-    if(pthread_mutex_init(&((*m)->p_mutex),&mutex_attribs)) {
+    if(pthread_mutex_init(&((*m)->p_mutex), &mutex_attribs)) {
         pthread_mutexattr_destroy(&mutex_attribs);
 #endif
         mem_free(*m);
@@ -114,8 +111,7 @@ int mutex_create(mutex_p *m)
 }
 
 
-int mutex_lock_impl(const char *func, int line, mutex_p m)
-{
+int mutex_lock_impl(const char *func, int line, mutex_p m) {
 #if IS_WINDOWS
     DWORD dwWaitResult = ~WAIT_OBJECT_0;
 #else
@@ -128,15 +124,11 @@ int mutex_lock_impl(const char *func, int line, mutex_p m)
         return MUTEX_ERR_NULL_PTR;
     }
 
-    if(!m->initialized) {
-        return MUTEX_ERR_MUTEX_INIT;
-    }
+    if(!m->initialized) { return MUTEX_ERR_MUTEX_INIT; }
 
 #if IS_WINDOWS
     /* FIXME - This will potentially hang forever! */
-    while(dwWaitResult != WAIT_OBJECT_0) {
-        dwWaitResult = WaitForSingleObject(m->h_mutex,INFINITE);
-    }
+    while(dwWaitResult != WAIT_OBJECT_0) { dwWaitResult = WaitForSingleObject(m->h_mutex, INFINITE); }
 #else
     if(pthread_mutex_lock(&(m->p_mutex))) {
         info("WARN: error locking mutex.");
@@ -144,14 +136,13 @@ int mutex_lock_impl(const char *func, int line, mutex_p m)
     }
 #endif
 
-    //info("SPEW: Done.");
+    // info("SPEW: Done.");
 
     return MUTEX_STATUS_OK;
 }
 
 
-int mutex_try_lock_impl(const char *func, int line, mutex_p m)
-{
+int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
 #if IS_WINDOWS
     DWORD dwWaitResult = 0;
 #else
@@ -164,9 +155,7 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m)
         return MUTEX_ERR_NULL_PTR;
     }
 
-    if(!m->initialized) {
-        return MUTEX_ERR_MUTEX_INIT;
-    }
+    if(!m->initialized) { return MUTEX_ERR_MUTEX_INIT; }
 
 #if IS_WINDOWS
     dwWaitResult = WaitForSingleObject(m->h_mutex, 0);
@@ -185,9 +174,7 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m)
 }
 
 
-
-int mutex_unlock_impl(const char *func, int line, mutex_p m)
-{
+int mutex_unlock_impl(const char *func, int line, mutex_p m) {
     info("SPEW: unlocking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
@@ -195,9 +182,7 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m)
         return MUTEX_ERR_NULL_PTR;
     }
 
-    if(!m->initialized) {
-        return MUTEX_ERR_MUTEX_INIT;
-    }
+    if(!m->initialized) { return MUTEX_ERR_MUTEX_INIT; }
 
 #if IS_WINDOWS
     if(!ReleaseMutex(m->h_mutex)) {
@@ -208,14 +193,13 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m)
         return MUTEX_ERR_MUTEX_UNLOCK;
     }
 
-    //info("SPEW: Done.");
+    // info("SPEW: Done.");
 
     return MUTEX_STATUS_OK;
 }
 
 
-int mutex_destroy(mutex_p *m)
-{
+int mutex_destroy(mutex_p *m) {
     info("DETAIL: Starting to destroy mutex %p.", m);
 
     if(!m || !*m) {

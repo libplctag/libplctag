@@ -34,186 +34,192 @@
 #include "compat.h"
 
 #if IS_WINDOWS
-    #define WIN32_LEAN_AND_MEAN
-    #include <windows.h>
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
+#    define WIN32_LEAN_AND_MEAN
+
+#    define _WINSOCKAPI_
+
+#    include <winsock2.h>
+
+#    include <windows.h>
+
+#    include <ws2tcpip.h>
+
 #else
-    #include <arpa/inet.h>
-    #include <errno.h>
-    #include <netdb.h>
-    #include <netinet/in.h>
-    #include <sys/socket.h>
-    #include <sys/time.h>
-    #include <sys/types.h>
-    #include <unistd.h>
+#    include <arpa/inet.h>
+#    include <errno.h>
+#    include <netdb.h>
+#    include <netinet/in.h>
+#    include <sys/socket.h>
+#    include <sys/time.h>
+#    include <sys/types.h>
+#    include <unistd.h>
 #endif
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+
 #include "slice.h"
 #include "socket.h"
 #include "utils.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 
 /* lengths for socket read and write. */
 #ifdef IS_MSVC
-    typedef int sock_io_len_t;
+typedef int sock_io_len_t;
 #else
-    typedef size_t sock_io_len_t;
-    typedef struct timeval TIMEVAL;
+typedef size_t sock_io_len_t;
+typedef struct timeval TIMEVAL;
 #endif
 
 
 #define LISTEN_QUEUE (10)
 
-int socket_open(const char *host, const char *port)
-{
-	//int status;
-	struct addrinfo addr_hints;
-    struct addrinfo *addr_info = NULL;
-	int sock;
-    int sock_opt = 0;
-    int rc;
+
+int socket_open_tcp_client(const char *remote_host, const char *remote_port) {
+    int sock = -1;
+    int rc = 0;
+    struct sockaddr_in serv_addr = {0};
+    struct timeval timeout = {0};
+    struct linger so_linger = {0};
 
 #ifdef IS_WINDOWS
-	/* Windows needs special initialization. */
-	static WSADATA winsock_data;
-	rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
+    /* Windows needs special initialization. */
+    static WSADATA winsock_data;
+    rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
 
-	if (rc != NO_ERROR) {
-		info("WSAStartup failed with error: %d\n", rc);
-		return SOCKET_ERR_STARTUP;
-	}
+    if(rc != NO_ERROR) {
+        info("WSAStartup failed with error: %d\n", rc);
+        return SOCKET_ERR_STARTUP;
+    }
 #endif
 
-    /*
-     * Set up the hints for the type of socket that we want.
-     */
-
-    /* make sure the whole struct is set to 0 bytes */
-	memset(&addr_hints, 0, sizeof addr_hints);
-
-    /*
-     * From the man page (node == host name here):
-     *
-     * "If the AI_PASSIVE flag is specified in hints.ai_flags, and node is NULL, then
-     * the returned socket addresses will be suitable for bind(2)ing a socket that
-     * will  accept(2) connections.   The returned  socket  address  will  contain
-     * the  "wildcard  address" (INADDR_ANY for IPv4 addresses, IN6ADDR_ANY_INIT for
-     * IPv6 address).  The wildcard address is used by applications (typically servers)
-     * that intend to accept connections on any of the host's network addresses.  If
-     * node is not NULL, then the AI_PASSIVE flag is ignored.
-     *
-     * If the AI_PASSIVE flag is not set in hints.ai_flags, then the returned socket
-     * addresses will be suitable for use with connect(2), sendto(2), or sendmsg(2).
-     * If node is NULL, then the  network address  will  be  set  to the loopback
-     * interface address (INADDR_LOOPBACK for IPv4 addresses, IN6ADDR_LOOPBACK_INIT for
-     * IPv6 address); this is used by applications that intend to communicate with
-     * peers running on the same host."
-     *
-     * So we can get away with just setting AI_PASSIVE.
-     */
-    addr_hints.ai_flags = AI_PASSIVE;
-
-    /* this allows for both IPv4 and IPv6 */
-    addr_hints.ai_family = AF_UNSPEC;
-
-    /* we want a TCP socket.  And we want it now! */
-    addr_hints.ai_socktype = SOCK_STREAM;
-
-    /* Get the address info about the local system, to be used later. */
-    rc = getaddrinfo(host, port, &addr_hints, &addr_info);
-    if (rc != 0) {
-        info("ERROR: getaddrinfo() failed: %s\n", gai_strerror(rc));
-        return SOCKET_ERR_OPEN;
-    }
-
-    /* finally, finally, finally, we get to open a socket! */
-    sock = (int)socket(addr_info->ai_family, addr_info->ai_socktype, addr_info->ai_protocol);
-
-    if (sock < 0) {
+    /* create the socket */
+    sock = (int)socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
+    if(sock < 0) {
         info("ERROR: socket() failed: %s\n", gai_strerror(sock));
         return SOCKET_ERR_CREATE;
     }
 
-    /* if this is going to be a server socket, bind it. */
-    if(strcmp(host,"0.0.0.0") == 0) {
-        info("socket_open() setting up server socket.   Binding to address 0.0.0.0.");
-
-        rc = bind(sock, addr_info->ai_addr, (socklen_t)(unsigned int)addr_info->ai_addrlen);
-        if (rc < 0)	{
-            printf("ERROR: Unable to bind() socket: %s\n", gai_strerror(rc));
-            return SOCKET_ERR_BIND;
-        }
-
-        rc = listen(sock, LISTEN_QUEUE);
-        if(rc < 0) {
-            info("ERROR: Unable to call listen() on socket: %s\n", gai_strerror(rc));
-            return SOCKET_ERR_LISTEN;
-        }
-
-        /* set up our socket to allow reuse if we crash suddenly. */
-        sock_opt = 1;
-        rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char*)&sock_opt, sizeof(sock_opt));
-        if(rc) {
-            socket_close(sock);
-            info("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
-            return SOCKET_ERR_SETOPT;
-        }
-    } else {
-        struct timeval timeout; /* used for timing out connections etc. */
-        struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
-
 #ifdef SO_NOSIGPIPE
-        /* On *BSD and macOS, set the socket option to prevent SIGPIPE. */
-        rc = setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt));
-        if(rc) {
-            socket_close(sock);
-            info ("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
-            return SOCKET_ERR_SETOPT;
-        }
+    int sock_opt = 1;
+
+    /* On *BSD and macOS, set the socket option to prevent SIGPIPE. */
+    rc = setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt));
+    if(rc) {
+        socket_close(sock);
+        info("ERROR: Setting SO_NOSIGPIPE on socket failed: %s\n", gai_strerror(rc));
+        return SOCKET_ERR_SETOPT;
+    }
 #endif
 
-        timeout.tv_sec = 10;
-        timeout.tv_usec = 0;
+    timeout.tv_sec = 10;
+    timeout.tv_usec = 0;
 
-        rc = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-        if(rc) {
-            socket_close(sock);
-            info("ERROR: Setting SO_RCVTIMEO on socket failed: %s\n", gai_strerror(rc));
-            return SOCKET_ERR_SETOPT;
-        }
-
-        rc = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
-        if(rc) {
-            socket_close(sock);
-            info("ERROR: Setting SO_SNDTIMEO on socket failed: %s\n", gai_strerror(rc));
-            return SOCKET_ERR_SETOPT;
-        }
-
-        /* abort the connection on close. */
-        so_linger.l_onoff = 1;
-        so_linger.l_linger = 0;
-
-        rc = setsockopt(sock, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger));
-        if(rc) {
-            socket_close(sock);
-            info("ERROR: Setting SO_LINGER on socket failed: %s\n", gai_strerror(rc));
-            return SOCKET_ERR_SETOPT;
-        }
+    rc = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+    if(rc) {
+        socket_close(sock);
+        info("ERROR: Setting SO_RCVTIMEO on socket failed: %s\n", gai_strerror(rc));
+        return SOCKET_ERR_SETOPT;
     }
 
-    /* free the memory for the address info struct. */
-    freeaddrinfo(addr_info);
+    rc = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
+    if(rc) {
+        socket_close(sock);
+        info("ERROR: Setting SO_SNDTIMEO on socket failed: %s\n", gai_strerror(rc));
+        return SOCKET_ERR_SETOPT;
+    }
+
+    /* abort the connection on close. */
+    so_linger.l_onoff = 1;
+    so_linger.l_linger = 0;
+
+    rc = setsockopt(sock, SOL_SOCKET, SO_LINGER, (char *)&so_linger, sizeof(so_linger));
+    if(rc) {
+        socket_close(sock);
+        info("ERROR: Setting SO_LINGER on socket failed: %s\n", gai_strerror(rc));
+        return SOCKET_ERR_SETOPT;
+    }
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons((uint16_t)atoi(remote_port));
+
+    if((rc = inet_pton(AF_INET, remote_host, &serv_addr.sin_addr)) <= 0) {
+        socket_close(sock);
+        info("ERROR: Getting IP address for remote server, %s, failed: %d\n", remote_host, rc);
+        return SOCKET_ERR_CREATE;
+    }
+
+    /* now connect to the remote server */
+    if(connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) {
+        socket_close(sock);
+        info("ERROR: Connecting to remote server, %s, failed: %d\n", remote_host, rc);
+        return SOCKET_ERR_CONNECT;
+    }
 
     return sock;
 }
 
 
+int socket_open_tcp_server(const char *listening_port) {
+    struct sockaddr_in address = {0};
+    int sock = -1;
+    int sock_opt = 0;
+    int rc = 0;
 
-void socket_close(int sock)
-{
+#ifdef IS_WINDOWS
+    /* Windows needs special initialization. */
+    static WSADATA winsock_data;
+    rc = WSAStartup(MAKEWORD(2, 2), &winsock_data);
+
+    if(rc != NO_ERROR) {
+        info("WSAStartup failed with error: %d\n", rc);
+        return SOCKET_ERR_STARTUP;
+    }
+#endif
+
+    /* create the socket */
+    sock = (int)socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
+    if(sock < 0) {
+        info("ERROR: socket() failed: %s\n", gai_strerror(sock));
+        return SOCKET_ERR_CREATE;
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons((uint16_t)atoi(listening_port));
+
+    info("socket_open() setting up server socket. Binding to address 0.0.0.0.");
+
+    rc = bind(sock, (struct sockaddr *)&address, (socklen_t)sizeof(address));
+    if(rc < 0) {
+        perror("Error from bind(): ");
+        printf("ERROR: Unable to bind() socket: %d\n", rc);
+        return SOCKET_ERR_BIND;
+    }
+
+    rc = listen(sock, LISTEN_QUEUE);
+    if(rc < 0) {
+        info("ERROR: Unable to call listen() on socket: %d\n", rc);
+        return SOCKET_ERR_LISTEN;
+    }
+
+    /* set up our socket to allow reuse if we crash suddenly. */
+    sock_opt = 1;
+    rc = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt));
+    if(rc) {
+        socket_close(sock);
+        info("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
+        return SOCKET_ERR_SETOPT;
+    }
+
+    // }
+
+    return sock;
+}
+
+
+void socket_close(int sock) {
     if(sock >= 0) {
 #ifdef IS_WINDOWS
         closesocket(sock);
@@ -224,8 +230,7 @@ void socket_close(int sock)
 }
 
 
-int socket_accept(int sock)
-{
+int socket_accept(int sock) {
     fd_set accept_fd_set;
     TIMEVAL timeout;
     int num_accept_ready = 0;
@@ -241,13 +246,11 @@ int socket_accept(int sock)
     FD_SET(sock, &accept_fd_set);
 
     /* do a select to see if anything is ready to accept. */
-    num_accept_ready = select(sock+1, &accept_fd_set, NULL, NULL, &timeout);
-    if (num_accept_ready > 0) {
+    num_accept_ready = select(sock + 1, &accept_fd_set, NULL, NULL, &timeout);
+    if(num_accept_ready > 0) {
         info("Ready to accept on %d sockets.", num_accept_ready);
-        if (FD_ISSET(sock, &accept_fd_set)) {
-            return (int)accept(sock, NULL, NULL);
-        }
-    } else if (num_accept_ready < 0) {
+        if(FD_ISSET(sock, &accept_fd_set)) { return (int)accept(sock, NULL, NULL); }
+    } else if(num_accept_ready < 0) {
         info("Error selecting the listen socket! Errno=%d.", errno);
         return SOCKET_ERR_SELECT;
     }
@@ -256,8 +259,7 @@ int socket_accept(int sock)
 }
 
 
-slice_s socket_read(int sock, slice_s in_buf)
-{
+slice_s socket_read(int sock, slice_s in_buf) {
 #ifdef IS_WINDOWS
     int rc = (int)recv(sock, (char *)in_buf.data, (int)in_buf.len, 0);
 #else
@@ -279,13 +281,12 @@ slice_s socket_read(int sock, slice_s in_buf)
         }
     }
 
-    return ((rc>=0) ? slice_from_slice(in_buf, 0, (size_t)(unsigned int)rc) : slice_make_err(rc));
+    return ((rc >= 0) ? slice_from_slice(in_buf, 0, (size_t)(unsigned int)rc) : slice_make_err(rc));
 }
 
 
 /* this blocks until all the data is written or there is an error. */
-int socket_write(int sock, slice_s out_buf)
-{
+int socket_write(int sock, slice_s out_buf) {
     size_t total_bytes_written = 0;
     int rc = 0;
     slice_s tmp_out_buf = out_buf;

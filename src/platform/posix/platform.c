@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -34,44 +34,43 @@
 
 #define _GNU_SOURCE
 
-#include <platform.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <stdint.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <platform.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/time.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <errno.h>
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <fcntl.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <time.h>
-#include <inttypes.h>
+#include <unistd.h>
 
-#include <lib/libplctag.h>
-#include <util/debug.h>
+#include <libplctag/lib/libplctag.h>
+#include <utils/debug.h>
 
 
-
-#if defined(__APPLE__) || defined(__FreeBSD__) ||  defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
-    #define BSD_OS_TYPE
-    #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
-        #define _DARWIN_C_SOURCE _POSIX_C_SOURCE
-    #endif
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) \
+    || defined(__DragonFly__)
+#    define BSD_OS_TYPE
+#    if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#        define _DARWIN_C_SOURCE _POSIX_C_SOURCE
+#    endif
 #endif
 
 
 /***************************************************************************
  ******************************* Memory ************************************
  **************************************************************************/
-
 
 
 /*
@@ -82,8 +81,7 @@
  *
  * It will return NULL on failure.
  */
-extern void *mem_alloc(int size)
-{
+extern void *mem_alloc(int size) {
     if(size <= 0) {
         pdebug(DEBUG_WARN, "Allocation size must be greater than zero bytes!");
         return NULL;
@@ -93,7 +91,6 @@ extern void *mem_alloc(int size)
 }
 
 
-
 /*
  * mem_realloc
  *
@@ -101,8 +98,7 @@ extern void *mem_alloc(int size)
  *
  * It will return NULL on failure.
  */
-extern void *mem_realloc(void *orig, int size)
-{
+extern void *mem_realloc(void *orig, int size) {
     if(size <= 0) {
         pdebug(DEBUG_WARN, "New allocation size must be greater than zero bytes!");
         return NULL;
@@ -112,21 +108,15 @@ extern void *mem_realloc(void *orig, int size)
 }
 
 
-
 /*
  * mem_free
  *
  * Free the allocated memory passed in.  If the passed pointer is
  * null, do nothing.
  */
-extern void mem_free(const void *mem)
-{
-    if(mem) {
-        free((void *)mem);
-    }
+extern void mem_free(const void *mem) {
+    if(mem) { free((void *)mem); }
 }
-
-
 
 
 /*
@@ -134,8 +124,7 @@ extern void mem_free(const void *mem)
  *
  * set memory to the passed argument.
  */
-extern void mem_set(void *dest, int c, int size)
-{
+extern void mem_set(void *dest, int c, int size) {
     if(!dest) {
         pdebug(DEBUG_WARN, "Destination pointer is NULL!");
         return;
@@ -146,11 +135,9 @@ extern void mem_set(void *dest, int c, int size)
         return;
     }
 
+    // NOLINTNEXTLINE
     memset(dest, c, (size_t)(ssize_t)size);
 }
-
-
-
 
 
 /*
@@ -158,8 +145,7 @@ extern void mem_set(void *dest, int c, int size)
  *
  * copy memory from one pointer to another for the passed number of bytes.
  */
-extern void mem_copy(void *dest, void *src, int size)
-{
+extern void mem_copy(void *dest, void *src, int size) {
     if(!dest) {
         pdebug(DEBUG_WARN, "Destination pointer is NULL!");
         return;
@@ -180,9 +166,9 @@ extern void mem_copy(void *dest, void *src, int size)
         return;
     }
 
+    // NOLINTNEXTLINE
     memcpy(dest, src, (size_t)(unsigned int)size);
 }
-
 
 
 /*
@@ -190,8 +176,7 @@ extern void mem_copy(void *dest, void *src, int size)
  *
  * move memory from one pointer to another for the passed number of bytes.
  */
-extern void mem_move(void *dest, void *src, int size)
-{
+extern void mem_move(void *dest, void *src, int size) {
     if(!dest) {
         pdebug(DEBUG_WARN, "Destination pointer is NULL!");
         return;
@@ -212,15 +197,12 @@ extern void mem_move(void *dest, void *src, int size)
         return;
     }
 
+    // NOLINTNEXTLINE
     memmove(dest, src, (size_t)(unsigned int)size);
 }
 
 
-
-
-
-int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
-{
+int mem_cmp(void *src1, int src1_size, void *src2, int src2_size) {
     if(!src1 || src1_size <= 0) {
         if(!src2 || src2_size <= 0) {
             /* both are NULL or zero length, but that is "equal" for our purposes. */
@@ -237,18 +219,12 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
             /* both pointers are non-NULL and the lengths are positive. */
 
             /* short circuit the comparison if the blocks are different lengths */
-            if(src1_size != src2_size) {
-                return (src1_size - src2_size);
-            }
+            if(src1_size != src2_size) { return (src1_size - src2_size); }
 
             return memcmp(src1, src2, (size_t)(unsigned int)src1_size);
         }
     }
 }
-
-
-
-
 
 
 /***************************************************************************
@@ -265,8 +241,7 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
  *
  * Handle edge cases when NULL or zero length strings are passed.
  */
-extern int str_cmp(const char *first, const char *second)
-{
+extern int str_cmp(const char *first, const char *second) {
     int first_zero = !str_length(first);
     int second_zero = !str_length(second);
 
@@ -290,8 +265,6 @@ extern int str_cmp(const char *first, const char *second)
 }
 
 
-
-
 /*
  * str_cmp_i
  *
@@ -301,8 +274,7 @@ extern int str_cmp(const char *first, const char *second)
  *
  * Handle the usual edge cases.
  */
-extern int str_cmp_i(const char *first, const char *second)
-{
+extern int str_cmp_i(const char *first, const char *second) {
     int first_zero = !str_length(first);
     int second_zero = !str_length(second);
 
@@ -320,11 +292,10 @@ extern int str_cmp_i(const char *first, const char *second)
             return 1;
         } else {
             /* both are non-zero length. */
-            return strcasecmp(first,second);
+            return strcasecmp(first, second);
         }
     }
 }
-
 
 
 /*
@@ -336,8 +307,7 @@ extern int str_cmp_i(const char *first, const char *second)
  *
  * It just passes this through to POSIX strncasecmp.
  */
-extern int str_cmp_i_n(const char *first, const char *second, int count)
-{
+extern int str_cmp_i_n(const char *first, const char *second, int count) {
     int first_zero = !str_length(first);
     int second_zero = !str_length(second);
 
@@ -372,7 +342,6 @@ extern int str_cmp_i_n(const char *first, const char *second, int count)
 }
 
 
-
 /*
  * str_str_cmp_i
  *
@@ -381,8 +350,7 @@ extern int str_cmp_i_n(const char *first, const char *second, int count)
  *
  * Handle the usual edge cases.
  */
-extern char *str_str_cmp_i(const char *haystack, const char *needle)
-{
+extern char *str_str_cmp_i(const char *haystack, const char *needle) {
     int haystack_zero = !str_length(haystack);
     int needle_zero = !str_length(needle);
 
@@ -400,20 +368,18 @@ extern char *str_str_cmp_i(const char *haystack, const char *needle)
 }
 
 
-
 /*
  * str_copy
  *
  * Returns
  */
-extern int str_copy(char *dst, int dst_size, const char *src)
-{
-    if (!dst) {
+extern int str_copy(char *dst, int dst_size, const char *src) {
+    if(!dst) {
         pdebug(DEBUG_WARN, "Destination string pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if (!src) {
+    if(!src) {
         pdebug(DEBUG_WARN, "Source string pointer is NULL!");
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -423,7 +389,9 @@ extern int str_copy(char *dst, int dst_size, const char *src)
         return PLCTAG_ERR_TOO_SMALL;
     }
 
+    // NOLINTNEXTLINE
     strncpy(dst, src, (size_t)(unsigned int)dst_size);
+
     return PLCTAG_STATUS_OK;
 }
 
@@ -434,16 +402,11 @@ extern int str_copy(char *dst, int dst_size, const char *src)
  * Return the length of the string.  If a null pointer is passed, return
  * null.
  */
-extern int str_length(const char *str)
-{
-    if(!str) {
-        return 0;
-    }
+extern int str_length(const char *str) {
+    if(!str) { return 0; }
 
     return (int)strlen(str);
 }
-
-
 
 
 /*
@@ -452,15 +415,11 @@ extern int str_length(const char *str)
  * Copy the passed string and return a pointer to the copy.
  * The caller is responsible for freeing the memory.
  */
-extern char *str_dup(const char *str)
-{
-    if(!str) {
-        return NULL;
-    }
+extern char *str_dup(const char *str) {
+    if(!str) { return NULL; }
 
     return strdup(str);
 }
-
 
 
 /*
@@ -470,21 +429,18 @@ extern char *str_dup(const char *str)
  * an int.  Return an int in integer in the passed
  * pointer and a status from the function.
  */
-extern int str_to_int(const char *str, int *val)
-{
+extern int str_to_int(const char *str, int *val) {
     char *endptr;
     long int tmp_val;
 
-    tmp_val = strtol(str,&endptr,0);
+    tmp_val = strtol(str, &endptr, 0);
 
-    if (errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
-        pdebug(DEBUG_WARN,"strtol returned %ld with errno %d",tmp_val, errno);
+    if(errno == ERANGE && (tmp_val == LONG_MAX || tmp_val == LONG_MIN)) {
+        pdebug(DEBUG_WARN, "strtol returned %ld with errno %d", tmp_val, errno);
         return -1;
     }
 
-    if (endptr == str) {
-        return -1;
-    }
+    if(endptr == str) { return -1; }
 
     /* FIXME - this will truncate long values. */
     *val = (int)tmp_val;
@@ -493,20 +449,15 @@ extern int str_to_int(const char *str, int *val)
 }
 
 
-extern int str_to_float(const char *str, float *val)
-{
+extern int str_to_float(const char *str, float *val) {
     char *endptr;
     float tmp_val;
 
-    tmp_val = strtof(str,&endptr);
+    tmp_val = strtof(str, &endptr);
 
-    if (errno == ERANGE && (tmp_val == HUGE_VALF || tmp_val == -HUGE_VALF || tmp_val == 0)) {
-        return -1;
-    }
+    if(errno == ERANGE && (tmp_val == HUGE_VALF || tmp_val == -HUGE_VALF || tmp_val == 0)) { return -1; }
 
-    if (endptr == str) {
-        return -1;
-    }
+    if(endptr == str) { return -1; }
 
     /* FIXME - this will truncate long values. */
     *val = tmp_val;
@@ -515,9 +466,8 @@ extern int str_to_float(const char *str, float *val)
 }
 
 
-extern char **str_split(const char *str, const char *sep)
-{
-    int sub_str_count=0;
+extern char **str_split(const char *str, const char *sep) {
+    int sub_str_count = 0;
     int size = 0;
     const char *sub;
     const char *tmp;
@@ -525,39 +475,35 @@ extern char **str_split(const char *str, const char *sep)
 
     /* first, count the sub strings */
     tmp = str;
-    sub = strstr(tmp,sep);
+    sub = strstr(tmp, sep);
 
     while(sub && *sub) {
         /* separator could be at the front, ignore that. */
-        if(sub != tmp) {
-            sub_str_count++;
-        }
+        if(sub != tmp) { sub_str_count++; }
 
         tmp = sub + str_length(sep);
-        sub = strstr(tmp,sep);
+        sub = strstr(tmp, sep);
     }
 
-    if(tmp && *tmp && (!sub || !*sub))
-        sub_str_count++;
+    if(tmp && *tmp && (!sub || !*sub)) { sub_str_count++; }
 
     /* calculate total size for string plus pointers */
-    size = ((int)sizeof(char *)*(sub_str_count+1)+str_length(str)+1);
+    size = ((int)sizeof(char *) * (sub_str_count + 1) + str_length(str) + 1);
 
     /* allocate enough memory */
     res = mem_alloc(size);
 
-    if(!res)
-        return NULL;
+    if(!res) { return NULL; }
 
     /* calculate the beginning of the string */
-    tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count+1);
+    tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count + 1);
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
-    str_copy((char *)tmp, (int)(size - ((char*)tmp - (char*)res)), str);
+    str_copy((char *)tmp, (int)(size - ((char *)tmp - (char *)res)), str);
 
     /* set up the pointers */
-    sub_str_count=0;
-    sub = strstr(tmp,sep);
+    sub_str_count = 0;
+    sub = strstr(tmp, sep);
 
     while(sub && *sub) {
         /* separator could be at the front, ignore that. */
@@ -569,27 +515,23 @@ extern char **str_split(const char *str, const char *sep)
         }
 
         /* zero out the separator chars */
-        mem_set((char*)sub,0,str_length(sep));
+        mem_set((char *)sub, 0, str_length(sep));
 
         /* point past the separator (now zero) */
         tmp = sub + str_length(sep);
 
         /* find the next separator */
-        sub = strstr(tmp,sep);
+        sub = strstr(tmp, sep);
     }
 
     /* if there is a chunk at the end, store it. */
-    if(tmp && *tmp && (!sub || !*sub)) {
-        res[sub_str_count] = (char*)tmp;
-    }
+    if(tmp && *tmp && (!sub || !*sub)) { res[sub_str_count] = (char *)tmp; }
 
     return res;
 }
 
 
-
-char *str_concat_impl(int num_args, ...)
-{
+char *str_concat_impl(int num_args, ...) {
     va_list arg_list;
     int total_length = 0;
     char *result = NULL;
@@ -597,11 +539,9 @@ char *str_concat_impl(int num_args, ...)
 
     /* first loop to find the length */
     va_start(arg_list, num_args);
-    for(int i=0; i < num_args; i++) {
+    for(int i = 0; i < num_args; i++) {
         tmp = va_arg(arg_list, char *);
-        if(tmp) {
-            total_length += str_length(tmp);
-        }
+        if(tmp) { total_length += str_length(tmp); }
     }
     va_end(arg_list);
 
@@ -610,14 +550,14 @@ char *str_concat_impl(int num_args, ...)
 
     result = mem_alloc(total_length);
     if(!result) {
-        pdebug(DEBUG_ERROR,"Unable to allocate new string buffer!");
+        pdebug(DEBUG_ERROR, "Unable to allocate new string buffer!");
         return NULL;
     }
 
     /* loop to copy the strings */
     result[0] = 0;
     va_start(arg_list, num_args);
-    for(int i=0; i < num_args; i++) {
+    for(int i = 0; i < num_args; i++) {
         tmp = va_arg(arg_list, char *);
         if(tmp) {
             int len = str_length(result);
@@ -630,8 +570,6 @@ char *str_concat_impl(int num_args, ...)
 }
 
 
-
-
 /***************************************************************************
  ******************************* Mutexes ***********************************
  **************************************************************************/
@@ -641,20 +579,17 @@ struct mutex_t {
     int initialized;
 };
 
-int mutex_create(mutex_p *m)
-{
+int mutex_create(mutex_p *m) {
     pthread_mutexattr_t mutex_attribs;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(*m) {
-        pdebug(DEBUG_WARN, "Called with non-NULL pointer!");
-    }
+    if(*m) { pdebug(DEBUG_WARN, "Called with non-NULL pointer!"); }
 
     *m = (struct mutex_t *)mem_alloc(sizeof(struct mutex_t));
 
-    if(! *m) {
-        pdebug(DEBUG_ERROR,"null mutex pointer.");
+    if(!*m) {
+        pdebug(DEBUG_ERROR, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -662,11 +597,11 @@ int mutex_create(mutex_p *m)
     pthread_mutexattr_init(&mutex_attribs);
     pthread_mutexattr_settype(&mutex_attribs, PTHREAD_MUTEX_RECURSIVE);
 
-    if(pthread_mutex_init(&((*m)->p_mutex),&mutex_attribs)) {
+    if(pthread_mutex_init(&((*m)->p_mutex), &mutex_attribs)) {
         pthread_mutexattr_destroy(&mutex_attribs);
         mem_free(*m);
         *m = NULL;
-        pdebug(DEBUG_ERROR,"Error initializing mutex.");
+        pdebug(DEBUG_ERROR, "Error initializing mutex.");
         return PLCTAG_ERR_MUTEX_INIT;
     }
 
@@ -680,42 +615,34 @@ int mutex_create(mutex_p *m)
 }
 
 
-int mutex_lock_impl(const char *func, int line, mutex_p m)
-{
-    pdebug(DEBUG_SPEW,"locking mutex %p, called from %s:%d.", m, func, line);
+int mutex_lock_impl(const char *func, int line, mutex_p m) {
+    pdebug(DEBUG_SPEW, "locking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!m->initialized) {
-        return PLCTAG_ERR_MUTEX_INIT;
-    }
+    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
 
     if(pthread_mutex_lock(&(m->p_mutex))) {
         pdebug(DEBUG_WARN, "error locking mutex.");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
-    //pdebug(DEBUG_SPEW,"Done.");
-
     return PLCTAG_STATUS_OK;
 }
 
 
-int mutex_try_lock_impl(const char *func, int line, mutex_p m)
-{
-    pdebug(DEBUG_SPEW,"trying to lock mutex %p, called from %s:%d.", m, func, line);
+int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
+    pdebug(DEBUG_SPEW, "trying to lock mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
         pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!m->initialized) {
-        return PLCTAG_ERR_MUTEX_INIT;
-    }
+    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
 
     if(pthread_mutex_trylock(&(m->p_mutex))) {
         pdebug(DEBUG_SPEW, "error locking mutex.");
@@ -728,33 +655,28 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m)
 }
 
 
-
-int mutex_unlock_impl(const char *func, int line, mutex_p m)
-{
-    pdebug(DEBUG_SPEW,"unlocking mutex %p, called from %s:%d.", m, func, line);
+int mutex_unlock_impl(const char *func, int line, mutex_p m) {
+    pdebug(DEBUG_SPEW, "unlocking mutex %p, called from %s:%d.", m, func, line);
 
     if(!m) {
-        pdebug(DEBUG_WARN,"null mutex pointer.");
+        pdebug(DEBUG_WARN, "null mutex pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!m->initialized) {
-        return PLCTAG_ERR_MUTEX_INIT;
-    }
+    if(!m->initialized) { return PLCTAG_ERR_MUTEX_INIT; }
 
     if(pthread_mutex_unlock(&(m->p_mutex))) {
         pdebug(DEBUG_WARN, "error unlocking mutex.");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
 
-    //pdebug(DEBUG_SPEW,"Done.");
+    // pdebug(DEBUG_SPEW,"Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
-int mutex_destroy(mutex_p *m)
-{
+int mutex_destroy(mutex_p *m) {
     pdebug(DEBUG_DETAIL, "Starting to destroy mutex %p.", m);
 
     if(!m || !*m) {
@@ -777,11 +699,6 @@ int mutex_destroy(mutex_p *m)
 }
 
 
-
-
-
-
-
 /***************************************************************************
  ******************************* Threads ***********************************
  **************************************************************************/
@@ -800,8 +717,7 @@ struct thread_t {
  * TODO - use the stacksize!
  */
 
-extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg)
-{
+extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     pdebug(DEBUG_DETAIL, "Warning: ignoring stacksize (%d) parameter.", stacksize);
@@ -813,7 +729,7 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
 
     *t = (thread_p)mem_alloc(sizeof(struct thread_t));
 
-    if(! *t) {
+    if(!*t) {
         pdebug(DEBUG_ERROR, "Failed to allocate memory for thread.");
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -836,10 +752,7 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
  * Stop the current thread.  Does not take arguments.  Note: the thread
  * ends completely and this function does not return!
  */
-void thread_stop(void)
-{
-    pthread_exit((void*)0);
-}
+void thread_stop(void) { pthread_exit((void *)0); }
 
 
 /*
@@ -848,8 +761,7 @@ void thread_stop(void)
  * Kill another thread.
  */
 
-void thread_kill(thread_p t)
-{
+void thread_kill(thread_p t) {
     if(t) {
 #ifdef __ANDROID__
         pthread_kill(t->p_thread, 0);
@@ -865,8 +777,7 @@ void thread_kill(thread_p t)
  * Wait for the argument thread to stop and then continue.
  */
 
-int thread_join(thread_p t)
-{
+int thread_join(thread_p t) {
     void *unused;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -876,7 +787,7 @@ int thread_join(thread_p t)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(pthread_join(t->p_thread,&unused)) {
+    if(pthread_join(t->p_thread, &unused)) {
         pdebug(DEBUG_ERROR, "Error joining thread.");
         return PLCTAG_ERR_THREAD_JOIN;
     }
@@ -893,13 +804,11 @@ int thread_join(thread_p t)
  * Detach the thread.  You cannot call thread_join on a detached thread!
  */
 
-extern int thread_detach()
-{
+extern int thread_detach(void) {
     pthread_detach(pthread_self());
 
     return PLCTAG_STATUS_OK;
 }
-
 
 
 /*
@@ -908,11 +817,10 @@ extern int thread_detach()
  * This gets rid of the resources of a thread struct.  The thread in
  * question must be dead first!
  */
-extern int thread_destroy(thread_p *t)
-{
+extern int thread_destroy(thread_p *t) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(!t || ! *t) {
+    if(!t || !*t) {
         pdebug(DEBUG_WARN, "null thread pointer.");
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -925,10 +833,6 @@ extern int thread_destroy(thread_p *t)
 
     return PLCTAG_STATUS_OK;
 }
-
-
-
-
 
 
 /***************************************************************************
@@ -947,9 +851,8 @@ extern int thread_destroy(thread_p *t)
 
 #define ATOMIC_LOCK_VAL (1)
 
-extern int lock_acquire_try(lock_t *lock)
-{
-    int rc = __sync_lock_test_and_set((int*)lock, ATOMIC_LOCK_VAL);
+extern int lock_acquire_try(lock_t *lock) {
+    int rc = __sync_lock_test_and_set((int *)lock, ATOMIC_LOCK_VAL);
 
     if(rc != ATOMIC_LOCK_VAL) {
         return 1;
@@ -958,17 +861,15 @@ extern int lock_acquire_try(lock_t *lock)
     }
 }
 
-int lock_acquire(lock_t *lock)
-{
-    while(!lock_acquire_try(lock)) ;
+int lock_acquire(lock_t *lock) {
+    while(!lock_acquire_try(lock));
 
     return 1;
 }
 
 
-extern void lock_release(lock_t *lock)
-{
-    __sync_lock_release((int*)lock);
+extern void lock_release(lock_t *lock) {
+    __sync_lock_release((int *)lock);
     /*pdebug("released lock");*/
 }
 
@@ -983,8 +884,7 @@ struct cond_t {
     int flag;
 };
 
-int cond_create(cond_p *c)
-{
+int cond_create(cond_p *c) {
     int rc = PLCTAG_STATUS_OK;
     cond_p tmp_cond = NULL;
 
@@ -995,9 +895,7 @@ int cond_create(cond_p *c)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(*c) {
-        pdebug(DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?");
-    }
+    if(*c) { pdebug(DEBUG_WARN, "Condition var pointer is not null, was it not deleted first?"); }
 
     /* clear the output first. */
     *c = NULL;
@@ -1031,8 +929,7 @@ int cond_create(cond_p *c)
 }
 
 
-int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
-{
+int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time = time_ms();
     int64_t end_time = start_time + timeout_ms;
@@ -1050,7 +947,7 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    if(pthread_mutex_lock(& (c->mutex))) {
+    if(pthread_mutex_lock(&(c->mutex))) {
         pdebug(DEBUG_WARN, "Unable to lock mutex!");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
@@ -1101,7 +998,7 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
         pdebug(DEBUG_SPEW, "Condition wait terminated due to error or timeout for call at %s:%d.", func, line_num);
     }
 
-    if(pthread_mutex_unlock(& (c->mutex))) {
+    if(pthread_mutex_unlock(&(c->mutex))) {
         pdebug(DEBUG_WARN, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
@@ -1112,8 +1009,7 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms)
 }
 
 
-int cond_signal_impl(const char *func, int line_num, cond_p c)
-{
+int cond_signal_impl(const char *func, int line_num, cond_p c) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
@@ -1123,7 +1019,7 @@ int cond_signal_impl(const char *func, int line_num, cond_p c)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(pthread_mutex_lock(& (c->mutex))) {
+    if(pthread_mutex_lock(&(c->mutex))) {
         pdebug(DEBUG_WARN, "Unable to lock mutex!");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
@@ -1135,7 +1031,7 @@ int cond_signal_impl(const char *func, int line_num, cond_p c)
         rc = PLCTAG_ERR_BAD_STATUS;
     }
 
-    if(pthread_mutex_unlock(& (c->mutex))) {
+    if(pthread_mutex_unlock(&(c->mutex))) {
         pdebug(DEBUG_WARN, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
@@ -1146,8 +1042,7 @@ int cond_signal_impl(const char *func, int line_num, cond_p c)
 }
 
 
-int cond_clear_impl(const char *func, int line_num, cond_p c)
-{
+int cond_clear_impl(const char *func, int line_num, cond_p c) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_SPEW, "Starting.  Called from %s:%d.", func, line_num);
@@ -1157,14 +1052,14 @@ int cond_clear_impl(const char *func, int line_num, cond_p c)
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(pthread_mutex_lock(& (c->mutex))) {
+    if(pthread_mutex_lock(&(c->mutex))) {
         pdebug(DEBUG_WARN, "Unable to lock mutex!");
         return PLCTAG_ERR_MUTEX_LOCK;
     }
 
     c->flag = 0;
 
-    if(pthread_mutex_unlock(& (c->mutex))) {
+    if(pthread_mutex_unlock(&(c->mutex))) {
         pdebug(DEBUG_WARN, "Unable to unlock mutex!");
         return PLCTAG_ERR_MUTEX_UNLOCK;
     }
@@ -1175,13 +1070,12 @@ int cond_clear_impl(const char *func, int line_num, cond_p c)
 }
 
 
-int cond_destroy(cond_p *c)
-{
+int cond_destroy(cond_p *c) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    if(!c || ! *c) {
+    if(!c || !*c) {
         pdebug(DEBUG_WARN, "Condition var pointer is null!");
         return PLCTAG_ERR_NULL_PTR;
     }
@@ -1199,14 +1093,13 @@ int cond_destroy(cond_p *c)
 }
 
 
-
 /***************************************************************************
  ******************************* Sockets ***********************************
  **************************************************************************/
 
 
 #ifndef INVALID_SOCKET
-#define INVALID_SOCKET (-1)
+#    define INVALID_SOCKET (-1)
 #endif
 
 struct sock_t {
@@ -1222,8 +1115,7 @@ static int sock_create_event_wakeup_channel(sock_p sock);
 
 #define MAX_IPS (8)
 
-extern int socket_create(sock_p *s)
-{
+extern int socket_create(sock_p *s) {
     int32_t rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1235,7 +1127,7 @@ extern int socket_create(sock_p *s)
 
     *s = (sock_p)mem_alloc(sizeof(struct sock_t));
 
-    if(! *s) {
+    if(!*s) {
         pdebug(DEBUG_ERROR, "Failed to allocate memory for socket.");
         return PLCTAG_ERR_NO_MEM;
     }
@@ -1257,8 +1149,7 @@ extern int socket_create(sock_p *s)
 }
 
 
-int socket_connect_tcp_start(sock_p s, const char *host, int port)
-{
+int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     int rc = PLCTAG_STATUS_OK;
     struct in_addr ips[MAX_IPS];
     int num_ips = 0;
@@ -1268,32 +1159,32 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     int done = 0;
     int fd;
     int flags;
-    struct timeval timeout; /* used for timing out connections etc. */
+    struct timeval timeout;  /* used for timing out connections etc. */
     struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
 
-    pdebug(DEBUG_DETAIL,"Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     /* check for errors */
     if(fd < 0) {
-        pdebug(DEBUG_ERROR,"Socket creation failed, errno: %d",errno);
+        pdebug(DEBUG_ERROR, "Socket creation failed, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
     /* set up our socket to allow reuse if we crash suddenly. */
     sock_opt = 1;
 
-    if(setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,(char*)&sock_opt,sizeof(sock_opt))) {
+    if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&sock_opt, sizeof(sock_opt))) {
         close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket reuse option, errno: %d",errno);
+        pdebug(DEBUG_ERROR, "Error setting socket reuse option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
 #ifdef BSD_OS_TYPE
     /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
-    if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
+    if(setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
         close(fd);
         pdebug(DEBUG_ERROR, "Error setting socket SIGPIPE suppression option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
@@ -1303,15 +1194,15 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     timeout.tv_sec = 10;
     timeout.tv_usec = 0;
 
-    if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout))) {
+    if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout))) {
         close(fd);
-        pdebug(DEBUG_ERROR,"Error setting socket receive timeout option, errno: %d",errno);
+        pdebug(DEBUG_ERROR, "Error setting socket receive timeout option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
-    if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout))) {
+    if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout))) {
         close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket set timeout option, errno: %d",errno);
+        pdebug(DEBUG_ERROR, "Error setting socket set timeout option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1319,15 +1210,15 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     so_linger.l_onoff = 1;
     so_linger.l_linger = 0;
 
-    if(setsockopt(fd, SOL_SOCKET, SO_LINGER,(char*)&so_linger,sizeof(so_linger))) {
+    if(setsockopt(fd, SOL_SOCKET, SO_LINGER, (char *)&so_linger, sizeof(so_linger))) {
         close(fd);
-        pdebug(DEBUG_ERROR,"Error setting socket close linger option, errno: %d",errno);
+        pdebug(DEBUG_ERROR, "Error setting socket close linger option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
     /* make the socket non-blocking. */
-    flags=fcntl(fd,F_GETFL,0);
-    if(flags<0) {
+    flags = fcntl(fd, F_GETFL, 0);
+    if(flags < 0) {
         pdebug(DEBUG_ERROR, "Error getting socket options, errno: %d", errno);
         close(fd);
         return PLCTAG_ERR_OPEN;
@@ -1336,7 +1227,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     /* set the non-blocking flag. */
     flags |= O_NONBLOCK;
 
-    if(fcntl(fd,F_SETFL,flags)<0) {
+    if(fcntl(fd, F_SETFL, flags) < 0) {
         pdebug(DEBUG_ERROR, "Error setting socket to non-blocking, errno: %d", errno);
         close(fd);
         return PLCTAG_ERR_OPEN;
@@ -1345,27 +1236,25 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     /* figure out what address we are connecting to. */
 
     /* try a numeric IP address conversion first. */
-    if(inet_pton(AF_INET,host,(struct in_addr *)ips) > 0) {
-        pdebug(DEBUG_DETAIL, "Found numeric IP address: %s",host);
+    if(inet_pton(AF_INET, host, (struct in_addr *)ips) > 0) {
+        pdebug(DEBUG_DETAIL, "Found numeric IP address: %s", host);
         num_ips = 1;
     } else {
         struct addrinfo hints;
         struct addrinfo *res_head = NULL;
-        struct addrinfo *res=NULL;
+        struct addrinfo *res = NULL;
         int rc = 0;
 
         mem_set(&ips, 0, sizeof(ips));
         mem_set(&hints, 0, sizeof(hints));
 
         hints.ai_socktype = SOCK_STREAM; /* TCP */
-        hints.ai_family = AF_INET; /* IP V4 only */
+        hints.ai_family = AF_INET;       /* IP V4 only */
 
-        if ((rc = getaddrinfo(host, NULL, &hints, &res_head)) != 0) {
-            pdebug(DEBUG_WARN,"Error looking up PLC IP address %s, error = %d\n", host, rc);
+        if((rc = getaddrinfo(host, NULL, &hints, &res_head)) != 0) {
+            pdebug(DEBUG_WARN, "Error looking up PLC IP address %s, error = %d\n", host, rc);
 
-            if(res_head) {
-                freeaddrinfo(res_head);
-            }
+            if(res_head) { freeaddrinfo(res_head); }
 
             close(fd);
             return PLCTAG_ERR_BAD_GATEWAY;
@@ -1394,8 +1283,10 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
     i = 0;
     done = 0;
 
-    memset((void *)&gw_addr,0, sizeof(gw_addr));
-    gw_addr.sin_family = AF_INET ;
+    // NOLINTNEXTLINE
+    memset((void *)&gw_addr, 0, sizeof(gw_addr));
+
+    gw_addr.sin_family = AF_INET;
     gw_addr.sin_port = htons((uint16_t)port);
 
     do {
@@ -1405,9 +1296,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
         pdebug(DEBUG_DETAIL, "Attempting to connect to %s:%d", inet_ntoa(*((struct in_addr *)&ips[i])), port);
 
         /* this is done non-blocking. Could be interrupted, so restart if needed.*/
-        do {
-            rc = connect(fd,(struct sockaddr *)&gw_addr,sizeof(gw_addr));
-        } while(rc < 0 && errno == EINTR);
+        do { rc = connect(fd, (struct sockaddr *)&gw_addr, sizeof(gw_addr)); } while(rc < 0 && errno == EINTR);
 
         if(rc == 0) {
             /* instantly connected. */
@@ -1419,8 +1308,9 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
             pdebug(DEBUG_DETAIL, "Started connecting to %s:%d successfully.", inet_ntoa(*((struct in_addr *)&ips[i])), port);
             done = 1;
             rc = PLCTAG_STATUS_PENDING;
-        } else  {
-            pdebug(DEBUG_DETAIL, "Attempt to connect to %s:%d failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])),port, errno);
+        } else {
+            pdebug(DEBUG_DETAIL, "Attempt to connect to %s:%d failed, errno: %d", inet_ntoa(*((struct in_addr *)&ips[i])), port,
+                   errno);
             i++;
         }
     } while(!done && i < num_ips);
@@ -1443,9 +1333,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port)
 }
 
 
-
-int socket_connect_tcp_check(sock_p sock, int timeout_ms)
-{
+int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
     fd_set write_set;
     struct timeval tv;
@@ -1454,7 +1342,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
     socklen_t sock_err_len = (socklen_t)(sizeof(sock_err));
 
 
-    pdebug(DEBUG_DETAIL,"Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!sock) {
         pdebug(DEBUG_WARN, "Null socket pointer passed!");
@@ -1469,12 +1357,11 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
 
     FD_SET(sock->fd, &write_set);
 
-    select_rc = select(sock->fd+1, NULL, &write_set, NULL, &tv);
+    select_rc = select(sock->fd + 1, NULL, &write_set, NULL, &tv);
 
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
             pdebug(DEBUG_DETAIL, "Socket is probably connected.");
-            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "select() returned but socket is not connected!");
             return PLCTAG_ERR_BAD_REPLY;
@@ -1497,7 +1384,9 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
                 break;
 
             case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                pdebug(
+                    DEBUG_WARN,
+                    "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                 return PLCTAG_ERR_OPEN;
                 break;
 
@@ -1518,10 +1407,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
     if(rc == 0) {
         /* sock_err has the error. */
         switch(sock_err) {
-            case 0:
-                pdebug(DEBUG_DETAIL, "No error, socket is connected.");
-                rc = PLCTAG_STATUS_OK;
-                break;
+            case 0: pdebug(DEBUG_DETAIL, "No error, socket is connected."); break;
 
             case EBADF:
                 pdebug(DEBUG_WARN, "Socket fd is not valid!");
@@ -1569,9 +1455,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms)
 }
 
 
-
-int socket_wait_event(sock_p sock, int events, int timeout_ms)
-{
+int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     int result = SOCK_EVENT_NONE;
     fd_set read_set;
     fd_set write_set;
@@ -1617,13 +1501,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
     FD_SET(sock->fd, &err_set);
 
     /* add more depending on the mask. */
-    if(events & SOCK_EVENT_CAN_READ) {
-        FD_SET(sock->fd, &read_set);
-    }
+    if(events & SOCK_EVENT_CAN_READ) { FD_SET(sock->fd, &read_set); }
 
-    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
-        FD_SET(sock->fd, &write_set);
-    }
+    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) { FD_SET(sock->fd, &write_set); }
 
     /* calculate the timeout. */
     if(timeout_ms > 0) {
@@ -1642,11 +1522,10 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
     } else if(num_sockets > 0) {
         /* was there a wake up? */
         if(FD_ISSET(sock->wake_read_fd, &read_set)) {
-            int bytes_read = 0;
             char buf[32];
 
             /* empty the socket. */
-            while((bytes_read = (int)read(sock->wake_read_fd, &buf[0], sizeof(buf))) > 0) { }
+            while((int)read(sock->wake_read_fd, &buf[0], sizeof(buf)) > 0) {}
 
             pdebug(DEBUG_DETAIL, "Socket woken up.");
             result |= (events & SOCK_EVENT_WAKE_UP);
@@ -1695,7 +1574,9 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
                 break;
 
             case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                pdebug(
+                    DEBUG_WARN,
+                    "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                 return PLCTAG_ERR_BAD_PARAM;
                 break;
 
@@ -1717,8 +1598,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms)
 }
 
 
-int socket_wake(sock_p sock)
-{
+int socket_wake(sock_p sock) {
     int rc = PLCTAG_STATUS_OK;
     const char dummy_data[] = "Dummy data.";
 
@@ -1755,9 +1635,7 @@ int socket_wake(sock_p sock)
 }
 
 
-
-int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
-{
+int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1788,7 +1666,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
      */
 
     /* The socket is non-blocking. */
-    rc = (int)read(s->fd,buf,(size_t)size);
+    rc = (int)read(s->fd, buf, (size_t)size);
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             if(timeout_ms > 0) {
@@ -1799,7 +1677,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
             rc = 0;
         } else {
-            pdebug(DEBUG_WARN,"Socket read error: rc=%d, errno=%d", rc, errno);
+            pdebug(DEBUG_WARN, "Socket read error: rc=%d, errno=%d", rc, errno);
             return PLCTAG_ERR_READ;
         }
     }
@@ -1817,7 +1695,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
         FD_SET(s->fd, &read_set);
 
-        select_rc = select(s->fd+1, &read_set, NULL, NULL, &tv);
+        select_rc = select(s->fd + 1, &read_set, NULL, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &read_set)) {
                 pdebug(DEBUG_DETAIL, "Socket can read data.");
@@ -1843,7 +1721,9 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
                     break;
 
                 case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    pdebug(
+                        DEBUG_WARN,
+                        "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
@@ -1860,13 +1740,13 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
         }
 
         /* try to read again. */
-        rc = (int)read(s->fd,buf,(size_t)size);
+        rc = (int)read(s->fd, buf, (size_t)size);
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
                 pdebug(DEBUG_DETAIL, "No data read.");
                 rc = 0;
             } else {
-                pdebug(DEBUG_WARN,"Socket read error: rc=%d, errno=%d", rc, errno);
+                pdebug(DEBUG_WARN, "Socket read error: rc=%d, errno=%d", rc, errno);
                 return PLCTAG_ERR_READ;
             }
         }
@@ -1878,9 +1758,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms)
 }
 
 
-
-int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
-{
+int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1943,7 +1821,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 
         FD_SET(s->fd, &write_set);
 
-        select_rc = select(s->fd+1, NULL, &write_set, NULL, &tv);
+        select_rc = select(s->fd + 1, NULL, &write_set, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &write_set)) {
                 pdebug(DEBUG_DETAIL, "Socket can write data.");
@@ -1969,7 +1847,9 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
                     break;
 
                 case EINVAL: /* number of FDs was negative or exceeded the max allowed. */
-                    pdebug(DEBUG_WARN, "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
+                    pdebug(
+                        DEBUG_WARN,
+                        "The number of fds passed to select() was negative or exceeded the allowed limit or the timeout is invalid!");
                     return PLCTAG_ERR_BAD_PARAM;
                     break;
 
@@ -1986,13 +1866,13 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
         }
 
         /* select() passed and said we can write, so try. */
-    #ifdef BSD_OS_TYPE
+#ifdef BSD_OS_TYPE
         /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
         rc = (int)write(s->fd, buf, (size_t)size);
-    #else
+#else
         /* on Linux, we use MSG_NOSIGNAL */
         rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
-    #endif
+#endif
 
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -2011,9 +1891,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms)
 }
 
 
-
-int socket_close(sock_p s)
-{
+int socket_close(sock_p s) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -2040,12 +1918,7 @@ int socket_close(sock_p s)
 }
 
 
-
-
-int socket_destroy(sock_p *s)
-{
-    int rc = PLCTAG_STATUS_OK;
-
+int socket_destroy(sock_p *s) {
     pdebug(DEBUG_INFO, "Starting.");
 
     if(!s || !*s) {
@@ -2055,19 +1928,13 @@ int socket_destroy(sock_p *s)
 
     /* close the wake sockets */
     if((*s)->wake_read_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_read_fd)) {
-            pdebug(DEBUG_WARN, "Error closing read wake socket!");
-            rc = PLCTAG_ERR_CLOSE;
-        }
+        if(close((*s)->wake_read_fd)) { pdebug(DEBUG_WARN, "Error closing read wake socket!"); }
 
         (*s)->wake_read_fd = INVALID_SOCKET;
     }
 
     if((*s)->wake_write_fd != INVALID_SOCKET) {
-        if(close((*s)->wake_write_fd)) {
-            pdebug(DEBUG_WARN, "Error closing write wake socket!");
-            rc = PLCTAG_ERR_CLOSE;
-        }
+        if(close((*s)->wake_write_fd)) { pdebug(DEBUG_WARN, "Error closing write wake socket!"); }
 
         (*s)->wake_write_fd = INVALID_SOCKET;
     }
@@ -2084,16 +1951,12 @@ int socket_destroy(sock_p *s)
 }
 
 
-
-
-
-int sock_create_event_wakeup_channel(sock_p sock)
-{
+int sock_create_event_wakeup_channel(sock_p sock) {
     int rc = PLCTAG_STATUS_OK;
     int flags = 0;
-    int wake_fds[2] = { 0 };
+    int wake_fds[2] = {0};
 #ifdef BSD_OS_TYPE
-    int sock_opt=1;
+    int sock_opt = 1;
 #endif
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -2104,45 +1967,29 @@ int sock_create_event_wakeup_channel(sock_p sock)
         if((rc = socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds))) {
             pdebug(DEBUG_WARN, "Unable to open waker pipe!");
             switch(errno) {
-                case EAFNOSUPPORT:
-                    pdebug(DEBUG_WARN, "The specified addresss family is not supported on this machine!");
-                    break;
+                case EAFNOSUPPORT: pdebug(DEBUG_WARN, "The specified addresss family is not supported on this machine!"); break;
 
                 case EFAULT:
                     pdebug(DEBUG_WARN, "The address socket_vector does not specify a valid part of the process address space.");
                     break;
 
-                case EMFILE:
-                    pdebug(DEBUG_WARN, "No more file descriptors are available for this process.");
-                    break;
+                case EMFILE: pdebug(DEBUG_WARN, "No more file descriptors are available for this process."); break;
 
-                case ENFILE:
-                    pdebug(DEBUG_WARN, "No more file descriptors are available for the system.");
-                    break;
+                case ENFILE: pdebug(DEBUG_WARN, "No more file descriptors are available for the system."); break;
 
                 case ENOBUFS:
                     pdebug(DEBUG_WARN, "Insufficient resources were available in the system to perform the operation.");
                     break;
 
-                case ENOMEM:
-                    pdebug(DEBUG_WARN, "Insufficient memory was available to fulfill the request.");
-                    break;
+                case ENOMEM: pdebug(DEBUG_WARN, "Insufficient memory was available to fulfill the request."); break;
 
-                case EOPNOTSUPP:
-                    pdebug(DEBUG_WARN, "The specified protocol does not support creation of socket pairs.");
-                    break;
+                case EOPNOTSUPP: pdebug(DEBUG_WARN, "The specified protocol does not support creation of socket pairs."); break;
 
-                case EPROTONOSUPPORT:
-                    pdebug(DEBUG_WARN, "The specified protocol is not supported on this machine.");
-                    break;
+                case EPROTONOSUPPORT: pdebug(DEBUG_WARN, "The specified protocol is not supported on this machine."); break;
 
-                case EPROTOTYPE:
-                    pdebug(DEBUG_WARN, "The socket type is not supported by the protocol.");
-                    break;
+                case EPROTOTYPE: pdebug(DEBUG_WARN, "The socket type is not supported by the protocol."); break;
 
-                default:
-                    pdebug(DEBUG_WARN, "Unexpected error %d!", errno);
-                    break;
+                default: pdebug(DEBUG_WARN, "Unexpected error %d!", errno); break;
             }
 
             rc = PLCTAG_ERR_BAD_REPLY;
@@ -2151,13 +1998,13 @@ int sock_create_event_wakeup_channel(sock_p sock)
 
 #ifdef BSD_OS_TYPE
         /* The *BSD family has a different way to suppress SIGPIPE on sockets. */
-        if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
+        if(setsockopt(wake_fds[0], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
             pdebug(DEBUG_ERROR, "Error setting wake fd read socket SIGPIPE suppression option, errno: %d", errno);
             rc = PLCTAG_ERR_OPEN;
             break;
         }
 
-        if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char*)&sock_opt, sizeof(sock_opt))) {
+        if(setsockopt(wake_fds[1], SOL_SOCKET, SO_NOSIGPIPE, (char *)&sock_opt, sizeof(sock_opt))) {
             pdebug(DEBUG_ERROR, "Error setting wake fd write socket SIGPIPE suppression option, errno: %d", errno);
             rc = PLCTAG_ERR_OPEN;
             break;
@@ -2220,15 +2067,9 @@ int sock_create_event_wakeup_channel(sock_p sock)
 }
 
 
-
-
-
-
 /***************************************************************************
  ***************************** Miscellaneous *******************************
  **************************************************************************/
-
-
 
 
 /*
@@ -2239,8 +2080,7 @@ int sock_create_event_wakeup_channel(sock_p sock)
  *
  * TODO - should the signal interrupt handling be done here or in app code?
  */
-int sleep_ms(int ms)
-{
+int sleep_ms(int ms) {
     struct timespec wait_time;
     struct timespec remainder;
     int done = 1;
@@ -2251,11 +2091,11 @@ int sleep_ms(int ms)
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    wait_time.tv_sec = ms/1000;
-    wait_time.tv_nsec = ((long)ms % 1000)*1000000; /* convert to nanoseconds */
+    wait_time.tv_sec = ms / 1000;
+    wait_time.tv_nsec = ((long)ms % 1000) * 1000000; /* convert to nanoseconds */
 
     do {
-        int rc = nanosleep(&wait_time, &remainder);
+        rc = nanosleep(&wait_time, &remainder);
         if(rc < 0 && errno == EINTR) {
             /* we were interrupted, keep going. */
             wait_time = remainder;
@@ -2293,11 +2133,10 @@ int sleep_ms(int ms)
  *
  * Return the current epoch time in milliseconds.
  */
-int64_t time_ms(void)
-{
+int64_t time_ms(void) {
     struct timeval tv;
 
-    gettimeofday(&tv,NULL);
+    gettimeofday(&tv, NULL);
 
-    return  ((int64_t)tv.tv_sec*1000)+ ((int64_t)tv.tv_usec/1000);
+    return ((int64_t)tv.tv_sec * 1000) + ((int64_t)tv.tv_usec / 1000);
 }

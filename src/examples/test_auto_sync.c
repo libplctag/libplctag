@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2021 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,19 +32,17 @@
  ***************************************************************************/
 
 
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <stdint.h>
+#include "compat_utils.h"
 #include <inttypes.h>
-#include <sys/time.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
+#include <libplctag/lib/libplctag.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 
-#define REQUIRED_VERSION 2,4,7
-#define TAG_ATTRIBS "protocol=ab_eip&gateway=10.206.1.40&path=1,4&cpu=LGX&elem_type=DINT&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
+#define REQUIRED_VERSION 2, 4, 7
+#define TAG_ATTRIBS \
+    "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
@@ -58,99 +56,104 @@ static volatile int write_start_count = 0;
 static volatile int write_complete_count = 0;
 
 
-void *reader_function(void *tag_arg)
-{
+void *reader_function(void *tag_arg) {
     int32_t tag = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = util_time_ms();
+    int64_t start_time = system_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    while(run_until > util_time_ms()) {
+    while(run_until > system_time_ms()) {
         int32_t val = plc_tag_get_int32(tag, 0);
 
-        fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val, util_time_ms()-start_time);
+        // NOLINTNEXTLINE
+        fprintf(stderr, "READER: Iteration %d, got value: %d at time %" PRId64 "\n", iteration++, val,
+                system_time_ms() - start_time);
 
-        util_sleep_ms(READ_SLEEP_MS);
+        system_sleep_ms(READ_SLEEP_MS, NULL);
     }
 
-    return NULL;
+    return 0;
 }
 
 
-void *writer_function(void *tag_arg)
-{
+void *writer_function(void *tag_arg) {
     int32_t tag = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = util_time_ms();
+    int64_t start_time = system_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    util_sleep_ms(WRITE_SLEEP_MS);
+    system_sleep_ms(WRITE_SLEEP_MS, NULL);
 
-    while(run_until > util_time_ms()) {
+    while(run_until > system_time_ms()) {
         int32_t val = plc_tag_get_int32(tag, 0);
-        int32_t new_val = ((val+1) > 499) ? 0 : (val+1);
+        int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
 
         /* write the value */
         plc_tag_set_int32(tag, 0, new_val);
 
-        fprintf(stderr, "WRITER: Iteration %d, wrote value: %d at time %" PRId64 "\n", iteration++, new_val, util_time_ms()-start_time);
+        // NOLINTNEXTLINE
+        fprintf(stderr, "WRITER: Iteration %d, wrote value: %d at time %" PRId64 "\n", iteration++, new_val,
+                system_time_ms() - start_time);
 
-        util_sleep_ms(WRITE_SLEEP_MS);
+        system_sleep_ms(WRITE_SLEEP_MS, NULL);
     }
 
-    return NULL;
+    return 0;
 }
 
 
-void tag_callback(int32_t tag_id, int event, int status)
-{
+void tag_callback(int32_t tag_id, int event, int status) {
     /* handle the events. */
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic operation was aborted!\n", tag_id);
             break;
 
         case PLCTAG_EVENT_CREATED:
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag was creation finished.\n");
             break;
 
         case PLCTAG_EVENT_DESTROYED:
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag was destroyed.\n");
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
             read_complete_count++;
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic read operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_READ_STARTED:
             read_start_count++;
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic read operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_COMPLETED:
             write_complete_count++;
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic write operation completed with status %s.\n", tag_id, plc_tag_decode_error(status));
             break;
 
         case PLCTAG_EVENT_WRITE_STARTED:
             write_start_count++;
+            // NOLINTNEXTLINE
             fprintf(stderr, "Tag %d automatic write operation started with status %s.\n", tag_id, plc_tag_decode_error(status));
 
             break;
 
         default:
+            // NOLINTNEXTLINE
             fprintf(stderr, "Unexpected event %d on tag %d!\n", event, tag_id);
             break;
-
     }
 }
 
 
-
-
-int main(int argc, char **argv)
-{
+int main(void) {
     int rc = PLCTAG_STATUS_OK;
     int32_t tag = 0;
     pthread_t read_thread, write_thread;
@@ -158,64 +161,78 @@ int main(int argc, char **argv)
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
 
-    (void)argc;
-    (void)argv;
-
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!\n", REQUIRED_VERSION);
+        // NOLINTNEXTLINE
         fprintf(stderr, "Available library version is %d.%d.%d.\n", version_major, version_minor, version_patch);
         exit(1);
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     tag = plc_tag_create(TAG_ATTRIBS, DATA_TIMEOUT);
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Error, %s, creating tag!\n", plc_tag_decode_error(tag));
         return 1;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Tag status %s.\n", plc_tag_decode_error(plc_tag_status(tag)));
 
     /* register the callback */
     rc = plc_tag_register_callback(tag, tag_callback);
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 1;
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Ready to start threads.\n");
 
     /* create the threads. */
     pthread_create(&read_thread, NULL, reader_function, (void *)(intptr_t)tag);
     pthread_create(&write_thread, NULL, writer_function, (void *)(intptr_t)tag);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for threads to quit.\n");
 
     pthread_join(read_thread, NULL);
     pthread_join(write_thread, NULL);
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "Done.\n");
 
     plc_tag_destroy(tag);
 
     /* check the results. */
-    fprintf(stderr, "Total reads triggered %d, finished %d, and total expected %d.\n", read_start_count, read_complete_count, RUN_PERIOD/READ_PERIOD_MS);
-    fprintf(stderr, "Total writes triggered %d, finished %d, and total expected %d.\n", write_start_count, write_complete_count, RUN_PERIOD/WRITE_SLEEP_MS);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Total reads triggered %d, finished %d, and total expected %d.\n", read_start_count, read_complete_count,
+            RUN_PERIOD / READ_PERIOD_MS);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Total writes triggered %d, finished %d, and total expected %d.\n", write_start_count, write_complete_count,
+            RUN_PERIOD / WRITE_SLEEP_MS);
 
     rc = 0;
 
-    if(abs((RUN_PERIOD/READ_PERIOD_MS) - read_start_count) > 3) {
-        fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_start_count, (RUN_PERIOD/READ_PERIOD_MS));
+    if(abs((RUN_PERIOD / READ_PERIOD_MS) - read_start_count) > 3) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_start_count,
+                (RUN_PERIOD / READ_PERIOD_MS));
         rc = 1;
     }
 
-    if(abs((RUN_PERIOD/WRITE_SLEEP_MS) - write_start_count) > 3) {
-        fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_start_count, (RUN_PERIOD/WRITE_SLEEP_MS));
+    if(abs((RUN_PERIOD / WRITE_SLEEP_MS) - write_start_count) > 3) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_start_count,
+                (RUN_PERIOD / WRITE_SLEEP_MS));
         rc = 1;
     }
 
