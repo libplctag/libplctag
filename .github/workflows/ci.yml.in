@@ -710,13 +710,12 @@ jobs:
         path: ${{ env.DIST }}
 
 
-  windows_ARM64:
-
+windows_ARM64:
     runs-on: windows-latest
 
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_windows_Arm64"
+      ARTIFACT: "libplctag_@VERSION@_windows_arm64"  # Changed to reflect ARM64 target
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -733,29 +732,16 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    #- name: Set up MSVC
-    #  uses: ilammy/msvc-dev-cmd@v1
-    #  with:
-    #    arch: ARM64
-
-    - name: Check Environment
-      run: |
-        echo "--- PATH ---"
-        echo $Env:PATH
-        echo "--- Compiler Check for cl.exe ---"
-        where cl.exe
-        echo "--- Compiler Check for gcc.exe ---"
-        where gcc.exe
-      shell: pwsh
+    - name: Setup MSVC for ARM64
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64_arm64
 
     - name: Configure CMake
-      run: |
-        cd ${{ env.BUILD }}
-        cmake .. -G "Ninja" -A ARM64 "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_VERBOSE_MAKEFILE=On"
-      shell: pwsh
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }} && cmake --build . --verbose --config Release
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
