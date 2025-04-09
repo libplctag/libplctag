@@ -576,15 +576,16 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
+
   windows_x86:
 
-    runs-on:windows-latest
+    runs-on: windows-latest
 
     env:
       VERSION: "@VERSION@"
       ARTIFACT: "libplctag_@VERSION@_windows_x86"
-      BUILD: "${{ github.workspace }}/build"
-      DIST: "${{ github.workspace }}/build/bin_dist"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
@@ -724,8 +725,8 @@ jobs:
     env:
       VERSION: "@VERSION@"
       ARTIFACT: "libplctag_@VERSION@_windows_Arm"
-      BUILD: "${{ github.workspace }}/build"
-      DIST: "${{ github.workspace }}/build/bin_dist"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
@@ -766,8 +767,8 @@ jobs:
     env:
       VERSION: "@VERSION@"
       ARTIFACT: "libplctag_@VERSION@_windows_Arm64"
-      BUILD: "${{ github.workspace }}/build"
-      DIST: "${{ github.workspace }}/build/bin_dist"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
