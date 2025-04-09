@@ -471,8 +471,9 @@ jobs:
     - name: Test Basic Functions
       run: |
         cd ${{ env.DIST }}
-        echo "start up simulator..."
+        echo "start up simulator."
         start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
+        echo "waiting for simulator to start up..."
         timeout /T 5
         echo "test simple get/set tag."
         .\simple
