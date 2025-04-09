@@ -783,10 +783,14 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    - name: Setup MSVC for ARM
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: amd64_arm
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3.1
+
+    - name: Setup MSVC for ARM manually
+      run: |
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
+        set >> "%GITHUB_ENV%"
+      shell: cmd
 
     - name: Configure CMake
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
