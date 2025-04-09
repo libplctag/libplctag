@@ -458,7 +458,7 @@ jobs:
       run: mkdir ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -A x64  -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
