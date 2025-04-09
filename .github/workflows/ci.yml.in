@@ -752,19 +752,16 @@ jobs:
       run: |
         echo "--- PATH ---"
         echo $Env:PATH
-        echo "--- Compiler Check ---"
+        echo "--- Compiler Check for cl.exe ---"
         where cl.exe
+        echo "--- Compiler Check for gcc.exe ---"
         where gcc.exe
       shell: pwsh
 
     - name: Configure CMake
       run: |
         cd ${{ env.BUILD }}
-        cmake .. -G "Ninja" `
-          -DCMAKE_C_COMPILER=cl.exe `
-          -DCMAKE_CXX_COMPILER=cl.exe `
-          -DCMAKE_BUILD_TYPE=Release `
-          -DCMAKE_VERBOSE_MAKEFILE=On
+        cmake .. -G "Ninja" "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_VERBOSE_MAKEFILE=On"
       shell: pwsh
 
     - name: Build
