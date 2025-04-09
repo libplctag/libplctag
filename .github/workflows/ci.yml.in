@@ -718,47 +718,6 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
-  windows_ARM:
-
-    runs-on: windows-latest
-
-    env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_windows_Arm"
-      BUILD: "${{ github.workspace }}\\build"
-      DIST: "${{ github.workspace }}\\build\\bin_dist"
-      BRANCH: ${{ github.head_ref || github.ref_name }}
-
-    steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
-
-    - name: "Checkout library source."
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ env.BRANCH }}
-
-    - name: Create build directory
-      run: mkdir ${{ env.BUILD }}
-
-
-    - name: Set up MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: ARM
-
-    - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -DCMAKE_VERBOSE_MAKEFILE=On
-
-    - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
-
-    - name: Upload ZIP artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
-
 
   windows_ARM64:
 
@@ -788,8 +747,81 @@ jobs:
       with:
         arch: ARM64
 
+  - name: Check Environment
+    run: |
+      echo "--- PATH ---"
+      echo $Env:PATH
+      echo "--- Compiler Check ---"
+      where cl.exe
+      where gcc.exe
+    shell: pwsh
+
+  - name: Configure CMake
+    run: |
+      cd ${{ env.BUILD }}
+      cmake .. -G "Ninja" `
+        -DCMAKE_C_COMPILER=cl.exe `
+        -DCMAKE_CXX_COMPILER=cl.exe `
+        -DCMAKE_BUILD_TYPE=Release `
+        -DCMAKE_VERBOSE_MAKEFILE=On
+    shell: pwsh
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}
+
+
+  windows_ARM:
+
+    runs-on: windows-latest
+
+    env:
+      VERSION: "@VERSION@"
+      ARTIFACT: "libplctag_@VERSION@_windows_Arm"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
+
+    - name: Create build directory
+      run: mkdir ${{ env.BUILD }}
+
+    - name: Set up MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ARM
+
+    - name: Check Environment
+      run: |
+        echo "--- PATH ---"
+        echo $Env:PATH
+        echo "--- Compiler Check ---"
+        where cl.exe
+        where gcc.exe
+      shell: pwsh
+
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -DCMAKE_VERBOSE_MAKEFILE=On
+      run: |
+        cd ${{ env.BUILD }}
+        cmake .. -G "Ninja" `
+          -DCMAKE_C_COMPILER=cl.exe `
+          -DCMAKE_CXX_COMPILER=cl.exe `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_VERBOSE_MAKEFILE=On
+      shell: pwsh
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
