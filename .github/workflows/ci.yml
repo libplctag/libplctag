@@ -470,7 +470,7 @@ jobs:
 
     - name: Test Basic Functions
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
         timeout /T 5
@@ -484,7 +484,7 @@ jobs:
 
     - name: Test Micro800
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
@@ -496,7 +496,7 @@ jobs:
 
     - name: Test Omron NJ/NX
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=Omron --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
@@ -508,7 +508,7 @@ jobs:
 
     - name: Test PLC/5
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] --debug
         timeout /T 5
@@ -520,7 +520,7 @@ jobs:
 
     - name: Test SLC 500
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] --debug
         timeout /T 5
@@ -532,7 +532,7 @@ jobs:
 
     - name: Test Duplicate Connection ID
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         dir
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug
@@ -545,7 +545,7 @@ jobs:
 
     - name: Test Large Tags
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
         timeout /T 5
@@ -557,7 +557,7 @@ jobs:
 
     - name: Test Array Notation Read/Write
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5]
         timeout /T 5
@@ -577,7 +577,7 @@ jobs:
 
   windows_x86:
 
-    runs-on: windows-2019
+    runs-on:windows-latest
 
     env:
       VERSION: "2.6.4"
@@ -598,15 +598,20 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+    - name: Set up MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: Win32
+
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A Win32 -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Test Basic Functions
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
         timeout /T 5
@@ -620,7 +625,7 @@ jobs:
 
     - name: Test Micro800
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
@@ -632,7 +637,7 @@ jobs:
 
     - name: Test Omron NJ/NX
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=Omron --tag=TestDINTArray:DINT[10] --debug
         timeout /T 5
@@ -644,7 +649,7 @@ jobs:
 
     - name: Test PLC/5
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] --debug
         timeout /T 5
@@ -656,7 +661,7 @@ jobs:
 
     - name: Test SLC 500
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] --debug
         timeout /T 5
@@ -668,7 +673,7 @@ jobs:
 
     - name: Test Duplicate Connection ID
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         dir
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug
@@ -681,7 +686,7 @@ jobs:
 
     - name: Test Large Tags
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
         timeout /T 5
@@ -693,7 +698,7 @@ jobs:
 
     - name: Test Array Notation Read/Write
       run: |
-        cd ${{ env.DIST }}\Release
+        cd ${{ env.DIST }}
         echo "start up simulator..."
         start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5]
         timeout /T 5
@@ -713,7 +718,7 @@ jobs:
 
   windows_ARM:
 
-    runs-on: windows-2019
+    runs-on:windows-latest
 
     env:
       VERSION: "2.6.4"
@@ -734,8 +739,14 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+
+    - name: Set up MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ARM
+
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
@@ -749,7 +760,7 @@ jobs:
 
   windows_ARM64:
 
-    runs-on: windows-2019
+    runs-on:windows-latest
 
     env:
       VERSION: "2.6.4"
@@ -770,8 +781,13 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+    - name: Set up MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ARM64
+
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Visual Studio 16 2019" -A ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
