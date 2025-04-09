@@ -760,49 +760,49 @@ jobs:
         path: ${{ env.DIST }}
 
 
-  windows_ARM:
+  #windows_ARM:
 
-    runs-on: windows-latest
+  #  runs-on: windows-latest
 
-    env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_windows_Arm"
-      BUILD: "${{ github.workspace }}\\build"
-      DIST: "${{ github.workspace }}\\build\\bin_dist"
-      BRANCH: ${{ github.head_ref || github.ref_name }}
+  #  env:
+  #    VERSION: "2.6.4"
+  #    ARTIFACT: "libplctag_2.6.4_windows_Arm"
+  #    BUILD: "${{ github.workspace }}\\build"
+  #    DIST: "${{ github.workspace }}\\build\\bin_dist"
+  #    BRANCH: ${{ github.head_ref || github.ref_name }}
 
-    steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
+  #  steps:
+  #  - name: Print out current branch
+  #    run: echo "Building branch ${{ env.BRANCH }}"
 
-    - name: "Checkout library source."
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ env.BRANCH }}
+  #  - name: "Checkout library source."
+  #    uses: actions/checkout@v4
+  #    with:
+  #      ref: ${{ env.BRANCH }}
 
-    - name: Create build directory
-      run: mkdir ${{ env.BUILD }}
+  #  - name: Create build directory
+  #    run: mkdir ${{ env.BUILD }}
 
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v1.3.1
+  #  - name: Setup MSBuild
+  #    uses: microsoft/setup-msbuild@v1.3.1
 
-    - name: Install ARM Windows SDK (if missing)
-      run: |
-        choco install windows-sdk-10-version-2004-all -y
+  #  - name: Install ARM Windows SDK (if missing)
+  #    run: |
+  #      choco install windows-sdk-10-version-2004-all -y
 
-    - name: Configure and Build with MSVC for ARM
-      run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
-        cd %BUILD%
-        cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
-        cmake --build . --verbose --config MinSizeRel
-      shell: cmd
+  #  - name: Configure and Build with MSVC for ARM
+  #    run: |
+  #      call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
+  #      cd %BUILD%
+  #      cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
+  #      cmake --build . --verbose --config MinSizeRel
+  #    shell: cmd
 
-    - name: Upload ZIP artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+  #  - name: Upload ZIP artifact
+  #    uses: actions/upload-artifact@v4
+  #    with:
+  #      name: ${{ env.ARTIFACT }}
+  #      path: ${{ env.DIST }}
 
 
   ubuntu_cross_build_arm6:
