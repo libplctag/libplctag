@@ -458,8 +458,13 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+    - name: Setup MSVC for x86-64
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64_amd64
+
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -A x64 -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
@@ -596,8 +601,13 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+    - name: Setup MSVC for x86
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64_win32
+
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -A Win32 -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=WIN32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
