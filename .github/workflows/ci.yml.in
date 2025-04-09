@@ -710,7 +710,7 @@ jobs:
         path: ${{ env.DIST }}
 
 
-windows_ARM64:
+  windows_ARM64:
     runs-on: windows-latest
 
     env:
@@ -773,21 +773,13 @@ windows_ARM64:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    - name: Check Environment
-      run: |
-        echo "--- PATH ---"
-        echo $Env:PATH
-        echo "--- Compiler Check for cl.exe ---"
-        where cl.exe
-        echo "--- Compiler Check for gcc.exe ---"
-        where gcc.exe
-      shell: pwsh
+    - name: Setup MSVC for ARM
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64_arm
 
     - name: Configure CMake
-      run: |
-        cd ${{ env.BUILD }}
-        cmake .. -G "Ninja" -A ARM "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_VERBOSE_MAKEFILE=On"
-      shell: pwsh
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
