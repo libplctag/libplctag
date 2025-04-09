@@ -39,6 +39,7 @@
 
 /* KEEP THE SPACES BETWEEN THE INCLUDES.  The order is required! */
 #define _WINSOCKAPI_
+
 #include <Winsock2.h>
 
 #include <Windows.h>
