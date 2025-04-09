@@ -143,7 +143,7 @@ endif()
 # build examples flag
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build examples or not")
 
-set(USE_SANITIZERS 1 CACHE BOOL "Build with google sanitizers or not")
+set(USE_SANITIZERS 1 CACHE BOOL "Build with sanitizers or not")
 
 # set flags for MacOSX
 if (APPLE)
