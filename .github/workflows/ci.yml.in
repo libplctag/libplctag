@@ -786,17 +786,13 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.3.1
 
-    - name: Setup MSVC for ARM manually
+    - name: Configure and Build with MSVC for ARM
       run: |
-        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
-        set >> "%GITHUB_ENV%"
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
+        cd ${{ env.BUILD }}
+        cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
+        cmake --build . --verbose --config MinSizeRel
       shell: cmd
-
-    - name: Configure CMake
-      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
-
-    - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
