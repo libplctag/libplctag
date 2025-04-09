@@ -53,6 +53,7 @@
 #include "slice.h"
 #include "tcp_server.h"
 #include "utils.h"
+#include "mutex.h"
 
 static void usage(void);
 static void process_args(int argc, const char **argv, plc_s *plc);
@@ -146,8 +147,6 @@ void setup_break_handler(void)
 int main(int argc, const char **argv)
 {
     tcp_server_p server = NULL;
-    uint8_t buf[4200];  /* CIP only allows 4002 for the CIP request, but there is overhead. */
-    slice_s server_buf = slice_make(buf, sizeof(buf));
     plc_s plc;
 
     /* set up handler for ^C etc. */
@@ -164,7 +163,7 @@ int main(int argc, const char **argv)
     process_args(argc, argv, &plc);
 
     /* open a server connection and listen on the right port. */
-    server = tcp_server_create("0.0.0.0", (plc.port_str ? plc.port_str : "44818"), server_buf, request_handler, &plc);
+    server = tcp_server_create("0.0.0.0", (plc.port_str ? plc.port_str : "44818"), request_handler, &plc, sizeof(plc));
 
     tcp_server_start(server, &done);
 
@@ -423,6 +422,11 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc)
         error("Unable to allocate memory for new tag!");
     }
 
+    /* create the tag data mutex */
+    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) {
+        error("Unable to create tag data mutex!");
+    }
+
     /* try to match the two parts of a tag definition string. */
 
     info("Match data file.");
@@ -571,6 +575,12 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
     if(!tag) {
         error("Unable to allocate memory for new tag!");
     }
+    
+    /* create the tag data mutex */
+    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) {
+        error("Unable to create tag data mutex!");
+    }
+
 
     /* try to match the three parts of a tag definition string. */
 
@@ -730,6 +740,8 @@ void parse_cip_tag(const char *tag_str, plc_s *plc)
 
 slice_s request_handler(slice_s input, slice_s output, void *plc_arg)
 {
+    //Remember that we get a copy of the plc_arg/context contents. So values are frozen
+    //in time, but references are to a shared resource and must be mutex'ed.
     plc_s *plc = (plc_s*)plc_arg;
 
     /* check to see if we have a full packet. */

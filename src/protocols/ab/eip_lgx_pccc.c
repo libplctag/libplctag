@@ -83,7 +83,7 @@ struct tag_vtable_t lgx_pccc_vtable = {
     /* data accessors */
     ab_get_int_attrib,
     ab_set_int_attrib,
-    
+
     ab_get_byte_array_attrib
 };
 
@@ -379,7 +379,7 @@ static int check_read_status(ab_tag_p tag)
     rc = check_read_request_status(tag, request);
     if(rc != PLCTAG_STATUS_OK)  {
         pdebug(DEBUG_DETAIL, "Read request status is not OK.");
-        rc_dec(request);
+        tag->req = rc_dec(request);
         return rc;
     }
 
@@ -469,8 +469,8 @@ static int check_read_status(ab_tag_p tag)
         tag->encoded_type_info_size = (int)(type_end - type_start);
         mem_copy(tag->encoded_type_info, type_start, tag->encoded_type_info_size);
 
-        /* have the IO thread take care of the request buffers */
-        ab_tag_abort(tag);
+        // /* have the IO thread take care of the request buffers */
+        // ab_tag_abort(tag);
 
         rc = PLCTAG_STATUS_OK;
     } while(0);
@@ -737,9 +737,18 @@ static int check_write_status(ab_tag_p tag)
     if(rc != PLCTAG_STATUS_OK) {
         if(rc_is_error(rc)) {
             /* the request is dead, from session side. */
-            tag->req = rc_dec(tag->req);
+
+            if(tag->req) {
+                /* make absolutely sure that the abort flag is set. */
+                spin_block(&tag->req->lock) {
+                    tag->req->abort_request = 1;
+                }
+
+                tag->req = rc_dec(tag->req);
+            }
         }
 
+        /* handles case of PLCTAG_STATUS_PENDING */
         return rc;
     }
 

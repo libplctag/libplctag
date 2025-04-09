@@ -88,7 +88,7 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc)
     info("PCCC packet:");
     slice_dump(pccc_input);
 
-    if(slice_match_bytes(pccc_input, PCCC_PREFIX, sizeof(PCCC_PREFIX))) {
+    if(slice_match_data_prefix(pccc_input, PCCC_PREFIX, sizeof(PCCC_PREFIX))) {
         slice_s pccc_command;
 
         info("Matched valid PCCC prefix.");
@@ -98,18 +98,26 @@ slice_s dispatch_pccc_request(slice_s input, slice_s output, plc_s *plc)
         pccc_command = slice_from_slice(pccc_input, 4, slice_len(pccc_input) - 4);
 
         /* match the command. */
-        if(plc->plc_type == PLC_PLC5 && slice_match_bytes(pccc_command, PLC5_READ, sizeof(PLC5_READ))) {
+        if(plc->plc_type == PLC_PLC5 && slice_match_data_prefix(pccc_command, PLC5_READ, sizeof(PLC5_READ))) {
             pccc_output = handle_plc5_read_request(pccc_command, pccc_output, plc);
-        } else if(plc->plc_type == PLC_PLC5 && slice_match_bytes(pccc_command, PLC5_WRITE, sizeof(PLC5_WRITE))) {
+        } else if(plc->plc_type == PLC_PLC5 && slice_match_data_prefix(pccc_command, PLC5_WRITE, sizeof(PLC5_WRITE))) {
             pccc_output = handle_plc5_write_request(pccc_command, pccc_output, plc);
-        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX) && slice_match_bytes(pccc_command, SLC_READ, sizeof(SLC_READ))) {
+        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX) && slice_match_data_prefix(pccc_command, SLC_READ, sizeof(SLC_READ))) {
             pccc_output = handle_slc_read_request(pccc_command, pccc_output, plc);
-        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX) && slice_match_bytes(pccc_command, SLC_WRITE, sizeof(SLC_WRITE))) {
+        } else if((plc->plc_type == PLC_SLC || plc->plc_type == PLC_MICROLOGIX) && slice_match_data_prefix(pccc_command, SLC_WRITE, sizeof(SLC_WRITE))) {
             pccc_output = handle_slc_write_request(pccc_command, pccc_output, plc);
         } else {
             info("Unsupported PCCC command!");
             pccc_output = make_pccc_error(pccc_output, PCCC_ERR_UNSUPPORTED_COMMAND, plc);
         }
+    } else {
+        slice_s prefix = slice_make(&(PCCC_PREFIX[0]), sizeof(PCCC_PREFIX));
+        info("Invalid PCCC prefix!");
+        info("Expected:");
+        slice_dump(prefix);
+        info("Got:");
+        slice_dump(pccc_input);
+        pccc_output = make_pccc_error(pccc_output, PCCC_ERR_UNSUPPORTED_COMMAND, plc);
     }
 
     return slice_from_slice(output, 0, 11 + slice_len(pccc_output));
@@ -498,4 +506,3 @@ slice_s make_pccc_error(slice_s output, uint8_t err_code, plc_s *plc)
 
     return err_resp;
 }
-

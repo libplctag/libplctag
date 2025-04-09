@@ -165,11 +165,7 @@ int test_string(const char *tag_string)
 
 int main()
 {
-    int32_t tag = 0;
     int rc;
-    int offset = 0;
-    int str_cap = 0;
-    char *str = NULL;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -183,7 +179,7 @@ int main()
                                             plc_tag_get_int_attribute(0, "version_patch", -1));
 
     /* turn off debugging output. */
-    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
     /* we expect a failure here. */
     rc = test_string(tag_string1);

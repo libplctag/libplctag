@@ -555,7 +555,7 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     }
 
     /* encode the path */
-    rc = cip.encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
+    rc = CIP.encode_path(path, use_connected_msg, plc_type, &tmp_conn_path[0], &tmp_conn_path_size, &is_dhp, &dhp_dest);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_INFO, "Unable to convert path string to binary path, error %s!", plc_tag_decode_error(rc));
         // rc_dec(conn);
@@ -1501,26 +1501,26 @@ int process_requests(omron_conn_p conn)
             /* if there are still requests after purging all the aborted requests, process them. */
 
             /* how much space do we have to work with. */
-            remaining_request_space = conn->max_payload_size - (int)sizeof(cip_multi_req_header);
+            remaining_request_space = max_payload_size - (int)sizeof(cip_multi_req_header);
 
              /* -2 bytes for the msp (multi service packet) number of packets and -4 bytes for the cip response header,
-              * we later subtract 2 bytes for each packet, this is to allow for the INT offset to the packet within the msp 
+              * we later subtract 2 bytes for each packet, this is to allow for the INT offset to the packet within the msp
               * finally we subtract 10 bytes just to give a comfort blanket as I had seen PLC_TAG_TOO_LARGE issue without it due to too much
               * data being packed into a single packet */
-            remaining_response_space = conn->max_payload_size - 2 - 4 -10;
+             remaining_response_space = max_payload_size - 2 - 4 - 10;
 
-            if(vector_length(conn->requests)) {
+             if(vector_length(conn->requests)) {
                 do {
                     request = vector_get(conn->requests, 0);
 
                     remaining_request_space = remaining_request_space - get_payload_size(request);
 
-                    /* calculate if all of the response data from the packed requests will fit into a single response packet. 
+                    /* calculate if all of the response data from the packed requests will fit into a single response packet.
                      * the -8 bytes is the maximum padding between packets, the -2 bytes is from the offset integer which stores the
                      * offset to this packet */
-                    remaining_response_space = remaining_response_space - request->response_size - 8 - 2; 
+                    remaining_response_space = remaining_response_space - request->response_size - 8 - 2;
 
-                    /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must have been read 
+                    /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must have been read
                      * before, so that its response size is known */
                     allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
 
@@ -1530,8 +1530,8 @@ int process_requests(omron_conn_p conn)
                      * request packet and if fragmented reads are not supported then also in the expected response packet.
                      */
 
-                    if((num_bundled_requests == 0) || ((allow_packing && (remaining_request_space > 0)) && ((remaining_response_space >= 0) || (request->supports_fragmented_read)))) {
-                        //pdebug(DEBUG_DETAIL, "packed %d requests with remaining request space %d and remaining response space %d", num_bundled_requests+1, remaining_request_space, remaining_response_space);
+                     if((num_bundled_requests == 0) || ((allow_packing && (remaining_request_space > 0)) && ((remaining_response_space >= 0) || (request->supports_fragmented_read)))) {
+                        //pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1, remaining_request_space);
                         bundled_requests[num_bundled_requests] = request;
                         num_bundled_requests++;
 
@@ -1584,27 +1584,106 @@ int process_requests(omron_conn_p conn)
              * status back to the tag.
              */
             if(num_bundled_requests > 1) {
+                cip_multi_resp_header *multi_resp = NULL;
+
                 if(le2h16(((eip_encap *)(conn->data))->encap_command) == OMRON_EIP_UNCONNECTED_SEND) {
                     eip_cip_uc_resp *resp = (eip_cip_uc_resp *)(conn->data);
+                    uint16_t udi_item_length = le2h16(resp->cpf_udi_item_length);
+                    size_t response_overhead = 0;
+                    size_t response_size = 0;
+
+                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
+
                     pdebug(DEBUG_INFO, "Received unconnected packet with conn sequence ID %llx", resp->encap_sender_context);
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
-                        rc = cip.decode_cip_error_code(&(resp->status));
+                        rc = CIP.decode_cip_error_code(&(resp->status));
                         pdebug(DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
+                        break;
+                    }
+
+                    response_overhead = (size_t)((uint8_t*)multi_resp - conn->data);
+                    response_size = (size_t)conn->data_size - response_overhead;
+
+                    /* check the passed UDI data item size against what we really got. */
+                    if((size_t)udi_item_length != response_size) {
+                        pdebug(DEBUG_WARN, "Incorrectly constructed response! UDI data length field is %zu but actual size is %zu!",
+                                            (size_t)udi_item_length,
+                                            response_size
+                              );
+
+                        rc = PLCTAG_ERR_BAD_DATA;
                         break;
                     }
                 } else if(le2h16(((eip_encap *)(conn->data))->encap_command) == OMRON_EIP_CONNECTED_SEND) {
                     eip_cip_co_resp *resp = (eip_cip_co_resp *)(conn->data);
+                    uint16_t cdi_item_length = le2h16(resp->cpf_cdi_item_length);
+                    size_t response_overhead = 0;
+                    size_t response_size = 0;
+
+                    multi_resp = (cip_multi_resp_header *)(&(resp->reply_service));
+
                     pdebug(DEBUG_INFO, "Received connected packet with connection ID %x and sequence ID %u(%x)", le2h32(resp->cpf_orig_conn_id), le2h16(resp->cpf_conn_seq_num), le2h16(resp->cpf_conn_seq_num));
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != OMRON_EIP_OK && resp->status != OMRON_CIP_ERR_PARTIAL_ERROR) {
-                        rc = cip.decode_cip_error_code(&(resp->status));
+                        rc = CIP.decode_cip_error_code(&(resp->status));
                         pdebug(DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
                     }
+
+                    response_overhead = (size_t)((uint8_t*)(&resp->cpf_conn_seq_num) - conn->data);
+                    response_size = (size_t)conn->data_size - response_overhead;
+
+                    pdebug(DEBUG_DETAIL, "response_overhead=%zu", response_overhead);
+                    pdebug(DEBUG_DETAIL, "response_size=%zu", response_size);
+
+                    /* check the passed CDI data item size against what we really got. */
+                    if((size_t)cdi_item_length != response_size) {
+                        pdebug(DEBUG_WARN, "Incorrectly constructed response! CDI data length field is %zu but actual size is %zu!",
+                                            (size_t)cdi_item_length,
+                                            response_size
+                              );
+
+                        rc = PLCTAG_ERR_BAD_DATA;
+                        break;
+                    }
+                } else {
+                    pdebug(DEBUG_WARN, "Unexpected EIP packet type, %04x!", le2h16(((eip_encap *)(conn->data))->encap_command));
+                    rc = PLCTAG_ERR_BAD_DATA;
+                    break;
                 }
+
+                /* we have multiple requests, sanity check the data. */
+                if(le2h16(multi_resp->request_count) == num_bundled_requests) {
+                    size_t offset_base = (size_t)((uint8_t *)(&multi_resp->request_count) - conn->data);
+
+                    pdebug(DEBUG_DETAIL, "offset_base=%zu", offset_base);
+
+                    /* check all the offsets */
+                    for(int resp_index = 0; resp_index < num_bundled_requests; resp_index++) {
+                        size_t resp_offset = (size_t)le2h16(multi_resp->request_offsets[resp_index]) + offset_base;
+
+                        pdebug(DEBUG_DETAIL, "Response %d starts at byte offset %zu", resp_offset);
+
+                        if(resp_offset >= (size_t)conn->data_size) {
+                            pdebug(DEBUG_WARN, "Response %d has offset %zu which is outside the conn data!", resp_offset);
+                            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+                            break;
+                        }
+                    }
+                } else {
+                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    rc = PLCTAG_ERR_BAD_DATA;
+                    break;
+                }
+
+            }
+
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Got error %s when processing incoming response(s)!", plc_tag_decode_error(rc));
+                break;
             }
 
             /* copy the results back out. Every request gets a copy. */
@@ -2383,7 +2462,7 @@ int receive_forward_open_response(omron_conn_p conn)
         }
 
         if(fo_resp->general_status != OMRON_EIP_OK) {
-            pdebug(DEBUG_WARN, "Forward Open command failed, response code: %s (%d)", cip.decode_cip_error_short(&fo_resp->general_status), fo_resp->general_status);
+            pdebug(DEBUG_WARN, "Forward Open command failed, response code: %s (%d)", CIP.decode_cip_error_short(&fo_resp->general_status), fo_resp->general_status);
             if(fo_resp->general_status == OMRON_CIP_ERR_UNSUPPORTED_SERVICE) {
                 /* this type of command is not supported! */
                 pdebug(DEBUG_WARN, "Received CIP command unsupported error from the PLC!");
@@ -2405,10 +2484,10 @@ int receive_forward_open_response(omron_conn_p conn)
                         pdebug(DEBUG_WARN, "Error from forward open request, duplicate connection ID.  Need to try again.");
                         rc = PLCTAG_ERR_DUPLICATE;
                     } else {
-                        pdebug(DEBUG_WARN, "CIP extended error %s (%s)!", cip.decode_cip_error_short(&fo_resp->general_status), cip.decode_cip_error_long(&fo_resp->general_status));
+                        pdebug(DEBUG_WARN, "CIP extended error %s (%s)!", CIP.decode_cip_error_short(&fo_resp->general_status), CIP.decode_cip_error_long(&fo_resp->general_status));
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "CIP error code %s (%s)!", cip.decode_cip_error_short(&fo_resp->general_status), cip.decode_cip_error_long(&fo_resp->general_status));
+                    pdebug(DEBUG_WARN, "CIP error code %s (%s)!", CIP.decode_cip_error_short(&fo_resp->general_status), CIP.decode_cip_error_long(&fo_resp->general_status));
                 }
             }
 
