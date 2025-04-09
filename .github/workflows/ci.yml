@@ -461,10 +461,10 @@ jobs:
     - name: Setup MSVC for x86-64
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        arch: amd64_amd64
+        arch: amd64
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
@@ -604,10 +604,10 @@ jobs:
     - name: Setup MSVC for x86
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        arch: amd64_win32
+        arch: amd64
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=WIN32 -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_GENERATOR_PLATFORM=Win32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
@@ -748,7 +748,7 @@ jobs:
         arch: amd64_arm64
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_GENERATOR_PLATFORM=ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }} && cmake --build . --verbose --config Release
@@ -789,7 +789,7 @@ jobs:
         arch: amd64_arm
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_GENERATOR_PLATFORM=ARM -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
