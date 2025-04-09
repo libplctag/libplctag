@@ -458,13 +458,8 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    - name: Set up MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: x64
-
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -A x64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
@@ -601,13 +596,8 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    - name: Set up MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: Win32
-
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }}; cmake .. -G "Ninja" -A Win32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
@@ -743,10 +733,10 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    - name: Set up MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: ARM64
+    #- name: Set up MSVC
+    #  uses: ilammy/msvc-dev-cmd@v1
+    #  with:
+    #    arch: ARM64
 
     - name: Check Environment
       run: |
@@ -761,7 +751,7 @@ jobs:
     - name: Configure CMake
       run: |
         cd ${{ env.BUILD }}
-        cmake .. -G "Ninja" "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_VERBOSE_MAKEFILE=On"
+        cmake .. -G "Ninja" -A ARM64 "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_VERBOSE_MAKEFILE=On"
       shell: pwsh
 
     - name: Build
@@ -797,28 +787,20 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    - name: Set up MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: ARM
-
     - name: Check Environment
       run: |
         echo "--- PATH ---"
         echo $Env:PATH
-        echo "--- Compiler Check ---"
+        echo "--- Compiler Check for cl.exe ---"
         where cl.exe
+        echo "--- Compiler Check for gcc.exe ---"
         where gcc.exe
       shell: pwsh
 
     - name: Configure CMake
       run: |
         cd ${{ env.BUILD }}
-        cmake .. -G "Ninja" `
-          -DCMAKE_C_COMPILER=cl.exe `
-          -DCMAKE_CXX_COMPILER=cl.exe `
-          -DCMAKE_BUILD_TYPE=Release `
-          -DCMAKE_VERBOSE_MAKEFILE=On
+        cmake .. -G "Ninja" -A ARM "-DCMAKE_C_COMPILER=cl.exe" "-DCMAKE_CXX_COMPILER=cl.exe" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_VERBOSE_MAKEFILE=On"
       shell: pwsh
 
     - name: Build
