@@ -27,10 +27,10 @@ if(BUILD_32_BIT)
     set(EXTRA_LINK_FLAGS_DEBUG " -m32")
 endif()
 
-set(CMAKE_C_FLAGS_MINSIZEREL " -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -std=c11 ${EXTRA_COMPILE_FLAGS_MINSIZEREL}")
+set(CMAKE_C_FLAGS_MINSIZEREL " -Os -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -std=c11 ${EXTRA_COMPILE_FLAGS_MINSIZEREL}")
 set(CMAKE_C_FLAGS_DEBUG " -O0 -g -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer -std=c11 ${EXTRA_COMPILE_FLAGS_DEBUG}")
 
-set(CMAKE_CXX_FLAGS_MINSIZEREL " -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${EXTRA_COMPILE_FLAGS_MINSIZEREL}")
+set(CMAKE_CXX_FLAGS_MINSIZEREL " -Os -DNDEBUG -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden ${EXTRA_COMPILE_FLAGS_MINSIZEREL}")
 set(CMAKE_CXX_FLAGS_DEBUG " -O0 -g -Wall -pedantic -Wextra -Wconversion -fno-strict-aliasing -fvisibility=hidden -fno-omit-frame-pointer ${EXTRA_COMPILE_FLAGS_DEBUG}")
 
 set(CMAKE_SHARED_LINKER_FLAGS_MINSIZEREL "")
