@@ -32,7 +32,7 @@ set(AB_SERVER_FILES
 add_executable(ab_server ${AB_SERVER_FILES})
 target_link_libraries(ab_server ${EXTRA_LINKER_LIBS})
 
-if(UNIX AND BUILD_MODBUS_EMULATOR)
+if(POSIX AND BUILD_MODBUS_EMULATOR)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
 
@@ -42,7 +42,6 @@ if(UNIX AND BUILD_MODBUS_EMULATOR)
     target_include_directories(modbus_server PRIVATE ${LIBMODBUS_INCLUDE_DIRS})
 
     target_link_libraries(modbus_server ${LIBMODBUS_LINK_LIBRARIES})
-
 
     macro(print_all_modbus_variables)
         message(STATUS "print_all_modbus_variables------------------------------------------{")

@@ -67,3 +67,4 @@ endif()
 # pull in the GCC config
 include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
 
+set(POSIX True)
