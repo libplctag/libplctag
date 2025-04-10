@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,11 +31,11 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stdint.h>
-#include "cip.h"
 #include "cpf.h"
+#include "cip.h"
 #include "eip.h"
 #include "utils.h"
+#include <stdint.h>
 
 #define CPF_ITEM_NAI ((uint16_t)0x0000) /* NULL Address Item */
 #define CPF_ITEM_CAI ((uint16_t)0x00A1) /* connected address item */
@@ -46,7 +46,7 @@
 typedef struct {
     uint32_t interface_handle;
     uint16_t router_timeout;
-    uint16_t item_count;        /* should be 2 for now. */
+    uint16_t item_count; /* should be 2 for now. */
     uint16_t item_addr_type;
     uint16_t item_addr_length;
     uint16_t item_data_type;
@@ -58,7 +58,7 @@ typedef struct {
 typedef struct {
     uint32_t interface_handle;
     uint16_t router_timeout;
-    uint16_t item_count;        /* should be 2 for now. */
+    uint16_t item_count; /* should be 2 for now. */
     uint16_t item_addr_type;
     uint16_t item_addr_length;
     uint32_t conn_id;
@@ -70,9 +70,7 @@ typedef struct {
 #define CPF_CONN_HEADER_SIZE (22)
 
 
-
-slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc)
-{
+slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc) {
     slice_s result;
     cpf_uc_header_s header;
 
@@ -118,23 +116,25 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc)
     }
 
     if(header.item_data_length != (slice_len(input) - CPF_UCONN_HEADER_SIZE)) {
-        info("CPF unconnected payload length, %d, does not match passed length, %d!", (slice_len(input) - CPF_UCONN_HEADER_SIZE - 2), header.item_data_length);
+        info("CPF unconnected payload length, %d, does not match passed length, %d!",
+             (slice_len(input) - CPF_UCONN_HEADER_SIZE - 2), header.item_data_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* dispatch and handle the result. */
-    result = cip_dispatch_request(slice_from_slice(input, (size_t)CPF_UCONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(input) - CPF_UCONN_HEADER_SIZE)),
-                                slice_from_slice(output, (size_t)CPF_UCONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(output) - CPF_UCONN_HEADER_SIZE)),
-                                plc);
+    result = cip_dispatch_request(
+        slice_from_slice(input, (size_t)CPF_UCONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(input) - CPF_UCONN_HEADER_SIZE)),
+        slice_from_slice(output, (size_t)CPF_UCONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(output) - CPF_UCONN_HEADER_SIZE)),
+        plc);
 
     if(!slice_has_err(result)) {
         /* build outbound header. */
         slice_set_uint32_le(output, 0, header.interface_handle);
         slice_set_uint16_le(output, 4, header.router_timeout);
-        slice_set_uint16_le(output, 6, 2); /* two items. */
-        slice_set_uint16_le(output, 8, CPF_ITEM_NAI); /* connected address type. */
-        slice_set_uint16_le(output, 10, 0); /* No connection ID. */
-        slice_set_uint16_le(output, 12, CPF_ITEM_UDI); /* connected data type */
+        slice_set_uint16_le(output, 6, 2);                            /* two items. */
+        slice_set_uint16_le(output, 8, CPF_ITEM_NAI);                 /* connected address type. */
+        slice_set_uint16_le(output, 10, 0);                           /* No connection ID. */
+        slice_set_uint16_le(output, 12, CPF_ITEM_UDI);                /* connected data type */
         slice_set_uint16_le(output, 14, (uint16_t)slice_len(result)); /* result from CIP processing downstream. */
 
         /* create a new slice with the CPF header and the response packet in it. */
@@ -144,13 +144,10 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc)
     /* errors are pass through. */
 
     return result;
-
 }
 
 
-
-slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc)
-{
+slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
     slice_s result;
     cpf_co_header_s header;
 
@@ -200,7 +197,8 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc)
     }
 
     if(header.item_data_length != (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2))) {
-        info("CPF payload length, %d, does not match passed length, %d!", (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2)), header.item_data_length);
+        info("CPF payload length, %d, does not match passed length, %d!", (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2)),
+             header.item_data_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
@@ -208,18 +206,21 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc)
     plc->server_connection_seq = header.conn_seq;
 
     /* dispatch and handle the result. */
-    result = cip_dispatch_request(slice_from_slice(input,  (size_t)CPF_CONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(input) - CPF_CONN_HEADER_SIZE)),
-                                  slice_from_slice(output, (size_t)CPF_CONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(output) - CPF_CONN_HEADER_SIZE)),
-                                  plc);
+    result = cip_dispatch_request(
+        slice_from_slice(input, (size_t)CPF_CONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(input) - CPF_CONN_HEADER_SIZE)),
+        slice_from_slice(output, (size_t)CPF_CONN_HEADER_SIZE, (size_t)((uint16_t)slice_len(output) - CPF_CONN_HEADER_SIZE)),
+        plc);
 
     if(!slice_has_err(result)) {
         /* build outbound header. */
-        slice_set_uint16_le(output, 0, 2); /* two items. */
+        slice_set_uint16_le(output, 0, 2);            /* two items. */
         slice_set_uint16_le(output, 2, CPF_ITEM_CAI); /* connected address type. */
-        slice_set_uint16_le(output, 4, 4); /* connection ID is 4 bytes. */
+        slice_set_uint16_le(output, 4, 4);            /* connection ID is 4 bytes. */
         slice_set_uint32_le(output, 6, plc->client_connection_id);
         slice_set_uint16_le(output, 10, CPF_ITEM_CDI); /* connected data type */
-        slice_set_uint16_le(output, 12, (uint16_t)(slice_len(result) + 2)); /* result from CIP processing downstream.  Plus 2 bytes for sequence number. */
+        slice_set_uint16_le(
+            output, 12,
+            (uint16_t)(slice_len(result) + 2)); /* result from CIP processing downstream.  Plus 2 bytes for sequence number. */
         slice_set_uint16_le(output, 14, plc->client_connection_seq);
 
         /* create a new slice with the CPF header and the response packet in it. */
@@ -230,4 +231,3 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc)
 
     return result;
 }
-

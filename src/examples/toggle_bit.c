@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,12 +32,12 @@
  ***************************************************************************/
 
 
+#include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
-#define REQUIRED_VERSION 2,1,0
+#define REQUIRED_VERSION 2, 1, 0
 
 /*
  * the name TestDINTArray[3].17 picks a specific bit out of the TestDINTArray tag element 3.  This is a bit-valued tag
@@ -51,15 +51,14 @@
  */
 
 
-
-int main()
-{
+int main(void) {
     int32_t tag = 0;
     int rc;
     int b;
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "Required compatible library version %d.%d.%d not available!", REQUIRED_VERSION);
         exit(1);
     }
@@ -69,18 +68,18 @@ int main()
 
     /* everything OK? */
     if(tag < 0) {
-        fprintf(stderr,"ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR %s: Could not create tag!\n", plc_tag_decode_error(tag));
 
         return 0;
     }
 
     /* let the connect succeed we hope */
-    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) {
-        util_sleep_ms(100);
-    }
+    while(plc_tag_status(tag) == PLCTAG_STATUS_PENDING) { system_sleep_ms(100, NULL); }
 
     if(plc_tag_status(tag) != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Error setting up tag internal state. Error %s\n", plc_tag_decode_error(plc_tag_status(tag)));
         return 0;
     }
 
@@ -88,7 +87,8 @@ int main()
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
 
@@ -96,7 +96,8 @@ int main()
      * Read the bit value.   For a bit tag like this, always use offset of zero.
      */
     b = plc_tag_get_bit(tag, 0);
-    fprintf(stderr,"Before bool = %d\n", b);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "Before bool = %d\n", b);
 
     plc_tag_set_bit(tag, 0, (b ? 0 : 1));
 
@@ -108,7 +109,8 @@ int main()
     rc = plc_tag_write(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
 
@@ -117,18 +119,18 @@ int main()
     rc = plc_tag_read(tag, DATA_TIMEOUT);
 
     if(rc != PLCTAG_STATUS_OK) {
-        fprintf(stderr,"ERROR: Unable to read the data! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        // NOLINTNEXTLINE
+        fprintf(stderr, "ERROR: Unable to read the data! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         return 0;
     }
 
     /* print out the data */
     b = plc_tag_get_bit(tag, 0);
-    fprintf(stderr,"After bool = %d\n", b);
+    // NOLINTNEXTLINE
+    fprintf(stderr, "After bool = %d\n", b);
 
     /* we are done */
     plc_tag_destroy(tag);
 
     return 0;
 }
-
-

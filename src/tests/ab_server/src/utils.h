@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -51,3 +51,6 @@ extern void error_impl(const char *func, int line, const char *templ, ...);
 #define info(...) info_impl(__func__, __LINE__, __VA_ARGS__)
 extern void info_impl(const char *func, int line, const char *templ, ...);
 extern void slice_dump(slice_s s);
+
+#define RANDOM_U64_ERROR (UINT64_MAX)
+extern uint64_t random_u64(uint64_t upper_bound);

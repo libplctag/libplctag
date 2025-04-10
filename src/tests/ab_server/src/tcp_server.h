@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -50,4 +50,3 @@ typedef struct tcp_server *tcp_server_p;
 extern tcp_server_p tcp_server_create(const char *host, const char *port, slice_s (*handler)(slice_s input, slice_s output, void *context), void *context, size_t context_size);
 extern void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate);
 extern void tcp_server_destroy(tcp_server_p server);
-

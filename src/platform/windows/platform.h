@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -46,32 +46,28 @@ extern "C"
 #endif
 */
 
+/* KEEP THE SPACES BETWEEN LINES!  The order is required! */
 #define _WINSOCKAPI_
+#include <Winsock2.h>
+
 #include <windows.h>
+
+#include <Ws2tcpip.h>
+
+
 #include <tchar.h>
 #include <strsafe.h>
 #include <io.h>
-#include <Winsock2.h>
-#include <Ws2tcpip.h>
 #include <string.h>
 #include <stdlib.h>
-#include <winnt.h>
 #include <errno.h>
 #include <math.h>
 #include <process.h>
 #include <time.h>
 #include <stdio.h>
 
-/*#include <WinSock2.h>*/
-/*#include <Ws2tcpip.h>*/
-/*#include <sys/types.h>*/
 #include <stdint.h>
-/*#include <io.h>*/
-/*#include <stdlib.h>*/
 #include <malloc.h>
-
-//#include "libplctag_lib.h"
-
 
 
 /* WinSock does not define this or support signals */
@@ -163,9 +159,6 @@ extern char *str_concat_impl(int num_args, ...);
 /* mutex functions/defs */
 typedef struct mutex_t *mutex_p;
 extern int mutex_create(mutex_p *m);
-// extern int mutex_lock(mutex_p m);
-// extern int mutex_try_lock(mutex_p m);
-// extern int mutex_unlock(mutex_p m);
 extern int mutex_destroy(mutex_p *m);
 
 extern int mutex_lock_impl(const char *func, int line_num, mutex_p m);

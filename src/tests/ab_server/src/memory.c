@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -33,9 +33,9 @@
 
 #include "compat.h"
 
-#include <stdlib.h>
 #include "memory.h"
 #include "utils.h"
+#include <stdlib.h>
 
 /*
  * mem_alloc
@@ -45,8 +45,7 @@
  *
  * It will return NULL on failure.
  */
-extern void *mem_alloc(int size)
-{
+extern void *mem_alloc(int size) {
     if(size <= 0) {
         info("WARN: Allocation size must be greater than zero bytes!");
         return NULL;
@@ -63,8 +62,7 @@ extern void *mem_alloc(int size)
  *
  * It will return NULL on failure.
  */
-extern void *mem_realloc(void *orig, int size)
-{
+extern void *mem_realloc(void *orig, int size) {
     if(size <= 0) {
         info("WARN: New allocation size must be greater than zero bytes!");
         return NULL;
@@ -80,11 +78,8 @@ extern void *mem_realloc(void *orig, int size)
  * Free the allocated memory passed in.  If the passed pointer is
  * null, do nothing.
  */
-extern void mem_free(const void *mem)
-{
-    if(mem) {
-        free((void *)mem);
-    }
+extern void mem_free(const void *mem) {
+    if(mem) { free((void *)mem); }
 }
 
 
@@ -93,8 +88,7 @@ extern void mem_free(const void *mem)
  *
  * set memory to the passed argument.
  */
-extern void mem_set(void *dest, int c, int size)
-{
+extern void mem_set(void *dest, int c, int size) {
     if(!dest) {
         info("WARN: Destination pointer is NULL!");
         return;
@@ -105,6 +99,7 @@ extern void mem_set(void *dest, int c, int size)
         return;
     }
 
+    // NOLINTNEXTLINE
     memset(dest, c, (size_t)(ssize_t)size);
 }
 
@@ -114,8 +109,7 @@ extern void mem_set(void *dest, int c, int size)
  *
  * copy memory from one pointer to another for the passed number of bytes.
  */
-extern void mem_copy(void *dest, void *src, int size)
-{
+extern void mem_copy(void *dest, void *src, int size) {
     if(!dest) {
         info("WARN: Destination pointer is NULL!");
         return;
@@ -136,6 +130,7 @@ extern void mem_copy(void *dest, void *src, int size)
         return;
     }
 
+    // NOLINTNEXTLINE
     memcpy(dest, src, (size_t)(unsigned int)size);
 }
 
@@ -145,8 +140,7 @@ extern void mem_copy(void *dest, void *src, int size)
  *
  * move memory from one pointer to another for the passed number of bytes.
  */
-extern void mem_move(void *dest, void *src, int size)
-{
+extern void mem_move(void *dest, void *src, int size) {
     if(!dest) {
         info("WARN: Destination pointer is NULL!");
         return;
@@ -167,12 +161,12 @@ extern void mem_move(void *dest, void *src, int size)
         return;
     }
 
+    // NOLINTNEXTLINE
     memmove(dest, src, (size_t)(unsigned int)size);
 }
 
 
-int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
-{
+int mem_cmp(void *src1, int src1_size, void *src2, int src2_size) {
     if(!src1 || src1_size <= 0) {
         if(!src2 || src2_size <= 0) {
             /* both are NULL or zero length, but that is "equal" for our purposes. */
@@ -189,9 +183,7 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size)
             /* both pointers are non-NULL and the lengths are positive. */
 
             /* short circuit the comparison if the blocks are different lengths */
-            if(src1_size != src2_size) {
-                return (src1_size - src2_size);
-            }
+            if(src1_size != src2_size) { return (src1_size - src2_size); }
 
             return memcmp(src1, src2, (size_t)(unsigned int)src1_size);
         }

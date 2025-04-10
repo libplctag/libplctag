@@ -1,61 +1,75 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <ctype.h>
-#include <inttypes.h>
-#include "../lib/libplctag.h"
 #include "./cli.h"
-#include "./getline.h"
 #include "../examples/utils.h"
 #include "../util/debug.h"
+#include "./getline.h"
+#include <ctype.h>
+#include <inttypes.h>
+#include <libplctag/lib/libplctag.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* globals here */
 struct tags *tags = NULL;
 cli_request_t cli_request = {
-    "ab_eip",
-    "127.0.0.1",
-    "1,0",
-    "controllogix",
-    READ,
-    500,
-    1, // DEBUG_ERROR
+    "ab_eip", "127.0.0.1", "1,0", "controllogix", READ, 500,
+    1,  // DEBUG_ERROR
     "",
-    false // offline
+    false  // offline
 };
 
-void usage(void)
-{
+void usage(void) {
+    // NOLINTNEXTLINE
     fprintf(stdout, "Usage:\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\tLIBPLCTAG CLI.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\tThis is a command-line interface to access tags/registers, in PLCs supported by libplctag.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tcli {--read | --write | --watch} {-protocol} {-ip} {-path} {-plc}\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t\t[-debug] [-interval] [-attributes] [-offline]\n");
 
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tCLI Action (Required):\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\t--read\t\t- Perform a one-shot READ operation.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t--write\t\t- Perform a one-shot WRITE operation.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t--watch\t\t- Perform a continuous WATCH operation at the specified interval.\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-h | --help\t- Prints the Usage details.\n");
 
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tLIBPLCTAG Parameters (Required):\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\t-protocol\t- type of plc protocol. (default: ab_eip)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-ip\t\t- network address for the host PLC. (default: 127.0.0.1)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-path\t\t- routing path for the Tags. (default: 1,0)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-plc\t\t- type of the PLC. (default: controllogix)\n");
 
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\tLIBPLCTAG Parameters (Optional):\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\n\t-debug\t\t- logging output level. (default: 1)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-interval\t- interval in ms for WATCH operation. (default: 500)\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-attributes\t- additional attributes. (default: '')\n");
+    // NOLINTNEXTLINE
     fprintf(stdout, "\t-offline\t- operation mode. (default: false)\n");
 
     fflush(stdout);
 }
 
-int parse_args(int argc, char *argv[])
-{
-    if (argc < 2) {
+int parse_args(int argc, char *argv[]) {
+    if(argc < 2) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: invalid number of arguments.\n");
         fflush(stderr);
         return -1;
@@ -64,17 +78,19 @@ int parse_args(int argc, char *argv[])
     int i = 0;
 
     char *operation = argv[++i];
-    if (!strcmp(operation, "--read")) {
+    if(!strcmp(operation, "--read")) {
         cli_request.operation = READ;
-    } else if (!strcmp(operation, "--write")) {
+    } else if(!strcmp(operation, "--write")) {
         cli_request.operation = WRITE;
-    } else if (!strcmp(operation, "--watch")) {
-         cli_request.operation = WATCH;
-    } else if (!strcmp(operation, "--help") || !strcmp(operation, "-h")) {
+    } else if(!strcmp(operation, "--watch")) {
+        cli_request.operation = WATCH;
+    } else if(!strcmp(operation, "--help") || !strcmp(operation, "-h")) {
         usage();
         exit(0);
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: invalid PLC operation.\n");
+        // NOLINTNEXTLINE
         fprintf(stderr, "INFO: Use one of --read, --write, --watch.\n");
         fflush(stderr);
         return -1;
@@ -82,40 +98,46 @@ int parse_args(int argc, char *argv[])
 
     char *param;
     char *val;
-    while (++i < argc) {
+    while(++i < argc) {
         param = strtok(argv[i], "=");
         val = strtok(NULL, "");
 
-        if (!strcmp(param, "-protocol")) {
+        if(!strcmp(param, "-protocol")) {
             cli_request.protocol = val;
-            if (!strcmp(val, "modbus_tcp")) {
+            if(!strcmp(val, "modbus_tcp")) {
                 cli_request.plc = NULL;
                 cli_request.path = "0";
             }
-        } else if (!strcmp(param, "-ip")) {
+        } else if(!strcmp(param, "-ip")) {
             cli_request.ip = val;
-        } else if (!strcmp(param, "-path")) {
+        } else if(!strcmp(param, "-path")) {
             cli_request.path = val;
-        } else if (!strcmp(param, "-plc")) {
+        } else if(!strcmp(param, "-plc")) {
             cli_request.plc = val;
-        } else if (!strcmp(param, "-debug")) {
+        } else if(!strcmp(param, "-debug")) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &cli_request.debug_level);
-        } else if (!strcmp(param, "-interval")) {
+        } else if(!strcmp(param, "-interval")) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &cli_request.interval);
-        } else if (!strcmp(param, "-attributes")) {
+        } else if(!strcmp(param, "-attributes")) {
             cli_request.attributes = val;
-        } else if (!strcmp(param, "-offline")) {
-            if (!strcmp(val, "true")) {
+        } else if(!strcmp(param, "-offline")) {
+            if(!strcmp(val, "true")) {
                 cli_request.offline = true;
-            } else if (!strcmp(val, "false")) {
+            } else if(!strcmp(val, "false")) {
                 cli_request.offline = false;
             } else {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "ERROR: invalid parameter value for offline.");
+                // NOLINTNEXTLINE
                 fprintf(stderr, "INFO: Supported values 'true' or 'false'.");
                 fflush(stderr);
             }
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "ERROR: invalid PLC parameter: %s.\n", param);
+            // NOLINTNEXTLINE
             fprintf(stderr, "INFO: Supported params -protocol, -ip, -path, -plc, -debug, -interval, -attributes, -offline.\n");
             fflush(stderr);
             return -1;
@@ -125,26 +147,17 @@ int parse_args(int argc, char *argv[])
     return 0;
 }
 
-void print_request()
-{
+void print_request(void) {
     pdebug(DEBUG_INFO, "Running with params:");
     pdebug(DEBUG_INFO, "Protocol: %s", cli_request.protocol);
     pdebug(DEBUG_INFO, "IP: %s", cli_request.ip);
     pdebug(DEBUG_INFO, "Path: %s", cli_request.path);
     pdebug(DEBUG_INFO, "PLC: %s", cli_request.plc);
-    switch (cli_request.operation) {
-    case READ:
-        pdebug(DEBUG_INFO, "Operation: READ.");
-        break;
-    case WRITE:
-        pdebug(DEBUG_INFO, "Operation: WRITE.");
-        break;
-    case WATCH:
-        pdebug(DEBUG_INFO, "Operation: WATCH.");
-        break;
-    default:
-        pdebug(DEBUG_INFO, "Operation: INVALID.");
-        break;
+    switch(cli_request.operation) {
+        case READ: pdebug(DEBUG_INFO, "Operation: READ."); break;
+        case WRITE: pdebug(DEBUG_INFO, "Operation: WRITE."); break;
+        case WATCH: pdebug(DEBUG_INFO, "Operation: WATCH."); break;
+        default: pdebug(DEBUG_INFO, "Operation: INVALID."); break;
     }
     pdebug(DEBUG_INFO, "Interval: %d", cli_request.interval);
     pdebug(DEBUG_INFO, "Debug Level: %d", cli_request.debug_level);
@@ -152,35 +165,30 @@ void print_request()
     pdebug(DEBUG_INFO, "Offline: %s", btoa(cli_request.offline));
 }
 
-int is_comment(const char *line)
-{
+int is_comment(const char *line) {
     int i = 0;
 
     /* scan past the first whitespace */
-    for(i=0; line[i] && isspace(line[i]); i++);
+    for(i = 0; line[i] && isspace(line[i]); i++);
 
     return (line[i] == '#') ? 1 : 0;
 }
 
-void trim_line(char *line)
-{
+void trim_line(char *line) {
     int len = 0;
 
-    if(!line || strlen(line) == 0) {
-        return;
-    }
+    if(!line || strlen(line) == 0) { return; }
 
     len = (int)strlen(line);
 
-    while(len>0 && line[len - 1] == '\n') {
+    while(len > 0 && line[len - 1] == '\n') {
         line[len - 1] = 0;
         len--;
     }
 }
 
-tag_line_parts_t split_string(const char *str, const char *sep)
-{
-    int sub_str_count=0;
+tag_line_parts_t split_string(const char *str, const char *sep) {
+    int sub_str_count = 0;
     int size = 0;
     const char *sub;
     const char *tmp;
@@ -189,42 +197,37 @@ tag_line_parts_t split_string(const char *str, const char *sep)
 
     /* first, count the sub strings */
     tmp = str;
-    sub = strstr(tmp,sep);
+    sub = strstr(tmp, sep);
 
     while(sub && *sub) {
         /* separator could be at the front, ignore that. */
-        if(sub != tmp) {
-            sub_str_count++;
-        }
+        if(sub != tmp) { sub_str_count++; }
 
         tmp = sub + strlen(sep);
-        sub = strstr(tmp,sep);
+        sub = strstr(tmp, sep);
     }
 
-    if(tmp && *tmp && (!sub || !*sub)) {
-        sub_str_count++;
-    }
+    if(tmp && *tmp && (!sub || !*sub)) { sub_str_count++; }
 
     tag_line_parts_t.num_parts = sub_str_count;
 
     /* calculate total size for string plus pointers */
-    size = (int)(sizeof(char *)*((size_t)sub_str_count+1))+(int)strlen(str)+1;
+    size = (int)(sizeof(char *) * ((size_t)sub_str_count + 1)) + (int)strlen(str) + 1;
 
     /* allocate enough memory */
     res = malloc((size_t)size);
-    if(!res) {
-        return tag_line_parts_t;
-    }
+    if(!res) { return tag_line_parts_t; }
 
     /* calculate the beginning of the string */
-    tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count+1);
+    tmp = (char *)res + sizeof(char *) * (size_t)(sub_str_count + 1);
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
-    strncpy((char *)tmp, str, (size_t)(size - ((char*)tmp - (char*)res)));
+    // NOLINTNEXTLINE
+    strncpy((char *)tmp, str, (size_t)(size - ((char *)tmp - (char *)res)));
 
     /* set up the pointers */
-    sub_str_count=0;
-    sub = strstr(tmp,sep);
+    sub_str_count = 0;
+    sub = strstr(tmp, sep);
 
     while(sub && *sub) {
         /* separator could be at the front, ignore that. */
@@ -236,19 +239,18 @@ tag_line_parts_t split_string(const char *str, const char *sep)
         }
 
         /* zero out the separator chars */
-        memset((char*)sub, 0, strlen(sep));
+        // NOLINTNEXTLINE
+        memset((char *)sub, 0, strlen(sep));
 
         /* point past the separator (now zero) */
         tmp = sub + strlen(sep);
 
         /* find the next separator */
-        sub = strstr(tmp,sep);
+        sub = strstr(tmp, sep);
     }
 
     /* if there is a chunk at the end, store it. */
-    if(tmp && *tmp && (!sub || !*sub)) {
-        res[sub_str_count] = (char*)tmp;
-    }
+    if(tmp && *tmp && (!sub || !*sub)) { res[sub_str_count] = (char *)tmp; }
 
     tag_line_parts_t.parts = res;
 
@@ -256,31 +258,25 @@ tag_line_parts_t split_string(const char *str, const char *sep)
 }
 
 int validate_line(tag_line_parts_t tag_line_parts) {
-    char req_params[4][10] =
-    {
-        "key",
-        "type",
-        "path",
-        "value"
-    };
+    char req_params[4][10] = {"key", "type", "path", "value"};
 
     int required = 3;
-    if (cli_request.operation == WRITE) required = 4;
+    if(cli_request.operation == WRITE) { required = 4; }
 
     bool found = false;
     int j;
     char *part;
-    for(int i=0; i < required; i++) {
+    for(int i = 0; i < required; i++) {
         j = 0;
         while(j < tag_line_parts.num_parts) {
             part = strdup(tag_line_parts.parts[j]);
-            if (!strcmp(req_params[i], strtok(part, "="))) {
+            if(!strcmp(req_params[i], strtok(part, "="))) {
                 found = true;
                 break;
             }
             ++j;
         }
-        if (!found) {
+        if(!found) {
             pdebug(DEBUG_ERROR, "Line missing: %s", req_params[i]);
             return -1;
         }
@@ -294,43 +290,19 @@ int validate_line(tag_line_parts_t tag_line_parts) {
 void print_tag(tag_t *tag) {
     pdebug(DEBUG_INFO, "Tag created:");
     pdebug(DEBUG_INFO, "Key: %s", tag->key);
-    switch (tag->type) {
-    case t_UINT64:
-        pdebug(DEBUG_INFO, "Type: uint64.");
-        break;
-    case t_INT64:
-        pdebug(DEBUG_INFO, "Type: int64.");
-        break;
-    case t_UINT32:
-        pdebug(DEBUG_INFO, "Type: uint32.");
-        break;
-    case t_INT32:
-        pdebug(DEBUG_INFO, "Type: int32.");
-        break;
-    case t_UINT16:
-        pdebug(DEBUG_INFO, "Type: uint16.");
-        break;
-    case t_INT16:
-        pdebug(DEBUG_INFO, "Type: int16.");
-        break;
-    case t_UINT8:
-        pdebug(DEBUG_INFO, "Type: uint8.");
-        break;
-    case t_INT8:
-        pdebug(DEBUG_INFO, "Type: int8.");
-        break;
-    case t_FLOAT64:
-        pdebug(DEBUG_INFO, "Type: float64.");
-        break;
-    case t_FLOAT32:
-        pdebug(DEBUG_INFO, "Type: float32.");
-        break;
-    case t_BOOL:
-        pdebug(DEBUG_INFO, "Type: bool.");
-        break;
-    default:
-        pdebug(DEBUG_INFO, "Type: INVALID.");
-        break;
+    switch(tag->type) {
+        case t_UINT64: pdebug(DEBUG_INFO, "Type: uint64."); break;
+        case t_INT64: pdebug(DEBUG_INFO, "Type: int64."); break;
+        case t_UINT32: pdebug(DEBUG_INFO, "Type: uint32."); break;
+        case t_INT32: pdebug(DEBUG_INFO, "Type: int32."); break;
+        case t_UINT16: pdebug(DEBUG_INFO, "Type: uint16."); break;
+        case t_INT16: pdebug(DEBUG_INFO, "Type: int16."); break;
+        case t_UINT8: pdebug(DEBUG_INFO, "Type: uint8."); break;
+        case t_INT8: pdebug(DEBUG_INFO, "Type: int8."); break;
+        case t_FLOAT64: pdebug(DEBUG_INFO, "Type: float64."); break;
+        case t_FLOAT32: pdebug(DEBUG_INFO, "Type: float32."); break;
+        case t_BOOL: pdebug(DEBUG_INFO, "Type: bool."); break;
+        default: pdebug(DEBUG_INFO, "Type: INVALID."); break;
     }
     pdebug(DEBUG_INFO, "Path: %s", tag->path);
     pdebug(DEBUG_INFO, "Bit: %d", tag->bit);
@@ -338,9 +310,10 @@ void print_tag(tag_t *tag) {
     pdebug(DEBUG_INFO, "Watch: %s", btoa(tag->watch));
 }
 
-int process_line(const char *line, tag_t *tag)
-{
+int process_line(const char *line, tag_t *tag) {
     tag_line_parts_t tag_line_parts;
+
+    if(line == NULL) { return -1; }
 
     tag_line_parts = split_string(line, ",");
     if(tag_line_parts.num_parts < 0) {
@@ -349,7 +322,7 @@ int process_line(const char *line, tag_t *tag)
     }
 
     /* check if the relevant parameters are there or not */
-    if (validate_line(tag_line_parts) != 0) {
+    if(validate_line(tag_line_parts) != 0) {
         pdebug(DEBUG_ERROR, "Line does not contain enough parts. Line: %s", line);
         return -1;
     }
@@ -372,7 +345,7 @@ int process_line(const char *line, tag_t *tag)
     char *part = NULL;
     char *param = NULL;
     char *val = NULL;
-    while (i < tag_line_parts.num_parts) {
+    while(i < tag_line_parts.num_parts) {
         part = strdup(tag_line_parts.parts[i]);
         pdebug(DEBUG_INFO, "Part: %s", part);
         param = strtok(part, "=");
@@ -381,15 +354,17 @@ int process_line(const char *line, tag_t *tag)
 
         if(!strcmp("key", param)) {
             tag->key = strdup(val);
-        } else if (!strcmp("type", param)) {
+        } else if(!strcmp("type", param)) {
             type = val;
-        } else if (!strcmp("value", param)) {
+        } else if(!strcmp("value", param)) {
             write_val = val;
-        } else if (!strcmp("bit", param)) {
+        } else if(!strcmp("bit", param)) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &tag->bit);
-        } else if (!strcmp("offset", param)) {
+        } else if(!strcmp("offset", param)) {
+            // NOLINTNEXTLINE
             sscanf(val, "%d", &tag->offset);
-        } else if (!strcmp("path", param)) {
+        } else if(!strcmp("path", param)) {
             tag->path = strdup(val);
         } else {
             pdebug(DEBUG_ERROR, "Unknown param %s!", param);
@@ -402,58 +377,68 @@ int process_line(const char *line, tag_t *tag)
     pdebug(DEBUG_INFO, "Parsing tag type now...");
     if(!strcmp("uint64", type)) {
         tag->type = t_UINT64;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNu64, &tag->write_val.UINT64_val);
         }
     } else if(!strcmp("int64", type)) {
         tag->type = t_INT64;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNi64, &tag->write_val.INT64_val);
         }
     } else if(!strcmp("uint32", type)) {
         tag->type = t_UINT32;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNu32, &tag->write_val.UINT32_val);
         }
     } else if(!strcmp("int32", type)) {
         tag->type = t_INT32;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNi32, &tag->write_val.INT32_val);
         }
     } else if(!strcmp("uint16", type)) {
         tag->type = t_UINT16;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNu16, &tag->write_val.UINT16_val);
         }
     } else if(!strcmp("int16", type)) {
         tag->type = t_INT16;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNi16, &tag->write_val.INT16_val);
         }
     } else if(!strcmp("uint8", type)) {
         tag->type = t_UINT8;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNu8, &tag->write_val.UINT8_val);
         }
     } else if(!strcmp("int8", type)) {
         tag->type = t_INT8;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%" SCNi8, &tag->write_val.INT8_val);
         }
     } else if(!strcmp("float64", type)) {
         tag->type = t_FLOAT64;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%lf", &tag->write_val.FLOAT64_val);
         }
     } else if(!strcmp("float32", type)) {
         tag->type = t_FLOAT32;
-        if (cli_request.operation == WRITE) {
+        if(cli_request.operation == WRITE) {
+            // NOLINTNEXTLINE
             sscanf(write_val, "%f", &tag->write_val.FLOAT32_val);
         }
     } else if(!strcmp("bool", type)) {
         tag->type = t_BOOL;
-        if (cli_request.operation == WRITE) {
-            if (!strcmp("true", write_val)) {
+        if(cli_request.operation == WRITE) {
+            if(!strcmp("true", write_val)) {
                 tag->write_val.BOOL_val = true;
             } else {
                 tag->write_val.BOOL_val = false;
@@ -471,18 +456,17 @@ int process_line(const char *line, tag_t *tag)
     return 0;
 }
 
-void add_tag(int tag_handle, tag_t tag)
-{
+void add_tag(int tag_handle, tag_t tag) {
     struct tags *t;
 
     t = malloc(sizeof(struct tags));
     t->tag_handle = tag_handle;
     t->tag = tag;
+    // NOLINTNEXTLINE
     HASH_ADD_INT(tags, tag_handle, t);
 }
 
-int check_tags()
-{
+int check_tags(void) {
     int rc = PLCTAG_STATUS_OK;
     struct tags *t;
 
@@ -498,47 +482,40 @@ int check_tags()
     return rc;
 }
 
-int process_tags()
-{
+int process_tags(void) {
     char *line = NULL;
     size_t line_len = 0;
-    char *tag_path = (char *) malloc(1024);
+    char *tag_path = (char *)malloc(1024);
 
-    while (getline(&line, &line_len, stdin) > 0) {
-        if (is_comment(line)) {
-            continue;
-        }
+    while(getline(&line, &line_len, stdin) > 0) {
+        if(is_comment(line)) { continue; }
 
-        if (!strcmp(line, "break\n")) {
-            break;
-        }
+        if(!strcmp(line, "break\n")) { break; }
 
         tag_t tag;
         trim_line(line);
         pdebug(DEBUG_INFO, "Trimmed Line: %s", line);
         /* ignore lines that can't be processed */
-        if (process_line(line, &tag) == -1) {
-            continue;
-        }
+        if(process_line(line, &tag) == -1) { continue; }
 
-        switch (cli_request.operation) {
-        case WATCH:
-            sprintf(tag_path, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol,
-                cli_request.ip, cli_request.path, cli_request.plc,
-                cli_request.debug_level, cli_request.interval, tag.path,
-                cli_request.attributes);
-            break;
-        default:
-            sprintf(tag_path, TAG_PATH, cli_request.protocol,
-                cli_request.ip, cli_request.path, cli_request.plc,
-                cli_request.debug_level, tag.path, cli_request.attributes);
-            break;
+        switch(cli_request.operation) {
+            case WATCH:
+                // NOLINTNEXTLINE
+                snprintf(tag_path, 1024, TAG_PATH_AUTO_READ_SYNC, cli_request.protocol, cli_request.ip, cli_request.path,
+                         cli_request.plc, cli_request.debug_level, cli_request.interval, tag.path, cli_request.attributes);
+                break;
+            default:
+                // NOLINTNEXTLINE
+                snprintf(tag_path, 1024, TAG_PATH, cli_request.protocol, cli_request.ip, cli_request.path, cli_request.plc,
+                         cli_request.debug_level, tag.path, cli_request.attributes);
+                break;
         }
 
         pdebug(DEBUG_INFO, "%s", tag_path);
         int tag_handle = plc_tag_create(tag_path, 0);
-        if (tag_handle < 0) {
-            pdebug(DEBUG_ERROR, "Error, %s, creating tag %s with string %s!", plc_tag_decode_error(tag_handle), tag.key, tag_path);
+        if(tag_handle < 0) {
+            pdebug(DEBUG_ERROR, "Error, %s, creating tag %s with string %s!", plc_tag_decode_error(tag_handle), tag.key,
+                   tag_path);
             free(tag_path);
             free(line);
             return -1;
@@ -554,168 +531,188 @@ int process_tags()
 }
 
 int get_tag(int32_t tag_handle, tag_t *tag) {
-    switch (tag->type) {
-    case t_UINT64:
-        tag->val.UINT64_val = plc_tag_get_uint64(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.UINT64_val = tag->val.UINT64_val;
-            fprintf(stdout, "{\"%s\":%" PRIu64"}\n", tag->key, tag->val.UINT64_val);
-            fflush(stdout);
+    switch(tag->type) {
+        case t_UINT64:
+            tag->val.UINT64_val = plc_tag_get_uint64(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.UINT64_val = tag->val.UINT64_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu64 "}\n", tag->key, tag->val.UINT64_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.UINT64_val != tag->last_val.UINT64_val) {
+                tag->last_val.UINT64_val = tag->val.UINT64_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu64 "}\n", tag->key, tag->val.UINT64_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.UINT64_val != tag->last_val.UINT64_val) {
-            tag->last_val.UINT64_val = tag->val.UINT64_val;
-            fprintf(stdout, "{\"%s\":%" PRIu64"}\n", tag->key, tag->val.UINT64_val);
-            fflush(stdout);
-        }
-        break;
-    case t_INT64:
-        tag->val.INT64_val = plc_tag_get_int64(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.INT64_val = tag->val.INT64_val;
-            fprintf(stdout, "{\"%s\":%" PRIi64"}\n", tag->key, tag->val.INT64_val);
-            fflush(stdout);
+        case t_INT64:
+            tag->val.INT64_val = plc_tag_get_int64(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.INT64_val = tag->val.INT64_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi64 "}\n", tag->key, tag->val.INT64_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.INT64_val != tag->last_val.INT64_val) {
+                tag->last_val.INT64_val = tag->val.INT64_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi64 "}\n", tag->key, tag->val.INT64_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.INT64_val != tag->last_val.INT64_val) {
-            tag->last_val.INT64_val = tag->val.INT64_val;
-            fprintf(stdout, "{\"%s\":%" PRIi64"}\n", tag->key, tag->val.INT64_val);
-            fflush(stdout);
-        }
-        break;
-    case t_UINT32:
-        tag->val.UINT32_val = plc_tag_get_uint32(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.UINT32_val = tag->val.UINT32_val;
-            fprintf(stdout, "{\"%s\":%" PRIu32"}\n", tag->key, tag->val.UINT32_val);
-            fflush(stdout);
+        case t_UINT32:
+            tag->val.UINT32_val = plc_tag_get_uint32(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.UINT32_val = tag->val.UINT32_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu32 "}\n", tag->key, tag->val.UINT32_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.UINT32_val != tag->last_val.UINT32_val) {
+                tag->last_val.UINT32_val = tag->val.UINT32_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu32 "}\n", tag->key, tag->val.UINT32_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.UINT32_val != tag->last_val.UINT32_val) {
-            tag->last_val.UINT32_val = tag->val.UINT32_val;
-            fprintf(stdout, "{\"%s\":%" PRIu32"}\n", tag->key, tag->val.UINT32_val);
-            fflush(stdout);
-        }
-        break;
-    case t_INT32:
-        tag->val.INT32_val = plc_tag_get_int32(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.INT32_val = tag->val.INT32_val;
-            fprintf(stdout, "{\"%s\":%" PRIi32"}\n", tag->key, tag->val.INT32_val);
-            fflush(stdout);
+        case t_INT32:
+            tag->val.INT32_val = plc_tag_get_int32(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.INT32_val = tag->val.INT32_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi32 "}\n", tag->key, tag->val.INT32_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.INT32_val != tag->last_val.INT32_val) {
+                tag->last_val.INT32_val = tag->val.INT32_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi32 "}\n", tag->key, tag->val.INT32_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.INT32_val != tag->last_val.INT32_val) {
-            tag->last_val.INT32_val = tag->val.INT32_val;
-            fprintf(stdout, "{\"%s\":%" PRIi32"}\n", tag->key, tag->val.INT32_val);
-            fflush(stdout);
-        }
-        break;
-    case t_UINT16:
-        tag->val.UINT16_val = plc_tag_get_uint16(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.UINT16_val = tag->val.UINT16_val;
-            fprintf(stdout, "{\"%s\":%" PRIu16"}\n", tag->key, tag->val.UINT16_val);
-            fflush(stdout);
+        case t_UINT16:
+            tag->val.UINT16_val = plc_tag_get_uint16(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.UINT16_val = tag->val.UINT16_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu16 "}\n", tag->key, tag->val.UINT16_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.UINT16_val != tag->last_val.UINT16_val) {
+                tag->last_val.UINT16_val = tag->val.UINT16_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu16 "}\n", tag->key, tag->val.UINT16_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.UINT16_val != tag->last_val.UINT16_val) {
-            tag->last_val.UINT16_val = tag->val.UINT16_val;
-            fprintf(stdout, "{\"%s\":%" PRIu16"}\n", tag->key, tag->val.UINT16_val);
-            fflush(stdout);
-        }
-        break;
-    case t_INT16:
-        tag->val.INT16_val = plc_tag_get_int16(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.INT16_val = tag->val.INT16_val;
-            fprintf(stdout, "{\"%s\":%" PRIi16"}\n", tag->key, tag->val.INT16_val);
-            fflush(stdout);
+        case t_INT16:
+            tag->val.INT16_val = plc_tag_get_int16(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.INT16_val = tag->val.INT16_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi16 "}\n", tag->key, tag->val.INT16_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.INT16_val != tag->last_val.INT16_val) {
+                tag->last_val.INT16_val = tag->val.INT16_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi16 "}\n", tag->key, tag->val.UINT16_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.INT16_val != tag->last_val.INT16_val) {
-            tag->last_val.INT16_val = tag->val.INT16_val;
-            fprintf(stdout, "{\"%s\":%" PRIi16"}\n", tag->key, tag->val.UINT16_val);
-            fflush(stdout);
-        }
-        break;
-    case t_UINT8:
-        tag->val.UINT8_val = plc_tag_get_uint8(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.UINT8_val = tag->val.UINT8_val;
-            fprintf(stdout, "{\"%s\":%" PRIu8"}\n", tag->key, tag->val.UINT8_val);
-            fflush(stdout);
+        case t_UINT8:
+            tag->val.UINT8_val = plc_tag_get_uint8(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.UINT8_val = tag->val.UINT8_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu8 "}\n", tag->key, tag->val.UINT8_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.UINT8_val != tag->last_val.UINT8_val) {
+                tag->last_val.UINT8_val = tag->val.UINT8_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIu8 "}\n", tag->key, tag->val.UINT8_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.UINT8_val != tag->last_val.UINT8_val) {
-            tag->last_val.UINT8_val = tag->val.UINT8_val;
-            fprintf(stdout, "{\"%s\":%" PRIu8"}\n", tag->key, tag->val.UINT8_val);
-            fflush(stdout);
-        }
-        break;
-    case t_INT8:
-        tag->val.INT8_val = plc_tag_get_int8(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.INT8_val = tag->val.INT8_val;
-            fprintf(stdout, "{\"%s\":%" PRIi8"}\n", tag->key, tag->val.INT8_val);
-            fflush(stdout);
+        case t_INT8:
+            tag->val.INT8_val = plc_tag_get_int8(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.INT8_val = tag->val.INT8_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi8 "}\n", tag->key, tag->val.INT8_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.INT8_val != tag->last_val.INT8_val) {
+                tag->last_val.INT8_val = tag->val.INT8_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%" PRIi8 "}\n", tag->key, tag->val.INT8_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.INT8_val != tag->last_val.INT8_val) {
-            tag->last_val.INT8_val = tag->val.INT8_val;
-            fprintf(stdout, "{\"%s\":%" PRIi8"}\n", tag->key, tag->val.INT8_val);
-            fflush(stdout);
-        }
-        break;
-    case t_FLOAT64:
-        tag->val.FLOAT64_val = plc_tag_get_float64(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
-            fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
-            fflush(stdout);
+        case t_FLOAT64:
+            tag->val.FLOAT64_val = plc_tag_get_float64(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.FLOAT64_val != tag->last_val.FLOAT64_val) {
+                tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.FLOAT64_val != tag->last_val.FLOAT64_val) {
-            tag->last_val.FLOAT64_val = tag->val.FLOAT64_val;
-            fprintf(stdout, "{\"%s\":%lf}\n", tag->key, tag->val.FLOAT64_val);
-            fflush(stdout);
-        }
-        break;
-    case t_FLOAT32:
-        tag->val.FLOAT32_val = plc_tag_get_float32(tag_handle, tag->offset);
-        if (!tag->watch) {
-            tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
-            fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
-            fflush(stdout);
+        case t_FLOAT32:
+            tag->val.FLOAT32_val = plc_tag_get_float32(tag_handle, tag->offset);
+            if(!tag->watch) {
+                tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.FLOAT32_val != tag->last_val.FLOAT32_val) {
+                tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.FLOAT32_val != tag->last_val.FLOAT32_val) {
-            tag->last_val.FLOAT32_val = tag->val.FLOAT32_val;
-            fprintf(stdout, "{\"%s\":%f}\n", tag->key, tag->val.FLOAT32_val);
-            fflush(stdout);
-        }
-        break;
-    case t_BOOL:
-        if (tag->bit == -1) {
-            tag->val.BOOL_val = plc_tag_get_uint8(tag_handle, tag->offset);
-        } else {
-            tag->val.BOOL_val = plc_tag_get_bit(tag_handle, tag->bit);
-        }
-        if (!tag->watch) {
-            tag->last_val.BOOL_val = tag->val.BOOL_val;
-            fprintf(stdout, "{\"%s\":%s}\n", tag->key, btoa(tag->val.BOOL_val));
-            fflush(stdout);
+        case t_BOOL:
+            if(tag->bit == -1) {
+                tag->val.BOOL_val = plc_tag_get_uint8(tag_handle, tag->offset);
+            } else {
+                tag->val.BOOL_val = plc_tag_get_bit(tag_handle, tag->bit);
+            }
+            if(!tag->watch) {
+                tag->last_val.BOOL_val = tag->val.BOOL_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%s}\n", tag->key, btoa(tag->val.BOOL_val));
+                fflush(stdout);
+                break;
+            }
+            if(tag->val.BOOL_val != tag->last_val.BOOL_val) {
+                tag->last_val.BOOL_val = tag->val.BOOL_val;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%s}\n", tag->key, btoa(tag->val.BOOL_val));
+                fflush(stdout);
+            }
             break;
-        }
-        if (tag->val.BOOL_val != tag->last_val.BOOL_val) {
-            tag->last_val.BOOL_val = tag->val.BOOL_val;
-            fprintf(stdout, "{\"%s\":%s}\n", tag->key, btoa(tag->val.BOOL_val));
-            fflush(stdout);
-        }
-        break;
-    default:
-        return PLCTAG_ERR_BAD_STATUS;
-        break;
+        default: return PLCTAG_ERR_BAD_STATUS; break;
     }
 
     return PLCTAG_STATUS_OK;
@@ -734,9 +731,9 @@ int read_tags(void) {
     }
 
     /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){
+    while(check_tags() == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
-        util_sleep_ms(1);
+        thrd_sleep_ms(10, NULL);
     }
 
     for(t = tags; t != NULL; t = t->hh.next) {
@@ -751,47 +748,25 @@ int read_tags(void) {
 }
 
 int set_tag(int32_t tag_handle, tag_t *tag) {
-    switch (tag->type) {
-    case t_UINT64:
-        plc_tag_set_uint64(tag_handle, tag->offset, tag->write_val.UINT64_val);
-        break;
-    case t_INT64:
-        plc_tag_set_int64(tag_handle, tag->offset, tag->write_val.INT64_val);
-        break;
-    case t_UINT32:
-        plc_tag_set_uint32(tag_handle, tag->offset, tag->write_val.UINT32_val);
-        break;
-    case t_INT32:
-        plc_tag_set_int32(tag_handle, tag->offset, tag->write_val.INT32_val);
-        break;
-    case t_UINT16:
-        plc_tag_set_uint16(tag_handle, tag->offset, tag->write_val.UINT16_val);
-        break;
-    case t_INT16:
-        plc_tag_set_int16(tag_handle, tag->offset, tag->write_val.INT16_val);
-        break;
-    case t_UINT8:
-        plc_tag_set_uint8(tag_handle, tag->offset, tag->write_val.UINT8_val);
-        break;
-    case t_INT8:
-        plc_tag_set_int8(tag_handle, tag->offset, tag->write_val.INT8_val);
-        break;
-    case t_FLOAT64:
-        plc_tag_set_float64(tag_handle, tag->offset, tag->write_val.FLOAT64_val);
-        break;
-    case t_FLOAT32:
-        plc_tag_set_float32(tag_handle, tag->offset, tag->write_val.FLOAT32_val);
-        break;
-    case t_BOOL:
-        if (tag->bit == -1) {
-            plc_tag_set_uint8(tag_handle, tag->offset, tag->write_val.BOOL_val);
+    switch(tag->type) {
+        case t_UINT64: plc_tag_set_uint64(tag_handle, tag->offset, tag->write_val.UINT64_val); break;
+        case t_INT64: plc_tag_set_int64(tag_handle, tag->offset, tag->write_val.INT64_val); break;
+        case t_UINT32: plc_tag_set_uint32(tag_handle, tag->offset, tag->write_val.UINT32_val); break;
+        case t_INT32: plc_tag_set_int32(tag_handle, tag->offset, tag->write_val.INT32_val); break;
+        case t_UINT16: plc_tag_set_uint16(tag_handle, tag->offset, tag->write_val.UINT16_val); break;
+        case t_INT16: plc_tag_set_int16(tag_handle, tag->offset, tag->write_val.INT16_val); break;
+        case t_UINT8: plc_tag_set_uint8(tag_handle, tag->offset, tag->write_val.UINT8_val); break;
+        case t_INT8: plc_tag_set_int8(tag_handle, tag->offset, tag->write_val.INT8_val); break;
+        case t_FLOAT64: plc_tag_set_float64(tag_handle, tag->offset, tag->write_val.FLOAT64_val); break;
+        case t_FLOAT32: plc_tag_set_float32(tag_handle, tag->offset, tag->write_val.FLOAT32_val); break;
+        case t_BOOL:
+            if(tag->bit == -1) {
+                plc_tag_set_uint8(tag_handle, tag->offset, tag->write_val.BOOL_val);
+                break;
+            }
+            plc_tag_set_bit(tag_handle, tag->bit, tag->write_val.BOOL_val);
             break;
-        }
-        plc_tag_set_bit(tag_handle, tag->bit, tag->write_val.BOOL_val);
-        break;
-    default:
-        return PLCTAG_ERR_BAD_STATUS;
-        break;
+        default: return PLCTAG_ERR_BAD_STATUS; break;
     }
 
     return PLCTAG_STATUS_OK;
@@ -802,76 +777,74 @@ int verify_write_tags(void) {
     struct tags *t;
 
     for(t = tags; t != NULL; t = t->hh.next) {
-        switch (t->tag.type) {
-        case t_UINT64:
-            if (t->tag.last_val.UINT64_val != t->tag.write_val.UINT64_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_INT64:
-            if (t->tag.last_val.INT64_val != t->tag.write_val.INT64_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_UINT32:
-            if (t->tag.last_val.UINT32_val != t->tag.write_val.UINT32_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_INT32:
-            if (t->tag.last_val.INT32_val != t->tag.write_val.INT32_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_UINT16:
-            if (t->tag.last_val.UINT16_val != t->tag.write_val.UINT16_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_INT16:
-            if (t->tag.last_val.INT16_val != t->tag.write_val.INT16_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_UINT8:
-            if (t->tag.last_val.UINT8_val != t->tag.write_val.UINT8_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_INT8:
-            if (t->tag.last_val.INT8_val != t->tag.write_val.INT8_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_FLOAT64:
-            if (t->tag.last_val.FLOAT64_val != t->tag.write_val.FLOAT64_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_FLOAT32:
-            if (t->tag.last_val.FLOAT32_val != t->tag.write_val.FLOAT32_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        case t_BOOL:
-            if (t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
-                pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
-                return PLCTAG_ERR_BAD_STATUS;
-            }
-            break;
-        default:
-            return PLCTAG_ERR_BAD_STATUS;
-            break;
+        switch(t->tag.type) {
+            case t_UINT64:
+                if(t->tag.last_val.UINT64_val != t->tag.write_val.UINT64_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_INT64:
+                if(t->tag.last_val.INT64_val != t->tag.write_val.INT64_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_UINT32:
+                if(t->tag.last_val.UINT32_val != t->tag.write_val.UINT32_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_INT32:
+                if(t->tag.last_val.INT32_val != t->tag.write_val.INT32_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_UINT16:
+                if(t->tag.last_val.UINT16_val != t->tag.write_val.UINT16_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_INT16:
+                if(t->tag.last_val.INT16_val != t->tag.write_val.INT16_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_UINT8:
+                if(t->tag.last_val.UINT8_val != t->tag.write_val.UINT8_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_INT8:
+                if(t->tag.last_val.INT8_val != t->tag.write_val.INT8_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_FLOAT64:
+                if(t->tag.last_val.FLOAT64_val != t->tag.write_val.FLOAT64_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_FLOAT32:
+                if(t->tag.last_val.FLOAT32_val != t->tag.write_val.FLOAT32_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            case t_BOOL:
+                if(t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
+                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    return PLCTAG_ERR_BAD_STATUS;
+                }
+                break;
+            default: return PLCTAG_ERR_BAD_STATUS; break;
         }
     }
 
@@ -896,15 +869,15 @@ int write_tags(void) {
     }
 
     /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){
+    while(check_tags() == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
-        util_sleep_ms(1);
+        thrd_sleep_ms(10, NULL);
     }
 
     read_tags();
 
     rc = verify_write_tags();
-    if (rc != PLCTAG_STATUS_OK) {
+    if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to write value to tags %s!", plc_tag_decode_error(rc));
         return rc;
     }
@@ -919,26 +892,16 @@ void tag_callback(int32_t tag_handle, int event, int status) {
 
     /* handle the events. */
     switch(event) {
-    case PLCTAG_EVENT_ABORTED:
-        pdebug(DEBUG_INFO, "tag(%s): Tag operation was aborted!", t->tag.key);
-        break;
-    case PLCTAG_EVENT_DESTROYED:
-        pdebug(DEBUG_INFO, "tag(%s): Tag was destroyed.", t->tag.key);
-        break;
-    case PLCTAG_EVENT_READ_COMPLETED:
-        get_tag(tag_handle, &t->tag);
-        pdebug(DEBUG_INFO, "tag(%s): Tag read operation completed with status %s.", t->tag.key, plc_tag_decode_error(status));
-        break;
-    case PLCTAG_EVENT_READ_STARTED:
-        pdebug(DEBUG_INFO, "tag(%s): Tag read operation started.", t->tag.key);
-        break;
-    case PLCTAG_EVENT_WRITE_COMPLETED:
-        break;
-    case PLCTAG_EVENT_WRITE_STARTED:
-        break;
-    default:
-        pdebug(DEBUG_INFO, "tag(%s): Unexpected event %d!", t->tag.key, event);
-        break;
+        case PLCTAG_EVENT_ABORTED: pdebug(DEBUG_INFO, "tag(%s): Tag operation was aborted!", t->tag.key); break;
+        case PLCTAG_EVENT_DESTROYED: pdebug(DEBUG_INFO, "tag(%s): Tag was destroyed.", t->tag.key); break;
+        case PLCTAG_EVENT_READ_COMPLETED:
+            get_tag(tag_handle, &t->tag);
+            pdebug(DEBUG_INFO, "tag(%s): Tag read operation completed with status %s.", t->tag.key, plc_tag_decode_error(status));
+            break;
+        case PLCTAG_EVENT_READ_STARTED: pdebug(DEBUG_INFO, "tag(%s): Tag read operation started.", t->tag.key); break;
+        case PLCTAG_EVENT_WRITE_COMPLETED: break;
+        case PLCTAG_EVENT_WRITE_STARTED: break;
+        default: pdebug(DEBUG_INFO, "tag(%s): Unexpected event %d!", t->tag.key, event); break;
     }
 }
 
@@ -956,9 +919,7 @@ int watch_tags(void) {
         }
     }
 
-    while(true){
-        util_sleep_ms(1000);
-    }
+    while(true) { thrd_sleep_ms(1000, NULL); }
 
     return 0;
 }
@@ -984,34 +945,36 @@ int do_offline(void) {
 
     pdebug(DEBUG_INFO, "Running offline!");
 
-    switch (cli_request.operation) {
-    case READ:
-        fprintf(stdout, "{}\n");
-        fflush(stdout);
-        break;
-    case WRITE:
-        fprintf(stdout, "{}\n");
-        fflush(stdout);
-        break;
-    case WATCH:
-        while (true) {
-            ++val;
-            val = val%10;
-            fprintf(stdout, "{\"%s\":%d}\n", t->tag.key, val);
+    switch(cli_request.operation) {
+        case READ:
+            // NOLINTNEXTLINE
+            fprintf(stdout, "{}\n");
             fflush(stdout);
-            util_sleep_ms(2000);
-        }
-        break;
-    default:
-        break;
+            break;
+        case WRITE:
+            // NOLINTNEXTLINE
+            fprintf(stdout, "{}\n");
+            fflush(stdout);
+            break;
+        case WATCH:
+            while(true) {
+                ++val;
+                val = val % 10;
+                // NOLINTNEXTLINE
+                fprintf(stdout, "{\"%s\":%d}\n", t->tag.key, val);
+                fflush(stdout);
+                thrd_sleep_ms(2000, NULL);
+            }
+            break;
+        default: break;
     }
 
     return 0;
 }
 
-int main(int argc, char *argv[])
-{
-    if (parse_args(argc, argv) == -1) {
+int main(int argc, char *argv[]) {
+    if(parse_args(argc, argv) == -1) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: invalid arguments.\n");
         fflush(stderr);
         usage();
@@ -1022,43 +985,40 @@ int main(int argc, char *argv[])
 
     print_request();
 
-    if (process_tags() != PLCTAG_STATUS_OK) {
+    if(process_tags() != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Could not process tags.");
         exit(1);
     }
 
-    if (cli_request.offline) {
-        exit(do_offline());
-    }
+    if(cli_request.offline) { exit(do_offline()); }
 
     /* wait for all tags to be ready */
-    while(check_tags() == PLCTAG_STATUS_PENDING){
+    while(check_tags() == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
-        util_sleep_ms(1);
+        thrd_sleep_ms(10, NULL);
     }
 
-    switch (cli_request.operation) {
-    case READ:
-        if (read_tags() != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Tag read failed.");
-            exit(1);
-        }
-        break;
-    case WRITE:
-        if (write_tags() != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Tag write failed.");
-            exit(1);
-        }
-        break;
-    case WATCH:
-        if (read_tags() != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Tag read failed.");
-            exit(1);
-        }
-        watch_tags();
-        break;
-    default:
-        break;
+    switch(cli_request.operation) {
+        case READ:
+            if(read_tags() != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_ERROR, "Tag read failed.");
+                exit(1);
+            }
+            break;
+        case WRITE:
+            if(write_tags() != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_ERROR, "Tag write failed.");
+                exit(1);
+            }
+            break;
+        case WATCH:
+            if(read_tags() != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_ERROR, "Tag read failed.");
+                exit(1);
+            }
+            watch_tags();
+            break;
+        default: break;
     }
 
     destroy_tags();
@@ -1067,3 +1027,4 @@ int main(int argc, char *argv[])
     pdebug(DEBUG_INFO, "DONE.");
     exit(0);
 }
+// NOLINTNEXTLINE

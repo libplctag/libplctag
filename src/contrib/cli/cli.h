@@ -2,6 +2,8 @@
 
 #include "./uthash.h"
 
+#include <stdbool.h>
+
 /* tag paths */
 #define TAG_PATH                  "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&name=%s%s"
 #define TAG_PATH_AUTO_READ_SYNC   "protocol=%s&gateway=%s&path=%s&plc=%s&debug=%d&auto_sync_read_ms=%d&name=%s%s"
@@ -41,9 +43,9 @@ typedef enum {
     t_UINT64, t_INT64,
     t_UINT32, t_INT32,
     t_UINT16, t_INT16,
-    t_UINT8, t_INT8, 
-    t_FLOAT64, t_FLOAT32, 
-    t_BOOL 
+    t_UINT8, t_INT8,
+    t_FLOAT64, t_FLOAT32,
+    t_BOOL
 } data_type_t;
 
 /* tag definition */
@@ -78,8 +80,8 @@ struct tags {
 
 void usage(void);
 int parse_args(int argc, char *argv[]);
-void print_request();
-int process_tags();
+void print_request(void);
+int process_tags(void);
 int is_comment(const char *line);
 void trim_line(char *line);
 tag_line_parts_t split_string(const char *str, const char *sep);

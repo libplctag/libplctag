@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -37,13 +37,22 @@
  * This file contains various compatibility includes and definitions
  * to allow compilation across POSIX and Windows systems.
  */
-
-#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
+#if defined(APPLE) || defined (__APPLE__) || defined(DARWIN) || defined(__DARWIN__)
+    #define IS_MACOS (1)
+    #define IS_POSIX (1)
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+    #define IS_BSD (1)
+    #define IS_POSIX (1)
+#elif defined(__linux__)
+    #define IS_LINUX (1)
+    #define IS_POSIX (1)
+#elif defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
     #define IS_WINDOWS (1)
-#endif
 
-#if defined(_MSC_VER)
-    #define IS_MSVC (1)
+    #if defined(_MSC_VER)
+        #define IS_MSVC (1)
+    #endif
+
 #endif
 
 
@@ -63,4 +72,3 @@
 #else
     #include <sys/types.h>
 #endif
-

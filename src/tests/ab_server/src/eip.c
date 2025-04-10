@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2020 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,23 +31,22 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <stdlib.h>
-#include "cpf.h"
 #include "eip.h"
+#include "cpf.h"
 #include "slice.h"
 #include "tcp_server.h"
 #include "utils.h"
+#include <stdlib.h>
 
-#define EIP_REGISTER_SESSION     ((uint16_t)0x0065)
-   #define EIP_REGISTER_SESSION_SIZE (4) /* 4 bytes, 2 16-bit words */
+#define EIP_REGISTER_SESSION ((uint16_t)0x0065)
+#define EIP_REGISTER_SESSION_SIZE (4) /* 4 bytes, 2 16-bit words */
 
-#define EIP_UNREGISTER_SESSION   ((uint16_t)0x0066)
-#define EIP_UNCONNECTED_SEND     ((uint16_t)0x006F)
-#define EIP_CONNECTED_SEND       ((uint16_t)0x0070)
+#define EIP_UNREGISTER_SESSION ((uint16_t)0x0066)
+#define EIP_UNCONNECTED_SEND ((uint16_t)0x006F)
+#define EIP_CONNECTED_SEND ((uint16_t)0x0070)
 
 /* supported EIP version */
-#define EIP_VERSION     ((uint16_t)1)
-
+#define EIP_VERSION ((uint16_t)1)
 
 
 typedef struct {
@@ -64,8 +63,7 @@ static slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_h
 static slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header);
 
 
-slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc)
-{
+slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
     slice_s output = slice_from_slice(raw_output, 0, plc->server_to_client_max_packet);
     slice_s response = slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE);
 
@@ -91,28 +89,27 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc)
     /* dispatch the request */
     switch(header.command) {
         case EIP_REGISTER_SESSION:
-            response = register_session(slice_from_slice(input, EIP_HEADER_SIZE, EIP_REGISTER_SESSION_SIZE), response, plc, &header);
+            response =
+                register_session(slice_from_slice(input, EIP_HEADER_SIZE, EIP_REGISTER_SESSION_SIZE), response, plc, &header);
             break;
 
         case EIP_UNREGISTER_SESSION:
-            response = unregister_session(slice_from_slice(input, EIP_HEADER_SIZE, EIP_REGISTER_SESSION_SIZE), response, plc, &header);
+            response =
+                unregister_session(slice_from_slice(input, EIP_HEADER_SIZE, EIP_REGISTER_SESSION_SIZE), response, plc, &header);
             break;
 
         case EIP_UNCONNECTED_SEND:
-            response = handle_cpf_unconnected(slice_from_slice(input, EIP_HEADER_SIZE, slice_len(input) - EIP_HEADER_SIZE),
-                                              slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE),
-                                              plc);
+            response =
+                handle_cpf_unconnected(slice_from_slice(input, EIP_HEADER_SIZE, slice_len(input) - EIP_HEADER_SIZE),
+                                       slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
 
         case EIP_CONNECTED_SEND:
             response = handle_cpf_connected(slice_from_slice(input, EIP_HEADER_SIZE, slice_len(input) - EIP_HEADER_SIZE),
-                                            slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE),
-                                            plc);
+                                            slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
 
-        default:
-            response = slice_make_err(TCP_SERVER_UNSUPPORTED);
-            break;
+        default: response = slice_make_err(TCP_SERVER_UNSUPPORTED); break;
     }
 
     if(!slice_has_err(response)) {
@@ -134,7 +131,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc)
     } else {
         /* error condition. */
         slice_set_uint16_le(output, 0, header.command);
-        slice_set_uint16_le(output, 2, (uint16_t)0);  /* no payload. */
+        slice_set_uint16_le(output, 2, (uint16_t)0); /* no payload. */
         slice_set_uint32_le(output, 4, plc->session_handle);
         slice_set_uint32_le(output, 8, (uint32_t)(int32_t)slice_get_err(response)); /* status */
         slice_set_uin64_le(output, 12, plc->sender_context);
@@ -145,8 +142,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc)
 }
 
 
-slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header)
-{
+slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header) {
     struct {
         uint16_t eip_version;
         uint16_t option_flags;
@@ -187,20 +183,21 @@ slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s
 
     /* EIP version must be 1. */
     if(register_request.eip_version != EIP_VERSION) {
-        info("Request failed sanity check: request EIP version is %u but should be %u.", register_request.eip_version, EIP_VERSION);
+        info("Request failed sanity check: request EIP version is %u but should be %u.", register_request.eip_version,
+             EIP_VERSION);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* Session request option flags must be zero. */
     if(register_request.option_flags != (uint16_t)0) {
-        info("Request failed sanity check: request option flags field is %u but should be zero.",register_request.option_flags);
+        info("Request failed sanity check: request option flags field is %u but should be zero.", register_request.option_flags);
 
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     /* all good, generate a session handle. */
-    plc->session_handle = header->session_handle = (uint32_t)rand();
+    plc->session_handle = header->session_handle = (uint32_t)(random_u64(UINT32_MAX) + 1);
 
     /* build the response. */
     slice_set_uint16_le(output, 0, register_request.eip_version);
@@ -210,8 +207,7 @@ slice_s register_session(slice_s input, slice_s output, plc_s *plc, eip_header_s
 }
 
 
-slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header)
-{
+slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header_s *header) {
     (void)input;
     (void)output;
     (void)header;
@@ -222,5 +218,3 @@ slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 }
-
-

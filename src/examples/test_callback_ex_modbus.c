@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2022 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -31,12 +31,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "../lib/libplctag.h"
-#include "utils.h"
+#include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define REQUIRED_VERSION 2, 5, 0
 
@@ -46,16 +46,13 @@
 typedef int16_t TAG_ELEMENT;
 
 
-void tag_callback(int32_t tag_id, int event, int status, void *userdata)
-{
+void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     static int create_seen = 0; /* this is HORRIBLY unsafe for threading! */
     TAG_ELEMENT *data = (TAG_ELEMENT *)userdata;
 
     /* handle the events. */
     switch(event) {
-        case PLCTAG_EVENT_ABORTED:
-            printf("Tag operation was aborted with status %s!\n", plc_tag_decode_error(status));
-            break;
+        case PLCTAG_EVENT_ABORTED: printf("Tag operation was aborted with status %s!\n", plc_tag_decode_error(status)); break;
 
         case PLCTAG_EVENT_CREATED:
             printf("Tag created with status %s.\n", plc_tag_decode_error(status));
@@ -64,13 +61,12 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
 
         case PLCTAG_EVENT_DESTROYED:
             printf("Tag was destroyed with status %s.\n", plc_tag_decode_error(status));
-            if(data) {
-                free((void *)data);
-            }
+            if(data) { free((void *)data); }
             break;
 
         case PLCTAG_EVENT_READ_COMPLETED:
             if(!create_seen) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Tag read operation completed before create was complete!\n");
                 plc_tag_destroy(tag_id);
                 exit(1);
@@ -80,9 +76,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
                 int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
                 int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
 
-                for(int i = 0; i < elem_count; i++) {
-                    data[i] = plc_tag_get_int16(tag_id, (i * elem_size));
-                }
+                for(int i = 0; i < elem_count; i++) { data[i] = plc_tag_get_int16(tag_id, (i * elem_size)); }
             }
 
             printf("Tag read operation completed with status %s.\n", plc_tag_decode_error(status));
@@ -91,6 +85,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
 
         case PLCTAG_EVENT_READ_STARTED:
             if(!create_seen) {
+                // NOLINTNEXTLINE
                 fprintf(stderr, "Tag read operation started before create was complete!\n");
                 plc_tag_destroy(tag_id);
                 exit(1);
@@ -108,54 +103,48 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata)
                 int elem_count = plc_tag_get_int_attribute(tag_id, "elem_count", -1);
                 int elem_size = plc_tag_get_int_attribute(tag_id, "elem_size", 0);
 
-                for(int i = 0; i < elem_count; i++) {
-                    plc_tag_set_int16(tag_id, (i * elem_size), data[i]);
-                }
+                for(int i = 0; i < elem_count; i++) { plc_tag_set_int16(tag_id, (i * elem_size), data[i] + 1); }
             }
 
             printf("Tag write operation started with status %s.\n", plc_tag_decode_error(status));
 
             break;
 
-        default:
-            printf("Unexpected event %d!\n", event);
-            break;
+        default: printf("Unexpected event %d!\n", event); break;
     }
 }
 
 
-
-void wait_for_ok(int32_t tag, int32_t timeout_ms)
-{
+void wait_for_ok(int32_t tag, int32_t timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
-    int64_t timeout_time = timeout_ms + util_time_ms();
+    int64_t timeout_time = timeout_ms + system_time_ms();
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "wait_for_ok() starting.\n");
 
     do {
         rc = plc_tag_status(tag);
 
         if(rc == PLCTAG_STATUS_PENDING) {
-            util_sleep_ms(20);
+            system_sleep_ms(20, NULL);
 
-            if(timeout_time < util_time_ms()) {
-                rc = PLCTAG_ERR_TIMEOUT;
-            }
+            if(timeout_time < system_time_ms()) { rc = PLCTAG_ERR_TIMEOUT; }
         }
     } while(rc == PLCTAG_STATUS_PENDING);
 
     if(rc != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "wait_for_ok(): Error %s returned on tag operation.!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         exit(1);
     }
 
+    // NOLINTNEXTLINE
     fprintf(stderr, "wait_for_ok() done.\n");
 }
 
 
-int main(int argc, const char **argv)
-{
+int main(void) {
     int32_t tag = 0;
     int rc;
     int i;
@@ -166,12 +155,10 @@ int main(int argc, const char **argv)
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
     TAG_ELEMENT *tag_element_array = NULL;
 
-    (void)argc;
-    (void)argv;
-
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major, version_minor, version_patch);
+        printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
+               version_minor, version_patch);
         return 1;
     }
 
@@ -209,14 +196,10 @@ int main(int argc, const char **argv)
     wait_for_ok(tag, DATA_TIMEOUT);
 
     /* print out the data */
-    for(i = 0; i < elem_count; i++) {
-        printf("data[%d]=%d\n", i, tag_element_array[i]);
-    }
+    for(i = 0; i < elem_count; i++) { printf("data[%d]=%d\n", i, tag_element_array[i]); }
 
     /* now test a write */
-    for(i = 0; i < elem_count; i++) {
-        tag_element_array[i]++;
-    }
+    for(i = 0; i < elem_count; i++) { tag_element_array[i]++; }
 
     printf("Writing tag data.\n");
     rc = plc_tag_write(tag, 0);
@@ -242,9 +225,7 @@ int main(int argc, const char **argv)
     wait_for_ok(tag, DATA_TIMEOUT);
 
     /* print out the data */
-    for(i = 0; i < elem_count; i++) {
-        printf("data[%d]=%d\n", i, tag_element_array[i]);
-    }
+    for(i = 0; i < elem_count; i++) { printf("data[%d]=%d\n", i, tag_element_array[i]); }
 
     /*
      * we do not need to free the array tag_element_array because the callback will do

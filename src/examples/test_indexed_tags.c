@@ -32,12 +32,12 @@
  ***************************************************************************/
 
 
+#include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
-#define REQUIRED_VERSION 2,6,4
+#define REQUIRED_VERSION 2, 6, 4
 
 /* test against a DINT array. */
 #define TAG_PATH_MAX (256)
@@ -57,8 +57,7 @@
 #define X_DIM (4)
 
 
-int32_t test_1_dim_tag_write_all(void)
-{
+int32_t test_1_dim_tag_write_all(void) {
     int32_t tag = 0;
     int32_t rc = 0;
 
@@ -74,14 +73,12 @@ int32_t test_1_dim_tag_write_all(void)
 
     for(int i = 0; i < Test_Array_1_DIM_ELEMENT_COUNT; i++) {
         int val = (Test_Array_1_DIM_ELEMENT_COUNT - 1) - i;
-        plc_tag_set_int32(tag, i*4, val);
+        plc_tag_set_int32(tag, i * 4, val);
         printf("        Setting element %d to %d\n", i, val);
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("      !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc));
-    }
+    if(rc != PLCTAG_STATUS_OK) { printf("      !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc)); }
 
     plc_tag_destroy(tag);
 
@@ -89,9 +86,7 @@ int32_t test_1_dim_tag_write_all(void)
 }
 
 
-
-int32_t test_1_dim_tag_read_individual(void)
-{
+int32_t test_1_dim_tag_read_individual(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -102,6 +97,7 @@ int32_t test_1_dim_tag_read_individual(void)
         int32_t correct_val = (Test_Array_1_DIM_ELEMENT_COUNT - 1) - i;
         int32_t actual_val = -1;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_1_DIM, i);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -126,9 +122,7 @@ int32_t test_1_dim_tag_read_individual(void)
 }
 
 
-
-int32_t test_1_dim_tag_write_individual(void)
-{
+int32_t test_1_dim_tag_write_individual(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -138,6 +132,7 @@ int32_t test_1_dim_tag_write_individual(void)
         char tag_path[TAG_PATH_MAX];
         int32_t correct_val = (Test_Array_1_DIM_ELEMENT_COUNT - 1) - i;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_1_DIM, i);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -151,9 +146,7 @@ int32_t test_1_dim_tag_write_individual(void)
         printf("        Setting individual element %d to %d\n", i, correct_val);
 
         rc = plc_tag_write(tag, DATA_TIMEOUT);
-        if(rc != PLCTAG_STATUS_OK) {
-            printf("        !! Failed to write tag with error %s\n", plc_tag_decode_error(rc));
-        }
+        if(rc != PLCTAG_STATUS_OK) { printf("        !! Failed to write tag with error %s\n", plc_tag_decode_error(rc)); }
 
         plc_tag_destroy(tag);
     }
@@ -161,8 +154,7 @@ int32_t test_1_dim_tag_write_individual(void)
     return rc;
 }
 
-int32_t test_1_dim_tag_read_all(void)
-{
+int32_t test_1_dim_tag_read_all(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -183,9 +175,9 @@ int32_t test_1_dim_tag_read_all(void)
     } else {
         for(int i = 0; i < Test_Array_1_DIM_ELEMENT_COUNT && rc == PLCTAG_STATUS_OK; i++) {
             int32_t correct_val = (Test_Array_1_DIM_ELEMENT_COUNT - 1) - i;
-            int32_t actual_val = plc_tag_get_int32(tag, i*4);
+            int32_t actual_val = plc_tag_get_int32(tag, i * 4);
 
-            if( correct_val == actual_val) {
+            if(correct_val == actual_val) {
                 printf("        Checking element %d is %d\n", i, actual_val);
             } else {
                 printf("        !! Element %d is %d, expected %d\n", i, actual_val, correct_val);
@@ -200,8 +192,7 @@ int32_t test_1_dim_tag_read_all(void)
 }
 
 
-void cleanup_test_1_dim(void)
-{
+void cleanup_test_1_dim(void) {
     printf("      1D Test: cleaning up test array.\n");
 
     int32_t tag = plc_tag_create(TAG_PATH_1_DIM_ALL, DATA_TIMEOUT);
@@ -210,9 +201,7 @@ void cleanup_test_1_dim(void)
         exit(1);
     }
 
-    for(int i = 0; i < Test_Array_1_DIM_ELEMENT_COUNT; i++) {
-        plc_tag_set_int32(tag, i * 4, 0);
-    }
+    for(int i = 0; i < Test_Array_1_DIM_ELEMENT_COUNT; i++) { plc_tag_set_int32(tag, i * 4, 0); }
 
     int32_t rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
@@ -224,10 +213,7 @@ void cleanup_test_1_dim(void)
 }
 
 
-
-
-int32_t test_2_dim_tag_write_all(void)
-{
+int32_t test_2_dim_tag_write_all(void) {
     int32_t tag = 0;
     int32_t rc = 0;
 
@@ -244,15 +230,13 @@ int32_t test_2_dim_tag_write_all(void)
         int z = i / Y_DIM;
         int y = i % Y_DIM;
 
-        plc_tag_set_int32(tag, i*4, 1000 + (10 * z) + y);
+        plc_tag_set_int32(tag, i * 4, 1000 + (10 * z) + y);
 
         printf("        Setting element %d [%d][%d] to %d\n", i, z, y, 1000 + (10 * z) + y);
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("        !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc));
-    }
+    if(rc != PLCTAG_STATUS_OK) { printf("        !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc)); }
 
     plc_tag_destroy(tag);
 
@@ -260,9 +244,7 @@ int32_t test_2_dim_tag_write_all(void)
 }
 
 
-
-int32_t test_2_dim_tag_read_individual(void)
-{
+int32_t test_2_dim_tag_read_individual(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -275,6 +257,7 @@ int32_t test_2_dim_tag_read_individual(void)
         int32_t correct_val = 1000 + (10 * z) + y;
         int32_t actual_val = -1;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_2_DIM, z, y);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -300,9 +283,7 @@ int32_t test_2_dim_tag_read_individual(void)
 }
 
 
-
-int32_t test_2_dim_tag_write_individual(void)
-{
+int32_t test_2_dim_tag_write_individual(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -314,6 +295,7 @@ int32_t test_2_dim_tag_write_individual(void)
         int y = i % Y_DIM;
         int32_t correct_val = 1000 + (10 * z) + y;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_2_DIM, z, y);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -327,9 +309,7 @@ int32_t test_2_dim_tag_write_individual(void)
         printf("        Setting individual element %d [%d][%d] to %d\n", i, z, y, correct_val);
 
         rc = plc_tag_write(tag, DATA_TIMEOUT);
-        if(rc != PLCTAG_STATUS_OK) {
-            printf("        !! Failed to write tag with error %s\n", plc_tag_decode_error(rc));
-        }
+        if(rc != PLCTAG_STATUS_OK) { printf("        !! Failed to write tag with error %s\n", plc_tag_decode_error(rc)); }
 
         plc_tag_destroy(tag);
     }
@@ -338,10 +318,7 @@ int32_t test_2_dim_tag_write_individual(void)
 }
 
 
-
-
-int32_t test_2_dim_tag_read_all(void)
-{
+int32_t test_2_dim_tag_read_all(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -363,9 +340,9 @@ int32_t test_2_dim_tag_read_all(void)
             int z = i / Y_DIM;
             int y = i % Y_DIM;
             int32_t correct_val = 1000 + (10 * z) + y;
-            int32_t actual_val = plc_tag_get_int32(tag, i*4);
+            int32_t actual_val = plc_tag_get_int32(tag, i * 4);
 
-            if( correct_val == actual_val) {
+            if(correct_val == actual_val) {
                 printf("        Checking element %d [%d][%d] is %d\n", i, z, y, actual_val);
             } else {
                 printf("        !! Element %d [%d][%d] is %d, expected %d\n", i, z, y, actual_val, correct_val);
@@ -380,8 +357,7 @@ int32_t test_2_dim_tag_read_all(void)
 }
 
 
-void cleanup_test_2_dim(void)
-{
+void cleanup_test_2_dim(void) {
     printf("      2D Test: cleaning up test array.\n");
 
     int32_t tag = plc_tag_create(TAG_PATH_2_DIM_ALL, DATA_TIMEOUT);
@@ -390,9 +366,7 @@ void cleanup_test_2_dim(void)
         exit(1);
     }
 
-    for(int i = 0; i < (Z_DIM * Y_DIM); i++) {
-        plc_tag_set_int32(tag, i * 4, 0);
-    }
+    for(int i = 0; i < (Z_DIM * Y_DIM); i++) { plc_tag_set_int32(tag, i * 4, 0); }
 
     int32_t rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
@@ -404,13 +378,7 @@ void cleanup_test_2_dim(void)
 }
 
 
-
-
-
-
-
-int32_t test_3_dim_tag_write_all(void)
-{
+int32_t test_3_dim_tag_write_all(void) {
     int32_t tag = 0;
     int32_t rc = 0;
 
@@ -428,17 +396,15 @@ int32_t test_3_dim_tag_write_all(void)
         int z = i / (Y_DIM * X_DIM);
         int y = (i / X_DIM) % Y_DIM;
         int x = i % X_DIM;
-        int val = 10000 + (100 * z) + (10*y) + x;
+        int val = 10000 + (100 * z) + (10 * y) + x;
 
-        plc_tag_set_int32(tag, i*4, val);
+        plc_tag_set_int32(tag, i * 4, val);
 
         printf("        Setting element %d [%d][%d][%x] to %d\n", i, z, y, x, val);
     }
 
     rc = plc_tag_write(tag, DATA_TIMEOUT);
-    if(rc != PLCTAG_STATUS_OK) {
-        printf("        !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc));
-    }
+    if(rc != PLCTAG_STATUS_OK) { printf("        !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc)); }
 
     plc_tag_destroy(tag);
 
@@ -446,9 +412,7 @@ int32_t test_3_dim_tag_write_all(void)
 }
 
 
-
-int32_t test_3_dim_tag_read_individual(void)
-{
+int32_t test_3_dim_tag_read_individual(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -459,9 +423,10 @@ int32_t test_3_dim_tag_read_individual(void)
         int z = i / (Y_DIM * X_DIM);
         int y = (i / X_DIM) % Y_DIM;
         int x = i % X_DIM;
-        int correct_val = 10000 + (100 * z) + (10*y) + x;
+        int correct_val = 10000 + (100 * z) + (10 * y) + x;
         int32_t actual_val = -1;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_3_DIM, z, y, x);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -487,9 +452,7 @@ int32_t test_3_dim_tag_read_individual(void)
 }
 
 
-
-int32_t test_3_dim_tag_write_individual(void)
-{
+int32_t test_3_dim_tag_write_individual(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -500,8 +463,9 @@ int32_t test_3_dim_tag_write_individual(void)
         int z = i / (Y_DIM * X_DIM);
         int y = (i / X_DIM) % Y_DIM;
         int x = i % X_DIM;
-        int correct_val = 10000 + (100 * z) + (10*y) + x;
+        int correct_val = 10000 + (100 * z) + (10 * y) + x;
 
+        // NOLINTNEXTLINE
         snprintf(tag_path, sizeof(tag_path), TAG_PATH_3_DIM, z, y, x);
 
         tag = plc_tag_create(tag_path, DATA_TIMEOUT);
@@ -515,9 +479,7 @@ int32_t test_3_dim_tag_write_individual(void)
         printf("        Setting individual element %d [%d][%d][%d] to %d\n", i, z, y, x, correct_val);
 
         rc = plc_tag_write(tag, DATA_TIMEOUT);
-        if(rc != PLCTAG_STATUS_OK) {
-            printf("        !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc));
-        }
+        if(rc != PLCTAG_STATUS_OK) { printf("        !!!! Failed to write tag with error %s\n", plc_tag_decode_error(rc)); }
 
         plc_tag_destroy(tag);
     }
@@ -526,10 +488,7 @@ int32_t test_3_dim_tag_write_individual(void)
 }
 
 
-
-
-int32_t test_3_dim_tag_read_all(void)
-{
+int32_t test_3_dim_tag_read_all(void) {
     int32_t tag = 0;
     int32_t rc = PLCTAG_STATUS_OK;
 
@@ -554,10 +513,10 @@ int32_t test_3_dim_tag_read_all(void)
             int z = i / (Y_DIM * X_DIM);
             int y = (i / X_DIM) % Y_DIM;
             int x = i % X_DIM;
-            int correct_val = 10000 + (100 * z) + (10*y) + x;
-            int32_t actual_val = plc_tag_get_int32(tag, i*4);
+            int correct_val = 10000 + (100 * z) + (10 * y) + x;
+            int32_t actual_val = plc_tag_get_int32(tag, i * 4);
 
-            if( correct_val == actual_val) {
+            if(correct_val == actual_val) {
                 printf("        Checking element %d [%d][%d][%d] is %d\n", i, z, y, x, actual_val);
             } else {
                 printf("        !! Element %d [%d][%d][%d] is %d, expected %d\n", i, z, y, x, actual_val, correct_val);
@@ -572,8 +531,7 @@ int32_t test_3_dim_tag_read_all(void)
 }
 
 
-void cleanup_test_3_dim(void)
-{
+void cleanup_test_3_dim(void) {
     printf("      3D Test: cleaning up test array.\n");
 
     int32_t tag = plc_tag_create(TAG_PATH_3_DIM_ALL, DATA_TIMEOUT);
@@ -582,9 +540,7 @@ void cleanup_test_3_dim(void)
         exit(1);
     }
 
-    for(int i = 0; i < (Z_DIM * Y_DIM * X_DIM); i++) {
-        plc_tag_set_int32(tag, i * 4, 0);
-    }
+    for(int i = 0; i < (Z_DIM * Y_DIM * X_DIM); i++) { plc_tag_set_int32(tag, i * 4, 0); }
 
     int32_t rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
@@ -596,14 +552,7 @@ void cleanup_test_3_dim(void)
 }
 
 
-
-
-
-
-
-
-int main()
-{
+int main(void) {
     int32_t rc;
 
     /* check the library version. */

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2021 by Kyle Hayes                                      *
+ *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
@@ -32,48 +32,33 @@
  ***************************************************************************/
 
 
+#include "compat_utils.h"
+#include <libplctag/lib/libplctag.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../lib/libplctag.h"
-#include "utils.h"
 
-#define REQUIRED_VERSION 2,4,0
+#define REQUIRED_VERSION 2, 4, 0
 
 #define TAG_STRING "protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=@raw"
 #define DATA_TIMEOUT 5000
 
 
-int main()
-{
+int main(void) {
     int32_t tag = 0;
     int rc = PLCTAG_STATUS_OK;
     int size = 0;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
-    uint8_t raw_payload[] = { 0x55, /* list tags */
-                              0x03,
-                              0x20,
-                              0x6b,
-                              0x25,
-                              0x00,
-                              0x00,
-                              0x00,
-                              0x04,
-                              0x00,
-                              0x02,
-                              0x00,
-                              0x07,
-                              0x00,
-                              0x08,
-                              0x00,
-                              0x01,
-                              0x00 };
+    uint8_t raw_payload[] = {0x55, /* list tags */
+                             0x03, 0x20, 0x6b, 0x25, 0x00, 0x00, 0x00, 0x04, 0x00,
+                             0x02, 0x00, 0x07, 0x00, 0x08, 0x00, 0x01, 0x00};
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
-        printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major, version_minor, version_patch);
+        printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
+               version_minor, version_patch);
         return 1;
     }
 
@@ -94,18 +79,18 @@ int main()
      */
     rc = plc_tag_set_size(tag, (int)(unsigned int)sizeof(raw_payload));
     if(rc < 0) {
-        printf( "Unable to set the payload size on the tag %s!\n", plc_tag_decode_error(rc));
+        printf("Unable to set the payload size on the tag %s!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 1;
     }
 
     /* set up the raw data */
-    for(int i=0; i < (int)(unsigned int)sizeof(raw_payload) && rc == PLCTAG_STATUS_OK; i++) {
+    for(int i = 0; i < (int)(unsigned int)sizeof(raw_payload) && rc == PLCTAG_STATUS_OK; i++) {
         rc = plc_tag_set_uint8(tag, i, raw_payload[i]);
     }
 
     if(rc != PLCTAG_STATUS_OK) {
-        printf( "Unable to set the payload data in the tag %s!\n", plc_tag_decode_error(rc));
+        printf("Unable to set the payload data in the tag %s!\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 1;
     }
@@ -113,7 +98,7 @@ int main()
     /* get the data, Write is the only action supported. */
     rc = plc_tag_write(tag, DATA_TIMEOUT);
     if(rc != PLCTAG_STATUS_OK) {
-        printf("ERROR: Unable to send the raw request! Got error code %d: %s\n",rc, plc_tag_decode_error(rc));
+        printf("ERROR: Unable to send the raw request! Got error code %d: %s\n", rc, plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
         return 1;
     }
@@ -127,9 +112,9 @@ int main()
     }
 
     /* print out the data */
-    for(int i=0; i < size; i++) {
+    for(int i = 0; i < size; i++) {
         uint8_t data = plc_tag_get_uint8(tag, i);
-        printf("data[%d]=%u (%x)\n",i, (unsigned int)data, (unsigned int)data);
+        printf("data[%d]=%u (%x)\n", i, (unsigned int)data, (unsigned int)data);
     }
 
     plc_tag_destroy(tag);
@@ -138,5 +123,3 @@ int main()
 
     return 0;
 }
-
-
