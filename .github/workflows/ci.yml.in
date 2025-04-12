@@ -811,7 +811,7 @@ jobs:
     - name: Ensure ARM Windows SDK is Installed
       run: |
         echo "Installing Visual Studio 2022 Build Tools"
-        choco install visualstudio2022buildtools --package-parameters "--allWorkloads --includeRecommended --includeOptional --passive"
+        choco install visualstudio2022buildtools -y --ignore-checksums
         echo "Installing Visual Studio 2022 ARM Tools and SDK"
         choco install visualstudio2022-workload-vctools -y --ignore-checksums --params "--add Microsoft.VisualStudio.Component.VC.Tools.ARM --add Microsoft.VisualStudio.Component.Windows11SDK.22000 --passive --wait"
       shell: cmd
