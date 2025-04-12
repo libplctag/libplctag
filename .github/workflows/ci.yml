@@ -812,7 +812,13 @@ jobs:
       run: |
         choco install visualstudio2022buildtools -y --ignore-checksums
         choco install visualstudio2022-workload-vctools -y --ignore-checksums
-        "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Component.VC.Tools.ARM --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.22000 --quiet --wait
+        dir "C:\Program Files (x86)\Microsoft Visual Studio\Installer"
+        "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify ^
+          --installPath "C:\Program Files\Microsoft Visual Studio\2022\BuildTools" ^
+          --add Microsoft.VisualStudio.Component.VC.Tools.ARM ^
+          --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 ^
+          --add Microsoft.VisualStudio.Component.Windows11SDK.22000 ^
+          --wait
       shell: cmd
 
     - name: Configure and Build with MSVC for ARM
