@@ -626,7 +626,7 @@ jobs:
     - name: Setup MSVC for x86
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        arch: amd64
+        arch: win32
 
     - name: Configure CMake
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=Win32 -DCMAKE_VERBOSE_MAKEFILE=On
