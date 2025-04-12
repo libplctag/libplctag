@@ -808,10 +808,10 @@ jobs:
 
     - name: Install Visual Studio 2022 with ARM support
       run: |
-        start /wait vs_installer.exe --quiet --wait --norestart --nocache `
-          --add Microsoft.VisualStudio.Workload.VCTools `
-          --add Microsoft.VisualStudio.Component.VC.Tools.ARM `
-          --add Microsoft.VisualStudio.Component.Windows11SDK.22000 `
+        start /wait vs_installer.exe --quiet --wait --norestart --nocache ^
+          --add Microsoft.VisualStudio.Workload.VCTools ^
+          --add Microsoft.VisualStudio.Component.VC.Tools.ARM ^
+          --add Microsoft.VisualStudio.Component.Windows11SDK.22000 ^
           --includeRecommended
       shell: cmd
 
