@@ -1,5 +1,5 @@
+# get defaults for GCC
+include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
 
-SET(CMAKE_C_COMPILER gcc.exe)
-SET(CMAKE_C_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
-SET(CMAKE_CXX_COMPILER g++.exe)
-SET(CMAKE_CXX_FLAGS "-m32 -mno-ms-bitfields -D_WIN32_WINNT=0x0600")
+# pretend to be a POSIX platform
+set(PLATFORM_SHIM_PATH "${CMAKE_SOURCE_DIR}/src/platform/posix" )
