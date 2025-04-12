@@ -783,12 +783,12 @@ jobs:
 
 
   windows_ARM:
-  
+
     runs-on: windows-latest
 
     env:
       VERSION: "2.6.5"
-      ARTIFACT: "libplctag_2.6.5_windows_Arm"
+      ARTIFACT: "libplctag_2.6.5_windows_arm"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -802,23 +802,25 @@ jobs:
       with:
         ref: ${{ env.BRANCH }}
 
+    - name: Download Visual Studio Installer
+      run: |
+        curl -L -o vs_installer.exe https://aka.ms/vs/17/release/vs_buildtools.exe
+
+    - name: Install Visual Studio 2022 with ARM support
+      run: |
+        start /wait vs_installer.exe --quiet --wait --norestart --nocache `
+          --add Microsoft.VisualStudio.Workload.VCTools `
+          --add Microsoft.VisualStudio.Component.VC.Tools.ARM `
+          --add Microsoft.VisualStudio.Component.Windows11SDK.22000 `
+          --includeRecommended
+      shell: cmd
+
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v1.3.1
-
-    - name: Ensure ARM Windows SDK is Installed
-      run: |
-        echo "Installing Visual Studio 2022 Build Tools"
-        choco install visualstudio2022buildtools -y --ignore-checksums
-        echo "Installing Visual Studio 2022 ARM Tools and SDK"
-        choco install visualstudio2022-workload-vctools -y --ignore-checksums --params "--add Microsoft.VisualStudio.Component.VC.Tools.ARM --add Microsoft.VisualStudio.Component.Windows11SDK.22000 --passive --wait"
-      shell: cmd
-
     - name: Configure and Build with MSVC for ARM
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
+        call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
         cd %BUILD%
         cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
         cmake --build . --verbose --config MinSizeRel
@@ -829,6 +831,9 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
+
+
+
 
 
   ubuntu_cross_build_arm6:
