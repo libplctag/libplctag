@@ -46,6 +46,8 @@
 #elif defined(__linux__)
     #define IS_LINUX (1)
     #define IS_POSIX (1)
+#elif defined(__unix__) || defined(__USE_POSIX) || defined(__MINGW32__) || defined(__MINGW64__)
+    #define IS_POSIX (1) 
 #elif defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
     #define IS_WINDOWS (1)
 

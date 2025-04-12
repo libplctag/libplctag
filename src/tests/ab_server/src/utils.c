@@ -41,7 +41,7 @@
 #include <time.h>
 
 
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || (__linux__)
+#if defined(__USE_POSIX) || defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || (__linux__)
 #    define USE_ARC4RANDOM
 #    define PLATFORM_POSIX
 
@@ -58,7 +58,6 @@
 #    define USE_BCRYPTGENRANDOM
 #    define PLATFORM_WINDOWS
 
-#    define _WINSOCKAPI_
 #    include <Winsock2.h>
 
 #    include <Windows.h>
