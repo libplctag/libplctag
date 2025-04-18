@@ -33,44 +33,10 @@
 
 #pragma once
 
-/*
- * This file contains various compatibility includes and definitions
- * to allow compilation across POSIX and Windows systems.
- */
-#if defined(APPLE) || defined (__APPLE__) || defined(DARWIN) || defined(__DARWIN__)
-    #define IS_MACOS (1)
-    #define IS_POSIX (1)
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-    #define IS_BSD (1)
-    #define IS_POSIX (1)
-#elif defined(__linux__)
-    #define IS_LINUX (1)
-    #define IS_POSIX (1)
-#elif defined(__unix__)
-    #define IS_POSIX (1) 
-#elif defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64) || defined(__MINGW32__) || defined(__MINGW64__)
-    #define IS_WINDOWS (1)
-
-    #if defined(_MSC_VER)
-        #define IS_MSVC (1)
-    #endif
-
-#endif
-
-
-#ifdef IS_WINDOWS
-    #define str_cmp_i(first, second) _stricmp(first, second)
-    #define strdup _strdup
-    #define str_scanf sscanf_s
-#else
-    #define str_cmp_i(first, second) strcasecmp(first, second)
-    #define str_scanf sscanf
-#endif
-
-/* Define ssize_t */
-#ifdef IS_MSVC
-    #include <BaseTsd.h>
-    typedef SSIZE_T ssize_t;
-#else
-    #include <sys/types.h>
-#endif
+#define RESULT_DEF(NAME, OK_TYPE) typedef struct { OK_TYPE val; int err; } NAME;        \
+static inline NAME NAME ## _err(int err) { return (NAME){ .err = err}; }                \
+static inline NAME NAME ## _val(OK_TYPE val) { return (NAME){ .val = val, .err = 0}; }  \
+static inline int NAME ## _get_err(NAME result) { return result.err; }                  \
+static inline OK_TYPE NAME ## _get_val(NAME result) { return result.val; }              \
+static inline bool NAME ## _is_err(NAME result) { return (result.err != 0); }           \
+static inline bool NAME ## _is_val(NAME result) { return (result.err == 0); }

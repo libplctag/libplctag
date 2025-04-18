@@ -47,7 +47,6 @@ extern "C"
 */
 
 /* KEEP THE SPACES BETWEEN LINES!  The order is required! */
-#define _WINSOCKAPI_
 #include <Winsock2.h>
 
 #include <windows.h>
@@ -215,7 +214,21 @@ extern int thread_destroy(thread_p *t);
 #define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
 #define THREAD_RETURN(val) return (DWORD)val;
 
-#define THREAD_LOCAL __declspec(thread)
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && (defined(__MINGW32__) || defined(__MINGW64__))
+    #define THREAD_LOCAL _Thread_local
+#else /* use Windows __declspec attribute */
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <processthreadsapi.h>
+    #define THREAD_LOCAL __declspec(thread)
+    #define thread_func_t LPTHREAD_START_ROUTINE
+    #define NO_RETURN __declspec(noreturn)
+    #define THREAD_FUNC(func) DWORD __stdcall func(LPVOID arg)
+    #define THREAD_RETURN(val) return (DWORD)val;
+
+#endif
+
 
 /* atomic operations */
 #define spin_block(lock) \

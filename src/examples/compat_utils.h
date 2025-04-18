@@ -51,7 +51,24 @@ extern "C" {
 
 #elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
 #    define WIN32_LEAN_AND_MEAN
+
 #    include <windows.h>
+
+/* if MinGW */
+#define __GNUC__
+#ifdef __GNUC__
+    #include <time.h>
+    #include <pthread.h>
+#else
+
+/* Windows does not define this??? */
+struct timespec {
+    time_t tv_sec;  /* seconds */
+    long   tv_nsec; /* nanoseconds */
+};
+
+#endif /* MinGW */
+
 
 #    define localtime_r(a, b) localtime_s((b), (a))
 #    define strcasecmp _stricmp
@@ -69,6 +86,7 @@ typedef CONDITION_VARIABLE pthread_cond_t;
 typedef struct pthread_attr_t pthread_attr_t;
 typedef struct pthread_mutexattr_t pthread_mutexattr_t;
 typedef struct pthread_condattr_t pthread_condattr_t;
+struct timespec;
 
 /* threads */
 extern int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg);

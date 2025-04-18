@@ -50,6 +50,19 @@ set(EXAMPLE_EXECUTABLES
   tag_rw2
 )
 
+# foreach(example ${EXAMPLE_EXECUTABLES})
+#     if(example STREQUAL "simple_cpp")
+#         set(FILE_EXTENSION "cpp")
+#     else()
+#         set(FILE_EXTENSION "c")
+#     endif()
+
+#     add_executable(${example} "${CMAKE_SOURCE_DIR}/src/examples/${example}.${FILE_EXTENSION}" "${CMAKE_SOURCE_DIR}/src/examples/compat_utils.c")
+
+#     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
+# endforeach()
+
+
 foreach(example ${EXAMPLE_EXECUTABLES})
     if(example STREQUAL "simple_cpp")
         set(FILE_EXTENSION "cpp")
@@ -59,5 +72,10 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     add_executable(${example} "${CMAKE_SOURCE_DIR}/src/examples/${example}.${FILE_EXTENSION}" "${CMAKE_SOURCE_DIR}/src/examples/compat_utils.c")
 
+    # Link with the static library and apply static linking flags
     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
+
+    if(STATIC_LINK_OPTIONS)
+        target_link_options(${example} PRIVATE ${STATIC_LINK_OPTIONS})
+    endif()
 endforeach()

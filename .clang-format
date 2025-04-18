@@ -93,7 +93,7 @@ ReferenceAlignment: Left
 ReflowComments: true
 SeparateDefinitionBlocks: Leave
 ShortNamespaceLines: 1
-SortIncludes: true
+SortIncludes: false
 SortUsingDeclarations: false
 SpaceAfterCStyleCast: false
 SpaceAfterLogicalNot: false

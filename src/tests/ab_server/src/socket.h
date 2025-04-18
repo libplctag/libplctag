@@ -33,26 +33,46 @@
 
 #pragma once
 
+#include "compat.h"
+
+#include "result.h"
 #include "slice.h"
 
+#include <stdint.h>
+
 typedef enum {
-    SOCKET_STATUS_OK = -1,
-    SOCKET_ERR_STARTUP = -2,
-    SOCKET_ERR_OPEN = -3,
-    SOCKET_ERR_CREATE = -4,
-    SOCKET_ERR_BIND = -5,
-    SOCKET_ERR_LISTEN = -6,
-    SOCKET_ERR_SETOPT = -7,
-    SOCKET_ERR_CONNECT = -8,
-    SOCKET_ERR_READ = -9,
-    SOCKET_ERR_WRITE = -10,
-    SOCKET_ERR_SELECT = -11,
-    SOCKET_ERR_ACCEPT = -12
+    SOCKET_STATUS_OK = 0,
+    SOCKET_ERR_BAD_PARAM,
+    SOCKET_ERR_STARTUP,
+    SOCKET_ERR_OPEN,
+    SOCKET_ERR_CREATE,
+    SOCKET_ERR_BIND,
+    SOCKET_ERR_LISTEN,
+    SOCKET_ERR_SETOPT,
+    SOCKET_ERR_CONNECT,
+    SOCKET_ERR_READ,
+    SOCKET_ERR_WRITE,
+    SOCKET_ERR_SELECT,
+    SOCKET_ERR_ACCEPT
 } socket_err_t;
 
-extern int socket_open_tcp_client(const char *remote_host, const char *remote_port);
-extern int socket_open_tcp_server(const char *listening_port);
-extern void socket_close(int sock);
-extern int socket_accept(int sock);
-extern slice_s socket_read(int sock, slice_s in_buf);
-extern int socket_write(int sock, slice_s out_buf);
+#ifndef IS_WINDOWS
+typedef int SOCKET;
+#define INVALID_SOCKET (-1)
+#else 
+#include <winsock2.h>
+#endif
+
+RESULT_DEF(socket_result, SOCKET)
+
+RESULT_DEF(socket_read_result, slice_s)
+
+RESULT_DEF(socket_write_result, int)
+
+
+extern socket_result socket_open_tcp_client(const char *remote_host, const char *remote_port);
+extern socket_result socket_open_tcp_server(const char *listening_port);
+extern void socket_close(SOCKET sock);
+extern socket_result socket_accept(SOCKET sock);
+extern socket_read_result socket_read(SOCKET sock, slice_s in_buf);
+extern socket_write_result socket_write(SOCKET sock, slice_s out_buf);
