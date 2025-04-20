@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
     }
 
     /* small delay to ensure writes complete */
-    system_sleep_ms(100, NULL);
+    compat_sleep_ms(100, NULL);
 
     /* read back and verify all values */
     // NOLINTNEXTLINE

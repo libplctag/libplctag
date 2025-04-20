@@ -55,7 +55,7 @@ struct thread_t {
 #if IS_WINDOWS
     HANDLE h_thread;
 #else
-    pthread_t p_thread;
+    compat_thread_t p_thread;
 #endif
     int initialized;
 };
@@ -129,7 +129,7 @@ void thread_stop(void) {
 #if IS_WINDOWS
     ExitThread((DWORD)0);
 #else
-    pthread_exit((void *)0);
+    compat_thread_exit((void *)0);
 #endif
 }
 
@@ -176,7 +176,7 @@ int thread_join(thread_p t) {
     /* FIXME - check for uninitialized threads */
     if(WaitForSingleObject(t->h_thread, (DWORD)INFINITE)) {
 #else
-    if(pthread_join(t->p_thread, &unused)) {
+    if(compat_thread_join(t->p_thread, &unused)) {
 #endif
         error("ERROR: Error joining thread.");
         return THREAD_ERR_THREAD_JOIN;
@@ -198,7 +198,7 @@ extern int thread_detach(void) {
 #if IS_WINDOWS
     /* FIXME - it does not look like you can do this on Windows??? */
 #else
-    pthread_detach(pthread_self());
+    compat_thread_detach(compat_thread_self());
 #endif
 
     return THREAD_STATUS_OK;

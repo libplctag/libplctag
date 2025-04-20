@@ -58,11 +58,11 @@ static void *thread_func(void *arg);
 
 
 int main(void) {
-    pthread_t threads[NUM_THREADS] = {0};
-    int64_t end_time = system_time_ms() + (10 * 1000);
+    compat_thread_t threads[NUM_THREADS] = {0};
+    int64_t end_time = compat_time_ms() + (10 * 1000);
 
     /* Set up the signal handler */
-    set_interrupt_handler(interrupt_handler);
+    compat_set_interrupt_handler(interrupt_handler);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Interrupt handlers set up.\n");
@@ -75,7 +75,7 @@ int main(void) {
 
     /* create 10 threads to run thread_func() */
     for(int task_id = 0; task_id < NUM_THREADS; task_id++) {
-        int rc = pthread_create(&threads[task_id], NULL, thread_func, (void *)(intptr_t)task_id);
+        int rc = compat_thread_create(&threads[task_id], thread_func, (void *)(intptr_t)task_id);
         if(rc != 0) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Error creating thread %d\n", task_id);
@@ -84,15 +84,15 @@ int main(void) {
     }
 
     /* wait while we test */
-    while(!terminate && (end_time > system_time_ms())) {
-        system_sleep_ms(1000, NULL);
+    while(!terminate && (end_time > compat_time_ms())) {
+        compat_sleep_ms(1000, NULL);
         // NOLINTNEXTLINE
-        fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - system_time_ms()));
+        fprintf(stderr, "Milliseconds remaining %" PRId64 "ms.\n", (end_time - compat_time_ms()));
     }
 
     terminate = 1;
 
-    for(int task_id = 0; task_id < NUM_THREADS; task_id++) { pthread_join(threads[task_id], NULL); }
+    for(int task_id = 0; task_id < NUM_THREADS; task_id++) { compat_thread_join(threads[task_id], NULL); }
 
     return 0;
 }
@@ -126,7 +126,7 @@ void *thread_func(void *arg) {
             // NOLINTNEXTLINE
             fprintf(stderr, "Task %d tag creation failed with error %s\n", task_id, plc_tag_decode_error(tag));
 
-            system_sleep_ms(100, NULL);
+            compat_sleep_ms(100, NULL);
             continue;
         }
 

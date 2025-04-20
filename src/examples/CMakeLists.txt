@@ -1,6 +1,12 @@
 message("Building examples.")
 
-set(EXAMPLE_EXECUTABLES 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
+else()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
+endif()
+
+set(EXAMPLE_EXECUTABLES
   async
   async_stress
   barcode_test
@@ -70,6 +76,8 @@ foreach(example ${EXAMPLE_EXECUTABLES})
         set(FILE_EXTENSION "c")
     endif()
 
+    # message("${example}:${CMAKE_BUILD_TYPE} is being compiled with flags=${CMAKE_C_FLAGS}")
+
     add_executable(${example} "${CMAKE_CURRENT_SOURCE_DIR}/${example}.${FILE_EXTENSION}" "${CMAKE_CURRENT_SOURCE_DIR}/compat_utils.c")
 
     # Link with the static library and apply static linking flags
@@ -79,3 +87,6 @@ foreach(example ${EXAMPLE_EXECUTABLES})
         target_link_options(${example} PRIVATE ${STATIC_LINK_OPTIONS})
     endif()
 endforeach()
+
+get_target_property(target_includes async INCLUDE_DIRECTORIES)
+message(STATUS "Target 'async' Includes (PRIVATE/PUBLIC): ${target_includes}")

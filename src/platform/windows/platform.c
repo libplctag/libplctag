@@ -75,6 +75,8 @@ extern "C"
 
 #define WINDOWS_REQUESTED_TIMER_PERIOD_MS ((unsigned int)4)
 
+/* not defined under Windows */
+typedef ptrdiff_t ssize_t;
 
 /***************************************************************************
  ******************************* Memory ************************************
@@ -1628,7 +1630,7 @@ int socket_wake(sock_p sock) {
         return PLCTAG_ERR_READ;
     }
 
-    rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), (int)MSG_NOSIGNAL);
+    rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), 0);
     if(rc < 0) {
         int err = WSAGetLastError();
 
@@ -1809,7 +1811,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    rc = send(s->fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+    rc = send(s->fd, (const char *)buf, size, 0);
     if(rc < 0) {
         int err = WSAGetLastError();
 
@@ -1900,7 +1902,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
 
         /* try to write since select() said we could. */
-        rc = send(s->fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+        rc = send(s->fd, (const char *)buf, size, 0);
         if(rc < 0) {
             int err = WSAGetLastError();
 
@@ -2345,9 +2347,8 @@ int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size)
 
 int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size) {
     DWORD numBytesWritten = 0;
-    BOOL rc;
 
-    rc = WriteFile(serial_port->hSerialPort, (LPVOID)data, (DWORD)size, &numBytesWritten, NULL);
+    WriteFile(serial_port->hSerialPort, (LPVOID)data, (DWORD)size, &numBytesWritten, NULL);
 
     return (int)numBytesWritten;
 }

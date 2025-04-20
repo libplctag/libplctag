@@ -117,7 +117,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
 
 void wait_for_ok(int32_t tag, int32_t timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
-    int64_t timeout_time = timeout_ms + system_time_ms();
+    int64_t timeout_time = timeout_ms + compat_time_ms();
 
     // NOLINTNEXTLINE
     fprintf(stderr, "wait_for_ok() starting.\n");
@@ -126,9 +126,9 @@ void wait_for_ok(int32_t tag, int32_t timeout_ms) {
         rc = plc_tag_status(tag);
 
         if(rc == PLCTAG_STATUS_PENDING) {
-            system_sleep_ms(20, NULL);
+            compat_sleep_ms(20, NULL);
 
-            if(timeout_time < system_time_ms()) { rc = PLCTAG_ERR_TIMEOUT; }
+            if(timeout_time < compat_time_ms()) { rc = PLCTAG_ERR_TIMEOUT; }
         }
     } while(rc == PLCTAG_STATUS_PENDING);
 

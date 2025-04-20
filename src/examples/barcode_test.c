@@ -60,7 +60,7 @@ static int mark_barcode_processed(void);
 
 int main(int argc, const char **argv) {
     int rc = PLCTAG_STATUS_OK;
-    int64_t last_read = system_time_ms();
+    int64_t last_read = compat_time_ms();
     int64_t first_read = last_read;
 
     (void)argc;
@@ -85,7 +85,7 @@ int main(int argc, const char **argv) {
 
         TRY(mark_barcode_processed())
 
-        new_time = system_time_ms();
+        new_time = compat_time_ms();
 
         diff_time = new_time - last_read;
         total_time = new_time - first_read;
@@ -124,7 +124,7 @@ int wait_for_new_barcode(void) {
                 rc = PLCTAG_STATUS_OK;
             } else {
                 rc = PLCTAG_STATUS_PENDING;
-                system_sleep_ms(4000, NULL);
+                compat_sleep_ms(4000, NULL);
             }
         }
     } while(rc == PLCTAG_STATUS_PENDING);

@@ -41,7 +41,7 @@ void ConcurrentRead(const char *tagPath1, const char *tagPath2) {
         // Invoke async read for both tag handles
         for(int i = 0; i < 2; i++) {
             rc[i] = plc_tag_read(tagHandles[i], 0);
-            system_sleep_ms(TIME_BETW_TAG, NULL);
+            compat_sleep_ms(TIME_BETW_TAG, NULL);
         }
 
         // Wait for both tag handles to be finish reading
@@ -51,7 +51,7 @@ void ConcurrentRead(const char *tagPath1, const char *tagPath2) {
                     FATAL("Error[%d] %d: %s\n", i, rc[i], plc_tag_decode_error(rc[i]));
                 }
 
-                system_sleep_ms(10, NULL);
+                compat_sleep_ms(10, NULL);
                 rc[i] = plc_tag_status(tagHandles[i]);
             }
         }
@@ -64,7 +64,7 @@ void ConcurrentRead(const char *tagPath1, const char *tagPath2) {
             }
         }
 
-        system_sleep_ms(TIME_BETW_OP, NULL);
+        compat_sleep_ms(TIME_BETW_OP, NULL);
     }
 
     for(int i = 0; i < 2; i++) { plc_tag_destroy(tagHandles[i]); }

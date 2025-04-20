@@ -131,7 +131,7 @@ int main(void) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
 
     /* set up the RNG */
-    srand((unsigned int)(uint64_t)system_time_ms());
+    srand((unsigned int)(uint64_t)compat_time_ms());
 
     /* create the tag. */
     if((tag = plc_tag_create(TAG_PATH, DATA_TIMEOUT)) < 0) {
@@ -158,7 +158,7 @@ int main(void) {
     /* update the string. */
     for(int i = 0; i < string_count; i++) {
         // NOLINTNEXTLINE
-        snprintf_platform(str, sizeof(str), "string value for element %d is %d.", i, (int)(rand() % 1000));
+        compat_snprintf(str, sizeof(str), "string value for element %d is %d.", i, (int)(rand() % 1000));
         update_string(tag, i, str);
     }
 

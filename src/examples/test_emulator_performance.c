@@ -79,7 +79,7 @@ int main(void) {
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
-    set_interrupt_handler(handle_interrupt);
+    compat_set_interrupt_handler(handle_interrupt);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Starting tests...\n\n");
@@ -106,8 +106,8 @@ static volatile int end_test_run = 0;
 
 void run_test(size_t thread_count) {
     size_t total_iterations = 0;
-    pthread_t threads[MAX_THREADS] = {0};
-    int64_t start_time_ms = system_time_ms();
+    compat_thread_t threads[MAX_THREADS] = {0};
+    int64_t start_time_ms = compat_time_ms();
     int64_t end_time_ms = start_time_ms + TEST_TIME_MS;
     int64_t total_test_run_time = 0;
 
@@ -118,11 +118,11 @@ void run_test(size_t thread_count) {
 
     for(size_t thread_id = 0; thread_id < thread_count; thread_id++) {
         /* create the threads that run the test. */
-        pthread_create(&threads[thread_id], NULL, test_func, (void *)(uintptr_t)thread_id);
+        compat_thread_create(&threads[thread_id], test_func, (void *)(uintptr_t)thread_id);
     }
 
     /* wait for the test to end. */
-    while(end_time_ms > system_time_ms() && !terminate) { system_sleep_ms(100, NULL); }
+    while(end_time_ms > compat_time_ms() && !terminate) { compat_sleep_ms(100, NULL); }
 
     end_test_run = 1;
 
@@ -131,12 +131,12 @@ void run_test(size_t thread_count) {
         void *result_ptr;
         int result = 0;
 
-        pthread_join(threads[thread_index], &result_ptr);
+        compat_thread_join(threads[thread_index], &result_ptr);
 
         total_iterations += (size_t)(uintptr_t)result;
     }
 
-    total_test_run_time = system_time_ms() - start_time_ms;
+    total_test_run_time = compat_time_ms() - start_time_ms;
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Test %zu threads ran for %" PRId64 "ms and completed with %zu total iterations per millisecond.\n",
@@ -161,9 +161,9 @@ void *test_func(void *arg) {
         snprintf(tag_str, sizeof(tag_str), TEST_TAG_PATH_TEMPLATE, (int)(size_t)thread_id);
 
         /* create the tag */
-        start_ms = system_time_ms();
+        start_ms = compat_time_ms();
         tag = plc_tag_create(tag_str, TAG_CREATE_TIMEOUT_MS);
-        end_ms = system_time_ms();
+        end_ms = compat_time_ms();
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Thread %d: tag creation took %" PRId64 "ms\n", thread_id, end_ms - start_ms);
@@ -177,9 +177,9 @@ void *test_func(void *arg) {
 
         /* read as fast as we can */
         while(!end_test_run) {
-            start_ms = system_time_ms();
+            start_ms = compat_time_ms();
             rc = plc_tag_read(tag, TAG_OP_TIMEOUT_MS);
-            end_ms = system_time_ms();
+            end_ms = compat_time_ms();
 
             if(end_ms - start_ms > longest_read) { longest_read = end_ms - start_ms; }
 
