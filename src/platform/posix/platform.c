@@ -704,7 +704,7 @@ int mutex_destroy(mutex_p *m) {
  **************************************************************************/
 
 struct thread_t {
-    pthread_t p_thread;
+    pthread_thread_t p_thread;
     int initialized;
 };
 
@@ -735,7 +735,7 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
     }
 
     /* create a pthread.  0 means success. */
-    if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
+    if(pthread_thread_create((&((*t)->p_thread), NULL, func, arg)) {, NULL, func)
         pdebug(DEBUG_ERROR, "error creating thread.");
         return PLCTAG_ERR_THREAD_CREATE;
     }

@@ -329,7 +329,7 @@ int make_prefix(char *prefix_buf, int prefix_buf_size) {
     /* build the prefix */
 
     /* get the time parts */
-    epoch_ms = system_time_ms();
+    epoch_ms = compat_time_ms();
     epoch = (time_t)(epoch_ms / 1000);
     remainder_ms = (int)(epoch_ms % 1000);
 
@@ -437,7 +437,7 @@ void destroy_tags(void) {
 
 
 int start_reads(void) {
-    int64_t now = system_time_ms();
+    int64_t now = compat_time_ms();
     int rc = PLCTAG_STATUS_OK;
 
     /* kick off any reads that need to happen */
@@ -504,7 +504,7 @@ int main(int argc, char **argv) {
     }
 
     /* set up signal handler first. */
-    set_interrupt_handler(interrupt_handler);
+    compat_set_interrupt_handler(interrupt_handler);
 
     /* clear the array of tags. */
     // NOLINTNEXTLINE
@@ -524,7 +524,7 @@ int main(int argc, char **argv) {
     }
 
     /* wait for all tags to be ready */
-    while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { system_sleep_ms(10, NULL); }
+    while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { compat_sleep_ms(10, NULL); }
 
     if(rc != PLCTAG_STATUS_OK) {
         // NOLINTNEXTLINE
@@ -537,7 +537,7 @@ int main(int argc, char **argv) {
         int num_tags_read = 0;
         int64_t start, end;
 
-        start = system_time_ms();
+        start = compat_time_ms();
 
         rc = start_reads();
 
@@ -545,9 +545,9 @@ int main(int argc, char **argv) {
             /* reads kicked off successfully */
 
             /* wait for the reads to complete */
-            while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { system_sleep_ms(10, NULL); }
+            while((rc = check_tags()) == PLCTAG_STATUS_PENDING) { compat_sleep_ms(10, NULL); }
 
-            end = system_time_ms();
+            end = compat_time_ms();
 
             if(rc == PLCTAG_STATUS_OK) {
                 /* tags are ready. */
@@ -564,10 +564,10 @@ int main(int argc, char **argv) {
 
         if(rc != PLCTAG_STATUS_OK) {
             /* delay a long delay to let the library reconnect. */
-            system_sleep_ms(RECONNECT_DELAY_MS, NULL);
+            compat_sleep_ms(RECONNECT_DELAY_MS, NULL);
         } else {
             /* delay a tiny bit. */
-            system_sleep_ms(10, NULL);
+            compat_sleep_ms(10, NULL);
         }
     }
 

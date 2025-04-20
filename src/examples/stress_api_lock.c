@@ -94,12 +94,12 @@ void *test_tag(void *data) {
         int64_t end = 0;
 
         /* capture the starting time */
-        start = system_time_ms();
+        start = compat_time_ms();
 
         /* read the tag */
         rc = plc_tag_read(tag, DATA_TIMEOUT);
 
-        end = system_time_ms();
+        end = compat_time_ms();
 
         if(rc != PLCTAG_STATUS_OK) {
             // NOLINTNEXTLINE
@@ -141,7 +141,7 @@ void *test_tag(void *data) {
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    pthread_t threads[MAX_THREADS];
+    compat_thread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int64_t seconds = 30; /* default 30 seconds */
@@ -173,13 +173,13 @@ int main(int argc, char **argv) {
     for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Creating serial test thread (Test #%d).\n", tid);
-        pthread_create(&threads[tid], NULL, test_tag, (void *)(intptr_t)tid);
+        compat_thread_create(&threads[tid], test_tag, (void *)(intptr_t)tid);
     }
 
-    start_time = system_time_ms();
+    start_time = compat_time_ms();
     end_time = start_time + (seconds * 1000);
 
-    while(!done && system_time_ms() < end_time) { system_sleep_ms(100, NULL); }
+    while(!done && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
 
     if(done) {
         // NOLINTNEXTLINE
@@ -191,7 +191,7 @@ int main(int argc, char **argv) {
 
     done = 1;
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(threads[tid], NULL); }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "All test threads terminated.\n");

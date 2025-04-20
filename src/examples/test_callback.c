@@ -262,9 +262,9 @@ int main(void) {
 
     /* test a timeout. */
     printf("Testing timeout behavior.\n");
-    start = system_time_ms();
+    start = compat_time_ms();
     rc = plc_tag_read(tag, 1);
-    end = system_time_ms();
+    end = compat_time_ms();
 
     if(rc != PLCTAG_ERR_TIMEOUT) {
         printf("Expected PLCTAG_ERR_TIMEOUT, got %s in %dms!\n", plc_tag_decode_error(rc), (int)(end - start));

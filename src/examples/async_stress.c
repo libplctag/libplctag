@@ -114,14 +114,14 @@ int main(int argc, char **argv) {
         usage();
     }
 
-    tags = calloc(sizeof(*tags), (size_t)(unsigned int)num_tags);
+    tags = calloc((size_t)(unsigned int)num_tags, sizeof(*tags));
     if(!tags) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Error allocating tags array!\n");
         exit(PLCTAG_ERR_NO_MEM);
     }
 
-    statuses = calloc(sizeof(*statuses), (size_t)(unsigned int)num_tags);
+    statuses = calloc((size_t)(unsigned int)num_tags, sizeof(*statuses));
     if(!statuses) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Error allocating status array!\n");
@@ -130,12 +130,12 @@ int main(int argc, char **argv) {
     }
 
     /* set up handler for ^C etc. */
-    set_interrupt_handler(interrupt_handler);
+    compat_set_interrupt_handler(interrupt_handler);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
 
-    start = system_time_ms();
+    start = compat_time_ms();
 
     /* create the tags */
     for(i = 0; i < num_tags && !done; i++) {
@@ -165,14 +165,14 @@ int main(int argc, char **argv) {
         }
     }
 
-    end = system_time_ms();
+    end = compat_time_ms();
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Creation of %d tags took %dms.\n", num_tags, (int)(end - start));
 
     /* read in a loop until ^C pressed */
     while(!done) {
-        start = system_time_ms();
+        start = compat_time_ms();
 
         rc = read_tags(tags, statuses, num_tags, DATA_TIMEOUT);
         if(rc != PLCTAG_STATUS_OK) {
@@ -193,10 +193,10 @@ int main(int argc, char **argv) {
                 }
             }
 
-            if(need_sleep) { system_sleep_ms(10, NULL); /* give the background thread time to process the abort. */ }
+            if(need_sleep) { compat_sleep_ms(10, NULL); /* give the background thread time to process the abort. */ }
         }
 
-        end = system_time_ms();
+        end = compat_time_ms();
 
         /* count up the total ms */
         total_ms += (end - start);
@@ -259,7 +259,7 @@ int read_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
 
 
 int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
-    int64_t end_timeout = (int64_t)timeout_ms + system_time_ms();
+    int64_t end_timeout = (int64_t)timeout_ms + compat_time_ms();
     int rc = PLCTAG_STATUS_OK;
     int tags_pending = 0;
 
@@ -290,14 +290,14 @@ int wait_for_tags(int32_t *tags, int *statuses, int num_tags, int timeout_ms) {
         /* anything left to do? */
         if(tags_pending > 0) {
             /* yes, there is, delay a bit. */
-            system_sleep_ms(10, NULL);
+            compat_sleep_ms(10, NULL);
         }
-    } while(tags_pending > 0 && end_timeout > system_time_ms() && !done);
+    } while(tags_pending > 0 && end_timeout > compat_time_ms() && !done);
 
     rc = PLCTAG_STATUS_OK;
 
     /* did any tags time out? */
-    if(end_timeout <= system_time_ms()) {
+    if(end_timeout <= compat_time_ms()) {
         for(int i = 0; i < num_tags; i++) {
             if(statuses[i] == PLCTAG_STATUS_PENDING) {
                 /* we timed out, so abort and mark the status. */

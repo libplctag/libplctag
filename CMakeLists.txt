@@ -48,6 +48,8 @@ set(C_STANDARD 11)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+message(STATUS "Compiler Implicit Includes: ${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES}")
+
 # make sure our outputs are going somewhere sane
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)

@@ -58,8 +58,8 @@ thread when a tag is ready to read.
 typedef struct {
     int tid;
     int32_t tag;
-    pthread_cond_t read_event;
-    pthread_mutex_t mutex;
+    compat_cond_t read_event;
+    compat_mutex_t mutex;
 } tag_state;
 
 
@@ -78,9 +78,9 @@ void tag_callback(int32_t tag_id, int event, int status, void *arg) {
     // NOLINTNEXTLINE
     fprintf(stderr, "callback tag(%d), tag id(%d), event(%d), status(%d)\n", tid, tag_id, event, status);
 
-    pthread_mutex_lock(&states[tid].mutex);
-    pthread_cond_signal(&states[tid].read_event);
-    pthread_mutex_unlock(&states[tid].mutex);
+    compat_mutex_lock(&states[tid].mutex);
+    compat_cond_signal(&states[tid].read_event);
+    compat_mutex_unlock(&states[tid].mutex);
 }
 
 
@@ -105,8 +105,8 @@ void *thread_func(void *data) {
     states[tid].tid = tid;
 
     /* should check result! */
-    pthread_mutex_init((pthread_mutex_t *)&states[tid].mutex, NULL);
-    pthread_cond_init(&states[tid].read_event, NULL);
+    compat_mutex_init((compat_mutex_t *)&states[tid].mutex);
+    compat_cond_init(&states[tid].read_event);
 
     /* everything OK? */
     if(tag < 0) {
@@ -117,15 +117,15 @@ void *thread_func(void *data) {
 
     while((rc = plc_tag_status(tag)) == PLCTAG_STATUS_PENDING) {
         if(done) { break; }
-        system_yield();
+        compat_thread_yield();
     }
 
     if(rc != PLCTAG_STATUS_OK) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc));
         plc_tag_destroy(tag);
-        pthread_mutex_destroy(&states[tid].mutex);
-        pthread_cond_destroy(&states[tid].read_event);
+        compat_mutex_destroy(&states[tid].mutex);
+        compat_cond_destroy(&states[tid].read_event);
         return 0;
     }
 
@@ -137,54 +137,54 @@ void *thread_func(void *data) {
         int64_t end;
 
         /* capture the starting time */
-        start = system_time_ms();
+        start = compat_time_ms();
 
         do {
             rc = plc_tag_read(tag, 0);
             // NOLINTNEXTLINE
             if(rc < 0) { fprintf(stderr, "Error setting up tag internal state. %s\n", plc_tag_decode_error(rc)); }
             if(rc == PLCTAG_STATUS_PENDING) {
-                pthread_mutex_lock(&states[tid].mutex);
-                pthread_cond_wait(&states[tid].read_event, &states[tid].mutex);
-                pthread_mutex_unlock(&states[tid].mutex);
+                compat_mutex_lock(&states[tid].mutex);
+                compat_cond_wait(&states[tid].read_event, &states[tid].mutex);
+                compat_mutex_unlock(&states[tid].mutex);
 
                 if((rc = plc_tag_status(tag)) != PLCTAG_STATUS_OK) {
                     // NOLINTNEXTLINE
                     fprintf(stderr, "something is wrong for tag(%d), status(%s)\n", tag, plc_tag_decode_error(rc));
                     plc_tag_destroy(tag);
-                    pthread_mutex_destroy(&states[tid].mutex);
-                    pthread_cond_destroy(&states[tid].read_event);
+                    compat_mutex_destroy(&states[tid].mutex);
+                    compat_cond_destroy(&states[tid].read_event);
                     return 0;
                 }
             }
             value = plc_tag_get_int32(tag, 0);
         } while(0);
 
-        end = system_time_ms();
+        end = compat_time_ms();
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Thread %d got result %d with return code %s in %" PRId64 "ms\n", tid, value, plc_tag_decode_error(rc),
                 (end - start));
 
-        system_yield();
+        compat_thread_yield();
     }
 
     plc_tag_destroy(tag);
 
-    pthread_mutex_destroy(&states[tid].mutex);
-    pthread_cond_destroy(&states[tid].read_event);
+    compat_mutex_destroy(&states[tid].mutex);
+    compat_cond_destroy(&states[tid].read_event);
 
     return 0;
 }
 
 int main(int argc, char **argv) {
 
-    pthread_t thread[MAX_THREADS];
+    compat_thread_t thread[MAX_THREADS];
 
     int thread_id = 0;
 
     /* set up handler for ^C etc. */
-    set_interrupt_handler(interrupt_handler);
+    compat_set_interrupt_handler(interrupt_handler);
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Hit ^C to terminate the test.\n");
@@ -218,13 +218,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Creating %d threads.\n", num_threads);
 
     for(thread_id = 0; thread_id < num_threads; thread_id++) {
-        pthread_create(&thread[thread_id], NULL, thread_func, (void *)(intptr_t)thread_id);
+        compat_thread_create(&thread[thread_id], thread_func, (void *)(intptr_t)thread_id);
     }
 
     /* wait until ^C */
-    while(!done) { system_sleep_ms(100, NULL); }
+    while(!done) { compat_sleep_ms(100, NULL); }
 
-    for(thread_id = 0; thread_id < num_threads; thread_id++) { pthread_join(thread[thread_id], NULL); }
+    for(thread_id = 0; thread_id < num_threads; thread_id++) { compat_thread_join(thread[thread_id], NULL); }
 
     return 0;
 }

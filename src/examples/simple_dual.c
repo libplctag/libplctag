@@ -95,7 +95,7 @@ int main(void) {
     }
 
     /* brute force wait for tags to finish setting up */
-    system_sleep_ms(DATA_TIMEOUT, NULL);
+    compat_sleep_ms(DATA_TIMEOUT, NULL);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);
@@ -137,7 +137,7 @@ int main(void) {
     }
 
     /* let the reads complete */
-    system_sleep_ms(DATA_TIMEOUT, NULL);
+    compat_sleep_ms(DATA_TIMEOUT, NULL);
 
     rc1 = plc_tag_status(tag1);
     rc2 = plc_tag_status(tag2);

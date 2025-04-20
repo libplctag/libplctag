@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
                 /* fall through */
             case PLC_LIB_UINT8:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNu8 "", &u_val8) != 1) {
+                if(compat_sscanf(write_str, "%" SCNu8 "", &u_val8) != 1) {
                     printf("ERROR: bad format for unsigned 8-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_UINT16:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNu16 "", &u_val16) != 1) {
+                if(compat_sscanf(write_str, "%" SCNu16 "", &u_val16) != 1) {
                     printf("ERROR: bad format for unsigned 16-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -257,7 +257,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_UINT32:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNu32 "", &u_val32) != 1) {
+                if(compat_sscanf(write_str, "%" SCNu32 "", &u_val32) != 1) {
                     printf("ERROR: bad format for unsigned 32-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -267,7 +267,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_UINT64:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNu64 "", &u_val64) != 1) {
+                if(compat_sscanf(write_str, "%" SCNu64 "", &u_val64) != 1) {
                     printf("ERROR: bad format for unsigned 64-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -277,7 +277,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT8:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNd8 "", &i_val8) != 1) {
+                if(compat_sscanf(write_str, "%" SCNd8 "", &i_val8) != 1) {
                     printf("ERROR: bad format for signed 8-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -287,7 +287,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT16:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNd16 "", &i_val16) != 1) {
+                if(compat_sscanf(write_str, "%" SCNd16 "", &i_val16) != 1) {
                     printf("ERROR: bad format for signed 16-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -297,7 +297,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT32:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNd32 "", &i_val32) != 1) {
+                if(compat_sscanf(write_str, "%" SCNd32 "", &i_val32) != 1) {
                     printf("ERROR: bad format for signed 32-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -307,7 +307,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_SINT64:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%" SCNd64 "", &i_val64) != 1) {
+                if(compat_sscanf(write_str, "%" SCNd64 "", &i_val64) != 1) {
                     printf("ERROR: bad format for signed 64-bit integer for write value.\n");
                     usage();
                     exit(1);
@@ -317,7 +317,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_REAL32:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%f", &f_val32) != 1) {
+                if(compat_sscanf(write_str, "%f", &f_val32) != 1) {
                     printf("ERROR: bad format for 32-bit floating point for write value.\n");
                     usage();
                     exit(1);
@@ -327,7 +327,7 @@ int main(int argc, char **argv) {
 
             case PLC_LIB_REAL64:
                 // NOLINTNEXTLINE
-                if(sscanf_platform(write_str, "%lf", &f_val64) != 1) {
+                if(compat_sscanf(write_str, "%lf", &f_val64) != 1) {
                     printf("ERROR: bad format for 64-bit floating point for write value.\n");
                     usage();
                     exit(1);

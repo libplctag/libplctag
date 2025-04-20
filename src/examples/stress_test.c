@@ -87,8 +87,8 @@ static void close_log(FILE *log) {
 static int wait_ms(int timeout_ms) {
     int64_t timeout = 0;
 
-    timeout = system_time_ms() + timeout_ms;
-    while(!done && timeout > system_time_ms()) { system_sleep_ms(5, NULL); }
+    timeout = compat_time_ms() + timeout_ms;
+    while(!done && timeout > compat_time_ms()) { compat_sleep_ms(5, NULL); }
 
     if(!done) {
         return PLCTAG_STATUS_OK;
@@ -148,7 +148,7 @@ static void *test_cip(void *data) {
     int start_index = (tid - 1) * num_elems;
 
     /* a hack to allow threads to start. */
-    system_sleep_ms((uint32_t)tid, NULL);
+    compat_sleep_ms((uint32_t)tid, NULL);
 
     log = open_log(tid);
 
@@ -175,7 +175,7 @@ static void *test_cip(void *data) {
         }
 
         /* capture the starting time */
-        start = system_time_ms();
+        start = compat_time_ms();
 
         do {
             rc = plc_tag_read(tag, DATA_TIMEOUT);
@@ -204,7 +204,7 @@ static void *test_cip(void *data) {
             }
         } while(0);
 
-        end = system_time_ms();
+        end = compat_time_ms();
 
         total_io_time += (end - start);
 
@@ -218,7 +218,7 @@ static void *test_cip(void *data) {
             // NOLINTNEXTLINE
             fprintf(log, "*** Test %d, iteration %d updated %d elements in %dms.\n", tid, iteration, num_elems,
                     (int)(end - start));
-            system_sleep_ms(10, NULL);
+            compat_sleep_ms(10, NULL);
         }
 
         iteration++;
@@ -242,7 +242,7 @@ static void interrupt_handler(void) { done = 1; }
 #define MAX_THREADS (100)
 
 int main(int argc, char **argv) {
-    pthread_t threads[MAX_THREADS];
+    compat_thread_t threads[MAX_THREADS];
     int64_t start_time;
     int64_t end_time;
     int num_threads = 0;
@@ -251,7 +251,7 @@ int main(int argc, char **argv) {
     int success = 0;
     thread_args args[MAX_THREADS];
 
-    set_interrupt_handler(interrupt_handler);
+    compat_set_interrupt_handler(interrupt_handler);
 
     /* check the library version. */
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
@@ -294,19 +294,19 @@ int main(int argc, char **argv) {
         // NOLINTNEXTLINE
         fprintf(stderr, "--- Creating serial test thread %d with %d elements.\n", args[tid].tid, args[tid].num_elems);
 
-        pthread_create(&threads[tid], NULL, test_cip, &args[tid]);
+        compat_thread_create(&threads[tid], test_cip, &args[tid]);
     }
 
-    start_time = system_time_ms();
+    start_time = compat_time_ms();
     end_time = start_time + (int64_t)(seconds * 1000);
 
-    while(!done && system_time_ms() < end_time) { system_sleep_ms(100, NULL); }
+    while(!done && compat_time_ms() < end_time) { compat_sleep_ms(100, NULL); }
 
     success = !done;
 
     done = 1;
 
-    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { pthread_join(threads[tid], NULL); }
+    for(int tid = 0; tid < num_threads && tid < MAX_THREADS; tid++) { compat_thread_join(threads[tid], NULL); }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "--- All test threads terminated.\n");
