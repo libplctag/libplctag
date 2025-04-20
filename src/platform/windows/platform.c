@@ -2360,7 +2360,7 @@ int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size
 
 
 int sleep_ms(int ms) {
-    Sleep(ms);
+    Sleep((DWORD)ms);
     return 1;
 }
 
