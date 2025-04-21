@@ -34,14 +34,14 @@
 
 #define _GNU_SOURCE
 
-// #include <arpa/inet.h>
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <math.h>
-// #include <netdb.h>
-// #include <netinet/in.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <platform.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -49,7 +49,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-// #include <sys/socket.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
@@ -704,7 +704,7 @@ int mutex_destroy(mutex_p *m) {
  **************************************************************************/
 
 struct thread_t {
-    pthread_thread_t p_thread;
+    pthread_t p_thread;
     int initialized;
 };
 
@@ -735,7 +735,7 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
     }
 
     /* create a pthread.  0 means success. */
-    if(pthread_thread_create((&((*t)->p_thread), NULL, func, arg)) {, NULL, func)
+    if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
         pdebug(DEBUG_ERROR, "error creating thread.");
         return PLCTAG_ERR_THREAD_CREATE;
     }

@@ -55,7 +55,7 @@ struct mutex_t {
 #if IS_WINDOWS
     HANDLE h_mutex;
 #else
-    compat_mutex_t p_mutex;
+    pthread_mutex_t p_mutex;
 #endif
     int initialized;
 };
@@ -89,7 +89,7 @@ int mutex_create(mutex_p *m) {
     pthread_mutexattr_init(&mutex_attribs);
     pthread_mutexattr_settype(&mutex_attribs, PTHREAD_MUTEX_RECURSIVE);
 
-    if(compat_mutex_init(&((*m)->p_mutex), &mutex_attribs)) {
+    if(pthread_mutex_init(&((*m)->p_mutex), &mutex_attribs)) {
         pthread_mutexattr_destroy(&mutex_attribs);
 #endif
         mem_free(*m);
@@ -130,7 +130,7 @@ int mutex_lock_impl(const char *func, int line, mutex_p m) {
     /* FIXME - This will potentially hang forever! */
     while(dwWaitResult != WAIT_OBJECT_0) { dwWaitResult = WaitForSingleObject(m->h_mutex, INFINITE); }
 #else
-    if(compat_mutex_lock(&(m->p_mutex))) {
+    if(pthread_mutex_lock(&(m->p_mutex))) {
         info("WARN: error locking mutex.");
         return MUTEX_ERR_MUTEX_LOCK;
     }
@@ -161,7 +161,7 @@ int mutex_try_lock_impl(const char *func, int line, mutex_p m) {
     dwWaitResult = WaitForSingleObject(m->h_mutex, 0);
     if(dwWaitResult != WAIT_OBJECT_0) {
 #else
-    if(compat_mutex_trylock(&(m->p_mutex))) {
+    if(pthread_mutex_trylock(&(m->p_mutex))) {
 #endif
         info("SPEW: error locking mutex.");
         return MUTEX_ERR_MUTEX_LOCK;
@@ -187,7 +187,7 @@ int mutex_unlock_impl(const char *func, int line, mutex_p m) {
 #if IS_WINDOWS
     if(!ReleaseMutex(m->h_mutex)) {
 #else
-    if(compat_mutex_unlock(&(m->p_mutex))) {
+    if(pthread_mutex_unlock(&(m->p_mutex))) {
 #endif
         info("WARN: error unlocking mutex.");
         return MUTEX_ERR_MUTEX_UNLOCK;
@@ -210,7 +210,7 @@ int mutex_destroy(mutex_p *m) {
 #if IS_WINDOWS
     CloseHandle((*m)->h_mutex);
 #else
-    if(compat_mutex_destroy(&((*m)->p_mutex))) {
+    if(pthread_mutex_destroy(&((*m)->p_mutex))) {
         info("WARN: error while attempting to destroy mutex.");
         return MUTEX_ERR_MUTEX_DESTROY;
     }
