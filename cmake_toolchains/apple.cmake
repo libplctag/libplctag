@@ -1,3 +1,4 @@
+message("Building on/for macOS")
 
 set(CMAKE_MACOSX_RPATH ON)
 
