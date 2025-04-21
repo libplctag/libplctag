@@ -96,7 +96,7 @@ macro(print_all_ar_variables)
 endmacro()
 
 # Debugging
-print_all_ar_variables()
+# print_all_ar_variables()
 
 # shared library
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
@@ -113,7 +113,7 @@ endif(PLATFORM_WINDOWS)
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
-target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)    
+target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)
 
 if(PLATFORM_WINDOWS)
     target_compile_definitions(plctag_static PUBLIC -D_CRT_SECURE_NO_WARNINGS)
@@ -129,6 +129,3 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h" DESTINATION include)
 if(EXISTS "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc")
     install(FILES "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" DESTINATION "lib${LIB_SUFFIX}/pkgconfig")
 endif()
-
-
-
