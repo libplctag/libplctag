@@ -65,6 +65,6 @@ elseif(${CROSS_BUILD_TYPE})
 endif()
 
 # pull in the GCC config
-include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/clang_or_gcc.cmake")
 
 set(POSIX True)
