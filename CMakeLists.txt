@@ -95,42 +95,17 @@ endif()
 # Target platform-specific config
 if(ANDROID_ABI OR ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/android.cmake")
-elseif(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
-elseif(APPLE)
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/apple.cmake")
-elseif(UNIX)
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/unix.cmake")
-elseif(WIN32)
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/windows.cmake")
-else()
-    message("Unsupported OS/platform!")
-    return()
-endif()
-
-
-# Target platform-specific config
-if(ANDROID_ABI OR ANDROID)
-    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/android.cmake")
-elseif(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
 elseif(APPLE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/apple.cmake")
 elseif(UNIX)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/unix.cmake")
 elseif(WIN32)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/windows.cmake")
-endif()
-
-# C compiler specific settings
-if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
-elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/msvc.cmake")
 else()
-    message("Unsupported OS/platform!")
+    message("Unsupported platform!")
     return()
 endif()
+
 
 
 # where to find include files.
