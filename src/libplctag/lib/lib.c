@@ -31,13 +31,14 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#define LIBPLCTAGDLL_EXPORTS 1
+#define LIBPLCTAGDLL_EXPORTS (1)
+
+#include <libplctag/lib/libplctag.h>
 
 #include <ctype.h>
 #include <float.h>
 #include <inttypes.h>
 #include <libplctag/lib/init.h>
-#include <libplctag/lib/libplctag.h>
 #include <libplctag/lib/tag.h>
 #include <libplctag/lib/version.h>
 #include <libplctag/protocols/ab/ab.h>

@@ -113,7 +113,7 @@ endif(PLATFORM_WINDOWS)
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
-target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAGDLL_EXPORTS=1)    
+target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)    
 
 if(PLATFORM_WINDOWS)
     target_compile_definitions(plctag_static PUBLIC -D_CRT_SECURE_NO_WARNINGS)

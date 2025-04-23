@@ -36,6 +36,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 cmake_minimum_required (VERSION 3.10)
 cmake_policy(SET CMP0054 NEW)
 
+# debugging help
+set(CMAKE_BUILD_PARALLEL_LEVEL 1)
+
 
 # this is the root libplctag project
 project (libplctag_project)
@@ -74,6 +77,19 @@ message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 # we need threads
 find_package(Threads REQUIRED)
 
+# C compiler-specific settings
+if(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
+    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
+elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
+elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/msvc.cmake")
+else()
+    message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
+    return()
+endif()
+
+
 # Target platform-specific config
 if(ANDROID_ABI OR ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/android.cmake")
@@ -91,8 +107,9 @@ endif()
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/msvc.cmake")
 else()
-    message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
+    message("Unsupported OS/platform!")
     return()
 endif()
 

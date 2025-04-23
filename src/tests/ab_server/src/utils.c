@@ -41,7 +41,7 @@
 #include <time.h>
 
 
-#if defined(__USE_POSIX) || defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || (__linux__)
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || (__linux__)
 #    define USE_ARC4RANDOM
 #    define PLATFORM_POSIX
 
@@ -58,15 +58,13 @@
 #    define USE_BCRYPTGENRANDOM
 #    define PLATFORM_WINDOWS
 
+/* Windows include file order is important! */
 #    include <Winsock2.h>
-
 #    include <Windows.h>
-
 #    include <Ws2tcpip.h>
-
 #    include <io.h>
-#    include <strsafe.h>
 #    include <tchar.h>
+#    include <strsafe.h>
 #    include <wincrypt.h>
 
 #else
@@ -82,7 +80,11 @@
 #ifdef PLATFORM_WINDOWS
 
 int util_sleep_ms(int ms) {
-    Sleep(ms);
+    if(ms <= 0) {
+        return 1;
+    }
+
+    Sleep((DWORD)(unsigned int)ms);
     return 1;
 }
 

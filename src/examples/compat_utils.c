@@ -126,7 +126,6 @@ int pthread_mutex_timedlock(pthread_mutex_t *mtx, const struct timespec *abstime
 
 #    endif
 
-
 #elif defined(WINDOWS_PLATFORM)
 
 #    include <process.h>
@@ -204,9 +203,12 @@ int set_interrupt_handler(void (*handler)(void)) {
 }
 
 
+#if !defined(__GNUC__)
+
 /* threads */
-int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *),
-                   void *restrict arg) {
+int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *),
+                   void *arg) {
+    (void)attr;
     *thread = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))start_routine, arg, 0, NULL);
     return *thread ? 0 : -1;
 }
@@ -262,7 +264,7 @@ void system_yield(void) { SwitchToThread(); }
 
 /* mutexes*/
 /*
-Need to emulate the following
+Need to emulate the following?
 
 
 pthread_mutex_t fastmutex = PTHREAD_MUTEX_INITIALIZER;
@@ -293,7 +295,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 }
 
 
-int pthread_mutex_timedlock(pthread_mutex_t *restrict mutex, const struct timespec *restrict abs_timeout_time) {
+int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abs_timeout_time) {
     DWORD ms = (DWORD)(abs_timeout_time->tv_sec * 1000 + abs_timeout_time->tv_nsec / 1000000);
     DWORD start_time = GetTickCount();
 
@@ -375,6 +377,7 @@ int pthread_cond_destroy(pthread_cond_t *cond) {
     return 0;
 }
 
+#endif /* #if !defined(MINGW) */
 
 #else
 #    error "Not a supported platform!"
