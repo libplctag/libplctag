@@ -56,19 +56,6 @@ set(EXAMPLE_EXECUTABLES
   tag_rw2
 )
 
-# foreach(example ${EXAMPLE_EXECUTABLES})
-#     if(example STREQUAL "simple_cpp")
-#         set(FILE_EXTENSION "cpp")
-#     else()
-#         set(FILE_EXTENSION "c")
-#     endif()
-
-#     add_executable(${example} "${CMAKE_CURRENT_SOURCE_DIR}/${example}.${FILE_EXTENSION}" "${CMAKE_CURRENT_SOURCE_DIR}/compat_utils.c")
-
-#     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
-# endforeach()
-
-
 foreach(example ${EXAMPLE_EXECUTABLES})
     if(example STREQUAL "simple_cpp")
         set(FILE_EXTENSION "cpp")
