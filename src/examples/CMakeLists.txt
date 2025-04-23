@@ -78,7 +78,7 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     # message("${example}:${CMAKE_BUILD_TYPE} is being compiled with flags=${CMAKE_C_FLAGS}")
 
-    add_executable(${example} "${CMAKE_CURRENT_SOURCE_DIR}/${example}.${FILE_EXTENSION}" "${CMAKE_CURRENT_SOURCE_DIR}/compat_utils.c")
+    add_executable(${example} "${CMAKE_SOURCE_DIR}/src/examples/${example}.${FILE_EXTENSION}" "${CMAKE_SOURCE_DIR}/src/examples/compat_utils.c")
 
     # Link with the static library and apply static linking flags
     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
@@ -87,6 +87,7 @@ foreach(example ${EXAMPLE_EXECUTABLES})
         target_link_options(${example} PRIVATE ${STATIC_LINK_OPTIONS})
     endif()
 endforeach()
+
 
 get_target_property(target_includes async INCLUDE_DIRECTORIES)
 message(STATUS "Target 'async' Includes (PRIVATE/PUBLIC): ${target_includes}")
