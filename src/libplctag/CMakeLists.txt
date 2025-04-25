@@ -5,8 +5,10 @@ CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_S
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
+    set(EXTRA_LINK_FLAGS "${EXTRA_LINK_FLAGS} ${EXTRA_LINK_FLAGS_DEBUG}")
 else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
+    set(EXTRA_LINK_FLAGS "${EXTRA_LINK_FLAGS} ${EXTRA_LINK_FLAGS_MINSIZEREL}")
 endif()
 
 message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
@@ -112,17 +114,25 @@ add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
 set_target_properties(plctag_dyn PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag")
 
+if(EXTRA_LINK_FLAGS)
+    target_link_options(plctag_dyn PUBLIC "${EXTRA_LINK_FLAGS}")
+endif()
+
 if(PLATFORM_WINDOWS)
     target_compile_definitions(plctag_dyn PUBLIC -D_CRT_SECURE_NO_WARNINGS)
 endif(PLATFORM_WINDOWS)
 
-# install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
+install(TARGETS plctag_dyn DESTINATION lib${LIB_SUFFIX})
 
 # static library
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
 target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)
+
+if(STATIC_LINK_OPTIONS)
+    target_link_options(plctag_static PUBLIC "${EXTRA_LINK_FLAGS} ${STATIC_LINK_OPTIONS}")
+endif()
 
 if(PLATFORM_WINDOWS)
     target_compile_definitions(plctag_static PUBLIC -D_CRT_SECURE_NO_WARNINGS)
@@ -131,7 +141,7 @@ endif(PLATFORM_WINDOWS)
 # make sure the .h file is in the output directory
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.h" COPYONLY)
 
-# install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
+install(TARGETS plctag_static DESTINATION lib${LIB_SUFFIX})
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h" DESTINATION include)
 

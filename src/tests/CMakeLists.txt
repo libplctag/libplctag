@@ -39,7 +39,16 @@ set(AB_SERVER_FILES
 
 # Add ab_server executable
 add_executable(ab_server ${AB_SERVER_FILES})
-target_link_libraries(ab_server ${EXTRA_LINKER_LIBS})
+target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
+
+if(STATIC_LINK_OPTIONS)
+    set(EXTRA_LINK_OPTIONS "${EXTRA_LINK_OPTIONS} ${STATIC_LINK_OPTIONS}")
+endif()
+
+if(EXTRA_LINK_OPTIONS)
+    target_link_options(ab_server PUBLIC ${EXTRA_LINK_OPTIONS})
+endif()
+
 
 if(POSIX AND BUILD_MODBUS_EMULATOR)
     find_package(PkgConfig REQUIRED)

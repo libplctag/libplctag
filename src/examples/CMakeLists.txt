@@ -73,9 +73,10 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
 
     if(STATIC_LINK_OPTIONS)
-        target_link_options(${example} PRIVATE ${STATIC_LINK_OPTIONS})
+        set(EXTRA_LINK_OPTIONS "${EXTRA_LINK_OPTIONS} ${STATIC_LINK_OPTIONS}")
+    endif()
+
+    if(EXTRA_LINK_OPTIONS)
+        target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
     endif()
 endforeach()
-
-get_target_property(target_includes async INCLUDE_DIRECTORIES)
-message(STATUS "Target 'async' Includes (PRIVATE/PUBLIC): ${target_includes}")
