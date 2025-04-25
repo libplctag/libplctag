@@ -1,5 +1,14 @@
 message("Building test utilities.")
 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
+else()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
+endif()
+
+message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
+
+
 # Define the source files for ab_server
 set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/cip.c
