@@ -18,13 +18,6 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 # get defaults for GCC
 include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
 
-# set up config for MinGW
-# set(CMAKE_SYSTEM_NAME Windows)
-# set(CMAKE_C_COMPILER gcc)
-# set(CMAKE_CXX_COMPILER g++)
-# set(CMAKE_MAKE_PROGRAM mingw32-make)
-
 message("CMAKE_C_COMPILER = ${CMAKE_C_COMPILER}")
 message("CMAKE_CXX_COMPILER = ${CMAKE_CXX_COMPILER}")
 message("CMAKE_MAKE_PROGRAM = ${CMAKE_MAKE_PROGRAM}")
-

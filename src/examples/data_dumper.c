@@ -183,13 +183,13 @@ int process_line(const char *line) {
 
         tags[num_tags].name = strdup(parts[0]);
 
-        if(strcasecmp("dint", parts[1]) == 0) {
+        if(compat_strcasecmp("dint", parts[1]) == 0) {
             tags[num_tags].data_type = i32_type;
-        } else if(strcasecmp("int", parts[1]) == 0) {
+        } else if(compat_strcasecmp("int", parts[1]) == 0) {
             tags[num_tags].data_type = i16_type;
-        } else if(strcasecmp("sint", parts[1]) == 0) {
+        } else if(compat_strcasecmp("sint", parts[1]) == 0) {
             tags[num_tags].data_type = i8_type;
-        } else if(strcasecmp("real", parts[1]) == 0) {
+        } else if(compat_strcasecmp("real", parts[1]) == 0) {
             tags[num_tags].data_type = f32_type;
         } else {
             // NOLINTNEXTLINE

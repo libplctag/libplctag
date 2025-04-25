@@ -174,7 +174,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose

@@ -122,27 +122,27 @@ void parse_args(int argc, char **argv) {
         if(!strcmp(argv[i], "-t")) {
             i++; /* get the arg next */
             if(i < argc) {
-                if(!strcasecmp("bit", argv[i])) {
+                if(!compat_strcasecmp("bit", argv[i])) {
                     data_type = PLC_LIB_BIT;
-                } else if(!strcasecmp("uint8", argv[i])) {
+                } else if(!compat_strcasecmp("uint8", argv[i])) {
                     data_type = PLC_LIB_UINT8;
-                } else if(!strcasecmp("sint8", argv[i])) {
+                } else if(!compat_strcasecmp("sint8", argv[i])) {
                     data_type = PLC_LIB_SINT8;
-                } else if(!strcasecmp("uint16", argv[i])) {
+                } else if(!compat_strcasecmp("uint16", argv[i])) {
                     data_type = PLC_LIB_UINT16;
-                } else if(!strcasecmp("sint16", argv[i])) {
+                } else if(!compat_strcasecmp("sint16", argv[i])) {
                     data_type = PLC_LIB_SINT16;
-                } else if(!strcasecmp("uint32", argv[i])) {
+                } else if(!compat_strcasecmp("uint32", argv[i])) {
                     data_type = PLC_LIB_UINT32;
-                } else if(!strcasecmp("sint32", argv[i])) {
+                } else if(!compat_strcasecmp("sint32", argv[i])) {
                     data_type = PLC_LIB_SINT32;
-                } else if(!strcasecmp("uint64", argv[i])) {
+                } else if(!compat_strcasecmp("uint64", argv[i])) {
                     data_type = PLC_LIB_UINT64;
-                } else if(!strcasecmp("sint64", argv[i])) {
+                } else if(!compat_strcasecmp("sint64", argv[i])) {
                     data_type = PLC_LIB_SINT64;
-                } else if(!strcasecmp("real32", argv[i])) {
+                } else if(!compat_strcasecmp("real32", argv[i])) {
                     data_type = PLC_LIB_REAL32;
-                } else if(!strcasecmp("real64", argv[i])) {
+                } else if(!compat_strcasecmp("real64", argv[i])) {
                     data_type = PLC_LIB_REAL64;
                 } else {
                     printf("ERROR: unknown data type: %s\n", argv[i]);
