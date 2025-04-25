@@ -529,7 +529,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     if(!tag->name) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate a copy of the data file \"%s\"!\n", data_file_name);
-        usage();
+        exit(1);
     }
 
     /* allocate the tag data array. */
@@ -539,6 +539,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate tag data buffer!\n");
         free(tag->name);
+        exit(1);
     }
 
     info("Processed \"%s\" into tag %s of type %x with dimensions (%d, %d, %d).", tag_str, tag->name, tag->tag_type,
@@ -580,11 +581,9 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         error("Unable to allocate memory for new tag!");
         return;
     }
-    
+
     /* create the tag data mutex */
-    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) {
-        error("Unable to create tag data mutex!");
-    }
+    if(mutex_create(&(tag->data_mutex)) != MUTEX_STATUS_OK) { error("Unable to create tag data mutex!"); }
 
 
     /* create the tag data mutex */
@@ -730,7 +729,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     if(!tag->name) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate a copy of the tag name \"%s\"!\n", tag_name);
-        usage();
+        exit(1);
     }
 
     /* allocate the tag data array. */
@@ -740,6 +739,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Unable to allocate tag data buffer!\n");
         free(tag->name);
+        exit(1);
     }
 
     info("Processed \"%s\" into tag %s of type %x with dimensions (%d, %d, %d).", tag_str, tag->name, tag->tag_type,

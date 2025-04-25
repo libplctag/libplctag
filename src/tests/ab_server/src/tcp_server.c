@@ -71,12 +71,12 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
     (void)host;
 
     if(server) {
-        socket_result sock_res = socket_open_tcp_server(port);
+        socket_fd_result sock_res = socket_open_tcp_server(port);
 
-        if(socket_result_is_val(sock_res)) {
-            server->sock_fd = socket_result_get_val(sock_res);
+        if(socket_fd_result_is_val(sock_res)) {
+            server->sock_fd = socket_fd_result_get_val(sock_res);
         } else {
-            error("ERROR: Unable to open TCP socket, error code %d!", socket_result_get_err(sock_res)); 
+            error("ERROR: Unable to open TCP socket, error code %d!", socket_fd_result_get_err(sock_res));
         }
 
         server->handler = handler;
@@ -94,10 +94,10 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
     info("Waiting for new client connection.");
 
     do {
-        socket_result sock_res = socket_accept(server->sock_fd);
+        socket_fd_result sock_res = socket_accept(server->sock_fd, 1000); /* MAGIC */
 
-        if(socket_result_is_val(sock_res)) {
-            SOCKET client_fd = socket_result_get_val(sock_res);
+        if(socket_fd_result_is_val(sock_res)) {
+            SOCKET client_fd = socket_fd_result_get_val(sock_res);
             struct client_session *session = NULL;
 
             /* The client thread is responsible for freeing these */
@@ -105,18 +105,14 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
             // FIXME - combine the allocations and use calloc or memset to get zeroed memory
             session = malloc(sizeof(struct client_session));
 
-            if(!session) {
-                error("Unable to allocate memory for the session!");
-            }
+            if(!session) { error("Unable to allocate memory for the session!"); }
 
             // NOLINTNEXTLINE
             memset(session, 0, sizeof(*session));
 
             session->server_context = malloc(server->context_size);
 
-            if(!session->server_context) {
-                error("Unable to allocate memory for the server context!");
-            }
+            if(!session->server_context) { error("Unable to allocate memory for the server context!"); }
 
             /* Make a copy of the server context so the thread can use it without threading concerns. */
             // NOLINTNEXTLINE
@@ -128,12 +124,16 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
             if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) != THREAD_STATUS_OK) {
                 error("ERROR: Unable to create connection handler thread!");
             }
+        } else if(socket_fd_result_get_err(sock_res) == SOCKET_ERR_TIMEOUT) {
+            info("Timed out waiting for new client connection.");
+            continue;
         } else {
-            error("ERROR: Received error, %d, accepting new client connection!", socket_result_get_err(sock_res));
+            error("ERROR: Received error, %d, accepting new client connection!", socket_fd_result_get_err(sock_res));
+            done = true;
         }
 
-        /* wait a bit to give back the CPU. */
-        util_sleep_ms(1);
+        /* give back the CPU. */
+        system_yield();
     } while(!done && !*terminate);
 
     /* in case we were terminated by signal, raise the done flag for all the threads to exit */
@@ -150,6 +150,7 @@ void tcp_server_destroy(tcp_server_p server) {
         free(server);
     }
 }
+
 
 THREAD_FUNC(conn_handler) {
     client_session_p session = arg;
@@ -168,15 +169,21 @@ THREAD_FUNC(conn_handler) {
     tmp_input = session->buffer;
 
     do {
-        socket_read_result slice_res = socket_read(session->client_fd, tmp_input);
+        socket_slice_result slice_res = socket_read(session->client_fd, tmp_input, 1000); /* MAGIC */
 
-        if(socket_read_result_is_err(slice_res)) {
-            info("Error, %d, reading data from the client!", socket_read_result_get_err(slice_res));
-            break;
+        if(socket_slice_result_is_err(slice_res)) {
+            if(socket_slice_result_get_err(slice_res) == SOCKET_ERR_TIMEOUT) {
+                info("Timed out waiting for client to send us a request.");
+                continue;
+            } else {
+                info("Error, %d, reading data from the client!", socket_slice_result_get_err(slice_res));
+                rc = TCP_SERVER_DONE;
+                break;
+            }
         }
 
         /* get an incoming packet or a partial packet. */
-        tmp_input = socket_read_result_get_val(slice_res);
+        tmp_input = socket_slice_result_get_val(slice_res);
 
         if(slice_has_err(tmp_input)) {
             info("WARN: error response reading socket! error %d", slice_get_err(tmp_input));
@@ -184,14 +191,15 @@ THREAD_FUNC(conn_handler) {
         }
 
         /* try to process the packet. */
+        /* FIXME - convert to RESULT types */
         tmp_output = server->handler(tmp_input, session->buffer, session->server_context);
 
         /* check the response. */
         if(!slice_has_err(tmp_output)) {
-            socket_write_result write_res = socket_write(session->client_fd, tmp_output);
+            socket_slice_result write_res = socket_write(session->client_fd, tmp_output, 1000); /* MAGIC*/
 
-            if(socket_write_result_is_err(write_res)) {
-                info("Error, %d, writing packet!", socket_write_result_get_err(write_res));
+            if(socket_slice_result_is_err(write_res)) {
+                info("Error, %d, writing packet!", socket_slice_result_get_err(write_res));
                 break;
             }
 
