@@ -6,6 +6,8 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
 endif()
 
+message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
+
 set(EXAMPLE_EXECUTABLES
   async
   async_stress
@@ -74,7 +76,6 @@ foreach(example ${EXAMPLE_EXECUTABLES})
         target_link_options(${example} PRIVATE ${STATIC_LINK_OPTIONS})
     endif()
 endforeach()
-
 
 get_target_property(target_includes async INCLUDE_DIRECTORIES)
 message(STATUS "Target 'async' Includes (PRIVATE/PUBLIC): ${target_includes}")
