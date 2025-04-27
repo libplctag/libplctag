@@ -69,14 +69,28 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     add_executable(${example} "${CMAKE_CURRENT_SOURCE_DIR}/${example}.${FILE_EXTENSION}" "${CMAKE_CURRENT_SOURCE_DIR}/compat_utils.c")
 
+    if(example STREQUAL "simple_cpp")
+        target_link_options(${example} PRIVATE "${STATIC_CXX_LINKER_OPTIONS}")
+    else()
+        target_link_options(${example} PRIVATE "${STATIC_C_LINKER_OPTIONS}")
+    endif()
+
     # Link with the static library and apply static linking flags
     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
 
-    if(STATIC_LINK_OPTIONS)
-        set(EXTRA_LINK_OPTIONS "${EXTRA_LINK_OPTIONS} ${STATIC_LINK_OPTIONS}")
+    if(UNIX AND NOT APPLE) 
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            target_link_options(${example} PRIVATE -static)
+        else()
+            target_link_options(${example} PRIVATE -static -s)
+        endif()
     endif()
 
-    if(EXTRA_LINK_OPTIONS)
-        target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
-    endif()
+    # if(STATIC_LINK_OPTIONS)
+    #     set(EXTRA_LINK_OPTIONS "${EXTRA_LINK_OPTIONS} ${STATIC_LINK_OPTIONS}")
+    # endif()
+
+    # if(EXTRA_LINK_OPTIONS)
+    #     target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
+    # endif()
 endforeach()

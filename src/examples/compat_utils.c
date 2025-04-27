@@ -55,21 +55,13 @@ int compat_thread_create(compat_thread_t *thread, void *(*start_routine)(void *)
     return pthread_create(thread, NULL, start_routine, arg);
 }
 
-int compat_thread_detach(compat_thread_t thread) {
-    return pthread_detach(thread);
-}
+int compat_thread_detach(compat_thread_t thread) { return pthread_detach(thread); }
 
-void compat_thread_exit(void *retval) {
-    pthread_exit(retval);
-}
+void compat_thread_exit(void *retval) { pthread_exit(retval); }
 
-int compat_thread_join(compat_thread_t thread, void **retval) {
-    return pthread_join(thread, retval);
-}
+int compat_thread_join(compat_thread_t thread, void **retval) { return pthread_join(thread, retval); }
 
-compat_thread_t compat_thread_self(void) {
-    return pthread_self();
-}
+compat_thread_t compat_thread_self(void) { return pthread_self(); }
 
 int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void)) {
     return pthread_once(once_control, init_routine);
@@ -80,23 +72,19 @@ void compat_thread_yield(void) { sched_yield(); }
 
 
 /* mutexes */
-int compat_mutex_init(compat_mutex_t *mutex) {
-    return pthread_mutex_init(mutex, NULL);
-}
+int compat_mutex_init(compat_mutex_t *mutex) { return pthread_mutex_init(mutex, NULL); }
 
-int compat_mutex_lock(compat_mutex_t *mutex) {
-    return pthread_mutex_lock(mutex);
-}
+int compat_mutex_lock(compat_mutex_t *mutex) { return pthread_mutex_lock(mutex); }
 
 
-#ifndef __APPLE__
+#    ifndef __APPLE__
 int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
     struct timespec ts;
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    
-    ts.tv_sec += timeout_duration_ms / 1000;
-    ts.tv_nsec += (timeout_duration_ms % 1000) * 1000000;
+
+    ts.tv_sec += (time_t)(timeout_duration_ms / 1000);
+    ts.tv_nsec += (long)((timeout_duration_ms % 1000) * 1000000);
 
     return pthread_mutex_timedlock(mutex, &ts);
 }
@@ -123,50 +111,34 @@ int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duratio
 #    endif /* __APPLE__ */
 
 
-int compat_mutex_trylock(compat_mutex_t *mutex) {
-    return pthread_mutex_trylock(mutex);
-}
+int compat_mutex_trylock(compat_mutex_t *mutex) { return pthread_mutex_trylock(mutex); }
 
-int compat_mutex_unlock(compat_mutex_t *mutex) {
-    return pthread_mutex_unlock(mutex);
-}
+int compat_mutex_unlock(compat_mutex_t *mutex) { return pthread_mutex_unlock(mutex); }
 
-int compat_mutex_destroy(compat_mutex_t *mutex) {
-    return pthread_mutex_destroy(mutex);
-}
+int compat_mutex_destroy(compat_mutex_t *mutex) { return pthread_mutex_destroy(mutex); }
 
 /* condition variables */
-int compat_cond_init(compat_cond_t *cond) {
-    return pthread_cond_init(cond, NULL);
-}
+int compat_cond_init(compat_cond_t *cond) { return pthread_cond_init(cond, NULL); }
 
-int compat_cond_signal(compat_cond_t *cond) {
-    return pthread_cond_signal(cond);
-}
+int compat_cond_signal(compat_cond_t *cond) { return pthread_cond_signal(cond); }
 
-int compat_cond_broadcast(compat_cond_t *cond) {
-    return pthread_cond_broadcast(cond);
-}
+int compat_cond_broadcast(compat_cond_t *cond) { return pthread_cond_broadcast(cond); }
 
-int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex) {
-    return pthread_cond_wait(cond, mutex);
-}
+int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex) { return pthread_cond_wait(cond, mutex); }
 
 int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    ts.tv_sec += timeout_duration_ms / 1000;
-    ts.tv_nsec += (timeout_duration_ms % 1000) * 1000000;
-    if (ts.tv_nsec >= 1000000000) {
+    ts.tv_sec += (time_t)(timeout_duration_ms / 1000);
+    ts.tv_nsec += (long)((timeout_duration_ms % 1000) * 1000000);
+    if(ts.tv_nsec >= 1000000000) {
         ts.tv_sec += 1;
         ts.tv_nsec -= 1000000000;
     }
     return pthread_cond_timedwait(cond, mutex, &ts);
 }
 
-int compat_cond_destroy(compat_cond_t *cond) {
-    return pthread_cond_destroy(cond);
-}
+int compat_cond_destroy(compat_cond_t *cond) { return pthread_cond_destroy(cond); }
 
 
 int64_t compat_time_ms(void) {
@@ -181,8 +153,8 @@ int compat_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms)
     struct timespec duration_ts;
     struct timespec remaining_ts;
 
-    duration_ts.tv_sec = sleep_duration_ms / 1000;
-    duration_ts.tv_nsec = (sleep_duration_ms % 1000) * 1000000;
+    duration_ts.tv_sec = (time_t)(sleep_duration_ms / 1000);
+    duration_ts.tv_nsec = (long)((sleep_duration_ms % 1000) * 1000000);
 
     nanosleep(&duration_ts, &remaining_ts);
 
@@ -211,7 +183,6 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
 
     return 0;
 }
-
 
 
 #elif defined(WINDOWS_PLATFORM)
@@ -275,7 +246,6 @@ int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void)) 
 void compat_thread_yield(void) { SwitchToThread(); }
 
 
-
 /* Mutex functions */
 
 int compat_mutex_init(compat_mutex_t *mutex) {
@@ -305,9 +275,7 @@ int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duratio
     while(1) {
         if(TryEnterCriticalSection(mutex)) { return 0; }
 
-        if(compat_time_ms() >= end_time) {
-            return -1;  /* we timed out */
-        }
+        if(compat_time_ms() >= end_time) { return -1; /* we timed out */ }
 
         /* yield the CPU */
         SwitchToThread();
@@ -330,7 +298,6 @@ int compat_mutex_unlock(compat_mutex_t *mutex) {
     LeaveCriticalSection(mutex); /* FIXME- what happens if the mutex was not locked? */
     return 0;
 }
-
 
 
 /* condition variable functions */
@@ -371,7 +338,6 @@ int compat_cond_destroy(compat_cond_t *cond) {
 }
 
 
-
 int64_t compat_time_ms(void) {
     FILETIME ft;
     int64_t res;
@@ -402,7 +368,6 @@ int compat_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms)
 
     return 0;
 }
-
 
 
 static void (*interrupt_handler)(void) = NULL;
@@ -444,7 +409,6 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
 
     return 0;
 }
-
 
 
 #else
