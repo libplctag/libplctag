@@ -47,7 +47,7 @@ target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
 
 # if(EXTRA_LINK_OPTIONS)
     # target_link_options(ab_server PUBLIC ${EXTRA_LINK_OPTIONS})
-    target_link_options(ab_server PRIVATE "${STATIC_C_LINKER_OPTIONS}")
+    target_link_options(ab_server PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
 # endif()
 
 

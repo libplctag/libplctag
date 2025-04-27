@@ -80,9 +80,9 @@ foreach(example ${EXAMPLE_EXECUTABLES})
 
     if(UNIX AND NOT APPLE) 
         if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-            target_link_options(${example} PRIVATE -static)
+            target_link_options(${example} PRIVATE -static ${EXTRA_LINK_FLAGS})
         else()
-            target_link_options(${example} PRIVATE -static -s)
+            target_link_options(${example} PRIVATE -static -s ${EXTRA_LINK_FLAGS})
         endif()
     endif()
 
