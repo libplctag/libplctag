@@ -2,9 +2,9 @@ name: libplctag CI
 
 on:
   push:
-    branches: [ release, prerelease, split_omron ]
+    branches: [ MinSizeRel, preMinSizeRel, split_omron ]
   pull_request:
-    branches: [ release, prerelease, split_omron ]
+    branches: [ MinSizeRel, preMinSizeRel, split_omron ]
 
 jobs:
 
@@ -35,7 +35,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -174,7 +174,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -310,7 +310,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -446,7 +446,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -489,7 +489,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Test Basic Functions
       run: |
@@ -627,7 +627,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Test Basic Functions
       run: |
@@ -765,7 +765,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=Win32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Test Basic Functions
       run: |
@@ -902,7 +902,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Test Basic Functions
       run: |
@@ -1040,7 +1040,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }} && cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }} && cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -1075,7 +1075,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -1111,7 +1111,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -1147,10 +1147,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -1186,10 +1186,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -1225,10 +1225,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
