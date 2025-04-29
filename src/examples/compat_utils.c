@@ -42,14 +42,6 @@
  * This file contains useful utilities for the sample programs.
  */
 
-
-/*
- * system_time_ms
- *
- * Return current system time in millisecond units.  This is NOT an
- * Unix epoch time.  Windows uses a different epoch starting 1/1/1601.
- */
-
 #if defined(POSIX_PLATFORM)
 
 #    include <pthread.h>
@@ -58,7 +50,98 @@
 #    include <time.h>
 #    include <unistd.h>
 
-int64_t system_time_ms(void) {
+/* threads */
+int compat_thread_create(compat_thread_t *thread, void *(*start_routine)(void *), void *arg) {
+    return pthread_create(thread, NULL, start_routine, arg);
+}
+
+int compat_thread_detach(compat_thread_t thread) { return pthread_detach(thread); }
+
+void compat_thread_exit(void *retval) { pthread_exit(retval); }
+
+int compat_thread_join(compat_thread_t thread, void **retval) { return pthread_join(thread, retval); }
+
+compat_thread_t compat_thread_self(void) { return pthread_self(); }
+
+int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void)) {
+    return pthread_once(once_control, init_routine);
+}
+
+
+void compat_thread_yield(void) { sched_yield(); }
+
+
+/* mutexes */
+int compat_mutex_init(compat_mutex_t *mutex) { return pthread_mutex_init(mutex, NULL); }
+
+int compat_mutex_lock(compat_mutex_t *mutex) { return pthread_mutex_lock(mutex); }
+
+
+#    ifndef __APPLE__
+int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    ts.tv_sec += (time_t)(timeout_duration_ms / 1000);
+    ts.tv_nsec += (long)((timeout_duration_ms % 1000) * 1000000);
+
+    return pthread_mutex_timedlock(mutex, &ts);
+}
+
+#    else /* __APPLE__ is defined */
+/* macOS does not provide an implementation of pthread_mutex_timedlock() */
+int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
+    int64_t end_time = compat_time_ms() + timeout_duration_ms;
+
+    if(!mutex) { return -1; }
+
+    while(1) {
+        if(compat_mutex_trylock(mutex)) { return 0; }
+
+        if(compat_time_ms() >= end_time) { return -1; /* timeout */ }
+
+        /* yield the CPU */
+        compat_thread_yield();
+    }
+
+    return 0;
+}
+
+#    endif /* __APPLE__ */
+
+
+int compat_mutex_trylock(compat_mutex_t *mutex) { return pthread_mutex_trylock(mutex); }
+
+int compat_mutex_unlock(compat_mutex_t *mutex) { return pthread_mutex_unlock(mutex); }
+
+int compat_mutex_destroy(compat_mutex_t *mutex) { return pthread_mutex_destroy(mutex); }
+
+/* condition variables */
+int compat_cond_init(compat_cond_t *cond) { return pthread_cond_init(cond, NULL); }
+
+int compat_cond_signal(compat_cond_t *cond) { return pthread_cond_signal(cond); }
+
+int compat_cond_broadcast(compat_cond_t *cond) { return pthread_cond_broadcast(cond); }
+
+int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex) { return pthread_cond_wait(cond, mutex); }
+
+int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ts.tv_sec += (time_t)(timeout_duration_ms / 1000);
+    ts.tv_nsec += (long)((timeout_duration_ms % 1000) * 1000000);
+    if(ts.tv_nsec >= 1000000000) {
+        ts.tv_sec += 1;
+        ts.tv_nsec -= 1000000000;
+    }
+    return pthread_cond_timedwait(cond, mutex, &ts);
+}
+
+int compat_cond_destroy(compat_cond_t *cond) { return pthread_cond_destroy(cond); }
+
+
+int64_t compat_time_ms(void) {
     struct timespec ts;
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -66,12 +149,12 @@ int64_t system_time_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + (int64_t)ts.tv_nsec / 1000000;
 }
 
-int system_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {
+int compat_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {
     struct timespec duration_ts;
     struct timespec remaining_ts;
 
-    duration_ts.tv_sec = sleep_duration_ms / 1000;
-    duration_ts.tv_nsec = (sleep_duration_ms % 1000) * 1000000;
+    duration_ts.tv_sec = (time_t)(sleep_duration_ms / 1000);
+    duration_ts.tv_nsec = (long)((sleep_duration_ms % 1000) * 1000000);
 
     nanosleep(&duration_ts, &remaining_ts);
 
@@ -82,8 +165,6 @@ int system_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms)
     return 0;
 }
 
-void system_yield(void) { sched_yield(); }
-
 
 static void (*interrupt_handler)(void) = NULL;
 
@@ -93,7 +174,7 @@ static void interrupt_handler_wrapper(int sig) {
     if(interrupt_handler) { interrupt_handler(); }
 }
 
-int set_interrupt_handler(void (*handler)(void)) {
+int compat_set_interrupt_handler(void (*handler)(void)) {
     interrupt_handler = handler;
 
     signal(SIGINT, interrupt_handler_wrapper);
@@ -104,35 +185,160 @@ int set_interrupt_handler(void (*handler)(void)) {
 }
 
 
-#    ifdef __APPLE__
-/* macOS does not support pthread_mutex_timedlock() */
-int pthread_mutex_timedlock(pthread_mutex_t *mtx, const struct timespec *abstime) {
-    int64_t abs_timeout_ms = (int64_t)(abstime->tv_sec * 1000 + abstime->tv_nsec / 1000000);
-    int64_t start_time_ms = system_time_ms();
-
-    if(!mtx) { return -1; }
-
-    while(1) {
-        if(pthread_mutex_trylock(mtx)) { return 0; }
-
-        if(system_time_ms() - start_time_ms >= abs_timeout_ms) { return -1; /* timeout */ }
-
-        /* yield the CPU */
-        system_yield();
-    }
-
-    return 0;
-}
-
-#    endif
-
-
 #elif defined(WINDOWS_PLATFORM)
 
 #    include <process.h>
 #    include <processthreadsapi.h>
 
-int64_t system_time_ms(void) {
+
+/* threads */
+int compat_thread_create(compat_thread_t *thread, void *(*start_routine)(void *), void *arg) {
+    *thread = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))start_routine, arg, 0, NULL);
+    return *thread ? 0 : -1;
+}
+
+
+int compat_thread_detach(compat_thread_t thread) {
+    CloseHandle(thread);
+
+    return 0;
+}
+
+
+void compat_thread_exit(void *retval) {
+    unsigned int temp_return_val = 0;
+
+    if(retval) { temp_return_val = *((unsigned int *)retval); }
+
+    _endthreadex(temp_return_val);
+}
+
+
+int compat_thread_join(compat_thread_t thread, void **retval) {
+    if(!thread) { return -1; }
+
+    if(WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) { return -1; }
+
+    if(retval) {
+        DWORD temp_ret_val = 0;
+        GetExitCodeThread(thread, (LPDWORD)&temp_ret_val);
+        *retval = (void *)(intptr_t)temp_ret_val;
+    }
+
+    CloseHandle(thread);
+
+    return 0;
+}
+
+
+compat_thread_t compat_thread_self(void) { return (compat_thread_t)GetCurrentThread(); }
+
+
+int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void)) {
+    if(!once_control) { return -1; }
+
+    if(InterlockedCompareExchange((volatile long *)once_control, 1, 0) == 0) { init_routine(); }
+
+    return 0;
+}
+
+
+void compat_thread_yield(void) { SwitchToThread(); }
+
+
+/* Mutex functions */
+
+int compat_mutex_init(compat_mutex_t *mutex) {
+    InitializeCriticalSection(mutex);
+    return 0;
+}
+
+
+int compat_mutex_destroy(compat_mutex_t *mutex) {
+    DeleteCriticalSection(mutex);
+
+    return 0;
+}
+
+
+int compat_mutex_lock(compat_mutex_t *mutex) {
+    EnterCriticalSection(mutex);
+
+    return 0;
+}
+
+
+int compat_mutex_timedlock(compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
+    int64_t start_time = compat_time_ms();
+    int64_t end_time = start_time + timeout_duration_ms;
+
+    while(1) {
+        if(TryEnterCriticalSection(mutex)) { return 0; }
+
+        if(compat_time_ms() >= end_time) { return -1; /* we timed out */ }
+
+        /* yield the CPU */
+        SwitchToThread();
+    }
+
+    return 0;
+}
+
+
+int compat_mutex_trylock(compat_mutex_t *mutex) {
+    if(TryEnterCriticalSection(mutex)) {
+        return 0;
+    } else {
+        return -1;
+    }
+}
+
+
+int compat_mutex_unlock(compat_mutex_t *mutex) {
+    LeaveCriticalSection(mutex); /* FIXME- what happens if the mutex was not locked? */
+    return 0;
+}
+
+
+/* condition variable functions */
+
+int compat_cond_init(compat_cond_t *cond) {
+    InitializeConditionVariable(cond);
+    return 0;
+}
+
+int compat_cond_signal(compat_cond_t *cond) {
+    WakeConditionVariable(cond);
+    return 0;
+}
+
+int compat_cond_broadcast(compat_cond_t *cond) {
+    WakeAllConditionVariable(cond);
+    return 0;
+}
+
+int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex) {
+    SleepConditionVariableCS(cond, mutex, INFINITE); /* Can this be interrupted? */
+    return 0;
+}
+
+int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mutex, const uint32_t timeout_duration_ms) {
+    if(SleepConditionVariableCS(cond, mutex, (DWORD)timeout_duration_ms)) {
+        return 0;
+    } else {
+        return -1;
+    }
+}
+
+int compat_cond_destroy(compat_cond_t *cond) {
+    (void)cond;
+
+    /* nothing to do on Windows */
+    return 0;
+}
+
+
+int64_t compat_time_ms(void) {
     FILETIME ft;
     int64_t res;
 
@@ -148,20 +354,21 @@ int64_t system_time_ms(void) {
 }
 
 
-int system_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {
-    int64_t start_time_ms = system_time_ms() + sleep_duration_ms;
+int compat_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms) {
+    int64_t start_time_ms = compat_time_ms() + sleep_duration_ms;
     int64_t end_time_ms = start_time_ms + sleep_duration_ms;
 
     Sleep(sleep_duration_ms);
 
     if(remaining_duration_ms) {
-        int64_t remaining_ms = end_time_ms - system_time_ms();
+        int64_t remaining_ms = end_time_ms - compat_time_ms();
 
         *remaining_duration_ms = (remaining_ms < 0) ? 0 : (uint32_t)remaining_ms;
     }
 
     return 0;
 }
+
 
 static void (*interrupt_handler)(void) = NULL;
 
@@ -194,7 +401,7 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
     }
 }
 
-int set_interrupt_handler(void (*handler)(void)) {
+int compat_set_interrupt_handler(void (*handler)(void)) {
     interrupt_handler = handler;
 
     /* FIXME - this can fail! */
@@ -204,206 +411,6 @@ int set_interrupt_handler(void (*handler)(void)) {
 }
 
 
-/* threads */
-int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *),
-                   void *restrict arg) {
-    *thread = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))start_routine, arg, 0, NULL);
-    return *thread ? 0 : -1;
-}
-
-
-int pthread_detach(pthread_t thread) {
-    CloseHandle(thread);
-
-    return 0;
-}
-
-
-void pthread_exit(void *retval) {
-    unsigned int temp_return_val = 0;
-
-    if(retval) { temp_return_val = *((unsigned int *)retval); }
-
-    _endthreadex(temp_return_val);
-}
-
-
-int pthread_join(pthread_t thread, void **retval) {
-    if(!thread) { return -1; }
-
-    if(WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) { return -1; }
-
-    if(retval) {
-        DWORD temp_ret_val = 0;
-        GetExitCodeThread(thread, (LPDWORD)&temp_ret_val);
-        *retval = (void *)(intptr_t)temp_ret_val;
-    }
-
-    CloseHandle(thread);
-
-    return 0;
-}
-
-
-pthread_t pthread_self(void) { return (pthread_t)GetCurrentThread(); }
-
-
-int pthread_once(pthread_once_t *once_control, void (*init_routine)(void)) {
-    if(!once_control) { return -1; }
-
-    if(InterlockedCompareExchange((volatile long *)once_control, 1, 0) == 0) { init_routine(); }
-
-    return 0;
-}
-
-
-void system_yield(void) { SwitchToThread(); }
-
-
-/* mutexes*/
-/*
-Need to emulate the following
-
-
-pthread_mutex_t fastmutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t recmutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
-pthread_mutex_t errchkmutex = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP;
-*/
-
-
-int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) {
-    (void)mutexattr;
-
-    InitializeCriticalSection(mutex);
-    return 0;
-}
-
-
-int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-    DeleteCriticalSection(mutex);
-
-    return 0;
-}
-
-
-int pthread_mutex_lock(pthread_mutex_t *mutex) {
-    EnterCriticalSection(mutex);
-
-    return 0;
-}
-
-
-int pthread_mutex_timedlock(pthread_mutex_t *restrict mutex, const struct timespec *restrict abs_timeout_time) {
-    DWORD ms = (DWORD)(abs_timeout_time->tv_sec * 1000 + abs_timeout_time->tv_nsec / 1000000);
-    DWORD start_time = GetTickCount();
-
-    while(1) {
-        if(TryEnterCriticalSection(mutex)) { return 0; }
-
-        if(GetTickCount() - start_time >= ms) {
-            return -1;  // Timeout
-        }
-
-        /* yield the CPU */
-        SwitchToThread();
-    }
-
-    return 0;
-}
-
-
-int pthread_mutex_trylock(pthread_mutex_t *mutex) {
-    if(TryEnterCriticalSection(mutex)) {
-        return 0;
-    } else {
-        return -1;
-    }
-}
-
-
-int pthread_mutex_unlock(pthread_mutex_t *mutex) {
-    LeaveCriticalSection(mutex); /* FIXME- what happens if the mutex was not locked? */
-    return 0;
-}
-
-
-/* condition variables */
-
-int pthread_cond_init(pthread_cond_t *cond, pthread_condattr_t *cond_attr) {
-    (void)cond_attr;
-
-    InitializeConditionVariable(cond);
-    return 0;
-}
-
-int pthread_cond_signal(pthread_cond_t *cond) {
-    WakeConditionVariable(cond);
-    return 0;
-}
-
-int pthread_cond_broadcast(pthread_cond_t *cond) {
-    WakeAllConditionVariable(cond);
-    return 0;
-}
-
-int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
-    SleepConditionVariableCS(cond, mutex, INFINITE); /* Can this be interrupted? */
-    return 0;
-}
-
-int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abs_timeout_time) {
-    int64_t start_time_ms = system_time_ms();
-    int64_t end_time_ms = start_time_ms + (int64_t)(abs_timeout_time->tv_sec * 1000 + abs_timeout_time->tv_nsec / 1000000);
-
-    int64_t delta_ms = end_time_ms - start_time_ms;
-
-    if(delta_ms > LONG_MAX) { delta_ms = LONG_MAX; }
-
-    if(delta_ms < 0) { delta_ms = 0; }
-
-    if(SleepConditionVariableCS(cond, mutex, (DWORD)delta_ms)) {
-        return 0;
-    } else {
-        return -1;
-    }
-}
-
-int pthread_cond_destroy(pthread_cond_t *cond) {
-    (void)cond;
-
-    /* nothing to do on Windows */
-    return 0;
-}
-
-
 #else
 #    error "Not a supported platform!"
 #endif
-
-int pthread_mutex_timedlock_ms(pthread_mutex_t *mtx, const uint32_t timeout_duration_ms) {
-    struct timespec abs_ts;
-
-    abs_ts.tv_sec = timeout_duration_ms / 1000;
-    abs_ts.tv_nsec = (timeout_duration_ms % 1000) * 1000000;
-
-    if(pthread_mutex_timedlock(mtx, &abs_ts) == 0) {
-        return 0;
-    } else {
-        return -1;
-    }
-
-    return 0;
-}
-
-int pthread_cond_timedwait_ms(pthread_cond_t *cond, pthread_mutex_t *mtx, const uint32_t timeout_duration_ms) {
-    struct timespec abs_ts;
-
-    abs_ts.tv_sec = timeout_duration_ms / 1000;
-    abs_ts.tv_nsec = (timeout_duration_ms % 1000) * 1000000;
-
-    if(pthread_cond_timedwait(cond, mtx, &abs_ts) == 0) {
-        return 0;
-    } else {
-        return -1;
-    }
-}

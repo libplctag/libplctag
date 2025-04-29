@@ -36,6 +36,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 cmake_minimum_required (VERSION 3.10)
 cmake_policy(SET CMP0054 NEW)
 
+# debugging help
+set(CMAKE_BUILD_PARALLEL_LEVEL 1)
+
 
 # this is the root libplctag project
 project (libplctag_project)
@@ -44,6 +47,8 @@ project (libplctag_project)
 set(C_STANDARD 11)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+message(STATUS "Compiler Implicit Includes: ${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES}")
 
 # make sure our outputs are going somewhere sane
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
@@ -74,27 +79,33 @@ message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 # we need threads
 find_package(Threads REQUIRED)
 
+# C compiler-specific settings
+if(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
+    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
+elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
+elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/msvc.cmake")
+else()
+    message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
+    return()
+endif()
+
+
 # Target platform-specific config
 if(ANDROID_ABI OR ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/android.cmake")
-elseif(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
 elseif(APPLE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/apple.cmake")
 elseif(UNIX)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/unix.cmake")
 elseif(WIN32)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/windows.cmake")
-endif()
-
-# C compiler specific settings
-if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
-elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
 else()
-    message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
+    message("Unsupported platform!")
     return()
 endif()
+
 
 
 # where to find include files.

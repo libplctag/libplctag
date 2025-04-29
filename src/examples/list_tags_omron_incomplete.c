@@ -750,13 +750,13 @@ char *setup_tag_string(int argc, char **argv) {
         // printf("INFO: argv[2] = \"%s\".\n", argv[2]);
 
         /* two args */
-        if(strcasecmp("--debug", argv[1]) == 0) {
+        if(compat_strcasecmp("--debug", argv[1]) == 0) {
             // printf("INFO: debug arg is in argv[1]=\"%s\"", argv[1]);
             // printf("INFO: host arg is in argv[2]=\"%s\"", argv[2]);
 
             gateway = argv[2];
             plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
-        } else if(strcasecmp("--debug", argv[2]) == 0) {
+        } else if(compat_strcasecmp("--debug", argv[2]) == 0) {
             // printf("INFO: debug arg is in argv[2]=\"%s\"", argv[2]);
             // printf("INFO: host arg is in argv[1]=\"%s\"", argv[1]);
 
@@ -828,6 +828,12 @@ int main(int argc, char **argv) {
             break;
         }
 
+        if(num_instances == 0) {
+            printf("ERROR: class reports no instances found!\n");
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
         // num_instances = 300;
         // max_id = 300;
 
@@ -861,10 +867,13 @@ int main(int argc, char **argv) {
     if(tag > 0) {
         plc_tag_destroy(tag);
     } else {
+        free(tags);
         usage();
     }
 
+    if(rc != PLCTAG_STATUS_OK) { free(tags); }
+
     printf("\n********* Complete *********!\n");
 
-    return 0;
+    return rc;
 }

@@ -38,107 +38,137 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 /* FIXME - centralize this platform setting! */
 #if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
 #    include <pthread.h>
 #    include <strings.h>
 #    include <unistd.h>
-#    define snprintf_platform snprintf
-#    define sscanf_platform sscanf
 
 #    define POSIX_PLATFORM
 
+#define compat_localtime_r localtime_r
+#define compat_strcasecmp strcasecmp
+#define compat_strdup strdup
+#define compat_snprintf snprintf
+#define compat_sscanf sscanf
+
+typedef pthread_t compat_thread_t;
+typedef pthread_once_t compat_once_t;
+typedef pthread_mutex_t compat_mutex_t;
+typedef pthread_cond_t compat_cond_t;
 
 #elif defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(WIN64) || defined(_WIN64)
-#    define WIN32_LEAN_AND_MEAN
-#    include <windows.h>
-
-#    define localtime_r(a, b) localtime_s((b), (a))
-#    define strcasecmp _stricmp
-#    define strdup _strdup
-#    define snprintf_platform sprintf_s
-#    define sscanf_platform sscanf_s
-
 #    define WINDOWS_PLATFORM
 
-typedef HANDLE pthread_t;
-typedef volatile long pthread_once_t;
-typedef CRITICAL_SECTION pthread_mutex_t;
-typedef CONDITION_VARIABLE pthread_cond_t;
+#    define WIN32_LEAN_AND_MEAN
 
-typedef struct pthread_attr_t pthread_attr_t;
-typedef struct pthread_mutexattr_t pthread_mutexattr_t;
-typedef struct pthread_condattr_t pthread_condattr_t;
+#    include <Windows.h>
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <time.h>
+
+
+static inline int compat_localtime_r(const time_t *timep, struct tm *result) {
+    return localtime_s(result, timep);
+}
+
+static inline int compat_strcasecmp(const char *s1, const char *s2) {
+    return stricmp(s1, s2);
+}
+
+static inline char *compat_strdup(const char *s) {
+    return _strdup(s);
+}
+
+static inline int compat_snprintf(char *str, size_t size, const char *format, ...) {
+    va_list args;
+    int rc;
+
+    va_start(args, format);
+    rc = vsnprintf_s(str, size, _TRUNCATE, format, args);
+    va_end(args);
+
+    return rc;
+}
+
+static inline int compat_sscanf(const char *str, const char *format, ...) {
+    va_list args;
+    int rc;
+
+    va_start(args, format);
+    #ifdef _MSVC_VER
+    rc = vsscanf_s(str, format, args);
+    #else
+    rc = vsscanf(str, format, args);
+    #endif
+    va_end(args);
+
+    return rc;
+}
+
+typedef HANDLE compat_thread_t;
+typedef volatile long compat_once_t;
+typedef CRITICAL_SECTION compat_mutex_t;
+typedef CONDITION_VARIABLE compat_cond_t;
+
+
+#else
+    #error "Unsupported platform!"
+#endif
+
 
 /* threads */
-extern int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg);
-extern int pthread_detach(pthread_t thread);
-extern void pthread_exit(void *retval); /* no return */
-extern int pthread_join(pthread_t thread, void **retval);
-extern pthread_t pthread_self(void);
+extern int compat_thread_create(compat_thread_t *thread, void *(*start_routine)(void *), void *arg);
+extern int compat_thread_detach(compat_thread_t thread);
+extern void compat_thread_exit(void *retval); /* no return */
+extern int compat_thread_join(compat_thread_t thread, void **retval);
+extern compat_thread_t compat_thread_self(void);
 
-extern int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
+extern int compat_thread_once(compat_once_t *once_control, void (*init_routine)(void));
 
-extern void system_yield(void);
+extern void compat_thread_yield(void);
 
 
 /* mutexes*/
-#    define PTHREAD_MUTEX_INITIALIZER {0}
 
-
-extern int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr);
-extern int pthread_mutex_destroy(pthread_mutex_t *mutex);
-extern int pthread_mutex_lock(pthread_mutex_t *mutex);
-extern int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime);
-extern int pthread_mutex_trylock(pthread_mutex_t *mutex);
-extern int pthread_mutex_unlock(pthread_mutex_t *mutex);
+extern int compat_mutex_init(compat_mutex_t *mutex);
+extern int compat_mutex_lock(compat_mutex_t *mutex);
+extern int compat_mutex_timedlock(compat_mutex_t *mtx, const uint32_t timeout_duration_ms);
+extern int compat_mutex_trylock(compat_mutex_t *mutex);
+extern int compat_mutex_unlock(compat_mutex_t *mutex);
+extern int compat_mutex_destroy(compat_mutex_t *mutex);
 
 
 /* condition variables */
 
-#    define PTHREAD_COND_INITIALIZER {0}
+extern int compat_cond_init(compat_cond_t *cond);
+extern int compat_cond_signal(compat_cond_t *cond);
+extern int compat_cond_broadcast(compat_cond_t *cond);
+extern int compat_cond_wait(compat_cond_t *cond, compat_mutex_t *mutex);
+extern int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mtx, const uint32_t timeout_duration_ms);
+extern int compat_cond_destroy(compat_cond_t *cond);
 
 
-extern int pthread_cond_init(pthread_cond_t *cond, pthread_condattr_t *cond_attr);
-extern int pthread_cond_signal(pthread_cond_t *cond);
-extern int pthread_cond_broadcast(pthread_cond_t *cond);
-extern int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
-extern int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime);
-extern int pthread_cond_destroy(pthread_cond_t *cond);
 
-
-#else
-#    error "Not a supported platform for threads, mutexes and condition variables!!"
-#endif
-
-#include <stdint.h>
-
-
-/* Need some way to get the current system time in milliseconds. */
-extern int64_t system_time_ms(void);
+/* current system epoch time in milliseconds. */
+extern int64_t compat_time_ms(void);
 
 /* cross platform sleep in milliseconds */
-extern int system_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms);
+extern int compat_sleep_ms(uint32_t sleep_duration_ms, uint32_t *remaining_duration_ms);
 
 /* cross platform yield CPU */
-extern void system_yield(void);
+extern void compat_thread_yield(void);
 
-/*
- * helpful versions of the pthreads theads API, struct timespec is
- * useful but not particularly friendly.
- */
-
-extern int pthread_mutex_timedlock_ms(pthread_mutex_t *mtx, const uint32_t timeout_duration_ms);
-extern int pthread_cond_timedwait_ms(pthread_cond_t *cond, pthread_mutex_t *mtx, const uint32_t timeout_duration_ms);
-
-enum { INTERRUPT_HANDLER_SUCCESS, INTERRUPT_HANDLER_ERROR };
 
 /* catch terminate/interrupt signals/events */
-extern int set_interrupt_handler(void (*handler)(void));
+extern int compat_set_interrupt_handler(void (*handler)(void));
 
 
 #define RANDOM_U64_ERROR (UINT64_MAX)
-extern uint64_t util_random_u64(uint64_t upper_bound);
+extern uint64_t compat_random_u64(uint64_t upper_bound);
 
 
 #ifdef __cplusplus

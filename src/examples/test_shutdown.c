@@ -67,8 +67,8 @@ static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
 int main(void) {
     int rc = PLCTAG_STATUS_OK;
     char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL) + 10] = {0};
-    pthread_t read_threads[NUM_TAGS];
-    pthread_t write_threads[NUM_TAGS];
+    compat_thread_t read_threads[NUM_TAGS];
+    compat_thread_t write_threads[NUM_TAGS];
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
@@ -106,8 +106,8 @@ int main(void) {
 
         /* create read and write thread for this tag. */
         /* FIXME - check error returns! */
-        pthread_create(&read_threads[i], NULL, reader_function, (void *)(intptr_t)tag_id);
-        pthread_create(&write_threads[i], NULL, writer_function, (void *)(intptr_t)tag_id);
+        compat_thread_create(&read_threads[i], reader_function, (void *)(intptr_t)tag_id);
+        compat_thread_create(&write_threads[i], writer_function, (void *)(intptr_t)tag_id);
 
         fprintf(stderr, ".");
     }
@@ -115,7 +115,7 @@ int main(void) {
     fprintf(stderr, "\nWaiting for threads to stabilize %dms.\n", RUN_PERIOD / 2);
 
     /* let everything run for a while */
-    system_sleep_ms(RUN_PERIOD / 2, NULL);
+    compat_sleep_ms(RUN_PERIOD / 2, NULL);
 
     /* forcible shut down the entire library. */
     // NOLINTNEXTLINE
@@ -129,8 +129,8 @@ int main(void) {
     fprintf(stderr, "Waiting for threads to quit.\n");
 
     for(int i = 0; i < NUM_TAGS; i++) {
-        pthread_join(read_threads[i], NULL);
-        pthread_join(write_threads[i], NULL);
+        compat_thread_join(read_threads[i], NULL);
+        compat_thread_join(write_threads[i], NULL);
     }
 
     // NOLINTNEXTLINE
@@ -142,11 +142,11 @@ int main(void) {
 
 void *reader_function(void *tag_arg) {
     int32_t tag_id = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = system_time_ms();
+    int64_t start_time = compat_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    while(run_until > system_time_ms()) {
+    while(run_until > compat_time_ms()) {
         int status = plc_tag_status(tag_id);
         int32_t val = plc_tag_get_int32(tag_id, 0);
 
@@ -158,9 +158,9 @@ void *reader_function(void *tag_arg) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "READER: Tag %" PRId32 " iteration %d, got value: %d at time %" PRId64 "\n", tag_id, iteration++, val,
-                system_time_ms() - start_time);
+                compat_time_ms() - start_time);
 
-        system_sleep_ms(READ_SLEEP_MS, NULL);
+        compat_sleep_ms(READ_SLEEP_MS, NULL);
     }
 
     // NOLINTNEXTLINE
@@ -172,13 +172,13 @@ void *reader_function(void *tag_arg) {
 
 void *writer_function(void *tag_arg) {
     int32_t tag_id = (int32_t)(intptr_t)tag_arg;
-    int64_t start_time = system_time_ms();
+    int64_t start_time = compat_time_ms();
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    system_sleep_ms(WRITE_SLEEP_MS, NULL);
+    compat_sleep_ms(WRITE_SLEEP_MS, NULL);
 
-    while(run_until > system_time_ms()) {
+    while(run_until > compat_time_ms()) {
         int32_t val = plc_tag_get_int32(tag_id, 0);
         int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
         int status = plc_tag_status(tag_id);
@@ -194,9 +194,9 @@ void *writer_function(void *tag_arg) {
 
         // NOLINTNEXTLINE
         fprintf(stderr, "WRITER: Tag %" PRId32 " iteration %d, wrote value: %d at time %" PRId64 "\n", tag_id, iteration++,
-                new_val, system_time_ms() - start_time);
+                new_val, compat_time_ms() - start_time);
 
-        system_sleep_ms(WRITE_SLEEP_MS, NULL);
+        compat_sleep_ms(WRITE_SLEEP_MS, NULL);
     }
 
     // NOLINTNEXTLINE

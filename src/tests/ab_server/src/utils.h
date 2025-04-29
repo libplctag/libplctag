@@ -40,8 +40,10 @@
 extern int util_sleep_ms(int ms);
 extern int64_t util_time_ms(void);
 
+extern void system_yield(void);
+
 /* string helpers */
-extern int match_chars(const char* source, int start_index, const char *chars);
+extern int match_chars(const char *source, int start_index, const char *chars);
 
 /* debug helpers */
 void debug_on(void);

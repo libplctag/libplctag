@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for %dms.\n", (wait_time_sec * 1000));
-    system_sleep_ms((uint32_t)wait_time_sec * 1000, NULL);
+    compat_sleep_ms((uint32_t)wait_time_sec * 1000, NULL);
 
     /* update the data again */
     update_tag(tag);

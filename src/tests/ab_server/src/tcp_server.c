@@ -46,14 +46,14 @@ static THREAD_FUNC(conn_handler);
 
 
 struct tcp_server {
-    int sock_fd;
+    SOCKET sock_fd;
     slice_s (*handler)(slice_s input, slice_s output, void *context);
     void *context;
     size_t context_size;
 };
 
 struct client_session {
-    int client_fd;
+    SOCKET client_fd;
     tcp_server_p server;
     void *server_context;
     bool *server_done;
@@ -71,9 +71,13 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
     (void)host;
 
     if(server) {
-        server->sock_fd = socket_open_tcp_server(port);
+        socket_fd_result sock_res = socket_open_tcp_server(port);
 
-        if(server->sock_fd < 0) { error("ERROR: Unable to open TCP socket, error code %d!", server->sock_fd); }
+        if(socket_fd_result_is_val(sock_res)) {
+            server->sock_fd = socket_fd_result_get_val(sock_res);
+        } else {
+            error("ERROR: Unable to open TCP socket, error code %d!", socket_fd_result_get_err(sock_res));
+        }
 
         server->handler = handler;
         server->context = context;
@@ -84,63 +88,52 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
 }
 
 void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
-    int client_fd;
     static bool done; /* static so it doesn't go out of scope, since it's passed to sub-threads. */
     done = false;     /* initialised every invocation for logic sake, even though that's once. */
 
     info("Waiting for new client connection.");
 
     do {
-        client_fd = socket_accept(server->sock_fd);
+        socket_fd_result sock_res = socket_accept(server->sock_fd, 1000); /* MAGIC */
 
-        if(client_fd >= 0) {
-            bool thread_created = false;
+        if(socket_fd_result_is_val(sock_res)) {
+            SOCKET client_fd = socket_fd_result_get_val(sock_res);
+            struct client_session *session = NULL;
 
             /* The client thread is responsible for freeing these */
             /* TODO: A malloc'ed blob inside a malloc'ed blob is too much. Simplify. */
             // FIXME - combine the allocations and use calloc or memset to get zeroed memory
-            struct client_session *session = malloc(sizeof(struct client_session));
+            session = malloc(sizeof(struct client_session));
+
+            if(!session) { error("Unable to allocate memory for the session!"); }
+
             // NOLINTNEXTLINE
             memset(session, 0, sizeof(*session));
 
             session->server_context = malloc(server->context_size);
-            if(session && session->server_context) {
-                /* Make a copy of the server context so the thread can use it without threading concerns. */
-                // NOLINTNEXTLINE
-                memcpy(session->server_context, server->context, server->context_size);
-                session->client_fd = client_fd; /* copy of a temporary value - no thread safety concerns */
-                session->server = server;       /* reference to a long-lived struct, which has values and the original context */
-                session->server_done = &done;   /* reference to a flag that any thread can raise (and all must monitor) */
 
-                /* spawn new thread to handle the connection */
+            if(!session->server_context) { error("Unable to allocate memory for the server context!"); }
 
-                // /* DEBUG */
-                // fprintf(stderr, "tcp_server.c:112 Creating new thread for socket %d.\n", client_fd);
-                // fflush(stderr);
-                // /* DEBUG */
+            /* Make a copy of the server context so the thread can use it without threading concerns. */
+            // NOLINTNEXTLINE
+            memcpy(session->server_context, server->context, server->context_size);
+            session->client_fd = client_fd; /* copy of a temporary value - no thread safety concerns */
+            session->server = server;       /* reference to a long-lived struct, which has values and the original context */
+            session->server_done = &done;   /* reference to a flag that any thread can raise (and all must monitor) */
 
-
-                if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) == THREAD_STATUS_OK) {
-                    thread_created = true;
-                } else {
-                    info("ERROR: Unable to create connection handler thread!");
-                }
-            } else {
-                info("ERROR: Unable to alloc client session memory!");
+            if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) != THREAD_STATUS_OK) {
+                error("ERROR: Unable to create connection handler thread!");
             }
-            if(!thread_created) /* then cleanup and abandon the connection */
-            {
-                socket_close(session->client_fd);
-                if(session->server_context) { free(session->server_context); }
-                if(session) { free(session); }
-            }
-        } else if(client_fd != SOCKET_STATUS_OK) {
-            /* There was an error either opening or accepting! */
-            info("WARN: error while trying to open/accept the client socket.");
+        } else if(socket_fd_result_get_err(sock_res) == SOCKET_ERR_TIMEOUT) {
+            info("Timed out waiting for new client connection.");
+            continue;
+        } else {
+            error("ERROR: Received error, %d, accepting new client connection!", socket_fd_result_get_err(sock_res));
+            done = true;
         }
 
-        /* wait a bit to give back the CPU. */
-        util_sleep_ms(1);
+        /* give back the CPU. */
+        system_yield();
     } while(!done && !*terminate);
 
     /* in case we were terminated by signal, raise the done flag for all the threads to exit */
@@ -150,13 +143,14 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
 
 void tcp_server_destroy(tcp_server_p server) {
     if(server) {
-        if(server->sock_fd >= 0) {
+        if(server->sock_fd != INVALID_SOCKET) {
             socket_close(server->sock_fd);
-            server->sock_fd = INT_MIN;
+            server->sock_fd = INVALID_SOCKET;
         }
         free(server);
     }
 }
+
 
 THREAD_FUNC(conn_handler) {
     client_session_p session = arg;
@@ -175,8 +169,20 @@ THREAD_FUNC(conn_handler) {
     tmp_input = session->buffer;
 
     do {
+        socket_slice_result slice_res = socket_read(session->client_fd, tmp_input, 1000); /* MAGIC */
+
+        if(socket_slice_result_is_err(slice_res)) {
+            if(socket_slice_result_get_err(slice_res) == SOCKET_ERR_TIMEOUT) {
+                info("Timed out waiting for client to send us a request.");
+                continue;
+            } else {
+                info("Error, %d, reading data from the client!", socket_slice_result_get_err(slice_res));
+                break;
+            }
+        }
+
         /* get an incoming packet or a partial packet. */
-        tmp_input = socket_read(session->client_fd, tmp_input);
+        tmp_input = socket_slice_result_get_val(slice_res);
 
         if(slice_has_err(tmp_input)) {
             info("WARN: error response reading socket! error %d", slice_get_err(tmp_input));
@@ -184,22 +190,21 @@ THREAD_FUNC(conn_handler) {
         }
 
         /* try to process the packet. */
+        /* FIXME - convert to RESULT types */
         tmp_output = server->handler(tmp_input, session->buffer, session->server_context);
 
         /* check the response. */
         if(!slice_has_err(tmp_output)) {
-            /* FIXME - this should be in a loop to make sure all data is pushed. */
-            rc = socket_write(session->client_fd, tmp_output);
+            socket_slice_result write_res = socket_write(session->client_fd, tmp_output, 1000); /* MAGIC*/
 
-            /* error writing? */
-            if(rc < 0) {
-                info("ERROR: error writing output packet! Error: %d", rc);
+            if(socket_slice_result_is_err(write_res)) {
+                info("Error, %d, writing packet!", socket_slice_result_get_err(write_res));
                 break;
-            } else {
-                /* all good. Reset the buffers etc. */
-                tmp_input = session->buffer;
-                rc = TCP_SERVER_PROCESSED;
             }
+
+            /* all good. Reset the buffers etc. */
+            tmp_input = session->buffer;
+            rc = TCP_SERVER_PROCESSED;
         } else {
             /* there was some sort of error or exceptional condition. */
             switch((rc = slice_get_err(tmp_output))) {
@@ -228,14 +233,6 @@ THREAD_FUNC(conn_handler) {
         }
     } while((rc == TCP_SERVER_INCOMPLETE || rc == TCP_SERVER_PROCESSED)
             && (*(session->server_done) != true)); /* make sure another thread hasn't killed the server */
-
-    /* done with the socket */
-
-
-    // /* DEBUG */
-    // fprintf(stderr, "tcp_server.c:227 Closing client socket %d.\n", session->client_fd);
-    // fflush(stderr);
-    // /* DEBUG */
 
     socket_close(session->client_fd);
 

@@ -38,8 +38,6 @@
 #include <platform.h>
 
 /* KEEP THE SPACES BETWEEN THE INCLUDES.  The order is required! */
-#define _WINSOCKAPI_
-
 #include <Winsock2.h>
 
 #include <Windows.h>
@@ -77,6 +75,8 @@ extern "C"
 
 #define WINDOWS_REQUESTED_TIMER_PERIOD_MS ((unsigned int)4)
 
+/* not defined under Windows */
+typedef ptrdiff_t ssize_t;
 
 /***************************************************************************
  ******************************* Memory ************************************
@@ -97,7 +97,7 @@ extern void *mem_alloc(int size) {
         return NULL;
     }
 
-    return calloc(size, 1);
+    return calloc((size_t)(unsigned int)size, 1);
 }
 
 
@@ -228,7 +228,7 @@ int mem_cmp(void *src1, int src1_size, void *src2, int src2_size) {
             /* short circuit the comparison if the blocks are different lengths */
             if(src1_size != src2_size) { return (src1_size - src2_size); }
 
-            return memcmp(src1, src2, src1_size);
+            return memcmp(src1, src2, (size_t)(unsigned int)src1_size);
         }
     }
 }
@@ -459,7 +459,7 @@ extern int str_copy(char *dst, int dst_size, const char *src) {
 
 
     /* FIXME - if there is not enough room, truncate the string. */
-    strncpy_s(dst, dst_size, src, _TRUNCATE);
+    strncpy_s(dst, (rsize_t)(unsigned int)dst_size, src, _TRUNCATE);
 
     return 0;
 }
@@ -539,8 +539,8 @@ extern int str_to_float(const char *str, float *val) {
 
 
 extern char **str_split(const char *str, const char *sep) {
-    int sub_str_count = 0;
-    int size = 0;
+    size_t sub_str_count = 0;
+    size_t size = 0;
     const char *sub;
     const char *tmp;
     char **res;
@@ -560,17 +560,17 @@ extern char **str_split(const char *str, const char *sep) {
     if(tmp && *tmp && (!sub || !*sub)) { sub_str_count++; }
 
     /* calculate total size for string plus pointers */
-    size = sizeof(char *) * (sub_str_count + 1) + str_length(str) + 1;
+    size = (sizeof(char *) * (sub_str_count + 1)) + (size_t)(unsigned int)str_length(str) + 1;
 
     /* allocate enough memory */
-    res = (char **)mem_alloc(size);
+    res = (char **)mem_alloc((int)(unsigned int)size);
     if(!res) { return NULL; }
 
     /* calculate the beginning of the string */
     tmp = (char *)res + sizeof(char *) * (sub_str_count + 1);
 
     /* copy the string into the new buffer past the first part with the array of char pointers. */
-    str_copy((char *)tmp, (int)(size - ((char *)tmp - (char *)res)), str);
+    str_copy((char *)tmp, (int)(ptrdiff_t)(size - ((char *)tmp - (char *)res)), str);
 
     /* set up the pointers */
     sub_str_count = 0;
@@ -785,6 +785,8 @@ struct thread_t {
  */
 
 extern int thread_create(thread_p *t, LPTHREAD_START_ROUTINE func, int stacksize, void *arg) {
+    (void)stacksize;
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(!t) {
@@ -1015,7 +1017,7 @@ int cond_wait_impl(const char *func, int line_num, cond_p c, int timeout_ms) {
         int64_t time_left = (int64_t)timeout_ms - (time_ms() - start_time);
 
         if(time_left > 0) {
-            int wait_rc = 0;
+            DWORD wait_rc = 0;
 
             if(SleepConditionVariableCS(&(c->cond), &(c->cs), (DWORD)time_left)) {
                 /* we might need to wait again. could be a spurious wake up. */
@@ -1155,7 +1157,7 @@ static int sock_create_event_wakeup_channel(sock_p sock);
 static WSADATA wsaData = {0};
 
 static int socket_lib_init(void) {
-    MMRESULT rc = 0;
+    // MMRESULT rc = 0;
 
     /*
     rc = timeBeginPeriod(WINDOWS_REQUESTED_TIMER_PERIOD_MS);
@@ -1226,7 +1228,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     fd = socket(AF_INET, SOCK_STREAM, 0 /*IPPROTO_TCP*/);
 
     /* check for errors */
-    if(fd < 0) {
+    if(fd == INVALID_SOCKET) {
         /*pdebug("Socket creation failed, errno: %d",errno);*/
         return PLCTAG_ERR_OPEN;
     }
@@ -1301,7 +1303,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     }
 
     /* set the socket to non-blocking. */
-    if(ioctlsocket(fd, FIONBIO, &non_blocking)) {
+    if(ioctlsocket(fd, (long)FIONBIO, &non_blocking)) {
         /*pdebug("Error getting socket options, errno: %d", errno);*/
         closesocket(fd);
         return PLCTAG_ERR_OPEN;
@@ -1317,7 +1319,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     memset((void *)&gw_addr, 0, sizeof(gw_addr));
     gw_addr.sin_family = AF_INET;
-    gw_addr.sin_port = htons(port);
+    gw_addr.sin_port = htons((uint16_t)(int16_t)port);
 
     do {
         /* try each IP until we run out or get a connection. */
@@ -1628,7 +1630,7 @@ int socket_wake(sock_p sock) {
         return PLCTAG_ERR_READ;
     }
 
-    rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), (int)MSG_NOSIGNAL);
+    rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), 0);
     if(rc < 0) {
         int err = WSAGetLastError();
 
@@ -1809,7 +1811,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    rc = send(s->fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+    rc = send(s->fd, (const char *)buf, size, 0);
     if(rc < 0) {
         int err = WSAGetLastError();
 
@@ -1900,7 +1902,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
 
         /* try to write since select() said we could. */
-        rc = send(s->fd, (const char *)buf, size, (int)MSG_NOSIGNAL);
+        rc = send(s->fd, (const char *)buf, size, 0);
         if(rc < 0) {
             int err = WSAGetLastError();
 
@@ -1985,7 +1987,7 @@ int socket_destroy(sock_p *s) {
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_STATUS_OK;
+    return rc;
 }
 
 
@@ -1994,7 +1996,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     SOCKET listener = INVALID_SOCKET;
     struct sockaddr_in listener_addr_info;
     socklen_t addr_info_size = sizeof(struct sockaddr_in);
-    int non_blocking = 1;
+    u_long non_blocking = 1;
     SOCKET wake_fds[2];
 
     pdebug(DEBUG_INFO, "Starting.");
@@ -2031,7 +2033,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
          */
 
         listener = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(listener < 0) {
+        if(listener == INVALID_SOCKET) {
             pdebug(DEBUG_WARN, "Error %d creating the listener socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
@@ -2080,7 +2082,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
          */
 
         wake_fds[0] = (SOCKET)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(wake_fds[0] < 0) {
+        if(wake_fds[0] <= 0) {
             pdebug(DEBUG_WARN, "Error %d creating the wake channel read side socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
@@ -2108,14 +2110,14 @@ int sock_create_event_wakeup_channel(sock_p sock) {
         /* now we need to set these to non-blocking. */
 
         /* reader */
-        if(ioctlsocket(wake_fds[0], FIONBIO, &non_blocking)) {
+        if(ioctlsocket(wake_fds[0], (long)FIONBIO, &non_blocking)) {
             pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }
 
         /* writer */
-        if(ioctlsocket(wake_fds[1], FIONBIO, &non_blocking)) {
+        if(ioctlsocket(wake_fds[1], (long)FIONBIO, &non_blocking)) {
             pdebug(DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
@@ -2345,9 +2347,8 @@ int plc_lib_serial_port_read(serial_port_p serial_port, uint8_t *data, int size)
 
 int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size) {
     DWORD numBytesWritten = 0;
-    BOOL rc;
 
-    rc = WriteFile(serial_port->hSerialPort, (LPVOID)data, (DWORD)size, &numBytesWritten, NULL);
+    WriteFile(serial_port->hSerialPort, (LPVOID)data, (DWORD)size, &numBytesWritten, NULL);
 
     return (int)numBytesWritten;
 }
@@ -2359,7 +2360,7 @@ int plc_lib_serial_port_write(serial_port_p serial_port, uint8_t *data, int size
 
 
 int sleep_ms(int ms) {
-    Sleep(ms);
+    Sleep((DWORD)ms);
     return 1;
 }
 
