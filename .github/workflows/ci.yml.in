@@ -1069,12 +1069,7 @@ jobs:
     - name: Install MSVC ARM32 compiler
       run: |
         curl -LO https://aka.ms/vs/17/release/vs_buildtools.exe
-        .\vs_buildtools.exe ^
-          --quiet --wait --norestart --nocache ^
-          --installPath C:\BuildTools ^
-          --add Microsoft.VisualStudio.Workload.VCTools ^
-          --add Microsoft.VisualStudio.Component.VC.Tools.ARM ^
-          --add Microsoft.VisualStudio.Component.Windows10SDK.19041
+        .\vs_buildtools.exe modify --quiet --wait --norestart --nocache --installPath C:\BuildTools --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM --add Microsoft.VisualStudio.Component.Windows10SDK.19041
 
     - name: Clone and bootstrap vcpkg
       run: |
