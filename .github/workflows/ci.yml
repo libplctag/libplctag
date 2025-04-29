@@ -739,7 +739,7 @@ jobs:
 
     env:
       VERSION: "2.6.5"
-      ARTIFACT: "libplctag_2.6.5_windows_x86"
+      ARTIFACT: "libplctag_2.6.5_windows_x86_MSVC"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1071,18 +1071,22 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+    - name: Install MinGW for ARM64
+      uses: egor-tensin/setup-mingw@v2
+      with:
+        platform: aarch64
+
     - name: Configure CMake
       run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
+      run: cd ${{ env.BUILD }} && cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
-
 
 
   windows_cross_build_ARM32_MinGW:
@@ -1107,11 +1111,16 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+    - name: Install MinGW for ARM32
+      uses: egor-tensin/setup-mingw@v2
+      with:
+        platform: arm # Use arm instead of aarch64
+
     - name: Configure CMake
-      run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
+      run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_FLAGS="-march=armv7-a" -DCMAKE_CXX_FLAGS="-march=armv7-a" -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
+      run: cd ${{ env.BUILD }} && cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
