@@ -236,7 +236,7 @@ socket_fd_result socket_accept(SOCKET sock, uint32_t timeout_ms) {
 
     /* set the timeout to zero */
     timeout.tv_sec = (time_t)(timeout_ms / 1000);
-    timeout.tv_usec = (long)(timeout_ms % 1000) * 1000;
+    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
 
     /* zero out the file descriptor set. */
     FD_ZERO(&accept_fd_set);
