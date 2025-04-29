@@ -1076,17 +1076,11 @@ jobs:
         git clone https://github.com/microsoft/vcpkg
         .\vcpkg\bootstrap-vcpkg.bat
 
-    - name: Create build directory
-      run: mkdir ${{ env.BUILD }}
-
     - name: Configure and Build libplctag
       run: |
         mkdir build
         cd build
-        cmake .. `
-          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake `
-          -DVCPKG_TARGET_TRIPLET=arm-windows `
-          -DCMAKE_BUILD_TYPE=MinSizeRel
+        cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=arm-windows -DCMAKE_BUILD_TYPE=MinSizeRel
         cmake --build . --config MinSizeRel
 
     - name: Upload ZIP artifact
