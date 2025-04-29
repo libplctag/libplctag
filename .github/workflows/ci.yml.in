@@ -2,9 +2,9 @@ name: libplctag CI
 
 on:
   push:
-    branches: [ MinSizeRel, preMinSizeRel, split_omron ]
+    branches: [ release, prerelease ]
   pull_request:
-    branches: [ MinSizeRel, preMinSizeRel, split_omron ]
+    branches: [ release, prerelease ]
 
 jobs:
 
