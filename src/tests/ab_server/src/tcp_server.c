@@ -177,7 +177,6 @@ THREAD_FUNC(conn_handler) {
                 continue;
             } else {
                 info("Error, %d, reading data from the client!", socket_slice_result_get_err(slice_res));
-                rc = TCP_SERVER_DONE;
                 break;
             }
         }
