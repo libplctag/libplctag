@@ -42,6 +42,8 @@
 
 #    include <ws2tcpip.h>
 
+#    define suseconds_t long
+
 #else
 #    include <arpa/inet.h>
 #    include <errno.h>
@@ -274,7 +276,7 @@ socket_slice_result socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms
 
     /* set the timeout to zero */
     timeout.tv_sec = (time_t)(timeout_ms / 1000);
-    timeout.tv_usec = (long)((timeout_ms % 1000) * 1000);
+    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
 
     /* zero out the file descriptor set. */
     FD_ZERO(&read_fd_set);
@@ -332,7 +334,7 @@ socket_slice_result socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_
 
     /* set the timeout to zero */
     timeout.tv_sec = (time_t)(timeout_ms / 1000);
-    timeout.tv_usec = (long)((timeout_ms % 1000) * 1000);
+    timeout.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
 
     /* zero out the file descriptor set. */
     FD_ZERO(&write_fd_set);
