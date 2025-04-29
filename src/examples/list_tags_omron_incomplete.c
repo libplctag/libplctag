@@ -828,6 +828,12 @@ int main(int argc, char **argv) {
             break;
         }
 
+        if(num_instances == 0) {
+            printf("ERROR: class reports no instances found!\n");
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
         // num_instances = 300;
         // max_id = 300;
 
@@ -861,10 +867,13 @@ int main(int argc, char **argv) {
     if(tag > 0) {
         plc_tag_destroy(tag);
     } else {
+        free(tags);
         usage();
     }
 
+    if(rc != PLCTAG_STATUS_OK) { free(tags); }
+
     printf("\n********* Complete *********!\n");
 
-    return 0;
+    return rc;
 }
