@@ -43,6 +43,7 @@
 #include <libplctag/lib/libplctag.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define REQUIRED_VERSION 2, 1, 0
 
@@ -55,7 +56,7 @@ int main(void) {
     int32_t tag[NUM_TAGS];
     int rc;
     int i;
-    int64_t timeout = DATA_TIMEOUT + system_time_ms();
+    int64_t timeout = DATA_TIMEOUT + compat_time_ms();
     int done = 0;
     int64_t start = 0;
     int64_t end = 0;
@@ -82,7 +83,7 @@ int main(void) {
         };
 
         // NOLINTNEXTLINE
-        snprintf_platform(tmp_tag_path, sizeof tmp_tag_path, TAG_ATTRIBS, num_elems_per_tag, i);
+        compat_snprintf(tmp_tag_path, sizeof tmp_tag_path, TAG_ATTRIBS, num_elems_per_tag, i);
 
         // NOLINTNEXTLINE
         fprintf(stderr, "Attempting to create tag with attribute string '%s'\n", tmp_tag_path);
@@ -104,8 +105,8 @@ int main(void) {
             if(rc != PLCTAG_STATUS_OK) { done = 0; }
         }
 
-        if(!done) { system_sleep_ms(10, NULL); }
-    } while(timeout > system_time_ms() && !done);
+        if(!done) { compat_sleep_ms(10, NULL); }
+    } while(timeout > compat_time_ms() && !done);
 
     if(!done) {
         // NOLINTNEXTLINE
@@ -116,7 +117,7 @@ int main(void) {
         return 1;
     }
 
-    start = system_time_ms();
+    start = compat_time_ms();
 
     /* get the data */
     for(i = 0; i < NUM_TAGS; i++) {
@@ -147,8 +148,8 @@ int main(void) {
             if(rc != PLCTAG_STATUS_OK) { done = 0; }
         }
 
-        if(!done) { system_sleep_ms(10, NULL); }
-    } while(timeout > system_time_ms() && !done);
+        if(!done) { compat_sleep_ms(10, NULL); }
+    } while(timeout > compat_time_ms() && !done);
 
     if(!done) {
         // NOLINTNEXTLINE
@@ -159,7 +160,7 @@ int main(void) {
         return 1;
     }
 
-    end = system_time_ms();
+    end = compat_time_ms();
 
     /* get any data we can */
     for(i = 0; i < NUM_TAGS; i++) {

@@ -58,16 +58,13 @@
 #    define USE_BCRYPTGENRANDOM
 #    define PLATFORM_WINDOWS
 
-#    define _WINSOCKAPI_
+/* Windows include file order is important! */
 #    include <Winsock2.h>
-
 #    include <Windows.h>
-
 #    include <Ws2tcpip.h>
-
 #    include <io.h>
-#    include <strsafe.h>
 #    include <tchar.h>
+#    include <strsafe.h>
 #    include <wincrypt.h>
 
 #else
@@ -83,7 +80,9 @@
 #ifdef PLATFORM_WINDOWS
 
 int util_sleep_ms(int ms) {
-    Sleep(ms);
+    if(ms <= 0) { return 1; }
+
+    Sleep((DWORD)(unsigned int)ms);
     return 1;
 }
 
@@ -137,6 +136,12 @@ int64_t util_time_ms(void) {
 
 #endif
 
+#ifdef PLATFORM_WINDOWS
+void system_yield(void) { SwitchToThread(); }
+#else
+#    include <sched.h>
+void system_yield(void) { sched_yield(); }
+#endif
 
 /*
  * string helpers
@@ -274,9 +279,7 @@ uint64_t random_u64(uint64_t upper_bound) {
     if(BCryptGenRandom(NULL, (PUCHAR)&random_number, sizeof(random_number), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) {
         return RANDOM_U64_ERROR;
     }
-    if(upper_bound == 0) {
-        return 0;
-    }
+    if(upper_bound == 0) { return 0; }
     random_number %= upper_bound;
 
     return random_number;

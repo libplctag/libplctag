@@ -46,7 +46,9 @@
 #elif defined(__linux__)
     #define IS_LINUX (1)
     #define IS_POSIX (1)
-#elif defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
+#elif defined(__unix__)
+    #define IS_POSIX (1) 
+#elif defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64) || defined(__MINGW32__) || defined(__MINGW64__)
     #define IS_WINDOWS (1)
 
     #if defined(_MSC_VER)
@@ -56,7 +58,7 @@
 #endif
 
 
-#ifdef IS_MSVC
+#ifdef IS_WINDOWS
     #define str_cmp_i(first, second) _stricmp(first, second)
     #define strdup _strdup
     #define str_scanf sscanf_s

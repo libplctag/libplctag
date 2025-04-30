@@ -33,46 +33,10 @@
 
 #pragma once
 
-#include "compat.h"
-
-#include "result.h"
-#include "slice.h"
-
-#include <stdint.h>
-
-typedef enum {
-    SOCKET_STATUS_OK = 0,
-    SOCKET_ERR_ACCEPT,
-    SOCKET_ERR_BAD_PARAM,
-    SOCKET_ERR_BIND,
-    SOCKET_ERR_CONNECT,
-    SOCKET_ERR_CREATE,
-    SOCKET_ERR_EOF,
-    SOCKET_ERR_LISTEN,
-    SOCKET_ERR_OPEN,
-    SOCKET_ERR_READ,
-    SOCKET_ERR_SELECT,
-    SOCKET_ERR_SETOPT,
-    SOCKET_ERR_STARTUP,
-    SOCKET_ERR_TIMEOUT,
-    SOCKET_ERR_WRITE
-} socket_err_t;
-
-#ifndef IS_WINDOWS
-typedef int SOCKET;
-#    define INVALID_SOCKET (-1)
-#else
-#    include <winsock2.h>
-#endif
-
-RESULT_DEF(socket_fd_result, SOCKET)
-
-RESULT_DEF(socket_slice_result, slice_s)
-
-
-extern socket_fd_result socket_open_tcp_client(const char *remote_host, const char *remote_port);
-extern socket_fd_result socket_open_tcp_server(const char *listening_port);
-extern void socket_close(SOCKET sock);
-extern socket_fd_result socket_accept(SOCKET sock, uint32_t timeout_ms);
-extern socket_slice_result socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms);
-extern socket_slice_result socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms);
+#define RESULT_DEF(NAME, OK_TYPE) typedef struct { OK_TYPE val; int err; } NAME;        \
+static inline NAME NAME ## _err(int err) { return (NAME){ .err = err}; }                \
+static inline NAME NAME ## _val(OK_TYPE val) { return (NAME){ .val = val, .err = 0}; }  \
+static inline int NAME ## _get_err(NAME result) { return result.err; }                  \
+static inline OK_TYPE NAME ## _get_val(NAME result) { return result.val; }              \
+static inline bool NAME ## _is_err(NAME result) { return (result.err != 0); }           \
+static inline bool NAME ## _is_val(NAME result) { return (result.err == 0); }

@@ -36,6 +36,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 cmake_minimum_required (VERSION 3.10)
 cmake_policy(SET CMP0054 NEW)
 
+# debugging help
+set(CMAKE_BUILD_PARALLEL_LEVEL 1)
+
 
 # this is the root libplctag project
 project (libplctag_project)
@@ -44,6 +47,8 @@ project (libplctag_project)
 set(C_STANDARD 11)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+message(STATUS "Compiler Implicit Includes: ${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES}")
 
 # make sure our outputs are going somewhere sane
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
@@ -54,7 +59,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project version
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 6)
-set (libplctag_VERSION_PATCH 4)
+set (libplctag_VERSION_PATCH 5)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -74,42 +79,48 @@ message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 # we need threads
 find_package(Threads REQUIRED)
 
-# Target platform-specific config
-if(ANDROID_ABI OR ANDROID)
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/android.cmake")
-elseif(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
+# C compiler-specific settings
+if(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
     include("${CMAKE_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
-elseif(APPLE)
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/apple.cmake")
-elseif(UNIX)
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/unix.cmake")
-elseif(WIN32)
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/windows.cmake")
-endif()
-
-# C compiler specific settings
-if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
+elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
     include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/msvc.cmake")
 else()
     message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
     return()
 endif()
 
 
+# Target platform-specific config
+if(ANDROID_ABI OR ANDROID)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/android.cmake")
+elseif(APPLE)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/apple.cmake")
+elseif(UNIX)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/unix.cmake")
+elseif(WIN32)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/windows.cmake")
+else()
+    message("Unsupported platform!")
+    return()
+endif()
+
+
+
 # where to find include files.
-include_directories("${CMAKE_SOURCE_DIR}/src" "${PLATFORM_SHIM_PATH}")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src" "${PLATFORM_SHIM_PATH}")
 
 # build the libplctag library, shared and static
-add_subdirectory("${CMAKE_SOURCE_DIR}/src/libplctag")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/libplctag")
 
 if(BUILD_EXAMPLES)
-    add_subdirectory("${CMAKE_SOURCE_DIR}/src/examples")
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/examples")
 endif(BUILD_EXAMPLES)
 
 if(BUILD_TESTS)
    message("Building tests.")
-   add_subdirectory("${CMAKE_SOURCE_DIR}/src/tests")
+   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 endif(BUILD_TESTS)
 
 
@@ -133,10 +144,12 @@ endif(BUILD_TESTS)
 #    endif()
 
 # Generate files from templates
-CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
+CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
 # build the GitHub Actions config file
-CONFIGURE_FILE("${CMAKE_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)  # Only if this is the main project
+  CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
+endif()
 
 
 # for installation

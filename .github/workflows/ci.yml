@@ -2,9 +2,9 @@ name: libplctag CI
 
 on:
   push:
-    branches: [ release, prerelease, split_omron ]
+    branches: [ release, prerelease ]
   pull_request:
-    branches: [ release, prerelease, split_omron ]
+    branches: [ release, prerelease ]
 
 jobs:
 
@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_ubuntu_x64"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -35,7 +35,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -152,8 +152,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_ubuntu_x86"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -174,7 +174,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=1 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -291,8 +291,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_macos_x64"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -310,7 +310,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -427,8 +427,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_macos_aarch64"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -446,7 +446,7 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -457,13 +457,13 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
-  windows_x64:
+  windows_x64_MSVC:
 
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_windows_x64"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -489,7 +489,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Test Basic Functions
       run: |
@@ -600,13 +600,146 @@ jobs:
         path: ${{ env.DIST }}
 
 
-  windows_x86:
+  windows_x64_MinGW:
 
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_windows_x86"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_windows_x64_MinGW"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
+
+    - name: Create build directory
+      run: mkdir ${{ env.BUILD }}
+
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 -DCMAKE_VERBOSE_MAKEFILE=On
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
+
+    - name: Test Basic Functions
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator."
+        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
+        echo "waiting for simulator to start up..."
+        timeout /T 5
+        echo "test simple get/set tag."
+        .\simple
+        echo "test callback use."
+        .\test_callback
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Micro800
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug
+        timeout /T 5
+        echo "test getting a tag on a Micro800."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Omron NJ/NX
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=Omron --tag=TestDINTArray:DINT[10] --debug
+        timeout /T 5
+        echo "test getting a tag on an Omron NJ/NX."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test PLC/5
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] --debug
+        timeout /T 5
+        echo "test getting a tag on a PLC/5."
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test SLC 500
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] --debug
+        timeout /T 5
+        echo "test getting a tag on a SLC 500."
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Duplicate Connection ID
+      run: |
+        cd ${{ env.DIST }}
+        dir
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug
+        timeout /T 5
+        echo "test getting a tag with connection failures."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Large Tags
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
+        timeout /T 5
+        echo "test getting a large tag."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Array Notation Read/Write
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5]
+        timeout /T 5
+        echo "test array notation read/write"
+        .\test_array_notation.exe 127.0.0.1 1,0 TestBigArray 5 2000
+        set test_result=%errorlevel%
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+        exit /b %test_result%
+      shell: cmd
+
+
+
+  windows_x86_MSVC:
+
+    runs-on: windows-latest
+
+    env:
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_windows_x86_MSVC"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -626,13 +759,13 @@ jobs:
     - name: Setup MSVC for x86
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        arch: amd64
+        arch: win32
 
     - name: Configure CMake
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=Win32 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Test Basic Functions
       run: |
@@ -742,12 +875,13 @@ jobs:
         path: ${{ env.DIST }}
 
 
-  windows_ARM64:
+  windows_x86_MinGW:
+
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_windows_arm64"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_windows_x64_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -764,6 +898,137 @@ jobs:
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
 
+    - name: Configure CMake
+      run: cd ${{ env.BUILD }} && cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_VERBOSE_MAKEFILE=On
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
+
+    - name: Test Basic Functions
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator."
+        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
+        echo "waiting for simulator to start up..."
+        timeout /T 5
+        echo "test simple get/set tag."
+        .\simple
+        echo "test callback use."
+        .\test_callback
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Micro800
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug
+        timeout /T 5
+        echo "test getting a tag on a Micro800."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Omron NJ/NX
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=Omron --tag=TestDINTArray:DINT[10] --debug
+        timeout /T 5
+        echo "test getting a tag on an Omron NJ/NX."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test PLC/5
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] --debug
+        timeout /T 5
+        echo "test getting a tag on a PLC/5."
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test SLC 500
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] --debug
+        timeout /T 5
+        echo "test getting a tag on a SLC 500."
+        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Duplicate Connection ID
+      run: |
+        cd ${{ env.DIST }}
+        dir
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug
+        timeout /T 5
+        echo "test getting a tag with connection failures."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Large Tags
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
+        timeout /T 5
+        echo "test getting a large tag."
+        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray" --debug=2
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+      shell: cmd
+
+    - name: Test Array Notation Read/Write
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5]
+        timeout /T 5
+        echo "test array notation read/write"
+        .\test_array_notation.exe 127.0.0.1 1,0 TestBigArray 5 2000
+        set test_result=%errorlevel%
+        echo "shut down server."
+        taskkill /F /IM ab_server.exe
+        exit /b %test_result%
+      shell: cmd
+
+
+  windows_cross_build_ARM64_MSVC:
+    runs-on: windows-latest
+
+    env:
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_windows_arm64"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
+
+    - name: Checkout library source.
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
+
+    - name: Create build directory
+      run: mkdir ${{ env.BUILD }}
+
     - name: Setup MSVC for ARM64
       uses: ilammy/msvc-dev-cmd@v1
       with:
@@ -773,7 +1038,7 @@ jobs:
       run: cd ${{ env.BUILD }} && cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64 -DCMAKE_VERBOSE_MAKEFILE=On
 
     - name: Build
-      run: cd ${{ env.BUILD }} && cmake --build . --verbose --config Release
+      run: cd ${{ env.BUILD }} && cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -782,58 +1047,55 @@ jobs:
         path: ${{ env.DIST }}
 
 
-  #windows_ARM:
+  windows_cross_build_ARM32_MSVC:
+    runs-on: windows-latest
 
-  #  runs-on: windows-latest
+    env:
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_windows_ARM32_MSVC"
+      BUILD: "${{ github.workspace }}\\build"
+      DIST: "${{ github.workspace }}\\build\\bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
 
-  #  env:
-  #    VERSION: "2.6.4"
-  #    ARTIFACT: "libplctag_2.6.4_windows_Arm"
-  #    BUILD: "${{ github.workspace }}\\build"
-  #    DIST: "${{ github.workspace }}\\build\\bin_dist"
-  #    BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }}"
 
-  #  steps:
-  #  - name: Print out current branch
-  #    run: echo "Building branch ${{ env.BRANCH }}"
+    - name: Checkout library source.
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
 
-  #  - name: "Checkout library source."
-  #    uses: actions/checkout@v4
-  #    with:
-  #      ref: ${{ env.BRANCH }}
+    - name: Install MSVC ARM32 compiler
+      run: |
+        curl -LO https://aka.ms/vs/17/release/vs_buildtools.exe
+        .\vs_buildtools.exe modify --quiet --wait --norestart --nocache --installPath C:\BuildTools --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM --add Microsoft.VisualStudio.Component.Windows10SDK.19041
 
-  #  - name: Create build directory
-  #    run: mkdir ${{ env.BUILD }}
+    - name: Clone and bootstrap vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg
+        .\vcpkg\bootstrap-vcpkg.bat
 
-  #  - name: Setup MSBuild
-  #    uses: microsoft/setup-msbuild@v1.3.1
+    - name: Configure and Build libplctag
+      run: |
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=arm-windows -DCMAKE_BUILD_TYPE=MinSizeRel
+        cmake --build . --config MinSizeRel
 
-  #  - name: Install ARM Windows SDK (if missing)
-  #    run: |
-  #      choco install windows-sdk-10-version-2004-all -y
-
-  #  - name: Configure and Build with MSVC for ARM
-  #    run: |
-  #      call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm
-  #      cd %BUILD%
-  #      cmake .. -G "Ninja" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM -DCMAKE_VERBOSE_MAKEFILE=On
-  #      cmake --build . --verbose --config MinSizeRel
-  #    shell: cmd
-
-  #  - name: Upload ZIP artifact
-  #    uses: actions/upload-artifact@v4
-  #    with:
-  #      name: ${{ env.ARTIFACT }}
-  #      path: ${{ env.DIST }}
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ${{ env.DIST }}
 
 
   ubuntu_cross_build_arm6:
-
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_linux_arm6hf"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_linux_arm6hf"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -854,10 +1116,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -871,8 +1133,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_linux_arm7l"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_linux_arm7l"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -893,10 +1155,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -910,8 +1172,8 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION: "2.6.4"
-      ARTIFACT: "libplctag_2.6.4_linux_aarch64"
+      VERSION: "2.6.5"
+      ARTIFACT: "libplctag_2.6.5_linux_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -932,10 +1194,10 @@ jobs:
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
