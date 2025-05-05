@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2025 by Simon labrecque                                 *
+ *   Copyright (C) 2025 by Simon Labrecque                                 *
  *   Author Simon Labrecque  simon@wegel.ca                                *
  *                                                                         *
  * This software is available under either the Mozilla Public License      *
