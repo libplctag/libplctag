@@ -877,7 +877,7 @@ jobs:
 
     env:
       VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_windows_x64_MinGW"
+      ARTIFACT: "libplctag_2.6.6_windows_x86_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
