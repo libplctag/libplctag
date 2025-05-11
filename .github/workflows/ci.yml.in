@@ -599,7 +599,6 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
-
   windows_x64_MinGW:
 
     runs-on: windows-latest
@@ -731,15 +730,13 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-
-
   windows_x86_MSVC:
 
     runs-on: windows-latest
 
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_windows_x86_MSVC"
+      ARTIFACT: "libplctag_@VERSION@_windows_x86"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -874,7 +871,6 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
-
   windows_x86_MinGW:
 
     runs-on: windows-latest
@@ -1006,7 +1002,6 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-
   windows_cross_build_ARM64_MSVC:
     runs-on: windows-latest
 
@@ -1046,50 +1041,6 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
-
-  windows_cross_build_ARM32_MSVC:
-    runs-on: windows-latest
-
-    env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_windows_ARM32_MSVC"
-      BUILD: "${{ github.workspace }}\\build"
-      DIST: "${{ github.workspace }}\\build\\bin_dist"
-      BRANCH: ${{ github.head_ref || github.ref_name }}
-
-    steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
-
-    - name: Checkout library source.
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ env.BRANCH }}
-
-    - name: Install MSVC ARM32 compiler
-      run: |
-        curl -LO https://aka.ms/vs/17/release/vs_buildtools.exe
-        .\vs_buildtools.exe modify --quiet --wait --norestart --nocache --installPath C:\BuildTools --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM --add Microsoft.VisualStudio.Component.Windows10SDK.19041
-
-    - name: Clone and bootstrap vcpkg
-      run: |
-        git clone https://github.com/microsoft/vcpkg
-        .\vcpkg\bootstrap-vcpkg.bat
-
-    - name: Configure and Build libplctag
-      run: |
-        mkdir build
-        cd build
-        cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=arm-windows -DCMAKE_BUILD_TYPE=MinSizeRel
-        cmake --build . --config MinSizeRel
-
-    - name: Upload ZIP artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
-
-
   ubuntu_cross_build_arm6:
     runs-on: ubuntu-latest
 
@@ -1126,7 +1077,6 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
-
 
   ubuntu_cross_build_arm7:
 
@@ -1165,7 +1115,6 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
-
 
   ubuntu_cross_build_aarch64:
 
