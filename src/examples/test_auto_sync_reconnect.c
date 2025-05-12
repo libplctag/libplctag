@@ -129,6 +129,8 @@ void tag_callback(int32_t tag_id, int event, int status) {
 void *monitor_thread_func(void *arg) {
     int64_t current_time;
 
+    (void)arg;
+
     fprintf(stderr, "Monitor thread started\n");
 
     while((current_time = compat_time_ms()) < global_state.end_time) {
@@ -317,7 +319,7 @@ int main(int argc, char **argv) {
     int expected_reads = TEST_DURATION_MS / auto_sync_read_ms;
 
     /* calculate reads during disconnection */
-    reads_during_disconnect = DISCONNECT_TIME_MS / auto_sync_read_ms;
+    // reads_during_disconnect = DISCONNECT_TIME_MS / auto_sync_read_ms;
 
     /* print results */
     fprintf(stderr, "\nTest Results:\n");
