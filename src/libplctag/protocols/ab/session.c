@@ -1338,6 +1338,7 @@ THREAD_FUNC(session_handler) {
                     } else {
                         state = SESSION_UNREGISTER;
                     }
+
                     cond_signal(session->session_wait_cond);
                 }
 
@@ -1604,6 +1605,7 @@ int process_requests(ab_session_p session) {
 
         do {
             /* copy and pack the requests into the session buffer. */
+            /* FIXME - pack_requests() only returns PLCTAG_STATUS_OK */
             rc = pack_requests(session, bundled_requests, num_bundled_requests);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error while packing requests, %s!", plc_tag_decode_error(rc));
@@ -1749,11 +1751,11 @@ int process_requests(ab_session_p session) {
                         }
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests,
+                           (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
-
             }
 
             if(rc != PLCTAG_STATUS_OK) {
@@ -2086,6 +2088,7 @@ int prepare_request(ab_session_p session) {
     encap = (eip_encap *)(session->data);
     payload_size = (int)session->data_size - (int)sizeof(eip_encap);
 
+    /* FIXME - why is this check here? Haven't we checked this up the call chain? */
     if(!session) {
         pdebug(DEBUG_WARN, "Called with null session!");
         return PLCTAG_ERR_NULL_PTR;
@@ -2097,6 +2100,8 @@ int prepare_request(ab_session_p session) {
     encap->encap_session_handle = h2le32(session->session_handle);
     encap->encap_status = h2le32(0);
     encap->encap_options = h2le32(0);
+
+    /* FIXME - support other kinds of requests? */
 
     /* set up the session sequence ID for this transaction */
     if(le2h16(encap->encap_command) == AB_EIP_UNCONNECTED_SEND) {

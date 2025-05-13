@@ -414,3 +414,27 @@ int compat_set_interrupt_handler(void (*handler)(void)) {
 #else
 #    error "Not a supported platform!"
 #endif
+
+#define BUFFER_SIZE 1024
+
+
+int compat_fprintf(FILE *out, const char *format, ...) {
+    // ... inside a function ...
+    char buffer[BUFFER_SIZE] = {0};
+    int formatted_len;
+    va_list va;
+
+    /* Initialize the variable argument list */
+    va_start(va, format);
+
+    /* print the string into the buffer. */
+    formatted_len = vsnprintf(buffer, sizeof(buffer), format, va);
+
+    /* done with the vararg list */
+    va_end(va);
+
+    /* output the data if any */
+    if(formatted_len > 0) { fputs(buffer, out); }
+
+    return formatted_len;
+}
