@@ -1088,6 +1088,9 @@ jobs:
         #   sudo apt install -y libmodbus5:arm64 libmodbus-dev:arm64 || true
         # fi
 
+    - name: Create build directory
+      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
     - name: Configure CMake with cross-compilation
       run: |
         cd ${{ env.BUILD }}
