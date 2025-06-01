@@ -1081,12 +1081,17 @@ jobs:
         sudo apt update
         sudo apt install -y build-essential cmake
         sudo apt install -y gcc-${{ matrix.gcc_prefix }} g++-${{ matrix.gcc_prefix }}
-        # Install target architecture libraries if needed
-        # if [ "${{ matrix.arch }}" = "armv6" ] || [ "${{ matrix.arch }}" = "armv7hf" ]; then
-        #   sudo apt install -y libmodbus5:armhf libmodbus-dev:armhf || true
-        # elif [ "${{ matrix.arch }}" = "aarch64" ]; then
-        #   sudo apt install -y libmodbus5:arm64 libmodbus-dev:arm64 || true
-        # fi
+
+        # Enable additional architectures for multiarch
+        if [ "${{ matrix.arch }}" = "armv6" ] || [ "${{ matrix.arch }}" = "armv7hf" ]; then
+          sudo dpkg --add-architecture armhf
+          sudo apt update
+          sudo apt install -y libc6-dev:armhf libgcc-s1:armhf
+        elif [ "${{ matrix.arch }}" = "aarch64" ]; then
+          sudo dpkg --add-architecture arm64
+          sudo apt update
+          sudo apt install -y libc6-dev:arm64 libgcc-s1:arm64
+        fi
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
