@@ -1096,7 +1096,7 @@ jobs:
         cd ${{ env.BUILD }}
         cmake \
           -DCMAKE_BUILD_TYPE=MinSizeRel \
-          -DBUILD_MODBUS_EMULATOR:BOOL=On \
+          -DBUILD_MODBUS_EMULATOR:BOOL=Off \
           -DCMAKE_VERBOSE_MAKEFILE=On \
           -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/cmake_toolchains/${{ matrix.cmake_toolchain_file }} \
           ..
