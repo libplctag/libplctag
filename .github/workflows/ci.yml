@@ -1041,7 +1041,7 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
-ubuntu_arm_cross:
+  ubuntu_arm_cross:
     runs-on: ubuntu-22.04
 
     strategy:
