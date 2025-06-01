@@ -10,7 +10,7 @@ jobs:
 
   ubuntu_x64:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       VERSION: "@VERSION@"
@@ -149,7 +149,7 @@ jobs:
 
   ubuntu_x86:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       VERSION: "@VERSION@"
@@ -1042,7 +1042,7 @@ jobs:
         path: ${{ env.DIST }}
 
   ubuntu_cross_build_arm6:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       VERSION: "@VERSION@"
@@ -1080,7 +1080,7 @@ jobs:
 
   ubuntu_cross_build_arm7:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       VERSION: "@VERSION@"
@@ -1118,7 +1118,7 @@ jobs:
 
   ubuntu_cross_build_aarch64:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       VERSION: "@VERSION@"
