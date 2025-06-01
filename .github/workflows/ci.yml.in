@@ -1086,6 +1086,10 @@ jobs:
         # Add target architecture
         sudo dpkg --add-architecture ${{ matrix.target_arch }}
 
+        # Modify existing sources.list to exclude ARM architectures from main repos
+        sudo sed -i 's/^deb /deb [arch=amd64,i386] /' /etc/apt/sources.list
+        sudo sed -i 's/^deb-src /deb-src [arch=amd64,i386] /' /etc/apt/sources.list
+
         # Add ARM ports repository for the target architecture
         cat << EOF | sudo tee /etc/apt/sources.list.d/${{ matrix.target_arch }}.list
         deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
