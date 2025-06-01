@@ -1,0 +1,13 @@
+message("Building for Linux (Ubuntu/Debian) Arm v6")
+
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR arm)
+set(CMAKE_C_COMPILER arm-linux-gnueabi-gcc)
+set(CMAKE_CXX_COMPILER arm-linux-gnueabi-g++)
+# set(CMAKE_C_FLAGS "-march=armv6 -mfpu=vfp -mfloat-abi=soft")
+# set(CMAKE_CXX_FLAGS "-march=armv6 -mfpu=vfp -mfloat-abi=soft")
+set(CMAKE_C_FLAGS "-march=armv6")
+set(CMAKE_CXX_FLAGS "-march=armv6")
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
