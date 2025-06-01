@@ -1076,9 +1076,21 @@ jobs:
       with:
         ref: ${{ env.BRANCH }}
 
-    - name: Set up build environment and cross-compilation tools
+    - name: Setup ARM cross-compilation
       run: |
+        # Add armhf architecture
+        sudo dpkg --add-architecture armhf
+
+        # Add ARM ports repository
+        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/armhf.list
+        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/armhf.list
+        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/armhf.list
+        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/armhf.list
+
+        # Update package lists
         sudo apt update
+
+        # Install cross-compilation tools
         sudo apt install -y build-essential cmake
         sudo apt install -y gcc-${{ matrix.gcc_prefix }} g++-${{ matrix.gcc_prefix }}
 
