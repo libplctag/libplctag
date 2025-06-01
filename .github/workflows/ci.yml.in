@@ -1051,14 +1051,17 @@ jobs:
             gcc_prefix: arm-linux-gnueabi
             cmake_toolchain_file: armv6.cmake
             artifact_suffix: armv6
+            target_arch: armhf
           - arch: armv7hf
             gcc_prefix: arm-linux-gnueabihf
             cmake_toolchain_file: armv7hf.cmake
             artifact_suffix: armv7_hf
+            target_arch: armhf
           - arch: aarch64
             gcc_prefix: aarch64-linux-gnu
             cmake_toolchain_file: aarch64.cmake
             artifact_suffix: arm64
+            target_arch: arm64
 
     env:
       VERSION: "@VERSION@"
@@ -1078,35 +1081,41 @@ jobs:
 
     - name: Setup ARM cross-compilation
       run: |
-        # Add armhf architecture
-        sudo dpkg --add-architecture armhf
+        set -e  # Exit on any error
 
-        # Add ARM ports repository
-        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/armhf.list
-        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/armhf.list
-        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/armhf.list
-        echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/armhf.list
+        # Add target architecture
+        sudo dpkg --add-architecture ${{ matrix.target_arch }}
 
-        # Update package lists
+        # Add ARM ports repository for the target architecture
+        cat << EOF | sudo tee /etc/apt/sources.list.d/${{ matrix.target_arch }}.list
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-backports main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse
+        EOF
+
+        # Single apt update after adding repositories
         sudo apt update
 
-        # Install cross-compilation tools
-        sudo apt install -y build-essential cmake
-        sudo apt install -y gcc-${{ matrix.gcc_prefix }} g++-${{ matrix.gcc_prefix }}
+        # Install cross-compilation tools and target libraries
+        sudo apt install -y \
+          build-essential \
+          cmake \
+          gcc-${{ matrix.gcc_prefix }} \
+          g++-${{ matrix.gcc_prefix }} \
+          libc6-dev:${{ matrix.target_arch }} \
+          libgcc-s1:${{ matrix.target_arch }}
 
-        # Enable additional architectures for multiarch
-        if [ "${{ matrix.arch }}" = "armv6" ] || [ "${{ matrix.arch }}" = "armv7hf" ]; then
-          sudo dpkg --add-architecture armhf
-          sudo apt update
-          sudo apt install -y libc6-dev:armhf libgcc-s1:armhf
-        elif [ "${{ matrix.arch }}" = "aarch64" ]; then
-          sudo dpkg --add-architecture arm64
-          sudo apt update
-          sudo apt install -y libc6-dev:arm64 libgcc-s1:arm64
-        fi
+    - name: Verify cross-compilation tools
+      run: |
+        echo "Verifying installed cross-compilation tools:"
+        ${{ matrix.gcc_prefix }}-gcc --version
+        ${{ matrix.gcc_prefix }}-g++ --version
 
     - name: Create build directory
-      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+      run: |
+        rm -rf ${{ env.BUILD }}
+        mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake with cross-compilation
       run: |
@@ -1119,10 +1128,18 @@ jobs:
           ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+      run: |
+        cd ${{ env.BUILD }}
+        cmake --build . --verbose
+
+    - name: Verify build artifacts
+      run: |
+        echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
+        ls -la ${{ env.DIST }} || echo "No artifacts directory found"
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
+        if-no-files-found: error
