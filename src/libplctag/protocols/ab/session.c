@@ -71,10 +71,10 @@
  * Number of milliseconds to wait to try to set up the session again
  * after a failure.
  */
-#define RETRY_WAIT_MS (5000)
+#define RETRY_WAIT_INITIAL_MS (100)
+#define RETRY_WAIT_MAX_MS (10000)
 
 #define SESSION_DISCONNECT_TIMEOUT (5000)
-
 #define SOCKET_WAIT_TIMEOUT_MS (20)
 #define SESSION_IDLE_WAIT_TIME (100)
 
@@ -114,6 +114,7 @@ static void session_destroy(void *session);
 static int session_register(ab_session_p session);
 static int session_close_socket(ab_session_p session);
 static int session_unregister(ab_session_p session);
+static int64_t calc_retry_time(unsigned int retry_count);
 static THREAD_FUNC(session_handler);
 static int purge_aborted_requests_unsafe(ab_session_p session);
 static int process_requests(ab_session_p session);
@@ -1161,6 +1162,20 @@ int session_add_request(ab_session_p session, ab_request_p req) {
 }
 
 
+int64_t calc_retry_time(unsigned int retry_count) {
+    int64_t result = 0;
+    result = RETRY_WAIT_INITIAL_MS * (1 << retry_count);
+
+    if(result > RETRY_WAIT_MAX_MS) { result = RETRY_WAIT_MAX_MS; }
+
+    result += (int64_t)random_u64(RETRY_WAIT_INITIAL_MS) - (int64_t)(RETRY_WAIT_INITIAL_MS / 2);
+
+    pdebug(DEBUG_DETAIL, "Retry count %u for retry time delay of %" PRId64 "ms.", retry_count, result);
+
+    return result;
+}
+
+
 /*****************************************************************
  **************** Session handling functions *********************
  ****************************************************************/
@@ -1186,17 +1201,22 @@ THREAD_FUNC(session_handler) {
     ab_session_p session = arg;
     int rc = PLCTAG_STATUS_OK;
     session_state_t state = SESSION_OPEN_SOCKET_START;
+    int64_t now = 0;
     int64_t timeout_time = 0;
     int64_t wait_until_time = 0;
     int64_t auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
+    unsigned int retry_count = 0;
+    int64_t retry_wait_ms = 0;
     int auto_disconnect = 0;
 
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
     while(!session->terminating && !atomic_get_bool(&library_terminating)) {
+        now = time_ms();
+
         /* how long should we wait if nothing wakes us? */
-        wait_until_time = time_ms() + SESSION_IDLE_WAIT_TIME;
+        wait_until_time = now + SESSION_IDLE_WAIT_TIME;
 
         /*
          * Do this on every cycle.   This keeps the queue clean(ish).
@@ -1220,11 +1240,13 @@ THREAD_FUNC(session_handler) {
                 } else {
                     if(rc == PLCTAG_STATUS_OK) {
                         /* bump auto disconnect time into the future so that we do not accidentally disconnect immediately. */
-                        auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
+                        auto_disconnect_time = now + SESSION_DISCONNECT_TIMEOUT;
 
                         pdebug(DEBUG_DETAIL, "Connect complete immediately, going to state SESSION_REGISTER.");
 
                         state = SESSION_REGISTER;
+
+                        retry_count = 0;
                     } else {
                         pdebug(DEBUG_DETAIL, "Connect started, going to state SESSION_OPEN_SOCKET_WAIT.");
 
@@ -1247,7 +1269,7 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_INFO, "Socket connection succeeded.");
 
                     /* calculate the disconnect time. */
-                    auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
+                    auto_disconnect_time = now + SESSION_DISCONNECT_TIMEOUT;
 
                     state = SESSION_REGISTER;
                 } else if(rc == PLCTAG_ERR_TIMEOUT) {
@@ -1256,6 +1278,7 @@ THREAD_FUNC(session_handler) {
                     /* don't wait more.  The TCP connect check will wait in select(). */
                 } else {
                     pdebug(DEBUG_WARN, "Session connect failed %s!", plc_tag_decode_error(rc));
+
                     state = SESSION_CLOSE_SOCKET;
                 }
 
@@ -1271,6 +1294,8 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_WARN, "session registration failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_CLOSE_SOCKET;
                 } else {
+                    retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+
                     if(session->use_connected_msg) {
                         state = SESSION_SEND_FORWARD_OPEN;
                     } else {
@@ -1287,6 +1312,8 @@ THREAD_FUNC(session_handler) {
                     pdebug(DEBUG_WARN, "Send Forward Open failed %s!", plc_tag_decode_error(rc));
                     state = SESSION_UNREGISTER;
                 } else {
+                    retry_wait_ms = RETRY_WAIT_INITIAL_MS;
+
                     pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_RECEIVE_FORWARD_OPEN state.");
                     state = SESSION_RECEIVE_FORWARD_OPEN;
                 }
@@ -1313,6 +1340,7 @@ THREAD_FUNC(session_handler) {
                         state = SESSION_UNREGISTER;
                     }
                 } else {
+                    retry_wait_ms = RETRY_WAIT_INITIAL_MS;
                     pdebug(DEBUG_DETAIL, "Send Forward Open succeeded, going to SESSION_IDLE state.");
                     state = SESSION_IDLE;
                 }
@@ -1327,7 +1355,7 @@ THREAD_FUNC(session_handler) {
                     int num_reqs = vector_length(session->requests);
                     if(num_reqs > 0) {
                         pdebug(DEBUG_DETAIL, "There are %d requests pending before cleanup and sending.", num_reqs);
-                        auto_disconnect_time = time_ms() + SESSION_DISCONNECT_TIMEOUT;
+                        auto_disconnect_time = now + SESSION_DISCONNECT_TIMEOUT;
                     }
                 }
 
@@ -1338,11 +1366,12 @@ THREAD_FUNC(session_handler) {
                     } else {
                         state = SESSION_UNREGISTER;
                     }
+
                     cond_signal(session->session_wait_cond);
                 }
 
                 /* check if we should disconnect */
-                if(auto_disconnect_time < time_ms()) {
+                if(auto_disconnect_time < now) {
                     pdebug(DEBUG_DETAIL, "Disconnecting due to inactivity.");
 
                     auto_disconnect = 1;
@@ -1407,7 +1436,10 @@ THREAD_FUNC(session_handler) {
                 pdebug(DEBUG_DETAIL, "in SESSION_START_RETRY state.");
 
                 /* FIXME - make this a tag attribute. */
-                timeout_time = time_ms() + RETRY_WAIT_MS;
+                timeout_time = now + calc_retry_time(retry_count);
+                retry_count++;
+
+                pdebug(DEBUG_DETAIL, "Waiting %dms before trying to reconnect.", (int)(retry_wait_ms));
 
                 /* start waiting. */
                 state = SESSION_WAIT_RETRY;
@@ -1418,10 +1450,12 @@ THREAD_FUNC(session_handler) {
             case SESSION_WAIT_RETRY:
                 pdebug(DEBUG_DETAIL, "in SESSION_WAIT_RETRY state.");
 
-                if(timeout_time < time_ms()) {
+                if(timeout_time < now) {
                     pdebug(DEBUG_DETAIL, "Transitioning to SESSION_OPEN_SOCKET_START.");
                     state = SESSION_OPEN_SOCKET_START;
                     cond_signal(session->session_wait_cond);
+                } else {
+                    pdebug(DEBUG_DETAIL, "Wait not complete, still %dms to go.", (int)(timeout_time - now));
                 }
 
                 break;
@@ -1466,9 +1500,12 @@ THREAD_FUNC(session_handler) {
          * doing some linked states.
          */
         if(wait_until_time > 0) {
-            int64_t time_left = wait_until_time - time_ms();
+            int64_t time_left = wait_until_time - now;
 
-            if(time_left > 0) { cond_wait(session->session_wait_cond, (int)time_left); }
+            if(time_left > 0) {
+                pdebug(DEBUG_DETAIL, "Waiting up to %" PRId64 "ms for something to happen.", time_left);
+                cond_wait(session->session_wait_cond, (int)time_left);
+            }
         }
     }
 
@@ -1604,6 +1641,7 @@ int process_requests(ab_session_p session) {
 
         do {
             /* copy and pack the requests into the session buffer. */
+            /* FIXME - pack_requests() only returns PLCTAG_STATUS_OK */
             rc = pack_requests(session, bundled_requests, num_bundled_requests);
             if(rc != PLCTAG_STATUS_OK) {
                 pdebug(DEBUG_WARN, "Error while packing requests, %s!", plc_tag_decode_error(rc));
@@ -1749,11 +1787,11 @@ int process_requests(ab_session_p session) {
                         }
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests,
+                           (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
-
             }
 
             if(rc != PLCTAG_STATUS_OK) {
@@ -2086,6 +2124,7 @@ int prepare_request(ab_session_p session) {
     encap = (eip_encap *)(session->data);
     payload_size = (int)session->data_size - (int)sizeof(eip_encap);
 
+    /* FIXME - why is this check here? Haven't we checked this up the call chain? */
     if(!session) {
         pdebug(DEBUG_WARN, "Called with null session!");
         return PLCTAG_ERR_NULL_PTR;
@@ -2097,6 +2136,8 @@ int prepare_request(ab_session_p session) {
     encap->encap_session_handle = h2le32(session->session_handle);
     encap->encap_status = h2le32(0);
     encap->encap_options = h2le32(0);
+
+    /* FIXME - support other kinds of requests? */
 
     /* set up the session sequence ID for this transaction */
     if(le2h16(encap->encap_command) == AB_EIP_UNCONNECTED_SEND) {

@@ -37,6 +37,7 @@ set(EXAMPLE_EXECUTABLES
   test_alternate_tag_listing
   test_array_notation
   test_auto_sync
+  test_auto_sync_reconnect
   test_callback
   test_callback_ex
   test_callback_ex_logix

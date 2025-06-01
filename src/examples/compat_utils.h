@@ -39,6 +39,8 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 /* FIXME - centralize this platform setting! */
 #if defined(__unix__) || defined(APPLE) || defined(__APPLE__) || defined(__MACH__) || defined(__linux__)
@@ -48,11 +50,11 @@ extern "C" {
 
 #    define POSIX_PLATFORM
 
-#define compat_localtime_r localtime_r
-#define compat_strcasecmp strcasecmp
-#define compat_strdup strdup
-#define compat_snprintf snprintf
-#define compat_sscanf sscanf
+#    define compat_localtime_r localtime_r
+#    define compat_strcasecmp strcasecmp
+#    define compat_strdup strdup
+#    define compat_snprintf snprintf
+#    define compat_sscanf sscanf
 
 typedef pthread_t compat_thread_t;
 typedef pthread_once_t compat_once_t;
@@ -66,22 +68,14 @@ typedef pthread_cond_t compat_cond_t;
 
 #    include <Windows.h>
 
-#include <stdarg.h>
-#include <stdio.h>
-#include <time.h>
+#    include <time.h>
 
 
-static inline int compat_localtime_r(const time_t *timep, struct tm *result) {
-    return localtime_s(result, timep);
-}
+static inline int compat_localtime_r(const time_t *timep, struct tm *result) { return localtime_s(result, timep); }
 
-static inline int compat_strcasecmp(const char *s1, const char *s2) {
-    return stricmp(s1, s2);
-}
+static inline int compat_strcasecmp(const char *s1, const char *s2) { return stricmp(s1, s2); }
 
-static inline char *compat_strdup(const char *s) {
-    return _strdup(s);
-}
+static inline char *compat_strdup(const char *s) { return _strdup(s); }
 
 static inline int compat_snprintf(char *str, size_t size, const char *format, ...) {
     va_list args;
@@ -99,11 +93,11 @@ static inline int compat_sscanf(const char *str, const char *format, ...) {
     int rc;
 
     va_start(args, format);
-    #ifdef _MSVC_VER
+#    ifdef _MSVC_VER
     rc = vsscanf_s(str, format, args);
-    #else
+#    else
     rc = vsscanf(str, format, args);
-    #endif
+#    endif
     va_end(args);
 
     return rc;
@@ -116,7 +110,7 @@ typedef CONDITION_VARIABLE compat_cond_t;
 
 
 #else
-    #error "Unsupported platform!"
+#    error "Unsupported platform!"
 #endif
 
 
@@ -152,7 +146,6 @@ extern int compat_cond_timedwait(compat_cond_t *cond, compat_mutex_t *mtx, const
 extern int compat_cond_destroy(compat_cond_t *cond);
 
 
-
 /* current system epoch time in milliseconds. */
 extern int64_t compat_time_ms(void);
 
@@ -170,6 +163,8 @@ extern int compat_set_interrupt_handler(void (*handler)(void));
 #define RANDOM_U64_ERROR (UINT64_MAX)
 extern uint64_t compat_random_u64(uint64_t upper_bound);
 
+
+extern int compat_fprintf(FILE *stream, const char *format, ...);
 
 #ifdef __cplusplus
 }
