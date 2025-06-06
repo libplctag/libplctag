@@ -10,7 +10,7 @@ jobs:
 
   ubuntu_x64:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       VERSION: "@VERSION@"
@@ -149,7 +149,7 @@ jobs:
 
   ubuntu_x86:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       VERSION: "@VERSION@"
@@ -1041,115 +1041,109 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
 
-  ubuntu_cross_build_arm6:
-    runs-on: ubuntu-latest
+  ubuntu_arm_cross:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        include:
+          - arch: armv6
+            gcc_prefix: arm-linux-gnueabi
+            cmake_toolchain_file: armv6.cmake
+            artifact_suffix: armv6
+            target_arch: armhf
+          - arch: armv7hf
+            gcc_prefix: arm-linux-gnueabihf
+            cmake_toolchain_file: armv7hf.cmake
+            artifact_suffix: armv7_hf
+            target_arch: armhf
+          - arch: aarch64
+            gcc_prefix: aarch64-linux-gnu
+            cmake_toolchain_file: aarch64.cmake
+            artifact_suffix: arm64
+            target_arch: arm64
 
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_linux_arm6hf"
+      ARTIFACT: "libplctag_@VERSION@_ubuntu_${{ matrix.artifact_suffix }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
+    - name: Print out current branch and architecture
+      run: echo "Building branch ${{ env.BRANCH }} for ${{ matrix.arch }}"
 
     - name: "Checkout library source."
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH }}
 
-    - name: Set up build environment
-      run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
+    - name: Setup ARM cross-compilation
+      run: |
+        set -e  # Exit on any error
+
+        # Add target architecture
+        sudo dpkg --add-architecture ${{ matrix.target_arch }}
+
+        # Modify existing sources.list to exclude ARM architectures from main repos
+        sudo sed -i 's/^deb /deb [arch=amd64,i386] /' /etc/apt/sources.list
+        sudo sed -i 's/^deb-src /deb-src [arch=amd64,i386] /' /etc/apt/sources.list
+
+        # Add ARM ports repository for the target architecture
+        cat << EOF | sudo tee /etc/apt/sources.list.d/${{ matrix.target_arch }}.list
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-backports main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse
+        EOF
+
+        # Single apt update after adding repositories
+        sudo apt update
+
+        # Install cross-compilation tools and target libraries
+        sudo apt install -y \
+          build-essential \
+          cmake \
+          gcc-${{ matrix.gcc_prefix }} \
+          g++-${{ matrix.gcc_prefix }} \
+          libc6-dev:${{ matrix.target_arch }} \
+          libgcc-s1:${{ matrix.target_arch }}
+
+    - name: Verify cross-compilation tools
+      run: |
+        echo "Verifying installed cross-compilation tools:"
+        ${{ matrix.gcc_prefix }}-gcc --version
+        ${{ matrix.gcc_prefix }}-g++ --version
 
     - name: Create build directory
-      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+      run: |
+        rm -rf ${{ env.BUILD }}
+        mkdir -p ${{ env.BUILD }}
 
-    - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm6 -DCMAKE_VERBOSE_MAKEFILE=On ..
+    - name: Configure CMake with cross-compilation
+      run: |
+        cd ${{ env.BUILD }}
+        cmake \
+          -DCMAKE_BUILD_TYPE=MinSizeRel \
+          -DBUILD_MODBUS_EMULATOR:BOOL=Off \
+          -DCMAKE_VERBOSE_MAKEFILE=On \
+          -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/cmake_toolchains/${{ matrix.cmake_toolchain_file }} \
+          ..
 
     - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
+      run: |
+        cd ${{ env.BUILD }}
+        cmake --build . --verbose
+
+    - name: Verify build artifacts
+      run: |
+        echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
+        ls -la ${{ env.DIST }} || echo "No artifacts directory found"
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
-
-  ubuntu_cross_build_arm7:
-
-    runs-on: ubuntu-latest
-
-    env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_linux_arm7l"
-      BUILD: "${{ github.workspace }}/build"
-      DIST: "${{ github.workspace }}/build/bin_dist"
-      BRANCH: ${{ github.head_ref || github.ref_name }}
-
-    steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
-
-    - name: "Checkout library source."
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ env.BRANCH }}
-
-    - name: Set up build environment
-      run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-armhf
-
-    - name: Create build directory
-      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
-
-    - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Arm7 -DCMAKE_VERBOSE_MAKEFILE=On ..
-
-    - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
-
-    - name: Upload ZIP artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
-
-  ubuntu_cross_build_aarch64:
-
-    runs-on: ubuntu-latest
-
-    env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_linux_aarch64"
-      BUILD: "${{ github.workspace }}/build"
-      DIST: "${{ github.workspace }}/build/bin_dist"
-      BRANCH: ${{ github.head_ref || github.ref_name }}
-
-    steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
-
-    - name: "Checkout library source."
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ env.BRANCH }}
-
-    - name: Set up build environment
-      run: sudo apt update; sudo apt install build-essential cmake crossbuild-essential-arm64
-
-    - name: Create build directory
-      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
-
-    - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=0 -DCROSS_BUILD_TYPE=Linux-Aarch64 -DCMAKE_VERBOSE_MAKEFILE=On ..
-
-    - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
-
-    - name: Upload ZIP artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        if-no-files-found: error
