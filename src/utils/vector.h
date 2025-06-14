@@ -38,8 +38,8 @@ typedef struct vector_t *vector_p;
 
 extern vector_p vector_create(int capacity, int max_inc);
 extern int vector_length(vector_p vec);
-extern int vector_put(vector_p vec, int index, void * ref);
+extern int vector_insert(vector_p vec, int index, void *data);
+extern int vector_set(vector_p vec, int index, void *ref);
 extern void *vector_get(vector_p vec, int index);
-extern int vector_on_each(vector_p vec, int (*callback_func)(vector_p vec, int index, void **data, int arg_count, void **args), int num_args, ...);
 extern void *vector_remove(vector_p vec, int index);
 extern int vector_destroy(vector_p vec);

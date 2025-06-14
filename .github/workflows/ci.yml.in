@@ -130,6 +130,12 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage"
+        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
+
     - name: Test Modbus
       run: |
         cd ${{ env.DIST }}
@@ -591,6 +597,13 @@ jobs:
         echo "shut down server."
         taskkill /F /IM ab_server.exe
         exit /b %test_result%
+      shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
     - name: Upload ZIP artifact

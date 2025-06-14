@@ -409,7 +409,7 @@ int add_session_unsafe(ab_session_p session) {
 
     if(!session) { return PLCTAG_ERR_NULL_PTR; }
 
-    vector_put(sessions, vector_length(sessions), session);
+    vector_set(sessions, vector_length(sessions), session);
 
     session->on_list = 1;
 
@@ -1150,7 +1150,7 @@ int session_add_request(ab_session_p session, ab_request_p req) {
         }
 
         /* insert into the requests vector */
-        vector_put(session->requests, vector_length(session->requests), req);
+        vector_set(session->requests, vector_length(session->requests), req);
     }
 
     /* wake up the session thread because we added something to process. */
@@ -1822,18 +1822,13 @@ int process_requests(ab_session_p session) {
             rc = PLCTAG_STATUS_OK;
         } while(0);
 
-        /* problem? clean up the pending requests and dump everything. */
+        /* problem? push the requests back on the queue. */
         if(rc != PLCTAG_STATUS_OK) {
-            for(int i = 0; i < num_bundled_requests; i++) {
-                if(bundled_requests[i]) {
-                    bundled_requests[i]->status = rc;
-                    bundled_requests[i]->request_size = 0;
-                    bundled_requests[i]->resp_received = 1;
+            pdebug(DEBUG_WARN, "Error sending or receiving requests!");
 
-                    pdebug(DEBUG_DETAIL, "rc_dec: Releasing request reference.");
-                    bundled_requests[i] = rc_dec(bundled_requests[i]);
-                }
-            }
+            pdebug(DEBUG_INFO, "Pushing %d requests back into the queue.", num_bundled_requests);
+
+            for(int i = num_bundled_requests - 1; i >= 0; i--) { vector_insert(session->requests, 0, bundled_requests[i]); }
         }
 
         /* tickle the main tickler thread to note that we have responses. */

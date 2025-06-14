@@ -335,7 +335,7 @@ int add_conn_unsafe(omron_conn_p conn) {
 
     if(!conn) { return PLCTAG_ERR_NULL_PTR; }
 
-    vector_put(conns, vector_length(conns), conn);
+    vector_set(conns, vector_length(conns), conn);
 
     conn->on_list = 1;
 
@@ -953,7 +953,7 @@ int conn_add_request_unsafe(omron_conn_p conn, omron_request_p req) {
     /* make sure the request points to the conn */
 
     /* insert into the requests vector */
-    vector_put(conn->requests, vector_length(conn->requests), req);
+    vector_set(conn->requests, vector_length(conn->requests), req);
 
     pdebug(DEBUG_DETAIL, "Total requests in the queue: %d", vector_length(conn->requests));
 
@@ -1397,7 +1397,7 @@ int process_requests(omron_conn_p conn) {
              * too much data being packed into a single packet */
             remaining_response_space = max_payload_size - 2 - 4 - 10;
 
-             if(vector_length(conn->requests)) {
+            if(vector_length(conn->requests)) {
                 do {
                     request = vector_get(conn->requests, 0);
 
@@ -1590,11 +1590,11 @@ int process_requests(omron_conn_p conn) {
                         }
                     }
                 } else {
-                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests, (size_t)le2h16(multi_resp->request_count));
+                    pdebug(DEBUG_WARN, "Expected %d packed responses back but got %zu!", num_bundled_requests,
+                           (size_t)le2h16(multi_resp->request_count));
                     rc = PLCTAG_ERR_BAD_DATA;
                     break;
                 }
-
             }
 
             if(rc != PLCTAG_STATUS_OK) {
@@ -1625,18 +1625,13 @@ int process_requests(omron_conn_p conn) {
             rc = PLCTAG_STATUS_OK;
         } while(0);
 
-        /* problem? clean up the pending requests and dump everything. */
+        /* problem? push the requests back on the queue. */
         if(rc != PLCTAG_STATUS_OK) {
-            for(int i = 0; i < num_bundled_requests; i++) {
-                if(bundled_requests[i]) {
-                    bundled_requests[i]->status = rc;
-                    bundled_requests[i]->request_size = 0;
-                    bundled_requests[i]->resp_received = 1;
+            pdebug(DEBUG_WARN, "Error sending or receiving requests!");
 
-                    pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference request for tag %" PRId32 ".", bundled_requests[i]->tag_id);
-                    bundled_requests[i] = rc_dec(bundled_requests[i]);
-                }
-            }
+            pdebug(DEBUG_INFO, "Pushing %d requests back into the queue.", num_bundled_requests);
+
+            for(int i = num_bundled_requests - 1; i >= 0; i--) { vector_insert(conn->requests, 0, bundled_requests[i]); }
         }
 
         /* tickle the main tickler thread to note that we have responses. */
