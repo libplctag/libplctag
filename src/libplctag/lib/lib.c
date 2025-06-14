@@ -382,38 +382,6 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
                     pdebug(DEBUG_SPEW,
                            "Unable to start auto read tag->read_in_flight=%d, tag->tag_is_dirty=%d, tag->write_in_flight=%d!",
                            tag->read_in_flight, tag->tag_is_dirty, tag->write_in_flight);
-
-                    /* check for stalled reads that might be from a connection loss */
-                    if(tag->read_in_flight) {
-                        /* define a timeout for potentially stalled operations - use 3x the auto_sync interval as a reasonable
-                         * timeout */
-                        /* TODO - this should be a tag-specific value */
-                        int64_t read_timeout = tag->auto_sync_read_ms * 3;
-
-                        /* if we have a read in flight for longer than our timeout, assume it stalled due to connection issues */
-                        if((current_time - tag->auto_sync_next_read) > read_timeout) {
-                            pdebug(
-                                DEBUG_WARN,
-                                "Auto-sync read operation appears stalled (possibly due to connection loss). Resetting state to allow reconnection.");
-
-                            /* abort any outstanding transaction. */
-                            // if(tag->vtable && tag->vtable->abort) { tag->vtable->abort(tag); }
-
-                            /* reset the read operation flags */
-                            tag->read_in_flight = 0;
-                            tag->read_complete = 0;
-
-                            /* set status to an error to indicate connection problem */
-                            tag->status = PLCTAG_ERR_TIMEOUT;
-
-                            /* raise abort event to notify callbacks */
-                            tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_TIMEOUT);
-
-                            /* reschedule for the next interval */
-                            tag->auto_sync_next_read = current_time + tag->auto_sync_read_ms;
-                            pdebug(DEBUG_DETAIL, "Rescheduling next read attempt at time %" PRId64 ".", tag->auto_sync_next_read);
-                        }
-                    }
                 }
             }
         }
