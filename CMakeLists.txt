@@ -59,7 +59,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project version
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 6)
-set (libplctag_VERSION_PATCH 5)
+set (libplctag_VERSION_PATCH 6)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -81,11 +81,11 @@ find_package(Threads REQUIRED)
 
 # C compiler-specific settings
 if(${CMAKE_GENERATOR} MATCHES "MinGW Makefiles")
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/mingw.cmake")
 elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang" OR CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/clang_or_gcc.cmake")
 elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
-    include("${CMAKE_SOURCE_DIR}/cmake_toolchains/msvc.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/msvc.cmake")
 else()
     message("Unsupported compiler ${CMAKE_COMPILER_ID}!")
     return()

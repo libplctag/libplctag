@@ -37,6 +37,7 @@ set(EXAMPLE_EXECUTABLES
   test_alternate_tag_listing
   test_array_notation
   test_auto_sync
+  test_reconnect_after_outage
   test_callback
   test_callback_ex
   test_callback_ex_logix
@@ -81,7 +82,7 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     # Link with the static library and apply static linking flags
     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
 
-    if(UNIX AND NOT APPLE) 
+    if(UNIX AND NOT APPLE)
         if(CMAKE_BUILD_TYPE STREQUAL "Debug")
             target_link_options(${example} PRIVATE -static ${EXTRA_LINK_FLAGS})
         else()

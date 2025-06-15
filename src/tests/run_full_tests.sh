@@ -21,7 +21,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_reconnect_after_outage test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -239,6 +239,9 @@ else
 fi
 
 
+# auto sync reconnect test will be run at the end because it manages its own ab_server
+
+
 let TEST++
 echo -n "Test $TEST: indexed tags ... "
 $VALGRIND$TEST_DIR/test_indexed_tags > "${TEST}_test_indexed_tags.log" 2>&1
@@ -265,6 +268,17 @@ fi
 
 # echo "  Killing AB emulator."
 killall -TERM ab_server > /dev/null 2>&1
+
+let TEST++
+echo -n "Test $TEST: Test reconnect after PLC outage... "
+$VALGRIND$TEST_DIR/test_reconnect_after_outage "${TEST_DIR}/ab_server" > "${TEST}_reconnect_after_outage.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 
 # echo -n "  Starting AB emulator for functional/slow ControlLogix tests... "
@@ -434,6 +448,22 @@ fi
 
 # echo "  Killing Modbus emulator."
 killall -TERM modbus_server > /dev/null 2>&1
+
+# Make sure no ab_server instances are running before running auto_sync_reconnect test
+killall -TERM ab_server > /dev/null 2>&1
+sleep 2
+
+# Run auto_sync_reconnect test last since it manages its own ab_server
+let TEST++
+echo -n "Test $TEST: auto sync reconnect... "
+$VALGRIND$TEST_DIR/test_reconnect_after_outage "${TEST_DIR}/ab_server" > "${TEST}_auto_sync_reconnect_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
 
 echo ""
 echo "$TEST tests."

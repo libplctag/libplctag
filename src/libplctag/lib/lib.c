@@ -380,7 +380,7 @@ void plc_tag_generic_tickler(plc_tag_p tag) {
                     pdebug(DEBUG_DETAIL, "Scheduling next read at time %" PRId64 ".", tag->auto_sync_next_read);
                 } else {
                     pdebug(DEBUG_SPEW,
-                           "Unable to start read tag->read_in_flight=%d, tag->tag_is_dirty=%d, tag->write_in_flight=%d!",
+                           "Unable to start auto read tag->read_in_flight=%d, tag->tag_is_dirty=%d, tag->write_in_flight=%d!",
                            tag->read_in_flight, tag->tag_is_dirty, tag->write_in_flight);
                 }
             }

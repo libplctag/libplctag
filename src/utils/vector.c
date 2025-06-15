@@ -100,8 +100,54 @@ int vector_length(vector_p vec) {
     return vec->len;
 }
 
+int vector_insert(vector_p vec, int index, void *data) {
+    int rc = PLCTAG_STATUS_OK;
 
-int vector_put(vector_p vec, int index, void *data) {
+    pdebug(DEBUG_SPEW, "Starting");
+
+    do {
+        if(!vec) {
+            pdebug(DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+            rc = PLCTAG_ERR_NULL_PTR;
+            break;
+        }
+
+        if(index < 0) {
+            pdebug(DEBUG_WARN, "Index is negative!");
+            rc = PLCTAG_ERR_OUT_OF_BOUNDS;
+            break;
+        }
+
+        /* inserting outside the vector works */
+        if(index >= vec->len) {
+            rc = vector_set(vec, index, data);
+            break;
+        }
+
+        /* make sure we have room */
+        rc = ensure_capacity(vec, vec->len + 1);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to ensure capacity!");
+            break;
+        }
+
+        /* move everything up one slot */
+        mem_move(&vec->data[index + 1], &vec->data[index], (int)((sizeof(void *) * (size_t)(vec->len - index))));
+
+        /* put in the new value */
+        vec->data[index] = data;
+
+        /* adjust the length */
+        vec->len++;
+    } while(0);
+
+    pdebug(DEBUG_SPEW, "Done");
+
+    return rc;
+}
+
+
+int vector_set(vector_p vec, int index, void *data) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_SPEW, "Starting");
