@@ -147,11 +147,28 @@ jobs:
         echo "shut down server."
         killall modbus_server -TERM &> /dev/null
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: ${{ env.DIST }}/libplctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/ab_server
+          ${{ env.DIST }}/list_tags_logix
+          ${{ env.DIST }}/list_tags_micro800
+
+    - name: Upload ZIP artifact with all binaries
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
+
 
   ubuntu_x86:
 
