@@ -147,7 +147,23 @@ jobs:
         echo "shut down server."
         killall modbus_server -TERM &> /dev/null
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: ${{ env.DIST }}/libplctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/ab_server
+          ${{ env.DIST }}/list_tags_logix
+          ${{ env.DIST }}/list_tags_micro8x0
+
+    - name: Upload ZIP artifact with all binaries
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
@@ -275,18 +291,29 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Array Notation Read/Write
+    - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
-        sleep 2
-        echo "test array notation read/write"
-        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        echo "Test reconnect after outage"
+        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: ${{ env.DIST }}/libplctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/ab_server
+          ${{ env.DIST }}/list_tags_logix
+          ${{ env.DIST }}/list_tags_micro8x0
+
+    - name: Upload ZIP all binary artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
@@ -411,18 +438,29 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Array Notation Read/Write
+    - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
-        sleep 2
-        echo "test array notation read/write"
-        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        echo "Test reconnect after outage"
+        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: ${{ env.DIST }}/libplctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/ab_server
+          ${{ env.DIST }}/list_tags_logix
+          ${{ env.DIST }}/list_tags_micro8x0
+
+    - name: Upload ZIP all binary artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
@@ -457,7 +495,23 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: ${{ env.DIST }}/libplctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/ab_server
+          ${{ env.DIST }}/list_tags_logix
+          ${{ env.DIST }}/list_tags_micro8x0
+
+    - name: Upload ZIP all binary artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
@@ -606,7 +660,26 @@ jobs:
         .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/plctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/plctag.*
+          ${{ env.DIST }}/ab_server.exe
+          ${{ env.DIST }}/list_tags_logix.exe
+          ${{ env.DIST }}/list_tags_micro8x0.exe
+
+    - name: Upload ZIP all binary artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
@@ -878,7 +951,26 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/plctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/plctag.*
+          ${{ env.DIST }}/ab_server.exe
+          ${{ env.DIST }}/list_tags_logix.exe
+          ${{ env.DIST }}/list_tags_micro8x0.exe
+
+    - name: Upload ZIP all binary artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
@@ -1048,7 +1140,26 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }} && cmake --build . --verbose --config MinSizeRel
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/plctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/plctag.*
+          ${{ env.DIST }}/ab_server.exe
+          ${{ env.DIST }}/list_tags_logix.exe
+          ${{ env.DIST }}/list_tags_micro8x0.exe
+
+    - name: Upload ZIP all binary artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
@@ -1154,7 +1265,23 @@ jobs:
         echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
         ls -la ${{ env.DIST }} || echo "No artifacts directory found"
 
-    - name: Upload ZIP artifact
+    - name: Upload ZIP artifact with only development libs
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_dev
+        path: ${{ env.DIST }}/libplctag.*
+
+    - name: Upload ZIP artifact with libs and tools
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_tools
+        path: |
+          ${{ env.DIST }}/libplctag.*
+          ${{ env.DIST }}/ab_server
+          ${{ env.DIST }}/list_tags_logix
+          ${{ env.DIST }}/list_tags_micro8x0
+
+    - name: Upload ZIP all binary artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
