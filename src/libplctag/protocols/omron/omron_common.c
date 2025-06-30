@@ -458,11 +458,15 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag) {
-        if(tag->req) {
-            spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+        omron_request_p req = NULL;
+
+        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+
+        if(req) {
+            spin_block(&req->lock) { req->abort_request = 1; }
 
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-            tag->req = rc_dec(tag->req);
+            tag->req = rc_dec(req);
         } else {
             pdebug(DEBUG_DETAIL, "Called without a request in flight.");
         }
@@ -515,8 +519,13 @@ int omron_tag_abort(omron_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag) {
-        if(tag->req) {
-            spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+        omron_request_p req = NULL;
+
+        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+
+        if(req) {
+            spin_block(&req->lock) { req->abort_request = 1; }
+            rc_dec(req);
         }
 
         /* do a real abort */
@@ -754,6 +763,7 @@ int check_tag_name(omron_tag_p tag, const char *name) {
 
 int omron_check_request_status(omron_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    omron_request_p req = NULL;
     eip_encap *eip_header = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -773,7 +783,9 @@ int omron_check_request_status(omron_tag_p tag) {
             break;
         }
 
-        if(!tag->req) {
+        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+
+        if(!req) {
             if(tag->read_in_progress || tag->write_in_progress) {
                 tag->read_in_progress = 0;
                 tag->write_in_progress = 0;
@@ -787,27 +799,27 @@ int omron_check_request_status(omron_tag_p tag) {
         }
 
         /* request can be used by more than one thread at once. */
-        spin_block(&tag->req->lock) {
-            if(!tag->req->resp_received) {
+        spin_block(&req->lock) {
+            if(!req->resp_received) {
                 rc = PLCTAG_STATUS_PENDING;
                 break;
             }
 
             /* check to see if it was an abort on the session side. */
-            if(tag->req->status != PLCTAG_STATUS_OK) {
-                rc = tag->req->status;
+            if(req->status != PLCTAG_STATUS_OK) {
+                rc = req->status;
                 break;
             }
         }
 
         /* check the length */
-        if((tag->req->request_size < 0) || (size_t)tag->req->request_size < sizeof(*eip_header)) {
+        if((req->request_size < 0) || (size_t)req->request_size < sizeof(*eip_header)) {
             pdebug(DEBUG_WARN, "Insufficient data returned for even an EIP header!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        eip_header = (eip_encap *)(tag->req->data);
+        eip_header = (eip_encap *)(req->data);
 
         if(le2h32(eip_header->encap_status) != OMRON_EIP_OK) {
             pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(eip_header->encap_status));
@@ -824,6 +836,8 @@ int omron_check_request_status(omron_tag_p tag) {
                 break;
         }
     } while(0);
+
+    if(req) { rc_dec(req); }
 
     if(rc_is_error(rc)) {
         /* the request is dead, from session side. */
