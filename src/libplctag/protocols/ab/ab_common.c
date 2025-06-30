@@ -701,11 +701,15 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
 
         critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
 
-        if(!req) {
+        if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
 
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-            critical_block(tag->api_mutex) { tag->req = rc_dec(tag->req); }
+            critical_block(tag->api_mutex) {
+                if(tag->req == req) { tag->req = rc_dec(tag->req); }
+            }
+
+            rc_dec(req);
         } else {
             pdebug(DEBUG_DETAIL, "Called without a request in flight.");
         }

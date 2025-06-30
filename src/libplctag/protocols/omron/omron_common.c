@@ -466,7 +466,11 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
             spin_block(&req->lock) { req->abort_request = 1; }
 
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-            tag->req = rc_dec(req);
+            critical_block(tag->api_mutex) {
+                if(tag->req == req) { tag->req = rc_dec(tag->req); }
+            }
+
+            rc_dec(req);
         } else {
             pdebug(DEBUG_DETAIL, "Called without a request in flight.");
         }
