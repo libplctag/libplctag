@@ -467,6 +467,7 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
 
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
             critical_block(tag->api_mutex) {
+                if(tag->req != req) { pdebug(DEBUG_WARN, "Request got changed out from underneath us!"); }
                 if(tag->req == req) { tag->req = rc_dec(tag->req); }
             }
 

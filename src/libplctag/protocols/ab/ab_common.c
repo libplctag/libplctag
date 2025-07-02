@@ -699,25 +699,26 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
     if(tag) {
         ab_request_p req = NULL;
 
-        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+        if(tag->req) {
+            critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+        }
 
         if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
 
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
             critical_block(tag->api_mutex) {
-                if(tag->req == req) { tag->req = rc_dec(tag->req); }
+                if(req != tag->req) { pdebug(DEBUG_WARN, "Request changed out from underneath us during abort process!"); }
+                tag->req = rc_dec(tag->req);
             }
 
-            rc_dec(req);
+            req = rc_dec(req);
         } else {
             pdebug(DEBUG_DETAIL, "Called without a request in flight.");
         }
 
         tag->read_in_progress = 0;
         tag->write_in_progress = 0;
-
-        rc_dec(req);
     } else {
         pdebug(DEBUG_DETAIL, "Called with a null tag pointer.");
     }
@@ -1131,7 +1132,9 @@ int check_request_status(ab_tag_p tag) {
         }
 
         /* make sure the request cannot be pulled out from underneath us. */
-        critical_block(tag->api_mutex) { request = rc_inc(tag->req); }
+        if(tag->req) {
+            critical_block(tag->api_mutex) { request = rc_inc(tag->req); }
+        }
 
         /* it was already gone. */
         if(!request) {
