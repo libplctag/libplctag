@@ -762,12 +762,12 @@ int ab_tag_abort(ab_tag_p tag) {
         critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
 
         if(req) {
-            spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+            spin_block(&req->lock) { req->abort_request = 1; }
 
             /* do a real abort */
             ab_tag_abort_request(tag);
 
-            rc_dec(req);
+            req = rc_dec(req);
 
             tag->status = PLCTAG_ERR_ABORT;
             return tag->status;
@@ -1196,7 +1196,7 @@ int check_request_status(ab_tag_p tag) {
     } while(0);
 
     /* if this is still hanging around, release the reference */
-    if(request) { rc_dec(request); }
+    if(request) { request = rc_dec(request); }
 
     if(rc_is_error(rc)) {
         /* the request is dead, from session side. */

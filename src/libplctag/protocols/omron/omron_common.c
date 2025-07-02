@@ -471,7 +471,7 @@ int omron_tag_abort_request_only(omron_tag_p tag) {
                 if(tag->req == req) { tag->req = rc_dec(tag->req); }
             }
 
-            rc_dec(req);
+            req = rc_dec(req);
         } else {
             pdebug(DEBUG_DETAIL, "Called without a request in flight.");
         }
@@ -530,7 +530,7 @@ int omron_tag_abort(omron_tag_p tag) {
 
         if(req) {
             spin_block(&req->lock) { req->abort_request = 1; }
-            rc_dec(req);
+            req = rc_dec(req);
         }
 
         /* do a real abort */
@@ -842,7 +842,7 @@ int omron_check_request_status(omron_tag_p tag) {
         }
     } while(0);
 
-    if(req) { rc_dec(req); }
+    if(req) { req = rc_dec(req); }
 
     if(rc_is_error(rc)) {
         /* the request is dead, from session side. */
