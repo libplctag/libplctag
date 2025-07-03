@@ -130,6 +130,12 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Simultaneaous Read/Write On Tag
+      run: |
+        cd ${{ env.DIST }}
+        echo "test simultaneaous read/write on a single tag"
+        .\test_simultaneous_rw_ab_server
+
     - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
@@ -275,6 +281,12 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    - name: Test Simultaneaous Read/Write On Tag
+      run: |
+        cd ${{ env.DIST }}
+        echo "test simultaneaous read/write on a single tag"
+        .\test_simultaneous_rw_ab_server
+
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
       with:
@@ -399,6 +411,12 @@ jobs:
         ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
+    - name: Test Simultaneaous Read/Write On Tag
+      run: |
+        cd ${{ env.DIST }}
+        echo "test simultaneaous read/write on a single tag"
+        .\test_simultaneous_rw_ab_server
 
     - name: Upload ZIP artifact
       uses: actions/upload-artifact@v4
@@ -577,6 +595,15 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    - name: Test Simultaneaous Read/Write On Tag
+      run: |
+        cd ${{ env.DIST }}
+        echo "test simultaneaous read/write on a single tag"
+        .\test_simultaneous_rw_ab_server.exe
+        set test_result=%errorlevel%
+        exit /b %test_result%
+      shell: cmd
+
     - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
@@ -721,6 +748,15 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    - name: Test Simultaneaous Read/Write On Tag
+      run: |
+        cd ${{ env.DIST }}
+        echo "test simultaneaous read/write on a single tag"
+        .\test_simultaneous_rw_ab_server.exe
+        set test_result=%errorlevel%
+        exit /b %test_result%
+      shell: cmd
+
   windows_x86_MSVC:
 
     runs-on: windows-latest
@@ -853,6 +889,15 @@ jobs:
         set test_result=%errorlevel%
         echo "shut down server."
         taskkill /F /IM ab_server.exe
+        exit /b %test_result%
+      shell: cmd
+
+    - name: Test Simultaneaous Read/Write On Tag
+      run: |
+        cd ${{ env.DIST }}
+        echo "test simultaneaous read/write on a single tag"
+        .\test_simultaneous_rw_ab_server.exe
+        set test_result=%errorlevel%
         exit /b %test_result%
       shell: cmd
 
@@ -990,6 +1035,15 @@ jobs:
         set test_result=%errorlevel%
         echo "shut down server."
         taskkill /F /IM ab_server.exe
+        exit /b %test_result%
+      shell: cmd
+
+    - name: Test Simultaneaous Read/Write On Tag
+      run: |
+        cd ${{ env.DIST }}
+        echo "test simultaneaous read/write on a single tag"
+        .\test_simultaneous_rw_ab_server.exe
+        set test_result=%errorlevel%
         exit /b %test_result%
       shell: cmd
 
