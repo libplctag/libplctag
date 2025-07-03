@@ -697,11 +697,22 @@ int ab_tag_abort_request_only(ab_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag) {
+        ab_request_p req = NULL;
+
         if(tag->req) {
-            spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+            critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+        }
+
+        if(req) {
+            spin_block(&req->lock) { req->abort_request = 1; }
 
             pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-            tag->req = rc_dec(tag->req);
+            critical_block(tag->api_mutex) {
+                if(req != tag->req) { pdebug(DEBUG_WARN, "Request changed out from underneath us during abort process!"); }
+                tag->req = rc_dec(tag->req);
+            }
+
+            req = rc_dec(req);
         } else {
             pdebug(DEBUG_DETAIL, "Called without a request in flight.");
         }
@@ -746,17 +757,23 @@ int ab_tag_abort(ab_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(tag) {
-        if(tag->req) {
-            spin_block(&tag->req->lock) { tag->req->abort_request = 1; }
+        ab_request_p req = NULL;
+
+        critical_block(tag->api_mutex) { req = rc_inc(tag->req); }
+
+        if(req) {
+            spin_block(&req->lock) { req->abort_request = 1; }
+
+            /* do a real abort */
+            ab_tag_abort_request(tag);
+
+            req = rc_dec(req);
+
+            tag->status = PLCTAG_ERR_ABORT;
+            return tag->status;
+        } else {
+            pdebug(DEBUG_DETAIL, "Called with a null tag pointer.");
         }
-
-        /* do a real abort */
-        ab_tag_abort_request(tag);
-
-        tag->status = PLCTAG_ERR_ABORT;
-        return tag->status;
-    } else {
-        pdebug(DEBUG_DETAIL, "Called with a null tag pointer.");
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -1094,6 +1111,7 @@ int check_tag_name(ab_tag_p tag, const char *name) {
 
 int check_request_status(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    ab_request_p request = NULL;
     eip_encap *eip_header = NULL;
 
     pdebug(DEBUG_SPEW, "Starting.");
@@ -1113,7 +1131,13 @@ int check_request_status(ab_tag_p tag) {
             break;
         }
 
-        if(!tag->req) {
+        /* make sure the request cannot be pulled out from underneath us. */
+        if(tag->req) {
+            critical_block(tag->api_mutex) { request = rc_inc(tag->req); }
+        }
+
+        /* it was already gone. */
+        if(!request) {
             if(tag->read_in_progress || tag->write_in_progress) {
                 tag->read_in_progress = 0;
                 tag->write_in_progress = 0;
@@ -1126,17 +1150,16 @@ int check_request_status(ab_tag_p tag) {
             break;
         }
 
-
         /* request can be used by more than one thread at once. */
-        spin_block(&tag->req->lock) {
-            if(!tag->req->resp_received) {
+        spin_block(&request->lock) {
+            if(!request->resp_received) {
                 rc = PLCTAG_STATUS_PENDING;
                 break;
             }
 
             /* check to see if it was an abort on the session side. */
-            if(tag->req->status != PLCTAG_STATUS_OK) {
-                rc = tag->req->status;
+            if(request->status != PLCTAG_STATUS_OK) {
+                rc = request->status;
                 break;
             }
         }
@@ -1145,13 +1168,13 @@ int check_request_status(ab_tag_p tag) {
         if(rc != PLCTAG_STATUS_OK) { break; }
 
         /* check the length */
-        if((tag->req->request_size < 0) || (size_t)tag->req->request_size < sizeof(*eip_header)) {
+        if((request->request_size < 0) || (size_t)request->request_size < sizeof(*eip_header)) {
             pdebug(DEBUG_WARN, "Insufficient data returned for even an EIP header!");
             rc = PLCTAG_ERR_TOO_SMALL;
             break;
         }
 
-        eip_header = (eip_encap *)(tag->req->data);
+        eip_header = (eip_encap *)(request->data);
 
         if(le2h32(eip_header->encap_status) != AB_EIP_OK) {
             pdebug(DEBUG_WARN, "EIP command failed, response code: %d", le2h32(eip_header->encap_status));
@@ -1163,14 +1186,17 @@ int check_request_status(ab_tag_p tag) {
             case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_SPEW, "Received a connected send EIP packet."); break;
             case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_SPEW, "Received an unconnected send EIP packet."); break;
             default:
-                pdebug(DEBUG_WARN, "Request pointer %p, header pointer %p.", tag->req, eip_header);
+                pdebug(DEBUG_WARN, "Request pointer %p, header pointer %p.", request, eip_header);
                 pdebug(DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
-                pdebug_dump_bytes(DEBUG_WARN, tag->req->data, tag->req->request_size);
+                pdebug_dump_bytes(DEBUG_WARN, request->data, request->request_size);
 
                 rc = PLCTAG_ERR_BAD_DATA;
                 break;
         }
     } while(0);
+
+    /* if this is still hanging around, release the reference */
+    if(request) { request = rc_dec(request); }
 
     if(rc_is_error(rc)) {
         /* the request is dead, from session side. */

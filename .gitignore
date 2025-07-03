@@ -59,3 +59,5 @@ build/*
 src/.DS_Store
 .DS_Store
 src/tests/log.txt
+.claude
+.vscode
