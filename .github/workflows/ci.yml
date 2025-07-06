@@ -1346,6 +1346,10 @@ jobs:
           echo "$PR_DATA" | head -c 500
           echo ""
 
+          echo "Debugging merge commit SHAs:"
+          echo "$PR_DATA" | jq -r '.[] | "PR #\(.number): merge_commit_sha=\(.merge_commit_sha // "null")"'
+          echo "Looking for SHA: ${{ github.sha }}"
+
           # Find the PR that was merged with this SHA
           PR_INFO=$(echo "$PR_DATA" | jq -r ".[] | select(.merge_commit_sha == \"${{ github.sha }}\") | {title: .title, body: .body} | @base64")
 
