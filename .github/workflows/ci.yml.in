@@ -1438,7 +1438,7 @@ jobs:
         tag_name: "v@VERSION@"
         name: ${{ github.event.pull_request.title }}
         body: ${{ steps.get_pr_details.outputs.pr_message }}
-        files: ./release_artifacts/**/*.zip
+        files: ./release_artifacts/**/*
         draft: false
         prerelease: false
       env:
