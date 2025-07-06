@@ -45,11 +45,15 @@
 
 #define REQUIRED_VERSION 2, 6, 6
 
-#define DATA_TIMEOUT (500)
-#define DISCONNECT_TIME_MS (3000)
-#define TEST_DURATION_MS (10000)
-#define AUTO_READ_POLL_MS (100)
-#define MANUAL_READ_TIMEOUT_MS (500)
+#define READ_TIMEOUT (100)
+#define FIRST_RUN_TIME (3000)
+#define DISCONNECT_TIME_MS (100000)
+#define SECOND_RUN_TIME (15000)
+#define TEST_DURATION_MS (FIRST_RUN_TIME + SECOND_RUN_TIME + DISCONNECT_TIME_MS)
+
+#define STRINGIFY(x) #x
+#define TO_STRING(x) STRINGIFY(x)
+
 
 /* uses auto_sync_read_ms for automatic reads */
 #define AUTO_SYNC_TAG_ATTRIBS \
@@ -157,7 +161,7 @@ void check_library_version(void) {
 
 void setup_tag(test_state_t *test_state, const char *tag_attribs) {
     /* create tag */
-    test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, DATA_TIMEOUT);
+    test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, READ_TIMEOUT);
     if(test_state->tag < 0) {
         log("Error %s creating tag!\n", plc_tag_decode_error(test_state->tag));
         exit(1);
@@ -206,13 +210,22 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             if(status == PLCTAG_ERR_TIMEOUT) {
                 test_state->read_timeout_count++;
 
-                log("[ABORTED] Tag %d w/status %s, automatic read operation timed out and aborted.\n", tag_id,
-                    plc_tag_decode_error(tag_status));
+                fputs("T", stderr);
+                fflush(stderr);
+
+                // log("[ABORTED] Tag %d w/status %s, automatic read operation timed out and aborted.\n", tag_id,
+                //     plc_tag_decode_error(tag_status));
             } else if(status != PLCTAG_ERR_ABORT) {
                 test_state->read_error_count++;
 
-                log("[ABORTED] Tag %d w/status %s, automatic read operation aborted with ERROR status %s.\n", tag_id,
-                    plc_tag_decode_error(tag_status), plc_tag_decode_error(status));
+                fputs("A", stderr);
+                fflush(stderr);
+
+                // log("[ABORTED] Tag %d w/status %s, automatic read operation aborted with ERROR status %s.\n", tag_id,
+                //     plc_tag_decode_error(tag_status), plc_tag_decode_error(status));
+            } else {
+                fputs("a", stderr);
+                fflush(stderr);
             }
             break;
 
@@ -220,8 +233,15 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             test_state->read_start_count++;
 
             if(status != PLCTAG_STATUS_OK && status != PLCTAG_STATUS_PENDING) {
-                log("[READ START] Tag %d w/status %s, automatic read operation started with ERROR status %s (errors=%d).\n",
-                    tag_id, plc_tag_decode_error(tag_status), plc_tag_decode_error(status), test_state->read_error_count);
+                fputs("S", stderr);
+                fflush(stderr);
+
+                // log("[READ START]")
+                // log("[READ START] Tag %d w/status %s, automatic read operation started with ERROR status %s (errors=%d).\n",
+                //     tag_id, plc_tag_decode_error(tag_status), plc_tag_decode_error(status), test_state->read_error_count);
+            } else {
+                fputs("s", stderr);
+                fflush(stderr);
             }
             break;
 
@@ -230,11 +250,20 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
                 test_state->read_success_count++;
 
                 if(test_state->reconnect_done) { test_state->read_success_after_reconnect++; }
+
+                fputs("c", stderr);
+                fflush(stderr);
+
+                // log("[READ COMPLETE] Tag %d w/status %s)
             } else {
                 test_state->read_error_count++;
 
-                log("[READ COMPLETE] Tag %d w/status %s, automatic read operation completed with ERROR status %s (errors=%d).\n",
-                    tag_id, plc_tag_decode_error(tag_status), plc_tag_decode_error(status), test_state->read_error_count);
+                fputs("C", stderr);
+                fflush(stderr);
+
+                // log("[READ COMPLETE] Tag %d w/status %s, automatic read operation completed with ERROR status %s
+                // (errors=%d).\n",
+                //     tag_id, plc_tag_decode_error(tag_status), plc_tag_decode_error(status), test_state->read_error_count);
             }
             break;
 
@@ -244,25 +273,25 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
 
 
 void do_disconnect(int64_t current_time, test_state_t *test_state) {
-    log("\n[DISCONNECT] Simulating PLC disconnect at time %" PRId64 " ms\n", current_time - test_state->start_time);
+    // log("\n[DISCONNECT] Simulating PLC disconnect at time %" PRId64 " ms\n", current_time - test_state->start_time);
 
     test_state->errors_before_disconnect = test_state->read_error_count;
 
-    log("[DISCONNECT] Read stats before disconnect: started=%d, completed=%d, errors=%d\n", test_state->read_start_count,
-        test_state->read_success_count, test_state->errors_before_disconnect);
+    // log("[DISCONNECT] Read stats before disconnect: started=%d, completed=%d, errors=%d\n", test_state->read_start_count,
+    //     test_state->read_success_count, test_state->errors_before_disconnect);
 
     /* kill the ab_server to truly simulate disconnect */
     stop_server();
 
     /* schedule reconnect time */
-    test_state->reconnect_time = current_time + DISCONNECT_TIME_MS;
+    // test_state->reconnect_time = current_time + DISCONNECT_TIME_MS;
 
-    log("[DISCONNECT] Disconnect phase complete, will reconnect in %d ms\n", DISCONNECT_TIME_MS);
+    // log("[DISCONNECT] Disconnect phase complete, will reconnect in %d ms\n", DISCONNECT_TIME_MS);
 }
 
 
 void do_reconnect(int64_t current_time, test_state_t *test_state) {
-    log("\n[RECONNECT] Simulating PLC reconnect at time %" PRId64 " ms\n", current_time - test_state->start_time);
+    // log("\n[RECONNECT] Simulating PLC reconnect at time %" PRId64 " ms\n", current_time - test_state->start_time);
 
     test_state->errors_after_reconnect = test_state->read_error_count;
 
@@ -271,11 +300,11 @@ void do_reconnect(int64_t current_time, test_state_t *test_state) {
     test_state->errors_during_disconnect =
         (test_state->errors_after_reconnect - test_state->errors_before_disconnect) + pending_reads;
 
-    log("[RECONNECT] Read stats before reconnect: started=%d, completed=%d, errors=%d\n", test_state->read_start_count,
-        test_state->read_success_count, test_state->errors_after_reconnect);
-    log("[RECONNECT] Disconnect evidence: %d errors, %d pending reads, %d total\n",
-        test_state->errors_after_reconnect - test_state->errors_before_disconnect, pending_reads,
-        test_state->errors_during_disconnect);
+    // log("[RECONNECT] Read stats before reconnect: started=%d, completed=%d, errors=%d\n", test_state->read_start_count,
+    // test_state->read_success_count, test_state->errors_after_reconnect);
+    // log("[RECONNECT] Disconnect evidence: %d errors, %d pending reads, %d total\n",
+    // test_state->errors_after_reconnect - test_state->errors_before_disconnect, pending_reads,
+    // test_state->errors_during_disconnect);
 
     /* start a new ab_server to simulate reconnect */
     start_server(test_state);
@@ -283,10 +312,10 @@ void do_reconnect(int64_t current_time, test_state_t *test_state) {
     test_state->reconnect_time = current_time;
     test_state->reconnect_done = 1;
 
-    int tag_status = plc_tag_status(test_state->tag);
-    log("[RECONNECT] Tag status after reconnect: %s\n", plc_tag_decode_error(tag_status));
+    // int tag_status = plc_tag_status(test_state->tag);
+    // log("[RECONNECT] Tag status after reconnect: %s\n", plc_tag_decode_error(tag_status));
 
-    log("[RECONNECT] Reconnection complete - monitoring for auto_sync_read resumption\n");
+    // log("[RECONNECT] Reconnection complete - monitoring for auto_sync_read resumption\n");
 }
 
 
@@ -299,7 +328,6 @@ int calc_test_stats(test_state_t *test_state) {
     log("Total reads started: %d, completed: %d, expected: %d\n", test_state->read_start_count, test_state->read_success_count,
         expected_reads);
     log("Read errors: %d\n", test_state->read_error_count);
-    log("Successful reads after reconnect: %d\n", test_state->read_success_after_reconnect);
     log("Time from reconnect to end: %" PRId64 " ms\n", test_state->end_time - test_state->reconnect_time);
     log("Final successful reads after reconnect: %d\n", test_state->read_success_after_reconnect);
     log("Errors during disconnection period: %d\n", test_state->errors_during_disconnect);
@@ -319,7 +347,7 @@ int calc_test_stats(test_state_t *test_state) {
     test_state->test_passed = (reconnect_success && disconnect_evidence);
 
     if(test_state->test_passed) {
-        log("TEST PASSED - Auto-sync reads successfully resumed after PLC reconnect\n");
+        log("TEST PASSED - reads successfully resumed after PLC reconnect\n");
         log("             Detected %d disconnection issues and %d successful reads after reconnect\n",
             test_state->errors_during_disconnect, test_state->read_success_after_reconnect);
     } else {
@@ -327,7 +355,7 @@ int calc_test_stats(test_state_t *test_state) {
 
         if(test_state->read_success_after_reconnect == 0) {
             log("- No successful reads after PLC reconnect\n");
-            log("  The auto-sync reads aren't resuming correctly\n");
+            log("  The reads aren't resuming correctly\n");
         }
 
         if(!disconnect_evidence) {
@@ -350,57 +378,60 @@ int run_auto_test(const char *ab_server_cmd) {
     /* initialize test state */
     auto_test_state.ab_server_cmd = ab_server_cmd;
     auto_test_state.start_time = compat_time_ms();
-    auto_test_state.end_time = auto_test_state.start_time + TEST_DURATION_MS;
-    auto_test_state.disconnect_time = auto_test_state.start_time + (TEST_DURATION_MS / 4); /* Disconnect after 25% of the test */
-    auto_test_state.read_timeout_ms = AUTO_READ_POLL_MS;
-    auto_test_state.reconnect_time = 0; /* Will be set when disconnect happens */
+    auto_test_state.end_time = auto_test_state.start_time + FIRST_RUN_TIME + DISCONNECT_TIME_MS + SECOND_RUN_TIME;
+    auto_test_state.disconnect_time = auto_test_state.start_time + FIRST_RUN_TIME;
+    auto_test_state.read_timeout_ms = READ_TIMEOUT;
+    auto_test_state.reconnect_time = auto_test_state.start_time + FIRST_RUN_TIME + DISCONNECT_TIME_MS;
     auto_test_state.test_passed = 0;
     auto_test_state.reconnect_done = 0;
+
+    log("[INFO] Test starting at time %" PRId64 " ms\n", auto_test_state.start_time);
+    log("[INFO] Disconnect time %" PRId64 " ms\n", auto_test_state.disconnect_time);
+    log("[INFO] Reconnect time %" PRId64 " ms\n", auto_test_state.reconnect_time);
+    log("[INFO] Test ending at time %" PRId64 " ms\n", auto_test_state.end_time);
 
     start_server(&auto_test_state);
 
     /* set up the tag and set the callback */
     setup_tag(&auto_test_state, AUTO_SYNC_TAG_ATTRIBS);
 
-    while((current_time = compat_time_ms()) < auto_test_state.end_time) {
-        int64_t complete_pct = (current_time - auto_test_state.start_time) * 100 / TEST_DURATION_MS;
 
-        /* log stats every 5% */
-        if(complete_pct >= next_pct) {
-            int tag_status = plc_tag_status(auto_test_state.tag);
-            int64_t elapsed_ms = current_time - auto_test_state.start_time;
+    while((current_time = compat_time_ms()) < auto_test_state.disconnect_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
 
-            next_pct = complete_pct + 5;
+    int before_disconnect_read_success_count = auto_test_state.read_success_count;
+    int read_error_before_disconnect = auto_test_state.read_error_count;
 
-            log("\n[STATUS] Test progress: %" PRId64 "%% complete (elapsed: %" PRId64 " ms)\n", complete_pct, elapsed_ms);
-            log("[STATUS] Tag status: %s\n", plc_tag_decode_error(tag_status));
-            log("[STATUS] Read stats: started=%d, completed=%d, timeouts=%d, errors=%d\n", auto_test_state.read_start_count,
-                auto_test_state.read_success_count, auto_test_state.read_timeout_count, auto_test_state.read_error_count);
 
-            /* If we're past the reconnect time, print additional diagnostics */
-            if(auto_test_state.reconnect_time > 0 && elapsed_ms > auto_test_state.reconnect_time) {
-                log("[STATUS] Time since reconnect: %" PRId64 "ms, read completions after reconnect: %d\n",
-                    current_time - auto_test_state.reconnect_time, auto_test_state.read_success_after_reconnect);
-            }
-        }
+    do_disconnect(current_time, &auto_test_state);
 
-        /* check if it's time to simulate a PLC disconnect */
-        if(auto_test_state.disconnect_time > 0 && current_time >= auto_test_state.disconnect_time
-           && auto_test_state.reconnect_time == 0) {
-            do_disconnect(current_time, &auto_test_state);
-        }
+    fputs("\nD\n", stderr);
+    fflush(stderr);
 
-        /* check if it's time to simulate a PLC reconnect - only do once */
-        if(auto_test_state.reconnect_time > 0 && current_time >= auto_test_state.reconnect_time
-           && !auto_test_state.reconnect_done) {
-            do_reconnect(current_time, &auto_test_state);
+    while((current_time = compat_time_ms()) < auto_test_state.reconnect_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
 
-            /* there is a data race here but we do not need to be exact. */
-            auto_test_state.reconnect_done = true;
-        }
+    int after_disconnect_read_success_count = auto_test_state.read_success_count - before_disconnect_read_success_count;
+    int read_error_after_disconnect = auto_test_state.read_error_count - read_error_before_disconnect;
 
-        compat_sleep_ms(AUTO_READ_POLL_MS / 2, NULL);
-    }
+    do_reconnect(current_time, &auto_test_state);
+
+    fputs("\nR\n", stderr);
+    fflush(stderr);
+
+    auto_test_state.reconnect_done = 1;
+
+    while((current_time = compat_time_ms()) < auto_test_state.end_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
+
+    int after_reconnect_read_success_count =
+        auto_test_state.read_success_count - (before_disconnect_read_success_count + after_disconnect_read_success_count);
+    int read_error_after_reconnect =
+        auto_test_state.read_error_count - (read_error_before_disconnect + read_error_after_disconnect);
+
+
+    log("\n[STATUS] Test completed.\n");
+
+    auto_test_state.errors_before_disconnect = read_error_before_disconnect;
+    auto_test_state.errors_after_reconnect = read_error_after_reconnect;
+    auto_test_state.read_success_after_reconnect = after_reconnect_read_success_count;
 
     log("[STATUS] Test completed.\n");
 
@@ -415,7 +446,6 @@ int run_auto_test(const char *ab_server_cmd) {
 int run_manual_test(const char *ab_server_cmd) {
     int64_t current_time = 0;
     int64_t wait_until_ms = 0;
-    int64_t next_pct = 0;
     test_state_t manual_test_state = {0};
 
     log("Manual tag test running for %dms...\n", TEST_DURATION_MS);
@@ -423,69 +453,80 @@ int run_manual_test(const char *ab_server_cmd) {
     /* initialize test state */
     manual_test_state.ab_server_cmd = ab_server_cmd;
     manual_test_state.start_time = compat_time_ms();
-    manual_test_state.end_time = manual_test_state.start_time + TEST_DURATION_MS;
-    manual_test_state.disconnect_time =
-        manual_test_state.start_time + (TEST_DURATION_MS / 4); /* Disconnect after 25% of the test */
-    manual_test_state.read_timeout_ms = MANUAL_READ_TIMEOUT_MS;
-    manual_test_state.reconnect_time = 0; /* Will be set when disconnect happens */
+    manual_test_state.end_time = manual_test_state.start_time + FIRST_RUN_TIME + DISCONNECT_TIME_MS + SECOND_RUN_TIME;
+    manual_test_state.disconnect_time = manual_test_state.start_time + FIRST_RUN_TIME;
+    manual_test_state.read_timeout_ms = READ_TIMEOUT;
+    manual_test_state.reconnect_time = manual_test_state.start_time + FIRST_RUN_TIME + DISCONNECT_TIME_MS;
     manual_test_state.test_passed = 0;
     manual_test_state.reconnect_done = 0;
+
+    log("[INFO] Test starting at time %" PRId64 " ms\n", manual_test_state.start_time);
+    log("[INFO] Disconnect time in %" PRId64 " ms\n", manual_test_state.disconnect_time - manual_test_state.start_time);
+    log("[INFO] Reconnect time in %" PRId64 " ms\n", manual_test_state.reconnect_time - manual_test_state.start_time);
+    log("[INFO] Test ending at in time %" PRId64 " ms\n", manual_test_state.end_time - manual_test_state.start_time);
 
     start_server(&manual_test_state);
 
     /* set up the tag and set the callback */
     setup_tag(&manual_test_state, MANUAL_SYNC_TAG_ATTRIBS);
 
-    while((current_time = compat_time_ms()) < manual_test_state.end_time) {
-        int64_t complete_pct = (current_time - manual_test_state.start_time) * 100 / TEST_DURATION_MS;
+    while((current_time = compat_time_ms()) < manual_test_state.disconnect_time) {
+        if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
-        if(wait_until_ms != 0) {
-            wait_until_ms = wait_until_ms + MANUAL_READ_TIMEOUT_MS;
-        } else {
-            wait_until_ms = current_time + MANUAL_READ_TIMEOUT_MS;
-        }
-
-        /* log stats every 5% */
-        if(complete_pct >= next_pct) {
-            int tag_status = plc_tag_status(manual_test_state.tag);
-            int64_t elapsed_ms = current_time - manual_test_state.start_time;
-
-            next_pct = complete_pct + 5;
-
-            log("\n[STATUS] Test progress: %" PRId64 "%% complete (elapsed: %" PRId64 " ms)\n", complete_pct, elapsed_ms);
-            log("[STATUS] Tag status: %s\n", plc_tag_decode_error(tag_status));
-            log("[STATUS] Read stats: started=%d, completed=%d, timeouts=%d, errors=%d\n", manual_test_state.read_start_count,
-                manual_test_state.read_success_count, manual_test_state.read_timeout_count, manual_test_state.read_error_count);
-
-            /* If we're past the reconnect time, print additional diagnostics */
-            if(manual_test_state.reconnect_time > 0 && elapsed_ms > manual_test_state.reconnect_time) {
-                log("[STATUS] Time since reconnect: %" PRId64 "ms, read completions after reconnect: %d\n",
-                    current_time - manual_test_state.reconnect_time, manual_test_state.read_success_after_reconnect);
-            }
-        }
-
-        /* check if it's time to simulate a PLC disconnect */
-        if(manual_test_state.disconnect_time > 0 && current_time >= manual_test_state.disconnect_time
-           && manual_test_state.reconnect_time == 0) {
-            do_disconnect(current_time, &manual_test_state);
-        }
-
-        /* check if it's time to simulate a PLC reconnect - only do once */
-        if(manual_test_state.reconnect_time > 0 && current_time >= manual_test_state.reconnect_time
-           && !manual_test_state.reconnect_done) {
-            do_reconnect(current_time, &manual_test_state);
-
-            /* there is a data race here but we do not need to be exact. */
-            manual_test_state.reconnect_done = true;
-        }
-
-        plc_tag_read(manual_test_state.tag, MANUAL_READ_TIMEOUT_MS);
+        plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
 
         /* wait at least the timeout time */
         wait_until_time_ms(wait_until_ms);
     }
 
-    log("[STATUS] Test completed.\n");
+    int before_disconnect_read_success_count = manual_test_state.read_success_count;
+    int read_error_before_disconnect = manual_test_state.read_error_count;
+
+
+    do_disconnect(current_time, &manual_test_state);
+
+    fputs("\nD\n", stderr);
+    fflush(stderr);
+
+    while((current_time = compat_time_ms()) < manual_test_state.reconnect_time) {
+        if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
+
+        plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+
+        /* wait at least the timeout time */
+        wait_until_time_ms(wait_until_ms);
+    }
+
+    int after_disconnect_read_success_count = manual_test_state.read_success_count - before_disconnect_read_success_count;
+    int read_error_after_disconnect = manual_test_state.read_error_count - read_error_before_disconnect;
+
+    do_reconnect(current_time, &manual_test_state);
+
+    fputs("\nR\n", stderr);
+    fflush(stderr);
+
+    manual_test_state.reconnect_done = 1;
+
+    while((current_time = compat_time_ms()) < manual_test_state.end_time) {
+        if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
+
+        plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+
+        /* wait at least the timeout time */
+        wait_until_time_ms(wait_until_ms);
+    }
+
+    int after_reconnect_read_success_count =
+        manual_test_state.read_success_count - (before_disconnect_read_success_count + after_disconnect_read_success_count);
+    int read_error_after_reconnect =
+        manual_test_state.read_error_count - (read_error_before_disconnect + read_error_after_disconnect);
+
+
+    log("\n[STATUS] Test completed.\n");
+
+    manual_test_state.errors_before_disconnect = read_error_before_disconnect;
+    manual_test_state.errors_after_reconnect = read_error_after_reconnect;
+    manual_test_state.read_success_after_reconnect = after_reconnect_read_success_count;
 
     plc_tag_destroy(manual_test_state.tag);
 
