@@ -1287,3 +1287,69 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
         if-no-files-found: error
+
+  debug_context:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Debug GitHub context
+      run: |
+        echo "Event name: ${{ github.event_name }}"
+        echo "Ref: ${{ github.ref }}"
+        echo "Base ref: ${{ github.base_ref }}"
+        echo "Head ref: ${{ github.head_ref }}"
+        echo "PR Action: ${{ github.event.action }}"
+        echo "PR Merged: ${{ github.event.pull_request.merged }}"
+        echo "Base ref condition: ${{ github.base_ref == 'release' }}"
+        echo "Event condition: ${{ github.event_name == 'pull_request' }}"
+        echo "Action condition: ${{ github.event.action == 'closed' }}"
+        echo "Merged condition: ${{ github.event.pull_request.merged == true }}"
+        echo "Combined condition: ${{ github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true }}"
+
+  create_release:
+    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
+    runs-on: ubuntu-22.04
+    if: github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+
+    env:
+      VERSION: "2.6.7"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get PR details
+      id: get_pr_details
+      run: |
+        PR_TITLE="${{ github.event.pull_request.title }}"
+        PR_BODY="${{ github.event.pull_request.body }}"
+        echo "pr_message<<EOF" >> $GITHUB_OUTPUT
+        echo "$PR_TITLE" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "$PR_BODY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./release_artifacts
+
+    - name: Create and push tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v2.6.7" -m "Release v2.6.7"
+        git push origin "v2.6.7"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: "v2.6.7"
+        name: ${{ github.event.pull_request.title }}
+        body: ${{ steps.get_pr_details.outputs.pr_message }}
+        files: ./release_artifacts/**/*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
