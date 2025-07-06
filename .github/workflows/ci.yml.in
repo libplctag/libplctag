@@ -1319,13 +1319,15 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Get PR merge message
-      id: get_pr_message
+    - name: Get PR details
+      id: get_pr_details
       run: |
-        # Get the commit message from the merge commit
-        COMMIT_MSG=$(git log -1 --pretty=format:"%s%n%n%b")
-        echo "commit_message<<EOF" >> $GITHUB_OUTPUT
-        echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+        PR_TITLE="${{ github.event.pull_request.title }}"
+        PR_BODY="${{ github.event.pull_request.body }}"
+        echo "pr_message<<EOF" >> $GITHUB_OUTPUT
+        echo "$PR_TITLE" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "$PR_BODY" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
     - name: Download all artifacts
@@ -1345,7 +1347,7 @@ jobs:
       with:
         tag_name: "v@VERSION@"
         name: "Release v@VERSION@"
-        body: ${{ steps.get_pr_message.outputs.commit_message }}
+        body: ${{ steps.get_pr_details.outputs.pr_message }}
         files: ./release_artifacts/**/*.zip
         draft: false
         prerelease: false
