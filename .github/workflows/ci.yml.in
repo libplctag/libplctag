@@ -1291,6 +1291,11 @@ jobs:
   debug_context:
     runs-on: ubuntu-22.04
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
     - name: Debug GitHub context
       run: |
         echo "Event name: ${{ github.event_name }}"
@@ -1301,8 +1306,8 @@ jobs:
         echo "PR Action: ${{ github.event.action }}"
         echo "PR Number: ${{ github.event.number }}"
         echo "PR Merged: ${{ github.event.pull_request.merged }}"
-        echo "PR Title: ${{ github.event.pull_request.title }}"
-        echo "PR Body: ${{ github.event.pull_request.body }}"
+        echo "PR Title (direct): ${{ github.event.pull_request.title }}"
+        echo "PR Body (direct): ${{ github.event.pull_request.body }}"
         echo "Repository: ${{ github.repository }}"
         echo "SHA: ${{ github.sha }}"
         echo "Actor: ${{ github.actor }}"
@@ -1321,6 +1326,49 @@ jobs:
         echo "Alternative push condition: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' }}"
         echo "Combined condition: ${{ (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release') }}"
 
+    - name: Test PR lookup logic
+      run: |
+        echo "=== Testing PR lookup logic ==="
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "Using direct PR context"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+        else
+          echo "Using API lookup for push event"
+          echo "Finding merged PR for commit ${{ github.sha }}"
+
+          # Search for PRs that were merged with this commit
+          PR_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls?state=closed&sort=updated&direction=desc&per_page=10")
+
+          echo "API response (first 500 chars):"
+          echo "$PR_DATA" | head -c 500
+          echo ""
+
+          echo "Debugging merge commit SHAs:"
+          echo "$PR_DATA" | jq -r '.[] | "PR #\(.number): merge_commit_sha=\(.merge_commit_sha // "null")"'
+          echo "Looking for SHA: ${{ github.sha }}"
+
+          # Find the PR that was merged with this SHA
+          PR_INFO=$(echo "$PR_DATA" | jq -r ".[] | select(.merge_commit_sha == \"${{ github.sha }}\") | {title: .title, body: .body} | @base64")
+
+          if [ -n "$PR_INFO" ] && [ "$PR_INFO" != "null" ]; then
+            PR_TITLE=$(echo "$PR_INFO" | base64 -d | jq -r '.title')
+            PR_BODY=$(echo "$PR_INFO" | base64 -d | jq -r '.body // ""')
+            echo "Found merged PR: $PR_TITLE"
+          else
+            echo "No merged PR found, using commit message"
+            PR_TITLE=$(git log -1 --pretty=format:"%s" ${{ github.sha }})
+            PR_BODY=$(git log -1 --pretty=format:"%b" ${{ github.sha }})
+            echo "Commit title: $PR_TITLE"
+          fi
+        fi
+
+        echo "=== Final Results ==="
+        echo "PR Title: $PR_TITLE"
+        echo "PR Body: $PR_BODY"
+
   create_release:
     needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
     runs-on: ubuntu-22.04
@@ -1338,8 +1386,34 @@ jobs:
     - name: Get PR details
       id: get_pr_details
       run: |
-        PR_TITLE="${{ github.event.pull_request.title }}"
-        PR_BODY="${{ github.event.pull_request.body }}"
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          # Direct PR event - use the PR context
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+        else
+          # Push event - find the merged PR via API
+          echo "Finding merged PR for commit ${{ github.sha }}"
+
+          # Search for PRs that were merged with this commit
+          PR_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls?state=closed&sort=updated&direction=desc&per_page=10")
+
+          # Find the PR that was merged with this SHA
+          PR_INFO=$(echo "$PR_DATA" | jq -r ".[] | select(.merge_commit_sha == \"${{ github.sha }}\") | {title: .title, body: .body} | @base64")
+
+          if [ -n "$PR_INFO" ] && [ "$PR_INFO" != "null" ]; then
+            PR_TITLE=$(echo "$PR_INFO" | base64 -d | jq -r '.title')
+            PR_BODY=$(echo "$PR_INFO" | base64 -d | jq -r '.body // ""')
+            echo "Found merged PR: $PR_TITLE"
+          else
+            # Fallback to commit message if no PR found
+            echo "No merged PR found, using commit message"
+            PR_TITLE=$(git log -1 --pretty=format:"%s" ${{ github.sha }})
+            PR_BODY=$(git log -1 --pretty=format:"%b" ${{ github.sha }})
+          fi
+        fi
+
         echo "pr_message<<EOF" >> $GITHUB_OUTPUT
         echo "$PR_TITLE" >> $GITHUB_OUTPUT
         echo "" >> $GITHUB_OUTPUT
