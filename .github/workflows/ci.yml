@@ -1346,7 +1346,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v2.6.7"
-        name: "Release v2.6.7"
+        name: ${{ github.event.pull_request.title }}
         body: ${{ steps.get_pr_details.outputs.pr_message }}
         files: ./release_artifacts/**/*.zip
         draft: false
