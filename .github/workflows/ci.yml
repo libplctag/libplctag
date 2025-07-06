@@ -1324,7 +1324,7 @@ jobs:
   create_release:
     needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
     runs-on: ubuntu-22.04
-    if: github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
     env:
       VERSION: "2.6.7"
