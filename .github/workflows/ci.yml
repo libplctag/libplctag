@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_ubuntu_x64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -174,8 +174,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_ubuntu_x86"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -324,8 +324,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_macos_x64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -471,8 +471,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_macos_aarch64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -522,8 +522,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_windows_x64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -690,8 +690,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_windows_x64_MinGW"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x64_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -821,8 +821,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_windows_x86"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x86"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -981,8 +981,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_windows_x86_MinGW"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x86_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1111,8 +1111,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_windows_arm64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_arm64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1188,8 +1188,8 @@ jobs:
             target_arch: arm64
 
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_ubuntu_${{ matrix.artifact_suffix }}"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_ubuntu_${{ matrix.artifact_suffix }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1288,28 +1288,49 @@ jobs:
         path: ${{ env.DIST }}
         if-no-files-found: error
 
-  create_complete_archive:
+  create_release:
     needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
     runs-on: ubuntu-22.04
+    if: github.ref == 'refs/heads/release' && github.event_name == 'push'
     
     env:
-      VERSION: "2.6.8"
-      ARTIFACT: "libplctag_2.6.8_complete"
+      VERSION: "2.6.7"
     
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Get PR merge message
+      id: get_pr_message
+      run: |
+        # Get the commit message from the merge commit
+        COMMIT_MSG=$(git log -1 --pretty=format:"%s%n%n%b")
+        echo "commit_message<<EOF" >> $GITHUB_OUTPUT
+        echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
-        path: ./all_artifacts
+        path: ./release_artifacts
     
-    - name: Create complete archive
+    - name: Create and push tag
       run: |
-        cd ./all_artifacts
-        echo "Creating complete archive with all build artifacts..."
-        zip -r ../libplctag_2.6.8_complete.zip ./*
-        
-    - name: Upload complete archive
-      uses: actions/upload-artifact@v4
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v2.6.7" -m "Release v2.6.7"
+        git push origin "v2.6.7"
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ./libplctag_2.6.8_complete.zip
+        tag_name: "v2.6.7"
+        name: "Release v2.6.7"
+        body: ${{ steps.get_pr_message.outputs.commit_message }}
+        files: ./release_artifacts/**/*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

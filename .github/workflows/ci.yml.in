@@ -1288,28 +1288,49 @@ jobs:
         path: ${{ env.DIST }}
         if-no-files-found: error
 
-  create_complete_archive:
+  create_release:
     needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
     runs-on: ubuntu-22.04
+    if: github.ref == 'refs/heads/release' && github.event_name == 'push'
     
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_complete"
     
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Get PR merge message
+      id: get_pr_message
+      run: |
+        # Get the commit message from the merge commit
+        COMMIT_MSG=$(git log -1 --pretty=format:"%s%n%n%b")
+        echo "commit_message<<EOF" >> $GITHUB_OUTPUT
+        echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
-        path: ./all_artifacts
+        path: ./release_artifacts
     
-    - name: Create complete archive
+    - name: Create and push tag
       run: |
-        cd ./all_artifacts
-        echo "Creating complete archive with all build artifacts..."
-        zip -r ../libplctag_@VERSION@_complete.zip ./*
-        
-    - name: Upload complete archive
-      uses: actions/upload-artifact@v4
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v@VERSION@" -m "Release v@VERSION@"
+        git push origin "v@VERSION@"
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ./libplctag_@VERSION@_complete.zip
+        tag_name: "v@VERSION@"
+        name: "Release v@VERSION@"
+        body: ${{ steps.get_pr_message.outputs.commit_message }}
+        files: ./release_artifacts/**/*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
