@@ -1287,3 +1287,29 @@ jobs:
         name: ${{ env.ARTIFACT }}
         path: ${{ env.DIST }}
         if-no-files-found: error
+
+  create_complete_archive:
+    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
+    runs-on: ubuntu-22.04
+    
+    env:
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_complete"
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./all_artifacts
+    
+    - name: Create complete archive
+      run: |
+        cd ./all_artifacts
+        echo "Creating complete archive with all build artifacts..."
+        zip -r ../libplctag_2.6.7_complete.zip ./*
+        
+    - name: Upload complete archive
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}
+        path: ./libplctag_2.6.7_complete.zip
