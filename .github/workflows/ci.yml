@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_ubuntu_x64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -174,8 +174,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_ubuntu_x86"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -324,8 +324,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_macos_x64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -471,8 +471,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_macos_aarch64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -522,8 +522,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -690,8 +690,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x64_MinGW"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x64_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -821,8 +821,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x86"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x86"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -981,8 +981,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x86_MinGW"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x86_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1111,8 +1111,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_arm64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_arm64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1188,8 +1188,8 @@ jobs:
             target_arch: arm64
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_ubuntu_${{ matrix.artifact_suffix }}"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_ubuntu_${{ matrix.artifact_suffix }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1293,8 +1293,8 @@ jobs:
     runs-on: ubuntu-22.04
     
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_complete"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_complete"
     
     steps:
     - name: Download all artifacts
@@ -1306,10 +1306,10 @@ jobs:
       run: |
         cd ./all_artifacts
         echo "Creating complete archive with all build artifacts..."
-        zip -r ../libplctag_2.6.7_complete.zip ./*
+        zip -r ../libplctag_2.6.8_complete.zip ./*
         
     - name: Upload complete archive
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}
-        path: ./libplctag_2.6.7_complete.zip
+        path: ./libplctag_2.6.8_complete.zip
