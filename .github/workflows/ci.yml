@@ -147,27 +147,28 @@ jobs:
         echo "shut down server."
         killall modbus_server -TERM &> /dev/null
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: ${{ env.DIST }}/libplctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/ab_server
-          ${{ env.DIST }}/list_tags_logix
-          ${{ env.DIST }}/list_tags_micro8x0
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
 
-    - name: Upload ZIP artifact with all binaries
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   ubuntu_x86:
 
@@ -297,27 +298,28 @@ jobs:
         echo "Test reconnect after outage"
         ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: ${{ env.DIST }}/libplctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/ab_server
-          ${{ env.DIST }}/list_tags_logix
-          ${{ env.DIST }}/list_tags_micro8x0
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
 
-    - name: Upload ZIP all binary artifacts
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   macos_x64:
 
@@ -444,27 +446,28 @@ jobs:
         echo "Test reconnect after outage"
         ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: ${{ env.DIST }}/libplctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/ab_server
-          ${{ env.DIST }}/list_tags_logix
-          ${{ env.DIST }}/list_tags_micro8x0
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
 
-    - name: Upload ZIP all binary artifacts
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   macos_ARM64:
 
@@ -495,27 +498,28 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: ${{ env.DIST }}/libplctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/ab_server
-          ${{ env.DIST }}/list_tags_logix
-          ${{ env.DIST }}/list_tags_micro8x0
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
 
-    - name: Upload ZIP all binary artifacts
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   windows_x64_MSVC:
 
@@ -660,30 +664,29 @@ jobs:
         .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/plctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd "${{ env.DIST }}"
+        # Create dev ZIP with only library files
+        7z a -tzip "../${{ env.ARTIFACT }}_dev.zip" libplctag.* plctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/plctag.*
-          ${{ env.DIST }}/ab_server.exe
-          ${{ env.DIST }}/list_tags_logix.exe
-          ${{ env.DIST }}/list_tags_micro8x0.exe
+        # Create tools ZIP with library and tools
+        7z a -tzip "../${{ env.ARTIFACT }}_tools.zip" libplctag.* plctag.* ab_server.exe list_tags_logix.exe list_tags_micro8x0.exe
 
-    - name: Upload ZIP all binary artifacts
+        # Create full ZIP with all binaries
+        7z a -tzip "../${{ env.ARTIFACT }}.zip" *
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir release_zips
+        move *.zip release_zips\
+      shell: cmd
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}\release_zips\*.zip
 
   windows_x64_MinGW:
 
@@ -951,30 +954,29 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/plctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd "${{ env.DIST }}"
+        # Create dev ZIP with only library files
+        7z a -tzip "../${{ env.ARTIFACT }}_dev.zip" libplctag.* plctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/plctag.*
-          ${{ env.DIST }}/ab_server.exe
-          ${{ env.DIST }}/list_tags_logix.exe
-          ${{ env.DIST }}/list_tags_micro8x0.exe
+        # Create tools ZIP with library and tools
+        7z a -tzip "../${{ env.ARTIFACT }}_tools.zip" libplctag.* plctag.* ab_server.exe list_tags_logix.exe list_tags_micro8x0.exe
 
-    - name: Upload ZIP all binary artifacts
+        # Create full ZIP with all binaries
+        7z a -tzip "../${{ env.ARTIFACT }}.zip" *
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir release_zips
+        move *.zip release_zips\
+      shell: cmd
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}\release_zips\*.zip
 
   windows_x86_MinGW:
 
@@ -1140,30 +1142,29 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }} && cmake --build . --verbose --config MinSizeRel
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/plctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd "${{ env.DIST }}"
+        # Create dev ZIP with only library files
+        7z a -tzip "../${{ env.ARTIFACT }}_dev.zip" libplctag.* plctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/plctag.*
-          ${{ env.DIST }}/ab_server.exe
-          ${{ env.DIST }}/list_tags_logix.exe
-          ${{ env.DIST }}/list_tags_micro8x0.exe
+        # Create tools ZIP with library and tools
+        7z a -tzip "../${{ env.ARTIFACT }}_tools.zip" libplctag.* plctag.* ab_server.exe list_tags_logix.exe list_tags_micro8x0.exe
 
-    - name: Upload ZIP all binary artifacts
+        # Create full ZIP with all binaries
+        7z a -tzip "../${{ env.ARTIFACT }}.zip" *
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir release_zips
+        move *.zip release_zips\
+      shell: cmd
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}\release_zips\*.zip
 
   ubuntu_arm_cross:
     runs-on: ubuntu-22.04
@@ -1265,27 +1266,28 @@ jobs:
         echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
         ls -la ${{ env.DIST }} || echo "No artifacts directory found"
 
-    - name: Upload ZIP artifact with only development libs
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_dev
-        path: ${{ env.DIST }}/libplctag.*
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
 
-    - name: Upload ZIP artifact with libs and tools
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.ARTIFACT }}_tools
-        path: |
-          ${{ env.DIST }}/libplctag.*
-          ${{ env.DIST }}/ab_server
-          ${{ env.DIST }}/list_tags_logix
-          ${{ env.DIST }}/list_tags_micro8x0
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
 
-    - name: Upload ZIP all binary artifacts
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
         if-no-files-found: error
 
   debug_context:
@@ -1368,6 +1370,36 @@ jobs:
         echo "=== Final Results ==="
         echo "PR Title: $PR_TITLE"
         echo "PR Body: $PR_BODY"
+
+  debug_artifacts:
+    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./release_artifacts
+
+    - name: List artifact structure
+      run: |
+        echo "=== Artifact Directory Structure ==="
+        find ./release_artifacts -type f -name "*.zip" | head -20
+        echo ""
+        echo "=== All files in release_artifacts ==="
+        find ./release_artifacts -type f | head -50
+        echo ""
+        echo "=== Directory structure ==="
+        ls -la ./release_artifacts/ || echo "No release_artifacts directory"
+        echo ""
+        echo "=== Sample directory contents ==="
+        for dir in ./release_artifacts/*/; do
+          if [ -d "$dir" ]; then
+            echo "Contents of $dir:"
+            ls -la "$dir" | head -10
+            echo ""
+            break
+          fi
+        done
 
   create_release:
     needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
