@@ -1446,9 +1446,12 @@ jobs:
           fi
         fi
 
-        echo "pr_message<<EOF" >> $GITHUB_OUTPUT
+        # Set separate outputs for title and body
+        echo "pr_title<<EOF" >> $GITHUB_OUTPUT
         echo "$PR_TITLE" >> $GITHUB_OUTPUT
-        echo "" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "pr_body<<EOF" >> $GITHUB_OUTPUT
         echo "$PR_BODY" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
@@ -1468,8 +1471,8 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v@VERSION@"
-        name: ${{ github.event.pull_request.title }}
-        body: ${{ steps.get_pr_details.outputs.pr_message }}
+        name: ${{ steps.get_pr_details.outputs.pr_title }}
+        body: ${{ steps.get_pr_details.outputs.pr_body }}
         files: ./release_artifacts/**/*.zip
         draft: false
         prerelease: false
