@@ -84,8 +84,12 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     target_link_libraries(${example} plctag_static ${EXTRA_LINKER_LIBS})
 
     if(UNIX AND NOT APPLE)
-        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        # Don't use static linking with sanitizers as they are incompatible
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT USE_SANITIZERS)
             target_link_options(${example} PRIVATE -static ${EXTRA_LINK_FLAGS})
+        elseif(CMAKE_BUILD_TYPE STREQUAL "Debug" AND USE_SANITIZERS)
+            # Use dynamic linking when sanitizers are enabled
+            target_link_options(${example} PRIVATE ${EXTRA_LINK_FLAGS})
         else()
             target_link_options(${example} PRIVATE -static -s ${EXTRA_LINK_FLAGS})
         endif()

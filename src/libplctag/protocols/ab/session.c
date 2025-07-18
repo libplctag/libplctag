@@ -1799,11 +1799,6 @@ int process_requests(ab_session_p session) {
                 break;
             }
 
-            if(rc != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_WARN, "Got error %s when processing incoming response(s)!", plc_tag_decode_error(rc));
-                break;
-            }
-
             /* copy the results back out. Every request gets a copy. */
             for(int i = 0; i < num_bundled_requests; i++) {
                 debug_set_tag_id(bundled_requests[i]->tag_id);
@@ -1828,7 +1823,9 @@ int process_requests(ab_session_p session) {
 
             pdebug(DEBUG_INFO, "Pushing %d requests back into the queue.", num_bundled_requests);
 
-            for(int i = num_bundled_requests - 1; i >= 0; i--) { vector_insert(session->requests, 0, bundled_requests[i]); }
+            for(int i = num_bundled_requests - 1; i >= 0; i--) {
+                if(bundled_requests[i]) { vector_insert(session->requests, 0, bundled_requests[i]); }
+            }
         }
 
         /* tickle the main tickler thread to note that we have responses. */

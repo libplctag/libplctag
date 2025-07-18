@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_ubuntu_x64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -153,19 +153,36 @@ jobs:
         echo "shut down server."
         killall modbus_server -TERM &> /dev/null
 
-    - name: Upload ZIP artifact
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
+
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
+
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   ubuntu_x86:
 
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_ubuntu_x86"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -287,19 +304,42 @@ jobs:
         echo "test simultaneaous read/write on a single tag"
         .\test_simultaneous_rw_ab_server
 
-    - name: Upload ZIP artifact
+- name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage"
+        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
+
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
+
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
+
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   macos_x64:
 
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_macos_x64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -418,19 +458,42 @@ jobs:
         echo "test simultaneaous read/write on a single tag"
         .\test_simultaneous_rw_ab_server
 
-    - name: Upload ZIP artifact
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage"
+        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
+
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
+
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
+
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   macos_ARM64:
 
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_macos_aarch64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -453,19 +516,36 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
-    - name: Upload ZIP artifact
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
+
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
+
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
 
   windows_x64_MSVC:
 
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_windows_x64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -611,19 +691,37 @@ jobs:
         .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
-    - name: Upload ZIP artifact
+    - name: Create ZIP artifacts
+      run: |
+        cd "${{ env.DIST }}"
+        # Create dev ZIP with only library files
+        7z a -tzip "../${{ env.ARTIFACT }}_dev.zip" libplctag.* plctag.*
+
+        # Create tools ZIP with library and tools
+        7z a -tzip "../${{ env.ARTIFACT }}_tools.zip" libplctag.* plctag.* ab_server.exe list_tags_logix.exe list_tags_micro8x0.exe
+
+        # Create full ZIP with all binaries
+        7z a -tzip "../${{ env.ARTIFACT }}.zip" *
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir release_zips
+        move *.zip release_zips\
+      shell: cmd
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}\release_zips\*.zip
 
   windows_x64_MinGW:
 
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_windows_x64_MinGW"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x64_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -762,8 +860,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_windows_x86"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x86"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -901,19 +999,37 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-    - name: Upload ZIP artifact
+    - name: Create ZIP artifacts
+      run: |
+        cd "${{ env.DIST }}"
+        # Create dev ZIP with only library files
+        7z a -tzip "../${{ env.ARTIFACT }}_dev.zip" libplctag.* plctag.*
+
+        # Create tools ZIP with library and tools
+        7z a -tzip "../${{ env.ARTIFACT }}_tools.zip" libplctag.* plctag.* ab_server.exe list_tags_logix.exe list_tags_micro8x0.exe
+
+        # Create full ZIP with all binaries
+        7z a -tzip "../${{ env.ARTIFACT }}.zip" *
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir release_zips
+        move *.zip release_zips\
+      shell: cmd
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}\release_zips\*.zip
 
   windows_x86_MinGW:
 
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_windows_x86_MinGW"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_x86_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1051,8 +1167,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_windows_arm64"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_windows_arm64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1080,11 +1196,29 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }} && cmake --build . --verbose --config MinSizeRel
 
-    - name: Upload ZIP artifact
+    - name: Create ZIP artifacts
+      run: |
+        cd "${{ env.DIST }}"
+        # Create dev ZIP with only library files
+        7z a -tzip "../${{ env.ARTIFACT }}_dev.zip" libplctag.* plctag.*
+
+        # Create tools ZIP with library and tools
+        7z a -tzip "../${{ env.ARTIFACT }}_tools.zip" libplctag.* plctag.* ab_server.exe list_tags_logix.exe list_tags_micro8x0.exe
+
+        # Create full ZIP with all binaries
+        7z a -tzip "../${{ env.ARTIFACT }}.zip" *
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir release_zips
+        move *.zip release_zips\
+      shell: cmd
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}\release_zips\*.zip
 
   ubuntu_arm_cross:
     runs-on: ubuntu-22.04
@@ -1109,8 +1243,8 @@ jobs:
             target_arch: arm64
 
     env:
-      VERSION: "2.6.6"
-      ARTIFACT: "libplctag_2.6.6_ubuntu_${{ matrix.artifact_suffix }}"
+      VERSION: "2.6.7"
+      ARTIFACT: "libplctag_2.6.7_ubuntu_${{ matrix.artifact_suffix }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1186,9 +1320,215 @@ jobs:
         echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
         ls -la ${{ env.DIST }} || echo "No artifacts directory found"
 
-    - name: Upload ZIP artifact
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        # Create dev ZIP with only library files
+        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
+
+        # Create tools ZIP with library and tools
+        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
+
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}
-        path: ${{ env.DIST }}
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
         if-no-files-found: error
+
+  debug_context:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Debug GitHub context
+      run: |
+        echo "Event name: ${{ github.event_name }}"
+        echo "Ref: ${{ github.ref }}"
+        echo "Ref name: ${{ github.ref_name }}"
+        echo "Base ref: ${{ github.base_ref }}"
+        echo "Head ref: ${{ github.head_ref }}"
+        echo "PR Action: ${{ github.event.action }}"
+        echo "PR Number: ${{ github.event.number }}"
+        echo "PR Merged: ${{ github.event.pull_request.merged }}"
+        echo "PR Title (direct): ${{ github.event.pull_request.title }}"
+        echo "PR Body (direct): ${{ github.event.pull_request.body }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "SHA: ${{ github.sha }}"
+        echo "Actor: ${{ github.actor }}"
+        echo "Workflow: ${{ github.workflow }}"
+        echo "Job: ${{ github.job }}"
+        echo "Run ID: ${{ github.run_id }}"
+        echo "Run Number: ${{ github.run_number }}"
+        echo "---"
+        echo "Base ref condition: ${{ github.base_ref == 'release' }}"
+        echo "Event condition: ${{ github.event_name == 'pull_request' }}"
+        echo "Action condition: ${{ github.event.action == 'closed' }}"
+        echo "Merged condition: ${{ github.event.pull_request.merged == true }}"
+        echo "Push to release condition: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' }}"
+        echo "---"
+        echo "Current release condition: ${{ github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true }}"
+        echo "Alternative push condition: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' }}"
+        echo "Combined condition: ${{ (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release') }}"
+
+    - name: Test PR lookup logic
+      run: |
+        echo "=== Testing PR lookup logic ==="
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "Using direct PR context"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+        else
+          echo "Using API lookup for push event"
+          echo "Finding merged PR for commit ${{ github.sha }}"
+
+          # Search for PRs that were merged with this commit
+          PR_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls?state=closed&sort=updated&direction=desc&per_page=10")
+
+          echo "API response (first 500 chars):"
+          echo "$PR_DATA" | head -c 500
+          echo ""
+
+          echo "Debugging merge commit SHAs:"
+          echo "$PR_DATA" | jq -r '.[] | "PR #\(.number): merge_commit_sha=\(.merge_commit_sha // "null")"'
+          echo "Looking for SHA: ${{ github.sha }}"
+
+          # Find the PR that was merged with this SHA
+          PR_INFO=$(echo "$PR_DATA" | jq -r ".[] | select(.merge_commit_sha == \"${{ github.sha }}\") | {title: .title, body: .body} | @base64")
+
+          if [ -n "$PR_INFO" ] && [ "$PR_INFO" != "null" ]; then
+            PR_TITLE=$(echo "$PR_INFO" | base64 -d | jq -r '.title')
+            PR_BODY=$(echo "$PR_INFO" | base64 -d | jq -r '.body // ""')
+            echo "Found merged PR: $PR_TITLE"
+          else
+            echo "No merged PR found, using commit message"
+            PR_TITLE=$(git log -1 --pretty=format:"%s" ${{ github.sha }})
+            PR_BODY=$(git log -1 --pretty=format:"%b" ${{ github.sha }})
+            echo "Commit title: $PR_TITLE"
+          fi
+        fi
+
+        echo "=== Final Results ==="
+        echo "PR Title: $PR_TITLE"
+        echo "PR Body: $PR_BODY"
+
+  debug_artifacts:
+    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./release_artifacts
+
+    - name: List artifact structure
+      run: |
+        echo "=== Artifact Directory Structure ==="
+        find ./release_artifacts -type f -name "*.zip" | head -20
+        echo ""
+        echo "=== All files in release_artifacts ==="
+        find ./release_artifacts -type f | head -50
+        echo ""
+        echo "=== Directory structure ==="
+        ls -la ./release_artifacts/ || echo "No release_artifacts directory"
+        echo ""
+        echo "=== Sample directory contents ==="
+        for dir in ./release_artifacts/*/; do
+          if [ -d "$dir" ]; then
+            echo "Contents of $dir:"
+            ls -la "$dir" | head -10
+            echo ""
+            break
+          fi
+        done
+
+  create_release:
+    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
+    runs-on: ubuntu-22.04
+    if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
+
+    env:
+      VERSION: "2.6.7"
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get PR details
+      id: get_pr_details
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          # Direct PR event - use the PR context
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+        else
+          # Push event - find the merged PR via API
+          echo "Finding merged PR for commit ${{ github.sha }}"
+
+          # Search for PRs that were merged with this commit
+          PR_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls?state=closed&sort=updated&direction=desc&per_page=10")
+
+          # Find the PR that was merged with this SHA
+          PR_INFO=$(echo "$PR_DATA" | jq -r ".[] | select(.merge_commit_sha == \"${{ github.sha }}\") | {title: .title, body: .body} | @base64")
+
+          if [ -n "$PR_INFO" ] && [ "$PR_INFO" != "null" ]; then
+            PR_TITLE=$(echo "$PR_INFO" | base64 -d | jq -r '.title')
+            PR_BODY=$(echo "$PR_INFO" | base64 -d | jq -r '.body // ""')
+            echo "Found merged PR: $PR_TITLE"
+          else
+            # Fallback to commit message if no PR found
+            echo "No merged PR found, using commit message"
+            PR_TITLE=$(git log -1 --pretty=format:"%s" ${{ github.sha }})
+            PR_BODY=$(git log -1 --pretty=format:"%b" ${{ github.sha }})
+          fi
+        fi
+
+        # Set separate outputs for title and body
+        echo "pr_title<<EOF" >> $GITHUB_OUTPUT
+        echo "$PR_TITLE" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "pr_body<<EOF" >> $GITHUB_OUTPUT
+        echo "$PR_BODY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./release_artifacts
+
+    - name: Create and push tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v2.6.7" -m "Release v2.6.7"
+        git push origin "v2.6.7"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: "v2.6.7"
+        name: ${{ steps.get_pr_details.outputs.pr_title }}
+        body: ${{ steps.get_pr_details.outputs.pr_body }}
+        files: ./release_artifacts/**/*.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

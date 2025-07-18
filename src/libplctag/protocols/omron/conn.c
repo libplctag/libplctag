@@ -1631,7 +1631,9 @@ int process_requests(omron_conn_p conn) {
 
             pdebug(DEBUG_INFO, "Pushing %d requests back into the queue.", num_bundled_requests);
 
-            for(int i = num_bundled_requests - 1; i >= 0; i--) { vector_insert(conn->requests, 0, bundled_requests[i]); }
+            for(int i = num_bundled_requests - 1; i >= 0; i--) {
+                if(bundled_requests[i]) { vector_insert(conn->requests, 0, bundled_requests[i]); }
+            }
         }
 
         /* tickle the main tickler thread to note that we have responses. */

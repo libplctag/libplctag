@@ -152,7 +152,7 @@ void *rc_inc_impl(const char *func, int line_num, void *data) {
     pdebug(DEBUG_SPEW, "Starting, called from %s:%d for %p", func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_WARN, "Invalid pointer passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_INFO, "Invalid pointer passed from %s:%d!", func, line_num);
         return result;
     }
 
@@ -202,7 +202,7 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
     pdebug(DEBUG_SPEW, "Starting, called from %s:%d for %p", func, line_num, data);
 
     if(!data) {
-        pdebug(DEBUG_WARN, "Null reference passed from %s:%d!", func, line_num);
+        pdebug(DEBUG_INFO, "Null reference passed from %s:%d!", func, line_num);
         return NULL;
     }
 
