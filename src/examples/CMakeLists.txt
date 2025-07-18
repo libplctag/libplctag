@@ -49,6 +49,7 @@ set(EXAMPLE_EXECUTABLES
   test_raw_cip
   test_reconnect
   test_shutdown
+  test_simultaneous_rw_ab_server
   test_special
   test_string
   test_tag_attributes
