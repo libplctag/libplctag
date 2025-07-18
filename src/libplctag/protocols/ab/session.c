@@ -51,10 +51,10 @@
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
 #define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4002)
+#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000) /* FIXME - bandaid to fix sending too much data. */
 
 #define MAX_CIP_MICRO800_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4002)
+#define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4000) /* FIXME - bandaid to fix sending too much data. */
 
 /* Omron is special */
 // #define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1994)
@@ -661,7 +661,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     int rc = PLCTAG_STATUS_OK;
     ab_session_p session = AB_SESSION_NULL;
     size_t total_allocation_size = sizeof(*session);
-    size_t data_buffer_capacity = (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity;
+    size_t data_buffer_capacity =
+        (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity + (size_t)32;  // MAGIC - FIXME this is just a bandaid.
     size_t data_buffer_offset = 0;
     size_t host_name_offset = 0;
     size_t host_name_size = 0;

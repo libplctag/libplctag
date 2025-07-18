@@ -56,7 +56,7 @@
 #define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4002)
 
 /* Omron is special */
-#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1994)
+#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990) /* FIXME - bandaid to fix sending too much data. */
 #define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
 
 /* maximum for PCCC embedded within CIP. */
@@ -464,7 +464,8 @@ omron_conn_p conn_create_unsafe(int max_payload_capacity, bool data_buffer_is_st
     int rc = PLCTAG_STATUS_OK;
     omron_conn_p conn = OMRON_CONN_NULL;
     int total_allocation_size = sizeof(*conn);
-    int data_buffer_capacity = EIP_CIP_PREFIX_SIZE + max_payload_capacity;
+    int data_buffer_capacity = EIP_CIP_PREFIX_SIZE + max_payload_capacity
+                               + 32;  // MAGIC - this is just padding until we get to the bottom of the overwrite bug.
     int data_buffer_offset = 0;
     int host_name_offset = 0;
     int host_name_size = 0;

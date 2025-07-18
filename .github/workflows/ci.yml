@@ -9,7 +9,6 @@ on:
 jobs:
 
   ubuntu_x64:
-
     runs-on: ubuntu-22.04
 
     env:
@@ -130,11 +129,11 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Simultaneaous Read/Write On Tag
+    - name: Test Simultaneous Read/Write On Tag
       run: |
         cd ${{ env.DIST }}
-        echo "test simultaneaous read/write on a single tag"
-        .\test_simultaneous_rw_ab_server
+        echo "test simultaneous read/write on a single tag"
+        ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -177,7 +176,6 @@ jobs:
         path: ${{ env.BUILD }}/release_zips/*.zip
 
   ubuntu_x86:
-
     runs-on: ubuntu-22.04
 
     env:
@@ -298,13 +296,13 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Simultaneaous Read/Write On Tag
+    - name: Test Simultaneous Read/Write On Tag
       run: |
         cd ${{ env.DIST }}
-        echo "test simultaneaous read/write on a single tag"
-        .\test_simultaneous_rw_ab_server
+        echo "test simultaneous read/write on a single tag"
+        ./test_simultaneous_rw_ab_server
 
-- name: Test Reconnect After Outage
+    - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
         echo "Test reconnect after outage"
@@ -452,11 +450,11 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
-    - name: Test Simultaneaous Read/Write On Tag
+    - name: Test Simultaneous Read/Write On Tag
       run: |
         cd ${{ env.DIST }}
-        echo "test simultaneaous read/write on a single tag"
-        .\test_simultaneous_rw_ab_server
+        echo "test simultaneous read/write on a single tag"
+        ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -675,13 +673,11 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-    - name: Test Simultaneaous Read/Write On Tag
+    - name: Test Simultaneous Read/Write On Tag
       run: |
         cd ${{ env.DIST }}
-        echo "test simultaneaous read/write on a single tag"
+        echo "test simultaneous read/write on a single tag"
         .\test_simultaneous_rw_ab_server.exe
-        set test_result=%errorlevel%
-        exit /b %test_result%
       shell: cmd
 
     - name: Test Reconnect After Outage
@@ -846,13 +842,18 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-    - name: Test Simultaneaous Read/Write On Tag
+    - name: Test Simultaneous Read/Write On Tag
       run: |
         cd ${{ env.DIST }}
-        echo "test simultaneaous read/write on a single tag"
+        echo "test simultaneous read/write on a single tag"
         .\test_simultaneous_rw_ab_server.exe
-        set test_result=%errorlevel%
-        exit /b %test_result%
+      shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
   windows_x86_MSVC:
@@ -990,13 +991,18 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-    - name: Test Simultaneaous Read/Write On Tag
+    - name: Test Simultaneous Read/Write On Tag
       run: |
         cd ${{ env.DIST }}
-        echo "test simultaneaous read/write on a single tag"
+        echo "test simultaneous read/write on a single tag"
         .\test_simultaneous_rw_ab_server.exe
-        set test_result=%errorlevel%
-        exit /b %test_result%
+      shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
     - name: Create ZIP artifacts
@@ -1154,13 +1160,18 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
-    - name: Test Simultaneaous Read/Write On Tag
+    - name: Test Simultaneous Read/Write On Tag
       run: |
         cd ${{ env.DIST }}
-        echo "test simultaneaous read/write on a single tag"
+        echo "test simultaneous read/write on a single tag"
         .\test_simultaneous_rw_ab_server.exe
-        set test_result=%errorlevel%
-        exit /b %test_result%
+      shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
   windows_cross_build_ARM64_MSVC:
