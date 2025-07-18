@@ -28,6 +28,7 @@ static volatile int write_passed = 0;
 void *reader_thread(void *arg) {
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Could not create tag for reading: %s\n", plc_tag_decode_error(tag));
         read_passed = 0;
         return NULL;
@@ -38,14 +39,17 @@ void *reader_thread(void *arg) {
         if(rc == PLCTAG_STATUS_OK) {
             int val = plc_tag_get_int32(tag, 0);
             if(val == EXPECTED_VALUE) {
+                // NOLINTNEXTLINE
                 fprintf(stdout, "[INFO ] Value is %d.\n", EXPECTED_VALUE);
                 read_passed = 1;
                 running = 0;
             } else {
                 // Failed
+                // NOLINTNEXTLINE
                 fprintf(stderr, "[ERROR] Unexpected value: %d\n", val);
             }
         } else {
+            // NOLINTNEXTLINE
             fprintf(stderr, "[ERROR] Read failed: %s\n", plc_tag_decode_error(rc));
             read_passed = 0;
         }
@@ -59,6 +63,7 @@ void *reader_thread(void *arg) {
 void *writer_thread(void *arg) {
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Could not create tag for writing: %s\n", plc_tag_decode_error(tag));
         write_passed = 0;
         return NULL;
@@ -67,9 +72,11 @@ void *writer_thread(void *arg) {
     plc_tag_set_int32(tag, 0, EXPECTED_VALUE);
     int rc = plc_tag_write(tag, TIMEOUT_MS);
     if(rc == PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stdout, "[WRITE] Value: %d\n", EXPECTED_VALUE);
         write_passed = 1;
     } else {
+        // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Write failed: %s\n", plc_tag_decode_error(rc));
         write_passed = 0;
     }
@@ -80,16 +87,22 @@ void *writer_thread(void *arg) {
 }
 
 void start_server() {
+    // NOLINTNEXTLINE
     fprintf(stdout, "[INFO ] Starting ab_server...\n");
+
     int rc = system(SERVER_CMD_START);
+
     if(rc != 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "[ERROR] Failed to start ab_server\n");
         exit(1);
     }
+
     compat_sleep_ms(1000, NULL);  // wait for server to initialize
 }
 
 void stop_server() {
+    // NOLINTNEXTLINE
     fprintf(stdout, "[INFO ] Stopping ab_server...\n");
     system(SERVER_CMD_STOP);
     compat_sleep_ms(500, NULL);
@@ -97,6 +110,7 @@ void stop_server() {
 
 int main(void) {
     if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: libplctag version not compatible\n");
         return 1;
     }
@@ -105,6 +119,7 @@ int main(void) {
 
     int32_t tag = plc_tag_create(TAG_ATTRIBS, TIMEOUT_MS);
     if(tag < 0) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "ERROR: Could not create tag: %s\n", plc_tag_decode_error(tag));
         stop_server();
         return 1;
@@ -123,19 +138,24 @@ int main(void) {
     plc_tag_destroy(tag);
     stop_server();
 
+    // NOLINTNEXTLINE
     fprintf(stdout, "[DONE ] Test completed.\n");
 
     if(!read_passed) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "[FAIL ] Read operations failed.\n");
         return 1;
     } else {
+        // NOLINTNEXTLINE
         fprintf(stdout, "[PASS ] Read operations succeeded.\n");
     }
 
     if(!write_passed) {
+        // NOLINTNEXTLINE
         fprintf(stderr, "[FAIL ] Write operation failed.\n");
         return 1;
     } else {
+        // NOLINTNEXTLINE
         fprintf(stdout, "[PASS ] Write operation succeeded.\n");
     }
 

@@ -47,8 +47,8 @@
 
 #define READ_TIMEOUT (100)
 #define FIRST_RUN_TIME (3000)
-#define DISCONNECT_TIME_MS (100000)
-#define SECOND_RUN_TIME (15000)
+#define DISCONNECT_TIME_MS (80000)
+#define SECOND_RUN_TIME (20000)
 #define TEST_DURATION_MS (FIRST_RUN_TIME + SECOND_RUN_TIME + DISCONNECT_TIME_MS)
 
 #define STRINGIFY(x) #x
@@ -203,7 +203,8 @@ void stop_server(void) {
 
 void tag_callback(int32_t tag_id, int event, int status, void *data) {
     test_state_t *test_state = (test_state_t *)data;
-    int tag_status = plc_tag_status(tag_id);
+
+    (void)tag_id;
 
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
@@ -273,6 +274,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
 
 
 void do_disconnect(int64_t current_time, test_state_t *test_state) {
+    (void)current_time;
     // log("\n[DISCONNECT] Simulating PLC disconnect at time %" PRId64 " ms\n", current_time - test_state->start_time);
 
     test_state->errors_before_disconnect = test_state->read_error_count;
@@ -370,7 +372,6 @@ int calc_test_stats(test_state_t *test_state) {
 
 int run_auto_test(const char *ab_server_cmd) {
     int64_t current_time = 0;
-    int64_t next_pct = 0;
     test_state_t auto_test_state = {0};
 
     log("Auto tag test running for %dms...\n", TEST_DURATION_MS);
@@ -419,7 +420,7 @@ int run_auto_test(const char *ab_server_cmd) {
 
     auto_test_state.reconnect_done = 1;
 
-    while((current_time = compat_time_ms()) < auto_test_state.end_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
+    while(compat_time_ms() < auto_test_state.end_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
 
     int after_reconnect_read_success_count =
         auto_test_state.read_success_count - (before_disconnect_read_success_count + after_disconnect_read_success_count);
