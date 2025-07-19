@@ -435,6 +435,17 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
 
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
 
@@ -570,6 +581,17 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     /* size of embedded packet */
     cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
+
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(embed_end - embed_start);
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* set the size of the request */
     req->request_size = (int)(data - (req->data));
@@ -1721,14 +1743,15 @@ static int check_write_status_unconnected(ab_tag_p tag) {
 int calculate_write_data_per_packet(ab_tag_p tag) {
     int overhead = 0;
     int data_per_packet = 0;
-    int max_payload_size = 0;
+    int available_payload = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* if we are here, then we have all the type data etc. */
+    available_payload = session_get_available_payload_space(tag->session);
+
     if(tag->use_connected_msg) {
         pdebug(DEBUG_DETAIL, "Connected tag.");
-        max_payload_size = session_get_max_payload(tag->session);
         overhead = 1                             /* service request, one byte */
                    + tag->encoded_name_size      /* full encoded name */
                    + tag->encoded_type_info_size /* encoded type size */
@@ -1737,7 +1760,6 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
                    + 8;                          /* MAGIC fudge factor */
     } else {
         pdebug(DEBUG_DETAIL, "Unconnected tag.");
-        max_payload_size = session_get_max_payload(tag->session);
         overhead = 1                                  /* service request, one byte */
                    + tag->encoded_name_size           /* full encoded name */
                    + tag->encoded_type_info_size      /* encoded type size */
@@ -1752,14 +1774,14 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
 
     pdebug(DEBUG_DETAIL, "Write overhead is %d bytes.", overhead);
 
-    data_per_packet = max_payload_size - overhead;
+    data_per_packet = available_payload - overhead;
 
-    pdebug(DEBUG_DETAIL, "Write packet maximum size is %d, write overhead is %d, and write data per packet is %d.",
-           max_payload_size, overhead, data_per_packet);
+    pdebug(DEBUG_DETAIL, "Write packet available payload is %d, write overhead is %d, and write data per packet is %d.",
+           available_payload, overhead, data_per_packet);
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               max_payload_size);
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, available_payload);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -1773,8 +1795,8 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
     }
 
     if(data_per_packet < 1) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               max_payload_size);
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, available_payload);
         return PLCTAG_ERR_TOO_LARGE;
     }
 

@@ -221,11 +221,11 @@ int tag_read_start(ab_tag_p tag) {
                + 1  /* pccc status */
                + 2; /* pccc sequence num */
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, session_get_available_payload_space(tag->session));
         tag->read_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -309,6 +309,18 @@ int tag_read_start(ab_tag_p tag) {
     pccc->cpf_nai_item_length = h2le16(0);                              /* ALWAYS 0 */
     pccc->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);                  /* ALWAYS 0x00B2 - Unconnected Data Item */
     pccc->cpf_udi_item_length = h2le16((uint16_t)(data - embed_start)); /* REQ: fill in with length of remaining data. */
+
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(data - embed_start);
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        tag->read_in_progress = 0;
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* set the size of the request */
     tag->req->request_size = (int)(data - (tag->req->data));
@@ -432,18 +444,18 @@ int tag_write_start(ab_tag_p tag) {
                + 2                           /* total transfer size in words */
                + tag->encoded_name_size + 1; /* size in bytes of this write */
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, session_get_available_payload_space(tag->session));
         tag->write_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_DETAIL, "Tag size is %d, write overhead is %d, and write data per packet is %d.",
-               session_get_max_payload(tag->session), overhead, data_per_packet);
+        pdebug(DEBUG_WARN, "Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->size, overhead,
+               data_per_packet);
         tag->write_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -563,6 +575,18 @@ int tag_write_start(ab_tag_p tag) {
     pccc->pccc_status = 0;                    /* STS 0 in request */
     pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
     pccc->pccc_function = (tag->is_bit ? AB_EIP_PLC5_RMW_FUNC : AB_EIP_PLC5_RANGE_WRITE_FUNC);
+
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(data - embed_start);
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        tag->write_in_progress = 0;
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* get ready to add the request to the queue for this session */
     tag->req->request_size = (int)(data - (tag->req->data));

@@ -193,12 +193,12 @@ int tag_read_start(ab_tag_p tag) {
 
     /* TODO - this is not correct for this kind of transaction */
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
         tag->read_in_progress = 0;
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, session_get_available_payload_space(tag->session));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -496,19 +496,19 @@ int tag_write_start(ab_tag_p tag) {
                + 2                             /* request total transfer size in elements. */
                + (tag->encoded_name_size) + 2; /* actual request size in elements */
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
         tag->write_in_progress = 0;
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, session_get_available_payload_space(tag->session));
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
         tag->write_in_progress = 0;
-        pdebug(DEBUG_DETAIL, "Tag size is %d, write overhead is %d, and write data per packet is %d.",
-               session_get_max_payload(tag->session), overhead, data_per_packet);
+        pdebug(DEBUG_WARN, "Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->size, overhead,
+               data_per_packet);
         return PLCTAG_ERR_TOO_LARGE;
     }
 

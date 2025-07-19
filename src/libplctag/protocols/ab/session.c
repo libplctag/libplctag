@@ -270,6 +270,31 @@ int session_get_max_payload(ab_session_p session) {
     return result;
 }
 
+int session_get_available_payload_space(ab_session_p session) {
+    int result = 0;
+
+    if(!session) {
+        pdebug(DEBUG_WARN, "Called with null session pointer!");
+        return 0;
+    }
+
+    critical_block(session->session_mutex) {
+        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+        result = max_payload_size;
+
+        // Account for CPF data item overhead
+        if(session->use_connected_msg) {
+            result -= (int)sizeof(cpf_connected_data_item);
+        } else {
+            result -= (int)sizeof(cpf_unconnected_data_item);
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "available payload space is %d bytes.", result);
+
+    return result;
+}
+
 int session_find_or_create(ab_session_p *tag_session, attr attribs) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *session_gw = attr_get_str(attribs, "gateway", "");
@@ -1590,10 +1615,10 @@ int process_requests(ab_session_p session) {
 
     /* grab a request off the front of the list. */
     critical_block(session->session_mutex) {
-        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+        int available_payload = session_get_available_payload_space(session);
 
         // FIXME - no logging in a mutex!
-        // pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+        // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
         /* is there anything to do? */
         if(vector_length(session->requests)) {
@@ -1608,19 +1633,7 @@ int process_requests(ab_session_p session) {
              * the EIP encapsulation header and the CPF header and the CPF address item,
              * which are already accounted for in the buffer structure.
              */
-            remaining_space = max_payload_size;
-
-            /*
-             * we need to account for the overhead of the CPF data item, and
-             * that depends on whether the session is connected or not.
-             * For connected sessions, we need 6 bytes for the CPF connected data item
-             * and the connection sequence number.
-             */
-            if(session->use_connected_msg) {
-                remaining_space -= (int)sizeof(cpf_connected_data_item);
-            } else {
-                remaining_space -= (int)sizeof(cpf_unconnected_data_item);
-            }
+            remaining_space = available_payload;
 
             /*
              * The logic below is a bit convoluted.
@@ -2795,12 +2808,12 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
     uint8_t *buffer = NULL;
 
     critical_block(session->session_mutex) {
-        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+        int available_payload = session_get_available_payload_space(session);
 
         // FIXME: no logging in a mutex!
-        // pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+        // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
-        request_capacity = (size_t)(max_payload_size + EIP_CIP_PREFIX_SIZE);
+        request_capacity = (size_t)(available_payload + EIP_CIP_PREFIX_SIZE);
     }
 
     pdebug(DEBUG_DETAIL, "Starting.");

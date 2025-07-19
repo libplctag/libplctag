@@ -502,6 +502,17 @@ int raw_tag_build_write_request_connected(ab_tag_p tag) {
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
 
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     /* set the size of the request */
     tag->req->request_size = (int)(data - (tag->req->data));
 
@@ -625,6 +636,17 @@ int raw_tag_build_write_request_unconnected(ab_tag_p tag) {
 
     /* size of embedded packet */
     cip->uc_cmd_length = h2le16((uint16_t)(embed_end - embed_start));
+
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(embed_end - embed_start);
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* set the size of the request */
     tag->req->request_size = (int)(data - (tag->req->data));
@@ -1096,6 +1118,17 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     /* set the size of the request */
     req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
 
@@ -1524,6 +1557,17 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
 
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     /* set the size of the request */
     req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));
 
@@ -1773,6 +1817,17 @@ int udt_tag_build_read_fields_request_connected(ab_tag_p tag) {
     cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
     cip->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length = h2le16((uint16_t)((int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num)));
+
+    /* Check if the payload size exceeds available space before setting request_size */
+    int packet_payload_size = (int)(data - data_start) + (int)sizeof(cip->cpf_conn_seq_num);
+    int available_payload = session_get_available_payload_space(tag->session);
+
+    if(packet_payload_size > available_payload) {
+        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
+               available_payload);
+        ab_tag_abort_request(tag);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
 
     /* set the size of the request */
     tag->req->request_size = (int)((int)sizeof(*cip) + (int)(data - data_start));

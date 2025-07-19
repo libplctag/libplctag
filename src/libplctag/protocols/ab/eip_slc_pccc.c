@@ -220,11 +220,11 @@ int tag_read_start(ab_tag_p tag) {
                + 1  /* PCCC status */
                + 2; /* PCCC packet sequence number */
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, session_get_available_payload_space(tag->session));
         tag->read_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -428,18 +428,18 @@ int tag_write_start(ab_tag_p tag) {
                + 1 /* request total transfer size in bytes. */
                + (tag->encoded_name_size);
 
-    data_per_packet = session_get_max_payload(tag->session) - overhead;
+    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               session_get_max_payload(tag->session));
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, session_get_available_payload_space(tag->session));
         tag->write_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_DETAIL, "Tag size is %d, write overhead is %d, and write data per packet is %d.",
-               session_get_max_payload(tag->session), overhead, data_per_packet);
+        pdebug(DEBUG_WARN, "Tag size is %d, write overhead is %d, and write data per packet is %d.", tag->size, overhead,
+               data_per_packet);
         tag->write_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
