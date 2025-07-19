@@ -45,26 +45,14 @@
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 
-#define MAX_REQUESTS (200)
+#define MAX_REQUESTS (400)
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
-#define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4002)
-
-#define MAX_CIP_MICRO800_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4002)
-
 /* Omron is special */
-#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990) /* FIXME - bandaid to fix sending too much data. */
+#define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1990)
 #define MAX_CIP_OMRON_MSG_SIZE (0x01FF & 502)
 
-/* maximum for PCCC embedded within CIP. */
-#define MAX_CIP_PLC5_MSG_SIZE (244)
-// #define MAX_CIP_SLC_MSG_SIZE (222)
-#define MAX_CIP_SLC_MSG_SIZE (244)
-#define MAX_CIP_MLGX_MSG_SIZE (244)
-#define MAX_CIP_LGX_PCCC_MSG_SIZE (244)
 
 /*
  * Number of milliseconds to wait to try to set up the conn again
@@ -1389,8 +1377,25 @@ int process_requests(omron_conn_p conn) {
 
             /* if there are still requests after purging all the aborted requests, process them. */
 
-            /* how much space do we have to work with. */
-            remaining_request_space = max_payload_size - (int)sizeof(cip_multi_req_header);
+            /*
+             * The total allowed space for requests is the negotiated packet capacity
+             * less the overhead of the CPF data item. The rest of the space is for
+             * the EIP encapsulation header and the CPF header and the CPF address item,
+             * which are already accounted for in the buffer structure.
+             */
+            remaining_request_space = max_payload_size;
+
+            /*
+             * we need to account for the overhead of the CPF data item, and
+             * that depends on whether the conn is connected or not.
+             * For connected sessions, we need 6 bytes for the CPF connected data item
+             * and the connection sequence number.
+             */
+            if(conn->use_connected_msg) {
+                remaining_request_space -= (int)sizeof(cpf_connected_data_item);
+            } else {
+                remaining_request_space -= (int)sizeof(cpf_unconnected_data_item);
+            }
 
             /* -2 bytes for the msp (multi service packet) number of packets and -4 bytes for the cip response header,
              * we later subtract 2 bytes for each packet, this is to allow for the INT offset to the packet within the msp
@@ -1398,40 +1403,89 @@ int process_requests(omron_conn_p conn) {
              * too much data being packed into a single packet */
             remaining_response_space = max_payload_size - 2 - 4 - 10;
 
+            /*
+             * The logic below follows the same pattern as the AB implementation:
+             *
+             * - If the first request takes up all the space, we cannot pack any more requests.
+             *
+             * - If the first request is packable, we can keep packing requests
+             *   until we run out of space or we reach the maximum number of requests. We need to make sure
+             *   that the overhead of the CIP packed request header is accounted for in the remaining space as well as the
+             *   two-byte offset entry for each request.
+             *
+             * - If we are packing requests, and the next one is not packable, we stop packing.
+             *
+             * - If the first request is not packable, we can only pack it
+             *   if it is the first one in the queue. And then can pack no more
+             *   requests after that.
+             */
+
             if(vector_length(conn->requests)) {
-                do {
-                    request = vector_get(conn->requests, 0);
+                /* Always process the first request, regardless of packability */
+                request = vector_get(conn->requests, 0);
+                int first_request_size = get_payload_size(request);
 
-                    remaining_request_space = remaining_request_space - get_payload_size(request);
+                /* Check if the first request fits at all */
+                if(first_request_size <= remaining_request_space) {
+                    bundled_requests[num_bundled_requests] = request;
+                    num_bundled_requests++;
+                    remaining_request_space -= first_request_size;
 
-                    /* calculate if all of the response data from the packed requests will fit into a single response packet.
-                     * the -8 bytes is the maximum padding between packets, the -2 bytes is from the offset integer which stores
-                     * the offset to this packet */
+                    /* calculate response space for first request */
                     remaining_response_space = remaining_response_space - request->response_size - 8 - 2;
+
+                    /* remove it from the queue. */
+                    vector_remove(conn->requests, 0);
 
                     /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must have
                      * been read before, so that its response size is known */
                     allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
 
-                    /*
-                     * If we have a non-packable request, only queue it if it is the first one.
-                     * If the request is packable, keep queuing as long as there is space in both the
-                     * request packet and if fragmented reads are not supported then also in the expected response packet.
-                     */
+                    /* If the first request is packable, try to pack more requests */
+                    if(allow_packing && vector_length(conn->requests) > 0) {
+                        /* Account for CIP multi-request overhead now that we know we'll have multiple requests */
+                        remaining_request_space -= (int)sizeof(cip_multi_req_header);
 
-                    if((num_bundled_requests == 0)
-                       || ((allow_packing && (remaining_request_space > 0))
-                           && ((remaining_response_space >= 0) || (request->supports_fragmented_read)))) {
-                        // pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1,
-                        // remaining_request_space);
-                        bundled_requests[num_bundled_requests] = request;
-                        num_bundled_requests++;
+                        /* Account for 2-byte offset entry per request (including the first one already processed) */
+                        int multi_request_overhead = 2;                    /* 2-byte offset entry per additional request */
+                        remaining_request_space -= multi_request_overhead; /* for the first request */
 
-                        /* remove it from the queue. */
-                        vector_remove(conn->requests, 0);
+                        while(vector_length(conn->requests) > 0 && num_bundled_requests < MAX_REQUESTS) {
+                            request = vector_get(conn->requests, 0);
+
+                            /* Only pack if this request is packable */
+                            if(!request->allow_packing) { break; }
+
+                            /* The tag must have packing enabled and the plc must either support fragmented reads or this tag must
+                             * have been read before, so that its response size is known */
+                            allow_packing = request->allow_packing && (request->supports_fragmented_read || !request->first_read);
+                            if(!allow_packing) { break; }
+
+                            int next_request_size = get_payload_size(request) + multi_request_overhead;
+
+                            /* Check if this request fits in remaining space */
+                            if(next_request_size > remaining_request_space) { break; }
+
+                            /* calculate if all of the response data from the packed requests will fit into a single response
+                             * packet. the -8 bytes is the maximum padding between packets, the -2 bytes is from the offset
+                             * integer which stores the offset to this packet */
+                            int next_response_space = remaining_response_space - request->response_size - 8 - 2;
+
+                            /* Check response space only if fragmented reads are not supported */
+                            if(!request->supports_fragmented_read && next_response_space < 0) { break; }
+
+                            bundled_requests[num_bundled_requests] = request;
+                            num_bundled_requests++;
+                            remaining_request_space -= next_request_size;
+                            remaining_response_space = next_response_space;
+                            vector_remove(conn->requests, 0);
+                        }
                     }
-                } while(vector_length(conn->requests) && (remaining_request_space > 0) && (num_bundled_requests < MAX_REQUESTS)
-                        && allow_packing && ((remaining_response_space >= 0) || (request->supports_fragmented_read)));
+                    /* If first request is not packable, we stop here (only the first request is packed) */
+                } else {
+                    pdebug(DEBUG_WARN, "First request size %d exceeds remaining space %d, cannot process any requests.",
+                           first_request_size, remaining_request_space);
+                }
             } else {
                 pdebug(DEBUG_DETAIL, "All requests in queue were aborted, nothing to do.");
             }

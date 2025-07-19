@@ -1747,6 +1747,11 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
                    + 8;                               /* MAGIC fudge factor */
     }
 
+    /* make sure that overhead is an even number of bytes */
+    if(overhead & 1) { overhead++; }
+
+    pdebug(DEBUG_DETAIL, "Write overhead is %d bytes.", overhead);
+
     data_per_packet = max_payload_size - overhead;
 
     pdebug(DEBUG_DETAIL, "Write packet maximum size is %d, write overhead is %d, and write data per packet is %d.",
@@ -1758,8 +1763,22 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* we want a multiple of 8 bytes */
-    data_per_packet &= 0xFFFFF8;
+    /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
+    8 bytes as the unit */
+    if(tag->size < 8) {
+        data_per_packet = tag->size;
+    } else {
+        /* round down to the nearest multiple of 8 bytes */
+        data_per_packet &= 0xFFFFFFF8;
+    }
+
+    if(data_per_packet < 1) {
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
+               max_payload_size);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    pdebug(DEBUG_DETAIL, "Write data per packet is %d bytes.", data_per_packet);
 
     tag->write_data_per_packet = data_per_packet;
 
