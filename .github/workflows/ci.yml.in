@@ -79,7 +79,7 @@ jobs:
         cd ${{ env.DIST }}
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug  &
-        sleep 2
+        sleep 3
         echo "test getting a tag on a PLC/5."
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
@@ -90,7 +90,7 @@ jobs:
         cd ${{ env.DIST }}
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
-        sleep 2
+        sleep 3
         echo "test getting a tag on a SLC 500."
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
@@ -245,10 +245,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
+        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -256,10 +256,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
+        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -267,10 +267,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 &
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
         sleep 2
         echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
