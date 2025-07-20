@@ -319,39 +319,48 @@ int tag_read_start(ab_tag_p tag) {
     pccc->cpf_udi_item_type = h2le16(AB_EIP_ITEM_UDI);                  /* ALWAYS 0x00B2 - Unconnected Data Item */
     pccc->cpf_udi_item_length = h2le16((uint16_t)(data - embed_start)); /* REQ: fill in with length of remaining data. */
 
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - embed_start);
-    int available_payload = session_get_available_payload_space(tag->session);
+    /* Check if the request size exceeds available space before setting request_size */
+    int calculated_request_size = (int)(data - (req->data));
+    int available_payload = (session_payload_space < req->request_capacity) ? session_payload_space : req->request_capacity;
 
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
-               available_payload);
-        ab_tag_abort_request(tag);
-        tag->read_in_progress = 0;
-        return PLCTAG_ERR_TOO_LARGE;
-    }
+    /* Validate request before adding to session */
+    do {
+        if(calculated_request_size <= 0) {
+            pdebug(DEBUG_WARN, "Invalid request size (%d bytes)!", calculated_request_size);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
+        if(calculated_request_size > available_payload) {
+            pdebug(DEBUG_WARN, "Request size (%d bytes) exceeds available space (%d bytes)!", calculated_request_size,
+                   available_payload);
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
 
-    /* mark it as ready to send */
-    // req->send_request = 1;
+        /* set the size of the request */
+        req->request_size = calculated_request_size;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+        /* add the request to the session's list. */
+        rc = session_add_request(tag->session, req);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+            break;
+        }
+
+        /* save the request for later */
+        tag->req = req;
+    } while(0);
+
+    /* Check if we failed - if so, clean up */
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-
         /* release the request since we failed to add it to the session */
         req = rc_dec(req);
 
         ab_tag_abort_request(tag);
-
+        tag->read_in_progress = 0;
         return rc;
     }
-
-    /* save the request for later */
-    tag->req = req;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -600,36 +609,48 @@ int tag_write_start(ab_tag_p tag) {
     pccc->pccc_seq_num = h2le16(conn_seq_id); /* FIXME - get sequence ID from session? */
     pccc->pccc_function = (tag->is_bit ? AB_EIP_PLC5_RMW_FUNC : AB_EIP_PLC5_RANGE_WRITE_FUNC);
 
-    /* Check if the payload size exceeds available space before setting request_size */
-    int packet_payload_size = (int)(data - embed_start);
-    int available_payload = session_get_available_payload_space(tag->session);
+    /* Check if the request size exceeds available space before setting request_size */
+    int calculated_request_size = (int)(data - (req->data));
+    int available_payload = (session_payload_space < req->request_capacity) ? session_payload_space : req->request_capacity;
 
-    if(packet_payload_size > available_payload) {
-        pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
-               available_payload);
-        ab_tag_abort_request(tag);
-        tag->write_in_progress = 0;
-        return PLCTAG_ERR_TOO_LARGE;
-    }
+    /* Validate request before adding to session */
+    do {
+        if(calculated_request_size <= 0) {
+            pdebug(DEBUG_WARN, "Invalid request size (%d bytes)!", calculated_request_size);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
 
-    /* get ready to add the request to the queue for this session */
-    req->request_size = (int)(data - (req->data));
+        if(calculated_request_size > available_payload) {
+            pdebug(DEBUG_WARN, "Request size (%d bytes) exceeds available space (%d bytes)!", calculated_request_size,
+                   available_payload);
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+        /* get ready to add the request to the queue for this session */
+        req->request_size = calculated_request_size;
+
+        /* add the request to the session's list. */
+        rc = session_add_request(tag->session, req);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_ERROR, "Unable to add request to session! Error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* save the request for later */
+        tag->req = req;
+    } while(0);
+
+    /* Check if we failed - if so, clean up */
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! Error %s!", plc_tag_decode_error(rc));
-
         /* release the request since we failed to add it to the session */
         req = rc_dec(req);
 
         ab_tag_abort_request(tag);
-
+        tag->write_in_progress = 0;
         return rc;
     }
-
-    /* save the request for later */
-    tag->req = req;
 
     pdebug(DEBUG_INFO, "Done.");
 
