@@ -159,6 +159,7 @@ int tag_read_start(ab_tag_p tag) {
     ;
     int overhead;
     int data_per_packet;
+    ab_request_p req = NULL;
     eip_cip_uc_req *lgx_pccc;
     embedded_pccc *embed_pccc;
     uint8_t *data;
@@ -193,12 +194,20 @@ int tag_read_start(ab_tag_p tag) {
 
     /* TODO - this is not correct for this kind of transaction */
 
-    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
+    int session_payload_space = session_get_available_payload_space(tag->session);
+
+    if(session_payload_space <= 0) {
+        pdebug(DEBUG_WARN, "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);
+        tag->read_in_progress = 0;
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    data_per_packet = session_payload_space - overhead;
 
     if(data_per_packet <= 0) {
         tag->read_in_progress = 0;
         pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
-               overhead, session_get_available_payload_space(tag->session));
+               overhead, session_payload_space);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -210,7 +219,7 @@ int tag_read_start(ab_tag_p tag) {
     }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         tag->read_in_progress = 0;
@@ -219,7 +228,7 @@ int tag_read_start(ab_tag_p tag) {
     }
 
     /* point the struct pointers to the buffer*/
-    lgx_pccc = (eip_cip_uc_req *)(tag->req->data);
+    lgx_pccc = (eip_cip_uc_req *)(req->data);
     embed_pccc = (embedded_pccc *)(lgx_pccc + 1);
 
     /* set up the embedded PCCC packet */
@@ -310,22 +319,28 @@ int tag_read_start(ab_tag_p tag) {
     lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
 
     /* set the size of the request */
-    tag->req->request_size = (int)(data - (tag->req->data));
+    req->request_size = (int)(data - (req->data));
 
     /* mark it as ready to send */
     // req->send_request = 1;
-    tag->req->allow_packing = tag->allow_packing;
+    req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
+    rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+
+        /* release the request since we failed to add it to the session */
+        req = rc_dec(req);
 
         ab_tag_abort_request(tag);
 
         return rc;
     }
+
+    /* save the request for later */
+    tag->req = req;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -456,6 +471,7 @@ static int check_read_status(ab_tag_p tag) {
 
 int tag_write_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    ab_request_p req = NULL;
     eip_cip_uc_req *lgx_pccc;
     embedded_pccc *embed_pccc;
     uint8_t *data;
@@ -496,12 +512,20 @@ int tag_write_start(ab_tag_p tag) {
                + 2                             /* request total transfer size in elements. */
                + (tag->encoded_name_size) + 2; /* actual request size in elements */
 
-    data_per_packet = session_get_available_payload_space(tag->session) - overhead;
+    int session_payload_space = session_get_available_payload_space(tag->session);
+
+    if(session_payload_space <= 0) {
+        pdebug(DEBUG_WARN, "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);
+        tag->write_in_progress = 0;
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    data_per_packet = session_payload_space - overhead;
 
     if(data_per_packet <= 0) {
         tag->write_in_progress = 0;
         pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
-               overhead, session_get_available_payload_space(tag->session));
+               overhead, session_payload_space);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
@@ -513,7 +537,7 @@ int tag_write_start(ab_tag_p tag) {
     }
 
     /* get a request buffer */
-    rc = session_create_request(tag->session, tag->tag_id, &tag->req);
+    rc = session_create_request(tag->session, tag->tag_id, &req);
 
     if(rc != PLCTAG_STATUS_OK) {
         tag->write_in_progress = 0;
@@ -522,7 +546,7 @@ int tag_write_start(ab_tag_p tag) {
     }
 
     /* point the struct pointers to the buffer*/
-    lgx_pccc = (eip_cip_uc_req *)(tag->req->data);
+    lgx_pccc = (eip_cip_uc_req *)(req->data);
     embed_pccc = (embedded_pccc *)(lgx_pccc + 1);
 
     /* set up the embedded PCCC packet */
@@ -615,15 +639,22 @@ int tag_write_start(ab_tag_p tag) {
     lgx_pccc->cpf_udi_item_length = h2le16((uint16_t)(data - (uint8_t *)(&lgx_pccc->cm_service_code)));
 
     /* get ready to add the request to the queue for this session */
-    tag->req->request_size = (int)(data - (tag->req->data));
+    req->request_size = (int)(data - (req->data));
 
     /* add the request to the session's list. */
-    rc = session_add_request(tag->session, tag->req);
+    rc = session_add_request(tag->session, req);
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+
+        /* release the request since we failed to add it to the session */
+        req = rc_dec(req);
+
         ab_tag_abort_request(tag);
         return rc;
     }
+
+    /* save the request for later */
+    tag->req = req;
 
     pdebug(DEBUG_INFO, "Done.");
 
