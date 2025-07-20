@@ -2049,6 +2049,7 @@ int get_payload_size(ab_request_p request) {
     int request_data_size = 0;
     eip_encap *header = (eip_encap *)(request->data);
     eip_cip_co_req *co_req = NULL;
+    eip_cip_uc_req *uc_req = NULL;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -2058,12 +2059,16 @@ int get_payload_size(ab_request_p request) {
         request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2 /* for connection sequence ID */
                             + 2                                     /* for multipacket offset */
             ;
+    } else if(le2h16(header->encap_command) == AB_EIP_UNCONNECTED_SEND) {
+        uc_req = (eip_cip_uc_req *)(request->data);
+        /* get length of embedded command */
+        request_data_size = le2h16(uc_req->uc_cmd_length) + 2 /* for multipacket offset */;
     } else {
         pdebug(DEBUG_DETAIL, "Not a supported type EIP packet type %d to get the payload size.", le2h16(header->encap_command));
         request_data_size = INT_MAX;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done, payload size: %d bytes.", request_data_size);
 
     return request_data_size;
 }

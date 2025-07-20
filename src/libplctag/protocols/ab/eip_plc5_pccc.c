@@ -198,7 +198,6 @@ int tag_tickler(ab_tag_p tag) {
 int tag_read_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
-    ;
     int overhead;
     int data_per_packet;
     ab_request_p req = NULL;

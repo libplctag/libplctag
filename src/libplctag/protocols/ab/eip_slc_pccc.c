@@ -306,27 +306,48 @@ int tag_read_start(ab_tag_p tag) {
      * how to get to the target device.
      */
 
-    /* set the size of the request */
-    req->request_size = (int)(data - (req->data));
+    /* Check if the request size exceeds available space before setting request_size */
+    int calculated_request_size = (int)(data - (req->data));
+    int available_payload = (session_payload_space < req->request_capacity) ? session_payload_space : req->request_capacity;
 
-    /* mark it as ready to send */
-    // req->send_request = 1;
+    /* Validate request before adding to session */
+    do {
+        if(calculated_request_size <= 0) {
+            pdebug(DEBUG_WARN, "Invalid request size (%d bytes)!", calculated_request_size);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+        if(calculated_request_size > available_payload) {
+            pdebug(DEBUG_WARN, "Request size (%d bytes) exceeds available space (%d bytes)!", calculated_request_size,
+                   available_payload);
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
+        /* set the size of the request */
+        req->request_size = calculated_request_size;
+
+        /* add the request to the session's list. */
+        rc = session_add_request(tag->session, req);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+            break;
+        }
+
+        /* save the request for later */
+        tag->req = req;
+    } while(0);
+
+    /* Check if we failed - if so, clean up */
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-
         /* release the request since we failed to add it to the session */
         req = rc_dec(req);
 
         ab_tag_abort_request(tag);
-
+        tag->read_in_progress = 0;
         return rc;
     }
-
-    /* save the request for later */
-    tag->req = req;
 
     pdebug(DEBUG_INFO, "Done.");
 
@@ -550,24 +571,48 @@ int tag_write_start(ab_tag_p tag) {
     pccc->pccc_function = (tag->is_bit ? AB_EIP_SLC_RANGE_BIT_WRITE_FUNC : AB_EIP_SLC_RANGE_WRITE_FUNC);
     pccc->pccc_transfer_size = (uint8_t)(tag->size);
 
-    /* get ready to add the request to the queue for this session */
-    req->request_size = (int)(data - (req->data));
+    /* Check if the request size exceeds available space before setting request_size */
+    int calculated_request_size = (int)(data - (req->data));
+    int available_payload = (session_payload_space < req->request_capacity) ? session_payload_space : req->request_capacity;
 
-    /* add the request to the session's list. */
-    rc = session_add_request(tag->session, req);
+    /* Validate request before adding to session */
+    do {
+        if(calculated_request_size <= 0) {
+            pdebug(DEBUG_WARN, "Invalid request size (%d bytes)!", calculated_request_size);
+            rc = PLCTAG_ERR_BAD_DATA;
+            break;
+        }
+
+        if(calculated_request_size > available_payload) {
+            pdebug(DEBUG_WARN, "Request size (%d bytes) exceeds available space (%d bytes)!", calculated_request_size,
+                   available_payload);
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
+        /* get ready to add the request to the queue for this session */
+        req->request_size = calculated_request_size;
+
+        /* add the request to the session's list. */
+        rc = session_add_request(tag->session, req);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_ERROR, "Unable to add request to session! Error %s!", plc_tag_decode_error(rc));
+            break;
+        }
+
+        /* save the request for later */
+        tag->req = req;
+    } while(0);
+
+    /* Check if we failed - if so, clean up */
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
-
         /* release the request since we failed to add it to the session */
         req = rc_dec(req);
 
         ab_tag_abort_request(tag);
-
+        tag->write_in_progress = 0;
         return rc;
     }
-
-    /* save the request for later */
-    tag->req = req;
 
     pdebug(DEBUG_INFO, "Done.");
 
