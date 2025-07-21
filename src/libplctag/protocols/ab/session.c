@@ -282,6 +282,9 @@ int session_get_available_payload_space(ab_session_p session) {
         int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
         result = max_payload_size;
 
+        pdebug(DEBUG_DETAIL, "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
+               session->max_payload_size, session->fo_conn_size, session->fo_ex_conn_size, max_payload_size);
+
         // Account for CPF data item overhead
         if(session->use_connected_msg) {
             result -= (int)sizeof(cpf_connected_data_item);
@@ -289,8 +292,12 @@ int session_get_available_payload_space(ab_session_p session) {
             result -= (int)sizeof(cpf_unconnected_data_item);
         }
     }
-
-    pdebug(DEBUG_DETAIL, "available payload space is %d bytes.", result);
+    if(result < 0) {
+        pdebug(DEBUG_WARN, "Available payload space is negative (%d bytes)! This should not happen!", result);
+        result = 0;
+    } else {
+        pdebug(DEBUG_INFO, "Available payload space is %d bytes.", result);
+    }
 
     return result;
 }
@@ -2056,13 +2063,15 @@ int get_payload_size(ab_request_p request) {
     if(le2h16(header->encap_command) == AB_EIP_CONNECTED_SEND) {
         co_req = (eip_cip_co_req *)(request->data);
         /* get length of new request */
-        request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2 /* for connection sequence ID */
-                            + 2                                     /* for multipacket offset */
-            ;
+        request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2; /* for connection sequence ID */
+
+        /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
     } else if(le2h16(header->encap_command) == AB_EIP_UNCONNECTED_SEND) {
         uc_req = (eip_cip_uc_req *)(request->data);
         /* get length of embedded command */
-        request_data_size = le2h16(uc_req->uc_cmd_length) + 2 /* for multipacket offset */;
+        request_data_size = le2h16(uc_req->uc_cmd_length);
+
+        /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
     } else {
         pdebug(DEBUG_DETAIL, "Not a supported type EIP packet type %d to get the payload size.", le2h16(header->encap_command));
         request_data_size = INT_MAX;

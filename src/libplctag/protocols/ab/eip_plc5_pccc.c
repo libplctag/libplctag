@@ -229,7 +229,30 @@ int tag_read_start(ab_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
+    /* Calculate the total request overhead for a PLC5 PCCC request */
+    int request_overhead = (int)sizeof(pccc_req)    /* base PCCC structure */
+                           + 2                      /* transfer_offset */
+                           + 2                      /* transfer_size */
+                           + tag->encoded_name_size /* encoded tag name */
+                           + 1;                     /* data size byte */
+
+    pdebug(DEBUG_INFO, "PLC5 request overhead: pccc_req=%d, transfer fields=4, encoded_name=%d, data_size=1, total=%d bytes",
+           (int)sizeof(pccc_req), tag->encoded_name_size, request_overhead);
+    pdebug(DEBUG_INFO, "Tag size=%d, session available=%d bytes", tag->size, session_payload_space);
+
+    /* Check if the entire request (overhead + response data space) fits in session capacity */
+    if(request_overhead > session_payload_space) {
+        pdebug(
+            DEBUG_WARN,
+            "PLC5 request overhead (%d bytes) exceeds session payload space (%d bytes). Tag name too long or PCCC packet limit exceeded.",
+            request_overhead, session_payload_space);
+        tag->read_in_progress = 0;
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
     data_per_packet = session_payload_space - overhead;
+
+    pdebug(DEBUG_INFO, "Data per packet: %d bytes", data_per_packet);
 
     if(data_per_packet <= 0) {
         pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
@@ -239,8 +262,9 @@ int tag_read_start(ab_tag_p tag) {
     }
 
     if(data_per_packet < tag->size) {
-        pdebug(DEBUG_DETAIL, "Unable to send request: Tag size is %d, write overhead is %d, and write data per packet is %d!",
-               tag->size, overhead, data_per_packet);
+        pdebug(DEBUG_WARN,
+               "Tag size (%d bytes) exceeds available response data space (%d bytes). PLC5 PCCC does not support fragmentation.",
+               tag->size, data_per_packet);
         tag->read_in_progress = 0;
         return PLCTAG_ERR_TOO_LARGE;
     }
@@ -252,6 +276,8 @@ int tag_read_start(ab_tag_p tag) {
         tag->read_in_progress = 0;
         return rc;
     }
+
+    pdebug(DEBUG_INFO, "Request created. Request size: %d bytes", req->request_capacity);
 
     /* point the struct pointers to the buffer*/
     pccc = (pccc_req *)(req->data);
@@ -283,6 +309,9 @@ int tag_read_start(ab_tag_p tag) {
     /* point to the end of the struct */
     data = ((uint8_t *)pccc) + sizeof(pccc_req);
 
+    ptrdiff_t embed_offset = (ptrdiff_t)(data - embed_start);
+    pdebug(DEBUG_WARN, "PLC5 PCCC request offset from start of embedded packet: %td bytes.", embed_offset);
+
     /* this kind of PCCC function takes an offset and size. */
     transfer_offset = h2le16((uint16_t)0);
     mem_copy(data, &transfer_offset, (int)(unsigned int)sizeof(transfer_offset));
@@ -299,6 +328,19 @@ int tag_read_start(ab_tag_p tag) {
     /* amount of data to get this time */
     *data = (uint8_t)(tag->size); /* bytes for this transfer */
     data++;
+
+
+    ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
+    pdebug(DEBUG_WARN, "PLC5 PCCC request full data length: %td bytes.", calculated_request_size);
+
+    pdebug(DEBUG_WARN, "PLC5 PCCC request data:");
+    pdebug_dump_bytes(DEBUG_WARN, req->data, (int)calculated_request_size);
+
+    ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
+    pdebug(DEBUG_WARN, "PLC5 PCCC request CIP data length: %td bytes.", cip_request_size);
+
+    pccc->cpf_udi_item_length = h2le16((uint16_t)(cip_request_size));
+    pdebug(DEBUG_WARN, "PLC5 PCCC request CPF UDI item length: %u bytes.", le2h16(pccc->cpf_udi_item_length));
 
     /*
      * after the embedded packet, we need to tell the message router
@@ -319,8 +361,9 @@ int tag_read_start(ab_tag_p tag) {
     pccc->cpf_udi_item_length = h2le16((uint16_t)(data - embed_start)); /* REQ: fill in with length of remaining data. */
 
     /* Check if the request size exceeds available space before setting request_size */
-    int calculated_request_size = (int)(data - (req->data));
-    int available_payload = (session_payload_space < req->request_capacity) ? session_payload_space : req->request_capacity;
+    ptrdiff_t available_payload = (session_payload_space < req->request_capacity) ? session_payload_space : req->request_capacity;
+    pdebug(DEBUG_WARN, "PLC5 PCCC request available payload space: %td bytes. Request capacity: %d bytes.", available_payload,
+           req->request_capacity);
 
     /* Validate request before adding to session */
     do {
@@ -330,7 +373,7 @@ int tag_read_start(ab_tag_p tag) {
             break;
         }
 
-        if(calculated_request_size > available_payload) {
+        if(calculated_request_size > (ptrdiff_t)available_payload) {
             pdebug(DEBUG_WARN, "Request size (%d bytes) exceeds available space (%d bytes)!", calculated_request_size,
                    available_payload);
             rc = PLCTAG_ERR_TOO_LARGE;
@@ -338,21 +381,33 @@ int tag_read_start(ab_tag_p tag) {
         }
 
         /* set the size of the request */
-        req->request_size = calculated_request_size;
+        req->request_size = (int)calculated_request_size;
+
+        pdebug(DEBUG_WARN, "PLC5 PCCC request size set to %d bytes.", req->request_size);
 
         /* add the request to the session's list. */
         rc = session_add_request(tag->session, req);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+            pdebug(DEBUG_WARN, "Unable to add request to session! rc=%d", rc);
             break;
         }
-
-        /* save the request for later */
-        tag->req = req;
     } while(0);
 
-    /* Check if we failed - if so, clean up */
-    if(rc != PLCTAG_STATUS_OK) {
+    if(rc == PLCTAG_STATUS_OK) {
+        /* store the request into the tag */
+        critical_block(tag->api_mutex) {
+            if(tag->req) {
+                pdebug(DEBUG_WARN, "Request already set! This should not happen!");
+                rc = PLCTAG_ERR_BAD_DATA;
+                break;
+            } else {
+                pdebug(DEBUG_INFO, "Setting request for tag %d", tag->tag_id);
+                tag->req = req;
+            }
+        }
+    } else {
+        pdebug(DEBUG_ERROR, "Failed to add request to session! rc=%s", plc_tag_decode_error(rc));
+
         /* release the request since we failed to add it to the session */
         req = rc_dec(req);
 
@@ -363,7 +418,7 @@ int tag_read_start(ab_tag_p tag) {
 
     pdebug(DEBUG_INFO, "Done.");
 
-    return PLCTAG_STATUS_PENDING;
+    return rc;
 }
 
 
