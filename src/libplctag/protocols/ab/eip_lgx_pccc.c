@@ -194,7 +194,7 @@ int tag_read_start(ab_tag_p tag) {
 
     /* TODO - this is not correct for this kind of transaction */
 
-    int session_payload_space = session_get_available_payload_space(tag->session);
+    int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
     if(session_payload_space <= 0) {
         pdebug(DEBUG_WARN, "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);
@@ -512,7 +512,7 @@ int tag_write_start(ab_tag_p tag) {
                + 2                             /* request total transfer size in elements. */
                + (tag->encoded_name_size) + 2; /* actual request size in elements */
 
-    int session_payload_space = session_get_available_payload_space(tag->session);
+    int session_payload_space = session_get_available_cip_payload_space(tag->session);
 
     if(session_payload_space <= 0) {
         pdebug(DEBUG_WARN, "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);

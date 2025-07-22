@@ -437,7 +437,7 @@ int build_read_request_connected(ab_tag_p tag, int byte_offset) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(data - (uint8_t *)(&cip->cpf_conn_seq_num));
-    int available_payload = session_get_available_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
@@ -584,7 +584,7 @@ int build_read_request_unconnected(ab_tag_p tag, int byte_offset) {
 
     /* Check if the payload size exceeds available space before setting request_size */
     int packet_payload_size = (int)(embed_end - embed_start);
-    int available_payload = session_get_available_payload_space(tag->session);
+    int available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(packet_payload_size > available_payload) {
         pdebug(DEBUG_WARN, "Request payload (%d bytes) exceeds available space (%d bytes)!", packet_payload_size,
@@ -1748,7 +1748,7 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* if we are here, then we have all the type data etc. */
-    available_payload = session_get_available_payload_space(tag->session);
+    available_payload = session_get_available_cip_payload_space(tag->session);
 
     if(tag->use_connected_msg) {
         pdebug(DEBUG_DETAIL, "Connected tag.");
@@ -1791,7 +1791,7 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
         data_per_packet = tag->size;
     } else {
         /* round down to the nearest multiple of 8 bytes */
-        data_per_packet &= 0xFFFFFFF8;
+        data_per_packet &= 0x7FFFFFF8;
     }
 
     if(data_per_packet < 1) {

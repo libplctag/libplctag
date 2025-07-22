@@ -155,7 +155,7 @@ extern void session_teardown(void);
 
 extern int session_find_or_create(ab_session_p *session, attr attribs);
 extern int session_get_max_payload(ab_session_p session);
-extern int session_get_available_payload_space(ab_session_p session);
+extern int session_get_available_cip_payload_space(ab_session_p session);
 extern int session_create_request(ab_session_p session, int tag_id, ab_request_p *request);
 extern int session_add_request(ab_session_p sess, ab_request_p req);
 
