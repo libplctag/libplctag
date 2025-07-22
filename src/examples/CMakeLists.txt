@@ -8,10 +8,10 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_MINSIZEREL}")
 endif()
 
-message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
-message("CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
+ # message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
+ # message("CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
 
-set(EXAMPLE_EXECUTABLES
+ set(EXAMPLE_EXECUTABLES
   async
   async_stress
   barcode_test

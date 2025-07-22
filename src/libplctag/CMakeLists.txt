@@ -13,7 +13,7 @@ else()
     set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} ${EXTRA_LINK_FLAGS_MINSIZEREL}")
 endif()
 
-message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
+# message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
 
 # set up the library sources
@@ -109,7 +109,7 @@ macro(print_all_ar_link_variables)
 endmacro()
 
 # Debugging
-print_all_ar_link_variables()
+# print_all_ar_link_variables()
 
 # shared library
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )

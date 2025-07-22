@@ -48,7 +48,7 @@ set(C_STANDARD 11)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-message(STATUS "Compiler Implicit Includes: ${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES}")
+# message(STATUS "Compiler Implicit Includes: ${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES}")
 
 # make sure our outputs are going somewhere sane
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
@@ -73,8 +73,7 @@ set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "Build the Modbus emulator.  Requires lib
 
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
 
-
-message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
+# message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 
 # we need threads
 find_package(Threads REQUIRED)
@@ -119,7 +118,6 @@ if(BUILD_EXAMPLES)
 endif(BUILD_EXAMPLES)
 
 if(BUILD_TESTS)
-   message("Building tests.")
    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 endif(BUILD_TESTS)
 

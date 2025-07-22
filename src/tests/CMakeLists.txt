@@ -6,7 +6,7 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
 endif()
 
-message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
+# message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
 
 # Define the source files for ab_server
