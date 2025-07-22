@@ -70,7 +70,6 @@ set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "Build the Modbus emulator.  Requires libmodbus!")
-
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
 
 # message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
