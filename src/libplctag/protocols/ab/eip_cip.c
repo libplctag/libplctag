@@ -1437,16 +1437,19 @@ static int check_read_status_connected(ab_tag_p tag) {
                 pdebug(DEBUG_DETAIL, "Restarting write call now.");
                 tag->pre_write_read = 0;
                 rc = tag_write_start((plc_tag_p)tag);
+            } else {
+                pdebug(DEBUG_DETAIL, "Read complete.");  
             }
         }
     }
 
     /* this is not an else clause because the above if could result in bad rc. */
-    if(rc != PLCTAG_STATUS_OK && rc != PLCTAG_STATUS_PENDING) {
-        /* error ! */
-        pdebug(DEBUG_WARN, "Error received!");
+    if(rc != PLCTAG_STATUS_PENDING) {
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error reading tag data! rc=%d %s", rc, plc_tag_decode_error(rc));
+        }
 
-        /* clean up everything. */
+        /* clean up everything if this tag is not pending. */
         ab_tag_abort_request(tag);
     }
 

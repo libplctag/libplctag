@@ -365,6 +365,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             /* default to requiring a connection. */
             tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
             tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
+            tag->first_read = 1; /* first read is needed to get the type. */
 
             break;
 
@@ -387,6 +388,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
             tag->use_connected_msg = 1;
             tag->allow_packing = 0;
+            tag->first_read = 1; /* first read is needed to get the type. */
 
             break;
 

@@ -277,7 +277,8 @@ int tag_read_start(ab_tag_p tag) {
         /* point the struct pointers to the buffer */
         eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
         pccc_dhp_read_cmd_req *pccc_cmd = (pccc_dhp_read_cmd_req *)(cip_req + 1);
-        embed_start = (uint8_t *)(pccc_cmd + 1);
+
+        embed_start = (uint8_t *)(cip_req + 1);
 
         /* fill in DH+ fields */
         pccc_cmd->dest_link = h2le16(0);
@@ -294,15 +295,27 @@ int tag_read_start(ab_tag_p tag) {
         pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2));
 
         /* point data pointer just past the fixed data fields */
-        data = embed_start;
+        data = (uint8_t *)(pccc_cmd + 1);
+
+        pdebug(DEBUG_DETAIL, "PLC5 DH+ PCCC request PCCC data 1:");
+        pdebug_dump_bytes(DEBUG_DETAIL, req->data,
+                       (int)(data - req->data));
 
         /* copy encoded tag name into the request */
         mem_copy(data, tag->encoded_name, tag->encoded_name_size);
         data += tag->encoded_name_size;
 
+        pdebug(DEBUG_DETAIL, "PLC5 DH+ PCCC request PCCC data 2:");
+        pdebug_dump_bytes(DEBUG_DETAIL, req->data,
+                       (int)(data - req->data));
+
         /* add data size byte */
         *data = (uint8_t)(tag->size);
         data++;
+
+        pdebug(DEBUG_DETAIL, "PLC5 DH+ PCCC request PCCC data 3:");
+        pdebug_dump_bytes(DEBUG_DETAIL, req->data,
+                       (int)(data - req->data));
 
         /* debug: request full data length */
         ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
@@ -496,7 +509,7 @@ int tag_write_start(ab_tag_p tag) {
         /* point the struct pointers to the buffer */
         eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
         pccc_dhp_write_cmd_req *pccc_cmd = (pccc_dhp_write_cmd_req *)(cip_req + 1);
-        embed_start = (uint8_t *)(pccc_cmd + 1);
+        embed_start = (uint8_t *)(cip_req + 1);
 
         /* fill in DH+ fields */
         pccc_cmd->dest_link = h2le16(0);
@@ -550,9 +563,6 @@ int tag_write_start(ab_tag_p tag) {
         cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
 
         pdebug(DEBUG_DETAIL, "PLC5 DH+ PCCC write request CPF UDI item length: %u bytes.", le2h16(cip_req->cpf_cdi_item_length));
-
-        cip_req->router_timeout = h2le16(1);
-        cip_req->encap_command = h2le16(AB_EIP_UNCONNECTED_SEND);
 
         /* set request size */
         req->request_size = (int)calculated_request_size;
@@ -659,8 +669,10 @@ int tag_write_bit_start(ab_tag_p tag) {
         /* stack the struct pointers as in tag_read_start */
         eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
         pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(cip_req + 1);
-        embed_start = (uint8_t *)(pccc_cmd + 1);
-        data = embed_start;
+        embed_start = (uint8_t *)(cip_req + 1);
+
+        /* point data pointer just past the fixed data fields */
+        data = (uint8_t *)(pccc_cmd + 1);
 
         /* copy encoded tag name into the request */
         mem_copy(data, tag->encoded_name, tag->encoded_name_size);
