@@ -103,7 +103,7 @@
 #define AB_EIP_PCCCLGX_TYPED_WRITE_FUNC ((uint8_t)0x67)
 #define AB_EIP_SLC_RANGE_READ_FUNC ((uint8_t)0xA2)
 #define AB_EIP_SLC_RANGE_WRITE_FUNC ((uint8_t)0xAA)
-#define AB_EIP_SLC_RANGE_BIT_WRITE_FUNC ((uint8_t)0xAB)
+#define AB_EIP_SLC_RANGE_BIT_WRITE_FUNC ((uint8_t)0xAB) /* SLC/MicroLogix bit write command */
 
 
 #define AB_PCCC_DATA_BIT 1

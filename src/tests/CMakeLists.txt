@@ -50,7 +50,6 @@ target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
     target_link_options(ab_server PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
 # endif()
 
-
 if(POSIX AND BUILD_MODBUS_EMULATOR)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
