@@ -270,7 +270,7 @@ int session_get_max_payload(ab_session_p session) {
     return result;
 }
 
-int session_get_available_payload_space(ab_session_p session) {
+int session_get_available_cip_payload_space(ab_session_p session) {
     int result = 0;
 
     if(!session) {
@@ -290,6 +290,7 @@ int session_get_available_payload_space(ab_session_p session) {
             result -= (int)sizeof(cpf_connected_data_item);
         } else {
             result -= (int)sizeof(cpf_unconnected_data_item);
+            result -= (int)(session->conn_path_size);
         }
     }
     if(result < 0) {
@@ -1622,7 +1623,9 @@ int process_requests(ab_session_p session) {
 
     /* grab a request off the front of the list. */
     critical_block(session->session_mutex) {
-        int available_payload = session_get_available_payload_space(session);
+        int available_payload = session_get_available_cip_payload_space(session);
+
+        pdebug(DEBUG_DETAIL, "Available payload space is %d bytes.", available_payload);
 
         // FIXME - no logging in a mutex!
         // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
@@ -2054,24 +2057,45 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
 
 int get_payload_size(ab_request_p request) {
     int request_data_size = 0;
-    eip_encap *header = (eip_encap *)(request->data);
-    eip_cip_co_req *co_req = NULL;
-    eip_cip_uc_req *uc_req = NULL;
+    eip_encap *header = NULL;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
+    if(!request || !request->data || request->request_size <= 0) {
+        pdebug(DEBUG_WARN, "Null request pointer or empty request data!");
+        return INT_MAX;
+    }
+
+    header = (eip_encap *)(request->data);
+
     if(le2h16(header->encap_command) == AB_EIP_CONNECTED_SEND) {
-        co_req = (eip_cip_co_req *)(request->data);
+        eip_cpf_co_header *co_req = (eip_cpf_co_header *)(request->data);
         /* get length of new request */
         request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2; /* for connection sequence ID */
 
         /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
     } else if(le2h16(header->encap_command) == AB_EIP_UNCONNECTED_SEND) {
-        uc_req = (eip_cip_uc_req *)(request->data);
+        eip_cpf_uc_header *uc_req = (eip_cpf_uc_header *)(request->data);
+
         /* get length of embedded command */
-        request_data_size = le2h16(uc_req->uc_cmd_length);
+        uint16_t cip_packet_size = le2h16(uc_req->cpf_udi_item_length);
+        pdebug(DEBUG_DETAIL, "Unconnected request packet size is %d bytes.", cip_packet_size);
+
+        request_data_size = (int)le2h16(uc_req->cpf_udi_item_length);
+
+        pdebug(DEBUG_DETAIL, "Unconnected request data size is %d bytes.", request_data_size);
 
         /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
+        ptrdiff_t cal_req_size = (ptrdiff_t)(request->request_size) - (((uint8_t *)(&uc_req->cpf_udi_item_length) + 2) - request->data);
+        pdebug(DEBUG_DETAIL, "Calculated request size is %td bytes.", cal_req_size);
+
+        if(cal_req_size < 0) {
+            pdebug(DEBUG_WARN, "Calculated request size is negative, something is wrong!");
+            request_data_size = 0;
+        } else if((uint16_t)cal_req_size != request_data_size) {
+            pdebug(DEBUG_WARN, "Calculated request size %td does not match the request data size %d!",
+                   cal_req_size, request_data_size);
+        }
     } else {
         pdebug(DEBUG_DETAIL, "Not a supported type EIP packet type %d to get the payload size.", le2h16(header->encap_command));
         request_data_size = INT_MAX;
@@ -2822,7 +2846,7 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
     uint8_t *buffer = NULL;
 
     critical_block(session->session_mutex) {
-        int available_payload = session_get_available_payload_space(session);
+        int available_payload = session_get_available_cip_payload_space(session);
 
         // FIXME: no logging in a mutex!
         // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);

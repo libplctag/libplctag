@@ -6,7 +6,7 @@ else()
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_MINSIZEREL}")
 endif()
 
-message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
+# message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 
 
 # Define the source files for ab_server
@@ -49,7 +49,6 @@ target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
     # target_link_options(ab_server PUBLIC ${EXTRA_LINK_OPTIONS})
     target_link_options(ab_server PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
 # endif()
-
 
 if(POSIX AND BUILD_MODBUS_EMULATOR)
     find_package(PkgConfig REQUIRED)
