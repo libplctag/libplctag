@@ -175,8 +175,6 @@ START_PACK typedef struct {
     uint8_t pccc_status;    /* STS 0x00 in request */
     uint16_le pccc_seq_num; /* TNS transaction/sequence id */
     uint8_t pccc_function;  /* FNC sub-function of command */
-    uint16_le pccc_offset;  /* offset of requested in total request */
-    uint16_le pccc_transfer_size; /* total number of words requested */
 } END_PACK pccc_write_cmd_req;
 
 
@@ -586,8 +584,6 @@ int tag_write_start(ab_tag_p tag) {
         pccc_cmd->pccc_status = 0;
         pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
         pccc_cmd->pccc_function = (tag->is_bit ? AB_EIP_PLC5_RMW_FUNC : AB_EIP_PLC5_RANGE_WRITE_FUNC);
-        pccc_cmd->pccc_offset = h2le16(0);
-        pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2));
 
         /* point data pointer just past the fixed data fields */
         data = (uint8_t *)(pccc_cmd + 1);
