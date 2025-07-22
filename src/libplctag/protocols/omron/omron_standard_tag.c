@@ -1774,7 +1774,7 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
         data_per_packet = tag->size;
     } else {
         /* round down to the nearest multiple of 8 bytes */
-        data_per_packet &= 0xFFFFFFF8;
+        data_per_packet &= 0x7FFFFFF8;
     }
 
     if(data_per_packet < 1) {
