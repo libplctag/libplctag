@@ -1625,7 +1625,7 @@ int process_requests(ab_session_p session) {
     critical_block(session->session_mutex) {
         int available_payload = session_get_available_cip_payload_space(session);
 
-        pdebug(DEBUG_WARN, "Available payload space is %d bytes.", available_payload);
+        pdebug(DEBUG_DETAIL, "Available payload space is %d bytes.", available_payload);
 
         // FIXME - no logging in a mutex!
         // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
@@ -2079,15 +2079,15 @@ int get_payload_size(ab_request_p request) {
 
         /* get length of embedded command */
         uint16_t cip_packet_size = le2h16(uc_req->cpf_udi_item_length);
-        pdebug(DEBUG_WARN, "Unconnected request packet size is %d bytes.", cip_packet_size);
+        pdebug(DEBUG_DETAIL, "Unconnected request packet size is %d bytes.", cip_packet_size);
 
         request_data_size = (int)le2h16(uc_req->cpf_udi_item_length);
 
-        pdebug(DEBUG_WARN, "Unconnected request data size is %d bytes.", request_data_size);
+        pdebug(DEBUG_DETAIL, "Unconnected request data size is %d bytes.", request_data_size);
 
         /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
         ptrdiff_t cal_req_size = (ptrdiff_t)(request->request_size) - (((uint8_t *)(&uc_req->cpf_udi_item_length) + 2) - request->data);
-        pdebug(DEBUG_WARN, "Calculated request size is %td bytes.", cal_req_size);
+        pdebug(DEBUG_DETAIL, "Calculated request size is %td bytes.", cal_req_size);
 
         if(cal_req_size < 0) {
             pdebug(DEBUG_WARN, "Calculated request size is negative, something is wrong!");
