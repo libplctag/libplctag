@@ -1,0 +1,161 @@
+# Valgrind suppressions for Protocol Toolkit
+# This file contains suppressions for known false positives in Valgrind
+
+# System library suppressions
+{
+   glibc_dl_init
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:_dl_init
+}
+
+{
+   glibc_dl_open
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:calloc
+   fun:_dl_open
+}
+
+{
+   pthread_create
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   fun:allocate_dtv
+   fun:_dl_allocate_tls
+   fun:pthread_create*
+}
+
+# Clang/LLVM suppressions
+{
+   clang_basic_block
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:_Znwm
+   ...
+   fun:_ZN4llvm*
+}
+
+# Protocol Toolkit specific suppressions
+{
+   ptk_shared_memory_init
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:mmap
+   fun:ptk_shared_init
+}
+
+{
+   ptk_thread_local_storage
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:pthread_setspecific
+   fun:ptk_*
+}
+
+# Threading suppressions
+{
+   thread_local_destructor
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:__cxa_thread_atexit
+}
+
+{
+   pthread_attr_init
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:pthread_attr_init
+}
+
+# OpenSSL suppressions (if used)
+{
+   openssl_init
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:CRYPTO_malloc
+   fun:*
+   fun:SSL_library_init
+}
+
+# Test framework suppressions
+{
+   test_harness_init
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:test_*_main
+}
+
+# Atomic operations suppressions
+{
+   atomic_operations_race
+   Helgrind:Race
+   fun:ptk_atomic_*
+}
+
+# Memory allocator suppressions
+{
+   ptk_local_alloc_metadata
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:ptk_local_alloc*
+}
+
+# Network socket suppressions
+{
+   socket_getaddrinfo
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:getaddrinfo
+   fun:ptk_*
+}
+
+{
+   socket_gethostbyname
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:gethostbyname*
+   fun:ptk_*
+}
+
+{
+   glibc_strcasecmp_uninit
+   Memcheck:Cond
+   fun:__strcasecmp_l_avx2
+}
+
+{
+   glibc_strcmp_uninit
+   Memcheck:Cond
+   fun:__strcmp_avx2
+}
+
+{
+    glibc_strcspn_uninit
+    Memcheck:Cond
+    fun:__strcspn_sse42
+}
+
+{
+   glibc_free_uninit
+   Memcheck:Cond
+   fun:free
+}
+
+{
+    glibc_strlen_uninit
+    Memcheck:Cond
+    fun:__strlen_avx2
+}
+
+

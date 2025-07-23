@@ -248,16 +248,6 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->allow_packing = 0;
             break;
 
-            // case AB_PLC_OMRON_NJNX:
-            //     tag->use_connected_msg = 1;
-
-            //     /*
-            //      * Default packing to off.  Omron requires the client to do the calculation of
-            //      * whether the results will fit or not.
-            //      */
-            //     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
-            //     break;
-
         default:
             pdebug(DEBUG_WARN, "Unknown PLC type!");
             tag->status = PLCTAG_ERR_BAD_CONFIG;
@@ -311,8 +301,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             }
 
             tag->byte_order = &plc5_tag_byte_order;
-
             tag->allow_packing = 0;
+            tag->first_read = 0; /* no first read for this kind of PLC. */
+
             break;
 
         case AB_PLC_SLC:
@@ -333,8 +324,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             }
 
             tag->byte_order = &slc_tag_byte_order;
-
             tag->allow_packing = 0;
+            tag->first_read = 0; /* no first read for this kind of PLC. */
+
             break;
 
         case AB_PLC_LGX_PCCC:
@@ -344,6 +336,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             tag->vtable = &lgx_pccc_vtable;
 
             tag->byte_order = &slc_tag_byte_order;
+            tag->first_read = 0; /* no first read for this kind of PLC. */
 
             break;
 
@@ -372,6 +365,7 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
             /* default to requiring a connection. */
             tag->use_connected_msg = attr_get_int(attribs, "use_connected_msg", 1);
             tag->allow_packing = attr_get_int(attribs, "allow_packing", 1);
+            tag->first_read = 1; /* first read is needed to get the type. */
 
             break;
 
@@ -394,34 +388,9 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
 
             tag->use_connected_msg = 1;
             tag->allow_packing = 0;
+            tag->first_read = 1; /* first read is needed to get the type. */
 
             break;
-
-            // case AB_PLC_OMRON_NJNX:
-            //     pdebug(DEBUG_DETAIL, "Setting up OMRON NJ/NX Series tag.");
-
-            //     if(str_length(path) == 0) {
-            //         pdebug(DEBUG_WARN,"A path is required for this PLC type.");
-            //         tag->status = PLCTAG_ERR_BAD_PARAM;
-            //         return (plc_tag_p)tag;
-            //     }
-
-            //     /* if we did not fill in the byte order elsewhere, fill it in now. */
-            //     if(!tag->byte_order) {
-            //         pdebug(DEBUG_DETAIL, "Using default Omron byte order.");
-            //         tag->byte_order = &omron_njnx_tag_byte_order;
-            //     }
-
-            //     /* if this was not filled in elsewhere default to generic *Logix */
-            //     if(tag->vtable == &default_vtable || !tag->vtable) {
-            //         pdebug(DEBUG_DETAIL, "Setting default Logix vtable.");
-            //         tag->vtable = &eip_cip_vtable;
-            //     }
-
-            //     tag->use_connected_msg = 1;
-            //     tag->allow_packing = attr_get_int(attribs, "allow_packing", 0);
-
-            //     break;
 
         default:
             pdebug(DEBUG_WARN, "Unknown PLC type!");
@@ -482,16 +451,19 @@ plc_tag_p ab_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_id, 
     }
 
     /* kick off a read to get the tag type and size. */
-    if(!tag->special_tag && tag->vtable->read) {
+    if(!tag->special_tag && tag->vtable->read && tag->first_read) {
         /* trigger the first read. */
+        /* convoluted logic that needs to be refactored */
+
+        /* if this is a PLC that does not need first reads to get the type, then we do not trigger an 
+        early read during creation.   We do, however, need to flag that the read is the first one so
+        that the created event will be raised. Ugh.  This is a mess. */
         pdebug(DEBUG_DETAIL, "Kicking off initial read.");
 
-        tag->first_read = 1;
         tag->read_in_flight = 1;
         tag->vtable->read((plc_tag_p)tag);
-        // tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, tag->status);
     } else {
-        pdebug(DEBUG_DETAIL, "Not kicking off initial read: tag is special or does not have read function.");
+        pdebug(DEBUG_DETAIL, "Tag does not need a first read, raising created event.");
 
         /* force the created event because we do not do an initial read here. */
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, tag->status);

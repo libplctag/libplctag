@@ -46,15 +46,15 @@
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 
-#define MAX_REQUESTS (200)
+#define MAX_REQUESTS (400)
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
 
 #define MAX_CIP_LGX_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4002)
+#define MAX_CIP_LGX_MSG_SIZE_EX (0xFFFF & 4000)
 
 #define MAX_CIP_MICRO800_MSG_SIZE (0x01FF & 504)
-#define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4002)
+#define MAX_CIP_MICRO800_MSG_SIZE_EX (0xFFFF & 4000)
 
 /* Omron is special */
 // #define MAX_CIP_OMRON_MSG_SIZE_EX (0xFFFF & 1994)
@@ -266,6 +266,39 @@ int session_get_max_payload(ab_session_p session) {
     critical_block(session->session_mutex) { result = GET_MAX_PAYLOAD_SIZE(session); }
 
     pdebug(DEBUG_DETAIL, "max payload size is %d bytes.", result);
+
+    return result;
+}
+
+int session_get_available_cip_payload_space(ab_session_p session) {
+    int result = 0;
+
+    if(!session) {
+        pdebug(DEBUG_WARN, "Called with null session pointer!");
+        return 0;
+    }
+
+    critical_block(session->session_mutex) {
+        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+        result = max_payload_size;
+
+        pdebug(DEBUG_DETAIL, "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
+               session->max_payload_size, session->fo_conn_size, session->fo_ex_conn_size, max_payload_size);
+
+        // Account for CPF data item overhead
+        if(session->use_connected_msg) {
+            result -= (int)sizeof(cpf_connected_data_item);
+        } else {
+            result -= (int)sizeof(cpf_unconnected_data_item);
+            result -= (int)(session->conn_path_size);
+        }
+    }
+    if(result < 0) {
+        pdebug(DEBUG_WARN, "Available payload space is negative (%d bytes)! This should not happen!", result);
+        result = 0;
+    } else {
+        pdebug(DEBUG_INFO, "Available payload space is %d bytes.", result);
+    }
 
     return result;
 }
@@ -661,7 +694,8 @@ ab_session_p session_create_unsafe(int max_payload_capacity, bool data_buffer_is
     int rc = PLCTAG_STATUS_OK;
     ab_session_p session = AB_SESSION_NULL;
     size_t total_allocation_size = sizeof(*session);
-    size_t data_buffer_capacity = (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity;
+    size_t data_buffer_capacity =
+        (size_t)EIP_CIP_PREFIX_SIZE + (size_t)max_payload_capacity + (size_t)32;  // MAGIC - FIXME this is just a bandaid.
     size_t data_buffer_offset = 0;
     size_t host_name_offset = 0;
     size_t host_name_size = 0;
@@ -1589,10 +1623,12 @@ int process_requests(ab_session_p session) {
 
     /* grab a request off the front of the list. */
     critical_block(session->session_mutex) {
-        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+        int available_payload = session_get_available_cip_payload_space(session);
+
+        pdebug(DEBUG_DETAIL, "Available payload space is %d bytes.", available_payload);
 
         // FIXME - no logging in a mutex!
-        // pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+        // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
         /* is there anything to do? */
         if(vector_length(session->requests)) {
@@ -1601,31 +1637,75 @@ int process_requests(ab_session_p session) {
 
             /* if there are still requests after purging all the aborted requests, process them. */
 
-            /* how much space do we have to work with. */
-            remaining_space = max_payload_size - (int)sizeof(cip_multi_req_header);
+            /*
+             * The total allowed space for requests is the negotiated packet capacity
+             * less the overhead of the CPF data item. The rest of the space is for
+             * the EIP encapsulation header and the CPF header and the CPF address item,
+             * which are already accounted for in the buffer structure.
+             */
+            remaining_space = available_payload;
+
+            /*
+             * The logic below is a bit convoluted.
+             *
+             * - If the first request takes up all the space, we cannot pack any more requests.
+             *
+             * - If the first request is packable, we can keep packing requests
+             *   until we run out of space or we reach the maximum number of requests.  We need to make sure
+             *   that the overhead of the CIP packed request header is accounted for in the remaining space as well as the
+             *   two-byte offset entry for each request.
+             *
+             * - If we are packing requests, and the next one is not packable, we stop packing.
+             *
+             * - If the first request is not packable, we can only pack it
+             *   if it is the first one in the queue. And then can pack no more
+             *   requests after that.
+             */
 
             if(vector_length(session->requests)) {
-                do {
-                    request = vector_get(session->requests, 0);
+                /* Always process the first request, regardless of packability */
+                request = vector_get(session->requests, 0);
+                int first_request_size = get_payload_size(request);
 
-                    remaining_space = remaining_space - get_payload_size(request);
+                /* Check if the first request fits at all */
+                if(first_request_size <= remaining_space) {
+                    bundled_requests[num_bundled_requests] = request;
+                    num_bundled_requests++;
+                    remaining_space -= first_request_size;
+                    vector_remove(session->requests, 0);
 
-                    /*
-                     * If we have a non-packable request, only queue it if it is the first one.
-                     * If the request is packable, keep queuing as long as there is space.
-                     */
+                    /* If the first request is packable, try to pack more requests */
+                    if(request->allow_packing && vector_length(session->requests) > 0) {
+                        /* Account for CIP multi-request overhead now that we know we'll have multiple requests */
+                        remaining_space -= (int)sizeof(cip_multi_req_header);
 
-                    if(num_bundled_requests == 0 || (request->allow_packing && remaining_space > 0)) {
-                        // pdebug(DEBUG_DETAIL, "packed %d requests with remaining space %d", num_bundled_requests+1,
-                        // remaining_space);
-                        bundled_requests[num_bundled_requests] = request;
-                        num_bundled_requests++;
+                        /* Account for 2-byte offset entry per request (including the first one already processed) */
+                        int multi_request_overhead = 2;            /* 2-byte offset entry per additional request */
+                        remaining_space -= multi_request_overhead; /* for the first request */
 
-                        /* remove it from the queue. */
-                        vector_remove(session->requests, 0);
+                        while(vector_length(session->requests) > 0 && num_bundled_requests < MAX_REQUESTS) {
+
+                            request = vector_get(session->requests, 0);
+
+                            /* Only pack if this request is packable */
+                            if(!request->allow_packing) { break; }
+
+                            int next_request_size = get_payload_size(request) + multi_request_overhead;
+
+                            /* Check if this request fits in remaining space */
+                            if(next_request_size > remaining_space) { break; }
+
+                            bundled_requests[num_bundled_requests] = request;
+                            num_bundled_requests++;
+                            remaining_space -= next_request_size;
+                            vector_remove(session->requests, 0);
+                        }
                     }
-                } while(vector_length(session->requests) && remaining_space > 0 && num_bundled_requests < MAX_REQUESTS
-                        && request->allow_packing);
+                    /* If first request is not packable, we stop here (only the first request is packed) */
+                } else {
+                    pdebug(DEBUG_WARN, "First request size %d exceeds remaining space %d, cannot process any requests.",
+                           first_request_size, remaining_space);
+                }
             } else {
                 pdebug(DEBUG_DETAIL, "All requests in queue were aborted, nothing to do.");
             }
@@ -1977,23 +2057,51 @@ int unpack_response(ab_session_p session, ab_request_p request, int sub_packet) 
 
 int get_payload_size(ab_request_p request) {
     int request_data_size = 0;
-    eip_encap *header = (eip_encap *)(request->data);
-    eip_cip_co_req *co_req = NULL;
+    eip_encap *header = NULL;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
+    if(!request || !request->data || request->request_size <= 0) {
+        pdebug(DEBUG_WARN, "Null request pointer or empty request data!");
+        return INT_MAX;
+    }
+
+    header = (eip_encap *)(request->data);
+
     if(le2h16(header->encap_command) == AB_EIP_CONNECTED_SEND) {
-        co_req = (eip_cip_co_req *)(request->data);
+        eip_cpf_co_header *co_req = (eip_cpf_co_header *)(request->data);
         /* get length of new request */
-        request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2 /* for connection sequence ID */
-                            + 2                                     /* for multipacket offset */
-            ;
+        request_data_size = le2h16(co_req->cpf_cdi_item_length) - 2; /* for connection sequence ID */
+
+        /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
+    } else if(le2h16(header->encap_command) == AB_EIP_UNCONNECTED_SEND) {
+        eip_cpf_uc_header *uc_req = (eip_cpf_uc_header *)(request->data);
+
+        /* get length of embedded command */
+        uint16_t cip_packet_size = le2h16(uc_req->cpf_udi_item_length);
+        pdebug(DEBUG_DETAIL, "Unconnected request packet size is %d bytes.", cip_packet_size);
+
+        request_data_size = (int)le2h16(uc_req->cpf_udi_item_length);
+
+        pdebug(DEBUG_DETAIL, "Unconnected request data size is %d bytes.", request_data_size);
+
+        /* FIXME - calculate the amount of data in the request by the length of the request and cross check */
+        ptrdiff_t cal_req_size = (ptrdiff_t)(request->request_size) - (((uint8_t *)(&uc_req->cpf_udi_item_length) + 2) - request->data);
+        pdebug(DEBUG_DETAIL, "Calculated request size is %td bytes.", cal_req_size);
+
+        if(cal_req_size < 0) {
+            pdebug(DEBUG_WARN, "Calculated request size is negative, something is wrong!");
+            request_data_size = 0;
+        } else if((uint16_t)cal_req_size != request_data_size) {
+            pdebug(DEBUG_WARN, "Calculated request size %td does not match the request data size %d!",
+                   cal_req_size, request_data_size);
+        }
     } else {
         pdebug(DEBUG_DETAIL, "Not a supported type EIP packet type %d to get the payload size.", le2h16(header->encap_command));
         request_data_size = INT_MAX;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_DETAIL, "Done, payload size: %d bytes.", request_data_size);
 
     return request_data_size;
 }
@@ -2738,12 +2846,12 @@ int session_create_request(ab_session_p session, int tag_id, ab_request_p *req) 
     uint8_t *buffer = NULL;
 
     critical_block(session->session_mutex) {
-        int max_payload_size = GET_MAX_PAYLOAD_SIZE(session);
+        int available_payload = session_get_available_cip_payload_space(session);
 
         // FIXME: no logging in a mutex!
-        // pdebug(DEBUG_DETAIL, "FIXME: max payload size %d", max_payload_size);
+        // pdebug(DEBUG_DETAIL, "FIXME: available payload space %d", available_payload);
 
-        request_capacity = (size_t)(max_payload_size + EIP_CIP_PREFIX_SIZE);
+        request_capacity = (size_t)(available_payload + EIP_CIP_PREFIX_SIZE);
     }
 
     pdebug(DEBUG_DETAIL, "Starting.");
