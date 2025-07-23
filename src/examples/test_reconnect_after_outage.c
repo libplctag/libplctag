@@ -46,9 +46,9 @@
 #define REQUIRED_VERSION 2, 6, 6
 
 #define READ_TIMEOUT (100)
-#define FIRST_RUN_TIME (3000)
-#define DISCONNECT_TIME_MS (80000)
-#define SECOND_RUN_TIME (20000)
+#define FIRST_RUN_TIME (10000)
+#define DISCONNECT_TIME_MS (60000)
+#define SECOND_RUN_TIME (30000)
 #define TEST_DURATION_MS (FIRST_RUN_TIME + SECOND_RUN_TIME + DISCONNECT_TIME_MS)
 
 #define STRINGIFY(x) #x
@@ -186,7 +186,7 @@ void start_server(test_state_t *test_state) {
         exit(1);
     }
 
-    compat_sleep_ms(500, NULL);
+    compat_sleep_ms(3000, NULL);
 }
 
 
@@ -198,7 +198,7 @@ void stop_server(void) {
     }
 
     /* wait for it to die */
-    compat_sleep_ms(500, NULL);
+    compat_sleep_ms(1000, NULL);
 }
 
 void tag_callback(int32_t tag_id, int event, int status, void *data) {
@@ -211,7 +211,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             if(status == PLCTAG_ERR_TIMEOUT) {
                 test_state->read_timeout_count++;
 
-                fputs("T", stderr);
+                fputs("At ", stderr);
                 fflush(stderr);
 
                 // log("[ABORTED] Tag %d w/status %s, automatic read operation timed out and aborted.\n", tag_id,
@@ -219,13 +219,13 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             } else if(status != PLCTAG_ERR_ABORT) {
                 test_state->read_error_count++;
 
-                fputs("A", stderr);
+                fputs("Ae ", stderr);
                 fflush(stderr);
 
                 // log("[ABORTED] Tag %d w/status %s, automatic read operation aborted with ERROR status %s.\n", tag_id,
                 //     plc_tag_decode_error(tag_status), plc_tag_decode_error(status));
             } else {
-                fputs("a", stderr);
+                fputs("A ", stderr);
                 fflush(stderr);
             }
             break;
@@ -234,14 +234,14 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             test_state->read_start_count++;
 
             if(status != PLCTAG_STATUS_OK && status != PLCTAG_STATUS_PENDING) {
-                fputs("S", stderr);
+                fputs("RSe ", stderr);
                 fflush(stderr);
 
                 // log("[READ START]")
                 // log("[READ START] Tag %d w/status %s, automatic read operation started with ERROR status %s (errors=%d).\n",
                 //     tag_id, plc_tag_decode_error(tag_status), plc_tag_decode_error(status), test_state->read_error_count);
             } else {
-                fputs("s", stderr);
+                fputs("RS ", stderr);
                 fflush(stderr);
             }
             break;
@@ -252,14 +252,14 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
 
                 if(test_state->reconnect_done) { test_state->read_success_after_reconnect++; }
 
-                fputs("c", stderr);
+                fputs("RC ", stderr);
                 fflush(stderr);
 
                 // log("[READ COMPLETE] Tag %d w/status %s)
             } else {
                 test_state->read_error_count++;
 
-                fputs("C", stderr);
+                fputs("RCe ", stderr);
                 fflush(stderr);
 
                 // log("[READ COMPLETE] Tag %d w/status %s, automatic read operation completed with ERROR status %s
@@ -408,7 +408,10 @@ int run_auto_test(const char *ab_server_cmd) {
     fputs("\nD\n", stderr);
     fflush(stderr);
 
-    while((current_time = compat_time_ms()) < auto_test_state.reconnect_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
+    while((current_time = compat_time_ms()) < auto_test_state.reconnect_time) {
+        compat_sleep_ms(1000, NULL); 
+        fputs(".", stderr); fflush(stderr);
+    }
 
     int after_disconnect_read_success_count = auto_test_state.read_success_count - before_disconnect_read_success_count;
     int read_error_after_disconnect = auto_test_state.read_error_count - read_error_before_disconnect;
