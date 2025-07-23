@@ -9,12 +9,11 @@ on:
 jobs:
 
   ubuntu_x64:
-
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_ubuntu_x64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_ubuntu_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -80,7 +79,7 @@ jobs:
         cd ${{ env.DIST }}
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug  &
-        sleep 2
+        sleep 3
         echo "test getting a tag on a PLC/5."
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
@@ -91,7 +90,7 @@ jobs:
         cd ${{ env.DIST }}
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
-        sleep 2
+        sleep 3
         echo "test getting a tag on a SLC 500."
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
@@ -129,6 +128,12 @@ jobs:
         ${{ env.DIST }}/test_indexed_tags
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -171,12 +176,11 @@ jobs:
         path: ${{ env.BUILD }}/release_zips/*.zip
 
   ubuntu_x86:
-
     runs-on: ubuntu-22.04
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_ubuntu_x86"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_ubuntu_x86"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -241,10 +245,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
+        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -252,10 +256,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
+        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -263,10 +267,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 &
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
         sleep 2
         echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -291,6 +295,12 @@ jobs:
         ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -326,8 +336,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_macos_x64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_macos_x64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -440,6 +450,12 @@ jobs:
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    ./test_simultaneous_rw_ab_server
+
     - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
@@ -474,8 +490,8 @@ jobs:
     runs-on: macos-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_macos_aarch64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_macos_aarch64"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -526,8 +542,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -657,6 +673,13 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
     - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
@@ -693,8 +716,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x64_MinGW"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x64_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -819,13 +842,27 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
+      shell: cmd
+
   windows_x86_MSVC:
 
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x86"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x86"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -954,6 +991,20 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
+      shell: cmd
+
     - name: Create ZIP artifacts
       run: |
         cd "${{ env.DIST }}"
@@ -983,8 +1034,8 @@ jobs:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_x86_MinGW"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_x86_MinGW"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1109,12 +1160,26 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
+      shell: cmd
+
   windows_cross_build_ARM64_MSVC:
     runs-on: windows-latest
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_windows_arm64"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_windows_arm64"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1189,8 +1254,8 @@ jobs:
             target_arch: arm64
 
     env:
-      VERSION: "2.6.7"
-      ARTIFACT: "libplctag_2.6.7_ubuntu_${{ matrix.artifact_suffix }}"
+      VERSION: "2.6.8"
+      ARTIFACT: "libplctag_2.6.8_ubuntu_${{ matrix.artifact_suffix }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1407,7 +1472,7 @@ jobs:
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
     env:
-      VERSION: "2.6.7"
+      VERSION: "2.6.8"
 
     steps:
     - name: Checkout repository
@@ -1446,9 +1511,12 @@ jobs:
           fi
         fi
 
-        echo "pr_message<<EOF" >> $GITHUB_OUTPUT
+        # Set separate outputs for title and body
+        echo "pr_title<<EOF" >> $GITHUB_OUTPUT
         echo "$PR_TITLE" >> $GITHUB_OUTPUT
-        echo "" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "pr_body<<EOF" >> $GITHUB_OUTPUT
         echo "$PR_BODY" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
@@ -1461,16 +1529,16 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag -a "v2.6.7" -m "Release v2.6.7"
-        git push origin "v2.6.7"
+        git tag -a "v2.6.8" -m "Release v2.6.8"
+        git push origin "v2.6.8"
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: "v2.6.7"
-        name: ${{ github.event.pull_request.title }}
-        body: ${{ steps.get_pr_details.outputs.pr_message }}
-        files: ./release_artifacts/**/*
+        tag_name: "v2.6.8"
+        name: ${{ steps.get_pr_details.outputs.pr_title }}
+        body: ${{ steps.get_pr_details.outputs.pr_body }}
+        files: ./release_artifacts/**/*.zip
         draft: false
         prerelease: false
       env:

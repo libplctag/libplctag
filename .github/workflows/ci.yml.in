@@ -9,7 +9,6 @@ on:
 jobs:
 
   ubuntu_x64:
-
     runs-on: ubuntu-22.04
 
     env:
@@ -80,7 +79,7 @@ jobs:
         cd ${{ env.DIST }}
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug  &
-        sleep 2
+        sleep 3
         echo "test getting a tag on a PLC/5."
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
@@ -91,7 +90,7 @@ jobs:
         cd ${{ env.DIST }}
         echo "start up simulator..."
         ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
-        sleep 2
+        sleep 3
         echo "test getting a tag on a SLC 500."
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
@@ -129,6 +128,12 @@ jobs:
         ${{ env.DIST }}/test_indexed_tags
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -171,7 +176,6 @@ jobs:
         path: ${{ env.BUILD }}/release_zips/*.zip
 
   ubuntu_x86:
-
     runs-on: ubuntu-22.04
 
     env:
@@ -241,10 +245,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] &
+        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -252,10 +256,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] &
+        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
         sleep 2
         echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0'
+        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -263,10 +267,10 @@ jobs:
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 &
+        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
         sleep 2
         echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray'
+        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
 
@@ -291,6 +295,12 @@ jobs:
         ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -439,6 +449,12 @@ jobs:
         ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -657,6 +673,13 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
     - name: Test Reconnect After Outage
       run: |
         cd ${{ env.DIST }}
@@ -819,6 +842,20 @@ jobs:
         exit /b %test_result%
       shell: cmd
 
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
+      shell: cmd
+
   windows_x86_MSVC:
 
     runs-on: windows-latest
@@ -952,6 +989,20 @@ jobs:
         echo "shut down server."
         taskkill /F /IM ab_server.exe
         exit /b %test_result%
+      shell: cmd
+
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
     - name: Create ZIP artifacts
@@ -1107,6 +1158,20 @@ jobs:
         echo "shut down server."
         taskkill /F /IM ab_server.exe
         exit /b %test_result%
+      shell: cmd
+
+    #- name: Test Simultaneous Read/Write On Tag
+    #  run: |
+    #    cd ${{ env.DIST }}
+    #    echo "test simultaneous read/write on a single tag"
+    #    .\test_simultaneous_rw_ab_server.exe
+    #  shell: cmd
+
+    - name: Test Reconnect After Outage
+      run: |
+        cd ${{ env.DIST }}
+        echo "Test reconnect after outage."
+        .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
   windows_cross_build_ARM64_MSVC:
@@ -1446,9 +1511,12 @@ jobs:
           fi
         fi
 
-        echo "pr_message<<EOF" >> $GITHUB_OUTPUT
+        # Set separate outputs for title and body
+        echo "pr_title<<EOF" >> $GITHUB_OUTPUT
         echo "$PR_TITLE" >> $GITHUB_OUTPUT
-        echo "" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "pr_body<<EOF" >> $GITHUB_OUTPUT
         echo "$PR_BODY" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
@@ -1468,9 +1536,9 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: "v@VERSION@"
-        name: ${{ github.event.pull_request.title }}
-        body: ${{ steps.get_pr_details.outputs.pr_message }}
-        files: ./release_artifacts/**/*
+        name: ${{ steps.get_pr_details.outputs.pr_title }}
+        body: ${{ steps.get_pr_details.outputs.pr_body }}
+        files: ./release_artifacts/**/*.zip
         draft: false
         prerelease: false
       env:

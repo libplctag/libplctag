@@ -9,8 +9,11 @@ TEST=0
 SUCCESSES=0
 FAILURES=0
 
+# limit the number of open files to 1024 to that Valgrind does not complain
+ulimit -n 1024
+
 # for deeper testing
-# VALGRIND="valgrind --tool=memcheck --track-origins=yes --leak-check=full --show-leak-kinds=all --error-exitcode=1  "
+# VALGRIND="valgrind --leak-check=full --error-exitcode=1 --track-origins=yes --suppressions=./valgrind.supp "
 VALGRIND=""
 
 if [[ ! -d $TEST_DIR ]]; then

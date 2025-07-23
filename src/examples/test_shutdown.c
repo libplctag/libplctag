@@ -85,7 +85,7 @@ int main(void) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* create all the tags. */
     fprintf(stderr, "Creating tag handles ");
