@@ -422,7 +422,7 @@ START_PACK typedef struct {
     uint16_le cpf_udi_item_length; /* REQ: fill in with length of remaining data. */
 
     /* CM Service Request - Connection Manager */
-    uint8_t cm_service_code;  /* ALWAYS 0x54 Forward Open Request */
+    uint8_t cm_service_code;  /* ALWAYS 0x5B Extended Forward Open Request */
     uint8_t cm_req_path_size; /* ALWAYS 2, size in words of path, next field */
     uint8_t cm_req_path[4];   /* ALWAYS 0x20,0x06,0x24,0x01 for CM, instance 1*/
 
