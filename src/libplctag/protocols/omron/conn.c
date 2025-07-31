@@ -218,6 +218,41 @@ int conn_get_max_payload(omron_conn_p conn) {
     return result;
 }
 
+
+int conn_get_available_cip_payload_space(omron_conn_p conn) {
+    int result = 0;
+
+    if(!conn) {
+        pdebug(DEBUG_WARN, "Called with null conn pointer!");
+        return 0;
+    }
+
+    critical_block(conn->mutex) {
+        int max_payload_size = GET_MAX_PAYLOAD_SIZE(conn);
+        result = max_payload_size;
+
+        pdebug(DEBUG_DETAIL, "Session payload calculation: max_payload_size=%d, fo_conn_size=%d, fo_ex_conn_size=%d, selected=%d",
+               conn->max_payload_size, conn->fo_conn_size, conn->fo_ex_conn_size, max_payload_size);
+
+        // Account for CPF data item overhead
+        if(conn->use_connected_msg) {
+            result -= (int)sizeof(cpf_connected_data_item);
+        } else {
+            result -= (int)sizeof(cpf_unconnected_data_item);
+            result -= (int)(conn->conn_path_size);
+        }
+    }
+    if(result < 0) {
+        pdebug(DEBUG_WARN, "Available payload space is negative (%d bytes)! This should not happen!", result);
+        result = 0;
+    } else {
+        pdebug(DEBUG_INFO, "Available payload space is %d bytes.", result);
+    }
+
+    return result;
+}
+
+
 int conn_find_or_create(omron_conn_p *tag_conn, attr attribs) {
     /*int debug = attr_get_int(attribs,"debug",0);*/
     const char *conn_gw = attr_get_str(attribs, "gateway", "");
