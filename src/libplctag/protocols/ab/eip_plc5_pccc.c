@@ -47,6 +47,7 @@
 /* PCCC */
 static int tag_read_start(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
+static int tag_write_bit_start(ab_tag_p tag);
 
 struct tag_vtable_t plc5_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
                                    (tag_vtable_func)tag_read_start, (tag_vtable_func)pccc_tag_status, (tag_vtable_func)pccc_tag_tickler,
@@ -87,4 +88,3 @@ int tag_read_start(ab_tag_p tag) {
 int tag_write_start(ab_tag_p tag) {
     return pccc_tag_write_start((ab_tag_p)tag, AB_EIP_PLC5_RANGE_WRITE_FUNC);
 }
-

@@ -44,6 +44,7 @@
 
 static int tag_read_start(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
+static int tag_write_bit_start(ab_tag_p tag);
 
 struct tag_vtable_t eip_slc_dhp_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
                                    (tag_vtable_func)tag_read_start, (tag_vtable_func)pccc_dhp_tag_status, (tag_vtable_func)pccc_dhp_tag_tickler,
@@ -55,28 +56,6 @@ struct tag_vtable_t eip_slc_dhp_vtable = {(tag_vtable_func)ab_tag_abort_request,
                                    ab_get_byte_array_attrib};
 
 
-
-// /* default string types used for PLC-5 PLCs. */
-// tag_byte_order_t slc_tag_byte_order = {.is_allocated = 0,
-
-//                                        .int16_order = {0, 1},
-//                                        .int32_order = {0, 1, 2, 3},
-//                                        .int64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-//                                        .float32_order = {0, 1, 2, 3},
-//                                        .float64_order = {0, 1, 2, 3, 4, 5, 6, 7},
-
-//                                        .str_is_defined = 1,
-//                                        .str_is_counted = 1,
-//                                        .str_is_fixed_length = 1,
-//                                        .str_is_zero_terminated = 0,
-//                                        .str_is_byte_swapped = 1,
-
-//                                        .str_pad_to_multiple_bytes = 2,
-//                                        .str_count_word_bytes = 2,
-//                                        .str_max_capacity = 82,
-//                                        .str_total_length = 84,
-//                                        .str_pad_bytes = 0};
-
 int tag_read_start(ab_tag_p tag) {
     return pccc_dhp_tag_read_start((ab_tag_p)tag, AB_EIP_SLC_RANGE_READ_FUNC);
 }
@@ -84,4 +63,3 @@ int tag_read_start(ab_tag_p tag) {
 int tag_write_start(ab_tag_p tag) {
     return pccc_dhp_tag_write_start((ab_tag_p)tag, AB_EIP_SLC_RANGE_WRITE_FUNC);
 }
-

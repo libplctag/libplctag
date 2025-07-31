@@ -1792,12 +1792,6 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    if(elements_per_packet < 1) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
-               available_payload, element_size);
-        return PLCTAG_ERR_TOO_LARGE;
-    }
-
     pdebug(DEBUG_DETAIL, "Write data per packet is %d bytes.", data_per_packet);
 
     tag->write_data_per_packet = data_per_packet;
