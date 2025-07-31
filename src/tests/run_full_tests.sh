@@ -104,6 +104,64 @@ else
 fi
 
 let TEST++
+echo -n "Test $TEST: Get INT bit ... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=TestINTArray[0].13' --debug=4 > "${TEST}_get_INT_bit_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: Set INT bit ... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=TestINTArray[0].13' --debug=4 --write=1 > "${TEST}_set_INT_bit_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: Get LINT bit ... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=TestLINTArray[0].43' --debug=4 > "${TEST}_get_INT_bit_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: Set LINT bit ... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&name=TestLINTArray[0].43' --debug=4 --write=1 > "${TEST}_set_INT_bit_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: basic large tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=10.206.1.40&path=1,4&plc=ControlLogix&elem_count=1000&name=TestBigArray' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "${TEST}_big_tag_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+
+
+let TEST++
 echo -n "Test $TEST: test non-standard UDT strings... "
 $VALGRIND$TEST_DIR/string_non_standard_udt > "${TEST}_non_standard_udt_string_test.log" 2>&1
 if [ $? != 0 ]; then
@@ -162,7 +220,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: basic CIP bridging... "
-$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=10.206.1.39&path=1,6,18,10.206.1.40,1,4&plc=lgx&name=TestBigArray[0]' --debug=4 --write=5 > "${TEST}_cip_bridge.log" 2>&1
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=10.206.1.37&path=1,4,18,10.206.1.39,1,0&plc=lgx&name=TestBigArray[0]' --debug=4 --write=5 > "${TEST}_cip_bridge.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++

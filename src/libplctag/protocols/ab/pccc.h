@@ -83,6 +83,16 @@ extern const char *pccc_decode_error(uint8_t *error_ptr);
 extern uint8_t *pccc_decode_dt_byte(uint8_t *data,int data_size, int *pccc_res_type, int *pccc_res_length);
 extern int pccc_encode_dt_byte(uint8_t *data,int buf_size, uint32_t data_type, uint32_t data_size);
 
+/* generic direct ethernet tag functions */
+extern int pccc_tag_status(ab_tag_p tag);
+extern int pccc_tag_tickler(ab_tag_p tag);
+extern int pccc_tag_read_start(ab_tag_p tag, uint8_t pccc_cmd);
+extern int pccc_tag_write_start(ab_tag_p tag, uint8_t pccc_cmd);
 
+/* PCCC over DH+ */
+extern int pccc_dhp_tag_status(ab_tag_p tag);
+extern int pccc_dhp_tag_tickler(ab_tag_p tag);
+extern int pccc_dhp_tag_read_start(ab_tag_p tag, uint8_t pccc_cmd);
+extern int pccc_dhp_tag_write_start(ab_tag_p tag, uint8_t pccc_cmd);
 
 #endif

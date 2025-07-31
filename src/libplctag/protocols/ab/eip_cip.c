@@ -713,14 +713,14 @@ int build_write_bit_request_connected(ab_tag_p tag) {
                 *data = (uint8_t)(~mask);
             }
 
-            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+            pdebug(DEBUG_DETAIL, "adding AND mask byte %d: %x", i, *data);
 
             data++;
         } else {
             /* this is not the data we care about. */
             *data = (uint8_t)0xFF;
 
-            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+            pdebug(DEBUG_DETAIL, "adding AND mask byte %d: %x", i, *data);
 
             data++;
         }
@@ -1788,18 +1788,27 @@ int calculate_write_data_per_packet(ab_tag_p tag) {
         return PLCTAG_ERR_TOO_LARGE;
     }
 
+    int elements_per_packet = 0;
+    int element_size = 0;
+
     /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
     8 bytes as the unit */
-    if(tag->size < 8) {
-        data_per_packet = tag->size;
+    if(tag->elem_size < 8) {
+        elements_per_packet = data_per_packet / tag->elem_size;
+        data_per_packet = elements_per_packet * tag->elem_size;
+        element_size = tag->elem_size;
+        pdebug(DEBUG_DETAIL, "Using tag size %d bytes for element size.", element_size);
     } else {
         /* round down to the nearest multiple of 8 bytes */
-        data_per_packet &= 0x7FFFFFF8;
+        elements_per_packet = data_per_packet / 8;
+        data_per_packet = elements_per_packet * 8;
+        element_size = 8;
+        pdebug(DEBUG_DETAIL, "Using element size %d bytes.", element_size);
     }
 
-    if(data_per_packet < 1) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
-               overhead, available_payload);
+    if(elements_per_packet < 1) {
+        pdebug(DEBUG_WARN, "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
+               available_payload, element_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
