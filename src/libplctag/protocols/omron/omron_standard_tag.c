@@ -576,7 +576,7 @@ int build_write_bit_request_connected(omron_tag_p tag) {
     /* get a request buffer */
     rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to get new request.  Error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
@@ -660,14 +660,14 @@ int build_write_bit_request_connected(omron_tag_p tag) {
                 *data = (uint8_t)(~mask);
             }
 
-            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+            pdebug(DEBUG_DETAIL, "adding AND mask byte %d: %x", i, *data);
 
             data++;
         } else {
             /* this is not the data we care about. */
             *data = (uint8_t)0xFF;
 
-            pdebug(DEBUG_DETAIL, "adding OR mask byte %d: %x", i, *data);
+            pdebug(DEBUG_DETAIL, "adding AND mask byte %d: %x", i, *data);
 
             data++;
         }
@@ -685,9 +685,9 @@ int build_write_bit_request_connected(omron_tag_p tag) {
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
+    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
     cip->cpf_cai_item_type = h2le16(OMRON_EIP_ITEM_CAI); /* ALWAYS 0x00A1 connected address item */
-    cip->cpf_cai_item_length = h2le16(4);                /* ALWAYS 4, size of connection ID*/
+    cip->cpf_cai_item_length = h2le16(4);             /* ALWAYS 4, size of connection ID*/
     cip->cpf_cdi_item_type = h2le16(OMRON_EIP_ITEM_CDI); /* ALWAYS 0x00B1 - connected Data Item */
     cip->cpf_cdi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&cip->cpf_conn_seq_num))); /* REQ: fill in with length of remaining data. */
@@ -698,13 +698,12 @@ int build_write_bit_request_connected(omron_tag_p tag) {
     /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the conn's list. */
+    /* add the request to the session's list. */
     rc = conn_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to add request to conn! Error %s!", plc_tag_decode_error(rc));
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-        tag->req = rc_dec(req);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        omron_tag_abort_request(tag);
         return rc;
     }
 
@@ -731,7 +730,7 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
     /* get a request buffer */
     rc = conn_create_request(tag->conn, tag->tag_id, &req);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to get new request.  Error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_ERROR, "Unable to get new request.  rc=%d", rc);
         return rc;
     }
 
@@ -859,20 +858,20 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
     cip->router_timeout = h2le16(1); /* one second timeout, enough? */
 
     /* Common Packet Format fields for unconnected send. */
-    cip->cpf_item_count = h2le16(2);                     /* ALWAYS 2 */
+    cip->cpf_item_count = h2le16(2);                  /* ALWAYS 2 */
     cip->cpf_nai_item_type = h2le16(OMRON_EIP_ITEM_NAI); /* ALWAYS 0 */
-    cip->cpf_nai_item_length = h2le16(0);                /* ALWAYS 0 */
+    cip->cpf_nai_item_length = h2le16(0);             /* ALWAYS 0 */
     cip->cpf_udi_item_type = h2le16(OMRON_EIP_ITEM_UDI); /* ALWAYS 0x00B2 - Unconnected Data Item */
     cip->cpf_udi_item_length =
         h2le16((uint16_t)(data - (uint8_t *)(&(cip->cm_service_code)))); /* REQ: fill in with length of remaining data. */
 
     /* CM Service Request - Connection Manager */
     cip->cm_service_code = OMRON_EIP_CMD_UNCONNECTED_SEND; /* 0x52 Unconnected Send */
-    cip->cm_req_path_size = 2;                             /* 2, size in 16-bit words of path, next field */
-    cip->cm_req_path[0] = 0x20;                            /* class */
-    cip->cm_req_path[1] = 0x06;                            /* Connection Manager */
-    cip->cm_req_path[2] = 0x24;                            /* instance */
-    cip->cm_req_path[3] = 0x01;                            /* instance 1 */
+    cip->cm_req_path_size = 2;                          /* 2, size in 16-bit words of path, next field */
+    cip->cm_req_path[0] = 0x20;                         /* class */
+    cip->cm_req_path[1] = 0x06;                         /* Connection Manager */
+    cip->cm_req_path[2] = 0x24;                         /* instance */
+    cip->cm_req_path[3] = 0x01;                         /* instance 1 */
 
     /* Unconnected send needs timeout information */
     cip->secs_per_tick = OMRON_EIP_SECS_PER_TICK; /* seconds per tick */
@@ -887,13 +886,12 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
     /* allow packing if the tag allows it. */
     req->allow_packing = tag->allow_packing;
 
-    /* add the request to the conn's list. */
+    /* add the request to the session's list. */
     rc = conn_add_request(tag->conn, req);
 
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to add request to conn! Error %s!", plc_tag_decode_error(rc));
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to request of tag %" PRId32 ".", tag->tag_id);
-        tag->req = rc_dec(req);
+        pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
+        omron_tag_abort_request(tag);
         return rc;
     }
 
@@ -904,6 +902,7 @@ int build_write_bit_request_unconnected(omron_tag_p tag) {
 
     return PLCTAG_STATUS_OK;
 }
+
 
 
 int build_write_request_connected(omron_tag_p tag, int byte_offset) {
@@ -1723,17 +1722,19 @@ static int check_write_status_unconnected(omron_tag_p tag) {
 }
 
 
+
 int calculate_write_data_per_packet(omron_tag_p tag) {
     int overhead = 0;
     int data_per_packet = 0;
-    int max_payload_size = 0;
+    int available_payload = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
     /* if we are here, then we have all the type data etc. */
+    available_payload = conn_get_available_cip_payload_space(tag->conn);
+
     if(tag->use_connected_msg) {
         pdebug(DEBUG_DETAIL, "Connected tag.");
-        max_payload_size = conn_get_max_payload(tag->conn);
         overhead = 1                             /* service request, one byte */
                    + tag->encoded_name_size      /* full encoded name */
                    + tag->encoded_type_info_size /* encoded type size */
@@ -1742,14 +1743,13 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
                    + 8;                          /* MAGIC fudge factor */
     } else {
         pdebug(DEBUG_DETAIL, "Unconnected tag.");
-        max_payload_size = conn_get_max_payload(tag->conn);
-        overhead = 1                               /* service request, one byte */
-                   + tag->encoded_name_size        /* full encoded name */
-                   + tag->encoded_type_info_size   /* encoded type size */
+        overhead = 1                                  /* service request, one byte */
+                   + tag->encoded_name_size           /* full encoded name */
+                   + tag->encoded_type_info_size      /* encoded type size */
                    + tag->conn->conn_path_size + 2 /* encoded device path size plus two bytes for length and padding */
-                   + 2                             /* element count, 16-bit int */
-                   + 4                             /* byte offset, 32-bit int */
-                   + 8;                            /* MAGIC fudge factor */
+                   + 2                                /* element count, 16-bit int */
+                   + 4                                /* byte offset, 32-bit int */
+                   + 8;                               /* MAGIC fudge factor */
     }
 
     /* make sure that overhead is an even number of bytes */
@@ -1757,29 +1757,44 @@ int calculate_write_data_per_packet(omron_tag_p tag) {
 
     pdebug(DEBUG_DETAIL, "Write overhead is %d bytes.", overhead);
 
-    data_per_packet = max_payload_size - overhead;
+    data_per_packet = available_payload - overhead;
 
-    pdebug(DEBUG_DETAIL, "Write packet maximum size is %d, write overhead is %d, and write data per packet is %d.",
-           max_payload_size, overhead, data_per_packet);
+    pdebug(DEBUG_DETAIL, "Write packet available payload is %d, write overhead is %d, and write data per packet is %d.",
+           available_payload, overhead, data_per_packet);
 
     if(data_per_packet <= 0) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               max_payload_size);
+        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for available payload, %d bytes!",
+               overhead, available_payload);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
-    /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
+    int element_size = 0;
+    int elements_per_packet = 0;
+
+   /* if the tag size is less than 8 bytes, then use a multiple of the tag size.  Otherwise use
     8 bytes as the unit */
-    if(tag->size < 8) {
-        data_per_packet = tag->size;
+    if(tag->elem_size < 8) {
+        elements_per_packet = data_per_packet / tag->elem_size;
+        data_per_packet = elements_per_packet * tag->elem_size;
+        element_size = tag->elem_size;
+        pdebug(DEBUG_DETAIL, "Using tag size %d bytes for element size.", element_size);
     } else {
         /* round down to the nearest multiple of 8 bytes */
-        data_per_packet &= 0x7FFFFFF8;
+        elements_per_packet = data_per_packet / 8;
+        data_per_packet = elements_per_packet * 8;
+        element_size = 8;
+        pdebug(DEBUG_DETAIL, "Using element size %d bytes.", element_size);
     }
 
-    if(data_per_packet < 1) {
-        pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %d bytes, is too large for packet, %d bytes!", overhead,
-               max_payload_size);
+    if(elements_per_packet < 1) {
+        pdebug(DEBUG_WARN, "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
+               available_payload, element_size);
+        return PLCTAG_ERR_TOO_LARGE;
+    }
+
+    if(elements_per_packet < 1) {
+        pdebug(DEBUG_WARN, "Unable to send request.  Available payload, %d bytes, is too small to write at least %d bytes!",
+               available_payload, element_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
