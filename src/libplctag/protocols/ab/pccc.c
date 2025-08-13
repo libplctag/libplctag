@@ -86,7 +86,7 @@ START_PACK typedef struct {
     uint8_t pccc_function;  /* FNC sub-function of command */
     uint16_le pccc_offset;  /* offset of requested in total request */
     uint16_le pccc_transfer_size; /* total number of words requested */
-} END_PACK pccc_read_cmd_req;
+} END_PACK plc5_pccc_read_cmd_req;
 
 START_PACK typedef struct {
     /* PCCC Command */
@@ -94,7 +94,8 @@ START_PACK typedef struct {
     uint8_t pccc_status;    /* STS 0x00 in request */
     uint16_le pccc_seq_num; /* TNS transaction/sequence id */
     uint8_t pccc_function;  /* FNC sub-function of command */
-} END_PACK pccc_rmw_cmd_req;
+    uint8_t pccc_transfer_size; /* total number of bytes requested */
+} END_PACK slc_pccc_read_cmd_req;
 
 START_PACK typedef struct {
     /* PCCC Command */
@@ -103,8 +104,26 @@ START_PACK typedef struct {
     uint16_le pccc_seq_num; /* TNS transaction/sequence id */
     uint8_t pccc_function;  /* FNC sub-function of command */
     uint16_le pccc_offset;  /* offset of requested in total request */
-    uint16_le pccc_transfer_size; /* total number of words requested */
-} END_PACK pccc_write_cmd_req;
+    uint16_le pccc_transfer_size; /* total number of words to be written */
+} END_PACK plc5_pccc_write_cmd_req;
+
+START_PACK typedef struct {
+    /* PCCC Command */
+    uint8_t pccc_command;   /* CMD read, write etc. */
+    uint8_t pccc_status;    /* STS 0x00 in request */
+    uint16_le pccc_seq_num; /* TNS transaction/sequence id */
+    uint8_t pccc_function;  /* FNC sub-function of command */
+    uint8_t pccc_transfer_size; /* total number of bytes to be written */
+} END_PACK slc_pccc_write_cmd_req;
+
+
+START_PACK typedef struct {
+    /* PCCC Command */
+    uint8_t pccc_command;   /* CMD read, write etc. */
+    uint8_t pccc_status;    /* STS 0x00 in request */
+    uint16_le pccc_seq_num; /* TNS transaction/sequence id */
+    uint8_t pccc_function;  /* FNC sub-function of command */
+} END_PACK pccc_rmw_cmd_req;
 
 
 
@@ -1458,12 +1477,12 @@ int pccc_tag_read_start(ab_tag_p tag, uint8_t pccc_func_code) {
 
         /* calculate request overhead */
         int request_overhead =   (int)sizeof(cip_pccc_req)
-                               + (int)sizeof(pccc_read_cmd_req)
+                               + (pccc_func_code == AB_EIP_PLC5_RANGE_READ_FUNC ? (int)sizeof(plc5_pccc_read_cmd_req) : (int)sizeof(slc_pccc_read_cmd_req))
                                + tag->encoded_name_size
                                + 1;
 
         pdebug(DEBUG_INFO, "PLC5 request overhead: CIP/PCCC header size %zu, PCCC read command header size %zu, encoded_name=%d, data_size=1, total=%d bytes",
-               sizeof(cip_pccc_req), sizeof(pccc_read_cmd_req), tag->encoded_name_size, request_overhead);
+               sizeof(cip_pccc_req), sizeof(plc5_pccc_read_cmd_req), tag->encoded_name_size, request_overhead);
 
         int request_payload_space = cip_payload_space - request_overhead;
 
@@ -1496,7 +1515,6 @@ int pccc_tag_read_start(ab_tag_p tag, uint8_t pccc_func_code) {
         /* point the struct pointers to the buffer */
         eip_cpf_uc_header *cip_req = (eip_cpf_uc_header *)(req->data);
         cip_pccc_req *cip_pccc = (cip_pccc_req *)(cip_req + 1);
-        pccc_read_cmd_req *pccc_cmd = (pccc_read_cmd_req *)(cip_pccc + 1);
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
@@ -1511,24 +1529,42 @@ int pccc_tag_read_start(ab_tag_p tag, uint8_t pccc_func_code) {
         cip_pccc->vendor_id = h2le16(AB_EIP_VENDOR_ID);
         cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
 
-        /* fill in PCCC command fields */
-        pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-        pccc_cmd->pccc_status = 0;
-        pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-        pccc_cmd->pccc_function = pccc_func_code;
-        pccc_cmd->pccc_offset = h2le16(0);
-        pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2)); /* size in words */
+        if(pccc_func_code == AB_EIP_PLC5_RANGE_READ_FUNC) {
+            plc5_pccc_read_cmd_req *pccc_cmd = (plc5_pccc_read_cmd_req *)(cip_pccc + 1);
+    
+            /* fill in PCCC command fields */
+            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
+            pccc_cmd->pccc_status = 0;
+            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
+            pccc_cmd->pccc_function = pccc_func_code;
+            pccc_cmd->pccc_offset = h2le16(0);
+            pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2)); /* size in words */
+    
+            /* point data pointer just past the fixed data fields */
+            data = (uint8_t *)(pccc_cmd + 1);
+        } else {
+            slc_pccc_read_cmd_req *pccc_cmd = (slc_pccc_read_cmd_req *)(cip_pccc + 1);
 
-        /* point data pointer just past the fixed data fields */
-        data = (uint8_t *)(pccc_cmd + 1);
+            /* fill in PCCC command fields */
+            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
+            pccc_cmd->pccc_status = 0;
+            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
+            pccc_cmd->pccc_function = pccc_func_code;
+            pccc_cmd->pccc_transfer_size = (uint8_t)tag->size; /* size in bytes */
 
+            /* point data pointer just past the fixed data fields */
+            data = (uint8_t *)(pccc_cmd + 1);    
+        }
+    
         /* copy encoded tag name into the request */
         mem_copy(data, tag->encoded_name, tag->encoded_name_size);
         data += tag->encoded_name_size;
 
-        /* add data size byte */
-        *data = (uint8_t)(tag->size);
-        data++;
+        if(pccc_func_code == AB_EIP_PLC5_RANGE_READ_FUNC) {
+            /* add data size byte */
+            *data = (uint8_t)(tag->size);
+            data++;
+        }
 
         /* debug: request full data length */
         ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
@@ -1686,7 +1722,7 @@ int pccc_tag_write_start(ab_tag_p tag, uint8_t pccc_func_code) {
 
         /* How much overhead? */
         overhead =   sizeof(cip_pccc_req)
-                   + sizeof(pccc_write_cmd_req)
+                   + (pccc_func_code == AB_EIP_PLC5_RANGE_READ_FUNC ? sizeof(plc5_pccc_write_cmd_req) : sizeof(slc_pccc_write_cmd_req))
                    + (size_t)(unsigned int)tag->encoded_name_size
                    + 1;
 
@@ -1728,7 +1764,6 @@ int pccc_tag_write_start(ab_tag_p tag, uint8_t pccc_func_code) {
         /* point the struct pointers to the buffer */
         eip_cpf_uc_header *cip_req = (eip_cpf_uc_header *)(req->data);
         cip_pccc_req *cip_pccc = (cip_pccc_req *)(cip_req + 1);
-        pccc_write_cmd_req *pccc_cmd = (pccc_write_cmd_req *)(cip_pccc + 1);
         embed_start = (uint8_t *)(&cip_pccc->service_code);
 
         /* fill in CIP/PCCC header fields */
@@ -1744,16 +1779,31 @@ int pccc_tag_write_start(ab_tag_p tag, uint8_t pccc_func_code) {
         cip_pccc->vendor_serial_number = h2le32(AB_EIP_VENDOR_SN);
 
         /* fill in PCCC command fields */
-        pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
-        pccc_cmd->pccc_status = 0;
-        pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
-        pccc_cmd->pccc_function = pccc_func_code;
-        pccc_cmd->pccc_offset = h2le16(0);
-        pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2)); // size is in bytes, PCCC transfer size is in words
+        if(pccc_func_code == AB_EIP_PLC5_RANGE_READ_FUNC) {
+            plc5_pccc_write_cmd_req *pccc_cmd = (plc5_pccc_write_cmd_req *)(cip_pccc + 1);
+    
+            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
+            pccc_cmd->pccc_status = 0;
+            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
+            pccc_cmd->pccc_function = pccc_func_code;
+            pccc_cmd->pccc_offset = h2le16(0);
+            pccc_cmd->pccc_transfer_size = h2le16((uint16_t)(tag->size / 2)); // size is in bytes, PCCC transfer size is in words
 
-        /* point data pointer just past the fixed data fields */
-        data = (uint8_t *)(pccc_cmd + 1);
+            /* point data pointer just past the fixed data fields */
+            data = (uint8_t *)(pccc_cmd + 1);
+        } else {
+            slc_pccc_write_cmd_req *pccc_cmd = (slc_pccc_write_cmd_req *)(cip_pccc + 1);
 
+            pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
+            pccc_cmd->pccc_status = 0;
+            pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
+            pccc_cmd->pccc_function = pccc_func_code;
+            pccc_cmd->pccc_transfer_size = (uint8_t)tag->size; /* size in bytes */
+
+            /* point data pointer just past the fixed data fields */
+            data = (uint8_t *)(pccc_cmd + 1);
+        }
+    
         /* copy encoded tag name into the request */
         mem_copy(data, tag->encoded_name, tag->encoded_name_size);
         data += tag->encoded_name_size;
@@ -1847,7 +1897,7 @@ int pccc_tag_write_bit_start(ab_tag_p tag) {
 
         /* How much overhead? */
         overhead =   sizeof(cip_pccc_req)
-                   + sizeof(pccc_write_cmd_req)
+                   + sizeof(plc5_pccc_write_cmd_req)
                    + (size_t)(unsigned int)tag->encoded_name_size
                    + 1;
 
