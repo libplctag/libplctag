@@ -1291,6 +1291,7 @@ int parse_pccc_subelem_mnemonic(const char **str, pccc_addr_t *address) {
 
 int parse_pccc_bit_num(const char **str, pccc_addr_t *address) {
     int tmp = 0;
+    int max_bit = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -1315,10 +1316,23 @@ int parse_pccc_bit_num(const char **str, pccc_addr_t *address) {
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    /* make sure that the data size is two bytes only. */
-    if(address->element_size_bytes != 2) {
-        pdebug(DEBUG_WARN, "Single bit selection only works on word-sized data.");
-        return PLCTAG_ERR_BAD_PARAM;
+    /* make sure that the data type is B, N, L or S. */
+    switch(address->file_type) {
+        case PCCC_FILE_BIT:
+            max_bit = 15;
+            break;
+        case PCCC_FILE_INT:
+            max_bit = 15;
+            break;
+        case PCCC_FILE_LONG_INT:
+            max_bit = 31;
+            break;
+        case PCCC_FILE_STATUS:
+            max_bit = 16;
+            break;
+        default:
+            pdebug(DEBUG_WARN, "Unsupported file type %x!", address->file);
+            return PLCTAG_ERR_BAD_PARAM;
     }
 
     /* step past the / character */
@@ -1331,8 +1345,8 @@ int parse_pccc_bit_num(const char **str, pccc_addr_t *address) {
         (*str)++;
     }
 
-    if(tmp < 0 || tmp > 15) {
-        pdebug(DEBUG_WARN, "Error processing bit number.  Must be between 0 and 15 inclusive, found %d!", tmp);
+    if(tmp < 0 || tmp > max_bit) {
+        pdebug(DEBUG_WARN, "Error processing bit number.  Must be between 0 and %d inclusive, found %d!", max_bit, tmp);
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 

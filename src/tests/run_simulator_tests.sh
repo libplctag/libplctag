@@ -46,7 +46,7 @@ fi
 sleep 1
 
 let TEST++
-echo -n "Test $TEST: basic large tag read/write... "
+echo -n "  Test $TEST: basic large tag read/write... "
 $VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=1000&name=TestBigArray' --debug=4 --write=1,2,3,4,5,6,7,8,9 > "${TEST}_big_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -57,7 +57,7 @@ else
 fi
 
 let TEST++
-echo -n "Test $TEST: stress RC memory code ... "
+echo -n "  Test $TEST: stress RC memory code ... "
 $VALGRIND$TEST_DIR/stress_rc_mem > "${TEST}_stress_rc_mem_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -68,7 +68,7 @@ else
 fi
 
 let TEST++
-echo -n "Test $TEST: CIP thread stress... "
+echo -n "  Test $TEST: CIP thread stress... "
 $TEST_DIR/thread_stress 20 "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestBigArray" > "${TEST}_thread_stress_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -80,7 +80,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: auto sync... "
+echo -n "  Test $TEST: auto sync... "
 $VALGRIND$TEST_DIR/test_auto_sync > "${TEST}_auto_sync_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -92,7 +92,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: indexed tags ... "
+echo -n "  Test $TEST: indexed tags ... "
 $VALGRIND$TEST_DIR/test_indexed_tags > "${TEST}_test_indexed_tags.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -104,7 +104,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: hard library shutdown... "
+echo -n "  Test $TEST: hard library shutdown... "
 $VALGRIND$TEST_DIR/test_shutdown > "${TEST}_shutdown.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -118,8 +118,10 @@ fi
 # echo "  Killing AB emulator."
 killall -TERM ab_server > /dev/null 2>&1
 
+echo "Starting stand-alone tests."
+
 let TEST++
-echo -n "Test $TEST: Test reconnect after PLC outage... "
+echo -n "  Test $TEST: Test reconnect after PLC outage... "
 $VALGRIND$TEST_DIR/test_reconnect_after_outage "${TEST_DIR}/ab_server" > "${TEST}_reconnect_after_outage.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -131,7 +133,7 @@ fi
 
 
 echo "Starting AB emulator for functional/slow ControlLogix tests."
-$VALGRIND$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" --delay=20  > logix_slow_emulator.log 2>&1 &
+$VALGRIND$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" --delay=50  > logix_slow_emulator.log 2>&1 &
 EMULATOR_PID=$!
 if [ $? != 0 ]; then
     echo "Unable to start AB/ControlLogix emulator!"
@@ -142,7 +144,7 @@ sleep 1
 
 
 let TEST++
-echo -n "Test $TEST: emulator test callbacks... "
+echo -n "  Test $TEST: emulator test callbacks... "
 $VALGRIND$TEST_DIR/test_callback > "${TEST}_callback_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -154,7 +156,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: emulator test extended callbacks sync... "
+echo -n "  Test $TEST: emulator test extended callbacks sync... "
 $VALGRIND$TEST_DIR/test_callback_ex > "${TEST}_extended_callback_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -166,7 +168,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: emulator test extended callbacks async... "
+echo -n "  Test $TEST: emulator test extended callbacks async... "
 $VALGRIND$TEST_DIR/test_callback_ex_logix > "${TEST}_extended_callback_async_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -196,7 +198,7 @@ sleep 1
 
 
 let TEST++
-echo -n "Test $TEST: basic Micro800 read/write... "
+echo -n "  Test $TEST: basic Micro800 read/write... "
 $VALGRIND$TEST_DIR/./tag_rw2 --type=sint32  '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micro800&name=TestDINTArray' --write=42 --debug=4 > "${TEST}_micro800_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -226,7 +228,7 @@ sleep 1
 
 
 let TEST++
-echo -n "Test $TEST: basic Omron read/write... "
+echo -n "  Test $TEST: basic Omron read/write... "
 $VALGRIND$TEST_DIR/./tag_rw2 --type=sint32  '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --write=42 --debug=4 > "${TEST}_omron_tag_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -236,17 +238,162 @@ else
     let SUCCESSES++
 fi
 
-echo "Killing Omron emulator."
+echo "  Killing Omron emulator."
 killall -TERM ab_server > /dev/null 2>&1
 
 
-echo ""
-echo "$TEST tests."
-echo "$SUCCESSES successes."
-echo "$FAILURES failures."
-
-if [ $FAILURES == 0 ]; then
-    exit 0
-else
+echo "Starting AB emulator for Micrologix tests."
+$TEST_DIR/ab_server --debug --plc=Micrologix '--tag=B3[10]' '--tag=N7[10]' '--tag=L19[10]' > micrologix_emulator.log 2>&1 &
+EMULATOR_PID=$!
+if [ $? != 0 ]; then
+    # echo "FAILURE"
+    echo "Unable to start AB/Micrologix emulator!"
     exit 1
+# else
+    # echo "OK"
 fi
+
+sleep 1
+
+let TEST++
+echo -n "  Test $TEST: B data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=uint16 '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micrologix&elem_count=1&name=B3:0' --write=0 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: B bit data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micrologix&elem_count=4&name=B3:0/6' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: N data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint16 '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micrologix&elem_count=1&name=N7:0' --write=42 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: N bit data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micrologix&elem_count=1&name=N7:0/10' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: L data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micrologix&elem_count=4&name=L10:0' --write=0,1,2,3 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: L bit data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=micrologix&name=L10:0/23' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+echo "  Killing Micrologix emulator."
+killall -TERM ab_server > /dev/null 2>&1
+
+
+
+echo "Starting AB emulator for PLC5 tests."
+$TEST_DIR/ab_server --debug --plc=PLC/5 '--tag=B3[10]' '--tag=N7[10]' > plc5_emulator.log 2>&1 &
+EMULATOR_PID=$!
+if [ $? != 0 ]; then
+    # echo "FAILURE"
+    echo "Unable to start AB/PLC5 emulator!"
+    exit 1
+# else
+    # echo "OK"
+fi
+
+sleep 1
+
+
+let TEST++
+echo -n "  Test $TEST: B data file PLC5 tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=uint16 '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=plc5&elem_count=1&name=B3:0' --debug=4 --write=0 > "${TEST}_plc5.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: B bit data file PLC5 tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=plc5&elem_count=1&name=B3:0/10' --debug=4 --write=1 > "${TEST}_plc5.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: N data file PLC5 tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint16 '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=plc5&elem_count=1&name=N7:0' --debug=4 --write=0 > "${TEST}_plc5.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: N bit data file PLC5 tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=127.0.0.1&plc=plc5&elem_count=1&name=N7:0/10' --debug=4 --write=1 > "${TEST}_plc5.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+echo "  Killing Micrologix emulator."
+killall -TERM ab_server > /dev/null 2>&1
+
+sleep 1
+
+echo ""
+echo "Results:"
+echo " - $TEST tests."
+echo " - $SUCCESSES successes."
+echo " - $FAILURES failures."
+
+exit $FAILURES
