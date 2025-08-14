@@ -45,7 +45,6 @@
 
 static int tag_read_start(ab_tag_p tag);
 static int tag_write_start(ab_tag_p tag);
-static int tag_write_bit_start(ab_tag_p tag);
 
 struct tag_vtable_t eip_plc5_dhp_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
                                            (tag_vtable_func)tag_read_start, (tag_vtable_func)pccc_dhp_tag_status,
