@@ -916,6 +916,12 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
             uint8_t *current_entry_data = data;
             int new_size = (int)payload_size + tag->offset;
 
+            pdebug(DEBUG_DETAIL, "Received %d bytes of tag list data.  Partial: %s", (int)payload_size,
+                   partial_data ? "yes" : "no");
+            pdebug(DEBUG_DETAIL, "new size: %d", new_size);
+            pdebug(DEBUG_DETAIL, "current tag size: %d", tag->size);
+            pdebug(DEBUG_DETAIL, "current offset: %d", tag->offset);
+
             /* copy the data into the tag and realloc if we need more space. */
 
             if(new_size > tag->size) {
@@ -944,6 +950,7 @@ int listing_tag_check_read_status_connected(ab_tag_p tag) {
             pdebug(DEBUG_DETAIL, "current offset %d", tag->offset);
 
             /* scan through the data to get the next ID to use. */
+            pdebug(DEBUG_DETAIL, "Scanning through data for next ID.");
             while((data_end - current_entry_data) > 0) {
                 tag_list_entry *current_entry = (tag_list_entry *)current_entry_data;
 
@@ -1135,6 +1142,7 @@ int listing_tag_build_read_request_connected(ab_tag_p tag) {
     req->allow_packing = tag->allow_packing;
 
     /* add the request to the session's list. */
+    tag->read_in_progress = 1;
     rc = session_add_request(tag->session, req);
 
     if(rc != PLCTAG_STATUS_OK) {
@@ -1575,12 +1583,13 @@ int udt_tag_build_read_metadata_request_connected(ab_tag_p tag) {
 
     /* add the request to the session's list. */
     rc = session_add_request(tag->session, req);
-
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_ERROR, "Unable to add request to session! rc=%d", rc);
         ab_tag_abort_request(tag);
         return rc;
     }
+
+    tag->read_in_progress = 1;
 
     /* save the request for later */
     tag->req = req;
