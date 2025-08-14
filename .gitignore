@@ -61,3 +61,4 @@ src/.DS_Store
 src/tests/log.txt
 .claude
 .vscode
+external_docs/

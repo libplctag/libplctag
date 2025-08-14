@@ -180,6 +180,7 @@ void usage(void) {
                     "\n"
                     "    PCCC-based PLC tags are in the format: <file>[<size>] where:\n"
                     "        <file> is the data file, only the following are supported:\n"
+                    "            B3   - 1-bit boolean value (as unsigned 16-bit integer).\n"
                     "            N7   - 2-byte signed integer.\n"
                     "            F8   - 4-byte floating point number.\n"
                     "            ST18 - 82-byte ASCII string.\n"
@@ -201,7 +202,8 @@ void usage(void) {
                     "\n"
                     "        <sizes> field is one or more (up to 3) numbers separated by commas.\n"
                     "\n"
-                    "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n");
+                    "Example: ab_server --plc=ControlLogix --path=1,0 --tag=MyTag:DINT[10,10]\n"
+                    "         ab_server --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10]\n");
 
     exit(1);
 }
@@ -441,7 +443,12 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         for(size_t i = 0; i < len && i < (size_t)200; i++) { data_file_name[i] = tag_str[start + i]; }
 
         /* check data file for a match. */
-        if(str_cmp_i(data_file_name, "N7") == 0) {
+        if(str_cmp_i(data_file_name, "B3") == 0) {
+            info("Found B3 data file.");
+            tag->tag_type = TAG_PCCC_TYPE_BIT;
+            tag->elem_size = 2;
+            tag->data_file_num = 3;
+        } else if(str_cmp_i(data_file_name, "N7") == 0) {
             info("Found N7 data file.");
             tag->tag_type = TAG_PCCC_TYPE_INT;
             tag->elem_size = 2;

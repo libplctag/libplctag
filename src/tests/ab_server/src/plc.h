@@ -55,6 +55,7 @@ typedef uint16_t tag_type_t;
 #define TAG_CIP_TYPE_STRING      ((tag_type_t)0x00D0) /* 88-byte string, with 82 bytes of data, 4-byte count and 2 bytes of padding */
 
 /* PCCC data types.   FIXME */
+#define TAG_PCCC_TYPE_BIT         ((uint8_t)0x85) /* 1-bit boolean value as unsigned 16-bit integer */
 #define TAG_PCCC_TYPE_INT         ((uint8_t)0x89) /* Signed 16–bit integer value */
 #define TAG_PCCC_TYPE_DINT        ((uint8_t)0x91) /* Signed 32–bit integer value */
 #define TAG_PCCC_TYPE_REAL        ((uint8_t)0x8a) /* 32–bit floating point value, IEEE format */
