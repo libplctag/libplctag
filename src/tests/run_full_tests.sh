@@ -184,8 +184,30 @@ else
 fi
 
 let TEST++
+echo -n "Test $TEST: B data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=uint16 '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&name=B3:0' --write=0 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: B bit data file Micrologix tag read/write... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&name=B3:0/6' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
 echo -n "Test $TEST: N data file Micrologix tag read/write... "
-$VALGRIND$TEST_DIR/tag_rw2 --type=sint16 '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&elem_count=1&name=N7:0' --write=42 --debug=4 > "${TEST}_micrologix.log" 2>&1
+$VALGRIND$TEST_DIR/tag_rw2 --type=sint16 '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&name=N7:0' --write=42 --debug=4 > "${TEST}_micrologix.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -196,7 +218,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: N bit data file Micrologix tag read/write... "
-$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&elem_count=1&name=N7:0/10' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&name=N7:0/10' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -217,31 +239,20 @@ else
 fi
 
 let TEST++
-echo -n "Test $TEST: L bit data file Micrologix tag read/write... "
+echo -n "Test $TEST: L bit data file Micrologix tag read... "
+$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&name=L10:0/23' --debug=4 > "${TEST}_micrologix.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "Test $TEST: L bit data file Micrologix tag write... "
 $VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&name=L10:0/23' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
-let TEST++
-echo -n "Test $TEST: B data file Micrologix tag read/write... "
-$VALGRIND$TEST_DIR/tag_rw2 --type=uint16 '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&elem_count=1&name=B3:0' --write=0 --debug=4 > "${TEST}_micrologix.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
-
-let TEST++
-echo -n "Test $TEST: B bit data file Micrologix tag read/write... "
-$VALGRIND$TEST_DIR/tag_rw2 --type=bit '--tag=protocol=ab-eip&gateway=10.206.1.36&plc=micrologix&elem_count=4&name=B3:0/6' --write=1 --debug=4 > "${TEST}_micrologix.log" 2>&1
-if [ $? != 0 ]; then
+if [ $? == 0 ]; then   # this should NOT succeed
     echo "FAILURE"
     let FAILURES++
 else
