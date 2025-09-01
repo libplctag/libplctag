@@ -211,7 +211,9 @@ static int slc_tag_write_bit_start(ab_tag_p tag);
 
 static int pccc_dhp_check_read_status(ab_tag_p tag);
 static int pccc_dhp_check_write_status(ab_tag_p tag);
-static int pccc_dhp_tag_write_bit_start(ab_tag_p tag);
+static int plc5_dhp_tag_write_bit_start(ab_tag_p tag);
+
+static int slc_dhp_tag_write_bit_start(ab_tag_p tag);
 
 /*
  * Public functions
@@ -2091,8 +2093,9 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
             break;
         }
 
-        if(tag->size != 2) {
-            pdebug(DEBUG_WARN, "Invalid tag size: %d (expected 2)", tag->size);
+        /* the mask is only 16 bits. */
+        if(tag->size != 2 || tag->elem_size != 2) {
+            pdebug(DEBUG_WARN, "Tag (%d bytes) and element size (%d bytes) must be 2 bytes!", tag->size, tag->elem_size);
             rc = PLCTAG_ERR_UNSUPPORTED;
             break;
         }
@@ -2101,7 +2104,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
 
         /* How much overhead? */
         overhead =   sizeof(cip_pccc_req)
-                   + sizeof(plc5_pccc_write_cmd_req)
+                   + sizeof(slc_pccc_write_cmd_req)
                    + (size_t)(unsigned int)tag->encoded_name_size
                    + 1;
 
@@ -2654,7 +2657,11 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
     pdebug(DEBUG_INFO, "Starting.");
 
     if(tag->is_bit) {
-        return pccc_dhp_tag_write_bit_start(tag);
+        if(tag->plc_type == AB_PLC_PLC5) {
+            return plc5_dhp_tag_write_bit_start(tag);
+        } else {
+            return slc_dhp_tag_write_bit_start(tag);
+        }
     }
 
     do {
@@ -2822,7 +2829,7 @@ int pccc_dhp_tag_write_start(ab_tag_p tag) {
     return rc;
 }
 
-int pccc_dhp_tag_write_bit_start(ab_tag_p tag) {
+int plc5_dhp_tag_write_bit_start(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     ab_request_p req = NULL;
     uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
@@ -3003,6 +3010,193 @@ int pccc_dhp_tag_write_bit_start(ab_tag_p tag) {
     pdebug(DEBUG_INFO, "Done.");
     return rc;
 }
+
+int slc_dhp_tag_write_bit_start(ab_tag_p tag) {
+    int rc = PLCTAG_STATUS_OK;
+    ab_request_p req = NULL;
+    uint16_t conn_seq_id = (uint16_t)(session_get_new_seq_id(tag->session));
+    uint8_t *data = NULL;
+    uint8_t *embed_start = NULL;
+    size_t overhead = 0;
+    int data_per_packet = 0;
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    do {
+        /* check for busy */
+        if(tag->read_in_progress || tag->write_in_progress) {
+            pdebug(DEBUG_WARN, "Read (%d) or write (%d) operation already in flight!", tag->read_in_progress, tag->write_in_progress);
+            rc = PLCTAG_ERR_BUSY;
+            break;
+        }
+
+        /* the mask is only 16 bits. */
+        if(tag->size != 2 || tag->elem_size != 2) {
+            pdebug(DEBUG_WARN, "Unsupported tag size or element size: %d, %d", tag->size, tag->elem_size);
+            rc = PLCTAG_ERR_UNSUPPORTED;
+            break;
+        }
+
+        tag->write_in_progress = 1;
+
+        /* How much overhead? */
+        overhead =   sizeof(eip_cpf_co_header)
+                   + sizeof(pccc_dhp_routing_header)
+                   + sizeof(slc_pccc_write_cmd_req)
+                   + (size_t)tag->encoded_name_size
+                   + (size_t)(tag->elem_size)
+                   + 2; /* the mask */
+
+        int session_payload_space = session_get_available_cip_payload_space(tag->session);
+
+        if(session_payload_space <= 0) {
+            pdebug(DEBUG_WARN, "Unable to get valid payload space from session. Available payload: %d bytes", session_payload_space);
+            tag->write_in_progress = 0;
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
+        data_per_packet = session_payload_space - (int)overhead;
+
+        if(data_per_packet < 0) {
+            pdebug(DEBUG_WARN, "Unable to send request.  Packet overhead, %zu bytes, is too large for available payload, %d bytes!",
+                   overhead, session_payload_space);
+            tag->write_in_progress = 0;
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
+        /* check if we can fit the AND/OR masks in the packet */
+        if(data_per_packet < (int)(tag->elem_size * 2)) {
+            pdebug(DEBUG_WARN, "Tag elem_size is %d, write overhead is %zu, and write data per packet is %zu.", tag->elem_size, overhead,
+                   data_per_packet);
+            tag->write_in_progress = 0;
+            rc = PLCTAG_ERR_TOO_LARGE;
+            break;
+        }
+
+        /* get a request buffer */
+        rc = session_create_request(tag->session, tag->tag_id, &req);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to get new request.  rc=%d", rc);
+            tag->write_in_progress = 0;
+            break;
+        }
+
+        /* stack the struct pointers as in tag_read_start */
+        eip_cpf_co_header *cip_req = (eip_cpf_co_header *)(req->data);
+        pccc_dhp_rmw_cmd_req *pccc_cmd = (pccc_dhp_rmw_cmd_req *)(cip_req + 1);
+        embed_start = (uint8_t *)(cip_req + 1);
+
+        /* point data pointer just past the fixed data fields */
+        data = (uint8_t *)(pccc_cmd + 1);
+
+        /* Add the transfer size. */
+        *data = (uint8_t)(tag->size & 0xFF);
+        data++;
+
+        /* copy encoded tag name into the request */
+        mem_copy(data, tag->encoded_name, tag->encoded_name_size);
+        data += tag->encoded_name_size;
+
+        /* The mask has bits set where the data will change the data file. */
+        for(int i = 0; i < tag->elem_size; i++) {
+            if((tag->bit / 8) == i) {
+                *data = (uint8_t)(1 << (tag->bit % 8));
+                pdebug(DEBUG_DETAIL, "adding mask byte %d: %x", i, *data);
+                data++;
+            } else {
+                *data = (uint8_t)0x00;
+                pdebug(DEBUG_DETAIL, "adding mask byte %d: %x", i, *data);
+                data++;
+            }
+        }
+
+        /* the set mask */
+        for(int i = 0; i < tag->elem_size; i++) {
+            *data = tag->data[i];
+            pdebug(DEBUG_DETAIL, "adding set byte %d: %x", i, *data);
+            data++;
+        }
+
+        /* debug: request full data length */
+        ptrdiff_t calculated_request_size = (ptrdiff_t)(data - req->data);
+        pdebug(DEBUG_DETAIL, "DH+ SLC bit write request full data length: %td bytes.", calculated_request_size);
+
+        /* debug: dump request data */
+        pdebug(DEBUG_DETAIL, "DH+ SLC bit write request data:");
+        pdebug_dump_bytes(DEBUG_DETAIL, req->data, (int)calculated_request_size);
+
+        /* debug: CIP data length */
+        ptrdiff_t cip_request_size = (ptrdiff_t)(data - embed_start);
+        pdebug(DEBUG_DETAIL, "DH+ SLC bit write request CIP data length: %td bytes.", cip_request_size);
+
+        /* fill in DH+ fields */
+        pccc_cmd->dest_link = h2le16(0);
+        pccc_cmd->dest_node = h2le16(tag->session->dhp_dest);
+        pccc_cmd->src_link = h2le16(0);
+        pccc_cmd->src_node = h2le16(0);
+
+        /* fill in PCCC command fields */
+        pccc_cmd->pccc_command = AB_EIP_PCCC_TYPED_CMD;
+        pccc_cmd->pccc_status = 0;
+        pccc_cmd->pccc_seq_num = h2le16(conn_seq_id);
+        pccc_cmd->pccc_function = AB_EIP_SLC_RANGE_WRITE_MASK_FUNC;
+
+        /* fill in Common Packet Format fields */
+        cip_req->cpf_item_count = h2le16(2);
+        cip_req->cpf_cai_item_type = h2le16(AB_EIP_ITEM_CAI);
+        cip_req->cpf_cai_item_length = h2le16(4);
+        cip_req->cpf_targ_conn_id = h2le32(tag->session->targ_connection_id);
+        cip_req->cpf_cdi_item_type = h2le16(AB_EIP_ITEM_CDI);
+        cip_req->cpf_conn_seq_num = h2le16(conn_seq_id);
+        cip_req->cpf_cdi_item_length = h2le16((uint16_t)((size_t)cip_request_size + sizeof(cip_req->cpf_conn_seq_num)));
+
+        pdebug(DEBUG_DETAIL, "DH+ PCCC bit write request CPF CDI item length: %u bytes.", le2h16(cip_req->cpf_cdi_item_length));
+
+        cip_req->router_timeout = h2le16(1);
+        cip_req->encap_command = h2le16(AB_EIP_CONNECTED_SEND);
+
+        /* set request size */
+        req->request_size = (int)calculated_request_size;
+        pdebug(DEBUG_DETAIL, "DH+ PCCC bit write request size set to %d bytes.", req->request_size);
+
+        /* add request to session */
+        rc = session_add_request(tag->session, req);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Unable to add bit write request to session! rc=%d", rc);
+            break;
+        }
+
+        rc = PLCTAG_STATUS_OK;
+    } while(0);
+
+    /* set tag->req if successful, else clean up */
+    if(rc == PLCTAG_STATUS_OK) {
+        critical_block(tag->api_mutex) {
+            if(tag->req) {
+                pdebug(DEBUG_WARN, "Request already set! This should not happen!");
+                rc = PLCTAG_ERR_BAD_DATA;
+            } else {
+                pdebug(DEBUG_INFO, "Setting bit write request for tag %d", tag->tag_id);
+                tag->req = req;
+                rc = PLCTAG_STATUS_PENDING;
+            }
+        }
+    } else {
+        pdebug(DEBUG_WARN, "Failed to generate new bit write request rc=%s", plc_tag_decode_error(rc));
+        req = rc_dec(req);
+        tag->write_in_progress = 0;
+        tag->write_complete = 1;
+        ab_tag_abort_request(tag);
+        return rc;
+    }
+
+    pdebug(DEBUG_INFO, "Done.");
+    return rc;
+}
+
+
 
 
 /*
