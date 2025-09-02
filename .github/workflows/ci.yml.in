@@ -539,7 +539,7 @@ jobs:
 
   windows_x64_MSVC:
 
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       VERSION: "@VERSION@"
@@ -713,7 +713,7 @@ jobs:
 
   windows_x64_MinGW:
 
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       VERSION: "@VERSION@"
@@ -858,7 +858,7 @@ jobs:
 
   windows_x86_MSVC:
 
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       VERSION: "@VERSION@"
@@ -1031,7 +1031,7 @@ jobs:
 
   windows_x86_MinGW:
 
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       VERSION: "@VERSION@"
@@ -1175,7 +1175,7 @@ jobs:
       shell: cmd
 
   windows_cross_build_ARM64_MSVC:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       VERSION: "@VERSION@"
