@@ -32,33 +32,19 @@
  ***************************************************************************/
 
 
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/defs.h>
-#include <libplctag/protocols/ab/eip_slc_dhp.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
-#include <utils/debug.h>
 
+struct tag_vtable_t eip_slc_dhp_vtable = {
+    .abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
+    .read = (tag_vtable_func)pccc_dhp_tag_read_start,
+    .status = (tag_vtable_func)pccc_dhp_tag_status,
+    .tickler = (tag_vtable_func)pccc_dhp_tag_tickler,
+    .write = (tag_vtable_func)pccc_dhp_tag_write_start,
+    .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
 
-static int tag_read_start(ab_tag_p tag);
-static int tag_write_start(ab_tag_p tag);
+    /* data accessors */
+    .get_int_attrib = ab_get_int_attrib,
+    .set_int_attrib = ab_set_int_attrib,
+    .get_byte_array_attrib = ab_get_byte_array_attrib
+};
 
-struct tag_vtable_t eip_slc_dhp_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
-                                   (tag_vtable_func)tag_read_start, (tag_vtable_func)pccc_dhp_tag_status, (tag_vtable_func)pccc_dhp_tag_tickler,
-                                   (tag_vtable_func)tag_write_start, (tag_vtable_func)NULL, /* wake_plc */
-
-                                   /* data accessors */
-                                   ab_get_int_attrib, ab_set_int_attrib,
-
-                                   ab_get_byte_array_attrib};
-
-
-int tag_read_start(ab_tag_p tag) {
-    return pccc_dhp_tag_read_start((ab_tag_p)tag, AB_EIP_SLC_RANGE_READ_FUNC);
-}
-
-int tag_write_start(ab_tag_p tag) {
-    return pccc_dhp_tag_write_start((ab_tag_p)tag, AB_EIP_SLC_RANGE_WRITE_FUNC);
-}

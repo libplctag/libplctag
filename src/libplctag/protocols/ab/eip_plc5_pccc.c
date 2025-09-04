@@ -31,31 +31,22 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include <inttypes.h>
-#include <libplctag/lib/libplctag.h>
-#include <libplctag/protocols/ab/ab_common.h>
-#include <libplctag/protocols/ab/defs.h>
-#include <libplctag/protocols/ab/eip_plc5_pccc.h>
-#include <libplctag/protocols/ab/error_codes.h>
-#include <libplctag/protocols/ab/pccc.h>
-#include <libplctag/protocols/ab/session.h>
 #include <libplctag/protocols/ab/tag.h>
-#include <stdint.h>
-#include <utils/debug.h>
 
 
-/* PCCC */
-static int tag_read_start(ab_tag_p tag);
-static int tag_write_start(ab_tag_p tag);
+struct tag_vtable_t plc5_vtable = {
+    .abort = (tag_vtable_func)ab_tag_abort_request, /* shared */
+    .read = (tag_vtable_func)pccc_tag_read_start,
+    .status = (tag_vtable_func)pccc_tag_status,
+    .tickler = (tag_vtable_func)pccc_tag_tickler,
+    .write = (tag_vtable_func)pccc_tag_write_start,
+    .wake_plc = (tag_vtable_func)NULL, /* wake_plc */
 
-struct tag_vtable_t plc5_vtable = {(tag_vtable_func)ab_tag_abort_request, /* shared */
-                                   (tag_vtable_func)tag_read_start, (tag_vtable_func)pccc_tag_status, (tag_vtable_func)pccc_tag_tickler,
-                                   (tag_vtable_func)tag_write_start, (tag_vtable_func)NULL, /* wake_plc */
-
-                                   /* data accessors */
-                                   ab_get_int_attrib, ab_set_int_attrib,
-
-                                   ab_get_byte_array_attrib};
+    /* data accessors */
+    .get_int_attrib = ab_get_int_attrib,
+    .set_int_attrib = ab_set_int_attrib,
+    .get_byte_array_attrib = ab_get_byte_array_attrib
+};
 
 
 /* default string types used for PLC-5 PLCs. */
@@ -79,11 +70,3 @@ tag_byte_order_t plc5_tag_byte_order = {.is_allocated = 0,
                                         .str_total_length = 84,
                                         .str_pad_bytes = 0};
 
-
-int tag_read_start(ab_tag_p tag) {
-    return pccc_tag_read_start((ab_tag_p)tag, AB_EIP_PLC5_RANGE_READ_FUNC);
-}
-
-int tag_write_start(ab_tag_p tag) {
-    return pccc_tag_write_start((ab_tag_p)tag, AB_EIP_PLC5_RANGE_WRITE_FUNC);
-}
