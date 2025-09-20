@@ -1394,39 +1394,41 @@ jobs:
         sudo apt update
 
         # Install basic build tools
-        sudo apt install -y build-essential cmake wget curl
+        sudo apt install -y build-essential cmake
 
-        # Download and install musl-cross-make for building musl toolchain
-        cd /tmp
-        git clone https://github.com/richfelker/musl-cross-make.git
-        cd musl-cross-make
-
-        # Configure for the target architecture
-        cat > config.mak << EOF
-        TARGET = ${{ matrix.musl_target }}
-        OUTPUT = /opt/cross
-        COMMON_CONFIG += CC="gcc -static --static"
-        COMMON_CONFIG += CXX="g++ -static --static"  
-        COMMON_CONFIG += FC="gfortran -static --static"
-        COMMON_CONFIG += --disable-nls
-        GCC_CONFIG += --enable-languages=c,c++
-        GCC_CONFIG += --disable-libquadmath --disable-decimal-float
-        GCC_CONFIG += --disable-libitm
-        MUSL_CONFIG += --disable-shared
-        EOF
-
-        # Build the toolchain (this can take a while)
-        make -j$(nproc)
-        sudo make install
-
-        # Add to PATH for subsequent steps
-        echo "/opt/cross/bin" >> $GITHUB_PATH
+        # Install pre-built musl cross-compilation toolchain from Ubuntu packages
+        if [ "${{ matrix.arch }}" = "x86_64" ]; then
+          # For x86_64, use the native musl tools from Ubuntu packages
+          sudo apt install -y musl-tools musl-dev
+          echo "MUSL_CC=musl-gcc" >> $GITHUB_ENV
+          echo "MUSL_CXX=musl-g++" >> $GITHUB_ENV
+          
+        elif [ "${{ matrix.arch }}" = "aarch64" ]; then
+          # For aarch64, try to use official Ubuntu/Debian musl cross-compiler packages
+          # First install the standard GNU cross-compiler as a base
+          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          
+          # Try to install musl cross-compiler packages from official repositories
+          if sudo apt install -y gcc-aarch64-linux-musl g++-aarch64-linux-musl; then
+            echo "MUSL_CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
+            echo "MUSL_CXX=aarch64-linux-musl-g++" >> $GITHUB_ENV
+          else
+            echo "ERROR: aarch64 musl cross-compiler packages not available in this Ubuntu version"
+            echo "Available packages:"
+            apt search musl | grep -i aarch64 || echo "No aarch64 musl packages found"
+            echo "Falling back to regular GNU cross-compiler with static linking"
+            echo "MUSL_CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+            echo "MUSL_CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+            echo "MUSL_STATIC_FLAG=-static" >> $GITHUB_ENV
+          fi
+        fi
 
     - name: Verify musl toolchain
       run: |
         echo "Verifying installed musl toolchain:"
-        /opt/cross/bin/${{ matrix.musl_target }}-gcc --version
-        /opt/cross/bin/${{ matrix.musl_target }}-g++ --version
+        echo "Compiler: $MUSL_CC"
+        $MUSL_CC --version
+        $MUSL_CXX --version
 
     - name: Create build directory
       run: |
@@ -1438,9 +1440,16 @@ jobs:
         cd ${{ env.BUILD }}
         
         # Set environment variables for cross-compilation
-        export CC=/opt/cross/bin/${{ matrix.musl_target }}-gcc
-        export CXX=/opt/cross/bin/${{ matrix.musl_target }}-g++
+        export CC=$MUSL_CC
+        export CXX=$MUSL_CXX
         export CMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
+        
+        # Add static linking flags if we're using fallback regular GCC
+        CMAKE_ARGS=""
+        if [ -n "$MUSL_STATIC_FLAG" ]; then
+          CMAKE_ARGS="-DCMAKE_C_FLAGS=-static -DCMAKE_CXX_FLAGS=-static"
+          echo "Using fallback static linking with regular GCC"
+        fi
         
         cmake \
           -DCMAKE_BUILD_TYPE=MinSizeRel \
@@ -1449,8 +1458,9 @@ jobs:
           -DCMAKE_VERBOSE_MAKEFILE=On \
           -DCMAKE_SYSTEM_NAME=Linux \
           -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
-          -DCMAKE_C_COMPILER=/opt/cross/bin/${{ matrix.musl_target }}-gcc \
-          -DCMAKE_CXX_COMPILER=/opt/cross/bin/${{ matrix.musl_target }}-g++ \
+          -DCMAKE_C_COMPILER=$MUSL_CC \
+          -DCMAKE_CXX_COMPILER=$MUSL_CXX \
+          $CMAKE_ARGS \
           ..
 
     - name: Build
