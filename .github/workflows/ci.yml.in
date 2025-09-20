@@ -51,6 +51,7 @@ jobs:
         ${{ env.DIST }}/test_callback
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Micro800
       run: |
@@ -62,6 +63,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32  '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Omron NJ/NX
       run: |
@@ -73,6 +75,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test PLC/5
       run: |
@@ -84,6 +87,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test SLC 500
       run: |
@@ -95,6 +99,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Duplicate Connection ID
       run: |
@@ -106,6 +111,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Large Tags
       run: |
@@ -117,6 +123,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Array Notation Read/Write
       run: |
@@ -128,6 +135,7 @@ jobs:
         ${{ env.DIST }}/test_indexed_tags
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     #- name: Test Simultaneous Read/Write On Tag
     #  run: |
@@ -140,6 +148,7 @@ jobs:
         cd ${{ env.DIST }}
         echo "Test reconnect after outage"
         ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
+        sleep 3
 
     - name: Test Modbus
       run: |
@@ -151,6 +160,7 @@ jobs:
         ${{ env.DIST }}/test_callback_ex_modbus
         echo "shut down server."
         killall modbus_server -TERM &> /dev/null
+        sleep 3
 
     - name: Create ZIP artifacts
       run: |
@@ -1577,6 +1587,7 @@ jobs:
         ./test_callback
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Micro800
       run: |
@@ -1588,6 +1599,7 @@ jobs:
         ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Omron NJ/NX
       run: |
@@ -1599,6 +1611,7 @@ jobs:
         ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test PLC/5
       run: |
@@ -1610,6 +1623,7 @@ jobs:
         ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test SLC 500
       run: |
@@ -1621,6 +1635,7 @@ jobs:
         ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Duplicate Connection ID
       run: |
@@ -1632,6 +1647,7 @@ jobs:
         ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Large Tags
       run: |
@@ -1643,6 +1659,7 @@ jobs:
         ./test_special
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Create ZIP artifacts
       run: |
