@@ -1357,6 +1357,7 @@ jobs:
 
   alpine_musl:
     runs-on: ubuntu-22.04
+    continue-on-error: ${{ matrix.arch == 'aarch64' }}
 
     strategy:
       matrix:
@@ -1404,10 +1405,7 @@ jobs:
           echo "MUSL_CXX=musl-gcc" >> $GITHUB_ENV
           
         elif [ "${{ matrix.arch }}" = "aarch64" ]; then
-          # For aarch64, try to use official Ubuntu/Debian musl cross-compiler packages
-          # First install the standard GNU cross-compiler as a base
-          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          
+          # For aarch64, we need a proper musl cross-compiler
           # Try to install musl cross-compiler packages from official repositories
           if sudo apt install -y gcc-aarch64-linux-musl g++-aarch64-linux-musl; then
             echo "MUSL_CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
@@ -1416,10 +1414,11 @@ jobs:
             echo "ERROR: aarch64 musl cross-compiler packages not available in this Ubuntu version"
             echo "Available packages:"
             apt search musl | grep -i aarch64 || echo "No aarch64 musl packages found"
-            echo "Falling back to regular GNU cross-compiler with static linking"
-            echo "MUSL_CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-            echo "MUSL_CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-            echo "MUSL_STATIC_FLAG=-static" >> $GITHUB_ENV
+            echo ""
+            echo "Cannot build for aarch64 Alpine/musl without proper musl cross-compiler."
+            echo "Regular glibc cross-compiler with -static produces glibc binaries, not musl binaries."
+            echo "Skipping this architecture."
+            exit 1
           fi
         fi
 
@@ -1444,13 +1443,6 @@ jobs:
         export CXX=$MUSL_CXX
         export CMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
         
-        # Add static linking flags if we're using fallback regular GCC
-        CMAKE_ARGS=""
-        if [ -n "$MUSL_STATIC_FLAG" ]; then
-          CMAKE_ARGS="-DCMAKE_C_FLAGS=-static -DCMAKE_CXX_FLAGS=-static"
-          echo "Using fallback static linking with regular GCC"
-        fi
-        
         cmake \
           -DCMAKE_BUILD_TYPE=MinSizeRel \
           -DBUILD_ALPINE_MUSL:BOOL=On \
@@ -1460,7 +1452,6 @@ jobs:
           -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
           -DCMAKE_C_COMPILER=$MUSL_CC \
           -DCMAKE_CXX_COMPILER=$MUSL_CXX \
-          $CMAKE_ARGS \
           ..
 
     - name: Build
