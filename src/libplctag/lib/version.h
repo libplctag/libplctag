@@ -42,10 +42,10 @@
  * checking them against a dynamically linked library.
  */
 
-#define LIB_VER_STRING "2.6.11"
+#define LIB_VER_STRING "2.6.12"
 #define LIB_VER_MAJOR (2)
 #define LIB_VER_MINOR (6)
-#define LIB_VER_PATCH (11)
+#define LIB_VER_PATCH (12)
 
 extern const char *VERSION;
 extern const uint64_t version_major;
