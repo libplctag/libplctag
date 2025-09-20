@@ -1504,6 +1504,51 @@ jobs:
         killall ab_server -INT &> /dev/null || true
         sleep 3
 
+    - name: Install Alpine packaging tools
+      run: |
+        apk add --no-cache abuild apk-tools tar
+
+    - name: Create Alpine packages
+      run: |
+        cd ${{ env.BUILD }}
+        
+        # Install to temporary directory for packaging
+        make install DESTDIR=/tmp/alpine-install
+        
+        # Create Alpine APK package structure
+        mkdir -p /tmp/alpine-pkg/usr
+        cp -r /tmp/alpine-install/usr/* /tmp/alpine-pkg/usr/
+        
+        # Create .PKGINFO file for APK
+        cat > /tmp/alpine-pkg/.PKGINFO << EOF
+        pkgname = libplctag
+        pkgver = ${{ env.VERSION }}-r0
+        pkgdesc = Library for communicating with Allen-Bradley PLCs
+        url = https://github.com/libplctag/libplctag
+        builddate = $(date +%s)
+        packager = Kyle Hayes <kyle.hayes@gmail.com>
+        size = $(du -sb /tmp/alpine-pkg/usr | cut -f1)
+        arch = x86_64
+        license = LGPL-2.0 OR MPL-2.0
+        depend = musl
+        EOF
+        
+        # Create the APK package
+        cd /tmp/alpine-pkg
+        tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-r0.apk .PKGINFO usr/
+        
+        # Also create a tarball for easier installation
+        cd /tmp/alpine-install
+        tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-x86_64.tar.gz usr/
+        
+        # Move packages to release directory
+        cd ${{ env.BUILD }}
+        mkdir -p release_packages
+        mv *.apk *.tar.gz release_packages/
+        
+        echo "Created Alpine packages:"
+        ls -la release_packages/
+
     - name: Create ZIP artifacts
       run: |
         cd ${{ env.DIST }}
@@ -1524,6 +1569,13 @@ jobs:
       with:
         name: ${{ env.ARTIFACT }}_zips
         path: ${{ env.BUILD }}/release_zips/*.zip
+        if-no-files-found: error
+
+    - name: Upload Alpine package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_packages
+        path: ${{ env.BUILD }}/release_packages/*
         if-no-files-found: error
 
   debug_context:
