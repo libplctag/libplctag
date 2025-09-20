@@ -1401,7 +1401,7 @@ jobs:
           # For x86_64, use the native musl tools from Ubuntu packages
           sudo apt install -y musl-tools musl-dev
           echo "MUSL_CC=musl-gcc" >> $GITHUB_ENV
-          echo "MUSL_CXX=musl-g++" >> $GITHUB_ENV
+          echo "MUSL_CXX=musl-gcc" >> $GITHUB_ENV
           
         elif [ "${{ matrix.arch }}" = "aarch64" ]; then
           # For aarch64, try to use official Ubuntu/Debian musl cross-compiler packages
