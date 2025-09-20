@@ -1660,7 +1660,7 @@ jobs:
         echo "PR Body: $PR_BODY"
 
   debug_artifacts:
-    needs: [ubuntu_matrix, ubuntu_packages, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
+    needs: [ubuntu_matrix, ubuntu_packages, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_native ]
     runs-on: ubuntu-22.04
     steps:
     - name: Download all artifacts
@@ -1690,7 +1690,7 @@ jobs:
         done
 
   create_release:
-    needs: [ubuntu_matrix, ubuntu_packages, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
+    needs: [ubuntu_matrix, ubuntu_packages, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_native ]
     runs-on: ubuntu-22.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
