@@ -1586,7 +1586,7 @@ jobs:
         echo "test callback use."
         ./test_callback
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall ab_server -INT &> /dev/null || true
         sleep 3
 
     - name: Test Micro800
@@ -1598,7 +1598,7 @@ jobs:
         echo "test getting a tag on a Micro800."
         ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall ab_server -INT &> /dev/null || true
         sleep 3
 
     - name: Test Omron NJ/NX
@@ -1610,7 +1610,7 @@ jobs:
         echo "test getting a tag on an Omron NJ/NX."
         ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall ab_server -INT &> /dev/null || true
         sleep 3
 
     - name: Test PLC/5
@@ -1622,7 +1622,7 @@ jobs:
         echo "test getting a tag on a PLC/5."
         ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall ab_server -INT &> /dev/null || true
         sleep 3
 
     - name: Test SLC 500
@@ -1634,7 +1634,7 @@ jobs:
         echo "test getting a tag on a SLC 500."
         ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall ab_server -INT &> /dev/null || true
         sleep 3
 
     - name: Test Duplicate Connection ID
@@ -1646,7 +1646,7 @@ jobs:
         echo "test getting a tag with connection failures."
         ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall ab_server -INT &> /dev/null || true
         sleep 3
 
     - name: Test Large Tags
@@ -1658,7 +1658,7 @@ jobs:
         echo "test getting and setting large tag arrays."
         ./test_special
         echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        killall ab_server -INT &> /dev/null || true
         sleep 3
 
     - name: Create ZIP artifacts
