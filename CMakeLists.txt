@@ -71,6 +71,7 @@ set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
 set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "Build the Modbus emulator.  Requires libmodbus!")
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
+set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 
 # message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 
@@ -91,7 +92,9 @@ endif()
 
 
 # Target platform-specific config
-if(ANDROID_ABI OR ANDROID)
+if(BUILD_ALPINE_MUSL)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/alpine.cmake")
+elseif(ANDROID_ABI OR ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/android.cmake")
 elseif(APPLE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/apple.cmake")
