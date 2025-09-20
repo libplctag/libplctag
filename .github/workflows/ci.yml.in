@@ -232,6 +232,94 @@ jobs:
         name: ${{ env.ARTIFACT }}_zips
         path: ${{ env.BUILD }}/release_zips/*.zip
 
+  ubuntu_packages:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        include:
+          - distro: debian
+            arch: x86_64
+            packages: "dpkg-dev debhelper fakeroot"
+            generator: "DEB"
+            file_ext: "deb"
+          - distro: redhat
+            arch: x86_64  
+            packages: "rpm-build rpmlint"
+            generator: "RPM"
+            file_ext: "rpm"
+
+    env:
+      VERSION: "@VERSION@"
+      ARTIFACT: "libplctag_@VERSION@_${{ matrix.arch }}"
+      BUILD: "${{ github.workspace }}/build"
+      DIST: "${{ github.workspace }}/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+    - name: Print out current configuration
+      run: echo "Building ${{ matrix.generator }} packages for ${{ matrix.distro }}/${{ matrix.arch }}"
+
+    - name: "Checkout library source."
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
+
+    - name: Set up build environment
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential cmake ${{ matrix.packages }}
+
+    - name: Create build directory
+      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
+
+    - name: Configure CMake for package building
+      run: |
+        cd ${{ env.BUILD }}
+        cmake \
+          -DCMAKE_BUILD_TYPE=MinSizeRel \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -DBUILD_MODBUS_EMULATOR:BOOL=On \
+          -DCPACK_GENERATOR=${{ matrix.generator }} \
+          -DCMAKE_VERBOSE_MAKEFILE=On \
+          ..
+
+    - name: Build
+      run: cd ${{ env.BUILD }}; cmake --build . --verbose
+
+    - name: Test Basic Functions
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
+        sleep 2
+        echo "test simple get/set tag."
+        ${{ env.DIST }}/simple
+        echo "test callback use."
+        ${{ env.DIST }}/test_callback
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+        sleep 3
+
+    - name: Create packages
+      run: |
+        cd ${{ env.BUILD }}
+        cpack -G ${{ matrix.generator }} -V
+        
+        # Move packages to release directory
+        mkdir -p packages
+        mv *.${{ matrix.file_ext }} packages/
+        
+        # List created packages
+        echo "Created packages:"
+        ls -la packages/
+
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_packages
+        path: ${{ env.BUILD }}/packages/*.${{ matrix.file_ext }}
+        if-no-files-found: error
 
   macos_x64:
 
@@ -1520,7 +1608,7 @@ jobs:
         echo "PR Body: $PR_BODY"
 
   debug_artifacts:
-    needs: [ubuntu_matrix, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
+    needs: [ubuntu_matrix, ubuntu_packages, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
     runs-on: ubuntu-22.04
     steps:
     - name: Download all artifacts
@@ -1550,7 +1638,7 @@ jobs:
         done
 
   create_release:
-    needs: [ubuntu_matrix, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
+    needs: [ubuntu_matrix, ubuntu_packages, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
     runs-on: ubuntu-22.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 

@@ -165,3 +165,53 @@ endmacro()
 
 # Debugging
 # print_all_variables()
+
+# CPack configuration for generating packages
+include(CPack)
+
+# Set package metadata
+set(CPACK_PACKAGE_NAME "libplctag")
+set(CPACK_PACKAGE_VENDOR "Kyle Hayes")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A library for communicating with Allen-Bradley/Rockwell PLCs")
+set(CPACK_PACKAGE_DESCRIPTION "libplctag is a portable and simple library for accessing Allen-Bradley and compatible PLCs. It provides both synchronous and asynchronous access to tags in Logix-class PLCs.")
+set(CPACK_PACKAGE_VERSION_MAJOR "2")
+set(CPACK_PACKAGE_VERSION_MINOR "6")
+set(CPACK_PACKAGE_VERSION_PATCH "3")
+set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+set(CPACK_PACKAGE_CONTACT "Kyle Hayes <kyle.hayes@gmail.com>")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/libplctag/libplctag")
+
+# License information
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-2.LGPL")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+# Debian package configuration
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Kyle Hayes <kyle.hayes@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.17)")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/libplctag/libplctag")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+
+# RPM package configuration  
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_RPM_PACKAGE_SUMMARY "Library for communicating with Allen-Bradley PLCs")
+set(CPACK_RPM_PACKAGE_DESCRIPTION "libplctag is a portable and simple library for accessing Allen-Bradley and compatible PLCs. It provides both synchronous and asynchronous access to tags in Logix-class PLCs.")
+set(CPACK_RPM_PACKAGE_GROUP "System Environment/Libraries")
+set(CPACK_RPM_PACKAGE_LICENSE "LGPL-2.0 OR MPL-2.0")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/libplctag/libplctag")
+set(CPACK_RPM_PACKAGE_REQUIRES "glibc >= 2.17")
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+
+# Source package configuration
+set(CPACK_SOURCE_GENERATOR "TGZ;ZIP")
+set(CPACK_SOURCE_IGNORE_FILES
+    ${CMAKE_BINARY_DIR}
+    /.git/
+    /\\.gitignore
+    /\\.github/
+    /build/
+    /\\.vscode/
+    /\\.DS_Store
+)
