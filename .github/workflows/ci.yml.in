@@ -1357,7 +1357,6 @@ jobs:
 
   alpine_musl:
     runs-on: ubuntu-22.04
-    continue-on-error: ${{ matrix.arch == 'aarch64' }}
 
     strategy:
       matrix:
@@ -1366,10 +1365,6 @@ jobs:
             musl_target: x86_64-linux-musl
             artifact_suffix: x86_64
             alpine_arch: x86_64
-          - arch: aarch64
-            musl_target: aarch64-linux-musl
-            artifact_suffix: aarch64
-            alpine_arch: aarch64
 
     env:
       VERSION: "@VERSION@"
@@ -1397,30 +1392,10 @@ jobs:
         # Install basic build tools
         sudo apt install -y build-essential cmake
 
-        # Install pre-built musl cross-compilation toolchain from Ubuntu packages
-        if [ "${{ matrix.arch }}" = "x86_64" ]; then
-          # For x86_64, use the native musl tools from Ubuntu packages
-          sudo apt install -y musl-tools musl-dev
-          echo "MUSL_CC=musl-gcc" >> $GITHUB_ENV
-          echo "MUSL_CXX=musl-gcc" >> $GITHUB_ENV
-          
-        elif [ "${{ matrix.arch }}" = "aarch64" ]; then
-          # For aarch64, we need a proper musl cross-compiler
-          # Try to install musl cross-compiler packages from official repositories
-          if sudo apt install -y gcc-aarch64-linux-musl g++-aarch64-linux-musl; then
-            echo "MUSL_CC=aarch64-linux-musl-gcc" >> $GITHUB_ENV
-            echo "MUSL_CXX=aarch64-linux-musl-g++" >> $GITHUB_ENV
-          else
-            echo "ERROR: aarch64 musl cross-compiler packages not available in this Ubuntu version"
-            echo "Available packages:"
-            apt search musl | grep -i aarch64 || echo "No aarch64 musl packages found"
-            echo ""
-            echo "Cannot build for aarch64 Alpine/musl without proper musl cross-compiler."
-            echo "Regular glibc cross-compiler with -static produces glibc binaries, not musl binaries."
-            echo "Skipping this architecture."
-            exit 1
-          fi
-        fi
+        # Install musl tools for x86_64 Alpine builds
+        sudo apt install -y musl-tools musl-dev
+        echo "MUSL_CC=musl-gcc" >> $GITHUB_ENV
+        echo "MUSL_CXX=musl-gcc" >> $GITHUB_ENV
 
     - name: Verify musl toolchain
       run: |
@@ -1502,6 +1477,180 @@ jobs:
         zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* tag_rw2 simple || \
         zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.*
 
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
+        if-no-files-found: error
+
+  alpine_native:
+    runs-on: ubuntu-22.04
+
+    container:
+      image: alpine:latest
+
+    env:
+      VERSION: "@VERSION@"
+      ARTIFACT: "libplctag_@VERSION@_alpine_native_x86_64"
+      BUILD: "/workspace/build"
+      DIST: "/workspace/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }} natively on Alpine Linux"
+
+    - name: Install Alpine development packages
+      run: |
+        apk update
+        apk add --no-cache \
+          build-base \
+          cmake \
+          git \
+          bash \
+          zip \
+          musl-dev \
+          linux-headers \
+          pkgconfig
+
+    - name: Clone libplctag repository
+      run: |
+        cd /
+        git clone --depth 1 --branch ${{ env.BRANCH }} https://github.com/libplctag/libplctag.git workspace
+        cd /workspace
+        git log -1 --oneline
+
+    - name: Create build directory
+      run: |
+        rm -rf ${{ env.BUILD }}
+        mkdir -p ${{ env.BUILD }}
+
+    - name: Configure CMake for Alpine native build
+      run: |
+        cd ${{ env.BUILD }}
+        cmake \
+          -DCMAKE_BUILD_TYPE=MinSizeRel \
+          -DBUILD_ALPINE_MUSL:BOOL=On \
+          -DCMAKE_VERBOSE_MAKEFILE=On \
+          ..
+
+    - name: Build
+      run: |
+        cd ${{ env.BUILD }}
+        cmake --build . --verbose
+
+    - name: Verify Alpine native binaries
+      run: |
+        echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
+        ls -la ${{ env.DIST }} || echo "No artifacts directory found"
+        
+        # Check that binaries are properly built for Alpine/musl
+        echo "Checking library linkage:"
+        if [ -f "${{ env.DIST }}/libplctag.so" ]; then
+          file "${{ env.DIST }}/libplctag.so"
+          ldd "${{ env.DIST }}/libplctag.so" || echo "Static binary (no dynamic dependencies)"
+        fi
+        
+        if [ -f "${{ env.DIST }}/simple" ]; then
+          file "${{ env.DIST }}/simple"  
+          ldd "${{ env.DIST }}/simple" || echo "Static binary (no dynamic dependencies)"
+        fi
+
+    - name: Test Basic Functions
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
+        sleep 2
+        echo "test simple get/set tag."
+        ./simple
+        echo "test callback use."
+        ./test_callback
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test Micro800
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
+        sleep 2
+        echo "test getting a tag on a Micro800."
+        ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test Omron NJ/NX
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
+        sleep 2
+        echo "test getting a tag on an Omron NJ/NX."
+        ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test PLC/5
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=PLC/5 --tag=N7[10] --debug &
+        sleep 2
+        echo "test getting a tag on a PLC/5."
+        ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test SLC 500
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=SLC500 --tag=N7[10] --debug &
+        sleep 2
+        echo "test getting a tag on a SLC 500."
+        ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test Duplicate Connection ID
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
+        sleep 2
+        echo "test getting a tag with connection failures."
+        ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Test Large Tags
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --debug &
+        sleep 2
+        echo "test getting and setting large tag arrays."
+        ./test_special
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null
+
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        
+        # Create basic ZIP with just binaries  
+        zip -r "../${{ env.ARTIFACT }}_bin.zip" .
+        
         # Create full ZIP with all binaries
         zip -r "../${{ env.ARTIFACT }}.zip" .
 
@@ -1599,7 +1748,7 @@ jobs:
         echo "PR Body: $PR_BODY"
 
   debug_artifacts:
-    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl ]
+    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
     runs-on: ubuntu-22.04
     steps:
     - name: Download all artifacts
@@ -1629,7 +1778,7 @@ jobs:
         done
 
   create_release:
-    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl ]
+    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_musl, alpine_native ]
     runs-on: ubuntu-22.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
