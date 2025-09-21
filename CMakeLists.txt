@@ -174,20 +174,21 @@ set(CPACK_PACKAGE_NAME "libplctag")
 set(CPACK_PACKAGE_VENDOR "Kyle Hayes")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A library for communicating with Allen-Bradley/Rockwell PLCs")
 set(CPACK_PACKAGE_DESCRIPTION "libplctag is a portable and simple library for accessing Allen-Bradley and compatible PLCs. It provides both synchronous and asynchronous access to tags in Logix-class PLCs.")
-set(CPACK_PACKAGE_VERSION_MAJOR "2")
-set(CPACK_PACKAGE_VERSION_MINOR "6")
-set(CPACK_PACKAGE_VERSION_PATCH "3")
+
+set(CPACK_PACKAGE_VERSION_MAJOR "${libplctag_VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR "${libplctag_VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_PATCH "${libplctag_VERSION_PATCH}")
 set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 set(CPACK_PACKAGE_CONTACT "Kyle Hayes <kyle.hayes@gmail.com>")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/libplctag/libplctag")
 
 # License information
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-2.LGPL")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-1.MPL")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
 # Debian package configuration
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Kyle Hayes <kyle.hayes@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_CONTACT "Kyle Hayes <kyle.hayes@gmail.com>")
 set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.17)")
@@ -215,3 +216,8 @@ set(CPACK_SOURCE_IGNORE_FILES
     /\\.vscode/
     /\\.DS_Store
 )
+
+# include the functions for CPack
+include(CPack)
+
+
