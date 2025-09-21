@@ -251,6 +251,13 @@ jobs:
       if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       run: |
         cd ${{ env.BUILD }}
+
+        # set up CPack Debian variables
+        export CPACK_PACKAGE_CONTACT="Kyle Hayes <kyle.hayes@gmail.com>"
+        export CPACK_DEBIAN_PACKAGE_SHLIBDEPS="ON"
+
+        # set up CPack RPM variables
+        export CPACK_RPM_PACKAGE_LICENSE="LGPL-2.0 OR MPL-2.0"
         
         # Create DEB package
         cpack -G DEB -V
