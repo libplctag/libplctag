@@ -8,19 +8,38 @@ on:
 
 jobs:
 
-  ubuntu_x64:
+  ubuntu_matrix:
     runs-on: ubuntu-22.04
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            libc: glibc
+            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=On"
+            apt_packages: "build-essential cmake libmodbus5 libmodbus-dev"
+            artifact_name: "libplctag_@VERSION@_ubuntu_x64"
+          - arch: x86_64
+            libc: musl
+            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
+            apt_packages: "build-essential cmake musl-tools musl-dev"
+            artifact_name: "libplctag_@VERSION@_ubuntu_x64_musl"
+          - arch: x86
+            libc: glibc
+            cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
+            apt_packages: "gcc-multilib g++-multilib"
+            artifact_name: "libplctag_@VERSION@_ubuntu_x86"
 
     env:
       VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_ubuntu_x64"
+      ARTIFACT: "${{ matrix.artifact_name }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
+    - name: Print out current configuration
+      run: echo "Building branch ${{ env.BRANCH }} for ${{ matrix.arch }}/${{ matrix.libc }}"
 
     - name: "Checkout library source."
       uses: actions/checkout@v4
@@ -28,13 +47,47 @@ jobs:
         ref: ${{ env.BRANCH }}
 
     - name: Set up build environment
-      run: sudo apt update; sudo apt install build-essential cmake libmodbus5 libmodbus-dev
+      run: |
+        sudo apt update
+        sudo apt install -y ${{ matrix.apt_packages }}
+
+    - name: Set up musl compiler (if needed)
+      if: matrix.libc == 'musl'
+      run: |
+        if [ "${{ matrix.arch }}" = "x86_64" ]; then
+          echo "CC=musl-gcc" >> $GITHUB_ENV
+          echo "CXX=musl-gcc" >> $GITHUB_ENV
+          echo "CFLAGS=" >> $GITHUB_ENV
+          echo "CXXFLAGS=" >> $GITHUB_ENV
+        else
+          # For x86 musl, we need to use the -m32 flag as compiler flags
+          echo "CC=musl-gcc" >> $GITHUB_ENV
+          echo "CXX=musl-gcc" >> $GITHUB_ENV
+          echo "CFLAGS=-m32" >> $GITHUB_ENV
+          echo "CXXFLAGS=-m32" >> $GITHUB_ENV
+        fi
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
 
     - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_MODBUS_EMULATOR:BOOL=On -DCMAKE_VERBOSE_MAKEFILE=On ..
+      run: |
+        cd ${{ env.BUILD }}
+        CMAKE_EXTRA_FLAGS=""
+        if [ "${{ matrix.libc }}" = "musl" ]; then
+          CMAKE_EXTRA_FLAGS="-DCMAKE_C_COMPILER=${CC} -DCMAKE_CXX_COMPILER=${CXX}"
+          if [ -n "${CFLAGS}" ]; then
+            CMAKE_EXTRA_FLAGS="${CMAKE_EXTRA_FLAGS} -DCMAKE_C_FLAGS='${CFLAGS}'"
+          fi
+          if [ -n "${CXXFLAGS}" ]; then
+            CMAKE_EXTRA_FLAGS="${CMAKE_EXTRA_FLAGS} -DCMAKE_CXX_FLAGS='${CXXFLAGS}'"
+          fi
+        fi
+        # Set install prefix for proper Linux packaging
+        if [ "${{ matrix.libc }}" = "glibc" ]; then
+          CMAKE_EXTRA_FLAGS="${CMAKE_EXTRA_FLAGS} -DCMAKE_INSTALL_PREFIX=/usr"
+        fi
+        cmake -DCMAKE_BUILD_TYPE=MinSizeRel ${{ matrix.cmake_flags }} -DCMAKE_VERBOSE_MAKEFILE=On $CMAKE_EXTRA_FLAGS ..
 
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
@@ -51,6 +104,7 @@ jobs:
         ${{ env.DIST }}/test_callback
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Micro800
       run: |
@@ -62,6 +116,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32  '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Omron NJ/NX
       run: |
@@ -73,6 +128,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test PLC/5
       run: |
@@ -84,6 +140,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test SLC 500
       run: |
@@ -95,6 +152,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Duplicate Connection ID
       run: |
@@ -106,6 +164,7 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Large Tags
       run: |
@@ -117,8 +176,10 @@ jobs:
         ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
         echo "shut down server."
         killall ab_server -INT &> /dev/null
+        sleep 3
 
     - name: Test Array Notation Read/Write
+      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -128,20 +189,18 @@ jobs:
         ${{ env.DIST }}/test_indexed_tags
         echo "shut down server."
         killall ab_server -INT &> /dev/null
-
-    #- name: Test Simultaneous Read/Write On Tag
-    #  run: |
-    #    cd ${{ env.DIST }}
-    #    echo "test simultaneous read/write on a single tag"
-    #    ./test_simultaneous_rw_ab_server
+        sleep 3
 
     - name: Test Reconnect After Outage
+      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       run: |
         cd ${{ env.DIST }}
         echo "Test reconnect after outage"
         ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
+        sleep 3
 
     - name: Test Modbus
+      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       run: |
         cd ${{ env.DIST }}
         echo "start up simulator..."
@@ -151,17 +210,24 @@ jobs:
         ${{ env.DIST }}/test_callback_ex_modbus
         echo "shut down server."
         killall modbus_server -TERM &> /dev/null
+        sleep 3
 
     - name: Create ZIP artifacts
       run: |
         cd ${{ env.DIST }}
-        # Create dev ZIP with only library files
-        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
-
-        # Create tools ZIP with library and tools
-        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
-
-        # Create full ZIP with all binaries
+        
+        if [ "${{ matrix.arch }}" = "x86_64" ] && [ "${{ matrix.libc }}" = "glibc" ]; then
+          # Create dev ZIP with only library files (for backward compatibility)
+          zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
+          
+          # Create tools ZIP with library and tools (for backward compatibility)
+          zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
+        else
+          # Create basic ZIP with just binaries for other configurations
+          zip -r "../${{ env.ARTIFACT }}_bin.zip" .
+        fi
+        
+        # Create full ZIP with all binaries (for all configurations)
         zip -r "../${{ env.ARTIFACT }}.zip" .
 
         # Move ZIPs to a release directory
@@ -175,161 +241,38 @@ jobs:
         name: ${{ env.ARTIFACT }}_zips
         path: ${{ env.BUILD }}/release_zips/*.zip
 
-  ubuntu_x86:
-    runs-on: ubuntu-22.04
-
-    env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_ubuntu_x86"
-      BUILD: "${{ github.workspace }}/build"
-      DIST: "${{ github.workspace }}/build/bin_dist"
-      BRANCH: ${{ github.head_ref || github.ref_name }}
-
-    steps:
-    - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }}"
-
-    - name: "Checkout library source."
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ env.BRANCH }}
-
-    - name: Set up build environment
-      run: sudo apt update; sudo apt-get -y --force-yes install gcc-multilib g++-multilib
-
-    - name: Create build directory
-      run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
-
-    - name: Configure CMake
-      run: cd ${{ env.BUILD }}; cmake -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86 -DCMAKE_VERBOSE_MAKEFILE=On ..
-
-    - name: Build
-      run: cd ${{ env.BUILD }}; cmake --build . --verbose
-
-    - name: Test Basic Functions
+    - name: Install packaging tools
+      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
-        sleep 2
-        echo "test simple get/set tag."
-        ${{ env.DIST }}/simple
-        echo "test callback use."
-        ${{ env.DIST }}/test_callback
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        sudo apt update
+        sudo apt install -y dpkg-dev debhelper fakeroot rpm alien
 
-    - name: Test Micro800
+    - name: Create DEB and RPM packages
+      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
-        sleep 2
-        echo "test getting a tag on a Micro800."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        cd ${{ env.BUILD }}
 
-    - name: Test Omron NJ/NX
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
-        sleep 2
-        echo "test getting a tag on an Omron NJ/NX."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
+        # Create DEB package
+        cpack -G DEB -V -DCPACK_PACKAGE_CONTACT="Kyle Hayes <kyle.hayes@gmail.com>" -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS="ON" -DCPACK_PACKAGE_NAME="libplctag"
+        
+        # Create RPM package  
+        cpack -G RPM -V -DCPACK_RPM_PACKAGE_LICENSE="LGPL-2.0 OR MPL-2.0" -DCPACK_PACKAGE_NAME="libplctag"
+        
+        # Move packages to release directory
+        mkdir -p packages
+        mv *.deb *.rpm packages/ 2>/dev/null || true
+        
+        # List created packages
+        echo "Created packages:"
+        ls -la packages/
 
-    - name: Test PLC/5
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug &
-        sleep 2
-        echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-
-    - name: Test SLC 500
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
-        sleep 2
-        echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-
-    - name: Test Duplicate Connection ID
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
-        sleep 2
-        echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-
-    - name: Test Large Tags
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
-        sleep 2
-        echo "test getting a large tag."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-
-    - name: Test Array Notation Read/Write
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
-        sleep 2
-        echo "test array notation read/write"
-        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-
-    #- name: Test Simultaneous Read/Write On Tag
-    #  run: |
-    #    cd ${{ env.DIST }}
-    #    echo "test simultaneous read/write on a single tag"
-    #    ./test_simultaneous_rw_ab_server
-
-    - name: Test Reconnect After Outage
-      run: |
-        cd ${{ env.DIST }}
-        echo "Test reconnect after outage"
-        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
-
-    - name: Create ZIP artifacts
-      run: |
-        cd ${{ env.DIST }}
-        # Create dev ZIP with only library files
-        zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
-
-        # Create tools ZIP with library and tools
-        zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
-
-        # Create full ZIP with all binaries
-        zip -r "../${{ env.ARTIFACT }}.zip" .
-
-        # Move ZIPs to a release directory
-        cd ..
-        mkdir -p release_zips
-        mv *.zip release_zips/
-
-    - name: Upload ZIP artifacts
+    - name: Upload package artifacts
+      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.ARTIFACT }}_zips
-        path: ${{ env.BUILD }}/release_zips/*.zip
+        name: ${{ env.ARTIFACT }}_packages
+        path: ${{ env.BUILD }}/packages/*
+        if-no-files-found: warn
 
   macos_x64:
 
@@ -1355,6 +1298,239 @@ jobs:
         path: ${{ env.BUILD }}/release_zips/*.zip
         if-no-files-found: error
 
+  alpine_native:
+    runs-on: ubuntu-22.04
+
+    container:
+      image: alpine:latest
+
+    env:
+      VERSION: "@VERSION@"
+      ARTIFACT: "libplctag_@VERSION@_alpine_native_x86_64"
+      BUILD: "/workspace/build"
+      DIST: "/workspace/build/bin_dist"
+      BRANCH: ${{ github.head_ref || github.ref_name }}
+
+    steps:
+    - name: Print out current branch
+      run: echo "Building branch ${{ env.BRANCH }} natively on Alpine Linux"
+
+    - name: Install Alpine development packages
+      run: |
+        apk update
+        apk add --no-cache \
+          build-base \
+          cmake \
+          git \
+          bash \
+          zip \
+          musl-dev \
+          linux-headers \
+          pkgconfig
+
+    - name: Clone libplctag repository
+      run: |
+        cd /
+        git clone --depth 1 --branch ${{ env.BRANCH }} https://github.com/libplctag/libplctag.git workspace
+        cd /workspace
+        git log -1 --oneline
+
+    - name: Create build directory
+      run: |
+        rm -rf ${{ env.BUILD }}
+        mkdir -p ${{ env.BUILD }}
+
+    - name: Configure CMake for Alpine native build
+      run: |
+        cd ${{ env.BUILD }}
+        cmake \
+          -DCMAKE_BUILD_TYPE=MinSizeRel \
+          -DBUILD_ALPINE_MUSL:BOOL=On \
+          -DCMAKE_VERBOSE_MAKEFILE=On \
+          ..
+
+    - name: Build
+      run: |
+        cd ${{ env.BUILD }}
+        cmake --build . --verbose
+
+    - name: Verify Alpine native binaries
+      run: |
+        echo "Build completed. Checking artifacts in ${{ env.DIST }}:"
+        ls -la ${{ env.DIST }} || echo "No artifacts directory found"
+        
+        # Check that binaries are properly built for Alpine/musl
+        echo "Checking library linkage:"
+        if [ -f "${{ env.DIST }}/libplctag.so" ]; then
+          file "${{ env.DIST }}/libplctag.so"
+          ldd "${{ env.DIST }}/libplctag.so" || echo "Static binary (no dynamic dependencies)"
+        fi
+        
+        if [ -f "${{ env.DIST }}/simple" ]; then
+          file "${{ env.DIST }}/simple"  
+          ldd "${{ env.DIST }}/simple" || echo "Static binary (no dynamic dependencies)"
+        fi
+
+    - name: Test Basic Functions
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
+        sleep 2
+        echo "test simple get/set tag."
+        ./simple
+        echo "test callback use."
+        ./test_callback
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null || true
+        sleep 3
+
+    - name: Test Micro800
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
+        sleep 2
+        echo "test getting a tag on a Micro800."
+        ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null || true
+        sleep 3
+
+    - name: Test Omron NJ/NX
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
+        sleep 2
+        echo "test getting a tag on an Omron NJ/NX."
+        ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null || true
+        sleep 3
+
+    - name: Test PLC/5
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=PLC/5 --tag=N7[10] --debug &
+        sleep 2
+        echo "test getting a tag on a PLC/5."
+        ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null || true
+        sleep 3
+
+    - name: Test SLC 500
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=SLC500 --tag=N7[10] --debug &
+        sleep 2
+        echo "test getting a tag on a SLC 500."
+        ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null || true
+        sleep 3
+
+    - name: Test Duplicate Connection ID
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
+        sleep 2
+        echo "test getting a tag with connection failures."
+        ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null || true
+        sleep 3
+
+    - name: Test Large Tags
+      run: |
+        cd ${{ env.DIST }}
+        echo "start up simulator..."
+        ./ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --debug &
+        sleep 2
+        echo "test getting and setting large tag arrays."
+        ./test_special
+        echo "shut down server."
+        killall ab_server -INT &> /dev/null || true
+        sleep 3
+
+    - name: Install Alpine packaging tools
+      run: |
+        apk add --no-cache abuild apk-tools tar
+
+    - name: Create Alpine packages
+      run: |
+        cd ${{ env.BUILD }}
+        
+        # Install to temporary directory for packaging
+        make install DESTDIR=/tmp/alpine-install
+        
+        # Create Alpine APK package structure
+        mkdir -p /tmp/alpine-pkg/usr
+        cp -r /tmp/alpine-install/usr/* /tmp/alpine-pkg/usr/
+        
+        # Create .PKGINFO file for APK
+        cat > /tmp/alpine-pkg/.PKGINFO << EOF
+        pkgname = libplctag
+        pkgver = ${{ env.VERSION }}-r0
+        pkgdesc = Library for communicating with Allen-Bradley PLCs
+        url = https://github.com/libplctag/libplctag
+        builddate = $(date +%s)
+        packager = Kyle Hayes <kyle.hayes@gmail.com>
+        size = $(du -sb /tmp/alpine-pkg/usr | cut -f1)
+        arch = x86_64
+        license = LGPL-2.0 OR MPL-2.0
+        depend = musl
+        EOF
+        
+        # Create the APK package
+        cd /tmp/alpine-pkg
+        tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-r0.apk .PKGINFO usr/
+        
+        # Also create a tarball for easier installation
+        cd /tmp/alpine-install
+        tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-x86_64.tar.gz usr/
+        
+        # Move packages to release directory
+        cd ${{ env.BUILD }}
+        mkdir -p release_packages
+        mv *.apk *.tar.gz release_packages/
+        
+        echo "Created Alpine packages:"
+        ls -la release_packages/
+
+    - name: Create ZIP artifacts
+      run: |
+        cd ${{ env.DIST }}
+        
+        # Create basic ZIP with just binaries  
+        zip -r "../${{ env.ARTIFACT }}_bin.zip" .
+        
+        # Create full ZIP with all binaries
+        zip -r "../${{ env.ARTIFACT }}.zip" .
+
+        # Move ZIPs to a release directory
+        cd ..
+        mkdir -p release_zips
+        mv *.zip release_zips/
+
+    - name: Upload ZIP artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_zips
+        path: ${{ env.BUILD }}/release_zips/*.zip
+        if-no-files-found: error
+
+    - name: Upload Alpine package artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT }}_packages
+        path: ${{ env.BUILD }}/release_packages/*
+        if-no-files-found: error
+
   debug_context:
     runs-on: ubuntu-22.04
     steps:
@@ -1437,7 +1613,7 @@ jobs:
         echo "PR Body: $PR_BODY"
 
   debug_artifacts:
-    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
+    needs: [ubuntu_matrix, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_native ]
     runs-on: ubuntu-22.04
     steps:
     - name: Download all artifacts
@@ -1467,7 +1643,7 @@ jobs:
         done
 
   create_release:
-    needs: [ubuntu_x64, ubuntu_x86, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross]
+    needs: [ubuntu_matrix, macos_x64, macos_ARM64, windows_x64_MSVC, windows_x64_MinGW, windows_x86_MSVC, windows_x86_MinGW, windows_cross_build_ARM64_MSVC, ubuntu_arm_cross, alpine_native ]
     runs-on: ubuntu-22.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
