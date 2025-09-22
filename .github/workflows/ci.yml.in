@@ -272,7 +272,7 @@ jobs:
         
         # Move packages to release directory
         mkdir -p packages
-    mv *.deb *.rpm packages/ 2>/dev/null || true
+        mv *.deb *.rpm packages/ 2>/dev/null || true
         
         # List created packages
         echo "Created packages:"
@@ -416,12 +416,6 @@ jobs:
         ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
         echo "shut down server."
         killall ab_server -INT &> /dev/null || true
-
-    #- name: Test Simultaneous Read/Write On Tag
-    #  run: |
-    #    cd ${{ env.DIST }}
-    #    echo "test simultaneous read/write on a single tag"
-    #    ./test_simultaneous_rw_ab_server
 
     - name: Test Reconnect After Outage
       run: |
@@ -994,7 +988,7 @@ jobs:
         fi
 
         # Create .PKGINFO for runtime
-  cat > "$RUNTIME_ROOT/.PKGINFO" << EOF
+        cat > "$RUNTIME_ROOT/.PKGINFO" << EOF
         pkgname = libplctag
         pkgver = ${{ env.VERSION }}-r0
         pkgdesc = Shared library for communicating with Allen-Bradley PLCs
@@ -1002,13 +996,13 @@ jobs:
         builddate = $(date +%s)
         packager = Kyle Hayes <kyle.hayes@gmail.com>
         size = $(du -sb "$RUNTIME_ROOT/usr" | cut -f1)
-  arch = ${{ matrix.arch }}
+        arch = ${{ matrix.arch }}
         license = LGPL-2.0 OR MPL-2.0
         depend = musl
         EOF
 
         # Create .PKGINFO for devel
-  cat > "$DEVEL_ROOT/.PKGINFO" << EOF
+        cat > "$DEVEL_ROOT/.PKGINFO" << EOF
         pkgname = libplctag-dev
         pkgver = ${{ env.VERSION }}-r0
         pkgdesc = Headers, static library, and tag_rw2 tool for libplctag development
@@ -1016,18 +1010,18 @@ jobs:
         builddate = $(date +%s)
         packager = Kyle Hayes <kyle.hayes@gmail.com>
         size = $(du -sb "$DEVEL_ROOT/usr" | cut -f1)
-  arch = ${{ matrix.arch }}
+        arch = ${{ matrix.arch }}
         license = LGPL-2.0 OR MPL-2.0
         depend = libplctag
         EOF
 
         # Create APKs (tarballs with .PKGINFO and usr/)
-  ( cd "$RUNTIME_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-r0.apk .PKGINFO usr/ )
-  ( cd "$DEVEL_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-dev-${{ env.VERSION }}-r0.apk .PKGINFO usr/ )
+        ( cd "$RUNTIME_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-r0.apk .PKGINFO usr/ )
+        ( cd "$DEVEL_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-dev-${{ env.VERSION }}-r0.apk .PKGINFO usr/ )
 
         # Also create tarballs for easier ad-hoc installs
-  ( cd "$RUNTIME_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-${{ matrix.arch }}-runtime.tar.gz usr/ )
-  ( cd "$DEVEL_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-${{ matrix.arch }}-devel.tar.gz usr/ )
+        ( cd "$RUNTIME_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-${{ matrix.arch }}-runtime.tar.gz usr/ )
+        ( cd "$DEVEL_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-${{ matrix.arch }}-devel.tar.gz usr/ )
 
         # Move packages to release directory
         mkdir -p ${{ env.BUILD }}/release_packages
