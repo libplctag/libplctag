@@ -811,7 +811,7 @@ jobs:
           -v "${{ github.workspace }}:/workspace" \
           -w /workspace \
           alpine:latest \
-        sh -s <<'ALPINE_SCRIPT'
+          sh -s <<'ALPINE_SCRIPT'
           set -euo pipefail
           apk update && apk add --no-cache \
             build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar
@@ -1012,6 +1012,18 @@ jobs:
 
           echo "Created Alpine packages:"
           ls -la /workspace/build/release_packages/
+
+          # If bin_dist is missing (some builds), synthesize it from installed files
+          if [ ! -d /workspace/build/bin_dist ] && [ -d /tmp/alpine-install/usr ]; then
+            mkdir -p /workspace/build/bin_dist
+            # Copy installed binaries and libraries into bin_dist for zipping
+            if [ -d /tmp/alpine-install/usr/bin ]; then
+              cp -a /tmp/alpine-install/usr/bin/* /workspace/build/bin_dist/ || true
+            fi
+            if [ -n "${LIBDIR:-}" ] && [ -d "$LIBDIR" ]; then
+              cp -a "$LIBDIR"/libplctag.* /workspace/build/bin_dist/ || true
+            fi
+          fi
 
           # Create ZIP artifacts
           if [ -d /workspace/build/bin_dist ]; then
