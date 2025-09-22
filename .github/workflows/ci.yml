@@ -39,6 +39,25 @@ jobs:
             apt_packages: "build-essential cmake zip"
             artifact_name: "libplctag_2.6.12_ubuntu_arm64"
 
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            libc: glibc
+            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=On"
+            apt_packages: "build-essential cmake libmodbus5 libmodbus-dev"
+            artifact_name: "libplctag_2.6.12_ubuntu_x64"
+          - arch: x86_64
+            libc: musl
+            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
+            apt_packages: "build-essential cmake musl-tools musl-dev"
+            artifact_name: "libplctag_2.6.12_ubuntu_x64_musl"
+          - arch: x86
+            libc: glibc
+            cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
+            apt_packages: "gcc-multilib g++-multilib"
+            artifact_name: "libplctag_2.6.12_ubuntu_x86"
+
     env:
       VERSION: "2.6.12"
       ARTIFACT: "${{ matrix.artifact_name }}"
@@ -285,7 +304,6 @@ jobs:
         name: ${{ env.ARTIFACT }}_packages
         path: ${{ env.BUILD }}/packages/*
         if-no-files-found: warn
-
 
   macos_matrix:
 
