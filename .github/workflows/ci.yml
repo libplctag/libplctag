@@ -795,7 +795,8 @@ jobs:
 
     steps:
     - name: Print out current configuration
-      run: echo "Building branch ${{ env.BRANCH }} natively on Alpine Linux for ${{ matrix.arch }} (host runner: ${{ matrix.runner }})"
+      run: |
+        echo "Building branch ${{ env.BRANCH }} natively on Alpine Linux for ${{ matrix.arch }} (host runner: ${{ matrix.runner }})"
     - name: "Checkout library source."
       uses: actions/checkout@v4
       with:
@@ -810,218 +811,218 @@ jobs:
           -v "${{ github.workspace }}:/workspace" \
           -w /workspace \
           alpine:latest \
-          sh -s <<'ALPINE_SCRIPT'
-        set -euo pipefail
-        apk update && apk add --no-cache \
-          build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar
+        sh -s <<'ALPINE_SCRIPT'
+          set -euo pipefail
+          apk update && apk add --no-cache \
+            build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar
 
-        # Prepare build
-        rm -rf /workspace/build && mkdir -p /workspace/build
-        cd /workspace/build
-
-        # Configure and build
-        cmake \
-          -DCMAKE_BUILD_TYPE=MinSizeRel \
-          -DBUILD_ALPINE_MUSL:BOOL=On \
-          -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_VERBOSE_MAKEFILE=On \
-          ..
-        cmake --build . --verbose
-
-        # Run tests inside container if binaries exist
-        if [ -f /workspace/build/bin_dist/ab_server ]; then
-          cd /workspace/build/bin_dist
-
-          # Test Basic Functions
-          echo "start up simulator..."
-          ./ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
-          sleep 2
-          echo "test simple get/set tag."
-          ./simple
-          echo "test callback use."
-          ./test_callback
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test Micro800
-          echo "start up simulator..."
-          ./ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
-          sleep 2
-          echo "test getting a tag on a Micro800."
-          ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test Omron NJ/NX
-          echo "start up simulator..."
-          ./ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
-          sleep 2
-          echo "test getting a tag on an Omron NJ/NX."
-          ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test PLC/5
-          echo "start up simulator..."
-          ./ab_server --plc=PLC/5 --tag=N7[10] --debug &
-          sleep 2
-          echo "test getting a tag on a PLC/5."
-          ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test SLC 500
-          echo "start up simulator..."
-          ./ab_server --plc=SLC500 --tag=N7[10] --debug &
-          sleep 2
-          echo "test getting a tag on a SLC 500."
-          ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test Duplicate Connection ID
-          echo "start up simulator..."
-          ./ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
-          sleep 2
-          echo "test getting a tag with connection failures."
-          ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test Large Tags
-          echo "start up simulator..."
-          ./ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --debug &
-          sleep 2
-          echo "test getting a large tag."
-          ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test Array Notation Read/Write
-          echo "start up simulator..."
-          ./ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" &
-          sleep 2
-          echo "test array notation read/write"
-          ./test_indexed_tags
-          echo "shut down server."
-          killall ab_server -INT &> /dev/null || true
-          sleep 2
-
-          # Test Reconnect After Outage
-          echo "Test reconnect after outage"
-          ./test_reconnect_after_outage ./ab_server
-          sleep 2
-
+          # Prepare build
+          rm -rf /workspace/build && mkdir -p /workspace/build
           cd /workspace/build
-        fi
 
-        # Install to temporary directory for packaging
-        make install DESTDIR=/tmp/alpine-install
+          # Configure and build
+          cmake \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DBUILD_ALPINE_MUSL:BOOL=On \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_VERBOSE_MAKEFILE=On \
+            ..
+          cmake --build . --verbose
 
-        # Determine lib directory
-        # Prefer /usr/lib, then /usr/lib64, then /usr/local/lib, then /usr/local/lib64
-        for CAND in \
-          /tmp/alpine-install/usr/lib \
-          /tmp/alpine-install/usr/lib64 \
-          /tmp/alpine-install/usr/local/lib \
-          /tmp/alpine-install/usr/local/lib64; do
-          if [ -d "$CAND" ]; then
-            LIBDIR="$CAND"
-            break
+          # Run tests inside container if binaries exist
+          if [ -f /workspace/build/bin_dist/ab_server ]; then
+            cd /workspace/build/bin_dist
+
+            # Test Basic Functions
+            echo "start up simulator..."
+            ./ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
+            sleep 2
+            echo "test simple get/set tag."
+            ./simple
+            echo "test callback use."
+            ./test_callback
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test Micro800
+            echo "start up simulator..."
+            ./ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
+            sleep 2
+            echo "test getting a tag on a Micro800."
+            ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test Omron NJ/NX
+            echo "start up simulator..."
+            ./ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
+            sleep 2
+            echo "test getting a tag on an Omron NJ/NX."
+            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test PLC/5
+            echo "start up simulator..."
+            ./ab_server --plc=PLC/5 --tag=N7[10] --debug &
+            sleep 2
+            echo "test getting a tag on a PLC/5."
+            ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test SLC 500
+            echo "start up simulator..."
+            ./ab_server --plc=SLC500 --tag=N7[10] --debug &
+            sleep 2
+            echo "test getting a tag on a SLC 500."
+            ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test Duplicate Connection ID
+            echo "start up simulator..."
+            ./ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
+            sleep 2
+            echo "test getting a tag with connection failures."
+            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test Large Tags
+            echo "start up simulator..."
+            ./ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --debug &
+            sleep 2
+            echo "test getting a large tag."
+            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test Array Notation Read/Write
+            echo "start up simulator..."
+            ./ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" &
+            sleep 2
+            echo "test array notation read/write"
+            ./test_indexed_tags
+            echo "shut down server."
+            killall ab_server -INT &> /dev/null || true
+            sleep 2
+
+            # Test Reconnect After Outage
+            echo "Test reconnect after outage"
+            ./test_reconnect_after_outage ./ab_server
+            sleep 2
+
+            cd /workspace/build
           fi
-        done
-        if [ -z "${LIBDIR:-}" ]; then
-          echo "ERROR: Could not determine library install directory under /tmp/alpine-install" >&2
-          find /tmp/alpine-install -maxdepth 3 -type d -name lib -o -name lib64 || true
-          exit 1
-        fi
 
-        # Prepare runtime package: only shared library and its symlinks
-        RUNTIME_ROOT=/tmp/apk-runtime
-        mkdir -p "$RUNTIME_ROOT/usr/lib"
-        if ls "$LIBDIR"/libplctag.so* >/dev/null 2>&1; then
-          cp -a "$LIBDIR"/libplctag.so* "$RUNTIME_ROOT/usr/lib/"
-        else
-          echo "ERROR: Shared library libplctag.so not found in $LIBDIR" >&2
-          exit 1
-        fi
+          # Install to temporary directory for packaging
+          make install DESTDIR=/tmp/alpine-install
 
-        # Prepare devel package: header, static lib, and tag_rw2 tool
-        DEVEL_ROOT=/tmp/apk-devel
-        mkdir -p "$DEVEL_ROOT/usr/include" "$DEVEL_ROOT/usr/lib" "$DEVEL_ROOT/usr/bin"
-        # Header
-        if [ -f /tmp/alpine-install/usr/include/libplctag.h ]; then
-          cp -a /tmp/alpine-install/usr/include/libplctag.h "$DEVEL_ROOT/usr/include/"
-        fi
-        # Static library
-        if [ -f "$LIBDIR"/libplctag.a ]; then
-          cp -a "$LIBDIR"/libplctag.a "$DEVEL_ROOT/usr/lib/"
-        fi
-        # Tool: tag_rw2
-        if [ -f /tmp/alpine-install/usr/bin/tag_rw2 ]; then
-          cp -a /tmp/alpine-install/usr/bin/tag_rw2 "$DEVEL_ROOT/usr/bin/"
-        fi
+          # Determine lib directory
+          # Prefer /usr/lib, then /usr/lib64, then /usr/local/lib, then /usr/local/lib64
+          for CAND in \
+            /tmp/alpine-install/usr/lib \
+            /tmp/alpine-install/usr/lib64 \
+            /tmp/alpine-install/usr/local/lib \
+            /tmp/alpine-install/usr/local/lib64; do
+            if [ -d "$CAND" ]; then
+              LIBDIR="$CAND"
+              break
+            fi
+          done
+          if [ -z "${LIBDIR:-}" ]; then
+            echo "ERROR: Could not determine library install directory under /tmp/alpine-install" >&2
+            find /tmp/alpine-install -maxdepth 3 -type d -name lib -o -name lib64 || true
+            exit 1
+          fi
 
-        # Create .PKGINFO for runtime
-  cat > "$RUNTIME_ROOT/.PKGINFO" << EOF
-  pkgname = libplctag
-  pkgver = $VERSION-r0
-        pkgdesc = Shared library for communicating with Allen-Bradley PLCs
-        url = https://github.com/libplctag/libplctag
-        builddate = $(date +%s)
-        packager = Kyle Hayes <kyle.hayes@gmail.com>
-        size = $(du -sb "$RUNTIME_ROOT/usr" | cut -f1)
-  arch = $MATRIX_ARCH
-        license = LGPL-2.0 OR MPL-2.0
-        depend = musl
-        EOF
+          # Prepare runtime package: only shared library and its symlinks
+          RUNTIME_ROOT=/tmp/apk-runtime
+          mkdir -p "$RUNTIME_ROOT/usr/lib"
+          if ls "$LIBDIR"/libplctag.so* >/dev/null 2>&1; then
+            cp -a "$LIBDIR"/libplctag.so* "$RUNTIME_ROOT/usr/lib/"
+          else
+            echo "ERROR: Shared library libplctag.so not found in $LIBDIR" >&2
+            exit 1
+          fi
 
-        # Create .PKGINFO for devel
-  cat > "$DEVEL_ROOT/.PKGINFO" << EOF
-  pkgname = libplctag-dev
-  pkgver = $VERSION-r0
-        pkgdesc = Headers, static library, and tag_rw2 tool for libplctag development
-        url = https://github.com/libplctag/libplctag
-        builddate = $(date +%s)
-        packager = Kyle Hayes <kyle.hayes@gmail.com>
-        size = $(du -sb "$DEVEL_ROOT/usr" | cut -f1)
-  arch = $MATRIX_ARCH
-        license = LGPL-2.0 OR MPL-2.0
-        depend = libplctag
-        EOF
+          # Prepare devel package: header, static lib, and tag_rw2 tool
+          DEVEL_ROOT=/tmp/apk-devel
+          mkdir -p "$DEVEL_ROOT/usr/include" "$DEVEL_ROOT/usr/lib" "$DEVEL_ROOT/usr/bin"
+          # Header
+          if [ -f /tmp/alpine-install/usr/include/libplctag.h ]; then
+            cp -a /tmp/alpine-install/usr/include/libplctag.h "$DEVEL_ROOT/usr/include/"
+          fi
+          # Static library
+          if [ -f "$LIBDIR"/libplctag.a ]; then
+            cp -a "$LIBDIR"/libplctag.a "$DEVEL_ROOT/usr/lib/"
+          fi
+          # Tool: tag_rw2
+          if [ -f /tmp/alpine-install/usr/bin/tag_rw2 ]; then
+            cp -a /tmp/alpine-install/usr/bin/tag_rw2 "$DEVEL_ROOT/usr/bin/"
+          fi
 
-        # Create APKs (tarballs with .PKGINFO and usr/)
-  ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0.apk .PKGINFO usr/ )
-  ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0.apk .PKGINFO usr/ )
+          # Create .PKGINFO for runtime
+          cat > "$RUNTIME_ROOT/.PKGINFO" << EOF
+          pkgname = libplctag
+          pkgver = $VERSION-r0
+          pkgdesc = Shared library for communicating with Allen-Bradley PLCs
+          url = https://github.com/libplctag/libplctag
+          builddate = $(date +%s)
+          packager = Kyle Hayes <kyle.hayes@gmail.com>
+          size = $(du -sb "$RUNTIME_ROOT/usr" | cut -f1)
+          arch = $MATRIX_ARCH
+          license = LGPL-2.0 OR MPL-2.0
+          depend = musl
+          EOF
 
-        # Also create tarballs for easier ad-hoc installs
-  ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-runtime.tar.gz usr/ )
-  ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-devel.tar.gz usr/ )
+          # Create .PKGINFO for devel
+          cat > "$DEVEL_ROOT/.PKGINFO" << EOF
+          pkgname = libplctag-dev
+          pkgver = $VERSION-r0
+          pkgdesc = Headers, static library, and tag_rw2 tool for libplctag development
+          url = https://github.com/libplctag/libplctag
+          builddate = $(date +%s)
+          packager = Kyle Hayes <kyle.hayes@gmail.com>
+          size = $(du -sb "$DEVEL_ROOT/usr" | cut -f1)
+          arch = $MATRIX_ARCH
+          license = LGPL-2.0 OR MPL-2.0
+          depend = libplctag
+          EOF
 
-        # Move packages to release directory
-        mkdir -p /workspace/build/release_packages
-        mv /workspace/build/*.apk /workspace/build/*.tar.gz /workspace/build/release_packages/
+          # Create APKs (tarballs with .PKGINFO and usr/)
+          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0.apk .PKGINFO usr/ )
+          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0.apk .PKGINFO usr/ )
 
-        echo "Created Alpine packages:"
-        ls -la /workspace/build/release_packages/
+          # Also create tarballs for easier ad-hoc installs
+          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-runtime.tar.gz usr/ )
+          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-devel.tar.gz usr/ )
 
-        # Create ZIP artifacts
-        if [ -d /workspace/build/bin_dist ]; then
-          cd /workspace/build/bin_dist
-          zip -r "../libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" .
-          zip -r "../libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" .
-          cd ..
-          mkdir -p release_zips
-          mv *.zip release_zips/
-        fi
-ALPINE_SCRIPT
+          # Move packages to release directory
+          mkdir -p /workspace/build/release_packages
+          mv /workspace/build/*.apk /workspace/build/*.tar.gz /workspace/build/release_packages/
+
+          echo "Created Alpine packages:"
+          ls -la /workspace/build/release_packages/
+
+          # Create ZIP artifacts
+          if [ -d /workspace/build/bin_dist ]; then
+            cd /workspace/build/bin_dist
+            zip -r "../libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" .
+            zip -r "../libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" .
+            cd ..
+            mkdir -p release_zips
+            mv *.zip release_zips/
+          fi
+        ALPINE_SCRIPT
 
     - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
