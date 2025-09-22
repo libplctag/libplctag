@@ -833,6 +833,7 @@ jobs:
         cmake \
           -DCMAKE_BUILD_TYPE=MinSizeRel \
           -DBUILD_ALPINE_MUSL:BOOL=On \
+          -DCMAKE_INSTALL_PREFIX=/usr \
           -DCMAKE_VERBOSE_MAKEFILE=On \
           ..
 
@@ -956,10 +957,22 @@ jobs:
         # Install to temporary directory for packaging
         make install DESTDIR=/tmp/alpine-install
 
-        # Determine lib directory (lib or lib64)
-        LIBDIR=/tmp/alpine-install/usr/lib
-        if [ ! -d "$LIBDIR" ] && [ -d "/tmp/alpine-install/usr/lib64" ]; then
-          LIBDIR=/tmp/alpine-install/usr/lib64
+        # Determine lib directory
+        # Prefer /usr/lib, then /usr/lib64, then /usr/local/lib, then /usr/local/lib64
+        for CAND in \
+          /tmp/alpine-install/usr/lib \
+          /tmp/alpine-install/usr/lib64 \
+          /tmp/alpine-install/usr/local/lib \
+          /tmp/alpine-install/usr/local/lib64; do
+          if [ -d "$CAND" ]; then
+            LIBDIR="$CAND"
+            break
+          fi
+        done
+        if [ -z "$LIBDIR" ]; then
+          echo "ERROR: Could not determine library install directory under /tmp/alpine-install" >&2
+          find /tmp/alpine-install -maxdepth 3 -type d -name lib -o -name lib64 || true
+          exit 1
         fi
 
         # Prepare runtime package: only shared library and its symlinks
