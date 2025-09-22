@@ -9,26 +9,35 @@ on:
 jobs:
 
   ubuntu_matrix:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       matrix:
         include:
           - arch: x86_64
             libc: glibc
+            runner: ubuntu-22.04
             cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=On"
             apt_packages: "build-essential cmake libmodbus5 libmodbus-dev"
             artifact_name: "libplctag_2.6.12_ubuntu_x64"
           - arch: x86_64
             libc: musl
+            runner: ubuntu-22.04
             cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
             apt_packages: "build-essential cmake musl-tools musl-dev"
             artifact_name: "libplctag_2.6.12_ubuntu_x64_musl"
           - arch: x86
             libc: glibc
+            runner: ubuntu-22.04
             cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
             apt_packages: "gcc-multilib g++-multilib"
             artifact_name: "libplctag_2.6.12_ubuntu_x86"
+          - arch: arm64
+            libc: glibc
+            runner: ubuntu-22.04-arm
+            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
+            apt_packages: "build-essential cmake zip"
+            artifact_name: "libplctag_2.6.12_ubuntu_arm64"
 
     env:
       VERSION: "2.6.12"
@@ -242,13 +251,13 @@ jobs:
         path: ${{ env.BUILD }}/release_zips/*.zip
 
     - name: Install packaging tools
-      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
+      if: (matrix.arch == 'x86_64' || matrix.arch == 'arm64') && matrix.libc == 'glibc'
       run: |
         sudo apt update
         sudo apt install -y dpkg-dev debhelper fakeroot rpm alien
 
     - name: Create DEB and RPM packages (runtime + devel components)
-      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
+      if: (matrix.arch == 'x86_64' || matrix.arch == 'arm64') && matrix.libc == 'glibc'
       run: |
         cd ${{ env.BUILD }}
 
@@ -263,14 +272,14 @@ jobs:
         
         # Move packages to release directory
         mkdir -p packages
-  mv *.deb *.rpm packages/ 2>/dev/null || true
+    mv *.deb *.rpm packages/ 2>/dev/null || true
         
         # List created packages
         echo "Created packages:"
         ls -la packages/
 
     - name: Upload package artifacts
-      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
+      if: (matrix.arch == 'x86_64' || matrix.arch == 'arm64') && matrix.libc == 'glibc'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}_packages
@@ -1193,11 +1202,6 @@ jobs:
             cmake_toolchain_file: armv7hf.cmake
             artifact_suffix: armv7_hf
             target_arch: armhf
-          - arch: aarch64
-            gcc_prefix: aarch64-linux-gnu
-            cmake_toolchain_file: aarch64.cmake
-            artifact_suffix: arm64
-            target_arch: arm64
 
     env:
       VERSION: "2.6.12"
@@ -1302,21 +1306,29 @@ jobs:
         if-no-files-found: error
 
   alpine_native:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
 
     container:
       image: alpine:latest
 
     env:
       VERSION: "2.6.12"
-      ARTIFACT: "libplctag_2.6.12_alpine_native_x86_64"
+      ARTIFACT: "libplctag_2.6.12_alpine_native_${{ matrix.arch }}"
       BUILD: "/workspace/build"
       DIST: "/workspace/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
 
     steps:
     - name: Print out current branch
-      run: echo "Building branch ${{ env.BRANCH }} natively on Alpine Linux"
+      run: echo "Building branch ${{ env.BRANCH }} natively on Alpine Linux for ${{ matrix.arch }}"
 
     - name: Install Alpine development packages
       run: |
@@ -1464,46 +1476,88 @@ jobs:
       run: |
         apk add --no-cache abuild apk-tools tar
 
-    - name: Create Alpine packages
+    - name: Create Alpine packages (runtime + devel)
       run: |
+        set -e
         cd ${{ env.BUILD }}
-        
+
         # Install to temporary directory for packaging
         make install DESTDIR=/tmp/alpine-install
-        
-        # Create Alpine APK package structure
-        mkdir -p /tmp/alpine-pkg/usr
-        cp -r /tmp/alpine-install/usr/* /tmp/alpine-pkg/usr/
-        
-        # Create .PKGINFO file for APK
-        cat > /tmp/alpine-pkg/.PKGINFO << EOF
+
+        # Determine lib directory (lib or lib64)
+        LIBDIR=/tmp/alpine-install/usr/lib
+        if [ ! -d "$LIBDIR" ] && [ -d "/tmp/alpine-install/usr/lib64" ]; then
+          LIBDIR=/tmp/alpine-install/usr/lib64
+        fi
+
+        # Prepare runtime package: only shared library and its symlinks
+        RUNTIME_ROOT=/tmp/apk-runtime
+        mkdir -p "$RUNTIME_ROOT/usr/lib"
+        if ls "$LIBDIR"/libplctag.so* >/dev/null 2>&1; then
+          cp -a "$LIBDIR"/libplctag.so* "$RUNTIME_ROOT/usr/lib/"
+        else
+          echo "ERROR: Shared library libplctag.so not found in $LIBDIR" >&2
+          exit 1
+        fi
+
+        # Prepare devel package: header, static lib, and tag_rw2 tool
+        DEVEL_ROOT=/tmp/apk-devel
+        mkdir -p "$DEVEL_ROOT/usr/include" "$DEVEL_ROOT/usr/lib" "$DEVEL_ROOT/usr/bin"
+        # Header
+        if [ -f /tmp/alpine-install/usr/include/libplctag.h ]; then
+          cp -a /tmp/alpine-install/usr/include/libplctag.h "$DEVEL_ROOT/usr/include/"
+        fi
+        # Static library
+        if [ -f "$LIBDIR"/libplctag.a ]; then
+          cp -a "$LIBDIR"/libplctag.a "$DEVEL_ROOT/usr/lib/"
+        fi
+        # Tool: tag_rw2
+        if [ -f /tmp/alpine-install/usr/bin/tag_rw2 ]; then
+          cp -a /tmp/alpine-install/usr/bin/tag_rw2 "$DEVEL_ROOT/usr/bin/"
+        fi
+
+        # Create .PKGINFO for runtime
+  cat > "$RUNTIME_ROOT/.PKGINFO" << EOF
         pkgname = libplctag
         pkgver = ${{ env.VERSION }}-r0
-        pkgdesc = Library for communicating with Allen-Bradley PLCs
+        pkgdesc = Shared library for communicating with Allen-Bradley PLCs
         url = https://github.com/libplctag/libplctag
         builddate = $(date +%s)
         packager = Kyle Hayes <kyle.hayes@gmail.com>
-        size = $(du -sb /tmp/alpine-pkg/usr | cut -f1)
-        arch = x86_64
+        size = $(du -sb "$RUNTIME_ROOT/usr" | cut -f1)
+  arch = ${{ matrix.arch }}
         license = LGPL-2.0 OR MPL-2.0
         depend = musl
         EOF
-        
-        # Create the APK package
-        cd /tmp/alpine-pkg
-        tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-r0.apk .PKGINFO usr/
-        
-        # Also create a tarball for easier installation
-        cd /tmp/alpine-install
-        tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-x86_64.tar.gz usr/
-        
+
+        # Create .PKGINFO for devel
+  cat > "$DEVEL_ROOT/.PKGINFO" << EOF
+        pkgname = libplctag-dev
+        pkgver = ${{ env.VERSION }}-r0
+        pkgdesc = Headers, static library, and tag_rw2 tool for libplctag development
+        url = https://github.com/libplctag/libplctag
+        builddate = $(date +%s)
+        packager = Kyle Hayes <kyle.hayes@gmail.com>
+        size = $(du -sb "$DEVEL_ROOT/usr" | cut -f1)
+  arch = ${{ matrix.arch }}
+        license = LGPL-2.0 OR MPL-2.0
+        depend = libplctag
+        EOF
+
+        # Create APKs (tarballs with .PKGINFO and usr/)
+  ( cd "$RUNTIME_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-r0.apk .PKGINFO usr/ )
+  ( cd "$DEVEL_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-dev-${{ env.VERSION }}-r0.apk .PKGINFO usr/ )
+
+        # Also create tarballs for easier ad-hoc installs
+  ( cd "$RUNTIME_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-${{ matrix.arch }}-runtime.tar.gz usr/ )
+  ( cd "$DEVEL_ROOT" && tar -czf ${{ env.BUILD }}/libplctag-${{ env.VERSION }}-alpine-${{ matrix.arch }}-devel.tar.gz usr/ )
+
         # Move packages to release directory
-        cd ${{ env.BUILD }}
-        mkdir -p release_packages
-        mv *.apk *.tar.gz release_packages/
-        
+        mkdir -p ${{ env.BUILD }}/release_packages
+        mv ${{ env.BUILD }}/*.apk ${{ env.BUILD }}/*.tar.gz ${{ env.BUILD }}/release_packages/
+
         echo "Created Alpine packages:"
-        ls -la release_packages/
+        ls -la ${{ env.BUILD }}/release_packages/
 
     - name: Create ZIP artifacts
       run: |
