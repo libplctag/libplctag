@@ -247,20 +247,23 @@ jobs:
         sudo apt update
         sudo apt install -y dpkg-dev debhelper fakeroot rpm alien
 
-    - name: Create DEB and RPM packages
+    - name: Create DEB and RPM packages (runtime + devel components)
       if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
       run: |
         cd ${{ env.BUILD }}
 
-        # Create DEB package
-        cpack -G DEB -V -DCPACK_PACKAGE_CONTACT="Kyle Hayes <kyle.hayes@gmail.com>" -DCPACK_DEBIAN_PACKAGE_SHLIBDEPS="ON" -DCPACK_PACKAGE_NAME="libplctag"
+        # Create DEB packages (components)
+        cpack -G DEB -V \
+          -D CPACK_PACKAGE_CONTACT="Kyle Hayes <kyle.hayes@gmail.com>" \
+          -D CPACK_DEBIAN_PACKAGE_SHLIBDEPS=ON
         
-        # Create RPM package  
-        cpack -G RPM -V -DCPACK_RPM_PACKAGE_LICENSE="LGPL-2.0 OR MPL-2.0" -DCPACK_PACKAGE_NAME="libplctag"
+        # Create RPM packages (components)
+        cpack -G RPM -V \
+          -D CPACK_RPM_PACKAGE_LICENSE="LGPL-2.0 OR MPL-2.0"
         
         # Move packages to release directory
         mkdir -p packages
-        mv *.deb *.rpm packages/ 2>/dev/null || true
+  mv *.deb *.rpm packages/ 2>/dev/null || true
         
         # List created packages
         echo "Created packages:"
