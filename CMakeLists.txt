@@ -167,7 +167,6 @@ endmacro()
 # print_all_variables()
 
 # CPack configuration for generating packages
-include(CPack)
 
 # Set package metadata
 set(CPACK_PACKAGE_NAME "libplctag")
@@ -186,12 +185,12 @@ set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/libplctag/libplctag")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-1.MPL")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 
-# Debian package configuration
+# Debian package configuration (global)
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_CONTACT "Kyle Hayes <kyle.hayes@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Kyle Hayes <kyle.hayes@gmail.com>")
 set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6 (>= 2.17)")
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/libplctag/libplctag")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 
@@ -217,7 +216,26 @@ set(CPACK_SOURCE_IGNORE_FILES
     /\\.DS_Store
 )
 
-# include the functions for CPack
+# Component packaging: two packages (runtime, devel)
+set(CPACK_COMPONENTS_ALL runtime devel)
+
+# Component descriptions
+set(CPACK_COMPONENT_RUNTIME_DESCRIPTION "Shared library for libplctag")
+set(CPACK_COMPONENT_DEVEL_DESCRIPTION "Headers, static library, and tag_rw2 tool for libplctag development")
+
+# Debian component package names and relationships
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "libplctag")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_NAME "libplctag-dev")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "libc6 (>= 2.17)")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS "libplctag (= ${CPACK_PACKAGE_VERSION})")
+
+# RPM component package names and relationships
+set(CPACK_RPM_RUNTIME_PACKAGE_NAME "libplctag")
+set(CPACK_RPM_DEVEL_PACKAGE_NAME "libplctag-devel")
+set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES "libplctag = ${CPACK_PACKAGE_VERSION}")
+
+# include the functions for CPack (after all CPACK_* variables are set)
 include(CPack)
 
 

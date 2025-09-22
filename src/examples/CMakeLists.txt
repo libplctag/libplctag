@@ -103,3 +103,8 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     #     target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
     # endif()
 endforeach()
+
+# Install only the tag_rw2 tool into the devel component
+install(TARGETS tag_rw2
+    RUNTIME DESTINATION bin
+    COMPONENT devel)
