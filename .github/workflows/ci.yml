@@ -1013,27 +1013,38 @@ jobs:
           echo "Created Alpine packages:"
           ls -la /workspace/build/release_packages/
 
-          # If bin_dist is missing (some builds), synthesize it from installed files
-          if [ ! -d /workspace/build/bin_dist ] && [ -d /tmp/alpine-install/usr ]; then
-            mkdir -p /workspace/build/bin_dist
-            # Copy installed binaries and libraries into bin_dist for zipping
-            if [ -d /tmp/alpine-install/usr/bin ]; then
-              cp -a /tmp/alpine-install/usr/bin/* /workspace/build/bin_dist/ || true
-            fi
-            if [ -n "${LIBDIR:-}" ] && [ -d "$LIBDIR" ]; then
-              cp -a "$LIBDIR"/libplctag.* /workspace/build/bin_dist/ || true
-            fi
+          # Create ZIP artifacts from installed files (Alpine doesn't produce bin_dist by default)
+          echo "Creating ZIP artifacts from installed files..."
+          mkdir -p /workspace/build/zip_staging
+          cd /workspace/build/zip_staging
+          
+          # Copy all installed files to staging area
+          if [ -d /tmp/alpine-install/usr/bin ]; then
+            cp -a /tmp/alpine-install/usr/bin/* . || true
           fi
-
-          # Create ZIP artifacts
+          if [ -n "${LIBDIR:-}" ] && [ -d "$LIBDIR" ]; then
+            cp -a "$LIBDIR"/libplctag.* . || true
+          fi
+          
+          # Also copy any built executables from build tree if they exist
           if [ -d /workspace/build/bin_dist ]; then
-            cd /workspace/build/bin_dist
-            zip -r "../libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" .
-            zip -r "../libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" .
-            cd ..
-            mkdir -p release_zips
-            mv *.zip release_zips/
+            cp -a /workspace/build/bin_dist/* . || true
           fi
+          
+          echo "Files staged for zipping:"
+          ls -la .
+          
+          # Create ZIP files
+          cd /workspace/build
+          zip -r "libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" zip_staging/
+          zip -r "libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" zip_staging/
+          
+          # Move ZIPs to release directory
+          mkdir -p release_zips
+          mv *.zip release_zips/
+          
+          echo "Created ZIP artifacts:"
+          ls -la release_zips/
         ALPINE_SCRIPT
 
     - name: Upload ZIP artifacts
