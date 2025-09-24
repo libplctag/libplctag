@@ -801,6 +801,11 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH }}
+    - name: Prepare build directory on host
+      run: |
+        mkdir -p "${{ env.BUILD }}"
+        # Make sure host owns and can write to build before container runs
+        chmod -R a+rwX "${{ env.BUILD }}" || true
     - name: Build and package inside Alpine container
       run: |
         set -euo pipefail
@@ -813,11 +818,14 @@ jobs:
           alpine:latest \
           sh -s <<'ALPINE_SCRIPT'
           set -euo pipefail
+          # Make outputs group/world writable so the host runner can modify artifacts
+          umask 000
           apk update && apk add --no-cache \
             build-base cmake git bash zip musl-dev linux-headers pkgconfig abuild apk-tools tar
 
-          # Prepare build
-          rm -rf /workspace/build && mkdir -p /workspace/build
+          # Prepare build: preserve host-owned build dir, just clean contents
+          mkdir -p /workspace/build
+          rm -rf /workspace/build/*
           cd /workspace/build
 
           # Configure and build
@@ -1045,6 +1053,10 @@ jobs:
           
           echo "Created ZIP artifacts:"
           ls -la release_zips/
+
+          # Ensure host runner can read/write build outputs
+          echo "Fixing permissions on /workspace/build for host runner access..."
+          chmod -R a+rwX /workspace/build || true
         ALPINE_SCRIPT
 
     - name: Debug Alpine build outputs
