@@ -1014,9 +1014,15 @@ jobs:
           ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-runtime.tar.gz usr/ )
           ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-devel.tar.gz usr/ )
 
-          # Move packages to release directory
+          # Move packages to release directory (guard against empty globs)
           mkdir -p /workspace/build/release_packages
-          mv /workspace/build/*.apk /workspace/build/*.tar.gz /workspace/build/release_packages/
+          echo "Moving package files to release_packages..."
+          for f in /workspace/build/*.apk /workspace/build/*.tar.gz; do
+            if [ -f "$f" ]; then
+              echo "  moving $(basename "$f")"
+              mv "$f" /workspace/build/release_packages/
+            fi
+          done
 
           echo "Created Alpine packages:"
           ls -la /workspace/build/release_packages/
@@ -1102,6 +1108,17 @@ jobs:
         name: ${{ env.ARTIFACT }}_zips
         path: ${{ env.BUILD }}/release_zips/*.zip
         if-no-files-found: error
+
+    - name: Debug Alpine packages before upload
+      run: |
+        echo "Alpine packages output (arch: ${{ matrix.arch }}) before upload:"
+        if [ -d "${{ env.BUILD }}/release_packages" ]; then
+          ls -la "${{ env.BUILD }}/release_packages" || true
+          echo "Found package files:" || true
+          find "${{ env.BUILD }}/release_packages" -maxdepth 1 -type f -ls || true
+        else
+          echo "release_packages directory missing at ${{ env.BUILD }}/release_packages" >&2
+        fi
 
     - name: Upload Alpine package artifacts
       uses: actions/upload-artifact@v4
