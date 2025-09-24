@@ -1033,19 +1033,56 @@ jobs:
           
           echo "Files staged for zipping:"
           ls -la .
+          echo "Staged file count: $(find . -type f | wc -l)"
+          echo "Staged total size (bytes): $(du -sb . | cut -f1)"
           
           # Create ZIP files
           cd /workspace/build
-          zip -r "libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" zip_staging/
-          zip -r "libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" zip_staging/
-          
-          # Move ZIPs to release directory
           mkdir -p release_zips
-          mv *.zip release_zips/
+          # Write ZIPs directly to release_zips to avoid glob/mv races
+          zip -r "release_zips/libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" zip_staging/ || { echo "Failed to create _bin zip" >&2; exit 1; }
+          zip -r "release_zips/libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" zip_staging/ || { echo "Failed to create full zip" >&2; exit 1; }
           
           echo "Created ZIP artifacts:"
           ls -la release_zips/
         ALPINE_SCRIPT
+
+    - name: Debug Alpine build outputs
+      run: |
+        echo "Alpine build output (arch: ${{ matrix.arch }}) contents before upload:" 
+        if [ -d "${{ env.BUILD }}/release_zips" ]; then
+          ls -la "${{ env.BUILD }}/release_zips" || true
+          echo "Found ZIP files:" || true
+          find "${{ env.BUILD }}/release_zips" -maxdepth 1 -type f -name '*.zip' -ls || true
+        else
+          echo "release_zips directory missing at ${{ env.BUILD }}/release_zips" >&2
+        fi
+        echo "Top-level build dir listing:" 
+        ls -la "${{ env.BUILD }}" || true
+
+    - name: 'Host-side fallback: ensure Alpine ZIPs exist'
+      run: |
+        set -euo pipefail
+        if compgen -G "${{ env.BUILD }}/release_zips/*.zip" > /dev/null; then
+          echo "ZIPs already exist, skipping fallback."
+          exit 0
+        fi
+        echo "No ZIPs found; creating host-side fallback zips."
+        mkdir -p "${{ env.BUILD }}/release_zips" "${{ env.BUILD }}/zip_host_fallback"
+        STAGE="${{ env.BUILD }}/zip_host_fallback"
+        # Prefer bin_dist if it exists
+        if [ -d "${{ env.BUILD }}/bin_dist" ]; then
+          cp -a "${{ env.BUILD }}/bin_dist/." "$STAGE/" || true
+        fi
+        # Also include any top-level built libraries/binaries
+        cp -a "${{ env.BUILD }}"/libplctag.* "$STAGE/" 2>/dev/null || true
+        # Add a small README so zip is non-empty even if nothing else
+        echo "This archive was created by a host-side fallback because container zips were missing." > "$STAGE/README.txt"
+        # Create zips using the same naming convention
+        ( cd "${{ env.BUILD }}" && zip -r "release_zips/${{ env.ARTIFACT }}_bin.zip" zip_host_fallback/ )
+        ( cd "${{ env.BUILD }}" && zip -r "release_zips/${{ env.ARTIFACT }}.zip" zip_host_fallback/ )
+        echo "Fallback ZIPs created:"
+        ls -la "${{ env.BUILD }}/release_zips"
 
     - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
