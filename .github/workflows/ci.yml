@@ -1017,14 +1017,15 @@ jobs:
           # Move packages to release directory (guard against empty globs)
           mkdir -p /workspace/build/release_packages
           echo "Moving package files to release_packages..."
-          shopt -s nullglob || true 2>/dev/null || true
-          for f in /workspace/build/*.apk /workspace/build/*.tar.gz; do
-            if [ -f "$f" ]; then
-              echo "  moving $(basename "$f")"
-              mv "$f" /workspace/build/release_packages/
-            fi
+          FOUND_PKGS=0
+          for f in $(find /workspace/build -maxdepth 1 -type f \( -name '*.apk' -o -name '*.tar.gz' \) 2>/dev/null); do
+            FOUND_PKGS=1
+            echo "  moving $(basename "$f")"
+            mv "$f" /workspace/build/release_packages/
           done
-          shopt -u nullglob 2>/dev/null || true
+          if [ "$FOUND_PKGS" -eq 0 ]; then
+            echo "  (no package files found)"
+          fi
 
           echo "Created Alpine packages:"
           ls -la /workspace/build/release_packages/
