@@ -817,7 +817,10 @@ jobs:
           -w /workspace \
           alpine:latest \
           sh -s <<'ALPINE_SCRIPT'
-          set -euo pipefail
+          # Use only -e; explicitly disable nounset and pipefail (BusyBox ash) and initialize loop vars
+          set -e
+          set +u 2>/dev/null || true
+          f="" # predeclare to avoid any stray expansions triggering errors
           # Make outputs group/world writable so the host runner can modify artifacts
           umask 000
           apk update && apk add --no-cache \
@@ -932,7 +935,10 @@ jobs:
           fi
 
           # Install to temporary directory for packaging
+          echo "PRE_INSTALL_MARKER: starting install"
           make install DESTDIR=/tmp/alpine-install
+          echo "POST_INSTALL_MARKER: install completed successfully"
+          echo "PRE_PACKAGE_MOVE_MARKER: beginning packaging operations"
 
           # Determine lib directory
           # Prefer /usr/lib, then /usr/lib64, then /usr/local/lib, then /usr/local/lib64
@@ -1018,6 +1024,7 @@ jobs:
           mkdir -p /workspace/build/release_packages
           echo "Moving package files to release_packages..."
           FOUND_PKGS=0
+          echo "PACKAGE_MOVE_START: scanning for package files (*.apk *.tar.gz)"
           find /workspace/build -maxdepth 1 -type f \( -name '*.apk' -o -name '*.tar.gz' \) 2>/dev/null | while IFS= read -r f; do
             [ -n "$f" ] || continue
             FOUND_PKGS=1
@@ -1027,6 +1034,7 @@ jobs:
           if [ "$FOUND_PKGS" -eq 0 ]; then
             echo "  (no package files found)"
           fi
+          echo "PACKAGE_MOVE_DONE: status=$FOUND_PKGS"
 
           echo "Created Alpine packages:"
           ls -la /workspace/build/release_packages/
