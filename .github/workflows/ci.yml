@@ -934,27 +934,19 @@ jobs:
             cd /workspace/build
           fi
 
-          # Install to temporary directory for packaging
+          # Install into controlled staging prefix inside workspace
           echo "PRE_INSTALL_MARKER: starting install"
-          make install DESTDIR=/tmp/alpine-install
-          echo "POST_INSTALL_MARKER: install completed successfully"
+          STAGE_ROOT=/workspace/build/alpine_stage
+          rm -rf "$STAGE_ROOT"
+          cmake --install . --prefix "$STAGE_ROOT/usr"
+          echo "POST_INSTALL_MARKER: install completed successfully (staged at $STAGE_ROOT/usr)"
           echo "PRE_PACKAGE_MOVE_MARKER: beginning packaging operations"
 
-          # Determine lib directory
-          # Prefer /usr/lib, then /usr/lib64, then /usr/local/lib, then /usr/local/lib64
-          for CAND in \
-            /tmp/alpine-install/usr/lib \
-            /tmp/alpine-install/usr/lib64 \
-            /tmp/alpine-install/usr/local/lib \
-            /tmp/alpine-install/usr/local/lib64; do
-            if [ -d "$CAND" ]; then
-              LIBDIR="$CAND"
-              break
-            fi
-          done
-          if [ -z "${LIBDIR:-}" ]; then
-            echo "ERROR: Could not determine library install directory under /tmp/alpine-install" >&2
-            find /tmp/alpine-install -maxdepth 3 -type d -name lib -o -name lib64 || true
+          # Known library directory after staging install
+          LIBDIR="$STAGE_ROOT/usr/lib"
+          if [ ! -d "$LIBDIR" ]; then
+            echo "ERROR: Expected library directory $LIBDIR not found" >&2
+            find "$STAGE_ROOT" -maxdepth 4 -type f -name 'libplctag*' -ls || true
             exit 1
           fi
 
@@ -972,16 +964,16 @@ jobs:
           DEVEL_ROOT=/tmp/apk-devel
           mkdir -p "$DEVEL_ROOT/usr/include" "$DEVEL_ROOT/usr/lib" "$DEVEL_ROOT/usr/bin"
           # Header
-          if [ -f /tmp/alpine-install/usr/include/libplctag.h ]; then
-            cp -a /tmp/alpine-install/usr/include/libplctag.h "$DEVEL_ROOT/usr/include/"
+          if [ -f "$STAGE_ROOT/usr/include/libplctag.h" ]; then
+            cp -a "$STAGE_ROOT/usr/include/libplctag.h" "$DEVEL_ROOT/usr/include/"
           fi
           # Static library
           if [ -f "$LIBDIR"/libplctag.a ]; then
             cp -a "$LIBDIR"/libplctag.a "$DEVEL_ROOT/usr/lib/"
           fi
           # Tool: tag_rw2
-          if [ -f /tmp/alpine-install/usr/bin/tag_rw2 ]; then
-            cp -a /tmp/alpine-install/usr/bin/tag_rw2 "$DEVEL_ROOT/usr/bin/"
+          if [ -f "$STAGE_ROOT/usr/bin/tag_rw2" ]; then
+            cp -a "$STAGE_ROOT/usr/bin/tag_rw2" "$DEVEL_ROOT/usr/bin/"
           fi
 
           # Create .PKGINFO for runtime
@@ -1045,8 +1037,8 @@ jobs:
           cd /workspace/build/zip_staging
           
           # Copy all installed files to staging area
-          if [ -d /tmp/alpine-install/usr/bin ]; then
-            cp -a /tmp/alpine-install/usr/bin/* . || true
+          if [ -d "$STAGE_ROOT/usr/bin" ]; then
+            cp -a "$STAGE_ROOT/usr/bin"/* . || true
           fi
           if [ -n "${LIBDIR:-}" ] && [ -d "$LIBDIR" ]; then
             cp -a "$LIBDIR"/libplctag.* . || true
