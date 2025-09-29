@@ -1005,28 +1005,56 @@ jobs:
           EOF
 
           # Create APKs (tarballs with .PKGINFO and usr/)
-          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0.apk .PKGINFO usr/ )
-          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0.apk .PKGINFO usr/ )
+          echo "PACKAGE_BUILD: creating runtime APK"
+          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create runtime APK" >&2; ls -R "$RUNTIME_ROOT" || true; exit 1; }
+          echo "PACKAGE_BUILD: creating devel APK"
+          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create devel APK" >&2; ls -R "$DEVEL_ROOT" || true; exit 1; }
+
+          # Verify APKs
+          for f in /workspace/build/libplctag-$VERSION-r0.apk /workspace/build/libplctag-dev-$VERSION-r0.apk; do
+            if [ -f "$f" ]; then
+              echo "PACKAGE_VERIFY: $(basename "$f") size=$(wc -c < "$f") bytes";
+              sha256sum "$f" || true
+            else
+              echo "PACKAGE_VERIFY_ERROR: expected file $(basename "$f") missing" >&2
+              exit 1
+            fi
+          done
 
           # Also create tarballs for easier ad-hoc installs
-          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-runtime.tar.gz usr/ )
-          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-devel.tar.gz usr/ )
+          echo "PACKAGE_BUILD: creating runtime tar.gz"
+          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-runtime.tar.gz usr/ ) || { echo "ERROR: failed to create runtime tar.gz" >&2; exit 1; }
+          echo "PACKAGE_BUILD: creating devel tar.gz"
+          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-devel.tar.gz usr/ ) || { echo "ERROR: failed to create devel tar.gz" >&2; exit 1; }
 
-          # Move packages to release directory (guard against empty globs)
+          # Verify tarballs
+          for f in /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-runtime.tar.gz /workspace/build/libplctag-$VERSION-alpine-$MATRIX_ARCH-devel.tar.gz; do
+            if [ -f "$f" ]; then
+              echo "PACKAGE_VERIFY: $(basename "$f") size=$(wc -c < "$f") bytes";
+              sha256sum "$f" || true
+            else
+              echo "PACKAGE_VERIFY_ERROR: expected file $(basename "$f") missing" >&2
+              exit 1
+            fi
+          done
+
+          # Copy packages to release directory (do not remove originals) with diagnostics
           mkdir -p /workspace/build/release_packages
-          echo "Moving package files to release_packages..."
+          echo "PACKAGE_STAGE_START: scanning for package files (*.apk *.tar.gz)"
           FOUND_PKGS=0
-          echo "PACKAGE_MOVE_START: scanning for package files (*.apk *.tar.gz)"
-          find /workspace/build -maxdepth 1 -type f \( -name '*.apk' -o -name '*.tar.gz' \) 2>/dev/null | while IFS= read -r f; do
-            [ -n "$f" ] || continue
+          for pkg in /workspace/build/*.apk /workspace/build/*.tar.gz; do
+            [ -f "$pkg" ] || continue
             FOUND_PKGS=1
-            echo "  moving $(basename "$f")"
-            mv "$f" /workspace/build/release_packages/
+            echo "  copying $(basename "$pkg")"
+            cp -a "$pkg" /workspace/build/release_packages/
           done
           if [ "$FOUND_PKGS" -eq 0 ]; then
-            echo "  (no package files found)"
+            echo "  (no package files found to copy)"
           fi
-          echo "PACKAGE_MOVE_DONE: status=$FOUND_PKGS"
+          echo "PACKAGE_STAGE_DONE: count=$FOUND_PKGS"
+          echo "Listing release_packages after copy:"; ls -la /workspace/build/release_packages || true
+          echo "Listing build root (apk/tar.gz):"; ls -1 /workspace/build/*.apk /workspace/build/*.tar.gz 2>/dev/null || true
+          touch /workspace/build/release_packages/_PACKAGES_OK
 
           echo "Created Alpine packages:"
           ls -la /workspace/build/release_packages/
