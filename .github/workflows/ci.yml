@@ -56,9 +56,9 @@ jobs:
 
     - name: Extract version from CMakeLists.txt
       run: |
-        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
         VERSION="${MAJOR}.${MINOR}.${PATCH}"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
         echo "ARTIFACT=libplctag_${VERSION}_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
@@ -326,9 +326,9 @@ jobs:
 
     - name: Extract version from CMakeLists.txt
       run: |
-        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
         VERSION="${MAJOR}.${MINOR}.${PATCH}"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
         echo "ARTIFACT=libplctag_${VERSION}_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
@@ -518,9 +518,9 @@ jobs:
     - name: Extract version from CMakeLists.txt
       shell: bash
       run: |
-        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
         VERSION="${MAJOR}.${MINOR}.${PATCH}"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
         echo "ARTIFACT=libplctag_${VERSION}_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
@@ -717,9 +717,9 @@ jobs:
 
     - name: Extract version from CMakeLists.txt
       run: |
-        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
         VERSION="${MAJOR}.${MINOR}.${PATCH}"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
         echo "ARTIFACT=libplctag_${VERSION}_ubuntu_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
@@ -838,9 +838,9 @@ jobs:
         ref: ${{ env.BRANCH }}
     - name: Extract version from CMakeLists.txt
       run: |
-        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
         VERSION="${MAJOR}.${MINOR}.${PATCH}"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
         echo "ARTIFACT=libplctag_${VERSION}_alpine_native_${{ matrix.arch }}" >> $GITHUB_ENV
@@ -1086,19 +1086,34 @@ jobs:
           # Copy packages to release directory (do not remove originals) with diagnostics
           mkdir -p /workspace/build/release_packages
           echo "PACKAGE_STAGE_START: scanning for package files (*.apk *.tar.gz)"
-          FOUND_PKGS=0
-          for pkg in /workspace/build/*.apk /workspace/build/*.tar.gz; do
-            [ -f "$pkg" ] || continue
-            FOUND_PKGS=1
-            echo "  copying $(basename "$pkg")"
-            cp -a "$pkg" /workspace/build/release_packages/
-          done
-          if [ "$FOUND_PKGS" -eq 0 ]; then
-            echo "  (no package files found to copy)"
+          echo "Listing build root before copy:"
+          ls -la /workspace/build/ | grep -E '\.(apk|tar\.gz)$' || echo "No .apk or .tar.gz files found"
+          
+          # Copy APK files
+          if ls /workspace/build/*.apk 1> /dev/null 2>&1; then
+            cp -v /workspace/build/*.apk /workspace/build/release_packages/ || { echo "ERROR: failed to copy APK files" >&2; exit 1; }
+          else
+            echo "WARNING: No APK files found in /workspace/build/" >&2
           fi
-          echo "PACKAGE_STAGE_DONE: count=$FOUND_PKGS"
+          
+          # Copy tar.gz files
+          if ls /workspace/build/*.tar.gz 1> /dev/null 2>&1; then
+            cp -v /workspace/build/*.tar.gz /workspace/build/release_packages/ || { echo "ERROR: failed to copy tar.gz files" >&2; exit 1; }
+          else
+            echo "WARNING: No tar.gz files found in /workspace/build/" >&2
+          fi
+          
+          echo "PACKAGE_STAGE_DONE"
           echo "Listing release_packages after copy:"; ls -la /workspace/build/release_packages || true
-          echo "Listing build root (apk/tar.gz):"; ls -1 /workspace/build/*.apk /workspace/build/*.tar.gz 2>/dev/null || true
+          
+          # Verify we have actual package files (not just the marker)
+          PKG_COUNT=$(find /workspace/build/release_packages -type f \( -name '*.apk' -o -name '*.tar.gz' \) | wc -l)
+          if [ "$PKG_COUNT" -eq 0 ]; then
+            echo "ERROR: No package files were copied to release_packages directory" >&2
+            exit 1
+          fi
+          echo "Successfully staged $PKG_COUNT package files"
+          
           touch /workspace/build/release_packages/_PACKAGES_OK
           
           # Ensure packages are readable by host
@@ -1207,7 +1222,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.ARTIFACT }}_packages
-        path: ${{ env.BUILD }}/release_packages/*
+        path: ${{ env.BUILD }}/release_packages/
         if-no-files-found: error
 
   debug_context:
@@ -1334,9 +1349,9 @@ jobs:
 
     - name: Extract version from CMakeLists.txt
       run: |
-        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
-        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*[^0-9]([0-9]+).*/\1/')
         VERSION="${MAJOR}.${MINOR}.${PATCH}"
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
         echo "Detected version: ${VERSION}"
