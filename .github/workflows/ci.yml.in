@@ -20,29 +20,27 @@ jobs:
             runner: ubuntu-22.04
             cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=On"
             apt_packages: "build-essential cmake libmodbus5 libmodbus-dev"
-            artifact_name: "libplctag_@VERSION@_ubuntu_x64"
+            artifact_suffix: "ubuntu_x64"
           - arch: x86_64
             libc: musl
             runner: ubuntu-22.04
             cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
             apt_packages: "build-essential cmake musl-tools musl-dev"
-            artifact_name: "libplctag_@VERSION@_ubuntu_x64_musl"
+            artifact_suffix: "ubuntu_x64_musl"
           - arch: x86
             libc: glibc
             runner: ubuntu-22.04
             cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
             apt_packages: "gcc-multilib g++-multilib"
-            artifact_name: "libplctag_@VERSION@_ubuntu_x86"
+            artifact_suffix: "ubuntu_x86"
           - arch: arm64
             libc: glibc
             runner: ubuntu-22.04-arm
             cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
             apt_packages: "build-essential cmake zip"
-            artifact_name: "libplctag_@VERSION@_ubuntu_arm64"
+            artifact_suffix: "ubuntu_arm64"
 
     env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "${{ matrix.artifact_name }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -55,6 +53,17 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH }}
+
+    - name: Extract version from CMakeLists.txt
+      run: |
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        echo "ARTIFACT=libplctag_${VERSION}_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
+        echo "Detected version: ${VERSION}"
+        echo "Artifact name: libplctag_${VERSION}_${{ matrix.artifact_suffix }}"
 
     - name: Set up build environment
       run: |
@@ -295,15 +304,13 @@ jobs:
           - name: x64
             runner: macos-13
             cmake_arch: x86_64
-            artifact_name: "libplctag_@VERSION@_macos_x64"
+            artifact_suffix: "macos_x64"
           - name: arm64
             runner: macos-14
             cmake_arch: arm64
-            artifact_name: "libplctag_@VERSION@_macos_aarch64"
+            artifact_suffix: "macos_aarch64"
 
     env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "${{ matrix.artifact_name }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -316,6 +323,17 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH }}
+
+    - name: Extract version from CMakeLists.txt
+      run: |
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        echo "ARTIFACT=libplctag_${VERSION}_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
+        echo "Detected version: ${VERSION}"
+        echo "Artifact name: libplctag_${VERSION}_${{ matrix.artifact_suffix }}"
 
     - name: Create build directory
       run: rm -rf ${{ env.BUILD }}; mkdir -p ${{ env.BUILD }}
@@ -458,34 +476,32 @@ jobs:
             runner: windows-2022
             msvc_arch: amd64
             cmake_processor: AMD64
-            artifact_name: "libplctag_@VERSION@_windows_x64"
+            artifact_suffix: "windows_x64"
           - name: x86
             toolchain: msvc
             runner: windows-2022
             msvc_arch: amd64_x86
             cmake_processor: Win32
-            artifact_name: "libplctag_@VERSION@_windows_x86"
+            artifact_suffix: "windows_x86"
           - name: arm64
             toolchain: msvc
             runner: windows-11-arm
             msvc_arch: arm64
             cmake_processor: ARM64
-            artifact_name: "libplctag_@VERSION@_windows_arm64"
+            artifact_suffix: "windows_arm64"
           # MinGW toolchain variants (no ZIP artifacts)
           - name: x64_MinGW
             toolchain: mingw
             runner: windows-2022
             cmake_processor: AMD64
-            artifact_name: "libplctag_@VERSION@_windows_x64_MinGW"
+            artifact_suffix: "windows_x64_MinGW"
           - name: x86_MinGW
             toolchain: mingw
             runner: windows-2022
             cmake_processor: x86
-            artifact_name: "libplctag_@VERSION@_windows_x86_MinGW"
+            artifact_suffix: "windows_x86_MinGW"
 
     env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "${{ matrix.artifact_name }}"
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -498,6 +514,18 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH }}
+
+    - name: Extract version from CMakeLists.txt
+      shell: bash
+      run: |
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        echo "ARTIFACT=libplctag_${VERSION}_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
+        echo "Detected version: ${VERSION}"
+        echo "Artifact name: libplctag_${VERSION}_${{ matrix.artifact_suffix }}"
 
     - name: Create build directory
       run: mkdir ${{ env.BUILD }}
@@ -674,8 +702,6 @@ jobs:
             target_arch: armhf
 
     env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_ubuntu_${{ matrix.artifact_suffix }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -688,6 +714,17 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH }}
+
+    - name: Extract version from CMakeLists.txt
+      run: |
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        echo "ARTIFACT=libplctag_${VERSION}_ubuntu_${{ matrix.artifact_suffix }}" >> $GITHUB_ENV
+        echo "Detected version: ${VERSION}"
+        echo "Artifact name: libplctag_${VERSION}_ubuntu_${{ matrix.artifact_suffix }}"
 
     - name: Setup ARM cross-compilation
       run: |
@@ -787,8 +824,6 @@ jobs:
             runner: ubuntu-22.04-arm
 
     env:
-      VERSION: "@VERSION@"
-      ARTIFACT: "libplctag_@VERSION@_alpine_native_${{ matrix.arch }}"
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -801,6 +836,16 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: ${{ env.BRANCH }}
+    - name: Extract version from CMakeLists.txt
+      run: |
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        echo "ARTIFACT=libplctag_${VERSION}_alpine_native_${{ matrix.arch }}" >> $GITHUB_ENV
+        echo "Detected version: ${VERSION}"
+        echo "Artifact name: libplctag_${VERSION}_alpine_native_${{ matrix.arch }}"
     - name: Prepare build directory on host
       run: |
         mkdir -p "${{ env.BUILD }}"
@@ -1055,6 +1100,9 @@ jobs:
           echo "Listing release_packages after copy:"; ls -la /workspace/build/release_packages || true
           echo "Listing build root (apk/tar.gz):"; ls -1 /workspace/build/*.apk /workspace/build/*.tar.gz 2>/dev/null || true
           touch /workspace/build/release_packages/_PACKAGES_OK
+          
+          # Ensure packages are readable by host
+          chmod -R a+r /workspace/build/release_packages/
 
           echo "Created Alpine packages:"
           ls -la /workspace/build/release_packages/
@@ -1085,12 +1133,15 @@ jobs:
           # Create ZIP files
           cd /workspace/build
           mkdir -p release_zips
-          # Write ZIPs directly to release_zips to avoid glob/mv races
-          zip -r "release_zips/libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" zip_staging/ || { echo "Failed to create _bin zip" >&2; exit 1; }
-          zip -r "release_zips/libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" zip_staging/ || { echo "Failed to create full zip" >&2; exit 1; }
+          # Write ZIPs directly to release_zips to avoid glob/mv races (use absolute paths)
+          zip -r "/workspace/build/release_zips/libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}_bin.zip" zip_staging/ || { echo "Failed to create _bin zip" >&2; exit 1; }
+          zip -r "/workspace/build/release_zips/libplctag_${VERSION}_alpine_native_${MATRIX_ARCH}.zip" zip_staging/ || { echo "Failed to create full zip" >&2; exit 1; }
           
           echo "Created ZIP artifacts:"
-          ls -la release_zips/
+          ls -la /workspace/build/release_zips/
+          
+          # Ensure ZIPs are readable by host
+          chmod -R a+r /workspace/build/release_zips/
 
           # Ensure host runner can read/write build outputs
           echo "Fixing permissions on /workspace/build for host runner access..."
@@ -1275,14 +1326,20 @@ jobs:
     runs-on: ubuntu-22.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
-    env:
-      VERSION: "@VERSION@"
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+
+    - name: Extract version from CMakeLists.txt
+      run: |
+        MAJOR=$(grep -E "set \(libplctag_VERSION_MAJOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        MINOR=$(grep -E "set \(libplctag_VERSION_MINOR" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        PATCH=$(grep -E "set \(libplctag_VERSION_PATCH" CMakeLists.txt | sed -E 's/.*([0-9]+).*/\1/')
+        VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+        echo "Detected version: ${VERSION}"
 
     - name: Get PR details
       id: get_pr_details
@@ -1333,13 +1390,13 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag -a "v@VERSION@" -m "Release v@VERSION@"
-        git push origin "v@VERSION@"
+        git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
+        git push origin "v${{ env.VERSION }}"
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: "v@VERSION@"
+        tag_name: "v${{ env.VERSION }}"
         name: ${{ steps.get_pr_details.outputs.pr_title }}
         body: ${{ steps.get_pr_details.outputs.pr_body }}
         files: ./release_artifacts/**/*.zip
