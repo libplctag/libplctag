@@ -1036,33 +1036,33 @@ jobs:
             cp -a "$STAGE_ROOT/usr/bin/tag_rw2" "$DEVEL_ROOT/usr/bin/"
           fi
 
-          # Create .PKGINFO for runtime (no leading whitespace for EOF delimiter)
-          cat > "$RUNTIME_ROOT/.PKGINFO" <<EOF
-pkgname = libplctag
-pkgver = $VERSION-r0
-pkgdesc = Shared library for communicating with Allen-Bradley PLCs
-url = https://github.com/libplctag/libplctag
-builddate = $(date +%s)
-packager = Kyle Hayes <kyle.hayes@gmail.com>
-size = $(du -sb "$RUNTIME_ROOT/usr" | cut -f1)
-arch = $MATRIX_ARCH
-license = LGPL-2.0 OR MPL-2.0
-depend = musl
-EOF
+          # Create .PKGINFO for runtime using printf to avoid nested heredoc issues
+          printf '%s\n' \
+            "pkgname = libplctag" \
+            "pkgver = $VERSION-r0" \
+            "pkgdesc = Shared library for communicating with Allen-Bradley PLCs" \
+            "url = https://github.com/libplctag/libplctag" \
+            "builddate = $(date +%s)" \
+            "packager = Kyle Hayes <kyle.hayes@gmail.com>" \
+            "size = $(du -sb "$RUNTIME_ROOT/usr" | cut -f1)" \
+            "arch = $MATRIX_ARCH" \
+            "license = LGPL-2.0 OR MPL-2.0" \
+            "depend = musl" \
+            > "$RUNTIME_ROOT/.PKGINFO"
 
-          # Create .PKGINFO for devel (no leading whitespace for EOF delimiter)
-          cat > "$DEVEL_ROOT/.PKGINFO" <<EOF
-pkgname = libplctag-dev
-pkgver = $VERSION-r0
-pkgdesc = Headers, static library, and tag_rw2 tool for libplctag development
-url = https://github.com/libplctag/libplctag
-builddate = $(date +%s)
-packager = Kyle Hayes <kyle.hayes@gmail.com>
-size = $(du -sb "$DEVEL_ROOT/usr" | cut -f1)
-arch = $MATRIX_ARCH
-license = LGPL-2.0 OR MPL-2.0
-depend = libplctag
-EOF
+          # Create .PKGINFO for devel using printf to avoid nested heredoc issues
+          printf '%s\n' \
+            "pkgname = libplctag-dev" \
+            "pkgver = $VERSION-r0" \
+            "pkgdesc = Headers, static library, and tag_rw2 tool for libplctag development" \
+            "url = https://github.com/libplctag/libplctag" \
+            "builddate = $(date +%s)" \
+            "packager = Kyle Hayes <kyle.hayes@gmail.com>" \
+            "size = $(du -sb "$DEVEL_ROOT/usr" | cut -f1)" \
+            "arch = $MATRIX_ARCH" \
+            "license = LGPL-2.0 OR MPL-2.0" \
+            "depend = libplctag" \
+            > "$DEVEL_ROOT/.PKGINFO"
 
           # Create APKs (tarballs with .PKGINFO and usr/)
           echo "PACKAGE_BUILD: creating runtime APK"
