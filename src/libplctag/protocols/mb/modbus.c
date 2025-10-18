@@ -486,6 +486,10 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
 
         while(*walker && (*walker)->connection_group_id != connection_group_id
               && (*walker)->server_id != (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
+
+            pdebug(DEBUG_DETAIL, "walking past PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
+                   (*walker)->server_id, (*walker)->server);
+                   
             walker = &((*walker)->next);
         }
 
@@ -500,6 +504,8 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
             /* nope, make a new one.  Do as little as possible in the mutex. */
 
             pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
+
+            pdebug(DEBUG_DETAIL, "connection_group_id=%d, server_id=%d, server=%s", connection_group_id, server_id, server);
 
             is_new = 1;
 
