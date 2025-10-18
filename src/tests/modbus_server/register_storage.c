@@ -80,7 +80,7 @@ bool register_storage_init(register_storage_t *storage,
         }
         storage->num_holding_registers = num_holding_registers;
         log_info("Allocated %d holding registers (%zu bytes)", 
-                num_holding_registers, num_holding_registers * sizeof(uint16_t));
+                num_holding_registers, (size_t)num_holding_registers * sizeof(uint16_t));
     }
     
     /* Allocate input registers */
@@ -94,7 +94,7 @@ bool register_storage_init(register_storage_t *storage,
         }
         storage->num_input_registers = num_input_registers;
         log_info("Allocated %d input registers (%zu bytes)",
-                num_input_registers, num_input_registers * sizeof(uint16_t));
+                num_input_registers, (size_t)num_input_registers * sizeof(uint16_t));
     }
     
     return true;

@@ -192,7 +192,7 @@ static void handle_client_read(client_connection_t *client,
             return;
         }
         
-        log_dump_bytes("Request", client->recv_buffer, client->recv_offset);
+        log_dump_bytes("Request", client->recv_buffer, (size_t)client->recv_offset);
         
         client->send_length = modbus_process_request(&request, storage,
                                                      client->send_buffer,
@@ -203,9 +203,9 @@ static void handle_client_read(client_connection_t *client,
             close_client(client);
             return;
         }
-        
-        log_dump_bytes("Response", client->send_buffer, client->send_length);
-        
+
+        log_dump_bytes("Response", client->send_buffer, (size_t)client->send_length);
+
         client->send_offset = 0;
         client->state = CLIENT_STATE_WRITING_RESPONSE;
     }
@@ -251,6 +251,9 @@ int main(int argc, char **argv) {
         clients[i].socket = INVALID_SOCKET;
     }
     
+    /* Initialize configuration with defaults */
+    config_init(&config);
+    
     /* Parse configuration */
     if (!config_parse_args(&config, argc, argv)) {
         config_print_usage(argv[0]);
@@ -262,6 +265,9 @@ int main(int argc, char **argv) {
         config_print_usage(argv[0]);
         return EXIT_FAILURE;
     }
+    
+    /* Initialize logger with debug flag from config */
+    logger_set_debug(config.debug);
     
     /* Initialize sockets */
     if (!socket_init()) {
@@ -296,9 +302,6 @@ int main(int argc, char **argv) {
             goto cleanup;
         }
         
-        log_info("Listening on %s:%d",
-                config.listen_endpoints[i].host,
-                config.listen_endpoints[i].port);
         num_listeners++;
     }
     
@@ -308,7 +311,7 @@ int main(int argc, char **argv) {
     while (g_running) {
         /* Build poll array */
         struct pollfd fds[MAX_LISTEN_ENDPOINTS + MAX_CLIENTS];
-        int nfds = 0;
+        nfds_t nfds = 0;
         
         /* Add listener sockets */
         for (int i = 0; i < num_listeners; i++) {

@@ -182,7 +182,7 @@ socket_t socket_create_listener(const char *ip, int port) {
         return INVALID_SOCKET_VALUE;
     }
     
-    log_info("Listening on %s:%d", ip, port);
+    log_debug("Listening on %s:%d", ip, port);
     return sock;
 }
 
@@ -216,6 +216,7 @@ socket_t socket_accept(socket_t listener, char *client_info, size_t info_len) {
     if (client_info && info_len > 0) {
         inet_ntop(AF_INET, &client_addr.sin_addr, ip_str, sizeof(ip_str));
         snprintf(client_info, info_len, "%s:%d", ip_str, ntohs(client_addr.sin_port));
+        log_debug("Accepted connection from %s", client_info);
     }
     
     return client_sock;

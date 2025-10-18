@@ -46,6 +46,30 @@ static inline void write_uint16_be(uint8_t *buffer, uint16_t value) {
     buffer[1] = (uint8_t)(value & 0xFF);
 }
 
+/* Helper function to decode Modbus function code to a string */
+static const char* modbus_function_code_to_string(uint8_t function_code) {
+    switch (function_code) {
+        case MODBUS_FC_READ_COILS:
+            return "Read Coils (FC 0x01)";
+        case MODBUS_FC_READ_DISCRETE_INPUTS:
+            return "Read Discrete Inputs (FC 0x02)";
+        case MODBUS_FC_READ_HOLDING_REGISTERS:
+            return "Read Holding Registers (FC 0x03)";
+        case MODBUS_FC_READ_INPUT_REGISTERS:
+            return "Read Input Registers (FC 0x04)";
+        case MODBUS_FC_WRITE_SINGLE_COIL:
+            return "Write Single Coil (FC 0x05)";
+        case MODBUS_FC_WRITE_SINGLE_REGISTER:
+            return "Write Single Register (FC 0x06)";
+        case MODBUS_FC_WRITE_MULTIPLE_COILS:
+            return "Write Multiple Coils (FC 0x0F)";
+        case MODBUS_FC_WRITE_MULTIPLE_REGISTERS:
+            return "Write Multiple Registers (FC 0x10)";
+        default:
+            return "Unknown Function Code";
+    }
+}
+
 bool modbus_parse_mbap_header(const uint8_t *buffer, int buffer_length,
                                mbap_header_t *header) {
     if (buffer_length < MBAP_HEADER_SIZE) {
@@ -105,9 +129,10 @@ bool modbus_parse_request(const uint8_t *buffer, int buffer_length,
                (size_t)request->data_length);
     }
     
-    log_debug("Parsed request: TID=%u, Unit=%u, FC=0x%02X, DataLen=%d",
+    log_debug("Parsed request: TID=%u, Unit=%u, %s, DataLen=%d",
              request->mbap.transaction_id, request->mbap.unit_id,
-             request->function_code, request->data_length);
+             modbus_function_code_to_string(request->function_code),
+             request->data_length);
     
     return true;
 }
@@ -510,6 +535,8 @@ int modbus_process_request(const modbus_message_t *request,
                            register_storage_t *storage,
                            uint8_t *response_buffer,
                            int response_buffer_size) {
+    log_debug("Processing: %s", modbus_function_code_to_string(request->function_code));
+    
     switch (request->function_code) {
         case MODBUS_FC_READ_COILS:
             return handle_read_coils(request, storage, response_buffer, response_buffer_size);

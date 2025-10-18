@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdint.h>
+#include <sys/time.h>
 
 static bool debug_enabled = false;
 
@@ -53,8 +54,8 @@ bool logger_is_debug_enabled(void) {
 static const char* level_to_string(log_level_t level) {
     switch (level) {
         case LOG_LEVEL_ERROR: return "ERROR";
-        case LOG_LEVEL_WARN:  return "WARN ";
-        case LOG_LEVEL_INFO:  return "INFO ";
+        case LOG_LEVEL_WARN:  return "WARN";
+        case LOG_LEVEL_INFO:  return "INFO";
         case LOG_LEVEL_DEBUG: return "DEBUG";
         default:              return "UNKNOWN";
     }
@@ -64,19 +65,24 @@ static void log_with_timestamp(log_level_t level, const char *fmt, va_list args)
     time_t now;
     struct tm *timeinfo;
     char timestamp[32];
+    long milliseconds;
+    struct timespec ts;
     
     /* Skip debug messages if debug is not enabled */
     if (level == LOG_LEVEL_DEBUG && !debug_enabled) {
         return;
     }
     
-    /* Get current time */
-    time(&now);
+    /* Get current time with milliseconds */
+    clock_gettime(CLOCK_REALTIME, &ts);
+    now = ts.tv_sec;
+    milliseconds = ts.tv_nsec / 1000000;
+    
     timeinfo = localtime(&now);
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
     
-    /* Print timestamp and level */
-    fprintf(stderr, "[%s] %s: ", timestamp, level_to_string(level));
+    /* Print timestamp with milliseconds and level */
+    fprintf(stderr, "%s.%03ld %s ", timestamp, milliseconds, level_to_string(level));
     
     /* Print the actual message */
     vfprintf(stderr, fmt, args);
@@ -134,8 +140,11 @@ void log_dump_bytes(const char *prefix, const uint8_t *data, size_t len) {
         
         for (size_t j = 0; j < 16 && (i + j) < len; j++) {
             uint8_t byte = data[i + j];
-            hex_pos += snprintf(hex_part + hex_pos, sizeof(hex_part) - hex_pos, 
+            int res = snprintf(hex_part + hex_pos, sizeof(hex_part) - hex_pos, 
                               "%02X ", byte);
+            if (res < 0) break;
+            hex_pos += (size_t)res;
+            
             ascii_part[ascii_pos++] = (byte >= 32 && byte <= 126) ? (char)byte : '.';
         }
         
