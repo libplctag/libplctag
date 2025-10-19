@@ -42,7 +42,11 @@ endif()
 
 # Compiler-specific warnings
 if(MSVC)
-    target_compile_options(modbus_server PRIVATE /W4)
+    # Replace /W3 with /W4 (CMake may warn about this override, but it's expected)
+    string(REPLACE "/W3" "/W4" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    string(REPLACE "/W3" "/W4" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+    string(REPLACE "/W3" "/W4" CMAKE_C_FLAGS_MINSIZEREL "${CMAKE_C_FLAGS_MINSIZEREL}")
+    target_compile_options(modbus_server PRIVATE /wd4996)  # Suppress deprecation warnings
 else()
     target_compile_options(modbus_server PRIVATE
         -Wall
