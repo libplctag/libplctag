@@ -309,8 +309,9 @@ int main(int argc, char **argv) {
     
     /* Main event loop */
     while (g_running) {
-        /* Build poll array */
+        /* Build poll array with parallel client pointer array */
         struct pollfd fds[MAX_LISTEN_ENDPOINTS + MAX_CLIENTS];
+        client_connection_t *client_ptrs[MAX_LISTEN_ENDPOINTS + MAX_CLIENTS];
         nfds_t nfds = 0;
         
         /* Add listener sockets */
@@ -318,6 +319,7 @@ int main(int argc, char **argv) {
             fds[nfds].fd = listener_sockets[i];
             fds[nfds].events = POLLIN;
             fds[nfds].revents = 0;
+            client_ptrs[nfds] = NULL;  /* NULL for listener sockets */
             nfds++;
         }
         
@@ -335,6 +337,7 @@ int main(int argc, char **argv) {
                 }
                 
                 fds[nfds].revents = 0;
+                client_ptrs[nfds] = &clients[i];  /* Store pointer to this client */
                 nfds++;
             }
         }
@@ -360,16 +363,14 @@ int main(int argc, char **argv) {
             }
         }
         
-        /* Process client sockets */
-        int fds_index = num_listeners;
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket != INVALID_SOCKET) {
-                if (fds[fds_index].revents & (POLLIN | POLLERR | POLLHUP)) {
-                    handle_client_read(&clients[i], &storage);
-                } else if (fds[fds_index].revents & POLLOUT) {
-                    handle_client_write(&clients[i]);
+        /* Process client sockets - use parallel array for direct access */
+        for (nfds_t j = num_listeners; j < nfds; j++) {
+            if (client_ptrs[j] != NULL) {
+                if (fds[j].revents & (POLLIN | POLLERR | POLLHUP)) {
+                    handle_client_read(client_ptrs[j], &storage);
+                } else if (fds[j].revents & POLLOUT) {
+                    handle_client_write(client_ptrs[j]);
                 }
-                fds_index++;
             }
         }
     }
