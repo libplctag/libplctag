@@ -484,13 +484,19 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
     critical_block(mb_mutex) {
         modbus_plc_p *walker = &plcs;
 
-        while(*walker && (*walker)->connection_group_id != connection_group_id
-              && (*walker)->server_id != (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
+        while(*walker && ((*walker)->connection_group_id != connection_group_id
+              || (*walker)->server_id != (uint8_t)(unsigned int)server_id || str_cmp_i(server, (*walker)->server) != 0)) {
 
             pdebug(DEBUG_DETAIL, "walking past PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
                    (*walker)->server_id, (*walker)->server);
                    
             walker = &((*walker)->next);
+        }
+
+        pdebug(DEBUG_DETAIL, "Finished walking PLC list walker=%p.", (void *)*walker);
+        if(*walker) {
+            pdebug(DEBUG_DETAIL, "Found matching PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
+                   (*walker)->server_id, (*walker)->server);
         }
 
         /* did we find one. */
