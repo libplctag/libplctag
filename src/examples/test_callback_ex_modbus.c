@@ -40,7 +40,7 @@
 
 #define REQUIRED_VERSION 2, 5, 0
 
-#define TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:5020&path=0&elem_count=10&name=hr1"
+#define TAG_PATH "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=10&name=hr1"
 #define DATA_TIMEOUT 5000
 
 typedef int16_t TAG_ELEMENT;

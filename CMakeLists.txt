@@ -69,7 +69,7 @@ set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${li
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
-set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "Build the Modbus emulator.  Requires libmodbus!")
+set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "DEPRECATED: No longer used. Modbus server is now built with BUILD_TESTS.")
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
 set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 

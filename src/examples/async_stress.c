@@ -54,7 +54,7 @@
 #define TAG_CREATE_TIMEOUT (5000)
 #define RETRY_TIMEOUT (10000)
 
-#define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=10.206.1.59:5020&path=0&elem_count=2&name=hr10"
+#define DEFAULT_TAG_PATH "protocol=modbus-tcp&gateway=10.206.1.59:1502&path=0&elem_count=2&name=hr10"
 
 
 void usage(void) {
