@@ -35,7 +35,12 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdint.h>
-#include <sys/time.h>
+
+#ifdef _WIN32
+    #include <Windows.h>
+#else
+    #include <sys/time.h>
+#endif
 
 static bool debug_enabled = false;
 
@@ -66,7 +71,6 @@ static void log_with_timestamp(log_level_t level, const char *fmt, va_list args)
     struct tm *timeinfo;
     char timestamp[32];
     long milliseconds;
-    struct timespec ts;
     
     /* Skip debug messages if debug is not enabled */
     if (level == LOG_LEVEL_DEBUG && !debug_enabled) {
@@ -74,11 +78,20 @@ static void log_with_timestamp(log_level_t level, const char *fmt, va_list args)
     }
     
     /* Get current time with milliseconds */
+#ifdef _WIN32
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    now = time(NULL);
+    timeinfo = localtime(&now);
+    milliseconds = st.wMilliseconds;
+#else
+    struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     now = ts.tv_sec;
     milliseconds = ts.tv_nsec / 1000000;
-    
     timeinfo = localtime(&now);
+#endif
+    
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
     
     /* Print timestamp with milliseconds and level */
