@@ -297,9 +297,16 @@ jobs:
         cpack -G RPM -V \
           -D CPACK_RPM_PACKAGE_LICENSE="LGPL-2.0 OR MPL-2.0"
         
-        # Move packages to release directory
+        # Move packages to release directory and add _EXPERIMENTAL suffix
         mkdir -p packages
-        mv *.deb *.rpm packages/ 2>/dev/null || true
+        for file in *.deb *.rpm; do
+          if [ -f "$file" ]; then
+            # Insert _EXPERIMENTAL before the file extension
+            filename="${file%.*}"
+            extension="${file##*.}"
+            mv "$file" "packages/${filename}_EXPERIMENTAL.${extension}"
+          fi
+        done
         
         # List created packages
         echo "Created packages:"
@@ -1115,12 +1122,12 @@ jobs:
 
           # Create APKs (tarballs with .PKGINFO and usr/)
           echo "PACKAGE_BUILD: creating runtime APK"
-          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create runtime APK" >&2; ls -R "$RUNTIME_ROOT" || true; exit 1; }
+          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0_EXPERIMENTAL.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create runtime APK" >&2; ls -R "$RUNTIME_ROOT" || true; exit 1; }
           echo "PACKAGE_BUILD: creating devel APK"
-          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create devel APK" >&2; ls -R "$DEVEL_ROOT" || true; exit 1; }
+          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0_EXPERIMENTAL.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create devel APK" >&2; ls -R "$DEVEL_ROOT" || true; exit 1; }
 
           # Verify APKs
-          for f in /workspace/build/libplctag-$VERSION-r0.apk /workspace/build/libplctag-dev-$VERSION-r0.apk; do
+          for f in /workspace/build/libplctag-$VERSION-r0_EXPERIMENTAL.apk /workspace/build/libplctag-dev-$VERSION-r0_EXPERIMENTAL.apk; do
             if [ -f "$f" ]; then
               echo "PACKAGE_VERIFY: $(basename "$f") size=$(wc -c < "$f") bytes";
               sha256sum "$f" || true
