@@ -124,28 +124,47 @@ created_info = {}  # tag_id -> {start_ts, done_ts, create_thread, attrs (list)}
 
 # For each matched create, scan the debug log between start and done times and collect
 # attr_create_from_str:137 key-value pairs (these are the raw key=value pairs)
+# To avoid collecting overlapping attributes from other tags, we look for a pattern:
+# - Start collecting from the "Starting." line
+# - Stop collecting when we hit the line just before "Done."
 attr_re = re.compile(r'attr_create_from_str:\d+\s+Key-value pair\s+"([^"]+)"')
 for start_thread, start_ts_str, done_ts_str, tag_id, latency_ms in matched_creates:
     start_obj = parse_timestamp(start_ts_str)
     done_obj = parse_timestamp(done_ts_str)
-    kvs = []
+    
+    # Collect all attr lines during the window, then deduplicate by keeping unique values
+    # This handles the case where multiple tags' attr logs overlap in time
+    all_kvs = []
     with open(debug_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+        in_window = False
         for line in f:
             ts = extract_timestamp(line)
             if not ts:
                 continue
             ts_obj = parse_timestamp(ts)
-            if ts_obj and start_obj <= ts_obj <= done_obj:
-                # Only consider attr lines produced during creation (tag(0) context)
+            
+            # Start collecting when we see the first attr line in the window
+            if ts_obj and start_obj <= ts_obj < done_obj:
+                if 'attr_create_from_str:108 Starting' in line:
+                    in_window = True
+                    all_kvs = []  # Reset for this tag
+            
+            # Collect attributes while in window
+            if ts_obj and start_obj <= ts_obj < done_obj and in_window:
                 if 'attr_create_from_str' in line and 'tag(0)' in line:
                     m = attr_re.search(line)
                     if m:
-                        kvs.append(m.group(1))
+                        all_kvs.append(m.group(1))
+            
+            # Stop collecting when we hit Done
+            if ts_obj and ts_obj >= done_obj:
+                in_window = False
+    
     created_info[tag_id] = {
         'start_ts': start_ts_str,
         'done_ts': done_ts_str,
         'create_thread': start_thread,
-        'attrs': kvs,
+        'attrs': all_kvs,
         'latency_ms': latency_ms
     }
 
@@ -255,37 +274,35 @@ print("PER-TAG THREAD ANALYSIS")
 print("=" * 80)
 print()
 
-# First, identify the global tickler thread (the thread that only says "has its own tickler")
+# First, identify the global tickler thread (the thread that only logs tag_tickler_func messages)
 print("PASS 4: Identifying global tickler thread...")
 tickler_thread = None
 thread_line_patterns = defaultdict(lambda: set())
 
-# Scan all tag files to find which thread only logs tickler messages
-import os
-tag_dir = '/Users/kyle/Projects/libplctag'
-for tag_num in range(0, 21):
-    tag_file = os.path.join(tag_dir, f'tag_{tag_num}.txt')
-    if os.path.exists(tag_file):
-        with open(tag_file, 'r', encoding='utf-8', errors='ignore') as f:
-            for line in f:
-                thread = extract_thread(line)
-                if thread is not None:
-                    # Extract the line number/function info to categorize thread activity
-                    if 'tag_tickler_func:609' in line or 'tag_tickler_func:634' in line:
-                        line_marker = '609_or_634'
-                    else:
-                        # Find function:line pattern
-                        match = re.search(r':(\d+)\s', line)
-                        line_marker = match.group(1) if match else 'unknown'
-                    
-                    thread_line_patterns[thread].add(line_marker)
+# Scan debug.txt to find which thread only logs tickler messages
+with open(debug_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+    for line in f:
+        thread = extract_thread(line)
+        if thread is not None:
+            # Extract the line number/function info to categorize thread activity
+            if 'tag_tickler_func:' in line:
+                line_marker = 'tickler'
+            else:
+                # Find function:line pattern
+                match = re.search(r':(\d+)\s', line)
+                line_marker = match.group(1) if match else 'other'
+            
+            thread_line_patterns[thread].add(line_marker)
 
-# The tickler thread is one that ONLY has line 609 and 634 (just wakes tags, doesn't process)
+# The tickler thread is one that ONLY has tickler markers (just wakes tags, doesn't process)
 for thread, patterns in thread_line_patterns.items():
-    if patterns == {'609_or_634'}:
+    if patterns == {'tickler'}:
         tickler_thread = thread
-        print(f"  Identified Thread {thread} as global tickler thread (only logs 609/634)")
+        print(f"  Identified Thread {thread} as global tickler thread (only logs tag_tickler_func)")
         break
+
+if tickler_thread is None:
+    print(f"  No dedicated tickler thread found (all threads have other activities)")
 
 print()
 
@@ -525,3 +542,95 @@ for tag_id in sorted(tag_info.keys()):
         print()
 
     print()
+
+print()
+print("=" * 80)
+print("PER-THREAD ANALYSIS (excluding global tickler thread)")
+print("=" * 80)
+print()
+
+# Build thread activity map: which threads perform which operations for which tags
+thread_activity = defaultdict(lambda: {
+    'first_seen_ts': None,
+    'last_seen_ts': None,
+    'tags_handled': set(),
+    'operations': defaultdict(int),
+})
+
+# Scan the debug.txt file to build thread activity information
+with open(debug_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+    for line in f:
+        thread = extract_thread(line)
+        tag_id = extract_tag_id(line)
+        ts_str = extract_timestamp(line)
+        ts_obj = parse_timestamp(ts_str)
+        
+        if thread is None or (tickler_thread and thread == tickler_thread):
+            continue
+        
+        # Track thread first/last appearance
+        if ts_obj:
+            if thread_activity[thread]['first_seen_ts'] is None:
+                thread_activity[thread]['first_seen_ts'] = ts_obj
+            thread_activity[thread]['last_seen_ts'] = ts_obj
+        
+        # Track which tags this thread handles (anything with a tag ID > 0)
+        if tag_id and tag_id > 0:
+            thread_activity[thread]['tags_handled'].add(tag_id)
+        
+        # Track operation types by looking for function markers
+        if 'send_request:' in line:
+            thread_activity[thread]['operations']['send_request'] += 1
+        if 'socket_write:' in line:
+            thread_activity[thread]['operations']['socket_write'] += 1
+        if 'receive_response:' in line:
+            thread_activity[thread]['operations']['receive_response'] += 1
+        if 'socket_read:' in line:
+            thread_activity[thread]['operations']['socket_read'] += 1
+        if 'modbus_plc_handler:' in line:
+            thread_activity[thread]['operations']['modbus_plc_handler'] += 1
+        if 'plc_tag_create_ex:' in line:
+            thread_activity[thread]['operations']['plc_tag_create_ex'] += 1
+        if 'plc_tag_destroy:' in line:
+            thread_activity[thread]['operations']['plc_tag_destroy'] += 1
+        if 'plc_tag_read:' in line:
+            thread_activity[thread]['operations']['plc_tag_read'] += 1
+        if 'plc_tag_write:' in line:
+            thread_activity[thread]['operations']['plc_tag_write'] += 1
+
+# Display per-thread information
+for thread in sorted(thread_activity.keys()):
+    info = thread_activity[thread]
+    
+    if info['first_seen_ts'] is None:
+        continue
+    
+    print(f"THREAD {thread}:")
+    print()
+    
+    # Active duration
+    first_ts_str = info['first_seen_ts'].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    last_ts_str = info['last_seen_ts'].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    duration_ms = (info['last_seen_ts'] - info['first_seen_ts']).total_seconds() * 1000
+    
+    print(f"  First Appearance: {first_ts_str}")
+    print(f"  Last Appearance:  {last_ts_str}")
+    print(f"  Active Duration:  {duration_ms:.0f}ms ({duration_ms/1000:.1f}s)")
+    print()
+    
+    # Tags handled
+    if info['tags_handled']:
+        sorted_tags = sorted(info['tags_handled'])
+        print(f"  Tags Handled: {', '.join(map(str, sorted_tags))}")
+        print()
+    
+    # Operation summary
+    if info['operations']:
+        print(f"  Operations:")
+        for op_type in sorted(info['operations'].keys()):
+            count = info['operations'][op_type]
+            print(f"    {op_type:20s}: {count:6d}")
+        print()
+    
+    print()
+
