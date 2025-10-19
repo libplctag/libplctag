@@ -46,10 +46,10 @@ endif()
   test_emulator_performance
   test_event
   test_indexed_tags
+  test_modbus_multiple
   test_raw_cip
   test_reconnect
   test_shutdown
-#   test_simultaneous_rw_ab_server
   test_special
   test_string
   test_tag_attributes
@@ -103,3 +103,8 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     #     target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
     # endif()
 endforeach()
+
+# Install only the tag_rw2 tool into the devel component
+install(TARGETS tag_rw2
+    RUNTIME DESTINATION bin
+    COMPONENT devel)

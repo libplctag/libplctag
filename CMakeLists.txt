@@ -59,7 +59,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin_dist)
 # the project version
 set (libplctag_VERSION_MAJOR 2)
 set (libplctag_VERSION_MINOR 6)
-set (libplctag_VERSION_PATCH 11)
+set (libplctag_VERSION_PATCH 12)
 set (VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
 
 set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}")
@@ -69,8 +69,9 @@ set (LIB_NAME_SUFFIX "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${li
 set(BUILD_EXAMPLES 1 CACHE BOOL "Build example executables or not")
 set(BUILD_TESTS 1 CACHE BOOL "Build test executables or not")
 set(BUILD_32_BIT 0 CACHE BOOL "Linux 32-bit build selector")
-set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "Build the Modbus emulator.  Requires libmodbus!")
+set(BUILD_MODBUS_EMULATOR 0 CACHE BOOL "DEPRECATED: No longer used. Modbus server is now built with BUILD_TESTS.")
 set(USE_SANITIZERS 1 CACHE BOOL "Build with debug sanitizers or not")
+set(BUILD_ALPINE_MUSL 0 CACHE BOOL "Build for Alpine Linux with musl C library")
 
 # message("CMAKE_GENERATOR = ${CMAKE_GENERATOR}")
 
@@ -91,7 +92,9 @@ endif()
 
 
 # Target platform-specific config
-if(ANDROID_ABI OR ANDROID)
+if(BUILD_ALPINE_MUSL)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/alpine.cmake")
+elseif(ANDROID_ABI OR ANDROID)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/android.cmake")
 elseif(APPLE)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake_toolchains/apple.cmake")
@@ -143,10 +146,11 @@ endif(BUILD_TESTS)
 # Generate files from templates
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/libplctag.pc.in" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libplctag.pc" @ONLY)
 
-# build the GitHub Actions config file
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)  # Only if this is the main project
-  CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
-endif()
+# Note: ci.yml no longer needs to be generated from a template.
+# The CI workflow now extracts the version directly from CMakeLists.txt at runtime.
+# if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)  # Only if this is the main project
+#   CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml.in" "${CMAKE_CURRENT_SOURCE_DIR}/.github/workflows/ci.yml" @ONLY)
+# endif()
 
 
 # for installation
@@ -162,3 +166,77 @@ endmacro()
 
 # Debugging
 # print_all_variables()
+
+# CPack configuration for generating packages
+
+# Set package metadata
+set(CPACK_PACKAGE_NAME "libplctag")
+set(CPACK_PACKAGE_VENDOR "Kyle Hayes")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A library for communicating with Allen-Bradley/Rockwell PLCs")
+set(CPACK_PACKAGE_DESCRIPTION "libplctag is a portable and simple library for accessing Allen-Bradley and compatible PLCs. It provides both synchronous and asynchronous access to tags in Logix-class PLCs.")
+
+set(CPACK_PACKAGE_VERSION_MAJOR "${libplctag_VERSION_MAJOR}")
+set(CPACK_PACKAGE_VERSION_MINOR "${libplctag_VERSION_MINOR}")
+set(CPACK_PACKAGE_VERSION_PATCH "${libplctag_VERSION_PATCH}")
+set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+set(CPACK_PACKAGE_CONTACT "Kyle Hayes <kyle.hayes@gmail.com>")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/libplctag/libplctag")
+
+# License information
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-1.MPL")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+# Debian package configuration (global)
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_DEBIAN_PACKAGE_CONTACT "Kyle Hayes <kyle.hayes@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Kyle Hayes <kyle.hayes@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/libplctag/libplctag")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+
+# RPM package configuration  
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_RPM_PACKAGE_SUMMARY "Library for communicating with Allen-Bradley PLCs")
+set(CPACK_RPM_PACKAGE_DESCRIPTION "libplctag is a portable and simple library for accessing Allen-Bradley and compatible PLCs. It provides both synchronous and asynchronous access to tags in Logix-class PLCs.")
+set(CPACK_RPM_PACKAGE_GROUP "System Environment/Libraries")
+set(CPACK_RPM_PACKAGE_LICENSE "LGPL-2.0 OR MPL-2.0")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/libplctag/libplctag")
+set(CPACK_RPM_PACKAGE_REQUIRES "glibc >= 2.17")
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+
+# Source package configuration
+set(CPACK_SOURCE_GENERATOR "TGZ;ZIP")
+set(CPACK_SOURCE_IGNORE_FILES
+    ${CMAKE_BINARY_DIR}
+    /.git/
+    /\\.gitignore
+    /\\.github/
+    /build/
+    /\\.vscode/
+    /\\.DS_Store
+)
+
+# Component packaging: two packages (runtime, devel)
+set(CPACK_COMPONENTS_ALL runtime devel)
+
+# Component descriptions
+set(CPACK_COMPONENT_RUNTIME_DESCRIPTION "Shared library for libplctag")
+set(CPACK_COMPONENT_DEVEL_DESCRIPTION "Headers, static library, and tag_rw2 tool for libplctag development")
+
+# Debian component package names and relationships
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "libplctag")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_NAME "libplctag-dev")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "libc6 (>= 2.17)")
+set(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS "libplctag (= ${CPACK_PACKAGE_VERSION})")
+
+# RPM component package names and relationships
+set(CPACK_RPM_RUNTIME_PACKAGE_NAME "libplctag")
+set(CPACK_RPM_DEVEL_PACKAGE_NAME "libplctag-devel")
+set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES "libplctag = ${CPACK_PACKAGE_VERSION}")
+
+# include the functions for CPack (after all CPACK_* variables are set)
+include(CPack)
+
+

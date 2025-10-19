@@ -3,11 +3,16 @@
 The build system uses CMake to bootstrap a local build.  On Linux.  On Windows, this makes a Visual Studio project.
 CMake is also used to create a build on macOS.
 
+libplctag supports multiple build targets including:
+- Standard Linux builds (glibc-based distributions)
+- Alpine Linux builds with musl C library (great for containers and embedded systems)
+- Windows builds (Visual Studio and MinGW)
+- macOS builds
+- Cross-compilation for ARM architectures
+
 Note that as of version 2.0.22, pre-built binaries are included in the GitHub releases.
 
-# Instructions for Linux
-
-## Install the compilers
+## Build Instructions for Linux
 
 ### Debian/Ubuntu
 
@@ -51,10 +56,10 @@ $> mkdir -p build
 $> cd build
 ```
 
-Run cmake (use "Release" for a release build and "Debug" for a debug build).
+Run cmake (use "MinSizeRel" for a release build and "Debug" for a debug build).
 
 ```text
-$> cmake .. -DCMAKE_BUILD_TYPE=Release
+$> cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel
 ```
 
 The ".." above is important.
@@ -83,7 +88,178 @@ $> cmake ..
 $> make
 ```
 
-# Instructions for Windows using Microsoft Visual Studio
+## Instructions for Alpine Linux with musl C Library
+
+As of version 2.6.12, libplctag includes support for building binaries specifically for Alpine Linux using the musl C library. Alpine Linux is commonly used in Docker containers and embedded systems where small, statically-linked binaries are preferred.
+
+### Option 1: Native Build on Alpine Linux
+
+If you're building directly on an Alpine Linux system:
+
+#### Install Build Dependencies
+
+```text
+$> apk update
+$> apk add build-base cmake git
+```
+
+#### Check out and Build
+
+```text
+$> git clone https://github.com/libplctag/libplctag.git
+$> cd libplctag
+$> mkdir -p build
+$> cd build
+$> cmake -DBUILD_ALPINE_MUSL=ON -DCMAKE_BUILD_TYPE=MinSizeRel ..
+$> make
+```
+
+### Option 2: Cross-Compile for Alpine from macOS
+
+#### Install musl Cross-Compiler
+
+Using Homebrew:
+
+```text
+$> brew install FiloSottile/musl-cross/musl-cross
+```
+
+This installs cross-compilers for both x86_64 and aarch64 (ARM64) architectures.
+
+#### Build for Alpine
+
+```text
+$> git clone https://github.com/libplctag/libplctag.git
+$> cd libplctag
+$> mkdir -p build
+$> cd build
+
+# For x86_64 Alpine
+$> cmake -DBUILD_ALPINE_MUSL=ON -DCMAKE_BUILD_TYPE=MinSizeRel \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+    -DCMAKE_C_COMPILER=x86_64-linux-musl-gcc \
+    -DCMAKE_CXX_COMPILER=x86_64-linux-musl-g++ \
+    ..
+
+# Or for aarch64 Alpine  
+$> cmake -DBUILD_ALPINE_MUSL=ON -DCMAKE_BUILD_TYPE=MinSizeRel \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+    -DCMAKE_C_COMPILER=aarch64-linux-musl-gcc \
+    -DCMAKE_CXX_COMPILER=aarch64-linux-musl-g++ \
+    ..
+
+$> make
+```
+
+### Option 3: Cross-Compile for Alpine from Linux
+
+#### Install musl Development Tools
+
+On Ubuntu/Debian:
+
+```text
+$> sudo apt-get update
+$> sudo apt-get install build-essential cmake git musl-tools musl-dev
+```
+
+On Red Hat/CentOS/Fedora, you may need to build the musl cross-compiler from source or install from a third-party repository.
+
+#### Build using musl-gcc wrapper
+
+```text
+$> git clone https://github.com/libplctag/libplctag.git
+$> cd libplctag
+$> mkdir -p build
+$> cd build
+$> cmake -DBUILD_ALPINE_MUSL=ON -DCMAKE_BUILD_TYPE=MinSizeRel ..
+$> make
+```
+
+The Alpine toolchain will automatically detect and use `musl-gcc` if available.
+
+#### Manual Cross-Compile Setup
+
+For more control or when targeting specific architectures:
+
+```text
+# For x86_64 
+$> cmake -DBUILD_ALPINE_MUSL=ON -DCMAKE_BUILD_TYPE=MinSizeRel \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+    -DCMAKE_C_COMPILER=musl-gcc \
+    ..
+
+$> make
+```
+
+## Alpine Build Features
+
+### Static Linking (Default)
+
+Alpine builds are configured for static linking by default, which creates portable binaries that don't depend on external libraries:
+
+```text
+$> file build/bin_dist/simple
+simple: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, stripped
+
+$> ldd build/bin_dist/simple
+not a dynamic executable
+```
+
+### Dynamic Linking Option
+
+To build with dynamic linking instead:
+
+```text
+$> cmake -DBUILD_ALPINE_MUSL=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=MinSizeRel ..
+$> make
+```
+
+### Testing Alpine Binaries
+
+You can test your Alpine binaries using Docker:
+
+```text
+$> docker run --rm -v $(pwd)/build/bin_dist:/test alpine:latest /bin/sh -c "
+    /test/simple --help 2>/dev/null || echo 'Binary works on Alpine!'
+    /test/tag_rw2 --help 2>/dev/null || echo 'tag_rw2 works on Alpine!'
+"
+```
+
+### Supported Architectures
+
+The Alpine build system supports:
+
+- **x86_64** (64-bit Intel/AMD)
+- **aarch64** (64-bit ARM, including Apple Silicon and ARM servers)
+
+### Build Artifacts
+
+Alpine builds produce:
+
+- `libplctag.a` - Static library
+- `libplctag.so` - Shared library (if `BUILD_SHARED_LIBS=ON`)
+- Example and test executables (statically linked by default)
+- `libplctag.h` - Header file
+- `libplctag.pc` - pkg-config file
+
+### Troubleshooting Alpine Builds
+
+**musl cross-compiler not found:**
+
+- On macOS: `brew install FiloSottile/musl-cross/musl-cross`
+- On Ubuntu/Debian: `sudo apt-get install musl-tools musl-dev`
+- Or build from source: [musl-cross-make](https://github.com/richfelker/musl-cross-make)
+
+**Sanitizer warnings in debug builds:**
+Sanitizers are automatically disabled for Alpine static builds as they don't work well with musl static linking. This is normal behavior.
+
+**Build errors with older CMake:**
+Alpine support requires CMake 3.10 or later. Update CMake if you encounter configuration errors.
+
+## Instructions for Windows using Microsoft Visual Studio
 
 The build process on Windows is a little involved if it is an older version of Visual Studio.  I welcome any contributions on how to make this cleaner.  Other than installing
 the software, there is one step that needs to be done on the command line, but only the first time you build the system.  After that,
@@ -92,7 +268,7 @@ you do not need to do that step.
 Use the latest version of Visual Studio if at all possible!   As of Visual Studio Community 2019, GitHub and CMake are integrated into the VS build
 system and it is really seamless and pleasant to use (thanks, Microsoft!).
 
-# Visual Studio Community 2019 with Windows 10 (19.03)
+### Visual Studio Community 2019 with Windows 10 (19.03)
 
 Microsoft has integrated GitHub and CMake into VS 2019 very nicely.  It is highly recommended to use at least this version as the integration
 has made the process much easier than in the past!
@@ -107,7 +283,7 @@ has made the process much easier than in the past!
 * Once this is done, you should be able to build the project.
 * Project binaries may take a little bit of a hunt to find.   If anyone has any tips on how to instruct VS through CMake to do something a little more obvious here, I would love to know!
 
-## ARM Windows builds
+### ARM Windows builds
 
 It is possible to build for ARM Windows.   The following is how I was able to do this and tested by a user with a 32-bit Raspberry Pi:
 
@@ -127,7 +303,7 @@ It is possible to build for ARM Windows.   The following is how I was able to do
 * Then I did a full clean and rebuilt my project.
 * Your binaries should be ARM binaries now.
 
-# Visual Studio Community 2015
+### Visual Studio Community 2015
 
 Testing was done using Visual Studio Community Edition 2015 on Windows 7 SP1 (not terribly up to date).
 
@@ -140,27 +316,27 @@ install the compilers.  I did not do it that way, so any corrections to these di
 
 Install the compilers first!  CMake gets unhappy when it cannot find the compilers.
 
-## Install CMake for Windows
+#### Install CMake for Windows
 
 Go to the cmake web site and download the installer.  Install cmake.  __NOTE__ install CMake so that it is usable either by all users or the current user.  The default is to
 not install it directly for any user! (Thanks to Nate Miller for pointing this out!)
 
-## Install Git
+#### Install Git
 
 There are many Git clients for Windows.  Select one that suits your workflow.
 
-## Check out the code
+#### Check out the code
 
 Instructions for this depend on what Git client you use.  I have Windows in a VM sharing a directory in the host Linux system, so I did not do this step on Windows.
 Any contributions to the instructions here greatly appreciated!
 
-## Open a Developer command prompt
+#### Open a Developer command prompt
 
 (I am not sure you need to do this, it looks like you do not if you have CMake properly installed.) Open a Developer Command Prompt (usually Start Menu > Visual Studio 20xx > Visual Studio Tools > Developer Command Prompt for VS20xx).
 
 This is required because there are a lot of special paths that need to be set up for Visual Studio and CMake to find the compilers, include files etc.
 
-## Run CMake
+#### Run CMake
 
 ```
 C:> cd Projects
@@ -177,7 +353,7 @@ again unless you check out the code into a new folder.
 There is a GUI for CMake, but it seems to be only able to create a new project, not load an existing one.  If anyone knows how to make this step work directly in
 the CMake GUI, please let me know!  It would be nice to skip the command line steps for Windows.
 
-## Build the project
+#### Build the project
 
 Now you have a Visual Studio project file (.sln) in the build directory.  Open that in Visual Studio.  The project should be called libplctag_project.  Build
 the whole project.
@@ -197,13 +373,13 @@ The last response in that thread shows a DLL to copy.  At least on my Win7 syste
 I only have Windows 7.  If you find that these instructions are wrong for Windows 10, please let me know what does work!
 
 
-# Instructions for Windows with MINGW or similar
+## Instructions for Windows with MINGW or similar
 
 (Instructions from user alpep, thanks!)
 
 I would like to share with you how I build the Libplctag for OS: Win10 32bit by using Mingw.
 
-## Step by step procedure:
+### Step by step procedure:
 
 1. Download and install CMake:
 
@@ -242,6 +418,216 @@ Executable needs following files `libgcc_s_dw2-1.dll` and `libwinpthread-1.dll` 
 
 Hope this could help someone else.
 
-# Instructions for macOS
+## Instructions for macOS
 
-I do not have a Mac.  All contributions here would be appreciated. I suspect that CMake will set up an XCode project correctly, but I have no way of testing that.
+### Prerequisites
+
+Install the required development tools:
+
+1. **Xcode Command Line Tools**:
+
+   ```bash
+   xcode-select --install
+   ```
+
+2. **Homebrew** (if not already installed):
+
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+
+3. **CMake and Git**:
+
+   ```bash
+   brew install cmake git
+   ```
+
+### Option 1: Building with VS Code
+
+VS Code provides an excellent development environment for C/C++ projects with CMake support.
+
+#### Install VS Code and Extensions
+
+1. **Download and install Visual Studio Code** from [https://code.visualstudio.com](https://code.visualstudio.com)
+
+2. **Install required extensions**:
+   - C/C++ Extension Pack (includes C/C++, CMake Tools, and CMake)
+   - GitLens (optional, for enhanced Git integration)
+
+   You can install these from the Extensions view (`Cmd+Shift+X`) or via the command line:
+   ```bash
+   code --install-extension ms-vscode.cpptools-extension-pack
+   code --install-extension eamodio.gitlens
+   ```
+
+#### Clone and Open the Project
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/libplctag/libplctag.git
+   cd libplctag
+   ```
+
+2. **Open in VS Code**:
+   ```bash
+   code .
+   ```
+
+   Or use VS Code's built-in Git integration:
+   - Open VS Code
+   - Press `Cmd+Shift+P` and type "Git: Clone"
+   - Enter the repository URL: `https://github.com/libplctag/libplctag.git`
+
+#### Configure and Build
+
+1. **CMake Configuration**:
+   - VS Code should automatically detect the CMakeLists.txt file
+   - Press `Cmd+Shift+P` and type "CMake: Configure"
+   - Select your compiler (usually Clang on macOS)
+   - Choose build type (Debug or MinSizeRel)
+
+2. **Build the Project**:
+   - Press `Cmd+Shift+P` and type "CMake: Build"
+   - Or use the build button in the status bar
+   - Or press `F7`
+
+3. **Alternative: Manual Configuration**:
+   If you prefer manual configuration, open a terminal in VS Code (`Ctrl+`` `) and run:
+   ```bash
+   mkdir -p build
+   cd build
+   cmake -DCMAKE_BUILD_TYPE=MinSizeRel ..
+   make -j$(sysctl -n hw.ncpu)
+   ```
+
+#### Running and Testing
+
+1. **Set Launch Configuration**:
+   Create `.vscode/launch.json` for debugging:
+   ```json
+   {
+     "version": "0.2.0",
+     "configurations": [
+       {
+         "name": "Debug simple example",
+         "type": "cppdbg",
+         "request": "launch",
+         "program": "${workspaceFolder}/build/bin_dist/simple",
+         "args": [],
+         "stopAtEntry": false,
+         "cwd": "${workspaceFolder}/build/bin_dist",
+         "environment": [],
+         "externalConsole": false,
+         "MIMode": "lldb"
+       }
+     ]
+   }
+   ```
+
+2. **Run Examples**:
+   ```bash
+   cd build/bin_dist
+   ./simple
+   ./tag_rw2 --help
+   ```
+
+#### Building for Different Targets
+
+**Standard macOS Build**:
+```bash
+cmake -DCMAKE_BUILD_TYPE=MinSizeRel ..
+```
+
+**Alpine Linux Cross-Compilation** (requires musl-cross):
+```bash
+brew install FiloSottile/musl-cross/musl-cross
+cmake -DBUILD_ALPINE_MUSL=ON -DCMAKE_BUILD_TYPE=MinSizeRel \
+  -DCMAKE_SYSTEM_NAME=Linux \
+  -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+  -DCMAKE_C_COMPILER=x86_64-linux-musl-gcc \
+  -DCMAKE_CXX_COMPILER=x86_64-linux-musl-g++ \
+  ..
+```
+
+**Debug Build with Sanitizers**:
+```bash
+cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_SANITIZERS=ON ..
+```
+
+### Option 2: Command Line Build (Traditional)
+
+If you prefer command-line building without VS Code:
+
+```bash
+# Clone the repository
+git clone https://github.com/libplctag/libplctag.git
+cd libplctag
+
+# Create build directory
+mkdir -p build
+cd build
+
+# Configure with CMake
+cmake -DCMAKE_BUILD_TYPE=MinSizeRel ..
+
+# Build (use all CPU cores)
+make -j$(sysctl -n hw.ncpu)
+
+# Test the build
+cd bin_dist
+./simple
+```
+
+### Option 3: Xcode Project Generation
+
+CMake can generate Xcode projects if you prefer using Xcode:
+
+```bash
+mkdir -p xcode_build
+cd xcode_build
+cmake -G Xcode -DCMAKE_BUILD_TYPE=MinSizeRel ..
+open libplctag_project.xcodeproj
+```
+
+### Troubleshooting macOS Builds
+
+**Xcode Command Line Tools Issues**:
+```bash
+sudo xcode-select --reset
+xcode-select --install
+```
+
+**CMake not found after Homebrew installation**:
+```bash
+echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Permission issues with Homebrew**:
+```bash
+sudo chown -R $(whoami) /opt/homebrew/
+```
+
+**Apple Silicon (M1/M2/M3/M4) specific**:
+The build system automatically detects Apple Silicon and configures appropriately. No special flags needed.
+
+**VS Code CMake Tools not detecting compiler**:
+
+- Press `Cmd+Shift+P` → "CMake: Reset"
+- Press `Cmd+Shift+P` → "CMake: Configure"
+- Select "Clang" as the compiler
+
+### macOS Build Artifacts
+
+Build artifacts will be located in:
+
+- `build/bin_dist/` - Executables and libraries
+- `build/bin_dist/libplctag.dylib` - Dynamic library
+- `build/bin_dist/libplctag_static.a` - Static library
+- `build/bin_dist/libplctag.h` - Header file
+
+### Performance Notes
+
+- Use `-j$(sysctl -n hw.ncpu)` to utilize all CPU cores during compilation
+- MinSizeRel builds are significantly faster than Debug builds
+- Consider using `ccache` for faster rebuilds: `brew install ccache`
