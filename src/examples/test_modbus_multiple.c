@@ -36,6 +36,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,9 +58,11 @@
 #define TAG_WRITE_20 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=co0&elem_count=1"
 
 #define DATA_TIMEOUT 500
-#define READ_PHASE_TIME_MS 10000  /* ~10 seconds for read phase */
+#define READ_PHASE_TIME_MS 5000  /* ~5 seconds for read phase */
+#define READ_PERIOD_MS 250  /* Read every 250 ms */
 #define WRITE_PHASE_DELAY_MS 12000  /* ~12 seconds before switching to write phase */
 #define WRITE_PHASE_TIME_MS 5000    /* ~5 seconds for write phase */
+#define WRITE_PERIOD_MS 500 /* Write every 500 ms */
 
 static void wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms);
 
@@ -89,14 +92,11 @@ int main(void) {
     plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     start_time = compat_time_ms();
-    read_phase_end_time = start_time + READ_PHASE_TIME_MS;
-    write_phase_start_time = read_phase_end_time + WRITE_PHASE_DELAY_MS;
-    write_phase_end_time = write_phase_start_time + WRITE_PHASE_TIME_MS;
 
     /* ===== PHASE 1: Create all 8 read tags and wait for OK ===== */
     printf("PHASE 1: Creating read tags (11-18).\n");
     for(i = 0; i < 8; i++) {
-        read_tags[i] = plc_tag_create(read_tag_paths[i], DATA_TIMEOUT);
+        read_tags[i] = plc_tag_create(read_tag_paths[i], 0);
         if(read_tags[i] < 0) {
             printf("ERROR %s: Could not create read tag %d!\n", plc_tag_decode_error(read_tags[i]), i + 11);
             for(int j = 0; j < i; j++) {
@@ -112,7 +112,12 @@ int main(void) {
     printf("PHASE 1: All read tags created.\n");
 
     /* ===== PHASE 2: Read tags 11-18 every DATA_TIMEOUT ms until READ_PHASE_TIME_MS ===== */
-    printf("PHASE 2: Starting read loop for %lld ms.\n", (long long)READ_PHASE_TIME_MS);
+    printf("PHASE 2: Starting read loop for %"PRId64" ms.\n", (long long)READ_PHASE_TIME_MS);
+
+    read_phase_end_time = compat_time_ms() + READ_PHASE_TIME_MS;
+    write_phase_start_time = read_phase_end_time + WRITE_PHASE_DELAY_MS;
+    write_phase_end_time = write_phase_start_time + WRITE_PHASE_TIME_MS;
+
     while(compat_time_ms() < read_phase_end_time) {
         /* Issue reads on all 8 read tags */
         for(i = 0; i < 8; i++) {
@@ -127,20 +132,20 @@ int main(void) {
 
         current_time = compat_time_ms();
         if((current_time - start_time) % 2000 < DATA_TIMEOUT) {  /* Print roughly every 2 seconds */
-            printf("PHASE 2: Read phase running... elapsed %lld ms\n", current_time - start_time);
+            printf("PHASE 2: Read phase running... elapsed %"PRId64" ms\n", current_time - start_time);
         }
 
-        compat_sleep_ms(DATA_TIMEOUT, NULL);
+        compat_sleep_ms(READ_PERIOD_MS, NULL);
     }
 
-    printf("PHASE 2: Read phase complete at %lld ms.\n", compat_time_ms() - start_time);
+    printf("PHASE 2: Read phase complete at %"PRId64" ms.\n", compat_time_ms() - start_time);
 
     /* ===== PHASE 3: Wait for write_phase_start_time ===== */
-    printf("PHASE 3: Waiting %lld ms before creating write tags...\n", (long long)WRITE_PHASE_DELAY_MS);
+    printf("PHASE 3: Waiting %"PRId64" ms before creating write tags...\n", (int64_t)WRITE_PHASE_DELAY_MS);
     while(compat_time_ms() < write_phase_start_time) {
         compat_sleep_ms(100, NULL);
     }
-    printf("PHASE 3: Wait complete at %lld ms.\n", compat_time_ms() - start_time);
+    printf("PHASE 3: Wait complete at %"PRId64" ms.\n", compat_time_ms() - start_time);
 
     /* ===== PHASE 4: Create both write tags and wait for OK ===== */
     printf("PHASE 4: Creating write tags (19-20).\n");
@@ -163,8 +168,11 @@ int main(void) {
     printf("PHASE 4: All write tags created.\n");
 
     /* ===== PHASE 5: Read/write loop for WRITE_PHASE_TIME_MS in batch mode ===== */
-    printf("PHASE 5: Starting read/write loop for %lld ms.\n", (long long)WRITE_PHASE_TIME_MS);
+    printf("PHASE 5: Starting read/write loop for %"PRId64" ms.\n", (long long)WRITE_PHASE_TIME_MS);
     last_write_time = compat_time_ms();
+
+    uint16_t write_value = 0x01;
+    int write_toggle = 0;
 
     while(compat_time_ms() < write_phase_end_time) {
         int all_tags_count = 10;
@@ -186,13 +194,14 @@ int main(void) {
         }
 
         /* Issue writes on both write tags */
-        plc_tag_set_uint16(write_tags[0], 0, 0x1c);
+        plc_tag_set_uint16(write_tags[0], 0, write_value++);
         if(plc_tag_write(write_tags[0], 0) != PLCTAG_STATUS_PENDING) {
             printf("ERROR: Could not start write on tag 19!\n");
             goto cleanup;
         }
 
-        plc_tag_set_bit(write_tags[1], 0, 1);
+        write_toggle ^= 1;
+        plc_tag_set_bit(write_tags[1], 0, write_toggle);
         if(plc_tag_write(write_tags[1], 0) != PLCTAG_STATUS_PENDING) {
             printf("ERROR: Could not start write on tag 20!\n");
             goto cleanup;
@@ -209,7 +218,7 @@ int main(void) {
         compat_sleep_ms(DATA_TIMEOUT, NULL);
     }
 
-    printf("PHASE 5: Read/write phase complete at %lld ms.\n", compat_time_ms() - start_time);
+    printf("PHASE 5: Read/write phase complete at %"PRId64" ms.\n", compat_time_ms() - start_time);
 
 cleanup:
     /* ===== PHASE 6: Destroy all tags ===== */
