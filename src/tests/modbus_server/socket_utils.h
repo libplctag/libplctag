@@ -42,6 +42,7 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     typedef SOCKET socket_t;
+    typedef unsigned int nfds_t;
     #define INVALID_SOCKET_VALUE INVALID_SOCKET
     #define SOCKET_ERROR_VALUE SOCKET_ERROR
     typedef int socklen_t;
@@ -61,7 +62,7 @@
 #endif
 
 /* Unified invalid socket value */
-#define INVALID_SOCKET INVALID_SOCKET_VALUE
+#define LIBPLCTAG_INVALID_SOCKET INVALID_SOCKET_VALUE
 
 /* Poll events wrapper */
 #ifdef _WIN32

@@ -45,6 +45,10 @@
 #include <poll.h>
 #else
 #include <winsock2.h>
+/* Define nfds_t for Windows if not already defined */
+#ifndef nfds_t
+typedef unsigned int nfds_t;
+#endif
 #endif
 
 /* Client connection states */
@@ -94,10 +98,10 @@ static void setup_signal_handlers(void) {
 }
 
 static void close_client(client_connection_t *client) {
-    if (client->socket != INVALID_SOCKET) {
+    if (client->socket != INVALID_SOCKET_VALUE) {
         log_info("Closing connection to %s", client->client_info);
         socket_close(client->socket);
-        client->socket = INVALID_SOCKET;
+        client->socket = INVALID_SOCKET_VALUE;
     }
 }
 
@@ -108,13 +112,13 @@ static bool accept_new_client(socket_t listener_socket,
     socket_t client_socket = socket_accept(listener_socket, client_info, 
                                            sizeof(client_info));
     
-    if (client_socket == INVALID_SOCKET) {
+    if (client_socket == INVALID_SOCKET_VALUE) {
         return false;
     }
     
     /* Find empty slot */
     for (int i = 0; i < max_clients; i++) {
-        if (clients[i].socket == INVALID_SOCKET) {
+        if (clients[i].socket == INVALID_SOCKET_VALUE) {
             clients[i].socket = client_socket;
             clients[i].state = CLIENT_STATE_READING_HEADER;
             clients[i].recv_offset = 0;
@@ -248,7 +252,7 @@ int main(int argc, char **argv) {
     /* Initialize */
     memset(listener_sockets, 0, sizeof(listener_sockets));
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        clients[i].socket = INVALID_SOCKET;
+        clients[i].socket = INVALID_SOCKET_VALUE;
     }
     
     /* Initialize configuration with defaults */
@@ -295,7 +299,7 @@ int main(int argc, char **argv) {
             config.listen_endpoints[i].port
         );
         
-        if (listener_sockets[num_listeners] == INVALID_SOCKET) {
+        if (listener_sockets[num_listeners] == INVALID_SOCKET_VALUE) {
             log_error("Failed to create listener on %s:%d",
                      config.listen_endpoints[i].host,
                      config.listen_endpoints[i].port);
@@ -325,7 +329,7 @@ int main(int argc, char **argv) {
         
         /* Add client sockets */
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket != INVALID_SOCKET) {
+            if (clients[i].socket != INVALID_SOCKET_VALUE) {
                 fds[nfds].fd = clients[i].socket;
                 fds[nfds].events = 0;
                 
@@ -364,12 +368,15 @@ int main(int argc, char **argv) {
         }
         
         /* Process client sockets - use parallel array for direct access */
-        for (nfds_t j = num_listeners; j < nfds; j++) {
-            if (client_ptrs[j] != NULL) {
-                if (fds[j].revents & (POLLIN | POLLERR | POLLHUP)) {
-                    handle_client_read(client_ptrs[j], &storage);
-                } else if (fds[j].revents & POLLOUT) {
-                    handle_client_write(client_ptrs[j]);
+        {
+            nfds_t j;
+            for (j = num_listeners; j < nfds; j++) {
+                if (client_ptrs[j] != NULL) {
+                    if (fds[j].revents & (POLLIN | POLLERR | POLLHUP)) {
+                        handle_client_read(client_ptrs[j], &storage);
+                    } else if (fds[j].revents & POLLOUT) {
+                        handle_client_write(client_ptrs[j]);
+                    }
                 }
             }
         }
@@ -381,7 +388,7 @@ int main(int argc, char **argv) {
 cleanup:
     /* Close all client connections */
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i].socket != INVALID_SOCKET) {
+        if (clients[i].socket != INVALID_SOCKET_VALUE) {
             close_client(&clients[i]);
         }
     }
