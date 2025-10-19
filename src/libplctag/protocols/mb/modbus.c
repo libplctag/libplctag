@@ -484,9 +484,19 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
     critical_block(mb_mutex) {
         modbus_plc_p *walker = &plcs;
 
-        while(*walker && (*walker)->connection_group_id != connection_group_id
-              && (*walker)->server_id != (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) != 0) {
+        while(*walker && ((*walker)->connection_group_id != connection_group_id
+              || (*walker)->server_id != (uint8_t)(unsigned int)server_id || str_cmp_i(server, (*walker)->server) != 0)) {
+
+            pdebug(DEBUG_DETAIL, "walking past PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
+                   (*walker)->server_id, (*walker)->server);
+                   
             walker = &((*walker)->next);
+        }
+
+        pdebug(DEBUG_DETAIL, "Finished walking PLC list walker=%p.", (void *)*walker);
+        if(*walker) {
+            pdebug(DEBUG_DETAIL, "Found matching PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
+                   (*walker)->server_id, (*walker)->server);
         }
 
         /* did we find one. */
@@ -494,12 +504,20 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
            && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
             pdebug(DEBUG_DETAIL, "Using existing PLC connection.");
             pdebug(DEBUG_DETAIL, "rc_inc: Acquiring Modbus connection reference.");
-            *plc = rc_inc(*walker);
+            *plc = rc_inc(*walker); /* this could result in NULL if the reference count is already zero */
             is_new = 0;
-        } else {
+        } 
+
+        /* 
+         * this needs to be a separate check because the rc_inc() above may return
+         * NULL if the ref count is already zero.
+         */
+        if(*walker == NULL) {
             /* nope, make a new one.  Do as little as possible in the mutex. */
 
             pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
+
+            pdebug(DEBUG_DETAIL, "connection_group_id=%d, server_id=%d, server=%s", connection_group_id, server_id, server);
 
             is_new = 1;
 

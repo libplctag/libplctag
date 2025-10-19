@@ -31,23 +31,46 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+#ifndef CONFIG_H
+#define CONFIG_H
 
-#include <stdint.h>
+#include <stdbool.h>
 
-/*
- * The library version in various ways.
- *
- * The defines are for building in specific versions and then
- * checking them against a dynamically linked library.
- */
+#define MAX_LISTEN_ENDPOINTS 10
+#define DEFAULT_REGISTER_COUNT 100
 
-#define LIB_VER_STRING "2.6.12"
-#define LIB_VER_MAJOR (2)
-#define LIB_VER_MINOR (6)
-#define LIB_VER_PATCH (12)
+/* Listening endpoint */
+typedef struct {
+    char host[64];
+    int port;
+} listen_endpoint_t;
 
-extern const char *VERSION;
-extern const uint64_t version_major;
-extern const uint64_t version_minor;
-extern const uint64_t version_patch;
+/* Server configuration */
+typedef struct {
+    /* Listening endpoints */
+    listen_endpoint_t listen_endpoints[MAX_LISTEN_ENDPOINTS];
+    int num_listen_endpoints;
+    
+    /* Register counts */
+    int num_coils;
+    int num_discrete_inputs;
+    int num_holding_registers;
+    int num_input_registers;
+    
+    /* Debug mode */
+    bool debug;
+} server_config_t;
+
+/* Initialize configuration with defaults */
+void config_init(server_config_t *config);
+
+/* Parse command line arguments */
+bool config_parse_args(server_config_t *config, int argc, char **argv);
+
+/* Print usage information */
+void config_print_usage(const char *program_name);
+
+/* Validate configuration */
+bool config_validate(const server_config_t *config);
+
+#endif /* CONFIG_H */

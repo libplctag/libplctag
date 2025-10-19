@@ -24,7 +24,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_reconnect_after_outage test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix modbus_server string_non_standard_udt string_standard tag_rw2 test_auto_sync test_modbus_multiple test_reconnect_after_outage test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_raw_cip test_reconnect test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -544,10 +544,10 @@ fi
 # echo "  Killing Omron emulator."
 killall -TERM ab_server > /dev/null 2>&1
 
-
+killall -TERM modbus_server > /dev/null 2>&1
 
 # echo -n "  Starting Modbus server $SCRIPT_DIR/modbus_server... "
-$TEST_DIR/modbus_server > modbus_emulator.log 2>&1 &
+$TEST_DIR/modbus_server --listen 127.0.0.1:1502 --listen 127.0.0.1:2502 > modbus_server.log 2>&1 &
 MODBUS_PID=$!
 if [ $? != 0 ]; then
     # echo "FAILURE"
@@ -585,7 +585,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: thread stress Modbus... "
-$VALGRIND$TEST_DIR/thread_stress 10 'protocol=modbus-tcp&gateway=127.0.0.1:5020&path=0&elem_count=2&name=hr10' > "${TEST}_modbus_stress_test.log" 2>&1
+$VALGRIND$TEST_DIR/thread_stress 10 'protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "${TEST}_modbus_stress_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -606,11 +606,35 @@ else
     let SUCCESSES++
 fi
 
+let TEST++
+echo -n "Test $TEST: for Modbus reconnect bug... "
+$VALGRIND$TEST_DIR/test_modbus_multiple > "${TEST}_test_modbus_multiple.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+# make sure that there is no thread(5) in the log file.
+let TEST++
+echo -n "Test $TEST: check for thread(5) in Modbus multiple test log... "
+if grep -q "thread(5)" "${TEST}_test_modbus_multiple.log" ; then
+    echo "FAILURE (found thread(5) in log file)"
+    let FAILURES++
+else
+    echo "OK (no thread(5) found in log file)"
+    let SUCCESSES++
+fi
+
 # echo "  Killing Modbus emulator."
 killall -TERM modbus_server > /dev/null 2>&1
 
 # Make sure no ab_server instances are running before running auto_sync_reconnect test
 killall -TERM ab_server > /dev/null 2>&1
+
+# wait for them to exit
 sleep 2
 
 # Run auto_sync_reconnect test last since it manages its own ab_server

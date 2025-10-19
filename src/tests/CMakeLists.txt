@@ -50,31 +50,8 @@ target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
     target_link_options(ab_server PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
 # endif()
 
-if(POSIX AND BUILD_MODBUS_EMULATOR)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(LIBMODBUS REQUIRED libmodbus)
+# Build the standalone Modbus TCP server (no external dependencies)
+# This is a pure C11 implementation using only BSD sockets
+message("Building Modbus TCP server.")
+add_subdirectory("modbus_server")
 
-    # Add modbus_server executable
-    add_executable(modbus_server ${CMAKE_CURRENT_SOURCE_DIR}/modbus_server/modbus_server.c)
-
-    target_include_directories(modbus_server PRIVATE ${LIBMODBUS_INCLUDE_DIRS})
-
-    target_link_libraries(modbus_server ${LIBMODBUS_LINK_LIBRARIES})
-
-    macro(print_all_modbus_variables)
-        message(STATUS "print_all_modbus_variables------------------------------------------{")
-        get_cmake_property(_variableNames VARIABLES)
-        foreach (_variableName ${_variableNames})
-            string(REGEX MATCH "^LIBMODBUS.*" MATCHED_STR "${_variableName}")
-            if(MATCHED_STR)
-                message(STATUS "${_variableName}=${${_variableName}}")
-            endif()
-        endforeach()
-        message(STATUS "print_all_modbus_variables------------------------------------------}")
-    endmacro()
-
-    # Debugging
-    # print_all_modbus_variables()
-else()
-    message("Not building Modbus test server.")
-endif()

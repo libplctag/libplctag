@@ -31,23 +31,41 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
+#ifndef LOGGER_H
+#define LOGGER_H
 
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
-/*
- * The library version in various ways.
- *
- * The defines are for building in specific versions and then
- * checking them against a dynamically linked library.
- */
+/* Log levels */
+typedef enum {
+    LOG_LEVEL_ERROR = 0,
+    LOG_LEVEL_WARN = 1,
+    LOG_LEVEL_INFO = 2,
+    LOG_LEVEL_DEBUG = 3
+} log_level_t;
 
-#define LIB_VER_STRING "2.6.12"
-#define LIB_VER_MAJOR (2)
-#define LIB_VER_MINOR (6)
-#define LIB_VER_PATCH (12)
+/* Initialize logger */
+void logger_init(bool debug_enabled);
 
-extern const char *VERSION;
-extern const uint64_t version_major;
-extern const uint64_t version_minor;
-extern const uint64_t version_patch;
+/* Set debug mode */
+void logger_set_debug(bool enabled);
+
+/* Check if debug is enabled */
+bool logger_is_debug_enabled(void);
+
+/* Log functions */
+void log_error(const char *fmt, ...);
+void log_warn(const char *fmt, ...);
+void log_info(const char *fmt, ...);
+void log_debug(const char *fmt, ...);
+
+/* Log with explicit level */
+void log_message(log_level_t level, const char *fmt, ...);
+
+/* Log binary data dump (debug only) */
+void log_dump_bytes(const char *prefix, const uint8_t *data, size_t len);
+
+#endif /* LOGGER_H */

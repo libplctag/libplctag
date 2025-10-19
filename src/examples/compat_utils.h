@@ -73,7 +73,7 @@ typedef pthread_cond_t compat_cond_t;
 
 static inline int compat_localtime_r(const time_t *timep, struct tm *result) { return localtime_s(result, timep); }
 
-static inline int compat_strcasecmp(const char *s1, const char *s2) { return stricmp(s1, s2); }
+static inline int compat_strcasecmp(const char *s1, const char *s2) { return _stricmp(s1, s2); }
 
 static inline char *compat_strdup(const char *s) { return _strdup(s); }
 
