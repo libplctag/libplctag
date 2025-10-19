@@ -504,9 +504,15 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
            && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
             pdebug(DEBUG_DETAIL, "Using existing PLC connection.");
             pdebug(DEBUG_DETAIL, "rc_inc: Acquiring Modbus connection reference.");
-            *plc = rc_inc(*walker);
+            *plc = rc_inc(*walker); /* this could result in NULL if the reference count is already zero */
             is_new = 0;
-        } else {
+        } 
+
+        /* 
+         * this needs to be a separate check because the rc_inc() above may return
+         * NULL if the ref count is already zero.
+         */
+        if(*walker == NULL) {
             /* nope, make a new one.  Do as little as possible in the mutex. */
 
             pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
