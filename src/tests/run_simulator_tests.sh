@@ -476,7 +476,8 @@ fi
 # make sure that there is no thread(5) in the log file.
 let TEST++
 echo -n "Test $TEST: check for thread(5) in Modbus multiple test log... "
-if grep -q "thread(5)" "${TEST}_test_modbus_multiple.log" ; then
+PREV_TEST=$((TEST - 1))
+if grep -q "thread(5)" "${PREV_TEST}_test_modbus_multiple.log" ; then
     echo "FAILURE (found thread(5) in log file)"
     let FAILURES++
 else
