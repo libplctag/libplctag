@@ -1,41 +1,9 @@
-/***************************************************************************
- *   Copyright (C) 2025 by Kyle Hayes                                      *
- *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
- *                                                                         *
- * This software is available under either the Mozilla Public License      *
- * version 2.0 or the GNU LGPL version 2 (or later) license, whichever     *
- * you choose.                                                             *
- *                                                                         *
- * MPL 2.0:                                                                *
- *                                                                         *
- *   This Source Code Form is subject to the terms of the Mozilla Public   *
- *   License, v. 2.0. If a copy of the MPL was not distributed with this   *
- *   file, You can obtain one at http://mozilla.org/MPL/2.0/.              *
- *                                                                         *
- *                                                                         *
- * LGPL 2:                                                                 *
- *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU Library General Public License as       *
- *   published by the Free Software Foundation; either version 2 of the    *
- *   License, or (at your option) any later version.                       *
- *                                                                         *
- *   This program is distributed in the hope that it will be useful,       *
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
- *   GNU General Public License for more details.                          *
- *                                                                         *
- *   You should have received a copy of the GNU Library General Public     *
- *   License along with this program; if not, write to the                 *
- *   Free Software Foundation, Inc.,                                       *
- *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
- ***************************************************************************/
-
-#ifndef MODBUS_PROTOCOL_H
-#define MODBUS_PROTOCOL_H
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "buf.h"
+#include "err.h"
 #include "register_storage.h"
 
 /* Modbus TCP Application Protocol (MBAP) Header */
@@ -53,9 +21,9 @@
 
 /* Modbus Exception Codes */
 #define MODBUS_EXCEPTION_ILLEGAL_FUNCTION        0x01
-#define MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS    0x02
+#define MODBUS_EXCEPTION_ILLEGAL_ADDRESS         0x02
 #define MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE      0x03
-#define MODBUS_EXCEPTION_SERVER_DEVICE_FAILURE   0x04
+#define MODBUS_EXCEPTION_DEVICE_FAILURE          0x04
 
 /* Maximum Modbus PDU size (260 bytes) */
 #define MODBUS_MAX_PDU_SIZE 260
@@ -71,51 +39,48 @@ typedef struct {
     uint8_t unit_id;
 } mbap_header_t;
 
-/* Modbus Request/Response structure */
-typedef struct {
-    mbap_header_t mbap;
-    uint8_t function_code;
-    uint8_t data[MODBUS_MAX_PDU_SIZE];
-    int data_length;
-} modbus_message_t;
+/**
+ * @brief Parse MBAP header from buffer
+ * @param buf Buffer to read from (will advance read cursor)
+ * @param header OUT: Parsed MBAP header
+ * @return UTIL_OK on success, error code on failure
+ */
+util_err_t modbus_parse_mbap_header(buf_t *buf, mbap_header_t *header);
 
 /**
- * Parse MBAP header from buffer
- * Returns true on success, false on error
+ * @brief Build MBAP header and response PDU header
+ * @param response Buffer to write to
+ * @param req_header Request header (for transaction_id, etc.)
+ * @param pdu_length Length of response PDU (not including MBAP)
+ * @return UTIL_OK on success, error code on failure
  */
-bool modbus_parse_mbap_header(const uint8_t *buffer, int buffer_length, 
-                               mbap_header_t *header);
+util_err_t modbus_build_response_header(buf_t *response,
+                                        const mbap_header_t *req_header,
+                                        uint16_t pdu_length);
 
 /**
- * Build MBAP header into buffer
- * Returns number of bytes written (always MBAP_HEADER_SIZE)
+ * @brief Build Modbus exception response
+ * @param response Buffer to write to (must be reset)
+ * @param req_header Request header
+ * @param function_code Original function code
+ * @param error Error code (will be mapped to Modbus exception)
  */
-int modbus_build_mbap_header(uint8_t *buffer, const mbap_header_t *header);
+void modbus_build_exception_response(buf_t *response,
+                                     const mbap_header_t *req_header,
+                                     uint8_t function_code,
+                                     util_err_t error);
 
 /**
- * Parse a complete Modbus request from buffer
- * Returns true on success, false on error
+ * @brief Process a Modbus request and generate response
+ * @param function_code Function code from request
+ * @param request Buffer with request PDU (positioned after FC)
+ * @param response Buffer for response (will be written to)
+ * @param req_header Request MBAP header
+ * @param storage Register storage
+ * @return UTIL_OK on success, error code otherwise
  */
-bool modbus_parse_request(const uint8_t *buffer, int buffer_length,
-                          modbus_message_t *request);
-
-/**
- * Process a Modbus request and generate a response
- * Returns number of bytes in response buffer, or -1 on error
- */
-int modbus_process_request(const modbus_message_t *request,
-                           register_storage_t *storage,
-                           uint8_t *response_buffer,
-                           int response_buffer_size);
-
-/**
- * Build a Modbus exception response
- * Returns number of bytes written
- */
-int modbus_build_exception_response(const mbap_header_t *request_header,
-                                    uint8_t function_code,
-                                    uint8_t exception_code,
-                                    uint8_t *buffer,
-                                    int buffer_size);
-
-#endif /* MODBUS_PROTOCOL_H */
+util_err_t modbus_process_request(uint8_t function_code,
+                                  buf_t *request,
+                                  buf_t *response,
+                                  const mbap_header_t *req_header,
+                                  register_storage_t *storage);

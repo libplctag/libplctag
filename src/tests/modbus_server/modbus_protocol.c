@@ -32,540 +32,522 @@
  ***************************************************************************/
 
 #include "modbus_protocol.h"
-#include "logger.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 
-/* Helper functions for byte ordering (network byte order = big endian) */
-static inline uint16_t read_uint16_be(const uint8_t *buffer) {
-    return (uint16_t)((buffer[0] << 8) | buffer[1]);
-}
-
-static inline void write_uint16_be(uint8_t *buffer, uint16_t value) {
-    buffer[0] = (uint8_t)(value >> 8);
-    buffer[1] = (uint8_t)(value & 0xFF);
-}
-
-/* Helper function to decode Modbus function code to a string */
-static const char* modbus_function_code_to_string(uint8_t function_code) {
-    switch (function_code) {
-        case MODBUS_FC_READ_COILS:
-            return "Read Coils (FC 0x01)";
-        case MODBUS_FC_READ_DISCRETE_INPUTS:
-            return "Read Discrete Inputs (FC 0x02)";
-        case MODBUS_FC_READ_HOLDING_REGISTERS:
-            return "Read Holding Registers (FC 0x03)";
-        case MODBUS_FC_READ_INPUT_REGISTERS:
-            return "Read Input Registers (FC 0x04)";
-        case MODBUS_FC_WRITE_SINGLE_COIL:
-            return "Write Single Coil (FC 0x05)";
-        case MODBUS_FC_WRITE_SINGLE_REGISTER:
-            return "Write Single Register (FC 0x06)";
-        case MODBUS_FC_WRITE_MULTIPLE_COILS:
-            return "Write Multiple Coils (FC 0x0F)";
-        case MODBUS_FC_WRITE_MULTIPLE_REGISTERS:
-            return "Write Multiple Registers (FC 0x10)";
+/* Map util_err_t to Modbus exception codes */
+static inline uint8_t util_err_to_modbus_exception(util_err_t err) {
+    switch (err) {
+        case UTIL_OK:
+            return 0; /* No error */
+        case UTIL_EBOUNDS:
+            return MODBUS_EXCEPTION_ILLEGAL_ADDRESS;
+        case UTIL_EINVAL:
+            return MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE;
+        case UTIL_ERESOURCE:
+            return MODBUS_EXCEPTION_DEVICE_FAILURE;
         default:
-            return "Unknown Function Code";
+            return MODBUS_EXCEPTION_ILLEGAL_FUNCTION;
     }
 }
 
-bool modbus_parse_mbap_header(const uint8_t *buffer, int buffer_length,
-                               mbap_header_t *header) {
-    if (buffer_length < MBAP_HEADER_SIZE) {
-        log_debug("Buffer too small for MBAP header (%d < %d)", 
-                 buffer_length, MBAP_HEADER_SIZE);
-        return false;
+/* Parse MBAP header from buffer using buf.h API */
+util_err_t modbus_parse_mbap_header(buf_t *buf, mbap_header_t *header) {
+    if (!buf || !header) {
+        return UTIL_EINVAL;
     }
-    
-    header->transaction_id = read_uint16_be(&buffer[0]);
-    header->protocol_id = read_uint16_be(&buffer[2]);
-    header->length = read_uint16_be(&buffer[4]);
-    header->unit_id = buffer[6];
-    
+
+    /* Save checkpoint for potential rollback */
+    buf_t checkpoint = buf_checkpoint(buf);
+
+    /* Read MBAP header fields */
+    if (!buf_read_u16_be(buf, "transaction_id", &header->transaction_id) ||
+        !buf_read_u16_be(buf, "protocol_id", &header->protocol_id) ||
+        !buf_read_u16_be(buf, "length", &header->length) ||
+        !buf_read_u8(buf, "unit_id", &header->unit_id)) {
+        buf_restore(buf, checkpoint);
+        return UTIL_EBOUNDS;
+    }
+
     /* Validate protocol ID (must be 0 for Modbus TCP) */
     if (header->protocol_id != 0) {
-        log_debug("Invalid protocol ID: %u (expected 0)", header->protocol_id);
-        return false;
+        buf_restore(buf, checkpoint);
+        return UTIL_EINVAL;
     }
-    
-    /* Validate length field */
+
+    /* Validate length field (PDU length: unit_id + function_code + data, min 2, max 260+1) */
     if (header->length < 2 || header->length > (MODBUS_MAX_PDU_SIZE + 1)) {
-        log_debug("Invalid length field: %u", header->length);
-        return false;
+        buf_restore(buf, checkpoint);
+        return UTIL_EINVAL;
     }
-    
-    return true;
+
+    return UTIL_OK;
 }
 
-int modbus_build_mbap_header(uint8_t *buffer, const mbap_header_t *header) {
-    write_uint16_be(&buffer[0], header->transaction_id);
-    write_uint16_be(&buffer[2], header->protocol_id);
-    write_uint16_be(&buffer[4], header->length);
-    buffer[6] = header->unit_id;
-    return MBAP_HEADER_SIZE;
+/* Build MBAP response header in buffer */
+util_err_t modbus_build_response_header(buf_t *response,
+                                        const mbap_header_t *req_header,
+                                        uint16_t pdu_length) {
+    if (!response || !req_header) {
+        return UTIL_EINVAL;
+    }
+
+    buf_reset(response);
+
+    /* Write MBAP header */
+    if (!buf_write_u16_be(response, "transaction_id", req_header->transaction_id) ||
+        !buf_write_u16_be(response, "protocol_id", 0) || /* protocol_id = 0 */
+        !buf_write_u16_be(response, "length", pdu_length + 1) || /* length = unit_id + PDU */
+        !buf_write_u8(response, "unit_id", req_header->unit_id)) {
+        return UTIL_EBOUNDS;
+    }
+
+    return UTIL_OK;
 }
 
-bool modbus_parse_request(const uint8_t *buffer, int buffer_length,
-                          modbus_message_t *request) {
-    if (!modbus_parse_mbap_header(buffer, buffer_length, &request->mbap)) {
-        return false;
+/* Build exception response */
+void modbus_build_exception_response(buf_t *response,
+                                     const mbap_header_t *req_header,
+                                     uint8_t function_code,
+                                     util_err_t error) {
+    if (!response || !req_header) {
+        return;
     }
-    
-    /* Check if we have the complete PDU */
-    int expected_length = MBAP_HEADER_SIZE + request->mbap.length - 1;
-    if (buffer_length < expected_length) {
-        log_debug("Incomplete PDU: got %d bytes, expected %d",
-                 buffer_length, expected_length);
-        return false;
-    }
-    
-    /* Extract function code and data */
-    request->function_code = buffer[MBAP_HEADER_SIZE];
-    request->data_length = request->mbap.length - 2; /* Length includes unit_id + function_code */
-    
-    if (request->data_length > 0) {
-        memcpy(request->data, &buffer[MBAP_HEADER_SIZE + 1], 
-               (size_t)request->data_length);
-    }
-    
-    log_debug("Parsed request: TID=%u, Unit=%u, %s, DataLen=%d",
-             request->mbap.transaction_id, request->mbap.unit_id,
-             modbus_function_code_to_string(request->function_code),
-             request->data_length);
-    
-    return true;
+
+    /* Build response header with 2-byte PDU (FC + exception code) */
+    modbus_build_response_header(response, req_header, 2);
+
+    /* Write exception function code (FC with high bit set) and exception code */
+    buf_write_u8(response, "function_code", function_code | 0x80);
+    buf_write_u8(response, "exception_code", util_err_to_modbus_exception(error));
 }
 
-int modbus_build_exception_response(const mbap_header_t *request_header,
-                                    uint8_t function_code,
-                                    uint8_t exception_code,
-                                    uint8_t *buffer,
-                                    int buffer_size) {
-    if (buffer_size < (MBAP_HEADER_SIZE + 2)) {
-        log_error("Buffer too small for exception response");
-        return -1;
-    }
-    
-    mbap_header_t response_header = *request_header;
-    response_header.length = 3; /* unit_id + exception_function_code + exception_code */
-    
-    int offset = modbus_build_mbap_header(buffer, &response_header);
-    buffer[offset++] = function_code | 0x80; /* Set high bit for exception */
-    buffer[offset++] = exception_code;
-    
-    log_debug("Built exception response: FC=0x%02X, Exception=0x%02X",
-             function_code, exception_code);
-    
-    return offset;
-}
+/* Handle FC 0x01: Read Coils */
+static util_err_t handle_read_coils(buf_t *request, buf_t *response,
+                                    const mbap_header_t *req_header,
+                                    register_storage_t *storage) {
+    uint16_t start_address, count;
 
-/* Function code handlers */
-static int handle_read_coils(const modbus_message_t *request,
-                            register_storage_t *storage,
-                            uint8_t *response_buffer,
-                            int response_buffer_size) {
-    if (request->data_length < 4) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "start_address", &start_address) ||
+        !buf_read_u16_be(request, "count", &count)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t start_address = read_uint16_be(&request->data[0]);
-    uint16_t count = read_uint16_be(&request->data[2]);
-    
+
+    /* Validate count (1-2000 coils) */
     if (count == 0 || count > 2000) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EINVAL;
     }
-    
-    int byte_count = (count + 7) / 8;
-    uint8_t *coil_data = (uint8_t*)malloc((size_t)byte_count);
+
+    /* Allocate response buffer for coils */
+    uint16_t byte_count = (count + 7) / 8;
+    uint8_t *coil_data = malloc(byte_count);
     if (!coil_data) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_SERVER_DEVICE_FAILURE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_ERESOURCE;
     }
-    
-    if (!register_storage_read_coils(storage, (int)start_address, (int)count, coil_data)) {
+
+    /* Read coils from storage */
+    bool success = register_storage_read_coils(storage, start_address, count, coil_data);
+    if (!success) {
         free(coil_data);
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EBOUNDS;
     }
-    
-    mbap_header_t response_header = request->mbap;
-    response_header.length = (uint16_t)(3 + byte_count); /* unit_id + fc + byte_count + data */
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    response_buffer[offset++] = (uint8_t)byte_count;
-    memcpy(&response_buffer[offset], coil_data, (size_t)byte_count);
-    offset += byte_count;
-    
+
+    /* Build response header */
+    modbus_build_response_header(response, req_header, 2 + byte_count); /* FC + byte_count + data */
+
+    /* Write response: FC, byte_count, coil data */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_READ_COILS) ||
+        !buf_write_u8(response, "byte_count", byte_count) ||
+        !buf_write_bytes(response, "coil_data", coil_data, byte_count)) {
+        free(coil_data);
+        return UTIL_EBOUNDS;
+    }
+
     free(coil_data);
-    log_debug("Read %d coils from address %u", count, start_address);
-    return offset;
+    log_detail("Read %u coils from address %u", count, start_address);
+    return UTIL_OK;
 }
 
-static int handle_read_discrete_inputs(const modbus_message_t *request,
-                                       register_storage_t *storage,
-                                       uint8_t *response_buffer,
-                                       int response_buffer_size) {
-    if (request->data_length < 4) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+/* Handle FC 0x02: Read Discrete Inputs */
+static util_err_t handle_read_discrete_inputs(buf_t *request, buf_t *response,
+                                              const mbap_header_t *req_header,
+                                              register_storage_t *storage) {
+    uint16_t start_address, count;
+
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "start_address", &start_address) ||
+        !buf_read_u16_be(request, "count", &count)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t start_address = read_uint16_be(&request->data[0]);
-    uint16_t count = read_uint16_be(&request->data[2]);
-    
+
+    /* Validate count (1-2000 inputs) */
     if (count == 0 || count > 2000) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EINVAL;
     }
-    
-    int byte_count = (count + 7) / 8;
-    uint8_t *input_data = (uint8_t*)malloc((size_t)byte_count);
+
+    /* Allocate response buffer for inputs */
+    uint16_t byte_count = (count + 7) / 8;
+    uint8_t *input_data = malloc(byte_count);
     if (!input_data) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_SERVER_DEVICE_FAILURE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_ERESOURCE;
     }
-    
-    if (!register_storage_read_discrete_inputs(storage, (int)start_address, (int)count, input_data)) {
+
+    /* Read discrete inputs from storage */
+    bool success = register_storage_read_discrete_inputs(storage, start_address, count, input_data);
+    if (!success) {
         free(input_data);
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EBOUNDS;
     }
-    
-    mbap_header_t response_header = request->mbap;
-    response_header.length = (uint16_t)(3 + byte_count);
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    response_buffer[offset++] = (uint8_t)byte_count;
-    memcpy(&response_buffer[offset], input_data, (size_t)byte_count);
-    offset += byte_count;
-    
+
+    /* Build response header */
+    modbus_build_response_header(response, req_header, 2 + byte_count); /* FC + byte_count + data */
+
+    /* Write response: FC, byte_count, input data */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_READ_DISCRETE_INPUTS) ||
+        !buf_write_u8(response, "byte_count", byte_count) ||
+        !buf_write_bytes(response, "input_data", input_data, byte_count)) {
+        free(input_data);
+        return UTIL_EBOUNDS;
+    }
+
     free(input_data);
-    log_debug("Read %d discrete inputs from address %u", count, start_address);
-    return offset;
+    log_detail("Read %u discrete inputs from address %u", count, start_address);
+    return UTIL_OK;
 }
 
-static int handle_read_holding_registers(const modbus_message_t *request,
-                                         register_storage_t *storage,
-                                         uint8_t *response_buffer,
-                                         int response_buffer_size) {
-    if (request->data_length < 4) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+/* Handle FC 0x03: Read Holding Registers */
+static util_err_t handle_read_holding_registers(buf_t *request, buf_t *response,
+                                                const mbap_header_t *req_header,
+                                                register_storage_t *storage) {
+    uint16_t start_address, count;
+
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "start_address", &start_address) ||
+        !buf_read_u16_be(request, "count", &count)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t start_address = read_uint16_be(&request->data[0]);
-    uint16_t count = read_uint16_be(&request->data[2]);
-    
+
+    /* Validate count (1-125 registers) */
     if (count == 0 || count > 125) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EINVAL;
     }
-    
-    uint16_t *register_data = (uint16_t*)malloc((size_t)count * sizeof(uint16_t));
+
+    /* Allocate response buffer for registers */
+    uint16_t *register_data = malloc(count * sizeof(uint16_t));
     if (!register_data) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_SERVER_DEVICE_FAILURE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_ERESOURCE;
     }
-    
-    if (!register_storage_read_holding_registers(storage, (int)start_address, (int)count, register_data)) {
+
+    /* Read holding registers from storage */
+    bool success = register_storage_read_holding_registers(storage, start_address, count, register_data);
+    if (!success) {
         free(register_data);
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EBOUNDS;
     }
-    
-    int byte_count = count * 2;
-    mbap_header_t response_header = request->mbap;
-    response_header.length = (uint16_t)(3 + byte_count);
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    response_buffer[offset++] = (uint8_t)byte_count;
-    
-    for (int i = 0; i < count; i++) {
-        write_uint16_be(&response_buffer[offset], register_data[i]);
-        offset += 2;
+
+    /* Build response header */
+    uint16_t byte_count = count * 2;
+    modbus_build_response_header(response, req_header, 2 + byte_count); /* FC + byte_count + data */
+
+    /* Write response: FC, byte_count, register values (big-endian) */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_READ_HOLDING_REGISTERS) ||
+        !buf_write_u8(response, "byte_count", byte_count)) {
+        free(register_data);
+        return UTIL_EBOUNDS;
     }
-    
+
+    for (uint16_t i = 0; i < count; i++) {
+        if (!buf_write_u16_be(response, "register", register_data[i])) {
+            free(register_data);
+            return UTIL_EBOUNDS;
+        }
+    }
+
     free(register_data);
-    log_debug("Read %d holding registers from address %u", count, start_address);
-    return offset;
+    log_detail("Read %u holding registers from address %u", count, start_address);
+    return UTIL_OK;
 }
 
-static int handle_read_input_registers(const modbus_message_t *request,
-                                       register_storage_t *storage,
-                                       uint8_t *response_buffer,
-                                       int response_buffer_size) {
-    if (request->data_length < 4) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+/* Handle FC 0x04: Read Input Registers */
+static util_err_t handle_read_input_registers(buf_t *request, buf_t *response,
+                                              const mbap_header_t *req_header,
+                                              register_storage_t *storage) {
+    uint16_t start_address, count;
+
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "start_address", &start_address) ||
+        !buf_read_u16_be(request, "count", &count)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t start_address = read_uint16_be(&request->data[0]);
-    uint16_t count = read_uint16_be(&request->data[2]);
-    
+
+    /* Validate count (1-125 registers) */
     if (count == 0 || count > 125) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EINVAL;
     }
-    
-    uint16_t *register_data = (uint16_t*)malloc((size_t)count * sizeof(uint16_t));
+
+    /* Allocate response buffer for registers */
+    uint16_t *register_data = malloc(count * sizeof(uint16_t));
     if (!register_data) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_SERVER_DEVICE_FAILURE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_ERESOURCE;
     }
-    
-    if (!register_storage_read_input_registers(storage, (int)start_address, (int)count, register_data)) {
+
+    /* Read input registers from storage */
+    bool success = register_storage_read_input_registers(storage, start_address, count, register_data);
+    if (!success) {
         free(register_data);
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EBOUNDS;
     }
-    
-    int byte_count = count * 2;
-    mbap_header_t response_header = request->mbap;
-    response_header.length = (uint16_t)(3 + byte_count);
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    response_buffer[offset++] = (uint8_t)byte_count;
-    
-    for (int i = 0; i < count; i++) {
-        write_uint16_be(&response_buffer[offset], register_data[i]);
-        offset += 2;
+
+    /* Build response header */
+    uint16_t byte_count = count * 2;
+    modbus_build_response_header(response, req_header, 2 + byte_count); /* FC + byte_count + data */
+
+    /* Write response: FC, byte_count, register values (big-endian) */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_READ_INPUT_REGISTERS) ||
+        !buf_write_u8(response, "byte_count", byte_count)) {
+        free(register_data);
+        return UTIL_EBOUNDS;
     }
-    
+
+    for (uint16_t i = 0; i < count; i++) {
+        if (!buf_write_u16_be(response, "register", register_data[i])) {
+            free(register_data);
+            return UTIL_EBOUNDS;
+        }
+    }
+
     free(register_data);
-    log_debug("Read %d input registers from address %u", count, start_address);
-    return offset;
+    log_detail("Read %u input registers from address %u", count, start_address);
+    return UTIL_OK;
 }
 
-static int handle_write_single_coil(const modbus_message_t *request,
-                                    register_storage_t *storage,
-                                    uint8_t *response_buffer,
-                                    int response_buffer_size) {
-    if (request->data_length < 4) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+/* Handle FC 0x05: Write Single Coil */
+static util_err_t handle_write_single_coil(buf_t *request, buf_t *response,
+                                           const mbap_header_t *req_header,
+                                           register_storage_t *storage) {
+    uint16_t address, value;
+
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "address", &address) ||
+        !buf_read_u16_be(request, "value", &value)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t address = read_uint16_be(&request->data[0]);
-    uint16_t value = read_uint16_be(&request->data[2]);
-    
-    /* Valid coil values are 0x0000 (OFF) or 0xFF00 (ON) */
+
+    /* Validate coil value (0x0000 = OFF, 0xFF00 = ON) */
     if (value != 0x0000 && value != 0xFF00) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_EINVAL;
     }
-    
+
+    /* Write coil to storage */
     bool coil_value = (value == 0xFF00);
-    if (!register_storage_write_coil(storage, (int)address, coil_value)) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
+    uint8_t coil_bytes = coil_value ? 0x01 : 0x00;
+    if (!register_storage_write_coils(storage, address, 1, &coil_bytes)) {
+        return UTIL_EBOUNDS;
     }
-    
-    /* Echo request as response */
-    mbap_header_t response_header = request->mbap;
-    response_header.length = 6; /* unit_id + fc + address + value */
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    write_uint16_be(&response_buffer[offset], address);
-    offset += 2;
-    write_uint16_be(&response_buffer[offset], value);
-    offset += 2;
-    
-    log_debug("Wrote single coil at address %u = %s", address, coil_value ? "ON" : "OFF");
-    return offset;
+
+    /* Build response header (echo request as response) */
+    modbus_build_response_header(response, req_header, 5); /* FC + address + value */
+
+    /* Write response: FC, address, value */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_WRITE_SINGLE_COIL) ||
+        !buf_write_u16_be(response, "address", address) ||
+        !buf_write_u16_be(response, "value", value)) {
+        return UTIL_EBOUNDS;
+    }
+
+    log_detail("Wrote single coil at address %u = %s", address, coil_value ? "ON" : "OFF");
+    return UTIL_OK;
 }
 
-static int handle_write_single_register(const modbus_message_t *request,
-                                        register_storage_t *storage,
-                                        uint8_t *response_buffer,
-                                        int response_buffer_size) {
-    if (request->data_length < 4) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+/* Handle FC 0x06: Write Single Register */
+static util_err_t handle_write_single_register(buf_t *request, buf_t *response,
+                                               const mbap_header_t *req_header,
+                                               register_storage_t *storage) {
+    uint16_t address, value;
+
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "address", &address) ||
+        !buf_read_u16_be(request, "value", &value)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t address = read_uint16_be(&request->data[0]);
-    uint16_t value = read_uint16_be(&request->data[2]);
-    
-    if (!register_storage_write_holding_register(storage, (int)address, value)) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
+
+    /* Write register to storage */
+    if (!register_storage_write_holding_registers(storage, address, 1, &value)) {
+        return UTIL_EBOUNDS;
     }
-    
-    /* Echo request as response */
-    mbap_header_t response_header = request->mbap;
-    response_header.length = 6;
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    write_uint16_be(&response_buffer[offset], address);
-    offset += 2;
-    write_uint16_be(&response_buffer[offset], value);
-    offset += 2;
-    
-    log_debug("Wrote single register at address %u = 0x%04X", address, value);
-    return offset;
+
+    /* Build response header (echo request as response) */
+    modbus_build_response_header(response, req_header, 5); /* FC + address + value */
+
+    /* Write response: FC, address, value */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_WRITE_SINGLE_REGISTER) ||
+        !buf_write_u16_be(response, "address", address) ||
+        !buf_write_u16_be(response, "value", value)) {
+        return UTIL_EBOUNDS;
+    }
+
+    log_detail("Wrote single register at address %u = 0x%04X", address, value);
+    return UTIL_OK;
 }
 
-static int handle_write_multiple_coils(const modbus_message_t *request,
-                                       register_storage_t *storage,
-                                       uint8_t *response_buffer,
-                                       int response_buffer_size) {
-    if (request->data_length < 5) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+/* Handle FC 0x0F: Write Multiple Coils */
+static util_err_t handle_write_multiple_coils(buf_t *request, buf_t *response,
+                                              const mbap_header_t *req_header,
+                                              register_storage_t *storage) {
+    uint16_t start_address, count;
+    uint8_t byte_count;
+
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "start_address", &start_address) ||
+        !buf_read_u16_be(request, "count", &count) ||
+        !buf_read_u8(request, "byte_count", &byte_count)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t start_address = read_uint16_be(&request->data[0]);
-    uint16_t count = read_uint16_be(&request->data[2]);
-    uint8_t byte_count = request->data[4];
-    
-    if (count == 0 || count > 1968 || byte_count != ((count + 7) / 8) ||
-        request->data_length < (5 + byte_count)) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+
+    /* Validate count and byte count */
+    if (count == 0 || count > 1968 || byte_count != ((count + 7) / 8)) {
+        return UTIL_EINVAL;
     }
-    
-    if (!register_storage_write_coils(storage, (int)start_address, (int)count, &request->data[5])) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
+
+    /* Read coil data from request */
+    const uint8_t *coil_data = buf_read_ptr(request);
+    if (!coil_data || buf_read_size(request) < byte_count) {
+        return UTIL_EINVAL;
     }
-    
-    mbap_header_t response_header = request->mbap;
-    response_header.length = 6;
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    write_uint16_be(&response_buffer[offset], start_address);
-    offset += 2;
-    write_uint16_be(&response_buffer[offset], count);
-    offset += 2;
-    
-    log_debug("Wrote %d coils starting at address %u", count, start_address);
-    return offset;
+
+    /* Write coils to storage */
+    if (!register_storage_write_coils(storage, start_address, count, coil_data)) {
+        return UTIL_EBOUNDS;
+    }
+
+    /* Advance read cursor */
+    buf_read_advance(request, byte_count);
+
+    /* Build response header */
+    modbus_build_response_header(response, req_header, 5); /* FC + start_address + count */
+
+    /* Write response: FC, start_address, count */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_WRITE_MULTIPLE_COILS) ||
+        !buf_write_u16_be(response, "start_address", start_address) ||
+        !buf_write_u16_be(response, "count", count)) {
+        return UTIL_EBOUNDS;
+    }
+
+    log_detail("Wrote %u coils starting at address %u", count, start_address);
+    return UTIL_OK;
 }
 
-static int handle_write_multiple_registers(const modbus_message_t *request,
-                                           register_storage_t *storage,
-                                           uint8_t *response_buffer,
-                                           int response_buffer_size) {
-    if (request->data_length < 5) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+/* Handle FC 0x10: Write Multiple Registers */
+static util_err_t handle_write_multiple_registers(buf_t *request, buf_t *response,
+                                                  const mbap_header_t *req_header,
+                                                  register_storage_t *storage) {
+    uint16_t start_address, count;
+    uint8_t byte_count;
+
+    /* Read request parameters */
+    if (!buf_read_u16_be(request, "start_address", &start_address) ||
+        !buf_read_u16_be(request, "count", &count) ||
+        !buf_read_u8(request, "byte_count", &byte_count)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t start_address = read_uint16_be(&request->data[0]);
-    uint16_t count = read_uint16_be(&request->data[2]);
-    uint8_t byte_count = request->data[4];
-    
-    if (count == 0 || count > 123 || byte_count != (count * 2) ||
-        request->data_length < (5 + byte_count)) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_VALUE,
-                                               response_buffer, response_buffer_size);
+
+    /* Validate count and byte count */
+    if (count == 0 || count > 123 || byte_count != (count * 2)) {
+        return UTIL_EINVAL;
     }
-    
-    uint16_t *register_data = (uint16_t*)malloc((size_t)count * sizeof(uint16_t));
+
+    /* Allocate temporary buffer for register values */
+    uint16_t *register_data = malloc(count * sizeof(uint16_t));
     if (!register_data) {
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_SERVER_DEVICE_FAILURE,
-                                               response_buffer, response_buffer_size);
+        return UTIL_ERESOURCE;
     }
-    
-    for (int i = 0; i < count; i++) {
-        register_data[i] = read_uint16_be(&request->data[5 + i * 2]);
+
+    /* Read register values from request (big-endian) */
+    for (uint16_t i = 0; i < count; i++) {
+        if (!buf_read_u16_be(request, "register", &register_data[i])) {
+            free(register_data);
+            return UTIL_EINVAL;
+        }
     }
-    
-    if (!register_storage_write_holding_registers(storage, (int)start_address, (int)count, register_data)) {
-        free(register_data);
-        return modbus_build_exception_response(&request->mbap, request->function_code,
-                                               MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS,
-                                               response_buffer, response_buffer_size);
-    }
-    
+
+    /* Write registers to storage */
+    bool success = register_storage_write_holding_registers(storage, start_address, count, register_data);
     free(register_data);
-    
-    mbap_header_t response_header = request->mbap;
-    response_header.length = 6;
-    
-    int offset = modbus_build_mbap_header(response_buffer, &response_header);
-    response_buffer[offset++] = request->function_code;
-    write_uint16_be(&response_buffer[offset], start_address);
-    offset += 2;
-    write_uint16_be(&response_buffer[offset], count);
-    offset += 2;
-    
-    log_debug("Wrote %d registers starting at address %u", count, start_address);
-    return offset;
+
+    if (!success) {
+        return UTIL_EBOUNDS;
+    }
+
+    /* Build response header */
+    modbus_build_response_header(response, req_header, 5); /* FC + start_address + count */
+
+    /* Write response: FC, start_address, count */
+    if (!buf_write_u8(response, "function_code", MODBUS_FC_WRITE_MULTIPLE_REGISTERS) ||
+        !buf_write_u16_be(response, "start_address", start_address) ||
+        !buf_write_u16_be(response, "count", count)) {
+        return UTIL_EBOUNDS;
+    }
+
+    log_detail("Wrote %u registers starting at address %u", count, start_address);
+    return UTIL_OK;
 }
 
-int modbus_process_request(const modbus_message_t *request,
-                           register_storage_t *storage,
-                           uint8_t *response_buffer,
-                           int response_buffer_size) {
-    log_debug("Processing: %s", modbus_function_code_to_string(request->function_code));
-    
-    switch (request->function_code) {
-        case MODBUS_FC_READ_COILS:
-            return handle_read_coils(request, storage, response_buffer, response_buffer_size);
-            
-        case MODBUS_FC_READ_DISCRETE_INPUTS:
-            return handle_read_discrete_inputs(request, storage, response_buffer, response_buffer_size);
-            
-        case MODBUS_FC_READ_HOLDING_REGISTERS:
-            return handle_read_holding_registers(request, storage, response_buffer, response_buffer_size);
-            
-        case MODBUS_FC_READ_INPUT_REGISTERS:
-            return handle_read_input_registers(request, storage, response_buffer, response_buffer_size);
-            
-        case MODBUS_FC_WRITE_SINGLE_COIL:
-            return handle_write_single_coil(request, storage, response_buffer, response_buffer_size);
-            
-        case MODBUS_FC_WRITE_SINGLE_REGISTER:
-            return handle_write_single_register(request, storage, response_buffer, response_buffer_size);
-            
-        case MODBUS_FC_WRITE_MULTIPLE_COILS:
-            return handle_write_multiple_coils(request, storage, response_buffer, response_buffer_size);
-            
-        case MODBUS_FC_WRITE_MULTIPLE_REGISTERS:
-            return handle_write_multiple_registers(request, storage, response_buffer, response_buffer_size);
-            
-        default:
-            log_debug("Unsupported function code: 0x%02X", request->function_code);
-            return modbus_build_exception_response(&request->mbap, request->function_code,
-                                                   MODBUS_EXCEPTION_ILLEGAL_FUNCTION,
-                                                   response_buffer, response_buffer_size);
+/* Main request dispatcher */
+util_err_t modbus_process_request(uint8_t function_code,
+                                  buf_t *request,
+                                  buf_t *response,
+                                  const mbap_header_t *req_header,
+                                  register_storage_t *storage) {
+    if (!request || !response || !req_header || !storage) {
+        return UTIL_EINVAL;
     }
+
+    util_err_t err = UTIL_OK;
+
+    switch (function_code) {
+        case MODBUS_FC_READ_COILS:
+            err = handle_read_coils(request, response, req_header, storage);
+            break;
+
+        case MODBUS_FC_READ_DISCRETE_INPUTS:
+            err = handle_read_discrete_inputs(request, response, req_header, storage);
+            break;
+
+        case MODBUS_FC_READ_HOLDING_REGISTERS:
+            err = handle_read_holding_registers(request, response, req_header, storage);
+            break;
+
+        case MODBUS_FC_READ_INPUT_REGISTERS:
+            err = handle_read_input_registers(request, response, req_header, storage);
+            break;
+
+        case MODBUS_FC_WRITE_SINGLE_COIL:
+            err = handle_write_single_coil(request, response, req_header, storage);
+            break;
+
+        case MODBUS_FC_WRITE_SINGLE_REGISTER:
+            err = handle_write_single_register(request, response, req_header, storage);
+            break;
+
+        case MODBUS_FC_WRITE_MULTIPLE_COILS:
+            err = handle_write_multiple_coils(request, response, req_header, storage);
+            break;
+
+        case MODBUS_FC_WRITE_MULTIPLE_REGISTERS:
+            err = handle_write_multiple_registers(request, response, req_header, storage);
+            break;
+
+        default:
+            log_detail("Unsupported function code: 0x%02X", function_code);
+            return UTIL_ENOTSUPPORTED;
+    }
+
+    /* Build exception response if handler failed */
+    if (err != UTIL_OK) {
+        modbus_build_exception_response(response, req_header, function_code, err);
+    }
+
+    return err;
 }

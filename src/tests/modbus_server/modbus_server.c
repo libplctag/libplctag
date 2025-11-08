@@ -31,51 +31,76 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "config.h"
-#include "logger.h"
-#include "socket_utils.h"
-#include "register_storage.h"
 #include "modbus_protocol.h"
+#include "register_storage.h"
+#include "log.h"
+#include "reactor.h"
+#include "fsm.h"
+#include "socket.h"
+#include "err.h"
+#include "buf.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 
-#ifndef _WIN32
-#include <poll.h>
-#else
-#include <winsock2.h>
-/* Define nfds_t for Windows if not already defined */
-#ifndef nfds_t
-typedef unsigned int nfds_t;
-#endif
-#endif
+/* Forward declarations */
+typedef struct client_ctx_s client_ctx_t;
+typedef struct listener_ctx_s listener_ctx_t;
 
-/* Client connection states */
-typedef enum {
-    CLIENT_STATE_READING_HEADER,
-    CLIENT_STATE_READING_BODY,
-    CLIENT_STATE_PROCESSING,
-    CLIENT_STATE_WRITING_RESPONSE
-} client_state_t;
-
-/* Client connection structure */
-typedef struct {
-    socket_t socket;
-    client_state_t state;
-    uint8_t recv_buffer[MODBUS_MAX_ADU_SIZE];
-    int recv_offset;
-    int expected_length;
-    uint8_t send_buffer[MODBUS_MAX_ADU_SIZE];
-    int send_length;
-    int send_offset;
-    char client_info[64];
-} client_connection_t;
-
-#define MAX_CLIENTS 100
-
-/* Global variables for signal handling */
+/* Global state */
+static reactor_t *g_reactor = NULL;
+static register_storage_t *g_storage = NULL;
 static volatile sig_atomic_t g_running = 1;
+
+/* FSM event type IDs (application-defined) */
+enum {
+    APP_EVENT_NONE = REACTOR_EVENT_MAX,
+    APP_EVENT_PROCESS,
+    APP_EVENT_IDLE,
+};
+
+/* FSM State IDs (application-defined) */
+enum {
+    APP_STATE_LISTENING = 1,
+    APP_STATE_READING_HEADER,
+    APP_STATE_READING_PDU,
+    APP_STATE_PROCESSING,
+    APP_STATE_SENDING,
+    APP_STATE_IDLE,
+    APP_STATE_CLOSING,
+};
+
+/* Listener context - one per listen endpoint */
+struct listener_ctx_s {
+    socket_t listener_socket;
+    char bind_address[256];
+    uint16_t bind_port;
+};
+
+/* Client context - one per connected client */
+struct client_ctx_s {
+    socket_t socket;
+    char client_address[256];
+    fsm_t *fsm;  /* FSM for handling this client connection */
+
+    /* Buffers for request/response */
+    uint8_t recv_buffer[MODBUS_MAX_ADU_SIZE];
+    buf_t recv_buf;
+
+    uint8_t send_buffer[MODBUS_MAX_ADU_SIZE];
+    buf_t send_buf;
+
+    /* Current MBAP header */
+    mbap_header_t mbap_header;
+
+    /* Expected total message length */
+    size_t expected_length;
+};
+
+/* ============================================================================
+ * Signal Handling
+ * ============================================================================ */
 
 static void signal_handler(int signum) {
     (void)signum;
@@ -97,313 +122,497 @@ static void setup_signal_handlers(void) {
 #endif
 }
 
-static void close_client(client_connection_t *client) {
-    if (client->socket != INVALID_SOCKET_VALUE) {
-        log_info("Closing connection to %s", client->client_info);
-        socket_close(client->socket);
-        client->socket = INVALID_SOCKET_VALUE;
-    }
-}
+/* ============================================================================
+ * FSM Actions
+ * ============================================================================ */
 
-static bool accept_new_client(socket_t listener_socket,
-                              client_connection_t *clients,
-                              int max_clients) {
-    char client_info[64];
-    socket_t client_socket = socket_accept(listener_socket, client_info, 
-                                           sizeof(client_info));
-    
-    if (client_socket == INVALID_SOCKET_VALUE) {
-        return false;
-    }
-    
-    /* Find empty slot */
-    for (int i = 0; i < max_clients; i++) {
-        if (clients[i].socket == INVALID_SOCKET_VALUE) {
-            clients[i].socket = client_socket;
-            clients[i].state = CLIENT_STATE_READING_HEADER;
-            clients[i].recv_offset = 0;
-            clients[i].expected_length = MBAP_HEADER_SIZE;
-            clients[i].send_offset = 0;
-            clients[i].send_length = 0;
-            strncpy(clients[i].client_info, client_info, sizeof(clients[i].client_info) - 1);
-            clients[i].client_info[sizeof(clients[i].client_info) - 1] = '\0';
-            
-            log_info("Accepted connection from %s", client_info);
-            return true;
-        }
-    }
-    
-    log_warn("Max clients reached, rejecting connection from %s", client_info);
-    socket_close(client_socket);
-    return false;
-}
+static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
+                               util_err_t status, fsm_state_id_t next_state, void *user_data) {
+    (void)current_state;
+    (void)event;
+    (void)next_state;
+    (void)fsm;
 
-static void handle_client_read(client_connection_t *client,
-                               register_storage_t *storage) {
-    int to_read = client->expected_length - client->recv_offset;
-    int n = socket_recv(client->socket, 
-                       &client->recv_buffer[client->recv_offset],
-                       to_read);
-    
-    if (n <= 0) {
-        if (n < 0) {
-            log_debug("Receive error from %s", client->client_info);
-        }
-        close_client(client);
+    client_ctx_t *client = (client_ctx_t *)user_data;
+
+    if (status != UTIL_OK) {
+        log_warn("Read event with error for %s: %d", client->client_address, status);
+        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
         return;
     }
-    
-    client->recv_offset += n;
-    
-    /* Check if we completed this phase */
-    if (client->recv_offset >= client->expected_length) {
-        if (client->state == CLIENT_STATE_READING_HEADER) {
-            /* Parse header to determine body length */
-            mbap_header_t header;
-            if (!modbus_parse_mbap_header(client->recv_buffer, client->recv_offset, &header)) {
-                log_debug("Invalid MBAP header from %s", client->client_info);
-                close_client(client);
-                return;
-            }
-            
-            /* Now read the PDU (length field includes unit_id which is already in header) */
-            client->expected_length = MBAP_HEADER_SIZE + header.length - 1;
-            
+
+    /* Read from socket */
+    uint8_t temp_buffer[1024];
+    int n = socket_recv(client->socket, temp_buffer, sizeof(temp_buffer));
+
+    if (n <= 0) {
+        log_info("Client %s disconnected", client->client_address);
+        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    /* Append received data to buffer */
+    size_t write_pos = buf_write_pos(&client->recv_buf);
+    if (write_pos + n > (int)buf_capacity(&client->recv_buf)) {
+        log_error("Receive buffer overflow from %s", client->client_address);
+        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    memcpy(buf_write_ptr(&client->recv_buf), temp_buffer, n);
+    buf_write_advance(&client->recv_buf, n);
+
+    log_detail("Received %d bytes from %s", n, client->client_address);
+
+    /* Check if we have the MBAP header yet */
+    if (buf_read_size(&client->recv_buf) >= MBAP_HEADER_SIZE &&
+        current_state == APP_STATE_READING_HEADER) {
+
+        /* Parse MBAP header */
+        buf_t header_buf = client->recv_buf;
+        header_buf.write = MBAP_HEADER_SIZE;  /* Only read header */
+
+        if (modbus_parse_mbap_header(&header_buf, &client->mbap_header) == UTIL_OK) {
+            /* Calculate total expected message length */
+            client->expected_length = MBAP_HEADER_SIZE + client->mbap_header.length - 1;
+
             if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
-                log_debug("PDU too large (%d bytes) from %s", 
-                         client->expected_length, client->client_info);
-                close_client(client);
+                log_error("PDU too large from %s", client->client_address);
+                fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
                 return;
             }
-            
-            if (client->recv_offset < client->expected_length) {
-                client->state = CLIENT_STATE_READING_BODY;
-            } else {
-                /* Header included the complete request */
-                client->state = CLIENT_STATE_PROCESSING;
-            }
-        } else if (client->state == CLIENT_STATE_READING_BODY) {
-            client->state = CLIENT_STATE_PROCESSING;
-        }
-    }
-    
-    /* Process complete request */
-    if (client->state == CLIENT_STATE_PROCESSING) {
-        modbus_message_t request;
-        if (!modbus_parse_request(client->recv_buffer, client->recv_offset, &request)) {
-            log_debug("Failed to parse request from %s", client->client_info);
-            close_client(client);
-            return;
-        }
-        
-        log_dump_bytes("Request", client->recv_buffer, (size_t)client->recv_offset);
-        
-        client->send_length = modbus_process_request(&request, storage,
-                                                     client->send_buffer,
-                                                     MODBUS_MAX_ADU_SIZE);
-        
-        if (client->send_length < 0) {
-            log_error("Failed to process request from %s", client->client_info);
-            close_client(client);
-            return;
-        }
 
-        log_dump_bytes("Response", client->send_buffer, (size_t)client->send_length);
-
-        client->send_offset = 0;
-        client->state = CLIENT_STATE_WRITING_RESPONSE;
-    }
-}
-
-static void handle_client_write(client_connection_t *client) {
-    int to_write = client->send_length - client->send_offset;
-    int n = socket_send(client->socket,
-                       &client->send_buffer[client->send_offset],
-                       to_write);
-    
-    if (n <= 0) {
-        if (n < 0) {
-            log_debug("Send error to %s", client->client_info);
+            log_detail("MBAP header parsed, expecting %zu bytes total", client->expected_length);
+            fsm_queue_event(client->fsm, REACTOR_EVENT_CAN_READ, UTIL_OK, client);
+        } else {
+            log_error("Invalid MBAP header from %s", client->client_address);
+            fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
         }
-        close_client(client);
         return;
     }
-    
-    client->send_offset += n;
-    
-    if (client->send_offset >= client->send_length) {
-        /* Response sent, prepare for next request */
-        client->state = CLIENT_STATE_READING_HEADER;
-        client->recv_offset = 0;
-        client->expected_length = MBAP_HEADER_SIZE;
-        client->send_offset = 0;
-        client->send_length = 0;
+
+    /* Check if we have the complete message */
+    if (buf_read_size(&client->recv_buf) >= client->expected_length) {
+        log_detail("Complete message received from %s (%zu bytes)",
+                  client->client_address, buf_read_size(&client->recv_buf));
+        fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
+    } else {
+        /* Need more data, continue reading */
+        reactor_set_event_enable_mask(g_reactor, client->socket, REACTOR_EVENT_CAN_READ, true);
     }
 }
+
+static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
+                                  util_err_t status, fsm_state_id_t next_state, void *user_data) {
+    (void)current_state;
+    (void)event;
+    (void)next_state;
+    (void)fsm;
+    (void)status;
+
+    client_ctx_t *client = (client_ctx_t *)user_data;
+
+    /* Extract function code from received message */
+    buf_t request_buf = client->recv_buf;
+    request_buf.read = MBAP_HEADER_SIZE;  /* Skip MBAP header */
+
+    uint8_t function_code;
+    if (!buf_read_u8(&request_buf, "function_code", &function_code)) {
+        log_error("Failed to read function code from %s", client->client_address);
+        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    log_detail("Processing function code 0x%02X from %s", function_code, client->client_address);
+
+    /* Process the request */
+    util_err_t err = modbus_process_request(function_code, &request_buf,
+                                            &client->send_buf, &client->mbap_header, g_storage);
+
+    if (err != UTIL_OK && err != UTIL_ENOTSUPPORTED) {
+        log_debug("Request processing returned error: %d", err);
+    }
+
+    /* Queue send event */
+    fsm_queue_event(client->fsm, REACTOR_EVENT_CAN_WRITE, UTIL_OK, client);
+}
+
+static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
+                               util_err_t status, fsm_state_id_t next_state, void *user_data) {
+    (void)current_state;
+    (void)event;
+    (void)next_state;
+    (void)fsm;
+
+    client_ctx_t *client = (client_ctx_t *)user_data;
+
+    if (status != UTIL_OK) {
+        log_warn("Write event with error for %s: %d", client->client_address, status);
+        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    /* Send response */
+    size_t to_send = buf_write_pos(&client->send_buf) - buf_read_pos(&client->send_buf);
+    if (to_send == 0) {
+        log_warn("No response data to send to %s", client->client_address);
+        fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
+        return;
+    }
+
+    const uint8_t *send_ptr = buf_read_ptr(&client->send_buf);
+    int n = socket_send(client->socket, (uint8_t *)send_ptr, to_send);
+
+    if (n <= 0) {
+        log_info("Client %s send failed", client->client_address);
+        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    log_detail("Sent %d bytes to %s", n, client->client_address);
+
+    if (n < (int)to_send) {
+        /* Partial send, for now just close */
+        log_warn("Partial send to %s, closing connection", client->client_address);
+        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    /* Response sent, prepare for next request */
+    fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
+}
+
+static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
+                               util_err_t status, fsm_state_id_t next_state, void *user_data) {
+    (void)current_state;
+    (void)event;
+    (void)next_state;
+    (void)fsm;
+    (void)status;
+
+    client_ctx_t *client = (client_ctx_t *)user_data;
+
+    /* Reset for next request */
+    buf_reset(&client->recv_buf);
+    buf_reset(&client->send_buf);
+    client->expected_length = MBAP_HEADER_SIZE;
+
+    log_detail("Client %s ready for next request", client->client_address);
+
+    /* Re-enable read on socket */
+    reactor_set_event_enable_mask(g_reactor, client->socket, REACTOR_EVENT_CAN_READ, true);
+}
+
+static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
+                                util_err_t status, fsm_state_id_t next_state, void *user_data) {
+    (void)current_state;
+    (void)event;
+    (void)next_state;
+    (void)fsm;
+    (void)status;
+
+    client_ctx_t *client = (client_ctx_t *)user_data;
+
+    if (client->socket != SOCKET_INVALID) {
+        reactor_remove_socket(g_reactor, client->socket);
+        socket_close(client->socket);
+        client->socket = SOCKET_INVALID;
+    }
+
+    if (client->fsm) {
+        fsm_destroy(client->fsm);
+        client->fsm = NULL;
+    }
+
+    free(client);
+    log_detail("Client context freed");
+}
+
+/* ============================================================================
+ * FSM Transition Table
+ * ============================================================================ */
+
+static fsm_transition_t client_transitions[] = {
+    /* State: READING_HEADER */
+    { APP_STATE_READING_HEADER, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_PDU },
+    { APP_STATE_READING_HEADER, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_READING_HEADER, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+
+    /* State: READING_PDU */
+    { APP_STATE_READING_PDU, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_PDU },
+    { APP_STATE_READING_PDU, APP_EVENT_PROCESS, client_process_action, APP_STATE_PROCESSING },
+    { APP_STATE_READING_PDU, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_READING_PDU, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+
+    /* State: PROCESSING */
+    { APP_STATE_PROCESSING, REACTOR_EVENT_CAN_WRITE, client_send_action, APP_STATE_SENDING },
+    { APP_STATE_PROCESSING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_PROCESSING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+
+    /* State: SENDING */
+    { APP_STATE_SENDING, APP_EVENT_IDLE, client_idle_action, APP_STATE_IDLE },
+    { APP_STATE_SENDING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_SENDING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+
+    /* State: IDLE */
+    { APP_STATE_IDLE, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_HEADER },
+    { APP_STATE_IDLE, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_IDLE, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+
+    /* Wildcard: CLOSING accepts anything and stays in CLOSING */
+    { APP_STATE_CLOSING, FSM_STATE_ID_ANY, NULL, APP_STATE_CLOSING },
+};
+
+static const size_t num_client_transitions = sizeof(client_transitions) / sizeof(client_transitions[0]);
+
+/* ============================================================================
+ * Socket Event Callback
+ * ============================================================================ */
+
+static void socket_event_callback(reactor_t *reactor, socket_t socket,
+                                  reactor_event_type_t event, util_err_t status, void *context) {
+    (void)reactor;
+    (void)socket;
+
+    /* Context is client_ctx_t* */
+    client_ctx_t *client = (client_ctx_t *)context;
+    if (!client || !client->fsm) {
+        log_error("Invalid client context in socket event callback");
+        return;
+    }
+
+    log_detail("Socket event for %s: event=%u, status=%d", client->client_address, event, status);
+
+    /* Queue event to FSM */
+    fsm_queue_event(client->fsm, (event_type_t)event, status, client);
+
+    /* Process events immediately */
+    fsm_process_events(client->fsm);
+}
+
+/* ============================================================================
+ * Listener Socket Callback
+ * ============================================================================ */
+
+static void listener_event_callback(reactor_t *reactor, socket_t socket,
+                                    reactor_event_type_t event, util_err_t status, void *context) {
+    (void)reactor;
+    (void)socket;
+
+    listener_ctx_t *listener = (listener_ctx_t *)context;
+
+    if (event != REACTOR_EVENT_CAN_ACCEPT) {
+        log_warn("Unexpected event on listener socket: %u", event);
+        return;
+    }
+
+    if (status != UTIL_OK) {
+        log_warn("Listener socket error: %d", status);
+        return;
+    }
+
+    /* Accept new client connection */
+    char client_addr[256];
+    socket_t client_socket = socket_accept(listener->listener_socket, client_addr, sizeof(client_addr));
+
+    if (client_socket == SOCKET_INVALID) {
+        log_warn("Failed to accept connection on %s:%u", listener->bind_address, listener->bind_port);
+        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+        return;
+    }
+
+    log_info("Accepted connection from %s", client_addr);
+
+    /* Create client context */
+    client_ctx_t *client = calloc(1, sizeof(*client));
+    if (!client) {
+        log_error("Failed to allocate client context");
+        socket_close(client_socket);
+        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+        return;
+    }
+
+    /* Initialize client context */
+    client->socket = client_socket;
+    strncpy(client->client_address, client_addr, sizeof(client->client_address) - 1);
+    client->client_address[sizeof(client->client_address) - 1] = '\0';
+
+    /* Initialize buffers */
+    client->recv_buf = buf_init(client->recv_buffer, sizeof(client->recv_buffer));
+    client->send_buf = buf_init(client->send_buffer, sizeof(client->send_buffer));
+    client->expected_length = MBAP_HEADER_SIZE;
+
+    /* Create FSM for client */
+    client->fsm = fsm_create(client_transitions, num_client_transitions,
+                            APP_STATE_READING_HEADER, 8, client);
+    if (!client->fsm) {
+        log_error("Failed to create FSM for client");
+        free(client);
+        socket_close(client_socket);
+        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+        return;
+    }
+
+    /* Register client socket with reactor */
+    if (!reactor_add_socket_with_callback(g_reactor, client_socket, REACTOR_EVENT_CAN_READ,
+                                         socket_event_callback, client)) {
+        log_error("Failed to register client socket with reactor");
+        fsm_destroy(client->fsm);
+        free(client);
+        socket_close(client_socket);
+        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+        return;
+    }
+
+    /* Re-enable listener accept */
+    reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+}
+
+/* ============================================================================
+ * Listener Creation
+ * ============================================================================ */
+
+static listener_ctx_t* create_listener(const char *bind_address, uint16_t bind_port) {
+    listener_ctx_t *listener = calloc(1, sizeof(*listener));
+    if (!listener) {
+        log_error("Failed to allocate listener context");
+        return NULL;
+    }
+
+    strncpy(listener->bind_address, bind_address, sizeof(listener->bind_address) - 1);
+    listener->bind_address[sizeof(listener->bind_address) - 1] = '\0';
+    listener->bind_port = bind_port;
+
+    /* Create listener socket */
+    listener->listener_socket = socket_create_and_bind_listener(bind_address, bind_port);
+    if (listener->listener_socket == SOCKET_INVALID) {
+        log_error("Failed to create listener socket on %s:%u", bind_address, bind_port);
+        free(listener);
+        return NULL;
+    }
+
+    log_info("Listener socket created on %s:%u", bind_address, bind_port);
+
+    /* Register listener socket with reactor */
+    if (!reactor_add_socket_with_callback(g_reactor, listener->listener_socket,
+                                         REACTOR_EVENT_CAN_ACCEPT, listener_event_callback, listener)) {
+        log_error("Failed to register listener socket with reactor");
+        socket_close(listener->listener_socket);
+        free(listener);
+        return NULL;
+    }
+
+    return listener;
+}
+
+static void destroy_listener(listener_ctx_t *listener) {
+    if (!listener) {
+        return;
+    }
+
+    if (listener->listener_socket != SOCKET_INVALID) {
+        reactor_remove_socket(g_reactor, listener->listener_socket);
+        socket_close(listener->listener_socket);
+    }
+
+    free(listener);
+}
+
+/* ============================================================================
+ * Main Function
+ * ============================================================================ */
 
 int main(int argc, char **argv) {
-    server_config_t config;
-    register_storage_t storage;
-    socket_t listener_sockets[MAX_LISTEN_ENDPOINTS];
-    client_connection_t clients[MAX_CLIENTS];
-    int num_listeners = 0;
     int rc = EXIT_FAILURE;
-    
-    /* Initialize */
-    memset(listener_sockets, 0, sizeof(listener_sockets));
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        clients[i].socket = INVALID_SOCKET_VALUE;
-    }
-    
-    /* Initialize configuration with defaults */
-    config_init(&config);
-    
-    /* Parse configuration */
-    if (!config_parse_args(&config, argc, argv)) {
-        config_print_usage(argv[0]);
-        return EXIT_FAILURE;
-    }
-    
-    if (config.num_listen_endpoints == 0) {
-        log_error("No listen endpoints specified");
-        config_print_usage(argv[0]);
-        return EXIT_FAILURE;
-    }
-    
-    /* Initialize logger with debug flag from config */
-    logger_set_debug(config.debug);
-    
-    /* Initialize sockets */
-    if (!socket_init()) {
-        log_error("Failed to initialize sockets");
-        return EXIT_FAILURE;
-    }
-    
+
+    /* Initialize logging */
+    log_init();
+
+    /* Parse command line arguments (for now, just use defaults) */
+    (void)argc;
+    (void)argv;
+
+    const char *bind_address = "127.0.0.1";
+    uint16_t bind_port = 502;
+    size_t num_coils = 1000;
+    size_t num_discrete_inputs = 1000;
+    size_t num_holding_registers = 1000;
+    size_t num_input_registers = 1000;
+
+    log_info("Modbus TCP Server starting...");
+
     /* Setup signal handlers */
     setup_signal_handlers();
-    
-    /* Initialize register storage */
-    if (!register_storage_init(&storage,
-                               config.num_coils,
-                               config.num_discrete_inputs,
-                               config.num_holding_registers,
-                               config.num_input_registers)) {
-        log_error("Failed to initialize register storage");
+
+    /* Initialize socket layer */
+    if (!socket_init()) {
+        log_error("Failed to initialize socket layer");
         goto cleanup;
     }
-    
-    /* Create listener sockets */
-    for (int i = 0; i < config.num_listen_endpoints; i++) {
-        listener_sockets[num_listeners] = socket_create_listener(
-            config.listen_endpoints[i].host,
-            config.listen_endpoints[i].port
-        );
-        
-        if (listener_sockets[num_listeners] == INVALID_SOCKET_VALUE) {
-            log_error("Failed to create listener on %s:%d",
-                     config.listen_endpoints[i].host,
-                     config.listen_endpoints[i].port);
-            goto cleanup;
-        }
-        
-        num_listeners++;
+
+    /* Create reactor */
+    g_reactor = reactor_create();
+    if (!g_reactor) {
+        log_error("Failed to create reactor");
+        goto cleanup;
     }
-    
-    log_info("Modbus TCP server started");
-    
+
+    log_detail("Reactor created");
+
+    /* Create register storage */
+    g_storage = register_storage_create(num_coils, num_discrete_inputs,
+                                       num_holding_registers, num_input_registers);
+    if (!g_storage) {
+        log_error("Failed to create register storage");
+        goto cleanup;
+    }
+
+    log_detail("Register storage created: coils=%zu, di=%zu, hr=%zu, ir=%zu",
+              num_coils, num_discrete_inputs, num_holding_registers, num_input_registers);
+
+    /* Create listener */
+    listener_ctx_t *listener = create_listener(bind_address, bind_port);
+    if (!listener) {
+        log_error("Failed to create listener");
+        goto cleanup;
+    }
+
+    log_info("Modbus TCP Server listening on %s:%u", bind_address, bind_port);
+
     /* Main event loop */
     while (g_running) {
-        /* Build poll array with parallel client pointer array */
-        struct pollfd fds[MAX_LISTEN_ENDPOINTS + MAX_CLIENTS];
-        client_connection_t *client_ptrs[MAX_LISTEN_ENDPOINTS + MAX_CLIENTS];
-        nfds_t nfds = 0;
-        
-        /* Add listener sockets */
-        for (int i = 0; i < num_listeners; i++) {
-            fds[nfds].fd = listener_sockets[i];
-            fds[nfds].events = POLLIN;
-            fds[nfds].revents = 0;
-            client_ptrs[nfds] = NULL;  /* NULL for listener sockets */
-            nfds++;
-        }
-        
-        /* Add client sockets */
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            if (clients[i].socket != INVALID_SOCKET_VALUE) {
-                fds[nfds].fd = clients[i].socket;
-                fds[nfds].events = 0;
-                
-                if (clients[i].state == CLIENT_STATE_READING_HEADER ||
-                    clients[i].state == CLIENT_STATE_READING_BODY) {
-                    fds[nfds].events |= POLLIN;
-                } else if (clients[i].state == CLIENT_STATE_WRITING_RESPONSE) {
-                    fds[nfds].events |= POLLOUT;
-                }
-                
-                fds[nfds].revents = 0;
-                client_ptrs[nfds] = &clients[i];  /* Store pointer to this client */
-                nfds++;
-            }
-        }
-        
-        /* Wait for events */
-        int poll_rc = poll_wrapper(fds, nfds, 1000);
-        
+        int poll_rc = reactor_run(g_reactor, 1000);  /* 1 second timeout */
+
         if (poll_rc < 0) {
-            if (!g_running) break;
-            log_error("poll() failed");
+            if (!g_running) {
+                break;
+            }
+            log_error("Reactor error");
             goto cleanup;
         }
-        
-        if (poll_rc == 0) {
-            /* Timeout, check running flag */
-            continue;
-        }
-        
-        /* Process listener sockets */
-        for (int i = 0; i < num_listeners; i++) {
-            if (fds[i].revents & POLLIN) {
-                accept_new_client(listener_sockets[i], clients, MAX_CLIENTS);
-            }
-        }
-        
-        /* Process client sockets - use parallel array for direct access */
-        {
-            nfds_t j;
-            for (j = num_listeners; j < nfds; j++) {
-                if (client_ptrs[j] != NULL) {
-                    if (fds[j].revents & (POLLIN | POLLERR | POLLHUP)) {
-                        handle_client_read(client_ptrs[j], &storage);
-                    } else if (fds[j].revents & POLLOUT) {
-                        handle_client_write(client_ptrs[j]);
-                    }
-                }
-            }
-        }
     }
-    
-    log_info("Shutting down...");
+
+    log_info("Shutdown signal received, stopping server");
     rc = EXIT_SUCCESS;
-    
+
 cleanup:
-    /* Close all client connections */
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i].socket != INVALID_SOCKET_VALUE) {
-            close_client(&clients[i]);
-        }
+    if (listener) {
+        destroy_listener(listener);
     }
-    
-    /* Close listener sockets */
-    for (int i = 0; i < num_listeners; i++) {
-        socket_close(listener_sockets[i]);
+
+    if (g_storage) {
+        register_storage_destroy(g_storage);
+        g_storage = NULL;
     }
-    
-    /* Cleanup storage */
-    register_storage_cleanup(&storage);
-    
-    /* Cleanup sockets */
+
+    if (g_reactor) {
+        reactor_destroy(g_reactor);
+        g_reactor = NULL;
+    }
+
     socket_cleanup();
-    
+    log_cleanup();
+
     log_info("Server stopped");
     return rc;
 }
