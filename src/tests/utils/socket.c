@@ -9,10 +9,15 @@
   #include <netdb.h>        // For getaddrinfo()
   #include <netinet/tcp.h>  // For TCP_NODELAY
   #include <sys/uio.h>      // For writev() and struct iovec
-  #include <alloca.h>       // For alloca() (or use malloc/free)
 #else
   #include <ws2tcpip.h>     // For getaddrinfo() on Windows
 #endif
+
+/* Maximum number of IO vectors/buffers for scatter-gather operations */
+#define SOCKET_MAX_IOVECS 16
+
+/* Maximum payload size for single datagram send in fallback case */
+#define SOCKET_MAX_PAYLOAD 4096
 
 /* ================================================================
  * Initialization
@@ -475,7 +480,12 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
     if (!segments || segment_count == 0) {
         return UTIL_EABORT;
     }
-    
+
+    /* Check if segment count exceeds maximum */
+    if (segment_count > SOCKET_MAX_IOVECS) {
+        return UTIL_EABORT;
+    }
+
     /* Check if all segments are empty */
     bool all_empty = true;
     for (size_t i = 0; i < segment_count; i++) {
@@ -487,12 +497,12 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
     if (all_empty) {
         return UTIL_OK;
     }
-    
+
 #if defined(_WIN32)
     /* Windows: use WSASend with WSABUF array */
-    WSABUF *bufs = alloca(segment_count * sizeof(WSABUF));
+    WSABUF bufs[SOCKET_MAX_IOVECS];
     DWORD buf_count = 0;
-    
+
     for (size_t i = 0; i < segment_count; i++) {
         size_t sz = buf_read_size(segments[i]);
         if (sz > 0) {
@@ -501,10 +511,10 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
             buf_count++;
         }
     }
-    
+
     DWORD bytes_sent = 0;
     int result = WSASend(sock, bufs, buf_count, &bytes_sent, 0, NULL, NULL);
-    
+
     if (result == SOCKET_ERROR) {
         int err = WSAGetLastError();
         if (err == WSAEWOULDBLOCK) {
@@ -512,7 +522,7 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
         }
         return util_err_from_wsa(err);
     }
-    
+
     /* Advance buffers by bytes_sent */
     size_t remaining = bytes_sent;
     for (size_t i = 0; i < segment_count && remaining > 0; i++) {
@@ -521,21 +531,23 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
         buf_read_advance(segments[i], consumed);
         remaining -= consumed;
     }
-    
+
     /* Check if more data remains */
+    bool has_remaining = false;
     for (size_t i = 0; i < segment_count; i++) {
         if (buf_read_size(segments[i]) > 0) {
-            return UTIL_EAGAIN;
+            has_remaining = true;
+            break;
         }
     }
-    
-    return UTIL_OK;
+
+    return has_remaining ? UTIL_EAGAIN : UTIL_OK;
     
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
     /* Unix: use writev with iovec array */
-    struct iovec *vecs = alloca(segment_count * sizeof(struct iovec));
+    struct iovec vecs[SOCKET_MAX_IOVECS];
     size_t vec_count = 0;
-    
+
     for (size_t i = 0; i < segment_count; i++) {
         size_t sz = buf_read_size(segments[i]);
         if (sz > 0) {
@@ -544,16 +556,16 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
             vec_count++;
         }
     }
-    
-    ssize_t sent = writev(sock, vecs, vec_count);
-    
+
+    ssize_t sent = writev(sock, vecs, (int)vec_count);
+
     if (sent < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return UTIL_EAGAIN;
         }
         return util_err_from_errno(errno);
     }
-    
+
     /* Advance buffers by sent bytes */
     size_t remaining = (size_t)sent;
     for (size_t i = 0; i < segment_count && remaining > 0; i++) {
@@ -562,15 +574,17 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
         buf_read_advance(segments[i], consumed);
         remaining -= consumed;
     }
-    
+
     /* Check if more data remains */
+    bool has_remaining = false;
     for (size_t i = 0; i < segment_count; i++) {
         if (buf_read_size(segments[i]) > 0) {
-            return UTIL_EAGAIN;
+            has_remaining = true;
+            break;
         }
     }
-    
-    return UTIL_OK;
+
+    return has_remaining ? UTIL_EAGAIN : UTIL_OK;
     
 #else
     /* Fallback: sequential send() */
@@ -632,7 +646,12 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
     if (!addr || !segments || segment_count == 0) {
         return UTIL_EABORT;
     }
-    
+
+    /* Check if segment count exceeds maximum */
+    if (segment_count > SOCKET_MAX_IOVECS) {
+        return UTIL_EABORT;
+    }
+
     /* Check if all segments are empty */
     bool all_empty = true;
     size_t total_size = 0;
@@ -646,12 +665,12 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
     if (all_empty) {
         return UTIL_OK;
     }
-    
+
 #if defined(_WIN32)
     /* Windows: use WSASendTo with WSABUF array */
-    WSABUF *bufs = alloca(segment_count * sizeof(WSABUF));
+    WSABUF bufs[SOCKET_MAX_IOVECS];
     DWORD buf_count = 0;
-    
+
     for (size_t i = 0; i < segment_count; i++) {
         size_t sz = buf_read_size(segments[i]);
         if (sz > 0) {
@@ -660,11 +679,11 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
             buf_count++;
         }
     }
-    
+
     DWORD bytes_sent = 0;
-    int result = WSASendTo(sock, bufs, buf_count, &bytes_sent, 0, 
+    int result = WSASendTo(sock, bufs, buf_count, &bytes_sent, 0,
                           (struct sockaddr*)&addr->addr, addr->addr_len, NULL, NULL);
-    
+
     if (result == SOCKET_ERROR) {
         int err = WSAGetLastError();
         if (err == WSAEWOULDBLOCK) {
@@ -672,7 +691,7 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
         }
         return util_err_from_wsa(err);
     }
-    
+
     /* For datagrams, either all is sent or none */
     if (bytes_sent == total_size) {
         for (size_t i = 0; i < segment_count; i++) {
@@ -681,12 +700,12 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
         }
         return UTIL_OK;
     }
-    
+
     return UTIL_EABORT;
     
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
     /* Unix: use sendmsg with iovec array */
-    struct iovec *vecs = alloca(segment_count * sizeof(struct iovec));
+    struct iovec vecs[SOCKET_MAX_IOVECS];  /* Fixed-size array instead of alloca() */
     size_t vec_count = 0;
     
     for (size_t i = 0; i < segment_count; i++) {
@@ -703,7 +722,7 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
     msg.msg_name = (void*)&addr->addr;
     msg.msg_namelen = addr->addr_len;
     msg.msg_iov = vecs;
-    msg.msg_iovlen = vec_count;
+    msg.msg_iovlen = (int)vec_count;
     
     ssize_t sent = sendmsg(sock, &msg, 0);
     
@@ -727,10 +746,14 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
     
 #else
     /* Fallback: concatenate and use single sendto() */
-    /* Note: This requires a temporary buffer - not ideal */
-    uint8_t *temp_buf = alloca(total_size);
+    /* Check that total payload fits in fixed buffer */
+    if (total_size > SOCKET_MAX_PAYLOAD) {
+        return UTIL_EABORT;  /* Payload too large for fallback implementation */
+    }
+
+    uint8_t temp_buf[SOCKET_MAX_PAYLOAD];  /* Fixed-size buffer instead of alloca() */
     size_t offset = 0;
-    
+
     for (size_t i = 0; i < segment_count; i++) {
         size_t sz = buf_read_size(segments[i]);
         if (sz > 0) {

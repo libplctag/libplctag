@@ -60,11 +60,23 @@ add_subdirectory("modbus_server")
 add_test(NAME modbus_server_binary_exists
          COMMAND test -x "${CMAKE_BINARY_DIR}/bin_dist/modbus_server")
 
-# Test that modbus_server can start, bind to port, and handle graceful shutdown
-add_test(NAME modbus_server_startup_shutdown
-         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --port 9502 & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
+# Test that modbus_server can start with single listen address
+add_test(NAME modbus_server_single_listener
+         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --listen=127.0.0.1:9502 & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
+         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# Test that modbus_server can start with multiple listen addresses
+add_test(NAME modbus_server_multiple_listeners
+         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --listen=127.0.0.1:9502 --listen=127.0.0.1:9503 & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
+         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# Test that modbus_server can start with debug level
+add_test(NAME modbus_server_with_debug_level
+         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --listen=127.0.0.1:9504 --debug=DETAIL & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
          WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 set_tests_properties(modbus_server_binary_exists PROPERTIES TIMEOUT 5)
-set_tests_properties(modbus_server_startup_shutdown PROPERTIES TIMEOUT 5)
+set_tests_properties(modbus_server_single_listener PROPERTIES TIMEOUT 5)
+set_tests_properties(modbus_server_multiple_listeners PROPERTIES TIMEOUT 5)
+set_tests_properties(modbus_server_with_debug_level PROPERTIES TIMEOUT 5)
 

@@ -39,6 +39,7 @@
 #include "socket.h"
 #include "err.h"
 #include "buf.h"
+#include "args.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -170,42 +171,60 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
     log_detail("Received data from %s, buffer has %zu bytes", client->client_address, buf_read_size(&client->recv_buf));
 
-    /* Check if we have the MBAP header yet */
-    if (buf_read_size(&client->recv_buf) >= MBAP_HEADER_SIZE &&
-        current_state == APP_STATE_READING_HEADER) {
+    /* In IDLE state: queue a CAN_READ to process the data in READING_HEADER state */
+    if (current_state == APP_STATE_IDLE) {
+        /* The data is already in the buffer from socket_recv_buf.
+         * Queue CAN_READ to trigger processing after transition to READING_HEADER. */
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
+        return;
+    }
 
-        /* Parse MBAP header */
-        buf_t header_buf = client->recv_buf;
-        header_buf.write = MBAP_HEADER_SIZE;  /* Only read header */
+    /* In READING_HEADER state: check if we have the MBAP header */
+    if (current_state == APP_STATE_READING_HEADER) {
+        if (buf_read_size(&client->recv_buf) >= MBAP_HEADER_SIZE) {
+            /* Parse MBAP header */
+            buf_t header_buf = client->recv_buf;
+            header_buf.write = MBAP_HEADER_SIZE;  /* Only read header */
 
-        if (modbus_parse_mbap_header(&header_buf, &client->mbap_header) == UTIL_OK) {
-            /* Calculate total expected message length */
-            client->expected_length = MBAP_HEADER_SIZE + client->mbap_header.length - 1;
+            if (modbus_parse_mbap_header(&header_buf, &client->mbap_header) == UTIL_OK) {
+                /* Calculate total expected message length */
+                client->expected_length = MBAP_HEADER_SIZE + client->mbap_header.length - 1;
 
-            if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
-                log_error("PDU too large from %s", client->client_address);
+                if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
+                    log_error("PDU too large from %s", client->client_address);
+                    fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+                    return;
+                }
+
+                log_detail("MBAP header parsed, expecting %zu bytes total", client->expected_length);
+
+                /* Queue a CAN_READ event to trigger READING_PDU processing.
+                 * This will cause the FSM to transition to READING_PDU and then
+                 * process the CAN_READ event in that state. */
+                fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
+            } else {
+                log_error("Invalid MBAP header from %s", client->client_address);
                 fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-                return;
             }
-
-            log_detail("MBAP header parsed, expecting %zu bytes total", client->expected_length);
-            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
-        } else {
-            log_error("Invalid MBAP header from %s", client->client_address);
-            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
         }
         return;
     }
 
-    /* Check if we have the complete message */
-    if (buf_read_size(&client->recv_buf) >= client->expected_length) {
-        log_detail("Complete message received from %s (%zu bytes)",
-                  client->client_address, buf_read_size(&client->recv_buf));
-        fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
-    } else {
-        /* Need more data, re-enable read and continue */
-        reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_READ, true);
+    /* In READING_PDU state: check if we have the complete message */
+    if (current_state == APP_STATE_READING_PDU) {
+        if (buf_read_size(&client->recv_buf) >= client->expected_length) {
+            log_detail("Complete message received from %s (%zu bytes)",
+                      client->client_address, buf_read_size(&client->recv_buf));
+            fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
+        } else {
+            /* Need more data, re-enable read and continue */
+            reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_READ, true);
+        }
+        return;
     }
+
+    /* Shouldn't reach here - unexpected state */
+    log_error("client_read_action called in unexpected state %u", current_state);
 }
 
 static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -322,13 +341,14 @@ static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_
         client->socket = INVALID_SOCKET;
     }
 
-    if (client->fsm) {
-        fsm_destroy(client->fsm);
-        client->fsm = NULL;
-    }
+    /* Note: We cannot call fsm_destroy() or free(client) here because we are being
+     * called from within fsm_process_events(). Destroying the FSM or client context
+     * while the FSM is still processing would cause a use-after-free error.
+     * The socket has been closed and removed from the reactor, so no more events
+     * will be delivered to this client. The FSM and context will be cleaned up
+     * by the reactor when it finishes processing all pending events. */
 
-    free(client);
-    log_detail("Client context freed");
+    log_detail("Client socket closed");
 }
 
 /* ============================================================================
@@ -389,8 +409,24 @@ static void socket_event_callback(reactor_t *reactor, socket_t socket,
     /* Queue event to FSM */
     fsm_queue_event(client->fsm, event, status, client);
 
-    /* Process events immediately */
+    /* Process events immediately.
+     * Note: After processing, the client context may be marked for cleanup
+     * if the socket was closed, but we don't clean it up here to avoid
+     * use-after-free. The cleanup will happen when the client_ctx_t is
+     * no longer referenced. */
     fsm_process_events(client->fsm);
+
+    /* After processing events, we need to check if the socket is still valid.
+     * If the client close action was triggered, the socket will be INVALID_SOCKET,
+     * and we should not attempt any more operations on the client. */
+    if (client->socket == INVALID_SOCKET) {
+        log_detail("Client socket is closed, cleaning up client context");
+        if (client->fsm) {
+            fsm_destroy(client->fsm);
+            client->fsm = NULL;
+        }
+        free(client);
+    }
 }
 
 /* ============================================================================
@@ -486,6 +522,45 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
  * Listener Creation
  * ============================================================================ */
 
+/**
+ * @brief Parse "address:port" format into address and port components
+ * @param listen_str String in format "address:port"
+ * @param address OUT: Parsed address (must be at least 256 bytes)
+ * @param port OUT: Parsed port number
+ * @return true on success, false on parse error
+ */
+static bool parse_listen_address(const char *listen_str, char *address, uint16_t *port) {
+    if (!listen_str || !address || !port) {
+        return false;
+    }
+
+    /* Find the colon separating address and port */
+    const char *colon = strchr(listen_str, ':');
+    if (!colon) {
+        log_error("Invalid listen format (expected address:port): %s", listen_str);
+        return false;
+    }
+
+    /* Extract address */
+    size_t addr_len = (size_t)(colon - listen_str);
+    if (addr_len == 0 || addr_len >= 256) {
+        log_error("Invalid address in listen format: %s", listen_str);
+        return false;
+    }
+    strncpy(address, listen_str, addr_len);
+    address[addr_len] = '\0';
+
+    /* Parse port */
+    int port_num = atoi(colon + 1);
+    if (port_num <= 0 || port_num > 65535) {
+        log_error("Invalid port in listen format (must be 1-65535): %s", listen_str);
+        return false;
+    }
+    *port = (uint16_t)port_num;
+
+    return true;
+}
+
 static listener_ctx_t* create_listener(server_ctx_t *server, const char *bind_address, uint16_t bind_port) {
     listener_ctx_t *listener = calloc(1, sizeof(*listener));
     if (!listener) {
@@ -548,33 +623,168 @@ static void destroy_listener(listener_ctx_t *listener) {
 
 int main(int argc, char **argv) {
     int rc = EXIT_FAILURE;
-    listener_ctx_t *listener = NULL;
+    listener_ctx_t *listeners[10] = {NULL};  /* Support up to 10 listeners */
+    size_t num_listeners = 0;
+    args_result_t args_result;
 
     /* Set log level for startup messages */
     log_set_level(LOG_LEVEL_INFO);
 
-    /* Parse command line arguments */
-    const char *bind_address = "127.0.0.1";
-    uint16_t bind_port = 502;
-    size_t num_coils = 1000;
-    size_t num_discrete_inputs = 1000;
-    size_t num_holding_registers = 1000;
-    size_t num_input_registers = 1000;
+    /* Define command-line arguments
+     * Note: args.h uses --flag=value format
+     * Examples:
+     *   modbus_server
+     *   modbus_server --listen=127.0.0.1:502
+     *   modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502
+     *   modbus_server --listen=0.0.0.0:502 --debug=INFO
+     *   modbus_server --coils=2000 --holding-registers=5000
+     *   modbus_server --help
+     */
+    args_flag_def_t flags[] = {
+        {
+            "listen",
+            ARGS_TYPE_STRING,
+            ARGS_OPTIONAL,
+            ARGS_MULTIPLE,
+            "server.listen",
+            "Address and port to listen on (address:port, can be specified multiple times)",
+            { .has_default = false }
+        },
+        {
+            "debug",
+            ARGS_TYPE_STRING,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "logging.debug",
+            "Debug/log level (ERROR, WARN, INFO, DETAIL, SPEW)",
+            { .has_default = true, .value.string_val = "INFO" }
+        },
+        {
+            "coils",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.coils",
+            "Number of coils (read/write bits, 0-65535)",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "discrete-inputs",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.discrete_inputs",
+            "Number of discrete inputs (read-only bits, 0-65535)",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "holding-registers",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.holding_registers",
+            "Number of holding registers (read/write 16-bit values, 0-65535)",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "input-registers",
+            ARGS_TYPE_INT,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "modbus.input_registers",
+            "Number of input registers (read-only 16-bit values, 0-65535)",
+            { .has_default = true, .value.int_val = 1000 }
+        },
+        {
+            "help",
+            ARGS_TYPE_BOOL,
+            ARGS_OPTIONAL,
+            ARGS_ONCE,
+            "general.help",
+            "Show this help message",
+            { .has_default = true, .value.bool_val = false }
+        },
+    };
+    const size_t num_flags = sizeof(flags) / sizeof(flags[0]);
 
-    /* Simple argument parsing: --port <port_number> */
-    for (int i = 1; i < argc - 1; i++) {
-        if (strcmp(argv[i], "--port") == 0) {
-            bind_port = (uint16_t)atoi(argv[i + 1]);
-            if (bind_port == 0) {
-                log_error("Invalid port number: %s", argv[i + 1]);
-                return EXIT_FAILURE;
-            }
-            i++;
-        } else if (strcmp(argv[i], "--address") == 0) {
-            bind_address = argv[i + 1];
-            i++;
+    /* Parse command-line arguments */
+    util_err_t parse_rc = args_parse(argc, (const char **)argv, flags, num_flags, &args_result);
+    if (parse_rc != UTIL_OK) {
+        printf("Error: %s\n", args_get_error_detail(&args_result));
+        args_print_help(argv[0], flags, num_flags);
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+
+    /* Check for help flag */
+    if (args_get_bool(&args_result, "help")) {
+        args_print_help(argv[0], flags, num_flags);
+        args_free(&args_result);
+        return EXIT_SUCCESS;
+    }
+
+    /* Parse debug/log level */
+    const char *debug_level_str = args_get_string(&args_result, "debug");
+    log_level_t log_level = LOG_LEVEL_INFO;
+    if (debug_level_str) {
+        if (strcmp(debug_level_str, "ERROR") == 0) {
+            log_level = LOG_LEVEL_ERROR;
+        } else if (strcmp(debug_level_str, "WARN") == 0) {
+            log_level = LOG_LEVEL_WARN;
+        } else if (strcmp(debug_level_str, "INFO") == 0) {
+            log_level = LOG_LEVEL_INFO;
+        } else if (strcmp(debug_level_str, "DETAIL") == 0) {
+            log_level = LOG_LEVEL_DETAIL;
+        } else if (strcmp(debug_level_str, "SPEW") == 0) {
+            log_level = LOG_LEVEL_SPEW;
+        } else {
+            printf("Error: Invalid debug level: %s\n", debug_level_str);
+            args_free(&args_result);
+            return EXIT_FAILURE;
         }
     }
+    log_set_level(log_level);
+
+    /* Extract listen addresses - if none specified, use default */
+    size_t listen_count = args_get_count(&args_result, "listen");
+    if (listen_count == 0) {
+        /* Default: listen on 127.0.0.1:502 */
+        listen_count = 1;
+    }
+
+    /* Extract register storage sizes from arguments */
+    int64_t coils_val = args_get_int(&args_result, "coils");
+    int64_t di_val = args_get_int(&args_result, "discrete-inputs");
+    int64_t hr_val = args_get_int(&args_result, "holding-registers");
+    int64_t ir_val = args_get_int(&args_result, "input-registers");
+
+    /* Validate register counts */
+    if (coils_val < 0 || coils_val > 65535) {
+        printf("Error: Invalid coils count: %lld (must be 0-65535)\n", (long long)coils_val);
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+    if (di_val < 0 || di_val > 65535) {
+        printf("Error: Invalid discrete-inputs count: %lld (must be 0-65535)\n", (long long)di_val);
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+    if (hr_val < 0 || hr_val > 65535) {
+        printf("Error: Invalid holding-registers count: %lld (must be 0-65535)\n", (long long)hr_val);
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+    if (ir_val < 0 || ir_val > 65535) {
+        printf("Error: Invalid input-registers count: %lld (must be 0-65535)\n", (long long)ir_val);
+        args_free(&args_result);
+        return EXIT_FAILURE;
+    }
+
+    /* Set register storage sizes */
+    size_t num_coils = (size_t)coils_val;
+    size_t num_discrete_inputs = (size_t)di_val;
+    size_t num_holding_registers = (size_t)hr_val;
+    size_t num_input_registers = (size_t)ir_val;
 
     log_info("Modbus TCP Server starting...");
 
@@ -618,14 +828,49 @@ int main(int argc, char **argv) {
     log_detail("Register storage created: coils=%zu, di=%zu, hr=%zu, ir=%zu",
               num_coils, num_discrete_inputs, num_holding_registers, num_input_registers);
 
-    /* Create listener */
-    listener = create_listener(server, bind_address, bind_port);
-    if (!listener) {
-        log_error("Failed to create listener");
-        goto cleanup;
-    }
+    /* Create listeners for each listen address */
+    if (listen_count > 0) {
+        for (size_t i = 0; i < listen_count && i < 10; i++) {
+            char listen_address[256];
+            uint16_t listen_port;
 
-    log_info("Modbus TCP Server listening on %s:%u", bind_address, bind_port);
+            /* Get listen address from arguments */
+            if (i == 0 && args_get_count(&args_result, "listen") == 0) {
+                /* No listen addresses specified, use default */
+                strcpy(listen_address, "127.0.0.1");
+                listen_port = 502;
+            } else {
+                /* Parse listen address from arguments */
+                args_value_t listen_val = args_get_at(&args_result, "listen", i);
+                if (!listen_val.present) {
+                    break;
+                }
+                if (!parse_listen_address(listen_val.value.string_val, listen_address, &listen_port)) {
+                    log_error("Failed to parse listen address: %s", listen_val.value.string_val);
+                    goto cleanup;
+                }
+            }
+
+            /* Create listener for this address */
+            listener_ctx_t *listener = create_listener(server, listen_address, listen_port);
+            if (!listener) {
+                log_error("Failed to create listener for %s:%u", listen_address, listen_port);
+                goto cleanup;
+            }
+
+            listeners[num_listeners++] = listener;
+            log_info("Modbus TCP Server listening on %s:%u", listen_address, listen_port);
+        }
+    } else {
+        /* No listen addresses specified, use default */
+        listener_ctx_t *listener = create_listener(server, "127.0.0.1", 502);
+        if (!listener) {
+            log_error("Failed to create listener");
+            goto cleanup;
+        }
+        listeners[num_listeners++] = listener;
+        log_info("Modbus TCP Server listening on 127.0.0.1:502");
+    }
 
     /* Main event loop - reactor_run() blocks until reactor_stop() is called */
     util_err_t reactor_rc = reactor_run(server->reactor, 1000);  /* 1 second TICK period */
@@ -639,8 +884,11 @@ int main(int argc, char **argv) {
 cleanup:
     log_info("Cleaning up server");
 
-    if (listener) {
-        destroy_listener(listener);
+    /* Destroy all listeners */
+    for (size_t i = 0; i < num_listeners; i++) {
+        if (listeners[i]) {
+            destroy_listener(listeners[i]);
+        }
     }
 
     if (server) {
@@ -659,6 +907,7 @@ cleanup:
 
     g_server = NULL;
     socket_cleanup();
+    args_free(&args_result);
 
     log_info("Server stopped");
     return rc;
