@@ -232,7 +232,7 @@ util_err_t args_parse(int argc, const char *argv[],
 
         if (eq) {
             // --flag=value
-            size_t name_len = eq - name_start;
+            size_t name_len = (size_t)(ptrdiff_t)(eq - name_start);
             if (name_len >= sizeof(flag_name)) {
                 log_error("args_parse: flag name too long");
                 result->error = UTIL_EARGS_INVALID_FORMAT;
