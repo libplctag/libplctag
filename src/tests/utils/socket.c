@@ -2,6 +2,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stddef.h>
 
 #ifndef _WIN32
   #include <unistd.h>       // For close()
