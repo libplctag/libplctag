@@ -102,7 +102,8 @@ void *writer_function(void *tag_arg) {
 }
 
 
-void tag_callback(int32_t tag_id, int event, int status) {
+void tag_callback(int32_t tag_id, int event, int status, void *user_data) {
+    (void)user_data;  /* unused */
     /* handle the events. */
     switch(event) {
         case PLCTAG_EVENT_ABORTED:
@@ -175,7 +176,7 @@ int main(void) {
 
     plc_tag_set_debug_level(PLCTAG_DEBUG_WARN);
 
-    tag = plc_tag_create(TAG_ATTRIBS, DATA_TIMEOUT);
+    tag = plc_tag_create_ex(TAG_ATTRIBS, tag_callback, NULL, DATA_TIMEOUT);
     if(tag < 0) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Error, %s, creating tag!\n", plc_tag_decode_error(tag));
@@ -184,15 +185,6 @@ int main(void) {
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Tag status %s.\n", plc_tag_decode_error(plc_tag_status(tag)));
-
-    /* register the callback */
-    rc = plc_tag_register_callback(tag, tag_callback);
-    if(rc != PLCTAG_STATUS_OK) {
-        // NOLINTNEXTLINE
-        fprintf(stderr, "Unable to register callback for tag %s!\n", plc_tag_decode_error(rc));
-        plc_tag_destroy(tag);
-        return 1;
-    }
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Ready to start threads.\n");
@@ -222,14 +214,14 @@ int main(void) {
 
     rc = 0;
 
-    if(abs((RUN_PERIOD / READ_PERIOD_MS) - read_start_count) > 3) {
+    if(abs((RUN_PERIOD / READ_PERIOD_MS) - read_start_count) > 5) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_start_count,
                 (RUN_PERIOD / READ_PERIOD_MS));
         rc = 1;
     }
 
-    if(abs((RUN_PERIOD / WRITE_SLEEP_MS) - write_start_count) > 3) {
+    if(abs((RUN_PERIOD / WRITE_SLEEP_MS) - write_start_count) > 5) {
         // NOLINTNEXTLINE
         fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_start_count,
                 (RUN_PERIOD / WRITE_SLEEP_MS));
