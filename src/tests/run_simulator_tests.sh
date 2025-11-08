@@ -43,7 +43,7 @@ if [ $? != 0 ]; then
     exit 1
 fi
 
-sleep 1
+sleep 2
 
 let TEST++
 echo -n "  Test $TEST: basic large tag read/write... "
