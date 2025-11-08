@@ -12,6 +12,7 @@ extern "C" {
 /* Cross-platform socket type */
 #ifdef _WIN32
   #include <winsock2.h>
+  #include <ws2tcpip.h>
   typedef SOCKET socket_t;
   #ifndef INVALID_SOCKET
   #define INVALID_SOCKET ((SOCKET)(~0))
