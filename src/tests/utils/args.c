@@ -7,6 +7,11 @@
 #include <errno.h>
 #include <math.h>
 
+/* Cross-platform compatibility for strcasecmp */
+#ifdef _WIN32
+  #define strcasecmp _stricmp
+#endif
+
 /* ================================================================
  * Internal Structures
  * ================================================================ */
