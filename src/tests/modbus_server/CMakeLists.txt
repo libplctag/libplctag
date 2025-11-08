@@ -9,12 +9,20 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Source files
 set(SOURCES
     modbus_server.c
-    logger.c
-    socket_utils.c
-    config.c
     register_storage.c
     modbus_protocol.c
+    ../utils/buf.c
+    ../utils/err.c
+    ../utils/fsm.c
+    ../utils/log.c
+    ../utils/reactor.c
+    ../utils/socket.c
+    ../utils/args.c
+    ../utils/utils.c
 )
+
+# Include directories
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../utils)
 
 # Create executable
 add_executable(modbus_server ${SOURCES})

@@ -45,13 +45,19 @@
 #include <signal.h>
 
 /* Forward declarations */
+typedef struct server_ctx_s server_ctx_t;
 typedef struct client_ctx_s client_ctx_t;
 typedef struct listener_ctx_s listener_ctx_t;
 
-/* Global state */
-static reactor_t *g_reactor = NULL;
-static register_storage_t *g_storage = NULL;
-static volatile sig_atomic_t g_running = 1;
+/* Server context - holds reactor and storage (accessed via signal handler) */
+struct server_ctx_s {
+    reactor_t *reactor;
+    register_storage_t *storage;
+};
+
+/* Single static variable for signal handler - this is necessary because
+ * signal handlers can only take an int parameter and cannot pass context */
+static server_ctx_t *g_server = NULL;
 
 /* FSM event type IDs (application-defined) */
 enum {
@@ -73,6 +79,7 @@ enum {
 
 /* Listener context - one per listen endpoint */
 struct listener_ctx_s {
+    server_ctx_t *server;
     socket_t listener_socket;
     char bind_address[256];
     uint16_t bind_port;
@@ -80,6 +87,7 @@ struct listener_ctx_s {
 
 /* Client context - one per connected client */
 struct client_ctx_s {
+    server_ctx_t *server;
     socket_t socket;
     char client_address[256];
     fsm_t *fsm;  /* FSM for handling this client connection */
@@ -104,7 +112,11 @@ struct client_ctx_s {
 
 static void signal_handler(int signum) {
     (void)signum;
-    g_running = 0;
+
+    /* Stop the reactor if it's been created */
+    if (g_server && g_server->reactor) {
+        reactor_stop(g_server->reactor);
+    }
 }
 
 static void setup_signal_handlers(void) {
@@ -137,32 +149,26 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
     if (status != UTIL_OK) {
         log_warn("Read event with error for %s: %d", client->client_address, status);
-        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
         return;
     }
 
-    /* Read from socket */
-    uint8_t temp_buffer[1024];
-    int n = socket_recv(client->socket, temp_buffer, sizeof(temp_buffer));
+    /* Read from socket using buf.h API */
+    util_err_t rc = socket_recv_buf(client->socket, &client->recv_buf);
 
-    if (n <= 0) {
+    if (rc == UTIL_ECLOSED) {
         log_info("Client %s disconnected", client->client_address);
-        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
         return;
     }
 
-    /* Append received data to buffer */
-    size_t write_pos = buf_write_pos(&client->recv_buf);
-    if (write_pos + n > (int)buf_capacity(&client->recv_buf)) {
-        log_error("Receive buffer overflow from %s", client->client_address);
-        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+    if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
+        log_error("Socket recv error from %s: %d", client->client_address, rc);
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
         return;
     }
 
-    memcpy(buf_write_ptr(&client->recv_buf), temp_buffer, n);
-    buf_write_advance(&client->recv_buf, n);
-
-    log_detail("Received %d bytes from %s", n, client->client_address);
+    log_detail("Received data from %s, buffer has %zu bytes", client->client_address, buf_read_size(&client->recv_buf));
 
     /* Check if we have the MBAP header yet */
     if (buf_read_size(&client->recv_buf) >= MBAP_HEADER_SIZE &&
@@ -178,15 +184,15 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
             if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
                 log_error("PDU too large from %s", client->client_address);
-                fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+                fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
                 return;
             }
 
             log_detail("MBAP header parsed, expecting %zu bytes total", client->expected_length);
-            fsm_queue_event(client->fsm, REACTOR_EVENT_CAN_READ, UTIL_OK, client);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
         } else {
             log_error("Invalid MBAP header from %s", client->client_address);
-            fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
         }
         return;
     }
@@ -197,8 +203,8 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
                   client->client_address, buf_read_size(&client->recv_buf));
         fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
     } else {
-        /* Need more data, continue reading */
-        reactor_set_event_enable_mask(g_reactor, client->socket, REACTOR_EVENT_CAN_READ, true);
+        /* Need more data, re-enable read and continue */
+        reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_READ, true);
     }
 }
 
@@ -219,7 +225,7 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
     uint8_t function_code;
     if (!buf_read_u8(&request_buf, "function_code", &function_code)) {
         log_error("Failed to read function code from %s", client->client_address);
-        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
         return;
     }
 
@@ -227,14 +233,14 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
 
     /* Process the request */
     util_err_t err = modbus_process_request(function_code, &request_buf,
-                                            &client->send_buf, &client->mbap_header, g_storage);
+                                            &client->send_buf, &client->mbap_header, client->server->storage);
 
     if (err != UTIL_OK && err != UTIL_ENOTSUPPORTED) {
-        log_debug("Request processing returned error: %d", err);
+        log_detail("Request processing returned error: %d", err);
     }
 
     /* Queue send event */
-    fsm_queue_event(client->fsm, REACTOR_EVENT_CAN_WRITE, UTIL_OK, client);
+    fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_WRITE, UTIL_OK, client);
 }
 
 static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -248,38 +254,35 @@ static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
     if (status != UTIL_OK) {
         log_warn("Write event with error for %s: %d", client->client_address, status);
-        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
         return;
     }
 
-    /* Send response */
-    size_t to_send = buf_write_pos(&client->send_buf) - buf_read_pos(&client->send_buf);
-    if (to_send == 0) {
-        log_warn("No response data to send to %s", client->client_address);
+    /* Send response using buf.h API */
+    util_err_t rc = socket_send_buf(client->socket, &client->send_buf);
+
+    if (rc == UTIL_ECLOSED) {
+        log_info("Client %s connection closed during send", client->client_address);
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
+        log_error("Socket send error to %s: %d", client->client_address, rc);
+        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        return;
+    }
+
+    log_detail("Sent response to %s", client->client_address);
+
+    /* Check if all data was sent */
+    if (buf_read_size(&client->send_buf) > 0) {
+        /* Partial send, re-enable write and continue */
+        reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_WRITE, true);
+    } else {
+        /* All data sent, prepare for next request */
         fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
-        return;
     }
-
-    const uint8_t *send_ptr = buf_read_ptr(&client->send_buf);
-    int n = socket_send(client->socket, (uint8_t *)send_ptr, to_send);
-
-    if (n <= 0) {
-        log_info("Client %s send failed", client->client_address);
-        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
-
-    log_detail("Sent %d bytes to %s", n, client->client_address);
-
-    if (n < (int)to_send) {
-        /* Partial send, for now just close */
-        log_warn("Partial send to %s, closing connection", client->client_address);
-        fsm_queue_event(client->fsm, REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
-
-    /* Response sent, prepare for next request */
-    fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
 }
 
 static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -300,7 +303,7 @@ static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
     log_detail("Client %s ready for next request", client->client_address);
 
     /* Re-enable read on socket */
-    reactor_set_event_enable_mask(g_reactor, client->socket, REACTOR_EVENT_CAN_READ, true);
+    reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_READ, true);
 }
 
 static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -313,10 +316,10 @@ static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_
 
     client_ctx_t *client = (client_ctx_t *)user_data;
 
-    if (client->socket != SOCKET_INVALID) {
-        reactor_remove_socket(g_reactor, client->socket);
+    if (client->socket != INVALID_SOCKET) {
+        reactor_remove_socket(client->server->reactor, client->socket);
         socket_close(client->socket);
-        client->socket = SOCKET_INVALID;
+        client->socket = INVALID_SOCKET;
     }
 
     if (client->fsm) {
@@ -370,7 +373,7 @@ static const size_t num_client_transitions = sizeof(client_transitions) / sizeof
  * ============================================================================ */
 
 static void socket_event_callback(reactor_t *reactor, socket_t socket,
-                                  reactor_event_type_t event, util_err_t status, void *context) {
+                                  event_type_t event, util_err_t status, void *context) {
     (void)reactor;
     (void)socket;
 
@@ -384,7 +387,7 @@ static void socket_event_callback(reactor_t *reactor, socket_t socket,
     log_detail("Socket event for %s: event=%u, status=%d", client->client_address, event, status);
 
     /* Queue event to FSM */
-    fsm_queue_event(client->fsm, (event_type_t)event, status, client);
+    fsm_queue_event(client->fsm, event, status, client);
 
     /* Process events immediately */
     fsm_process_events(client->fsm);
@@ -395,7 +398,7 @@ static void socket_event_callback(reactor_t *reactor, socket_t socket,
  * ============================================================================ */
 
 static void listener_event_callback(reactor_t *reactor, socket_t socket,
-                                    reactor_event_type_t event, util_err_t status, void *context) {
+                                    event_type_t event, util_err_t status, void *context) {
     (void)reactor;
     (void)socket;
 
@@ -412,30 +415,41 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     }
 
     /* Accept new client connection */
-    char client_addr[256];
-    socket_t client_socket = socket_accept(listener->listener_socket, client_addr, sizeof(client_addr));
+    socket_t client_socket = INVALID_SOCKET;
+    socket_address_t client_addr;
+    util_err_t rc = socket_accept(listener->listener_socket, &client_socket, &client_addr);
 
-    if (client_socket == SOCKET_INVALID) {
-        log_warn("Failed to accept connection on %s:%u", listener->bind_address, listener->bind_port);
-        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+    if (rc != UTIL_OK) {
+        log_warn("Failed to accept connection on %s:%u: %d", listener->bind_address, listener->bind_port, rc);
+        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
-    log_info("Accepted connection from %s", client_addr);
+    if (client_socket == INVALID_SOCKET) {
+        log_warn("socket_accept returned INVALID_SOCKET on %s:%u", listener->bind_address, listener->bind_port);
+        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
+        return;
+    }
+
+    /* Get client address string */
+    char client_addr_str[256];
+    socket_address_get_addr_str(&client_addr, client_addr_str, sizeof(client_addr_str));
+    uint16_t client_port = socket_address_get_port(&client_addr);
+    log_info("Accepted connection from %s:%u", client_addr_str, client_port);
 
     /* Create client context */
     client_ctx_t *client = calloc(1, sizeof(*client));
     if (!client) {
         log_error("Failed to allocate client context");
         socket_close(client_socket);
-        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
     /* Initialize client context */
+    client->server = listener->server;
     client->socket = client_socket;
-    strncpy(client->client_address, client_addr, sizeof(client->client_address) - 1);
-    client->client_address[sizeof(client->client_address) - 1] = '\0';
+    snprintf(client->client_address, sizeof(client->client_address), "%s:%u", client_addr_str, client_port);
 
     /* Initialize buffers */
     client->recv_buf = buf_init(client->recv_buffer, sizeof(client->recv_buffer));
@@ -449,43 +463,53 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
         log_error("Failed to create FSM for client");
         free(client);
         socket_close(client_socket);
-        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
     /* Register client socket with reactor */
-    if (!reactor_add_socket_with_callback(g_reactor, client_socket, REACTOR_EVENT_CAN_READ,
-                                         socket_event_callback, client)) {
-        log_error("Failed to register client socket with reactor");
+    rc = reactor_add_socket(listener->server->reactor, client_socket, socket_event_callback, client);
+    if (rc != UTIL_OK) {
+        log_error("Failed to register client socket with reactor: %d", rc);
         fsm_destroy(client->fsm);
         free(client);
         socket_close(client_socket);
-        reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
     /* Re-enable listener accept */
-    reactor_set_event_enable_mask(g_reactor, listener->listener_socket, REACTOR_EVENT_CAN_ACCEPT, true);
+    reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
 }
 
 /* ============================================================================
  * Listener Creation
  * ============================================================================ */
 
-static listener_ctx_t* create_listener(const char *bind_address, uint16_t bind_port) {
+static listener_ctx_t* create_listener(server_ctx_t *server, const char *bind_address, uint16_t bind_port) {
     listener_ctx_t *listener = calloc(1, sizeof(*listener));
     if (!listener) {
         log_error("Failed to allocate listener context");
         return NULL;
     }
 
+    listener->server = server;
     strncpy(listener->bind_address, bind_address, sizeof(listener->bind_address) - 1);
     listener->bind_address[sizeof(listener->bind_address) - 1] = '\0';
     listener->bind_port = bind_port;
 
+    /* Create socket address */
+    socket_address_t addr;
+    util_err_t rc = socket_address_init(&addr, bind_address, bind_port);
+    if (rc != UTIL_OK) {
+        log_error("Failed to initialize socket address: %d", rc);
+        free(listener);
+        return NULL;
+    }
+
     /* Create listener socket */
-    listener->listener_socket = socket_create_and_bind_listener(bind_address, bind_port);
-    if (listener->listener_socket == SOCKET_INVALID) {
+    listener->listener_socket = socket_create_tcp_server(&addr, 5);
+    if (listener->listener_socket == INVALID_SOCKET) {
         log_error("Failed to create listener socket on %s:%u", bind_address, bind_port);
         free(listener);
         return NULL;
@@ -494,9 +518,9 @@ static listener_ctx_t* create_listener(const char *bind_address, uint16_t bind_p
     log_info("Listener socket created on %s:%u", bind_address, bind_port);
 
     /* Register listener socket with reactor */
-    if (!reactor_add_socket_with_callback(g_reactor, listener->listener_socket,
-                                         REACTOR_EVENT_CAN_ACCEPT, listener_event_callback, listener)) {
-        log_error("Failed to register listener socket with reactor");
+    rc = reactor_add_socket(server->reactor, listener->listener_socket, listener_event_callback, listener);
+    if (rc != UTIL_OK) {
+        log_error("Failed to register listener socket with reactor: %d", rc);
         socket_close(listener->listener_socket);
         free(listener);
         return NULL;
@@ -510,8 +534,8 @@ static void destroy_listener(listener_ctx_t *listener) {
         return;
     }
 
-    if (listener->listener_socket != SOCKET_INVALID) {
-        reactor_remove_socket(g_reactor, listener->listener_socket);
+    if (listener->listener_socket != INVALID_SOCKET) {
+        reactor_remove_socket(listener->server->reactor, listener->listener_socket);
         socket_close(listener->listener_socket);
     }
 
@@ -524,14 +548,12 @@ static void destroy_listener(listener_ctx_t *listener) {
 
 int main(int argc, char **argv) {
     int rc = EXIT_FAILURE;
+    listener_ctx_t *listener = NULL;
 
-    /* Initialize logging */
-    log_init();
+    /* Set log level for startup messages */
+    log_set_level(LOG_LEVEL_INFO);
 
-    /* Parse command line arguments (for now, just use defaults) */
-    (void)argc;
-    (void)argv;
-
+    /* Parse command line arguments */
     const char *bind_address = "127.0.0.1";
     uint16_t bind_port = 502;
     size_t num_coils = 1000;
@@ -539,20 +561,46 @@ int main(int argc, char **argv) {
     size_t num_holding_registers = 1000;
     size_t num_input_registers = 1000;
 
+    /* Simple argument parsing: --port <port_number> */
+    for (int i = 1; i < argc - 1; i++) {
+        if (strcmp(argv[i], "--port") == 0) {
+            bind_port = (uint16_t)atoi(argv[i + 1]);
+            if (bind_port == 0) {
+                log_error("Invalid port number: %s", argv[i + 1]);
+                return EXIT_FAILURE;
+            }
+            i++;
+        } else if (strcmp(argv[i], "--address") == 0) {
+            bind_address = argv[i + 1];
+            i++;
+        }
+    }
+
     log_info("Modbus TCP Server starting...");
+
+    /* Create server context */
+    server_ctx_t *server = calloc(1, sizeof(*server));
+    if (!server) {
+        log_error("Failed to allocate server context");
+        return EXIT_FAILURE;
+    }
+
+    /* Set global server pointer for signal handler */
+    g_server = server;
 
     /* Setup signal handlers */
     setup_signal_handlers();
 
     /* Initialize socket layer */
-    if (!socket_init()) {
-        log_error("Failed to initialize socket layer");
+    util_err_t sock_rc = socket_init();
+    if (sock_rc != UTIL_OK) {
+        log_error("Failed to initialize socket layer: %d", sock_rc);
         goto cleanup;
     }
 
-    /* Create reactor */
-    g_reactor = reactor_create();
-    if (!g_reactor) {
+    /* Create reactor with max 100 sockets */
+    server->reactor = reactor_create(100);
+    if (!server->reactor) {
         log_error("Failed to create reactor");
         goto cleanup;
     }
@@ -560,9 +608,9 @@ int main(int argc, char **argv) {
     log_detail("Reactor created");
 
     /* Create register storage */
-    g_storage = register_storage_create(num_coils, num_discrete_inputs,
+    server->storage = register_storage_create(num_coils, num_discrete_inputs,
                                        num_holding_registers, num_input_registers);
-    if (!g_storage) {
+    if (!server->storage) {
         log_error("Failed to create register storage");
         goto cleanup;
     }
@@ -571,7 +619,7 @@ int main(int argc, char **argv) {
               num_coils, num_discrete_inputs, num_holding_registers, num_input_registers);
 
     /* Create listener */
-    listener_ctx_t *listener = create_listener(bind_address, bind_port);
+    listener = create_listener(server, bind_address, bind_port);
     if (!listener) {
         log_error("Failed to create listener");
         goto cleanup;
@@ -579,39 +627,38 @@ int main(int argc, char **argv) {
 
     log_info("Modbus TCP Server listening on %s:%u", bind_address, bind_port);
 
-    /* Main event loop */
-    while (g_running) {
-        int poll_rc = reactor_run(g_reactor, 1000);  /* 1 second timeout */
-
-        if (poll_rc < 0) {
-            if (!g_running) {
-                break;
-            }
-            log_error("Reactor error");
-            goto cleanup;
-        }
+    /* Main event loop - reactor_run() blocks until reactor_stop() is called */
+    util_err_t reactor_rc = reactor_run(server->reactor, 1000);  /* 1 second TICK period */
+    if (reactor_rc != UTIL_OK) {
+        log_error("Reactor error: %d", reactor_rc);
+        goto cleanup;
     }
 
-    log_info("Shutdown signal received, stopping server");
     rc = EXIT_SUCCESS;
 
 cleanup:
+    log_info("Cleaning up server");
+
     if (listener) {
         destroy_listener(listener);
     }
 
-    if (g_storage) {
-        register_storage_destroy(g_storage);
-        g_storage = NULL;
+    if (server) {
+        if (server->storage) {
+            register_storage_destroy(server->storage);
+            server->storage = NULL;
+        }
+
+        if (server->reactor) {
+            reactor_destroy(server->reactor);
+            server->reactor = NULL;
+        }
+
+        free(server);
     }
 
-    if (g_reactor) {
-        reactor_destroy(g_reactor);
-        g_reactor = NULL;
-    }
-
+    g_server = NULL;
     socket_cleanup();
-    log_cleanup();
 
     log_info("Server stopped");
     return rc;

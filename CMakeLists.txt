@@ -120,6 +120,7 @@ if(BUILD_EXAMPLES)
 endif(BUILD_EXAMPLES)
 
 if(BUILD_TESTS)
+   enable_testing()
    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 endif(BUILD_TESTS)
 

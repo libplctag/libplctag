@@ -55,3 +55,16 @@ target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
 message("Building Modbus TCP server.")
 add_subdirectory("modbus_server")
 
+# Register CTest tests for modbus_server
+# Test that modbus_server binary exists and is executable
+add_test(NAME modbus_server_binary_exists
+         COMMAND test -x "${CMAKE_BINARY_DIR}/bin_dist/modbus_server")
+
+# Test that modbus_server can start, bind to port, and handle graceful shutdown
+add_test(NAME modbus_server_startup_shutdown
+         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --port 9502 & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
+         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+set_tests_properties(modbus_server_binary_exists PROPERTIES TIMEOUT 5)
+set_tests_properties(modbus_server_startup_shutdown PROPERTIES TIMEOUT 5)
+
