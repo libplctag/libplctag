@@ -248,10 +248,22 @@ jobs:
         killall modbus_server -TERM &> /dev/null
         sleep 3
 
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.artifact_suffix }}
+        path: |
+          ${{ env.DIST }}/*_test.log
+          ${{ env.DIST }}/*_emulator.log
+          ${{ env.DIST }}/modbus_server.log
+          ${{ env.DIST }}/test_modbus_multiple.log
+        retention-days: 7
+
     - name: Create ZIP artifacts
       run: |
         cd ${{ env.DIST }}
-        
+
         if [ "${{ matrix.arch }}" = "x86_64" ] && [ "${{ matrix.libc }}" = "glibc" ]; then
           # Create dev ZIP with only library files (for backward compatibility)
           zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
@@ -496,6 +508,18 @@ jobs:
         killall modbus_server -TERM &> /dev/null
         sleep 3
 
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.artifact_suffix }}
+        path: |
+          ${{ env.DIST }}/*_test.log
+          ${{ env.DIST }}/*_emulator.log
+          ${{ env.DIST }}/modbus_server.log
+          ${{ env.DIST }}/test_modbus_multiple.log
+        retention-days: 7
+
     - name: Create ZIP artifacts
       run: |
         cd ${{ env.DIST }}
@@ -712,6 +736,18 @@ jobs:
         .\test_reconnect_after_outage .\ab_server.exe
       shell: cmd
 
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.artifact_suffix }}
+        path: |
+          ${{ env.DIST }}\*_test.log
+          ${{ env.DIST }}\*_emulator.log
+          ${{ env.DIST }}\modbus_server.log
+          ${{ env.DIST }}\test_modbus_multiple.log
+        retention-days: 7
+
     - name: Create ZIP artifacts (MSVC only)
       if: matrix.toolchain == 'msvc'
       run: |
@@ -860,6 +896,18 @@ jobs:
         cd ..
         mkdir -p release_zips
         mv *.zip release_zips/
+
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-ubuntu_${{ matrix.artifact_suffix }}
+        path: |
+          ${{ env.DIST }}/*_test.log
+          ${{ env.DIST }}/*_emulator.log
+          ${{ env.DIST }}/modbus_server.log
+          ${{ env.DIST }}/test_modbus_multiple.log
+        retention-days: 7
 
     - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
@@ -1496,6 +1544,20 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: ./release_artifacts
+
+    - name: Prepare release artifacts (exclude test logs)
+      run: |
+        echo "=== Artifacts to be released ==="
+        find ./release_artifacts -name "*_zips" -type d | while read dir; do
+          echo "From $dir:"
+          find "$dir" -name "*.zip" -type f
+        done
+
+        echo ""
+        echo "=== Artifacts NOT being released (test logs) ==="
+        find ./release_artifacts -name "test-logs-*" -type d | while read dir; do
+          echo "Skipped: $dir (test logs only)"
+        done
 
     - name: Create and push tag
       run: |
