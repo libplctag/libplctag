@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_NONE);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     /* make sure the library is a usable version */
     check_library_version();
