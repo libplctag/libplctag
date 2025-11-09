@@ -1642,6 +1642,13 @@ int socket_wake(sock_p sock) {
             pdebug(DEBUG_DETAIL, "Write wrote no data.");
 
             rc = PLCTAG_STATUS_OK;
+        } else if(err == WSAEBADF) {
+            /* If the write failed with WSAEBADF (bad socket), the wake pipe
+             * has been closed. Mark it as invalid and return success so the system
+             * can proceed. The next wake attempt will skip due to INVALID_SOCKET check. */
+            pdebug(DEBUG_WARN, "Wake pipe closed (WSAEBADF), marking as invalid.");
+            sock->wake_write_fd = INVALID_SOCKET;
+            rc = PLCTAG_STATUS_OK;
         } else {
             pdebug(DEBUG_WARN, "socket write error rc=%d, errno=%d", rc, err);
             return PLCTAG_ERR_WRITE;

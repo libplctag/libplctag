@@ -1630,7 +1630,18 @@ int socket_wake(sock_p sock) {
     if(rc >= 0) {
         rc = PLCTAG_STATUS_OK;
     } else {
-        pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+        int err = errno;
+        pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, err);
+
+        /* If the write failed with EBADF (bad file descriptor), the wake pipe
+         * has been closed. Mark it as invalid and return success so the system
+         * can proceed. The next wake attempt will skip due to INVALID_SOCKET check. */
+        if(err == EBADF) {
+            pdebug(DEBUG_WARN, "Wake pipe closed (EBADF), marking as invalid.");
+            sock->wake_write_fd = INVALID_SOCKET;
+            return PLCTAG_STATUS_OK;
+        }
+
         return PLCTAG_ERR_WRITE;
     }
 
