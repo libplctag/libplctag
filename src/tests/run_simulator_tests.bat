@@ -30,16 +30,20 @@ setlocal enabledelayedexpansion
 set EXECUTABLES=^
     ab_server.exe ^
     list_tags_logix.exe ^
+    modbus_server.exe ^
     string_non_standard_udt.exe ^
     string_standard.exe ^
+    stress_rc_mem.exe ^
     tag_rw2.exe ^
     test_auto_sync.exe ^
     test_callback.exe ^
     test_callback_ex.exe ^
     test_callback_ex_logix.exe ^
     test_callback_ex_modbus.exe ^
+    test_indexed_tags.exe ^
     test_modbus_multiple.exe ^
     test_raw_cip.exe ^
+    test_reconnect.exe ^
     test_reconnect_after_outage.exe ^
     test_shutdown.exe ^
     test_special.exe ^
