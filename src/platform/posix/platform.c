@@ -1610,11 +1610,9 @@ int socket_wake(sock_p sock) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!sock->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_READ;
-    }
-
+    /* The wake pipe is independent of the TCP connection state.
+     * Write to the wake pipe to interrupt the handler thread's select() call.
+     * This works regardless of whether the TCP connection is open. */
     // rc = (int)write(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data));
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
