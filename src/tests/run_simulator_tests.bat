@@ -74,12 +74,8 @@ start /b "%TEST_DIR%\ab_server.exe" --debug --plc=ControlLogix --path=1,0 ^
     "--tag=Test_Array_2x3x4:DINT[2,3,4]" ^
     > logix_fast_emulator.log 2>&1
 
-if errorlevel 1 (
-    echo Unable to start AB/ControlLogix emulator!
-    exit /b 1
-)
-
-timeout /T 1 /nobreak
+REM Give the server time to start and listen
+timeout /T 3 /nobreak
 
 REM Test 1: basic large tag read/write
 set /a TEST+=1
