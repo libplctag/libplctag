@@ -44,7 +44,8 @@ set EXECUTABLES=^
     test_modbus_multiple.exe ^
     test_raw_cip.exe ^
     test_reconnect.exe ^
-    test_reconnect_after_outage.exe ^
+    test_reconnect_after_outage_async.exe ^
+    test_reconnect_after_outage_sync.exe ^
     test_shutdown.exe ^
     test_special.exe ^
     test_string.exe ^
@@ -167,11 +168,24 @@ echo Starting stand-alone tests.
 echo ============================================================================
 echo.
 
-REM Test 7: Test reconnect after PLC outage
+REM Test 7: Test async reconnect after PLC outage
 set /a TEST+=1
-echo Test !TEST!: Test reconnect after PLC outage...
-"%TEST_DIR%\test_reconnect_after_outage.exe" "%TEST_DIR%\ab_server.exe" ^
-    > "!TEST!_reconnect_after_outage.log" 2>&1
+echo Test !TEST!: Test async reconnect after PLC outage...
+"%TEST_DIR%\test_reconnect_after_outage_async.exe" "%TEST_DIR%\ab_server.exe" ^
+    > "!TEST!_reconnect_after_outage_async.log" 2>&1
+if errorlevel 1 (
+    echo FAILURE
+    set /a FAILURES+=1
+) else (
+    echo OK
+    set /a SUCCESSES+=1
+)
+
+REM Test 8: Test sync reconnect after PLC outage
+set /a TEST+=1
+echo Test !TEST!: Test sync reconnect after PLC outage...
+"%TEST_DIR%\test_reconnect_after_outage_sync.exe" "%TEST_DIR%\ab_server.exe" ^
+    > "!TEST!_reconnect_after_outage_sync.log" 2>&1
 if errorlevel 1 (
     echo FAILURE
     set /a FAILURES+=1

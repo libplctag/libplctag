@@ -37,7 +37,8 @@ endif()
   test_alternate_tag_listing
   test_array_notation
   test_auto_sync
-  test_reconnect_after_outage
+  test_reconnect_after_outage_async
+  test_reconnect_after_outage_sync
   test_callback
   test_callback_ex
   test_callback_ex_logix

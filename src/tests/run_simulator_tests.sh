@@ -21,7 +21,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -121,8 +121,19 @@ killall -TERM ab_server > /dev/null 2>&1
 echo "Starting stand-alone tests."
 
 let TEST++
-echo -n "  Test $TEST: Test reconnect after PLC outage... "
-$VALGRIND$TEST_DIR/test_reconnect_after_outage "${TEST_DIR}/ab_server" > "${TEST}_reconnect_after_outage.log" 2>&1
+echo -n "  Test $TEST: Test async reconnect after PLC outage... "
+$VALGRIND$TEST_DIR/test_reconnect_after_outage_async "${TEST_DIR}/ab_server" > "${TEST}_reconnect_after_outage_async.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+let TEST++
+echo -n "  Test $TEST: Test sync reconnect after PLC outage... "
+$VALGRIND$TEST_DIR/test_reconnect_after_outage_sync "${TEST_DIR}/ab_server" > "${TEST}_reconnect_after_outage_sync.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
