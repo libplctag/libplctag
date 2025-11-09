@@ -1625,11 +1625,9 @@ int socket_wake(sock_p sock) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!sock->is_open) {
-        pdebug(DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_READ;
-    }
-
+    /* The wake pipe is independent of the TCP connection state.
+     * Write to the wake pipe to interrupt the handler thread's select() call.
+     * This works regardless of whether the TCP connection is open. */
     rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), 0);
     if(rc < 0) {
         int err = WSAGetLastError();
