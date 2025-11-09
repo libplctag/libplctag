@@ -44,7 +44,7 @@
 #define TAG_ATTRIBS \
     "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
-#define RUN_PERIOD (10000)
+#define RUN_PERIOD (12000)
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
@@ -214,19 +214,29 @@ int main(void) {
 
     rc = 0;
 
-    if(abs((RUN_PERIOD / READ_PERIOD_MS) - read_start_count) > 5) {
+    int expected_reads = RUN_PERIOD / READ_PERIOD_MS;
+    int expected_writes = RUN_PERIOD / WRITE_SLEEP_MS;
+
+    /* allow 10% margin */
+    if(abs(expected_reads - read_start_count) > ((10 * expected_reads) / 100)) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "Number of reads, %d, not close to the expected number, %d!\n", read_start_count,
-                (RUN_PERIOD / READ_PERIOD_MS));
+        fprintf(stderr, "FAILURE: Number of reads, %d, not close to the expected number, %d!\n", read_start_count,
+                expected_reads);
         rc = 1;
     }
 
-    if(abs((RUN_PERIOD / WRITE_SLEEP_MS) - write_start_count) > 5) {
+    /* allow 10% margin */
+    if(abs(expected_writes - write_start_count) > ((10 * expected_writes) / 100)) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "Number of writes, %d, not close to the expected number, %d!\n", write_start_count,
-                (RUN_PERIOD / WRITE_SLEEP_MS));
+        fprintf(stderr, "FAILURE: Number of writes, %d, not close to the expected number, %d!\n", write_start_count,
+                expected_writes);
         rc = 1;
-    }
+    } 
+    
+    if(rc == 0) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "SUCCESS: Test completed successfully.\n");
+    }  
 
     return rc;
 }

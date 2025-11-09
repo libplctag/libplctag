@@ -75,7 +75,7 @@ int main(void) {
         TAG_READ_11, TAG_READ_12, TAG_READ_13, TAG_READ_14,
         TAG_READ_15, TAG_READ_16, TAG_READ_17, TAG_READ_18
     };
-    int64_t start_time, current_time, read_phase_end_time, write_phase_start_time, write_phase_end_time, last_write_time;
+    int64_t start_time, current_time, read_phase_end_time, write_phase_start_time, write_phase_end_time;
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
     int version_minor = plc_tag_get_int_attribute(0, "version_minor", 0);
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
@@ -169,13 +169,12 @@ int main(void) {
 
     /* ===== PHASE 5: Read/write loop for WRITE_PHASE_TIME_MS in batch mode ===== */
     printf("PHASE 5: Starting read/write loop for %"PRId64" ms.\n", (long long)WRITE_PHASE_TIME_MS);
-    last_write_time = compat_time_ms();
 
     uint16_t write_value = 0x01;
     int write_toggle = 0;
 
     while(compat_time_ms() < write_phase_end_time) {
-        int all_tags_count = 10;
+        size_t all_tags_count = 10;
         int32_t all_tags[10];
         
         /* Build array of all tags for batch operations */
