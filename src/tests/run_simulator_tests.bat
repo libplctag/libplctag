@@ -205,12 +205,8 @@ start /b "%TEST_DIR%\ab_server.exe" --plc=ControlLogix --path=1,0 ^
     --delay=50 ^
     > logix_slow_emulator.log 2>&1
 
-if errorlevel 1 (
-    echo Unable to start AB/ControlLogix emulator!
-    exit /b 1
-)
-
-timeout /T 1 /nobreak
+REM Give the server time to start and listen
+timeout /T 3 /nobreak
 
 REM Test 8: emulator test callbacks
 set /a TEST+=1
