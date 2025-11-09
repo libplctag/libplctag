@@ -122,10 +122,7 @@ jobs:
       with:
         name: test-logs-${{ matrix.artifact_suffix }}
         path: |
-          *_test.log
-          *_emulator.log
-          modbus_server.log
-          test_modbus_multiple.log
+          *.log
         retention-days: 7
 
     - name: Create ZIP artifacts
@@ -261,10 +258,7 @@ jobs:
       with:
         name: test-logs-${{ matrix.artifact_suffix }}
         path: |
-          *_test.log
-          *_emulator.log
-          modbus_server.log
-          test_modbus_multiple.log
+          *.log
         retention-days: 7
 
     - name: Create ZIP artifacts
@@ -386,10 +380,7 @@ jobs:
       with:
         name: test-logs-${{ matrix.artifact_suffix }}
         path: |
-          ${{ github.workspace }}\src\tests\*_test.log
-          ${{ github.workspace }}\src\tests\*_emulator.log
-          ${{ github.workspace }}\src\tests\modbus_server.log
-          ${{ github.workspace }}\src\tests\test_modbus_multiple.log
+          ${{ github.workspace }}\src\tests\*.log
         retention-days: 7
 
     - name: Create ZIP artifacts (MSVC only)
