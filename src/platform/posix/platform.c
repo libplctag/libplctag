@@ -1612,7 +1612,13 @@ int socket_wake(sock_p sock) {
 
     /* The wake pipe is independent of the TCP connection state.
      * Write to the wake pipe to interrupt the handler thread's select() call.
-     * This works regardless of whether the TCP connection is open. */
+     * This works regardless of whether the TCP connection is open.
+     * Check that the wake pipe is valid before writing to it. */
+    if(sock->wake_write_fd == INVALID_SOCKET) {
+        pdebug(DEBUG_WARN, "Wake pipe not yet initialized, skipping wake.");
+        return PLCTAG_STATUS_OK;
+    }
+
     // rc = (int)write(sock->wake_write_fd, &dummy_data[0], sizeof(dummy_data));
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */

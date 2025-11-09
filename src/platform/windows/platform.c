@@ -1627,7 +1627,13 @@ int socket_wake(sock_p sock) {
 
     /* The wake pipe is independent of the TCP connection state.
      * Write to the wake pipe to interrupt the handler thread's select() call.
-     * This works regardless of whether the TCP connection is open. */
+     * This works regardless of whether the TCP connection is open.
+     * Check that the wake pipe is valid before writing to it. */
+    if(sock->wake_write_fd == INVALID_SOCKET) {
+        pdebug(DEBUG_WARN, "Wake pipe not yet initialized, skipping wake.");
+        return PLCTAG_STATUS_OK;
+    }
+
     rc = send(sock->wake_write_fd, (const char *)dummy_data, sizeof(dummy_data), 0);
     if(rc < 0) {
         int err = WSAGetLastError();
