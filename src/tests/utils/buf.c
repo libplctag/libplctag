@@ -317,8 +317,8 @@ bool buf_read_u16_be(buf_t *b, const char *field_name, uint16_t *out) {
         buf_set_error(b, UTIL_EBOUNDS, field_name);
         return false;
     }
-    *out = ((uint16_t)b->data[b->read + 0] << 8) |
-           ((uint16_t)b->data[b->read + 1] << 0);
+    *out = (uint16_t)(((uint16_t)b->data[b->read + 0] << 8)) |
+           (uint16_t)(((uint16_t)b->data[b->read + 1] << 0));
     b->read += 2;
     return true;
 }
@@ -333,8 +333,8 @@ bool buf_read_u16_le(buf_t *b, const char *field_name, uint16_t *out) {
         buf_set_error(b, UTIL_EBOUNDS, field_name);
         return false;
     }
-    *out = ((uint16_t)b->data[b->read + 0] << 0) |
-           ((uint16_t)b->data[b->read + 1] << 8);
+    *out = (uint16_t)(((uint16_t)b->data[b->read + 0] << 0)) |
+           (uint16_t)(((uint16_t)b->data[b->read + 1] << 8));
     b->read += 2;
     return true;
 }

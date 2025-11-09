@@ -136,13 +136,21 @@ static util_err_t handle_read_coils(buf_t *request, buf_t *response,
     }
 
     /* Validate count (1-2000 coils) */
-    if (count == 0 || count > 2000) {
+    if (count == 0 || count > MODBUS_MAX_READ_COILS) {
         return UTIL_EINVAL;
     }
 
     /* Allocate response buffer for coils */
-    uint16_t byte_count = (count + 7) / 8;
+    uint16_t tmp_byte_count = (count + 7) / 8;
+
+    if(tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
+        log_warn("Requested coil count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
+        return UTIL_EINVAL;
+    }
+
+    uint8_t byte_count = (uint8_t)((count + 7) / 8);
     uint8_t *coil_data = malloc(byte_count);
+
     if (!coil_data) {
         return UTIL_ERESOURCE;
     }
@@ -183,12 +191,19 @@ static util_err_t handle_read_discrete_inputs(buf_t *request, buf_t *response,
     }
 
     /* Validate count (1-2000 inputs) */
-    if (count == 0 || count > 2000) {
+    if (count == 0 || count > MODBUS_MAX_READ_DISCRETE_INPUTS) {
         return UTIL_EINVAL;
     }
 
     /* Allocate response buffer for inputs */
-    uint16_t byte_count = (count + 7) / 8;
+    uint16_t tmp_byte_count = (count + 7) / 8;
+
+    if(tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
+        log_warn("Requested discrete input count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
+        return UTIL_EINVAL;
+    }
+
+    uint8_t byte_count = (uint8_t)((count + 7) / 8);
     uint8_t *input_data = malloc(byte_count);
     if (!input_data) {
         return UTIL_ERESOURCE;
@@ -230,7 +245,7 @@ static util_err_t handle_read_holding_registers(buf_t *request, buf_t *response,
     }
 
     /* Validate count (1-125 registers) */
-    if (count == 0 || count > 125) {
+    if (count == 0 || count > MODBUS_MAX_READ_REGISTERS) {
         return UTIL_EINVAL;
     }
 
@@ -248,7 +263,7 @@ static util_err_t handle_read_holding_registers(buf_t *request, buf_t *response,
     }
 
     /* Build response header */
-    uint16_t byte_count = count * 2;
+    uint8_t byte_count = (uint8_t)(count * 2);
     modbus_build_response_header(response, req_header, 2 + byte_count); /* FC + byte_count + data */
 
     /* Write response: FC, byte_count, register values (big-endian) */
@@ -283,7 +298,7 @@ static util_err_t handle_read_input_registers(buf_t *request, buf_t *response,
     }
 
     /* Validate count (1-125 registers) */
-    if (count == 0 || count > 125) {
+    if (count == 0 || count > MODBUS_MAX_READ_REGISTERS) {
         return UTIL_EINVAL;
     }
 
@@ -301,7 +316,7 @@ static util_err_t handle_read_input_registers(buf_t *request, buf_t *response,
     }
 
     /* Build response header */
-    uint16_t byte_count = count * 2;
+    uint8_t byte_count = (uint8_t)(count * 2);
     modbus_build_response_header(response, req_header, 2 + byte_count); /* FC + byte_count + data */
 
     /* Write response: FC, byte_count, register values (big-endian) */
@@ -407,7 +422,7 @@ static util_err_t handle_write_multiple_coils(buf_t *request, buf_t *response,
     }
 
     /* Validate count and byte count */
-    if (count == 0 || count > 1968 || byte_count != ((count + 7) / 8)) {
+    if (count == 0 || count > MODBUS_MAX_WRITE_COILS || byte_count != ((count + 7) / 8)) {
         return UTIL_EINVAL;
     }
 
@@ -454,7 +469,7 @@ static util_err_t handle_write_multiple_registers(buf_t *request, buf_t *respons
     }
 
     /* Validate count and byte count */
-    if (count == 0 || count > 123 || byte_count != (count * 2)) {
+    if (count == 0 || count > MODBUS_MAX_WRITE_REGISTERS || byte_count != (count * 2)) {
         return UTIL_EINVAL;
     }
 

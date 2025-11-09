@@ -67,7 +67,7 @@ typedef struct {
  * @param fsm_ctx User data pointer associated with the FSM (may be NULL).
  * @return fsm_t* Pointer to the created FSM instance or NULL on failure.
  */
-fsm_t* fsm_create(const fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, size_t pending_queue_size, void *fsm_ctx);
+fsm_t* fsm_create(fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, size_t pending_queue_size, void *fsm_ctx);
 
 /**
  * @brief Destroy a finite state machine.

@@ -142,7 +142,7 @@ static void rebuild_pollfds_for_socket(reactor_t *r, size_t index) {
     pfd->revents = 0;
 
     /* Build poll events from enabled bitarray */
-    for (int i = 0; i < REACTOR_EVENT_MAX; i++) {
+    for (unsigned int i = 0; i < REACTOR_EVENT_MAX; i++) {
         if (bitarray_test(&entry->enabled, i)) {
             switch (i) {
                 case REACTOR_EVENT_CAN_READ:
@@ -815,7 +815,7 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
             return util_err_from_wsa(WSAGetLastError());
         }
 #else
-        int ret = poll(r->pollfds, r->active_socket_count, timeout);
+        int ret = poll(r->pollfds, (nfds_t)r->active_socket_count, timeout);
         if (ret < 0) {
             return util_err_from_errno(errno);
         }

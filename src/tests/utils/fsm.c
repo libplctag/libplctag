@@ -10,7 +10,7 @@ typedef struct {
 } fsm_queued_event_t;
 
 struct fsm_s {
-    const fsm_transition_t *table;
+    fsm_transition_t *table;
     size_t table_size;
     fsm_state_id_t current_state;
     void *fsm_ctx;
@@ -24,13 +24,13 @@ struct fsm_s {
 
 
 
-static const fsm_transition_t* fsm_lookup_transition(const fsm_t *fsm, fsm_state_id_t state, event_type_t event);
-static const size_t event_queue_size(const fsm_t *fsm);
+static fsm_transition_t* fsm_lookup_transition(const fsm_t *fsm, fsm_state_id_t state, event_type_t event);
+//static size_t event_queue_size(const fsm_t *fsm);
 static bool enqueue_event(fsm_t *fsm, event_type_t event, util_err_t status, void *event_ctx);
 static bool dequeue_event(fsm_t *fsm, event_type_t *out_event, util_err_t *out_status, void **out_ctx);
 
 
-fsm_t* fsm_create(const fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, 
+fsm_t* fsm_create(fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, 
                   size_t pending_queue_size, void *fsm_ctx) {
     if (!transition_table || transition_count == 0 || pending_queue_size == 0) {
         return NULL;
@@ -160,16 +160,16 @@ util_err_t fsm_dispatch_event(fsm_t *fsm, event_type_t event, util_err_t status,
 
 /* helper functions */
 
-static const size_t event_queue_size(const fsm_t *fsm) {
-    if (!fsm) {
-        return 0;
-    }
+// static size_t event_queue_size(const fsm_t *fsm) {
+//     if (!fsm) {
+//         return 0;
+//     }
 
-    return ((fsm->ring_head + fsm->ring_capacity) - fsm->ring_tail) % fsm->ring_capacity;
-}
+//     return ((fsm->ring_head + fsm->ring_capacity) - fsm->ring_tail) % fsm->ring_capacity;
+// }
 
 
-static const fsm_transition_t* fsm_lookup_transition(const fsm_t *fsm, fsm_state_id_t state, event_type_t event) {
+static fsm_transition_t* fsm_lookup_transition(const fsm_t *fsm, fsm_state_id_t state, event_type_t event) {
     /* Try exact match first */
     for (size_t i = 0; i < fsm->table_size; i++) {
         if (fsm->table[i].current_state == state && fsm->table[i].event == event) {
