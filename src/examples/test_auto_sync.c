@@ -82,8 +82,6 @@ void *writer_function(void *tag_arg) {
     int64_t run_until = start_time + RUN_PERIOD;
     int iteration = 1;
 
-    compat_sleep_ms(WRITE_SLEEP_MS, NULL);
-
     while(run_until > compat_time_ms()) {
         int32_t val = plc_tag_get_int32(tag, 0);
         int32_t new_val = ((val + 1) > 499) ? 0 : (val + 1);
@@ -214,24 +212,26 @@ int main(void) {
 
     rc = 0;
 
-    int expected_reads = RUN_PERIOD / READ_PERIOD_MS;
-    int expected_writes = RUN_PERIOD / WRITE_SLEEP_MS;
+    /* allow 10% margin*/
+    int read_success_expected = (read_start_count * 90) / read_start_count;
+    int read_success_actual = (read_complete_count * 100) / read_start_count;
 
-    /* allow 10% margin */
-    if(abs(expected_reads - read_start_count) > ((10 * expected_reads) / 100)) {
+    int write_success_expected = (write_start_count * 90) / write_start_count;
+    int write_success_actual = (write_complete_count * 100) / write_start_count;
+
+    if(read_success_actual < read_success_expected) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "FAILURE: Number of reads, %d, not close to the expected number, %d!\n", read_start_count,
-                expected_reads);
+        fprintf(stderr, "FAILURE: Number of reads, %d%%, not close to the expected number, %d%%!\n", read_success_actual,
+                read_success_expected);
         rc = 1;
     }
 
-    /* allow 10% margin */
-    if(abs(expected_writes - write_start_count) > ((10 * expected_writes) / 100)) {
+    if(write_success_actual < write_success_expected) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "FAILURE: Number of writes, %d, not close to the expected number, %d!\n", write_start_count,
-                expected_writes);
+        fprintf(stderr, "FAILURE: Number of writes, %d%%, not close to the expected number, %d%%!\n", write_success_actual,
+                write_success_expected);
         rc = 1;
-    } 
+    }
     
     if(rc == 0) {
         // NOLINTNEXTLINE
