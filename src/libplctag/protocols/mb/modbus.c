@@ -721,7 +721,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else {
                     pdebug(DEBUG_WARN, "Error %s received while starting socket connection.", plc_tag_decode_error(rc));
 
-                    socket_destroy(&(plc->sock));
+                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
 
                     /* exponential increase with jitter. */
                     UPDATE_ERR_DELAY();
@@ -753,7 +753,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else {
                     pdebug(DEBUG_WARN, "Error %s received while waiting for socket connection.", plc_tag_decode_error(rc));
 
-                    socket_destroy(&(plc->sock));
+                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
 
                     /* exponential increase with jitter. */
                     UPDATE_ERR_DELAY();
@@ -788,7 +788,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     pdebug(DEBUG_WARN, "Going to state PLC_CONNECT_START");
 
-                    socket_destroy(&(plc->sock));
+                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
 
                     plc->state = PLC_CONNECT_START;
                     break;
@@ -839,7 +839,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else {
                     pdebug(DEBUG_WARN, "Closing socket due to write error %s.", plc_tag_decode_error(rc));
 
-                    socket_destroy(&(plc->sock));
+                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
 
                     /* set up the state. */
                     plc->flags.response_ready = 0;
@@ -873,7 +873,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else {
                     pdebug(DEBUG_WARN, "Closing socket due to read error %s.", plc_tag_decode_error(rc));
 
-                    socket_destroy(&(plc->sock));
+                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
 
                     /* set up the state. */
                     plc->flags.response_ready = 0;
@@ -894,7 +894,9 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_DETAIL, "in PLC_ERR_WAIT state.");
 
                 /* clean up the socket in case we did not earlier */
-                if(plc->sock) { socket_destroy(&(plc->sock)); }
+                critical_block(plc->mutex) {
+                    if(plc->sock) { socket_destroy(&(plc->sock)); }
+                }
 
                 /* wait until done. */
                 if(err_delay_until > time_ms()) {
@@ -926,10 +928,14 @@ void wake_plc_thread(modbus_plc_p plc) {
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(plc) {
-        if(plc->sock) {
-            socket_wake(plc->sock);
-        } else {
-            pdebug(DEBUG_DETAIL, "PLC socket pointer is NULL.");
+        critical_block(plc->mutex) {
+            pdebug(DEBUG_DETAIL, "Waking PLC thread.");
+
+            if(plc->sock) {
+               socket_wake(plc->sock);
+            } else {
+                pdebug(DEBUG_DETAIL, "PLC socket pointer is NULL.");
+            }
         }
     } else {
         pdebug(DEBUG_WARN, "PLC pointer is NULL!");
@@ -993,7 +999,9 @@ int connect_plc(modbus_plc_p plc) {
         mem_free(server_port);
 
         pdebug(DEBUG_WARN, "Unable to connect to the server \"%s\", got error %s!", plc->server, plc_tag_decode_error(rc));
-        socket_destroy(&(plc->sock));
+
+        critical_block(plc->mutex) { socket_destroy(&(plc->sock));}
+
         return rc;
     }
 
