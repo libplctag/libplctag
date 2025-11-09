@@ -44,7 +44,7 @@
 #define TAG_ATTRIBS \
     "protocol=ab_eip&gateway=127.0.0.1&path=1,0&cpu=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[4]&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
-#define RUN_PERIOD (12000)
+#define RUN_PERIOD (15000)
 #define READ_SLEEP_MS (100)
 #define WRITE_SLEEP_MS (300)
 
