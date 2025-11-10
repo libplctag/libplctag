@@ -475,7 +475,8 @@ fi
 
 let TEST++
 echo -n "Test $TEST: for Modbus reconnect bug... "
-$VALGRIND$TEST_DIR/test_modbus_multiple > "${TEST}_test_modbus_multiple.log" 2>&1
+TST_LOG="${TEST}_modbus_reconnect_bug_test.log"
+$VALGRIND$TEST_DIR/test_modbus_multiple > ${TST_LOG} 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -488,11 +489,11 @@ fi
 let TEST++
 echo -n "Test $TEST: check for thread(5) in Modbus multiple test log... "
 PREV_TEST=$((TEST - 1))
-if grep -q "thread(5)" "${PREV_TEST}_test_modbus_multiple.log" ; then
-    echo "FAILURE (found thread(5) in log file)"
+if grep -q "thread(5)" ${TST_LOG} ; then
+    echo "FAILURE (found thread(5) in log file ${TST_LOG})"
     let FAILURES++
 else
-    echo "OK (no thread(5) found in log file)"
+    echo "OK (no thread(5) found in log file ${TST_LOG})"
     let SUCCESSES++
 fi
 
