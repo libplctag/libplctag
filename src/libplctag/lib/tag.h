@@ -172,8 +172,6 @@ extern atomic_bool library_terminating;
 extern int lib_init(void);
 extern void lib_teardown(void);
 extern void plc_tag_generic_tickler(plc_tag_p tag);
-#define plc_tag_generic_raise_event(t, e, s) plc_tag_generic_raise_event_impl(__func__, __LINE__, t, e, s)
-extern int plc_tag_generic_raise_event_impl(const char *func, int line_num, plc_tag_p tag, int8_t event_val, int8_t status);
 extern void plc_tag_generic_handle_event_callbacks(plc_tag_p tag);
 #define plc_tag_tickler_wake() plc_tag_tickler_wake_impl(__func__, __LINE__)
 extern int plc_tag_tickler_wake_impl(const char *func, int line_num);
