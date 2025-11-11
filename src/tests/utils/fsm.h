@@ -8,6 +8,7 @@ extern "C" {
 #include <stdbool.h>
 #include "err.h"
 #include "utils.h"
+#include "bitarray.h"
 
 /* Types */
 typedef struct fsm_s fsm_t;
@@ -21,10 +22,10 @@ typedef uint32_t fsm_state_id_t;
 
 /**
  * @brief Action function signature for state transitions.
- * 
+ *
  * Called while the FSM is still in current_state. The transition to
  * next_state is committed only after this function returns.
- * 
+ *
  * @param fsm - The state machine instance
  * @param current_state - State before transition
  * @param event - Event type that triggered this transition
@@ -35,26 +36,45 @@ typedef uint32_t fsm_state_id_t;
 typedef void (*fsm_action_fn)(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event, util_err_t status, fsm_state_id_t next_state, void *user_data);
 
 /**
+ * @brief State change callback function signature.
+ *
+ * Called when the FSM transitions to a new state, after the transition
+ * is committed but before events are processed.
+ *
+ * @param fsm - The state machine instance
+ * @param old_state - State before transition
+ * @param new_state - State after transition
+ * @param new_event_mask - Event mask for the new state (events accepted in new_state)
+ * @param user_context - FSM user context pointer (same as passed to fsm_create)
+ * @return util_err_t - Error code if state change handling fails
+ */
+typedef util_err_t (*fsm_on_state_change_fn)(fsm_t *fsm, fsm_state_id_t old_state, fsm_state_id_t new_state, bitarray_t new_event_mask, void *user_context);
+
+/**
  * @brief Transition row struct: on event -> optional action, next_state
- * 
+ *
  * Defines a single state transition in the FSM.  Make static arrays
  * of these to define the FSM's behavior.  Rows must have a unique combination
  * of current_state and event.
- * 
+ *
  * Use FSM_STATE_ID_ANY as current_state to match any state.  This can be used
  * for defaults or error handling.
- * 
+ *
  * Fields:
  *  current_state - State in which this transition is valid
  *  event - Event that triggers this transition
  *  action - Action function to execute on transition (may be NULL)
  *  next_state - State to transition to (may equal current_state to stay)
+ *  state_name - Human-readable name for current_state (for logging)
+ *  event_name - Human-readable name for event (for logging)
  */
 typedef struct {
     fsm_state_id_t current_state;
     event_type_t   event;
     fsm_action_fn  action;        /* may be NULL */
     fsm_state_id_t next_state;   /* may equal current to stay */
+    const char    *state_name;   /* for logging/debugging (may be NULL) */
+    const char    *event_name;   /* for logging/debugging (may be NULL) */
 } fsm_transition_t;
 
 /**
@@ -64,10 +84,12 @@ typedef struct {
  * @param transition_count Number of transitions in the table.
  * @param initial_state Initial state of the FSM.
  * @param pending_queue_size Maximum number of events that can be queued (typically 4-8).
- * @param fsm_ctx User data pointer associated with the FSM (may be NULL).
+ * @param on_state_change Optional callback invoked when FSM transitions to a new state (may be NULL).
+ * @param fsm_ctx User data pointer associated with the FSM (may be NULL). Passed to both
+ *                action functions and the state change callback.
  * @return fsm_t* Pointer to the created FSM instance or NULL on failure.
  */
-fsm_t* fsm_create(fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, size_t pending_queue_size, void *fsm_ctx);
+fsm_t* fsm_create(fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, size_t pending_queue_size, fsm_on_state_change_fn on_state_change, void *fsm_ctx);
 
 /**
  * @brief Destroy a finite state machine.
@@ -91,6 +113,26 @@ void *fsm_get_ctx(fsm_t *fsm);
  * @return fsm_state_id_t Current state ID.
  */
 fsm_state_id_t fsm_get_state(const fsm_t *fsm);
+
+/**
+ * @brief Get the current event mask for the FSM's current state.
+ *
+ * @param fsm Pointer to the FSM instance.
+ * @return bitarray_t Current event mask (events valid in current state).
+ */
+bitarray_t fsm_get_event_mask(const fsm_t *fsm);
+
+/**
+ * @brief Get the transition entry for a state and event combination.
+ *
+ * Used for logging and debugging to retrieve state/event names from the transition table.
+ *
+ * @param fsm Pointer to the FSM instance.
+ * @param state State to look up
+ * @param event Event to look up
+ * @return fsm_transition_t* Pointer to transition entry, or NULL if not found.
+ */
+const fsm_transition_t* fsm_get_transition(const fsm_t *fsm, fsm_state_id_t state, event_type_t event);
 
 
 /**

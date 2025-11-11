@@ -610,7 +610,8 @@ void reactor_destroy(reactor_t *r) {
 }
 
 util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
-                             reactor_socket_cb_t cb, void *ctx) {
+                             reactor_socket_cb_t cb, void *ctx,
+                             const bitarray_t *initial_events) {
     if (r == NULL || sock == INVALID_SOCKET || cb == NULL) {
         return UTIL_EINVAL;
     }
@@ -648,7 +649,14 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
             r->sockets[i].context = ctx;
             r->sockets[i].socket_type = sock_type;
             r->sockets[i].connected = (sock_type == SOCKET_TYPE_DGRAM);  /* UDP is always "connected" */
-            bitarray_set_all(&r->sockets[i].enabled);  /* All events enabled by default */
+
+            /* Use provided initial events, or enable all if not provided */
+            if (initial_events != NULL) {
+                r->sockets[i].enabled = *initial_events;
+            } else {
+                bitarray_set_all(&r->sockets[i].enabled);  /* All events enabled by default */
+            }
+
             bitarray_clear_all(&r->sockets[i].pending_events);
             memset(&r->sockets[i].last_revents, 0, sizeof(r->sockets[i].last_revents));
 
@@ -720,8 +728,7 @@ util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
     return UTIL_ENOTFOUND;
 }
 
-util_err_t reactor_set_event_enable_mask(reactor_t *r, socket_t sock,
-                                        event_type_t event, bool on) {
+util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_mask) {
     if (r == NULL || sock == INVALID_SOCKET) {
         return UTIL_EINVAL;
     }
@@ -735,11 +742,8 @@ util_err_t reactor_set_event_enable_mask(reactor_t *r, socket_t sock,
     /* Find socket, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == sock) {
-            if (on) {
-                bitarray_set(&r->sockets[i].enabled, event);
-            } else {
-                bitarray_clear(&r->sockets[i].enabled, event);
-            }
+            /* Atomically replace the entire event mask */
+            r->sockets[i].enabled = event_mask;
 
             /* Rebuild poll events for this socket */
             rebuild_pollfds_for_socket(r, i);
@@ -749,6 +753,10 @@ util_err_t reactor_set_event_enable_mask(reactor_t *r, socket_t sock,
 #else
             pthread_mutex_unlock(&r->lock);
 #endif
+
+            /* Wake the reactor to restart poll() with the new event mask */
+            tickle_wake_pipe(r);
+
             return UTIL_OK;
         }
     }

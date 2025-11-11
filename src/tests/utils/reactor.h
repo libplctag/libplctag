@@ -181,9 +181,10 @@ void reactor_destroy(reactor_t *r);
  * @param sock - The socket to register (will be set to non-blocking)
  * @param cb - Callback to invoke for socket events
  * @param ctx - User context associated with the socket
+ * @param initial_events - Bitarray of initial enabled events (or NULL for all enabled)
  * @return util_err_t - Error code indicating success or failure
  */
-util_err_t reactor_add_socket(reactor_t *r, socket_t sock, reactor_socket_cb_t cb, void *ctx);
+util_err_t reactor_add_socket(reactor_t *r, socket_t sock, reactor_socket_cb_t cb, void *ctx, const bitarray_t *initial_events);
 
 /**
  * @brief Remove a socket from the reactor.
@@ -199,35 +200,32 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock, reactor_socket_cb_t c
 util_err_t reactor_remove_socket(reactor_t *r, socket_t sock);
 
 /**
- * @brief Enable or disable a specific event for a registered socket.
+ * @brief Replace the entire event mask for a registered socket.
  *
- * Atomically modifies the event mask for a single event type. This provides clean
- * per-event control without requiring the application to track the full event mask.
+ * Atomically replaces the event mask with a new set of enabled events.
+ * This is typically used when an FSM transitions to a new state with
+ * a different set of accepted events.
  *
  * Thread safe - takes the reactor mutex internally.
  *
+ * The reactor will:
+ * 1. Replace the event mask
+ * 2. Rebuild the poll() file descriptor masks
+ * 3. Wake up the reactor to restart poll() with new masks
+ *
  * USAGE:
- * To enable an event:  reactor_set_event_enable_mask(r, sock, REACTOR_EVENT_CAN_READ, true)
- * To disable an event: reactor_set_event_enable_mask(r, sock, REACTOR_EVENT_CAN_READ, false)
+ * Typically called from an FSM state change callback:
+ *   reactor_set_event_mask(r, sock, new_event_mask)
  *
- * ONE-SHOT RE-ARMING:
- * After a one-shot event (CAN_READ, CAN_WRITE, etc.) fires, the reactor automatically
- * disables it before invoking the callback. To receive the event again, call
- * reactor_set_event_enable_mask(..., true) when ready.
- *
- * FSM INTEGRATION:
- * This per-event control naturally integrates with FSM-based protocols:
- *   - Initial setup: reactor_add_socket(r, sock, cb, ctx) with all events enabled
- *   - After event fires and callback completes: re-enable when ready
- *   - FSM action determines next needed event and re-enables it
+ * This ensures the reactor only monitors for events the current FSM state
+ * is ready to handle, preventing spurious event deliveries.
  *
  * @param r - Pointer to the reactor instance
  * @param sock - The socket to update
- * @param event - The specific event to enable/disable (single event, not a mask)
- * @param on - true to enable the event, false to disable
+ * @param event_mask - New event mask (bitarray with bits set for enabled events)
  * @return util_err_t - UTIL_OK on success, error code on failure
  */
-util_err_t reactor_set_event_enable_mask(reactor_t *r, socket_t sock, event_type_t event, bool on);
+util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_mask);
 
 
 /**
