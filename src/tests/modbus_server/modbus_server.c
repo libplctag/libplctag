@@ -78,6 +78,68 @@ enum {
     APP_STATE_CLOSING,
 };
 
+/* ============================================================================
+ * Debug/Logging Helpers
+ * ============================================================================ */
+
+/**
+ * @brief Convert FSM state ID to human-readable name
+ */
+static const char* state_name(fsm_state_id_t state) {
+    switch (state) {
+        case APP_STATE_LISTENING: return "LISTENING";
+        case APP_STATE_READING_HEADER: return "READING_HEADER";
+        case APP_STATE_READING_PDU: return "READING_PDU";
+        case APP_STATE_PROCESSING: return "PROCESSING";
+        case APP_STATE_SENDING: return "SENDING";
+        case APP_STATE_IDLE: return "IDLE";
+        case APP_STATE_CLOSING: return "CLOSING";
+        default: return "UNKNOWN";
+    }
+}
+
+/**
+ * @brief Convert event type ID to human-readable name
+ */
+static const char* event_name(event_type_t event) {
+    switch (event) {
+        case REACTOR_EVENT_ERROR: return "REACTOR_EVENT_ERROR";
+        case REACTOR_EVENT_CAN_READ: return "REACTOR_EVENT_CAN_READ";
+        case REACTOR_EVENT_CAN_WRITE: return "REACTOR_EVENT_CAN_WRITE";
+        case REACTOR_EVENT_CLOSED: return "REACTOR_EVENT_CLOSED";
+        case REACTOR_EVENT_CONNECTED: return "REACTOR_EVENT_CONNECTED";
+        case REACTOR_EVENT_WRITTEN: return "REACTOR_EVENT_WRITTEN";
+        case REACTOR_EVENT_TICK: return "REACTOR_EVENT_TICK";
+        case REACTOR_EVENT_SHUTDOWN: return "REACTOR_EVENT_SHUTDOWN";
+        default:
+            if (event == APP_EVENT_PROCESS) return "APP_EVENT_PROCESS";
+            if (event == APP_EVENT_IDLE) return "APP_EVENT_IDLE";
+            return "UNKNOWN_EVENT";
+    }
+}
+
+/**
+ * @brief Dump event mask as readable bits with event names
+ */
+static void dump_event_mask(const char *label, bitarray_t mask) {
+    log_detail("Event Mask [%s]: Enabled events:", label);
+
+    /* Check reactor events */
+    for (int i = 0; i < REACTOR_EVENT_MAX; i++) {
+        if (bitarray_test(&mask, (event_type_t)i)) {
+            log_detail("  - Bit %d: %s", i, event_name((event_type_t)i));
+        }
+    }
+
+    /* Check application events */
+    if (bitarray_test(&mask, (event_type_t)APP_EVENT_PROCESS)) {
+        log_detail("  - Bit %d: %s", APP_EVENT_PROCESS, event_name((event_type_t)APP_EVENT_PROCESS));
+    }
+    if (bitarray_test(&mask, (event_type_t)APP_EVENT_IDLE)) {
+        log_detail("  - Bit %d: %s", APP_EVENT_IDLE, event_name((event_type_t)APP_EVENT_IDLE));
+    }
+}
+
 /* Listener context - one per listen endpoint */
 struct listener_ctx_s {
     server_ctx_t *server;
@@ -133,6 +195,36 @@ static void setup_signal_handlers(void) {
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 #endif
+}
+
+/* ============================================================================
+ * FSM State Change Callback
+ * ============================================================================ */
+
+static util_err_t on_client_state_change(fsm_t *fsm, fsm_state_id_t old_state, fsm_state_id_t new_state,
+                                         bitarray_t new_event_mask, void *user_context) {
+    (void)fsm;
+    (void)old_state;
+
+    client_ctx_t *client = (client_ctx_t *)user_context;
+
+    /* Get transition info for better logging - look up an event in the new state to get its name */
+    const char *old_name = state_name(old_state);
+    const char *new_name = state_name(new_state);
+
+    log_info("Client %s FSM state transition: %s -> %s", client->client_address, old_name, new_name);
+
+    /* Dump the new event mask being applied */
+    dump_event_mask("FSM state change", new_event_mask);
+
+    /* Update the reactor with the new event mask for this socket */
+    util_err_t rc = reactor_set_event_mask(client->server->reactor, client->socket, new_event_mask);
+    if (rc != UTIL_OK) {
+        log_error("Failed to set event mask for client %s: %d", client->client_address, rc);
+        return rc;
+    }
+
+    return UTIL_OK;
 }
 
 /* ============================================================================
@@ -216,10 +308,8 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
             log_detail("Complete message received from %s (%zu bytes)",
                       client->client_address, buf_read_size(&client->recv_buf));
             fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
-        } else {
-            /* Need more data, re-enable read and continue */
-            reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_READ, true);
         }
+        /* No explicit re-enable needed; reactor event mask is controlled by FSM state transitions */
         return;
     }
 
@@ -258,7 +348,9 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
         log_detail("Request processing returned error: %d", err);
     }
 
-    /* Queue send event */
+    /* Queue send event to transition to SENDING state.
+     * The FSM state change callback will update the reactor event mask
+     * to enable CAN_WRITE when transitioning to SENDING state. */
     fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_WRITE, UTIL_OK, client);
 }
 
@@ -296,8 +388,8 @@ static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
     /* Check if all data was sent */
     if (buf_read_size(&client->send_buf) > 0) {
-        /* Partial send, re-enable write and continue */
-        reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_WRITE, true);
+        /* Partial send; the reactor event mask will stay set for CAN_WRITE
+         * since we're still in SENDING state */
     } else {
         /* All data sent, prepare for next request */
         fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
@@ -321,8 +413,8 @@ static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
     log_detail("Client %s ready for next request", client->client_address);
 
-    /* Re-enable read on socket */
-    reactor_set_event_enable_mask(client->server->reactor, client->socket, (event_type_t)REACTOR_EVENT_CAN_READ, true);
+    /* The FSM state change callback will update the reactor event mask
+     * to enable CAN_READ when transitioning to IDLE state */
 }
 
 static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -357,33 +449,33 @@ static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_
 
 static fsm_transition_t client_transitions[] = {
     /* State: READING_HEADER */
-    { APP_STATE_READING_HEADER, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_PDU },
-    { APP_STATE_READING_HEADER, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
-    { APP_STATE_READING_HEADER, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_READING_HEADER, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_PDU, "READING_HEADER", "CAN_READ" },
+    { APP_STATE_READING_HEADER, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING, "READING_HEADER", "CLOSED" },
+    { APP_STATE_READING_HEADER, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING, "READING_HEADER", "ERROR" },
 
     /* State: READING_PDU */
-    { APP_STATE_READING_PDU, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_PDU },
-    { APP_STATE_READING_PDU, APP_EVENT_PROCESS, client_process_action, APP_STATE_PROCESSING },
-    { APP_STATE_READING_PDU, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
-    { APP_STATE_READING_PDU, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_READING_PDU, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_PDU, "READING_PDU", "CAN_READ" },
+    { APP_STATE_READING_PDU, APP_EVENT_PROCESS, client_process_action, APP_STATE_PROCESSING, "READING_PDU", "PROCESS" },
+    { APP_STATE_READING_PDU, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING, "READING_PDU", "CLOSED" },
+    { APP_STATE_READING_PDU, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING, "READING_PDU", "ERROR" },
 
     /* State: PROCESSING */
-    { APP_STATE_PROCESSING, REACTOR_EVENT_CAN_WRITE, client_send_action, APP_STATE_SENDING },
-    { APP_STATE_PROCESSING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
-    { APP_STATE_PROCESSING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_PROCESSING, REACTOR_EVENT_CAN_WRITE, client_send_action, APP_STATE_SENDING, "PROCESSING", "CAN_WRITE" },
+    { APP_STATE_PROCESSING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING, "PROCESSING", "CLOSED" },
+    { APP_STATE_PROCESSING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING, "PROCESSING", "ERROR" },
 
     /* State: SENDING */
-    { APP_STATE_SENDING, APP_EVENT_IDLE, client_idle_action, APP_STATE_IDLE },
-    { APP_STATE_SENDING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
-    { APP_STATE_SENDING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_SENDING, APP_EVENT_IDLE, client_idle_action, APP_STATE_IDLE, "SENDING", "IDLE" },
+    { APP_STATE_SENDING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING, "SENDING", "CLOSED" },
+    { APP_STATE_SENDING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING, "SENDING", "ERROR" },
 
     /* State: IDLE */
-    { APP_STATE_IDLE, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_HEADER },
-    { APP_STATE_IDLE, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING },
-    { APP_STATE_IDLE, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING },
+    { APP_STATE_IDLE, REACTOR_EVENT_CAN_READ, client_read_action, APP_STATE_READING_HEADER, "IDLE", "CAN_READ" },
+    { APP_STATE_IDLE, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING, "IDLE", "CLOSED" },
+    { APP_STATE_IDLE, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING, "IDLE", "ERROR" },
 
     /* Wildcard: CLOSING accepts anything and stays in CLOSING */
-    { APP_STATE_CLOSING, FSM_STATE_ID_ANY, NULL, APP_STATE_CLOSING },
+    { APP_STATE_CLOSING, FSM_STATE_ID_ANY, NULL, APP_STATE_CLOSING, "CLOSING", "ANY" },
 };
 
 static const size_t num_client_transitions = sizeof(client_transitions) / sizeof(client_transitions[0]);
@@ -404,7 +496,16 @@ static void socket_event_callback(reactor_t *reactor, socket_t socket,
         return;
     }
 
-    log_detail("Socket event for %s: event=%u, status=%d", client->client_address, event, status);
+    /* Log with transition table information */
+    fsm_state_id_t current_state = fsm_get_state(client->fsm);
+    const fsm_transition_t *trans = fsm_get_transition(client->fsm, current_state, event);
+    if (trans && trans->state_name && trans->event_name) {
+        log_detail("Socket event for %s: State=%s, Event=%s, Status=%d",
+                   client->client_address, trans->state_name, trans->event_name, status);
+    } else {
+        log_detail("Socket event for %s: State=%u, Event=%u, Status=%d",
+                   client->client_address, current_state, event, status);
+    }
 
     /* Queue event to FSM */
     fsm_queue_event(client->fsm, event, status, client);
@@ -457,13 +558,11 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
 
     if (rc != UTIL_OK) {
         log_warn("Failed to accept connection on %s:%u: %d", listener->bind_address, listener->bind_port, rc);
-        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
     if (client_socket == INVALID_SOCKET) {
         log_warn("socket_accept returned INVALID_SOCKET on %s:%u", listener->bind_address, listener->bind_port);
-        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
@@ -478,7 +577,6 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     if (!client) {
         log_error("Failed to allocate client context");
         socket_close(client_socket);
-        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
@@ -492,30 +590,26 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     client->send_buf = buf_init(client->send_buffer, sizeof(client->send_buffer));
     client->expected_length = MBAP_HEADER_SIZE;
 
-    /* Create FSM for client */
+    /* Create FSM for client with state change callback */
     client->fsm = fsm_create(client_transitions, num_client_transitions,
-                            APP_STATE_READING_HEADER, 8, client);
+                            APP_STATE_READING_HEADER, 8, on_client_state_change, client);
     if (!client->fsm) {
         log_error("Failed to create FSM for client");
         free(client);
         socket_close(client_socket);
-        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
 
-    /* Register client socket with reactor */
-    rc = reactor_add_socket(listener->server->reactor, client_socket, socket_event_callback, client);
+    /* Register client socket with reactor, enabling only events for current FSM state (READING_HEADER) */
+    bitarray_t initial_event_mask = fsm_get_event_mask(client->fsm);
+    rc = reactor_add_socket(listener->server->reactor, client_socket, socket_event_callback, client, &initial_event_mask);
     if (rc != UTIL_OK) {
         log_error("Failed to register client socket with reactor: %d", rc);
         fsm_destroy(client->fsm);
         free(client);
         socket_close(client_socket);
-        reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
         return;
     }
-
-    /* Re-enable listener accept */
-    reactor_set_event_enable_mask(listener->server->reactor, listener->listener_socket, (event_type_t)REACTOR_EVENT_CAN_ACCEPT, true);
 }
 
 /* ============================================================================
@@ -592,8 +686,10 @@ static listener_ctx_t* create_listener(server_ctx_t *server, const char *bind_ad
 
     log_info("Listener socket created on %s:%u", bind_address, bind_port);
 
-    /* Register listener socket with reactor */
-    rc = reactor_add_socket(server->reactor, listener->listener_socket, listener_event_callback, listener);
+    /* Register listener socket with reactor, enabling only CAN_ACCEPT initially */
+    bitarray_t listener_events = BITARRAY_ZERO();
+    bitarray_set(&listener_events, REACTOR_EVENT_CAN_ACCEPT);
+    rc = reactor_add_socket(server->reactor, listener->listener_socket, listener_event_callback, listener, &listener_events);
     if (rc != UTIL_OK) {
         log_error("Failed to register listener socket with reactor: %d", rc);
         socket_close(listener->listener_socket);

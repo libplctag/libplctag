@@ -51,8 +51,8 @@ if [ $? != 0 ]; then
     echo "Unable to start Modbus emulator!"
     exit 1
 else
-    # sleep to let the server start up all the way
-    sleep 5
+    # sleep to let the server start up all the way (need time for both ports to be fully ready)
+    sleep 8
     # echo "Modbus server started"
 fi
 
