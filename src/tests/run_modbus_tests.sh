@@ -52,7 +52,7 @@ if [ $? != 0 ]; then
     exit 1
 else
     # sleep to let the server start up all the way
-    sleep 2
+    sleep 5
     # echo "Modbus server started"
 fi
 
