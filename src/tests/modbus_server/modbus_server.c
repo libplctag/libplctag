@@ -348,10 +348,10 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
         log_detail("Request processing returned error: %d", err);
     }
 
-    /* Queue send event to transition to SENDING state.
-     * The FSM state change callback will update the reactor event mask
-     * to enable CAN_WRITE when transitioning to SENDING state. */
-    fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_WRITE, UTIL_OK, client);
+    /* Queue APP_EVENT_IDLE to trigger immediate transition to SENDING state
+     * and attempt to send the response. If socket is not writable yet,
+     * the reactor will send REACTOR_EVENT_CAN_WRITE when it becomes writable. */
+    fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
 }
 
 static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -463,8 +463,11 @@ static fsm_transition_t client_transitions[] = {
     { APP_STATE_PROCESSING, REACTOR_EVENT_CAN_WRITE, client_send_action, APP_STATE_SENDING, "PROCESSING", "CAN_WRITE" },
     { APP_STATE_PROCESSING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING, "PROCESSING", "CLOSED" },
     { APP_STATE_PROCESSING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING, "PROCESSING", "ERROR" },
+    /* Also need to handle CAN_WRITE directly from PROCESSING in case socket is already writable after request processing */
+    { APP_STATE_PROCESSING, APP_EVENT_IDLE, client_send_action, APP_STATE_SENDING, "PROCESSING", "IDLE" },
 
     /* State: SENDING */
+    { APP_STATE_SENDING, REACTOR_EVENT_CAN_WRITE, client_send_action, APP_STATE_SENDING, "SENDING", "CAN_WRITE" },
     { APP_STATE_SENDING, APP_EVENT_IDLE, client_idle_action, APP_STATE_IDLE, "SENDING", "IDLE" },
     { APP_STATE_SENDING, REACTOR_EVENT_CLOSED, client_close_action, APP_STATE_CLOSING, "SENDING", "CLOSED" },
     { APP_STATE_SENDING, REACTOR_EVENT_ERROR, client_close_action, APP_STATE_CLOSING, "SENDING", "ERROR" },

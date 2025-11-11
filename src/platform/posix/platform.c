@@ -1168,6 +1168,8 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
+    pdebug(DEBUG_INFO, "socket() created fd=%d", fd);
+
     /* check for errors */
     if(fd < 0) {
         pdebug(DEBUG_ERROR, "Socket creation failed, errno: %d", errno);
@@ -1192,20 +1194,12 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     }
 #endif
 
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 0;
-
-    if(setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout))) {
-        close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket receive timeout option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
-
-    if(setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout))) {
-        close(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket set timeout option, errno: %d", errno);
-        return PLCTAG_ERR_OPEN;
-    }
+    /* NOTE: We do NOT set SO_RCVTIMEO or SO_SNDTIMEO here because:
+     * 1. We use non-blocking mode with select() for timeout handling
+     * 2. SO_RCVTIMEO + non-blocking mode can cause select() to not report readability correctly
+     * 3. select() provides finer control over timeout behavior than SO_RCVTIMEO/SO_SNDTIMEO
+     * Instead, timeout handling is done via select() in socket_wait_event() and socket_read()
+     */
 
     /* abort the connection immediately upon close. */
     so_linger.l_onoff = 1;
@@ -1358,7 +1352,10 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
 
     FD_SET(sock->fd, &write_set);
 
+    pdebug(DEBUG_INFO, "socket_connect_tcp_check: calling select() on fd=%d with timeout_ms=%d", sock->fd, timeout_ms);
     select_rc = select(sock->fd + 1, NULL, &write_set, NULL, &tv);
+
+    pdebug(DEBUG_INFO, "socket_connect_tcp_check: select() returned %d, write_set fd_isset=%d", select_rc, FD_ISSET(sock->fd, &write_set));
 
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
@@ -1404,6 +1401,19 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     }
 
     /* now make absolutely sure that the connection is ready. */
+    /* First, try getpeername to validate the connection is truly established */
+    struct sockaddr_in peer_addr;
+    socklen_t peer_addr_len = sizeof(peer_addr);
+    int getpeer_rc = getpeername(sock->fd, (struct sockaddr *)&peer_addr, &peer_addr_len);
+
+    if(getpeer_rc == 0) {
+        pdebug(DEBUG_INFO, "socket_connect_tcp_check: getpeername() succeeded, socket is truly connected to %s:%d",
+               inet_ntoa(peer_addr.sin_addr), ntohs(peer_addr.sin_port));
+    } else {
+        pdebug(DEBUG_WARN, "socket_connect_tcp_check: getpeername() failed with errno=%d, socket is NOT connected!", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
     rc = getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_err, &sock_err_len);
     if(rc == 0) {
         /* sock_err has the error. */
@@ -1502,9 +1512,17 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     FD_SET(sock->fd, &err_set);
 
     /* add more depending on the mask. */
-    if(events & SOCK_EVENT_CAN_READ) { FD_SET(sock->fd, &read_set); }
+    if(events & SOCK_EVENT_CAN_READ) {
+        FD_SET(sock->fd, &read_set);
+        pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
+    }
 
-    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) { FD_SET(sock->fd, &write_set); }
+    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
+        FD_SET(sock->fd, &write_set);
+        pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
+    }
+
+    pdebug(DEBUG_INFO, "socket_wait_event: events=0x%x, max_fd=%d, sock->fd=%d, timeout_ms=%d, calling select()", events, max_fd, sock->fd, timeout_ms);
 
     /* calculate the timeout. */
     if(timeout_ms > 0) {
@@ -1513,10 +1531,15 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         tv.tv_sec = (time_t)(timeout_ms / 1000);
         tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
 
+        pdebug(DEBUG_INFO, "socket_wait_event: calling select with timeout tv_sec=%ld tv_usec=%ld", tv.tv_sec, tv.tv_usec);
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
     } else {
+        pdebug(DEBUG_INFO, "socket_wait_event: calling select with infinite timeout");
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
     }
+
+    pdebug(DEBUG_INFO, "socket_wait_event: select() returned num_sockets=%d for sock->fd=%d, read_set has fd=%d, write_set has fd=%d, err_set has fd=%d",
+           num_sockets, sock->fd, FD_ISSET(sock->fd, &read_set), FD_ISSET(sock->fd, &write_set), FD_ISSET(sock->fd, &err_set));
 
     if(num_sockets == 0) {
         result |= (events & SOCK_EVENT_TIMEOUT);
@@ -1539,12 +1562,23 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
             byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
 
-            if(byte_read) {
+            pdebug(DEBUG_INFO, "socket_wait_event: recv(MSG_PEEK) returned %d, errno=%d", byte_read, errno);
+
+            if(byte_read > 0) {
                 pdebug(DEBUG_DETAIL, "Socket can read.");
                 result |= (events & SOCK_EVENT_CAN_READ);
-            } else {
-                pdebug(DEBUG_DETAIL, "Socket disconnected.");
+            } else if(byte_read == 0) {
+                pdebug(DEBUG_DETAIL, "Socket disconnected (recv returned 0).");
                 result |= (events & SOCK_EVENT_DISCONNECT);
+            } else {
+                pdebug(DEBUG_INFO, "socket_wait_event: recv(MSG_PEEK) error: errno=%d", errno);
+                if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                    pdebug(DEBUG_DETAIL, "Socket not ready (EAGAIN/EWOULDBLOCK), will retry.");
+                    /* Don't report anything, will wait for next event */
+                } else {
+                    pdebug(DEBUG_WARN, "Socket recv error: %d", errno);
+                    result |= (events & SOCK_EVENT_DISCONNECT);
+                }
             }
         }
 
@@ -1807,9 +1841,12 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
      * call select().
      */
 
+    pdebug(DEBUG_INFO, "socket_write: About to write %d bytes on fd=%d", size, s->fd);
+
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
     rc = (int)write(s->fd, buf, (size_t)size);
+    pdebug(DEBUG_INFO, "socket_write: write() returned %d for fd=%d", rc, s->fd);
 #else
     /* on Linux, we use MSG_NOSIGNAL */
     rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
@@ -1909,6 +1946,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
 int socket_close(sock_p s) {
     int rc = PLCTAG_STATUS_OK;
+    int fd_to_close = INVALID_SOCKET;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -1918,9 +1956,12 @@ int socket_close(sock_p s) {
     }
 
     if(s->fd != INVALID_SOCKET) {
+        fd_to_close = s->fd;
         if(close(s->fd)) {
-            pdebug(DEBUG_WARN, "Error closing socket!");
+            pdebug(DEBUG_WARN, "Error closing socket fd=%d!", s->fd);
             rc = PLCTAG_ERR_CLOSE;
+        } else {
+            pdebug(DEBUG_INFO, "Closed socket fd=%d", s->fd);
         }
 
         s->fd = INVALID_SOCKET;

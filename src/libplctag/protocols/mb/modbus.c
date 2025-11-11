@@ -587,9 +587,23 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                 /* set up the PLC state */
                 (*plc)->state = PLC_CONNECT_START;
 
+                /* The handler thread will hold a reference to the PLC.
+                 * Increment the refcount so that when the handler thread exits and calls rc_dec(),
+                 * the PLC won't be freed until that happens. The refcount will be decremented when
+                 * the handler thread exits. */
+                pdebug(DEBUG_DETAIL, "rc_inc: Handler thread acquiring reference to PLC.");
+                *plc = rc_inc(*plc);
+                if(!*plc) {
+                    pdebug(DEBUG_WARN, "Unable to increment PLC reference count!");
+                    rc = PLCTAG_ERR_NO_MEM;
+                    break;
+                }
+
                 rc = thread_create(&((*plc)->handler_thread), modbus_plc_handler, 32768, (void *)(*plc));
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN, "Unable to create new handler thread, error %s!", plc_tag_decode_error(rc));
+                    /* Release the reference we just took since thread creation failed */
+                    *plc = rc_dec(*plc);
                     break;
                 }
 
