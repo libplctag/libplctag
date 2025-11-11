@@ -37,6 +37,7 @@ endif()
   test_alternate_tag_listing
   test_array_notation
   test_auto_sync
+  test_auto_sync_modbus
   test_reconnect_after_outage_async
   test_reconnect_after_outage_sync
   test_callback
