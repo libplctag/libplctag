@@ -73,6 +73,9 @@ struct modbus_plc_t {
     /* Keep a ring linked list of tags for this PLC */
     struct modbus_tag_t *tag_ring;
 
+    /* Count of tags currently attached to this PLC */
+    atomic_int32_t tag_count;
+
     /* hostname/ip and possibly port of the server. */
     char *server;
     sock_p sock;
@@ -201,6 +204,10 @@ tag_byte_order_t modbus_tag_byte_order = {.is_allocated = 0,
 /* Modbus module globals. */
 mutex_p mb_mutex = NULL;
 modbus_plc_p plcs = NULL;
+
+/* PLC lifecycle management */
+static atomic_int32_t plc_count;
+static cond_p plc_cleanup_cond = NULL;
 
 
 /* helper functions */
@@ -391,6 +398,7 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
 
 void modbus_tag_destructor(void *tag_arg) {
     modbus_tag_p tag = (modbus_tag_p)tag_arg;
+    modbus_plc_p plc = NULL;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -399,8 +407,23 @@ void modbus_tag_destructor(void *tag_arg) {
         return;
     }
 
-    /* abort everything. */
-    mb_abort((plc_tag_p)tag);
+    /* Take a reference to the PLC to safely check its state */
+    if(tag->plc) {
+        plc = rc_inc(tag->plc);
+    }
+
+    /* abort everything, but only if PLC is still valid and not terminating */
+    if(plc && !plc->flags.terminate) {
+        pdebug(DEBUG_DETAIL, "PLC is active, calling mb_abort.");
+        mb_abort((plc_tag_p)tag);
+    } else {
+        pdebug(DEBUG_DETAIL, "PLC is terminating or null, skipping mb_abort.");
+    }
+
+    /* Release the temporary reference */
+    if(plc) {
+        plc = rc_dec(plc);
+    }
 
     if(tag->plc) {
         /* unlink the tag from the PLC. */
@@ -571,6 +594,10 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                 }
 
                 pdebug(DEBUG_DETAIL, "Created thread %p.", (*plc)->handler_thread);
+
+                /* Increment PLC count for lifecycle tracking */
+                atomic_add_int32(&plc_count, 1);
+                pdebug(DEBUG_DETAIL, "PLC created, count now %d.", atomic_get_int32(&plc_count));
             } while(0);
         }
     }
@@ -622,9 +649,13 @@ void modbus_plc_destructor(void *plc_arg) {
         /* set the flag to cause the thread to terminate. */
         plc->flags.terminate = 1;
 
-        /* signal the socket to free the thread. */
+        /* signal the socket to free the thread. Direct access is safe here since
+         * this is the destructor and the PLC is being destroyed anyway. */
         pdebug(DEBUG_DETAIL, "Waking Modbus handler thread %p.", plc->handler_thread);
-        wake_plc_thread(plc);
+        if(plc->sock) {
+            pdebug(DEBUG_DETAIL, "Waking socket directly.");
+            socket_wake(plc->sock);
+        }
 
         /* wait for the thread to terminate and destroy it. */
         thread_join(plc->handler_thread);
@@ -652,6 +683,16 @@ void modbus_plc_destructor(void *plc_arg) {
 
     /* check to make sure we have no tags left. */
     if(plc->tag_ring) { pdebug(DEBUG_WARN, "There are tags still remaining in the tag list, memory leak possible!"); }
+
+    /* Decrement PLC count and signal cleanup when last one is destroyed */
+    atomic_add_int32(&plc_count, -1);
+    int32_t remaining = atomic_get_int32(&plc_count);
+    pdebug(DEBUG_DETAIL, "PLC destroyed, count now %d.", remaining);
+
+    if(remaining == 0 && plc_cleanup_cond) {
+        pdebug(DEBUG_INFO, "Last PLC destroyed, signaling cleanup condition.");
+        cond_signal(plc_cleanup_cond);
+    }
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -922,27 +963,50 @@ THREAD_FUNC(modbus_plc_handler) {
         // cond_wait(plc->wait_cond, MODBUS_IDLE_WAIT_TIMEOUT);
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_INFO, "Handler thread exiting.");
+
+    /* Release the PLC reference held by this thread since rc_alloc.
+     * This should only happen AFTER all tags have been removed from the ring
+     * (the terminate flag is set when last tag is removed).
+     */
+    pdebug(DEBUG_DETAIL, "Releasing PLC reference held by handler thread.");
+    plc = rc_dec(plc);
 
     THREAD_RETURN(0);
 }
 
 
 void wake_plc_thread(modbus_plc_p plc) {
+    modbus_plc_p plc_ref = NULL;
+
     pdebug(DEBUG_DETAIL, "Starting.");
 
     if(plc) {
+        /* Take a reference to the PLC to safely access it */
+        plc_ref = rc_inc(plc);
+
+        /* Check if PLC is terminating to avoid accessing freed mutex */
+        if(plc_ref->flags.terminate) {
+            pdebug(DEBUG_DETAIL, "PLC is terminating, skipping wake.");
+            plc_ref = rc_dec(plc_ref);
+            pdebug(DEBUG_DETAIL, "Done.");
+            return;
+        }
+
         pdebug(DEBUG_WARN, "MUTEX: Acquire. Waking PLC thread.");
-        critical_block(plc->mutex) {
+        critical_block(plc_ref->mutex) {
             pdebug(DEBUG_DETAIL, "Waking PLC thread.");
 
-            if(plc->sock) {
-               socket_wake(plc->sock);
+            if(plc_ref->sock) {
+               socket_wake(plc_ref->sock);
             } else {
                 pdebug(DEBUG_DETAIL, "PLC socket pointer is NULL.");
             }
         }
         pdebug(DEBUG_WARN, "MUTEX: Release. PLC thread woken.");
+
+        /* Release the reference */
+        plc_ref = rc_dec(plc_ref);
     } else {
         pdebug(DEBUG_WARN, "PLC pointer is NULL!");
     }
@@ -2358,11 +2422,15 @@ int add_tag(modbus_plc_p plc, modbus_tag_p tag) {
             tag->next = plc->tag_ring->next;
             plc->tag_ring->next = tag;
         }
+
+        /* Increment tag count */
+        atomic_add_int32(&plc->tag_count, 1);
     }
 
     pdebug(DEBUG_DETAIL, "New ring after adding:");
     debug_ring(plc);
 
+    pdebug(DEBUG_DETAIL, "Tag added, count now %d.", atomic_get_int32(&plc->tag_count));
     pdebug(DEBUG_DETAIL, "Done.");
 
     return rc;
@@ -2402,6 +2470,17 @@ int remove_tag(modbus_plc_p plc, modbus_tag_p tag) {
                     pdebug(DEBUG_DETAIL, "Ring is now empty.");
                     plc->tag_ring = NULL;
                 }
+            }
+
+            /* Decrement tag count */
+            atomic_add_int32(&plc->tag_count, -1);
+            int32_t remaining = atomic_get_int32(&plc->tag_count);
+            pdebug(DEBUG_DETAIL, "Tag removed, count now %d.", remaining);
+
+            /* If no more tags, signal handler thread to terminate */
+            if(remaining == 0) {
+                pdebug(DEBUG_INFO, "Last tag removed from PLC, signaling handler thread to exit.");
+                plc->flags.terminate = 1;
             }
         } else {
             /* not found */
@@ -2446,10 +2525,15 @@ int mb_abort(plc_tag_p p_tag) {
     tag->status = (int8_t)PLCTAG_STATUS_OK;
     tag->op = TAG_OP_IDLE;
 
-    clear_request_slot(tag->plc, tag);
+    /* Only access PLC if it hasn't been terminated */
+    if(tag->plc && !tag->plc->flags.terminate) {
+        clear_request_slot(tag->plc, tag);
 
-    /* wake the PLC loop if we need to. */
-    wake_plc_thread(tag->plc);
+        /* wake the PLC loop if we need to. */
+        wake_plc_thread(tag->plc);
+    } else {
+        pdebug(DEBUG_DETAIL, "PLC is terminating or null, skipping abort operations.");
+    }
 
     pdebug(DEBUG_DETAIL, "Done.");
 
@@ -2620,21 +2704,34 @@ void mb_teardown(void) {
     pdebug(DEBUG_INFO, "Starting.");
 
     if(mb_mutex) {
-        pdebug(DEBUG_DETAIL, "Waiting for all Modbus PLCs to terminate.");
+        pdebug(DEBUG_DETAIL, "Signaling all Modbus PLCs to terminate.");
 
-        while(1) {
-            int plcs_remain = 0;
+        /* Signal all PLC handler threads to terminate */
+        critical_block(mb_mutex) {
+            modbus_plc_p walker = plcs;
+            while(walker) {
+                pdebug(DEBUG_DETAIL, "Signaling PLC to terminate.");
+                walker->flags.terminate = 1;
+                wake_plc_thread(walker);
+                walker = walker->next;
+            }
+        }
 
-            critical_block(mb_mutex) { plcs_remain = plcs ? 1 : 0; }
+        pdebug(DEBUG_DETAIL, "Waiting for all Modbus PLCs to be destroyed.");
 
-            if(plcs_remain) {
-                sleep_ms(10);  // MAGIC
-            } else {
+        /* Wait for all PLCs to be destroyed using condition variable */
+        while(atomic_get_int32(&plc_count) > 0) {
+            pdebug(DEBUG_DETAIL, "Waiting for %d PLC(s) to be destroyed.", atomic_get_int32(&plc_count));
+
+            /* Wait for signal with timeout */
+            int wait_rc = cond_wait(plc_cleanup_cond, 5000);  /* 5 second timeout */
+            if(wait_rc == PLCTAG_ERR_TIMEOUT) {
+                pdebug(DEBUG_WARN, "Timeout waiting for PLCs to be destroyed!");
                 break;
             }
         }
 
-        pdebug(DEBUG_DETAIL, "All Modbus PLCs terminated.");
+        pdebug(DEBUG_DETAIL, "All Modbus PLCs destroyed.");
     }
 
     if(mb_mutex) {
@@ -2643,6 +2740,13 @@ void mb_teardown(void) {
         mb_mutex = NULL;
     }
     pdebug(DEBUG_DETAIL, "Modbus mutex destroyed.");
+
+    if(plc_cleanup_cond) {
+        pdebug(DEBUG_DETAIL, "Destroying cleanup condition variable.");
+        cond_destroy(&plc_cleanup_cond);
+        plc_cleanup_cond = NULL;
+    }
+    pdebug(DEBUG_DETAIL, "Cleanup condition variable destroyed.");
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -2658,6 +2762,15 @@ int mb_init(void) {
         rc = mutex_create(&mb_mutex);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error %s creating mutex!", plc_tag_decode_error(rc));
+            return rc;
+        }
+    }
+
+    pdebug(DEBUG_DETAIL, "Setting up cleanup condition variable.");
+    if(!plc_cleanup_cond) {
+        rc = cond_create(&plc_cleanup_cond);
+        if(rc != PLCTAG_STATUS_OK) {
+            pdebug(DEBUG_WARN, "Error %s creating cleanup condition!", plc_tag_decode_error(rc));
             return rc;
         }
     }
