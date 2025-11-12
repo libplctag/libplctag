@@ -411,8 +411,8 @@ killall -TERM ab_server > /dev/null 2>&1
 
 killall -TERM modbus_server > /dev/null 2>&1
 
-# wait for them to exit
-sleep 2
+# wait for them to exit and system to recover
+sleep 3
 
 # echo -n "  Starting Modbus server $SCRIPT_DIR/modbus_server... "
 $TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1 &
@@ -422,8 +422,8 @@ if [ $? != 0 ]; then
     echo "Unable to start Modbus emulator!"
     exit 1
 else
-    # sleep to let the server start up all the way
-    sleep 2
+    # sleep to let the server start up all the way and system to recover from prior tests
+    sleep 10
     # echo "Modbus server started"
 fi
 
@@ -440,7 +440,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: test long reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 10 > "${TEST}_modbus_reconnect_long_test.log" 2>&1
+$VALGRIND$TEST_DIR/test_reconnect 15 > "${TEST}_modbus_reconnect_long_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
