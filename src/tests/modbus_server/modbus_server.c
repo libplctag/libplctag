@@ -217,6 +217,12 @@ static util_err_t on_client_state_change(fsm_t *fsm, fsm_state_id_t old_state, f
     /* Dump the new event mask being applied */
     dump_event_mask("FSM state change", new_event_mask);
 
+    /* If socket is no longer valid (was closed by client_close_action), don't try to update reactor */
+    if (client->socket == INVALID_SOCKET) {
+        log_detail("Socket already closed, skipping event mask update");
+        return UTIL_OK;
+    }
+
     /* Update the reactor with the new event mask for this socket */
     util_err_t rc = reactor_set_event_mask(client->server->reactor, client->socket, new_event_mask);
     if (rc != UTIL_OK) {
@@ -612,6 +618,14 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
         free(client);
         socket_close(client_socket);
         return;
+    }
+
+    /* Ensure listener socket still has CAN_ACCEPT enabled for next connection */
+    bitarray_t listener_event_mask = BITARRAY_ZERO();
+    bitarray_set(&listener_event_mask, REACTOR_EVENT_CAN_ACCEPT);
+    rc = reactor_set_event_mask(listener->server->reactor, listener->listener_socket, listener_event_mask);
+    if (rc != UTIL_OK) {
+        log_warn("Failed to re-enable listener socket events: %d", rc);
     }
 }
 
