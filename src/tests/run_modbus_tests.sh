@@ -69,7 +69,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: test long reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 10 > "${TEST}_modbus_reconnect_long_test.log" 2>&1
+$VALGRIND$TEST_DIR/test_reconnect 15 > "${TEST}_modbus_reconnect_long_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
