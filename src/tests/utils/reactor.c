@@ -843,6 +843,11 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
 #else
         int ret = poll(r->pollfds, (nfds_t)r->active_socket_count, timeout);
         if (ret < 0) {
+            /* EINTR is expected and should be retried */
+            if (errno == EINTR) {
+                log_detail("reactor_run: poll() interrupted by signal, retrying");
+                continue;
+            }
             log_error("reactor_run: poll() returned error: %d (errno=%d)", ret, errno);
             return util_err_from_errno(errno);
         }
