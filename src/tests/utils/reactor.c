@@ -7,6 +7,7 @@
 #include "err.h"
 #include "reactor.h"
 #include "utils.h"
+#include "log.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -644,6 +645,7 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
     /* Find first available slot, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == INVALID_SOCKET) {
+            log_detail("reactor_add_socket: Adding socket fd=%d at index %zu", sock, i);
             r->sockets[i].sock = sock;
             r->sockets[i].callback = cb;
             r->sockets[i].context = ctx;
@@ -653,8 +655,10 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
             /* Use provided initial events, or enable all if not provided */
             if (initial_events != NULL) {
                 r->sockets[i].enabled = *initial_events;
+                log_detail("reactor_add_socket: Set initial event mask for socket at index %zu", i);
             } else {
                 bitarray_set_all(&r->sockets[i].enabled);  /* All events enabled by default */
+                log_detail("reactor_add_socket: Enabled all events for socket at index %zu", i);
             }
 
             bitarray_clear_all(&r->sockets[i].pending_events);
@@ -700,10 +704,12 @@ util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
     /* Find socket, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == sock) {
+            log_detail("reactor_remove_socket: Removing socket fd=%d from index %zu", sock, i);
             r->sockets[i].sock = INVALID_SOCKET;
             r->sockets[i].callback = NULL;
             r->sockets[i].context = NULL;
             bitarray_clear_all(&r->sockets[i].pending_events);
+            bitarray_clear_all(&r->sockets[i].enabled);
 
             r->pollfds[i].fd = INVALID_SOCKET;
             r->pollfds[i].events = 0;
@@ -742,11 +748,13 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
     /* Find socket, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == sock) {
+            log_detail("reactor_set_event_mask: Found socket fd=%d at index %zu", sock, i);
             /* Atomically replace the entire event mask */
             r->sockets[i].enabled = event_mask;
 
             /* Rebuild poll events for this socket */
             rebuild_pollfds_for_socket(r, i);
+            log_detail("reactor_set_event_mask: Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
 
 #ifdef _WIN32
             LeaveCriticalSection(&r->lock);
@@ -816,6 +824,16 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         /* Use poll_timeout_ms directly for TICK event generation */
         int timeout = (int)poll_timeout_ms;
 
+        log_detail("reactor_run: Calling poll() with %zu sockets, timeout=%dms", r->active_socket_count, timeout);
+
+        /* Log poll fd setup for listener sockets (typically indices 1 and 2) */
+        for (size_t i = 1; i < r->active_socket_count && i < 3; i++) {
+            if (r->sockets[i].sock != INVALID_SOCKET) {
+                bool has_events = bitarray_has_any(&r->sockets[i].enabled);
+                log_detail("reactor_run: Socket[%zu] fd=%d events=0x%x has_enabled=%d", i, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
+            }
+        }
+
         /* Poll for socket activity */
 #ifdef _WIN32
         int ret = WSAPoll(r->pollfds, (ULONG)r->active_socket_count, timeout);
@@ -825,9 +843,12 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
 #else
         int ret = poll(r->pollfds, (nfds_t)r->active_socket_count, timeout);
         if (ret < 0) {
+            log_error("reactor_run: poll() returned error: %d (errno=%d)", ret, errno);
             return util_err_from_errno(errno);
         }
 #endif
+
+        log_detail("reactor_run: poll() returned %d ready sockets", ret);
 
         /* Detect timeout to raise TICK events */
         bool poll_timeout_expired = (ret == 0);
