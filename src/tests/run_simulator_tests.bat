@@ -206,7 +206,7 @@ start /b "%TEST_DIR%\ab_server.exe" --plc=ControlLogix --path=1,0 ^
     > logix_slow_emulator.log 2>&1
 
 REM Give the server time to start and listen
-timeout /T 3 /nobreak
+timeout /T 1 /nobreak
 
 REM Test 8: emulator test callbacks
 set /a TEST+=1
@@ -536,7 +536,7 @@ echo Killing emulators.
 taskkill /F /IM ab_server.exe >nul 2>&1
 taskkill /F /IM modbus_server.exe >nul 2>&1
 
-timeout /T 2 /nobreak
+timeout /T 3 /nobreak
 
 echo.
 echo ============================================================================
@@ -556,7 +556,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-timeout /T 2 /nobreak
+timeout /T 3 /nobreak
 
 REM Test 24: test short reconnect with Modbus
 set /a TEST+=1
@@ -574,7 +574,7 @@ if errorlevel 1 (
 REM Test 25: test long reconnect with Modbus
 set /a TEST+=1
 echo Test !TEST!: test long reconnect with Modbus...
-"%TEST_DIR%\test_reconnect.exe" 10 ^
+"%TEST_DIR%\test_reconnect.exe" 15 ^
     > "!TEST!_modbus_reconnect_long_test.log" 2>&1
 if errorlevel 1 (
     echo FAILURE
@@ -614,8 +614,9 @@ if errorlevel 1 (
 REM Test 28: for Modbus reconnect bug
 set /a TEST+=1
 echo Test !TEST!: for Modbus reconnect bug...
+set TST_LOG=!TEST!_modbus_reconnect_bug_test.log
 "%TEST_DIR%\test_modbus_multiple.exe" ^
-    > "!TEST!_test_modbus_multiple.log" 2>&1
+    > "!TST_LOG!" 2>&1
 if errorlevel 1 (
     echo FAILURE
     set /a FAILURES+=1
@@ -627,12 +628,12 @@ if errorlevel 1 (
 REM Test 29: check for thread(5) in Modbus multiple test log
 set /a TEST+=1
 echo Test !TEST!: check for thread(5) in Modbus multiple test log...
-findstr /R "thread\(5\)" "!TEST!_test_modbus_multiple.log" >nul 2>&1
+findstr /R "thread\(5\)" "!TST_LOG!" >nul 2>&1
 if errorlevel 1 (
-    echo OK (no thread(5) found in log file)
+    echo OK (no thread(5) found in log file !TST_LOG!)
     set /a SUCCESSES+=1
 ) else (
-    echo FAILURE (found thread(5) in log file)
+    echo FAILURE (found thread(5) in log file !TST_LOG!)
     set /a FAILURES+=1
 )
 
