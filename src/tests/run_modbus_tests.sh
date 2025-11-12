@@ -44,7 +44,7 @@ killall -TERM modbus_server > /dev/null 2>&1
 sleep 3
 
 # echo -n "  Starting Modbus server $SCRIPT_DIR/modbus_server... "
-$TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1 &
+$TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 > modbus_server.log 2>&1 &
 MODBUS_PID=$!
 if [ $? != 0 ]; then
     # echo "FAILURE"
@@ -52,7 +52,7 @@ if [ $? != 0 ]; then
     exit 1
 else
     # sleep to let the server start up all the way and allow system to recover
-    sleep 10
+    sleep 7
     # echo "Modbus server started"
 fi
 
