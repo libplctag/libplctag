@@ -1160,7 +1160,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     int done = 0;
     int fd;
     int flags;
-    struct timeval timeout;  /* used for timing out connections etc. */
     struct linger so_linger; /* used to set up short/no lingering after connections are close()ed. */
 
     pdebug(DEBUG_DETAIL, "Starting.");
@@ -1946,7 +1945,6 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
 int socket_close(sock_p s) {
     int rc = PLCTAG_STATUS_OK;
-    int fd_to_close = INVALID_SOCKET;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -1956,7 +1954,6 @@ int socket_close(sock_p s) {
     }
 
     if(s->fd != INVALID_SOCKET) {
-        fd_to_close = s->fd;
         if(close(s->fd)) {
             pdebug(DEBUG_WARN, "Error closing socket fd=%d!", s->fd);
             rc = PLCTAG_ERR_CLOSE;
