@@ -1207,7 +1207,12 @@ jobs:
         tag_name: "v${{ env.VERSION }}"
         name: ${{ steps.get_pr_details.outputs.pr_title }}
         body: ${{ steps.get_pr_details.outputs.pr_body }}
-        files: ./release_artifacts/**/*.zip
+        files: |
+          ./release_artifacts/**/*.zip
+          ./release_artifacts/**/*.deb
+          ./release_artifacts/**/*.rpm
+          ./release_artifacts/**/*.apk
+          ./release_artifacts/**/*.tar.gz
         draft: false
         prerelease: false
       env:
