@@ -1306,6 +1306,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
             case PLCTAG_ERR_NO_MATCH:
                 pdebug(DEBUG_SPEW, "Not our response.");
+                plc->flags.response_ready = 0;
                 rc = PLCTAG_STATUS_PENDING;
                 break;
 
@@ -1410,9 +1411,10 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                 rc = PLCTAG_STATUS_PENDING;
 
                 break;
-            
+
             case PLCTAG_ERR_NO_MATCH:
                 pdebug(DEBUG_SPEW, "Not our response.");
+                plc->flags.response_ready = 0;
                 rc = PLCTAG_STATUS_PENDING;
                 break;
 
