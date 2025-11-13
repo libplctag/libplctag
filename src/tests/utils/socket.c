@@ -5,6 +5,12 @@
 #include <stdio.h>
 #include <stddef.h>
 
+/* Platform detection for BSD-like systems (mirrors production code) */
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+    defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__)
+#    define UTIL_BSD_OS_TYPE
+#endif
+
 #ifndef _WIN32
   #include <unistd.h>       // For close()
   #include <fcntl.h>        // For fcntl() and O_NONBLOCK
@@ -165,6 +171,15 @@ socket_t socket_create_tcp(void) {
 #endif
     }
 
+#ifdef UTIL_BSD_OS_TYPE
+    /* Suppress SIGPIPE on BSD/macOS when writing to closed sockets */
+    int nosigpipe = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
+        close(sock);
+        return -1;
+    }
+#endif
+
     /* Socket created in blocking mode by default */
     return sock;
 }
@@ -178,6 +193,15 @@ socket_t socket_create_udp(void) {
         return -1;
 #endif
     }
+
+#ifdef UTIL_BSD_OS_TYPE
+    /* Suppress SIGPIPE on BSD/macOS when writing to closed sockets */
+    int nosigpipe = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
+        close(sock);
+        return -1;
+    }
+#endif
 
     /* Socket created in blocking mode by default */
     return sock;
@@ -203,6 +227,15 @@ socket_t socket_create_tcp_server(socket_address_t *address, int backlog) {
     }
 #else
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
+        close(sock);
+        return -1;
+    }
+#endif
+
+#ifdef UTIL_BSD_OS_TYPE
+    /* Suppress SIGPIPE on BSD/macOS when writing to closed sockets */
+    int nosigpipe = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
         close(sock);
         return -1;
     }
@@ -251,6 +284,15 @@ socket_t socket_create_udp_server(socket_address_t *address) {
     }
 #else
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
+        close(sock);
+        return -1;
+    }
+#endif
+
+#ifdef UTIL_BSD_OS_TYPE
+    /* Suppress SIGPIPE on BSD/macOS when writing to closed sockets */
+    int nosigpipe = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
         close(sock);
         return -1;
     }
@@ -403,6 +445,15 @@ util_err_t socket_accept(socket_t server, socket_t *out_client,
 #endif
     }
 
+#ifdef UTIL_BSD_OS_TYPE
+    /* Suppress SIGPIPE on BSD/macOS when writing to closed sockets */
+    int nosigpipe = 1;
+    if (setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
+        /* Log warning but don't fail - socket is already accepted */
+        log_warn("Failed to set SO_NOSIGPIPE on accepted socket");
+    }
+#endif
+
     /* Accepted socket starts in blocking mode by default */
     *out_client = client;
 
@@ -554,7 +605,7 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
     return has_remaining ? UTIL_EAGAIN : UTIL_OK;
     
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
-    /* Unix: use writev with iovec array */
+    /* Unix: use sendmsg with iovec array for signal safety */
     struct iovec vecs[SOCKET_MAX_IOVECS];
     size_t vec_count = 0;
 
@@ -567,7 +618,18 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
         }
     }
 
+#ifdef UTIL_BSD_OS_TYPE
+    /* On BSD/macOS, SO_NOSIGPIPE was set at socket creation, use writev() */
     ssize_t sent = writev(sock, vecs, (int)vec_count);
+#else
+    /* On Linux, use sendmsg() with MSG_NOSIGNAL to prevent SIGPIPE */
+    struct msghdr msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = vecs;
+    msg.msg_iovlen = (int)vec_count;
+    /* MSG_NOSIGNAL is Linux-specific */
+    ssize_t sent = sendmsg(sock, &msg, MSG_NOSIGNAL);
+#endif
 
     if (sent < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -733,8 +795,14 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
     msg.msg_namelen = addr->addr_len;
     msg.msg_iov = vecs;
     msg.msg_iovlen = (int)vec_count;
-    
+
+#ifdef UTIL_BSD_OS_TYPE
+    /* On BSD/macOS, SO_NOSIGPIPE was set at socket creation */
     ssize_t sent = sendmsg(sock, &msg, 0);
+#else
+    /* On Linux, MSG_NOSIGNAL prevents SIGPIPE when writing to closed sockets */
+    ssize_t sent = sendmsg(sock, &msg, MSG_NOSIGNAL);
+#endif
     
     if (sent < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -771,9 +839,19 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
             offset += sz;
         }
     }
-    
+
+#ifdef _WIN32
     ssize_t sent = sendto(sock, temp_buf, total_size, 0,
                          (struct sockaddr*)&addr->addr, addr->addr_len);
+#elif defined(UTIL_BSD_OS_TYPE)
+    /* On BSD/macOS, SO_NOSIGPIPE was set at socket creation */
+    ssize_t sent = sendto(sock, temp_buf, total_size, 0,
+                         (struct sockaddr*)&addr->addr, addr->addr_len);
+#else
+    /* On Linux, use MSG_NOSIGNAL to prevent SIGPIPE */
+    ssize_t sent = sendto(sock, temp_buf, total_size, MSG_NOSIGNAL,
+                         (struct sockaddr*)&addr->addr, addr->addr_len);
+#endif
     
     if (sent < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
