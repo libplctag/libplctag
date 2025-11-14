@@ -140,9 +140,18 @@ int lib_init(void) {
 
     pdebug(DEBUG_INFO, "Setting up global library data.");
 
+    /* Start the refcount cleanup thread first, as other subsystems may need it */
+    pdebug(DEBUG_INFO, "Starting refcount cleanup infrastructure.");
+    rc = refcount_startup();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_ERROR, "Unable to start refcount cleanup infrastructure!");
+        return rc;
+    }
+
     pdebug(DEBUG_INFO, "Creating tag hashtable.");
     if((tags = hashtable_create(INITIAL_TAG_TABLE_SIZE)) == NULL) { /* MAGIC */
         pdebug(DEBUG_ERROR, "Unable to create tag hashtable!");
+        refcount_teardown();
         return PLCTAG_ERR_NO_MEM;
     }
 
@@ -198,6 +207,10 @@ void lib_teardown(void) {
         hashtable_destroy(tags);
         tags = NULL;
     }
+
+    /* Shut down the refcount cleanup thread last */
+    pdebug(DEBUG_INFO, "Shutting down refcount cleanup infrastructure.");
+    refcount_teardown();
 
     atomic_set_bool(&library_terminating, false);
 
