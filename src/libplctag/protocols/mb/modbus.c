@@ -537,61 +537,52 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                 }
             } else {
                 /* No matching PLC found in list, will create a new one */
-                break;
-            }
-        }
+                pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
+                pdebug(DEBUG_DETAIL, "connection_group_id=%d, server_id=%d, server=%s", connection_group_id, server_id, server);
 
-        /*
-         * this needs to be a separate check because the rc_inc() above may return
-         * NULL if the ref count is already zero.
-         */
-        if(!found_valid && !*plc) {
-            /* nope, make a new one.  Do as little as possible in the mutex. */
+                is_new = 1;
 
-            pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
+                /* Allocate and initialize the PLC object inside the mutex.
+                 * This prevents duplicate creation when multiple threads race to create the same PLC.
+                 * Note: rc_alloc() already zero-initializes the memory. */
+                *plc = (modbus_plc_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_plc_t), modbus_plc_destructor);
+                if(*plc) {
+                    pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
+                    (*plc)->connection_group_id = connection_group_id;
 
-            pdebug(DEBUG_DETAIL, "connection_group_id=%d, server_id=%d, server=%s", connection_group_id, server_id, server);
+                    /* copy the server string so that we can find this again. */
+                    (*plc)->server = str_dup(server);
+                    if(!((*plc)->server)) {
+                        pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC server string!");
+                        rc = PLCTAG_ERR_NO_MEM;
+                    } else {
+                        /* make sure we can be found. */
+                        (*plc)->server_id = (uint8_t)(unsigned int)server_id;
 
-            is_new = 1;
+                        /* tag_ring is already NULL from rc_alloc() zero-initialization */
 
-            *plc = (modbus_plc_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_plc_t), modbus_plc_destructor);
-            if(*plc) {
-                pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
-                (*plc)->connection_group_id = connection_group_id;
+                        /* create the PLC mutex to protect the tag list. */
+                        rc = mutex_create(&((*plc)->mutex));
+                        if(rc != PLCTAG_STATUS_OK) {
+                            pdebug(DEBUG_WARN, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
+                            rc = PLCTAG_ERR_MUTEX_INIT;
+                        } else {
+                            /* set up the maximum request depth. */
+                            (*plc)->max_requests_in_flight = max_requests_in_flight;
 
-                /* copy the server string so that we can find this again. */
-                (*plc)->server = str_dup(server);
-                if(!((*plc)->server)) {
-                    pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC server string!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                } else {
-                    /* make sure we can be found. */
-                    (*plc)->server_id = (uint8_t)(unsigned int)server_id;
-
-                    /* other tags could try to add themselves immediately. */
-
-                    /* clear tag list */
-                    (*plc)->tag_ring = NULL;
-
-                    /* create the PLC mutex to protect the tag list. */
-                    rc = mutex_create(&((*plc)->mutex));
-                    if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_WARN, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
-                        break;
+                            /* Add the new PLC to the global list. We already have the mutex,
+                             * so no duplicate can be created by another thread. The struct is
+                             * fully initialized and the mutex exists, so other threads can
+                             * safely find and use this PLC. */
+                            (*plc)->next = plcs;
+                            plcs = *plc;
+                            found_valid = 1;
+                        }
                     }
-
-                    /* set up the maximum request depth. */
-                    (*plc)->max_requests_in_flight = max_requests_in_flight;
-
-                    /* link up the the PLC into the global list. */
-                    (*plc)->next = plcs;
-                    plcs = *plc;
-
-                    /* now the PLC can be found and the tag list is ready for use. */
+                } else {
+                    pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC object!");
+                    rc = PLCTAG_ERR_NO_MEM;
                 }
-            } else {
-                pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC object!");
-                rc = PLCTAG_ERR_NO_MEM;
             }
         }
     }
@@ -762,11 +753,17 @@ THREAD_FUNC(modbus_plc_handler) {
             /* FIXME - what should we do here? */
         }
 
-        /* if there is still a response marked ready, clean it up. */
-        if(plc->flags.response_ready) {
-            pdebug(DEBUG_DETAIL, "Orphan response found.");
-            plc->flags.response_ready = 0;
-            plc->read_data_len = 0;
+        /* if there is still a response marked ready, clean it up.
+         * We must protect this with the mutex because responses can be received
+         * while tickle_all_tags() is running. A tag's response might arrive
+         * after its tag_op_read_response() check but before tickle_all_tags()
+         * completes, so we need atomic access to the flag. */
+        critical_block(plc->mutex) {
+            if(plc->flags.response_ready) {
+                pdebug(DEBUG_DETAIL, "Orphan response found.");
+                plc->flags.response_ready = 0;
+                plc->read_data_len = 0;
+            }
         }
 
         switch(plc->state) {
@@ -1307,6 +1304,7 @@ static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
 
 static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    int response_ready = 0;
 
     pdebug(DEBUG_DETAIL, "Starting read response check operation for tag %d.", tag->tag_id);
 
@@ -1317,7 +1315,15 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
         return PLCTAG_STATUS_OK;
     }
 
-    if(plc->flags.response_ready) {
+    /* Check response_ready flag with mutex held to prevent race condition
+     * where the flag is set by the handler thread while we're processing tags.
+     * We copy the flag value inside the critical section to ensure we see
+     * a consistent state. */
+    critical_block(plc->mutex) {
+        response_ready = plc->flags.response_ready;
+    }
+
+    if(response_ready) {
         pdebug(DEBUG_DETAIL, "Read response ready for tag %d.", tag->tag_id);
 
         rc = check_read_response(plc, tag);
@@ -1329,7 +1335,9 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                 /* remove the tag from the request slot. */
                 clear_request_slot(plc, tag);
 
-                plc->flags.response_ready = 0;
+                critical_block(plc->mutex) {
+                    plc->flags.response_ready = 0;
+                }
                 tag->op = TAG_OP_READ_REQUEST;
 
                 rc = PLCTAG_STATUS_PENDING;
@@ -1337,7 +1345,9 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
             case PLCTAG_ERR_NO_MATCH:
                 pdebug(DEBUG_SPEW, "Not our response.");
-                plc->flags.response_ready = 0;
+                critical_block(plc->mutex) {
+                    plc->flags.response_ready = 0;
+                }
                 rc = PLCTAG_STATUS_PENDING;
                 break;
 
@@ -1349,7 +1359,6 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_DETAIL, "Found our response.");
-                    plc->flags.response_ready = 0;
                 } else {
                     pdebug(DEBUG_WARN, "Error %s checking read response!", plc_tag_decode_error(rc));
                     rc = PLCTAG_STATUS_OK;
@@ -1358,7 +1367,9 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                 /* remove the tag from the request slot. */
                 clear_request_slot(plc, tag);
 
-                plc->flags.response_ready = 0;
+                critical_block(plc->mutex) {
+                    plc->flags.response_ready = 0;
+                }
                 tag->op = TAG_OP_IDLE;
                 tag->read_in_flight = 0;
                 tag->read_complete = 1;
@@ -1421,6 +1432,7 @@ static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
 
 static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
+    int response_ready = 0;
 
     if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT) {
         pdebug(DEBUG_WARN, "PLC changed state, restarting request.");
@@ -1428,7 +1440,15 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
         return PLCTAG_STATUS_OK;
     }
 
-    if(plc->flags.response_ready) {
+    /* Check response_ready flag with mutex held to prevent race condition
+     * where the flag is set by the handler thread while we're processing tags.
+     * We copy the flag value inside the critical section to ensure we see
+     * a consistent state. */
+    critical_block(plc->mutex) {
+        response_ready = plc->flags.response_ready;
+    }
+
+    if(response_ready) {
         rc = check_write_response(plc, tag);
 
         switch(rc) {
@@ -1436,7 +1456,9 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                 /* partial response, keep going */
                 pdebug(DEBUG_DETAIL, "Found part of our response, but we are not done.");
 
-                plc->flags.response_ready = 0;
+                critical_block(plc->mutex) {
+                    plc->flags.response_ready = 0;
+                }
                 tag->op = TAG_OP_WRITE_REQUEST;
 
                 rc = PLCTAG_STATUS_PENDING;
@@ -1445,7 +1467,9 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
 
             case PLCTAG_ERR_NO_MATCH:
                 pdebug(DEBUG_SPEW, "Not our response.");
-                plc->flags.response_ready = 0;
+                critical_block(plc->mutex) {
+                    plc->flags.response_ready = 0;
+                }
                 rc = PLCTAG_STATUS_PENDING;
                 break;
 
@@ -1456,7 +1480,9 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                 /* remove the tag from the request slot. */
                 clear_request_slot(plc, tag);
 
-                plc->flags.response_ready = 0;
+                critical_block(plc->mutex) {
+                    plc->flags.response_ready = 0;
+                }
                 tag->op = TAG_OP_IDLE;
                 tag->write_complete = 1;
                 tag->write_in_flight = 0;
