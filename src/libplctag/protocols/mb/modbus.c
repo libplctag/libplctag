@@ -83,6 +83,8 @@ struct modbus_plc_t {
     int connection_group_id;
 
     /* State */
+
+    /* FIXME - make these atomic booleans */
     struct {
         unsigned int terminate : 1;
         unsigned int response_ready : 1;
@@ -494,37 +496,56 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
 
     /* see if we can find a matching server. */
     critical_block(mb_mutex) {
-        modbus_plc_p *walker = &plcs;
+        int found_valid = 0;
 
-        while(*walker && ((*walker)->connection_group_id != connection_group_id
-              || (*walker)->server_id != (uint8_t)(unsigned int)server_id || str_cmp_i(server, (*walker)->server) != 0)) {
+        /* Keep searching until we find a valid PLC or run out of options */
+        while(!found_valid && !*plc) {
+            modbus_plc_p *walker = &plcs;
 
-            pdebug(DEBUG_DETAIL, "walking past PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
-                   (*walker)->server_id, (*walker)->server);
-                   
-            walker = &((*walker)->next);
+            while(*walker && ((*walker)->connection_group_id != connection_group_id
+                  || (*walker)->server_id != (uint8_t)(unsigned int)server_id || str_cmp_i(server, (*walker)->server) != 0)) {
+
+                pdebug(DEBUG_DETAIL, "walking past PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
+                       (*walker)->server_id, (*walker)->server);
+
+                walker = &((*walker)->next);
+            }
+
+            pdebug(DEBUG_DETAIL, "Finished walking PLC list walker=%p.", (void *)*walker);
+            if(*walker) {
+                pdebug(DEBUG_DETAIL, "Found matching PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
+                       (*walker)->server_id, (*walker)->server);
+            }
+
+            /* did we find one. */
+            if(*walker && (*walker)->connection_group_id == connection_group_id
+               && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
+                pdebug(DEBUG_DETAIL, "Trying existing PLC connection.");
+                pdebug(DEBUG_DETAIL, "rc_inc: Acquiring Modbus connection reference.");
+                *plc = rc_inc(*walker); /* this could result in NULL if the reference count is already zero */
+                is_new = 0;
+
+                /* If rc_inc() failed, the PLC is being destroyed (deferred cleanup).
+                 * Remove it from the list so we don't find the dead PLC again, then restart search. */
+                if(*plc == NULL) {
+                    pdebug(DEBUG_DETAIL, "Found PLC with refcount zero (being destroyed), removing from list and restarting search.");
+                    *walker = (*walker)->next;
+                    /* Loop will restart the search from the beginning */
+                } else {
+                    /* Successfully acquired a reference to a valid PLC */
+                    found_valid = 1;
+                }
+            } else {
+                /* No matching PLC found in list, will create a new one */
+                break;
+            }
         }
 
-        pdebug(DEBUG_DETAIL, "Finished walking PLC list walker=%p.", (void *)*walker);
-        if(*walker) {
-            pdebug(DEBUG_DETAIL, "Found matching PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
-                   (*walker)->server_id, (*walker)->server);
-        }
-
-        /* did we find one. */
-        if(*walker && (*walker)->connection_group_id == connection_group_id
-           && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
-            pdebug(DEBUG_DETAIL, "Using existing PLC connection.");
-            pdebug(DEBUG_DETAIL, "rc_inc: Acquiring Modbus connection reference.");
-            *plc = rc_inc(*walker); /* this could result in NULL if the reference count is already zero */
-            is_new = 0;
-        } 
-
-        /* 
+        /*
          * this needs to be a separate check because the rc_inc() above may return
          * NULL if the ref count is already zero.
          */
-        if(*walker == NULL) {
+        if(!found_valid && !*plc) {
             /* nope, make a new one.  Do as little as possible in the mutex. */
 
             pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
@@ -587,23 +608,17 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                 /* set up the PLC state */
                 (*plc)->state = PLC_CONNECT_START;
 
-                /* The handler thread will hold a reference to the PLC.
-                 * Increment the refcount so that when the handler thread exits and calls rc_dec(),
-                 * the PLC won't be freed until that happens. The refcount will be decremented when
-                 * the handler thread exits. */
-                pdebug(DEBUG_DETAIL, "rc_inc: Handler thread acquiring reference to PLC.");
-                *plc = rc_inc(*plc);
-                if(!*plc) {
-                    pdebug(DEBUG_WARN, "Unable to increment PLC reference count!");
-                    rc = PLCTAG_ERR_NO_MEM;
-                    break;
-                }
+                /* With deferred cleanup, the handler thread does NOT need to hold an explicit
+                 * reference to the PLC. The tags hold the references through tag->plc pointers.
+                 * When the handler thread exits, it will not decrement the refcount, so the PLC
+                 * will stay alive as long as tags reference it. When the last tag is destroyed,
+                 * its destructor will release the final PLC reference and trigger PLC destruction
+                 * via deferred cleanup. */
+                pdebug(DEBUG_DETAIL, "Handler thread will reference PLC through task parameter (no explicit rc_inc).");
 
-                rc = thread_create(&((*plc)->handler_thread), modbus_plc_handler, 32768, (void *)(*plc));
+                rc = thread_create(&((*plc)->handler_thread), modbus_plc_handler, 32768 /* ignored */, (void *)(*plc));
                 if(rc != PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_WARN, "Unable to create new handler thread, error %s!", plc_tag_decode_error(rc));
-                    /* Release the reference we just took since thread creation failed */
-                    *plc = rc_dec(*plc);
                     break;
                 }
 
@@ -644,6 +659,12 @@ void modbus_plc_destructor(void *plc_arg) {
     /* remove the plc from the list. */
     critical_block(mb_mutex) {
         modbus_plc_p *walker = &plcs;
+
+        /*
+         * FIXME - this has an ABA problem.  We should compare the host, port and
+         * connection group ID to be sure we have the right one.  Even then we
+         * could have a new connection that matches the same parameters.
+         */
 
         while(*walker && *walker != plc) { walker = &((*walker)->next); }
 
@@ -979,12 +1000,15 @@ THREAD_FUNC(modbus_plc_handler) {
 
     pdebug(DEBUG_INFO, "Handler thread exiting.");
 
-    /* Release the PLC reference held by this thread since rc_alloc.
-     * This should only happen AFTER all tags have been removed from the ring
-     * (the terminate flag is set when last tag is removed).
+    /* With deferred cleanup thread, we do NOT call rc_dec() here.
+     * The tags hold references to the PLC through their tag->plc pointers.
+     * When each tag is destroyed, its destructor calls rc_dec() on the PLC.
+     * The last tag's destructor will trigger the PLC destructor via deferred cleanup.
+     *
+     * If we called rc_dec() here, we could trigger PLC destruction while teardown
+     * code is still running and trying to access the PLC (race condition).
      */
-    pdebug(DEBUG_DETAIL, "Releasing PLC reference held by handler thread.");
-    plc = rc_dec(plc);
+    pdebug(DEBUG_DETAIL, "Handler thread exiting without decrementing PLC reference (deferred cleanup will handle it).");
 
     THREAD_RETURN(0);
 }
@@ -998,6 +1022,13 @@ void wake_plc_thread(modbus_plc_p plc) {
     if(plc) {
         /* Take a reference to the PLC to safely access it */
         plc_ref = rc_inc(plc);
+
+        if(!plc_ref) {
+            /* PLC refcount already hit zero, it's being destroyed or already destroyed */
+            pdebug(DEBUG_DETAIL, "PLC reference count is zero, cannot wake (PLC is being destroyed).");
+            pdebug(DEBUG_DETAIL, "Done.");
+            return;
+        }
 
         /* Check if PLC is terminating to avoid accessing freed mutex */
         if(plc_ref->flags.terminate) {
