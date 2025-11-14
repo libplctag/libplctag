@@ -625,17 +625,23 @@ if errorlevel 1 (
     set /a SUCCESSES+=1
 )
 
-REM Test 29: check for thread(5) in Modbus multiple test log
+REM Test 29: check for exactly 2 PLC creation entries in Modbus reconnect test log
+REM This validates proper PLC object reuse and no spurious creation/destruction.
 set /a TEST+=1
-echo Test !TEST!: check for thread(5) in Modbus multiple test log...
-findstr /R "thread\(5\)" "!TST_LOG!" >nul 2>&1
-if errorlevel 1 (
-    echo OK (no thread(5) found in log file !TST_LOG!)
+echo Test !TEST!: check for exactly 2 PLC creation entries in Modbus reconnect test log...
+setlocal enabledelayedexpansion
+set PLC_COUNT=0
+for /F %%A in ('findstr /C:"Creating new PLC." "!TST_LOG!" ^| find /C /V ""') do (
+    set PLC_COUNT=%%A
+)
+if "!PLC_COUNT!"=="2" (
+    echo OK (found !PLC_COUNT! PLC creation entries in log file !TST_LOG!)
     set /a SUCCESSES+=1
 ) else (
-    echo FAILURE (found thread(5) in log file !TST_LOG!)
+    echo FAILURE (expected 2 PLC creation entries, found !PLC_COUNT! in log file !TST_LOG!)
     set /a FAILURES+=1
 )
+endlocal enabledelayedexpansion
 
 echo.
 echo Killing Modbus emulator.

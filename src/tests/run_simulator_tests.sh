@@ -485,15 +485,17 @@ else
     let SUCCESSES++
 fi
 
-# make sure that there is no thread(5) in the log file.
+# Check that exactly 2 PLC objects were created during test 29.
+# This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
-echo -n "Test $TEST: check for thread(5) in Modbus multiple test log... "
-if grep -q "thread(5)" ${TST_LOG} ; then
-    echo "FAILURE (found thread(5) in log file ${TST_LOG})"
-    let FAILURES++
-else
-    echo "OK (no thread(5) found in log file ${TST_LOG})"
+echo -n "Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
+PLC_COUNT=$(grep -c "Creating new PLC\." ${TST_LOG})
+if [ "${PLC_COUNT}" = "2" ] ; then
+    echo "OK (found ${PLC_COUNT} PLC creation entries in log file ${TST_LOG})"
     let SUCCESSES++
+else
+    echo "FAILURE (expected 2 PLC creation entries, found ${PLC_COUNT} in log file ${TST_LOG})"
+    let FAILURES++
 fi
 
 # echo "  Killing Modbus emulator."
