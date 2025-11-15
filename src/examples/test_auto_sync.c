@@ -212,24 +212,24 @@ int main(void) {
 
     rc = 0;
 
-    /* allow 10% margin*/
-    int read_success_expected = (read_start_count * 90) / read_start_count;
-    int read_success_actual = (read_complete_count * 100) / read_start_count;
+    /* allow 10% margin (i.e., expect at least 90% of auto_sync operations to complete) */
+    int expected_read_count = RUN_PERIOD / READ_PERIOD_MS;
+    int expected_write_count = RUN_PERIOD / WRITE_SLEEP_MS;
+    int min_read_count = (expected_read_count * 90) / 100;
+    int min_write_count = (expected_write_count * 90) / 100;
 
-    int write_success_expected = (write_start_count * 90) / write_start_count;
+    int read_success_actual = (read_complete_count * 100) / read_start_count;
     int write_success_actual = (write_complete_count * 100) / write_start_count;
 
-    if(read_success_actual < read_success_expected) {
+    if(read_complete_count < min_read_count) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "FAILURE: Number of reads, %d%%, not close to the expected number, %d%%!\n", read_success_actual,
-                read_success_expected);
+        fprintf(stderr, "FAILURE: Number of reads, %d%%, not close to the expected number, 90%%!\n", read_success_actual);
         rc = 1;
     }
 
-    if(write_success_actual < write_success_expected) {
+    if(write_complete_count < min_write_count) {
         // NOLINTNEXTLINE
-        fprintf(stderr, "FAILURE: Number of writes, %d%%, not close to the expected number, %d%%!\n", write_success_actual,
-                write_success_expected);
+        fprintf(stderr, "FAILURE: Number of writes, %d%%, not close to the expected number, 90%%!\n", write_success_actual);
         rc = 1;
     }
     
