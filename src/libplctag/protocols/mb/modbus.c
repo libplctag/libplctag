@@ -570,6 +570,10 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                             /* set up the maximum request depth. */
                             (*plc)->max_requests_in_flight = max_requests_in_flight;
 
+                            /* Initialize PLC state before making it visible to other threads */
+                            (*plc)->state = PLC_CONNECT_START;
+                            (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+
                             /* Add the new PLC to the global list. We already have the mutex,
                              * so no duplicate can be created by another thread. The struct is
                              * fully initialized and the mutex exists, so other threads can
