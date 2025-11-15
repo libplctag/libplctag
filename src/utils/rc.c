@@ -236,9 +236,10 @@ void *rc_dec_impl(const char *func, int line_num, void *data) {
 
         /* clean up only if count is zero. */
         if(rc && count <= 0) {
-            pdebug(DEBUG_DETAIL, "Queueing cleanup due to call at %s:%d for %p allocated in %s:%d.", func, line_num, data, rc->function_name, rc->line_num);
+            pdebug(DEBUG_DETAIL, "Queueing cleanup due to call at %s:%d for object%p allocated in %s:%d.", func, line_num, data, rc->function_name, rc->line_num);
 
-            /* Queue the cleanup instead of doing it immediately.
+            /*
+             * Queue the cleanup instead of doing it immediately.
              * This ensures cleanup happens in a separate thread, not in the caller's thread.
              */
             if(cleanup_thread_running && cleanup_mutex && cleanup_queue) {
@@ -301,28 +302,20 @@ THREAD_FUNC(refcount_cleanup_thread_func) {
     pdebug(DEBUG_INFO, "Cleanup thread starting.");
 
     while(cleanup_thread_running) {
-        refcount_p rc = NULL;
-\
+        refcount_p header = NULL;
+
         cond_wait(cleanup_cond, 100); /* 100 millisecond timeout */
 
-        critical_block(cleanup_mutex) {
-            rc = vector_remove(cleanup_queue, 0);
-        }
-
-        while(rc) {
-            pdebug(DEBUG_DETAIL, "Processing cleanup for refcount %p", rc);
-
-            /* Perform the actual cleanup outside the mutex to avoid holding
-             * the lock while running destructors */
-            if(rc) {
-                refcount_cleanup(rc);
-            }
-
-            /* Check for more entries */
+        do {
             critical_block(cleanup_mutex) {
-                rc = vector_remove(cleanup_queue, 0);
+                header = vector_remove(cleanup_queue, 0);
             }
-        }
+
+            if(header) {
+                pdebug(DEBUG_DETAIL, "Processing cleanup for object %p allocated at %s:%d", (void*)(header + 1), header->function_name, header->line_num);
+                refcount_cleanup(header);
+            }
+        } while(header != NULL);
     }
 
     pdebug(DEBUG_INFO, "Cleanup thread exiting.");
@@ -396,45 +389,38 @@ int refcount_startup(void) {
 int refcount_teardown(void) {
     pdebug(DEBUG_INFO, "Shutting down refcount cleanup infrastructure.");
 
-    if(!cleanup_thread) {
-        pdebug(DEBUG_WARN, "Cleanup thread not initialized!");
-        return PLCTAG_STATUS_OK;
-    }
-
-    /* Signal the cleanup thread to exit */
-    pdebug(DEBUG_DETAIL, "Signaling cleanup thread to exit.");
-    cleanup_thread_running = 0;
-    if(cleanup_cond) {
-        cond_signal(cleanup_cond);
-    }
-
     /* Wait for the cleanup thread to finish */
     if(cleanup_thread) {
+        /* Signal the cleanup thread to exit */
+        pdebug(DEBUG_DETAIL, "Signaling cleanup thread to exit.");        
+        cleanup_thread_running = 0;
+        if(cleanup_cond) {
+            cond_signal(cleanup_cond);
+        }
+
         pdebug(DEBUG_DETAIL, "Waiting for cleanup thread to exit.");
+        
         thread_join(cleanup_thread);
         thread_destroy(&cleanup_thread);
         cleanup_thread = NULL;
+    } else {
+        pdebug(DEBUG_WARN, "Cleanup thread not running!");
     }
-    pdebug(DEBUG_DETAIL, "Cleanup thread exited.");
 
     /* drain any remaining queue entries */
     if(cleanup_queue) {
         pdebug(DEBUG_DETAIL, "Draining any remaining cleanup queue entries.");
 
-        refcount_p rc = NULL;
+        refcount_p header = NULL;
+        
+        do {
+            critical_block(cleanup_mutex) { header = vector_remove(cleanup_queue, 0); }
 
-        critical_block(cleanup_mutex) {
-            rc = vector_remove(cleanup_queue, 0);
-        }
-
-        while(rc != NULL) {
-            pdebug(DEBUG_DETAIL, "Force cleanup of queued refcount %p", (void *)rc);
-            refcount_cleanup(rc);
-
-            critical_block(cleanup_mutex) {
-                rc = vector_remove(cleanup_queue, 0);
+            if(header) {
+                pdebug(DEBUG_DETAIL, "Force cleanup of queued refcount %p", (void *)header);
+                refcount_cleanup(header);
             }
-        }
+        } while(header != NULL);
 
         vector_destroy(cleanup_queue);
         cleanup_queue = NULL;
