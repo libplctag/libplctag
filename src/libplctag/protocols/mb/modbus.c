@@ -104,6 +104,7 @@ struct modbus_plc_t {
         PLC_BUILD_REQUEST,
         PLC_SEND_REQUEST,
         PLC_RECEIVE_RESPONSE,
+        PLC_IDLE_WAIT,
         PLC_ERR_WAIT
     } state;
     int max_requests_in_flight;
@@ -727,6 +728,90 @@ void modbus_plc_destructor(void *plc_arg) {
     pdebug(DEBUG_INFO, "Done.");
 }
 
+
+/**
+ * @brief Reset all pending requests for a Modbus PLC.
+ *
+ * This function resets all pending requests for a Modbus PLC by clearing
+ * the request slots and resetting the tags to their request state if they were waiting for
+ * a response. This is typically called when the socket is disconnected or has an error.
+ * 
+ * This closes the socket if it is open!
+ * 
+ * This resets all the flags and data lengths to their initial state.
+ * 
+ * @param plc Pointer to the Modbus PLC structure.
+ * @return int Status code indicating success or failure.
+ */
+static int reset_plc(modbus_plc_p plc) {
+    pdebug(DEBUG_INFO, "Starting.");
+
+    if(!plc) {
+        pdebug(DEBUG_WARN, "Null PLC pointer passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!plc->mutex) {
+        pdebug(DEBUG_WARN, "PLC mutex is null!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    pdebug(DEBUG_WARN, "MUTEX: Acquire. Resetting PLC.");
+    critical_block(plc->mutex) {
+        /* Clear all pending requests and reset tags to allow retry since the server may have been restarted */
+        pdebug(DEBUG_DETAIL, "Clearing all pending requests due to socket disconnect.");
+        if(plc->tag_ring) {
+            modbus_tag_p cur = plc->tag_ring;
+            do {
+                if(cur->op == TAG_OP_READ_RESPONSE || cur->op == TAG_OP_WRITE_RESPONSE) {
+                    pdebug(DEBUG_DETAIL, "Resetting tag %" PRId32 " from %s to request state due to socket disconnect.",
+                            cur->tag_id, op_to_str(cur->op));
+                    /* Reset seq_id since we're not waiting for this response anymore */
+                    cur->seq_id = 0;
+                    cur->request_slot = -1;
+                    /* Reset to the corresponding REQUEST state to allow retry on reconnect */
+                    if(cur->op == TAG_OP_READ_RESPONSE) {
+                        cur->op = TAG_OP_READ_REQUEST;
+                    } else {
+                        cur->op = TAG_OP_WRITE_REQUEST;
+                    }
+                } else if(cur->op == TAG_OP_READ_REQUEST || cur->op == TAG_OP_WRITE_REQUEST) {
+                    /* Also clear request slots for tags in REQUEST state */
+                    pdebug(DEBUG_DETAIL, "Clearing request slot for tag %" PRId32 " in %s state.",
+                            cur->tag_id, op_to_str(cur->op));
+                    cur->request_slot = -1;
+                }
+                cur = cur->next;
+            } while(cur && cur != plc->tag_ring);
+        }
+        /* Clear all request slots */
+        for(int slot = 0; slot < plc->max_requests_in_flight; slot++) {
+            plc->tags_with_requests[slot] = 0;
+        }
+
+        if(plc->sock) {
+            pdebug(DEBUG_DETAIL, "Closing socket due to error or disconnect.");
+            socket_close(plc->sock);
+        } else {
+            pdebug(DEBUG_DETAIL, "Socket already closed.");
+        }
+
+        /* set up the state. */
+        plc->flags.response_ready = 0;
+        plc->flags.request_ready = 0;
+        plc->read_data_len = 0;
+        plc->write_data_len = 0;
+        plc->write_data_offset = 0;
+    }
+    pdebug(DEBUG_WARN, "MUTEX: Release. PLC reset.");
+
+    pdebug(DEBUG_INFO, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+
 #define UPDATE_ERR_DELAY()                                                                 \
     do {                                                                                   \
         err_delay = err_delay * 2;                                                         \
@@ -774,6 +859,9 @@ THREAD_FUNC(modbus_plc_handler) {
             case PLC_CONNECT_START:
                 pdebug(DEBUG_DETAIL, "in PLC_CONNECT_START state.");
 
+                /* reset the PLC to initial state, including closing the socket */
+                reset_plc(plc);
+
                 /* connect to the PLC */
                 rc = connect_plc(plc);
                 if(rc == PLCTAG_STATUS_PENDING) {
@@ -788,10 +876,6 @@ THREAD_FUNC(modbus_plc_handler) {
                     plc->state = PLC_READY;
                 } else {
                     pdebug(DEBUG_WARN, "Error %s received while starting socket connection.", plc_tag_decode_error(rc));
-
-                    pdebug(DEBUG_WARN, "MUTEX: Acquire. Closing socket due to connection error.");
-                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
-                    pdebug(DEBUG_WARN, "MUTEX: Release.Socket connection failed.");
 
                     /* exponential increase with jitter. */
                     UPDATE_ERR_DELAY();
@@ -823,10 +907,6 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else {
                     pdebug(DEBUG_WARN, "Error %s received while waiting for socket connection.", plc_tag_decode_error(rc));
 
-                    pdebug(DEBUG_WARN, "MUTEX: Acquire. Closing socket due to connection error.");
-                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
-                    pdebug(DEBUG_WARN, "MUTEX: Release. Socket closed due to connection error.");
-
                     /* exponential increase with jitter. */
                     UPDATE_ERR_DELAY();
 
@@ -849,6 +929,15 @@ THREAD_FUNC(modbus_plc_handler) {
 
                 /* this will wait if nothing wakes it up or until it times out. */
                 sock_events = socket_wait_event(plc->sock, waitable_events, MODBUS_IDLE_WAIT_TIMEOUT);
+                if(sock_events & SOCK_EVENT_TIMEOUT) { 
+                    pdebug(DEBUG_DETAIL, "Timed out waiting for something to happen.");
+
+                    /* reset the PLC state */
+                    reset_plc(plc);
+
+                    /* go to the state where we wait for something to happen. */
+                    plc->state = PLC_IDLE_WAIT;
+                }
 
                 /* check for socket errors or disconnects. */
                 if((sock_events & SOCK_EVENT_ERROR) || (sock_events & SOCK_EVENT_DISCONNECT)) {
@@ -860,10 +949,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     pdebug(DEBUG_WARN, "Going to state PLC_CONNECT_START");
 
-                    pdebug(DEBUG_WARN, "MUTEX: Acquire. Closing socket due to error or disconnect.");
-                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
-                    pdebug(DEBUG_WARN, "MUTEX: Release. Socket closed due to error or disconnect.");
-
+                    /* try to reconnect immediately */
                     plc->state = PLC_CONNECT_START;
                     break;
                 }
@@ -911,18 +997,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else if(rc == PLCTAG_STATUS_PENDING) {
                     pdebug(DEBUG_DETAIL, "Not all data written, will try again.");
                 } else {
-                    pdebug(DEBUG_WARN, "Closing socket due to write error %s.", plc_tag_decode_error(rc));
-
-                    pdebug(DEBUG_WARN, "MUTEX: Acquire. Closing socket due to write error.");
-                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
-                    pdebug(DEBUG_WARN, "MUTEX: Release. Socket closed due to write error.");
-
-                    /* set up the state. */
-                    plc->flags.response_ready = 0;
-                    plc->flags.request_ready = 0;
-                    plc->read_data_len = 0;
-                    plc->write_data_len = 0;
-                    plc->write_data_offset = 0;
+                    pdebug(DEBUG_WARN, "Resetting PLC due to write error %s.", plc_tag_decode_error(rc));
 
                     /* try to reconnect immediately. */
                     plc->state = PLC_CONNECT_START;
@@ -947,18 +1022,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 } else if(rc == PLCTAG_STATUS_PENDING) {
                     pdebug(DEBUG_DETAIL, "Response not complete, continue reading data.");
                 } else {
-                    pdebug(DEBUG_WARN, "Closing socket due to read error %s.", plc_tag_decode_error(rc));
-
-                    pdebug(DEBUG_WARN, "MUTEX: Acquire. Closing socket due to read error.");
-                    critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
-                    pdebug(DEBUG_WARN, "MUTEX: Release. Socket closed due to read error.");
-
-                    /* set up the state. */
-                    plc->flags.response_ready = 0;
-                    plc->flags.request_ready = 0;
-                    plc->read_data_len = 0;
-                    plc->write_data_len = 0;
-                    plc->write_data_offset = 0;
+                    pdebug(DEBUG_WARN, "Reconnecting due to read error %s.", plc_tag_decode_error(rc));
 
                     /* try to reconnect immediately. */
                     plc->state = PLC_CONNECT_START;
@@ -968,21 +1032,29 @@ THREAD_FUNC(modbus_plc_handler) {
 
                 break;
 
+
+            case PLC_IDLE_WAIT:
+                pdebug(DEBUG_DETAIL, "in PLC_IDLE_WAIT state.");
+
+                /* wait until something happens. */
+                sock_events = socket_wait_event(plc->sock, SOCK_EVENT_DEFAULT_MASK, MODBUS_IDLE_WAIT_TIMEOUT);
+
+                if(sock_events & SOCK_EVENT_WAKE_UP) {
+                    pdebug(DEBUG_DETAIL, "PLC woke up.");
+                    plc->state = PLC_CONNECT_START;
+                } else if(sock_events & SOCK_EVENT_TIMEOUT) {
+                    pdebug(DEBUG_DETAIL, "PLC idle wait timed out.");
+                }
+
+                break;
+
             case PLC_ERR_WAIT:
                 pdebug(DEBUG_DETAIL, "in PLC_ERR_WAIT state.");
-
-                /* clean up the socket in case we did not earlier */
-                pdebug(DEBUG_WARN, "MUTEX: Acquire. Closing socket if necessary in PLC_ERR_WAIT state.");
-                critical_block(plc->mutex) {
-                    if(plc->sock) { socket_destroy(&(plc->sock)); }
-                }
-                pdebug(DEBUG_WARN, "MUTEX: Release. Socket closed if necessary in PLC_ERR_WAIT state.");
-                
 
                 /* wait until done. */
                 if(err_delay_until > time_ms()) {
                     pdebug(DEBUG_DETAIL, "Waiting for at least %" PRId64 "ms.", (err_delay_until - time_ms()));
-                    sleep_ms(PLC_SOCKET_ERR_DELAY_WAIT_INCREMENT);
+                    socket_wait_event(plc->sock, SOCK_EVENT_WAKE_UP |SOCK_EVENT_TIMEOUT, (int)(err_delay_until - time_ms()));
                 } else {
                     pdebug(DEBUG_DETAIL, "Error wait is over, going to state PLC_CONNECT_START.");
                     plc->state = PLC_CONNECT_START;
@@ -1061,6 +1133,15 @@ void wake_plc_thread(modbus_plc_p plc) {
 }
 
 
+/**
+ * @brief Connect to the PLC.
+ * 
+ * This may be called to (re)establish a connection to the PLC. In that case,
+ * we may already have a socket object and a parsed server/port.
+ * 
+ * @param plc 
+ * @return int 
+ */
 int connect_plc(modbus_plc_p plc) {
     int rc = PLCTAG_STATUS_OK;
     char **server_port = NULL;
@@ -1068,6 +1149,9 @@ int connect_plc(modbus_plc_p plc) {
     int port = MODBUS_DEFAULT_PORT;
 
     pdebug(DEBUG_DETAIL, "Starting.");
+
+
+    pdebug(DEBUG_DETAIL, "Parsing server host and port from server string.");
 
     server_port = str_split(plc->server, ":");
     if(!server_port) {
@@ -1097,14 +1181,17 @@ int connect_plc(modbus_plc_p plc) {
 
     pdebug(DEBUG_DETAIL, "Using server \"%s\" and port %d.", server, port);
 
-    rc = socket_create(&(plc->sock));
-    if(rc != PLCTAG_STATUS_OK) {
-        /* done with the split string. */
-        mem_free(server_port);
-        server_port = NULL;
+    if(!plc->sock) {
+        pdebug(DEBUG_DETAIL, "Creating new socket.");
+        rc = socket_create(&(plc->sock));
+        if(rc != PLCTAG_STATUS_OK) {
+            /* done with the split string. */
+            mem_free(server_port);
+            server_port = NULL;
 
-        pdebug(DEBUG_WARN, "Unable to create socket object, error %s!", plc_tag_decode_error(rc));
-        return rc;
+            pdebug(DEBUG_WARN, "Unable to create socket object, error %s!", plc_tag_decode_error(rc));
+            return rc;
+        }
     }
 
     /* connect to the socket */
@@ -1115,11 +1202,6 @@ int connect_plc(modbus_plc_p plc) {
         mem_free(server_port);
 
         pdebug(DEBUG_WARN, "Unable to connect to the server \"%s\", got error %s!", plc->server, plc_tag_decode_error(rc));
-
-        pdebug(DEBUG_WARN, "MUTEX: Acquire. Closing socket due to connection error.");
-        critical_block(plc->mutex) { socket_destroy(&(plc->sock)); }
-        pdebug(DEBUG_WARN, "MUTEX: Release. Socket closed due to connection error.");
-
         return rc;
     }
 
@@ -1848,7 +1930,7 @@ int receive_response(modbus_plc_p plc) {
         pdebug(DEBUG_DETAIL, "After reading the socket, total read=%d and data needed=%d.", plc->read_data_len, data_needed);
     } while(rc > 0);
 
-
+    /* are we done? */
     if(data_needed == 0) {
         /* we got our packet. */
         pdebug(DEBUG_DETAIL, "Received full packet.");
