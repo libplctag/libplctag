@@ -1674,6 +1674,11 @@ LIB_EXPORT int plc_tag_read(int32_t id, int timeout) {
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
 
+        if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
+            pdebug(DEBUG_WARN, "Timeout expired waiting for tag read to complete!");
+            rc = PLCTAG_ERR_TIMEOUT;
+        }
+
         /* the read is not in flight anymore. */
         critical_block(tag->api_mutex) {
             tag->read_in_flight = 0;
@@ -1860,6 +1865,11 @@ LIB_EXPORT int plc_tag_write(int32_t id, int timeout) {
                 plc_tag_abort_impl(tag);
             }
         } while(rc == PLCTAG_STATUS_PENDING && time_ms() < end_time);
+
+        if(rc != PLCTAG_STATUS_OK && time_ms() >= end_time) {
+            pdebug(DEBUG_WARN, "Timeout expired waiting for tag write to complete!");
+            rc = PLCTAG_ERR_TIMEOUT;
+        }
 
         /* the write is not in flight anymore. */
         critical_block(tag->api_mutex) {
