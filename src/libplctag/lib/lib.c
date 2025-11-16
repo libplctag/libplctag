@@ -1099,6 +1099,12 @@ LIB_EXPORT void plc_tag_shutdown(void) {
 
     pdebug(DEBUG_INFO, "Starting.");
 
+    /* Prevent double shutdown. If tags is NULL, shutdown has already been called. */
+    if(!tags) {
+        pdebug(DEBUG_WARN, "plc_tag_shutdown() called after previous shutdown. Ignoring.");
+        return;
+    }
+
     /* terminate anything waiting on the library and prevent any tags from being created. */
     atomic_set_bool(&library_terminating, true);
 
