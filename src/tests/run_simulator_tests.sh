@@ -144,7 +144,7 @@ fi
 
 
 echo "Starting AB emulator for functional/slow ControlLogix tests."
-{ $VALGRIND$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" --delay=50  > logix_slow_emulator.log 2>&1 & } 2>/dev/null
+{ $VALGRIND$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" --delay=100  > logix_slow_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
 if [ $EMULATOR_PID -le 0 ]; then
     echo "Unable to start AB/ControlLogix emulator!"
