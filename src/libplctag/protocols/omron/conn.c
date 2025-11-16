@@ -1039,7 +1039,7 @@ THREAD_FUNC(conn_handler) {
 
     pdebug(DEBUG_INFO, "Starting thread for conn %p", conn);
 
-    while(!conn->terminating && !atomic_get_bool(&library_terminating)) {
+    while(!conn->terminating && atomic_get_bool(&lib_active)) {
         /* how long should we wait if nothing wakes us? */
         wait_until_time = time_ms() + CONN_IDLE_WAIT_TIME;
 

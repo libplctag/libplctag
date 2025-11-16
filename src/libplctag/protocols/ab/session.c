@@ -1252,7 +1252,7 @@ THREAD_FUNC(session_handler) {
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
-    while(!session->terminating && !atomic_get_bool(&library_terminating)) {
+    while(!session->terminating && atomic_get_bool(&lib_active)) {
         now = time_ms();
 
         /* how long should we wait if nothing wakes us? */

@@ -167,7 +167,7 @@ struct plc_tag_t {
 
 /* the following may need to be used where the tag is already mapped or is not yet mapped */
 
-extern atomic_bool library_terminating;
+extern atomic_bool lib_active;
 
 extern int lib_init(void);
 extern void lib_teardown(void);

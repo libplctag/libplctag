@@ -828,7 +828,7 @@ THREAD_FUNC(modbus_plc_handler) {
         THREAD_RETURN(0);
     }
 
-    while(!plc->flags.terminate && !atomic_get_bool(&library_terminating)) {
+    while(!plc->flags.terminate && atomic_get_bool(&lib_active)) {
         rc = tickle_all_tags(plc);
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error %s tickling tags!", plc_tag_decode_error(rc));

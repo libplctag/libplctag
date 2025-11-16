@@ -68,7 +68,7 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
 static volatile hashtable_p tags = NULL;
 static mutex_p tag_lookup_mutex = NULL;
 
-atomic_bool library_terminating = false;
+atomic_bool lib_active = true;
 
 static thread_p tag_tickler_thread = NULL;
 static cond_p tag_tickler_wait = NULL;
@@ -136,7 +136,7 @@ int lib_init(void) {
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    atomic_set_bool(&library_terminating, false);
+    atomic_set_bool(&lib_active, true);
 
     pdebug(DEBUG_INFO, "Setting up global library data.");
 
@@ -167,7 +167,7 @@ int lib_init(void) {
 void lib_teardown(void) {
     pdebug(DEBUG_INFO, "Tearing down library.");
 
-    atomic_set_bool(&library_terminating, true);
+    atomic_set_bool(&lib_active, false);
 
     if(tag_tickler_wait) {
         pdebug(DEBUG_INFO, "Signaling tag tickler condition var.");
@@ -205,8 +205,6 @@ void lib_teardown(void) {
         tags = NULL;
         pdebug(DEBUG_INFO, "Tag hashtable destroyed.");
     }
-
-    atomic_set_bool(&library_terminating, false);
 
     pdebug(DEBUG_INFO, "Library teardown complete.");
 }
@@ -522,7 +520,7 @@ THREAD_FUNC(tag_tickler_func) {
 
     pdebug(DEBUG_INFO, "Starting.");
 
-    while(!atomic_get_bool(&library_terminating)) {
+    while(atomic_get_bool(&lib_active)) {
         int max_index = 0;
         int64_t timeout_wait_ms = TAG_TICKLER_TIMEOUT_MS;
 
@@ -856,8 +854,8 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
 
     pdebug(DEBUG_INFO, "Starting");
 
-    /* check to see if the library is terminating. */
-    if(atomic_get_bool(&library_terminating)) {
+    /* check to see if the library is initialized. */
+    if(!atomic_get_bool(&lib_active)) {
         pdebug(DEBUG_WARN, "The plctag library is in the process of shutting down!");
         return PLCTAG_ERR_NOT_ALLOWED;
     }
@@ -1100,13 +1098,13 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     pdebug(DEBUG_INFO, "Starting.");
 
     /* Prevent double shutdown. If tags is NULL, shutdown has already been called. */
-    if(!tags) {
+    if(!tags || !atomic_get_bool(&lib_active)) {
         pdebug(DEBUG_WARN, "plc_tag_shutdown() called after previous shutdown. Ignoring.");
         return;
     }
 
     /* terminate anything waiting on the library and prevent any tags from being created. */
-    atomic_set_bool(&library_terminating, true);
+    atomic_set_bool(&lib_active, false);
 
     /* close all tags. */
     pdebug(DEBUG_INFO, "Closing all tags.");
@@ -1148,11 +1146,6 @@ LIB_EXPORT void plc_tag_shutdown(void) {
     pdebug(DEBUG_INFO, "About to destroy modules.");
     destroy_modules();
     pdebug(DEBUG_INFO, "Modules destroyed successfully.");
-
-    /* Clear the termination flag in case we want to start up again. */
-    pdebug(DEBUG_INFO, "Clearing library termination flag.");
-    atomic_set_bool(&library_terminating, false);
-    pdebug(DEBUG_INFO, "Library termination flag cleared.");
 
     pdebug(DEBUG_INFO, "Done.");
 }
@@ -4277,6 +4270,12 @@ int check_byte_order_str(const char *byte_order, int length) {
 
 plc_tag_p lookup_tag(int32_t tag_id) {
     plc_tag_p tag = NULL;
+
+    /* If library is not initialized, return NULL immediately to avoid accessing destroyed mutex. */
+    if(!atomic_get_bool(&lib_active)) {
+        pdebug(DEBUG_INFO, "Library not initialized, returning NULL for tag lookup.");
+        return NULL;
+    }
 
     critical_block(tag_lookup_mutex) {
         tag = hashtable_get(tags, (int64_t)tag_id);
