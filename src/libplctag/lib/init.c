@@ -140,17 +140,26 @@ tag_create_function find_tag_create_func(attr attributes) {
  */
 
 void destroy_modules(void) {
+
+    pdebug(DEBUG_INFO, "Starting.");
+
+    pdebug(DEBUG_INFO, "Tearing down AB module.");
     ab_teardown();
 
+    pdebug(DEBUG_INFO, "Tearing down Modbus module.");
     mb_teardown();
 
+    pdebug(DEBUG_INFO, "Tearing down Omron module.");
     omron_teardown();
 
+    pdebug(DEBUG_INFO, "Tearing down library module.");
     lib_teardown();
 
     /* last so that we continue to process deferred destructors until the end. */
+    pdebug(DEBUG_INFO, "Tearing down refcount infrastructure.");
     refcount_teardown();
 
+    pdebug(DEBUG_INFO, "Tearing down library mutex.");
     spin_block(&library_initialization_lock) {
         if(lib_mutex != NULL) {
             /* FIXME casting to get rid of volatile is WRONG */
@@ -159,7 +168,10 @@ void destroy_modules(void) {
         }
     }
 
+    pdebug(DEBUG_INFO, "Unregistering logger.");
     plc_tag_unregister_logger();
+
+    pdebug(DEBUG_INFO, "Done.");
 
     library_initialized = 0;
 }
