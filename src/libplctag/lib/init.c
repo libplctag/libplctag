@@ -38,6 +38,7 @@
 #include <libplctag/protocols/mb/modbus.h>
 #include <libplctag/protocols/omron/omron.h>
 #include <libplctag/protocols/system/system.h>
+#include <utils/rc.h>
 #include <platform.h>
 #include <stdlib.h>
 #include <utils/attr.h>
@@ -57,12 +58,13 @@ struct {
     const tag_create_function tag_constructor;
 } tag_type_map[] = {
     /* System tags */
-    {NULL, "system", "library", NULL, system_tag_create},
+    {.protocol= NULL, .make = "system", .family = "library", .model = NULL, .tag_constructor = system_tag_create},
     /* Allen-Bradley PLCs */
-    {"ab-eip", NULL, NULL, NULL, ab_tag_create},
-    {"ab_eip", NULL, NULL, NULL, ab_tag_create},
-    {"modbus-tcp", NULL, NULL, NULL, mb_tag_create},
-    {"modbus_tcp", NULL, NULL, NULL, mb_tag_create}};
+    {.protocol= "ab-eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol= "ab_eip", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = ab_tag_create},
+    {.protocol= "modbus-tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create},
+    {.protocol= "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}
+};
 
 static lock_t library_initialization_lock = LOCK_INIT;
 static volatile int library_initialized = 0;
@@ -146,6 +148,9 @@ void destroy_modules(void) {
 
     lib_teardown();
 
+    /* last so that we continue to process deferred destructors until the end. */
+    refcount_teardown();
+
     spin_block(&library_initialization_lock) {
         if(lib_mutex != NULL) {
             /* FIXME casting to get rid of volatile is WRONG */
@@ -171,6 +176,12 @@ int initialize_modules(void) {
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_INFO, "Starting.");
+
+    /* fast path once the library is up and running. */
+    if(library_initialized) {
+        pdebug(DEBUG_INFO, "Library already initialized, returning.");
+        return PLCTAG_STATUS_OK;
+    }
 
     /*
      * Try to keep busy waiting to a minimum.
@@ -200,17 +211,38 @@ int initialize_modules(void) {
                 /* initialize a random seed value. */
                 srand((unsigned int)time_ms());
 
+                /* Start the refcount cleanup thread first, as other subsystems may need it */
+                pdebug(DEBUG_INFO, "Starting refcount cleanup infrastructure.");
+                rc = refcount_startup();
+                if(rc != PLCTAG_STATUS_OK) { pdebug(DEBUG_ERROR, "Unable to start refcount cleanup infrastructure!"); }
+
                 pdebug(DEBUG_INFO, "Initializing library modules.");
-                rc = lib_init();
+                if(rc == PLCTAG_STATUS_OK) { rc = lib_init();
+                    if(rc != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_ERROR, "Unable to initialize library module!");
+                    }
+                }
 
                 pdebug(DEBUG_INFO, "Initializing AB module.");
-                if(rc == PLCTAG_STATUS_OK) { rc = ab_init(); }
+                if(rc == PLCTAG_STATUS_OK) { rc = ab_init(); 
+                    if(rc != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_ERROR, "Unable to initialize AB module!");
+                    }
+                }
 
                 pdebug(DEBUG_INFO, "Initializing Modbus module.");
-                if(rc == PLCTAG_STATUS_OK) { rc = mb_init(); }
+                if(rc == PLCTAG_STATUS_OK) { rc = mb_init(); 
+                    if(rc != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_ERROR, "Unable to initialize Modbus module!");
+                    }
+                }
 
                 pdebug(DEBUG_INFO, "Initializing Omron module.");
-                if(rc == PLCTAG_STATUS_OK) { rc = omron_init(); }
+                if(rc == PLCTAG_STATUS_OK) { rc = omron_init(); 
+                    if(rc != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_ERROR, "Unable to initialize Omron module!");
+                    }
+                }
 
                 /* hook the destructor */
                 atexit(plc_tag_shutdown);
