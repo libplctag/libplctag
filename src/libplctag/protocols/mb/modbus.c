@@ -497,141 +497,134 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
 
     /* see if we can find a matching server. */
     critical_block(mb_mutex) {
-        int found_valid = 0;
+        /* Keep searching until we find a valid PLC or run out of existing plc objects */
+        modbus_plc_p *walker = &plcs;
 
-        /* Keep searching until we find a valid PLC or run out of options */
-        while(!found_valid && !*plc) {
-            modbus_plc_p *walker = &plcs;
+        /* we have to match and the reference count must be > 0 */
+        while(*walker && ((*walker)->connection_group_id != connection_group_id
+                || (*walker)->server_id != (uint8_t)(unsigned int)server_id 
+                || str_cmp_i(server, (*walker)->server) != 0 
+                || !rc_inc(*walker))) {
 
-            while(*walker && ((*walker)->connection_group_id != connection_group_id
-                  || (*walker)->server_id != (uint8_t)(unsigned int)server_id || str_cmp_i(server, (*walker)->server) != 0)) {
+            pdebug(DEBUG_DETAIL, "walking past PLC: connection_group_id=%d, server_id=%d, server=%s", 
+                                (*walker)->connection_group_id,
+                                (*walker)->server_id, 
+                                (*walker)->server);
 
-                pdebug(DEBUG_DETAIL, "walking past PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
-                       (*walker)->server_id, (*walker)->server);
+            walker = &((*walker)->next);
+        }
 
-                walker = &((*walker)->next);
-            }
+        pdebug(DEBUG_DETAIL, "Finished walking PLC list walker=%p.", (void *)*walker);
 
-            pdebug(DEBUG_DETAIL, "Finished walking PLC list walker=%p.", (void *)*walker);
-            if(*walker) {
-                pdebug(DEBUG_DETAIL, "Found matching PLC: connection_group_id=%d, server_id=%d, server=%s", (*walker)->connection_group_id,
-                       (*walker)->server_id, (*walker)->server);
-            }
+        if(*walker) {
+            pdebug(DEBUG_DETAIL, "Found matching PLC: connection_group_id=%d, server_id=%d, server=%s", 
+                                (*walker)->connection_group_id,                
+                                (*walker)->server_id, 
+                                (*walker)->server);
 
-            /* did we find one. */
-            if(*walker && (*walker)->connection_group_id == connection_group_id
-               && (*walker)->server_id == (uint8_t)(unsigned int)server_id && str_cmp_i(server, (*walker)->server) == 0) {
-                pdebug(DEBUG_DETAIL, "Trying existing PLC connection.");
-                pdebug(DEBUG_DETAIL, "rc_inc: Acquiring Modbus connection reference.");
-                *plc = rc_inc(*walker); /* this could result in NULL if the reference count is already zero */
-                is_new = 0;
+            /* we have taken a reference above when walking the list */
 
-                /* If rc_inc() failed, the PLC is being destroyed (deferred cleanup).
-                 * Remove it from the list so we don't find the dead PLC again, then restart search. */
-                if(*plc == NULL) {
-                    pdebug(DEBUG_DETAIL, "Found PLC with refcount zero (being destroyed), removing from list and restarting search.");
-                    *walker = (*walker)->next;
-                    /* Loop will restart the search from the beginning */
-                } else {
-                    /* Successfully acquired a reference to a valid PLC */
-                    found_valid = 1;
-                }
+            is_new = 0;
+            rc = PLCTAG_STATUS_OK;
+
+            *plc = *walker;
+
+            /* leave the critical section, we found a match. */
+            break;
+        }
+
+        /* we did not find a matching PLC, create a new one. */
+        pdebug(DEBUG_DETAIL, "No matching PLC found, creating a new one.");
+
+        is_new = 1;
+
+        /* No matching PLC found in list, will create a new one */
+        pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
+
+        pdebug(DEBUG_DETAIL, "connection_group_id=%d, server_id=%d, server=%s", connection_group_id, server_id, server);
+
+        /* Allocate and initialize the PLC object inside the mutex.
+            * This prevents duplicate creation when multiple threads race to create the same PLC.
+            * Note: rc_alloc() already zero-initializes the memory. */
+        *plc = (modbus_plc_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_plc_t), modbus_plc_destructor);
+        if(*plc) {
+            pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
+            (*plc)->connection_group_id = connection_group_id;
+
+            /* copy the server string so that we can find this again. */
+            (*plc)->server = str_dup(server);
+            if(!((*plc)->server)) {
+                pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC server string!");
+                rc = PLCTAG_ERR_NO_MEM;
             } else {
-                /* No matching PLC found in list, will create a new one */
-                pdebug(DEBUG_DETAIL, "Creating new PLC connection.");
-                pdebug(DEBUG_DETAIL, "connection_group_id=%d, server_id=%d, server=%s", connection_group_id, server_id, server);
+                /* make sure we can be found. */
+                (*plc)->server_id = (uint8_t)(unsigned int)server_id;
 
-                is_new = 1;
+                /* tag_ring is already NULL from rc_alloc() zero-initialization */
 
-                /* Allocate and initialize the PLC object inside the mutex.
-                 * This prevents duplicate creation when multiple threads race to create the same PLC.
-                 * Note: rc_alloc() already zero-initializes the memory. */
-                *plc = (modbus_plc_p)rc_alloc((int)(unsigned int)sizeof(struct modbus_plc_t), modbus_plc_destructor);
-                if(*plc) {
-                    pdebug(DEBUG_DETAIL, "Setting connection_group_id to %d.", connection_group_id);
-                    (*plc)->connection_group_id = connection_group_id;
-
-                    /* copy the server string so that we can find this again. */
-                    (*plc)->server = str_dup(server);
-                    if(!((*plc)->server)) {
-                        pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC server string!");
-                        rc = PLCTAG_ERR_NO_MEM;
-                    } else {
-                        /* make sure we can be found. */
-                        (*plc)->server_id = (uint8_t)(unsigned int)server_id;
-
-                        /* tag_ring is already NULL from rc_alloc() zero-initialization */
-
-                        /* create the PLC mutex to protect the tag list. */
-                        rc = mutex_create(&((*plc)->mutex));
-                        if(rc != PLCTAG_STATUS_OK) {
-                            pdebug(DEBUG_WARN, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
-                            rc = PLCTAG_ERR_MUTEX_INIT;
-                        } else {
-                            /* set up the maximum request depth. */
-                            (*plc)->max_requests_in_flight = max_requests_in_flight;
-
-                            /* Initialize PLC state before making it visible to other threads */
-                            (*plc)->state = PLC_CONNECT_START;
-                            (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
-
-                            /* Add the new PLC to the global list. We already have the mutex,
-                             * so no duplicate can be created by another thread. The struct is
-                             * fully initialized and the mutex exists, so other threads can
-                             * safely find and use this PLC. */
-                            (*plc)->next = plcs;
-                            plcs = *plc;
-                            found_valid = 1;
-                        }
-                    }
+                /* create the PLC mutex to protect the tag list. */
+                rc = mutex_create(&((*plc)->mutex));
+                if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_WARN, "Unable to create new mutex, error %s!", plc_tag_decode_error(rc));
+                    rc = PLCTAG_ERR_MUTEX_INIT;
                 } else {
-                    pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC object!");
-                    rc = PLCTAG_ERR_NO_MEM;
+                    /* set up the maximum request depth. */
+                    (*plc)->max_requests_in_flight = max_requests_in_flight;
+
+                    /* Initialize PLC state before making it visible to other threads */
+                    (*plc)->state = PLC_CONNECT_START;
+                    (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+
+                    /* Add the new PLC to the global list. We already have the mutex,
+                        * so no duplicate can be created by another thread. The struct is
+                        * fully initialized and the mutex exists, so other threads can
+                        * safely find and use this PLC. */
+                    (*plc)->next = plcs;
+                    plcs = *plc;
+                    pdebug(DEBUG_DETAIL, "New PLC added to the global PLC list.");
                 }
             }
+        } else {
+            pdebug(DEBUG_WARN, "Unable to allocate Modbus PLC object!");
+            rc = PLCTAG_ERR_NO_MEM;
         }
     }
 
     /* if everything went well and it is new, set up the new PLC. */
-    if(rc == PLCTAG_STATUS_OK) {
-        if(is_new) {
-            pdebug(DEBUG_INFO, "Creating new PLC.");
+    if(rc == PLCTAG_STATUS_OK && is_new) {
+        pdebug(DEBUG_INFO, "Initializing new PLC.");
 
-            do {
-                /* we want to stay connected initially */
-                (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+        do {
+            /* 
+             * With deferred cleanup, the handler thread does NOT need to hold an explicit
+             * reference to the PLC. The tags hold the references through tag->plc pointers.
+             * When the handler thread exits, it will not decrement the refcount, so the PLC
+             * will stay alive as long as tags reference it. When the last tag is destroyed,
+             * its destructor will release the final PLC reference and trigger PLC destruction
+             * via deferred cleanup.
+             */
+            pdebug(DEBUG_DETAIL, "Handler thread will reference PLC through task parameter (no explicit rc_inc).");
 
-                /* set up the PLC state */
-                (*plc)->state = PLC_CONNECT_START;
+            rc = thread_create(&((*plc)->handler_thread), modbus_plc_handler, 32768 /* ignored */, (void *)(*plc));
+            if(rc != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_WARN, "Unable to create new handler thread, error %s!", plc_tag_decode_error(rc));
+                break;
+            }
 
-                /* With deferred cleanup, the handler thread does NOT need to hold an explicit
-                 * reference to the PLC. The tags hold the references through tag->plc pointers.
-                 * When the handler thread exits, it will not decrement the refcount, so the PLC
-                 * will stay alive as long as tags reference it. When the last tag is destroyed,
-                 * its destructor will release the final PLC reference and trigger PLC destruction
-                 * via deferred cleanup. */
-                pdebug(DEBUG_DETAIL, "Handler thread will reference PLC through task parameter (no explicit rc_inc).");
+            pdebug(DEBUG_DETAIL, "Created thread %p.", (*plc)->handler_thread);
 
-                rc = thread_create(&((*plc)->handler_thread), modbus_plc_handler, 32768 /* ignored */, (void *)(*plc));
-                if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Unable to create new handler thread, error %s!", plc_tag_decode_error(rc));
-                    break;
-                }
+            /* Increment PLC count for lifecycle tracking */
+            atomic_add_int32(&plc_count, 1);
 
-                pdebug(DEBUG_DETAIL, "Created thread %p.", (*plc)->handler_thread);
-
-                /* Increment PLC count for lifecycle tracking */
-                atomic_add_int32(&plc_count, 1);
-                pdebug(DEBUG_DETAIL, "PLC created, count now %d.", atomic_get_int32(&plc_count));
-            } while(0);
-        }
+            pdebug(DEBUG_DETAIL, "PLC created, count now %d.", atomic_get_int32(&plc_count));
+        } while(0);
     }
 
     if(rc != PLCTAG_STATUS_OK && *plc) {
-        pdebug(DEBUG_WARN, "PLC lookup and/or creation failed!");
+        pdebug(DEBUG_WARN, "PLC lookup or creation failed!");
 
         /* clean up. */
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing the reference to the PLC.");
+        pdebug(DEBUG_DETAIL, "rc_dec: Releasing the reference to the PLC due to creation error!");
         *plc = rc_dec(*plc);
     }
 
