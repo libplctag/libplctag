@@ -473,11 +473,15 @@ int remove_session_unsafe(ab_session_p session) {
     for(int i = 0; i < vector_length(sessions); i++) {
         ab_session_p tmp = vector_get(sessions, i);
 
+        /* FIXME potential ABA problem here */
         if(tmp == session) {
             vector_remove(sessions, i);
             break;
         }
     }
+
+    /* no longer on the list */
+    session->on_list = 0;
 
     pdebug(DEBUG_DETAIL, "Done");
 
@@ -491,6 +495,8 @@ int remove_session(ab_session_p s) {
 
     if(s->on_list) {
         critical_block(session_mutex) { rc = remove_session_unsafe(s); }
+    } else {
+        pdebug(DEBUG_DETAIL, "Session not on list, skipping removal.");
     }
 
     pdebug(DEBUG_DETAIL, "Done.");
@@ -677,7 +683,7 @@ ab_session_p create_micro800_session_unsafe(const char *host, const char *path, 
             session->fo_ex_conn_size = MAX_CIP_MICRO800_MSG_SIZE_EX;
             session->max_payload_size = (uint16_t)session->fo_conn_size;
         } else {
-            pdebug(DEBUG_WARN, "Unable to create Micrologix session!");
+            pdebug(DEBUG_WARN, "Unable to create Micro800 session!");
         }
     } while(0);
 
