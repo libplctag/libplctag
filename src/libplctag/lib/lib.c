@@ -172,36 +172,43 @@ void lib_teardown(void) {
     if(tag_tickler_wait) {
         pdebug(DEBUG_INFO, "Signaling tag tickler condition var.");
         cond_signal(tag_tickler_wait);
+        pdebug(DEBUG_INFO, "Tag tickler condition var signaled.");
     }
 
     if(tag_tickler_thread) {
-        pdebug(DEBUG_INFO, "Tearing down tag tickler thread.");
+        pdebug(DEBUG_INFO, "About to join tag tickler thread.");
         thread_join(tag_tickler_thread);
+        pdebug(DEBUG_INFO, "Tag tickler thread joined successfully.");
+        pdebug(DEBUG_INFO, "Destroying tag tickler thread.");
         thread_destroy(&tag_tickler_thread);
         tag_tickler_thread = NULL;
+        pdebug(DEBUG_INFO, "Tag tickler thread destroyed.");
     }
 
     if(tag_tickler_wait) {
-        pdebug(DEBUG_INFO, "Tearing down tag tickler condition var.");
+        pdebug(DEBUG_INFO, "About to destroy tag tickler condition var.");
         cond_destroy(&tag_tickler_wait);
         tag_tickler_wait = NULL;
+        pdebug(DEBUG_INFO, "Tag tickler condition var destroyed.");
     }
 
     if(tag_lookup_mutex) {
-        pdebug(DEBUG_INFO, "Tearing down tag lookup mutex.");
+        pdebug(DEBUG_INFO, "About to destroy tag lookup mutex.");
         mutex_destroy(&tag_lookup_mutex);
         tag_lookup_mutex = NULL;
+        pdebug(DEBUG_INFO, "Tag lookup mutex destroyed.");
     }
 
     if(tags) {
-        pdebug(DEBUG_INFO, "Destroying tag hashtable.");
+        pdebug(DEBUG_INFO, "About to destroy tag hashtable.");
         hashtable_destroy(tags);
         tags = NULL;
+        pdebug(DEBUG_INFO, "Tag hashtable destroyed.");
     }
 
     atomic_set_bool(&library_terminating, false);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_INFO, "Library teardown complete.");
 }
 
 
@@ -1132,10 +1139,14 @@ LIB_EXPORT void plc_tag_shutdown(void) {
 
     pdebug(DEBUG_INFO, "Cleaning up library resources.");
 
+    pdebug(DEBUG_INFO, "About to destroy modules.");
     destroy_modules();
+    pdebug(DEBUG_INFO, "Modules destroyed successfully.");
 
     /* Clear the termination flag in case we want to start up again. */
+    pdebug(DEBUG_INFO, "Clearing library termination flag.");
     atomic_set_bool(&library_terminating, false);
+    pdebug(DEBUG_INFO, "Library termination flag cleared.");
 
     pdebug(DEBUG_INFO, "Done.");
 }

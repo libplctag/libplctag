@@ -127,14 +127,46 @@ int main(void) {
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for threads to quit.\n");
+    fflush(stderr);
+
+    /* Join all threads with periodic status logging */
+    int threads_remaining = NUM_TAGS * 2;
+    int64_t wait_start = compat_time_ms();
+    int64_t wait_timeout = 30000;  /* 30 second timeout */
 
     for(int i = 0; i < NUM_TAGS; i++) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Joining reader thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
+        fflush(stderr);
         compat_thread_join(read_threads[i], NULL);
+        threads_remaining--;
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Reader thread %d joined. Threads remaining: %d\n", i, threads_remaining);
+        fflush(stderr);
+
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Joining writer thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
+        fflush(stderr);
         compat_thread_join(write_threads[i], NULL);
+        threads_remaining--;
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Writer thread %d joined. Threads remaining: %d\n", i, threads_remaining);
+        fflush(stderr);
+
+        /* Check if we're taking too long */
+        int64_t elapsed = compat_time_ms() - wait_start;
+        if (elapsed > wait_timeout) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: Thread join timeout after %" PRId64 "ms with %d threads still remaining!\n",
+                    elapsed, threads_remaining);
+            fflush(stderr);
+            break;
+        }
     }
 
     // NOLINTNEXTLINE
-    fprintf(stderr, "Done.\n");
+    fprintf(stderr, "Done at time %" PRId64 "ms.\n", compat_time_ms() - wait_start);
+    fflush(stderr);
 
     return rc;
 }

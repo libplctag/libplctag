@@ -780,6 +780,8 @@ void thread_kill(thread_p t) {
 
 int thread_join(thread_p t) {
     void *unused;
+    int64_t join_start_time = 0;
+    int join_result = 0;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
@@ -788,7 +790,14 @@ int thread_join(thread_p t) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(pthread_join(t->p_thread, &unused)) {
+    pdebug(DEBUG_INFO, "About to join thread %p.", (void *)t->p_thread);
+    join_start_time = time_ms();
+
+    join_result = pthread_join(t->p_thread, &unused);
+
+    pdebug(DEBUG_INFO, "Thread join completed after %" PRId64 "ms. Result: %d", (time_ms() - join_start_time), join_result);
+
+    if(join_result) {
         pdebug(DEBUG_ERROR, "Error joining thread.");
         return PLCTAG_ERR_THREAD_JOIN;
     }
