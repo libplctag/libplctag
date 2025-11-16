@@ -47,7 +47,7 @@
 
 #define READ_TIMEOUT (100)
 #define FIRST_RUN_TIME (10000)
-#define DISCONNECT_TIME_MS (60000)
+#define DISCONNECT_TIME_MS (30000)
 #define SECOND_RUN_TIME (30000)
 #define TEST_DURATION_MS (FIRST_RUN_TIME + SECOND_RUN_TIME + DISCONNECT_TIME_MS)
 
@@ -253,6 +253,8 @@ void do_disconnect(int64_t current_time, test_state_t *test_state) {
 
     /* kill the ab_server to truly simulate disconnect */
     stop_server();
+
+    log("\n[INFO] Disconnected at time %" PRId64 " ms\n", current_time);
 }
 
 
@@ -267,7 +269,8 @@ void do_reconnect(int64_t current_time, test_state_t *test_state) {
     /* start a new ab_server to simulate reconnect */
     start_server(test_state);
 
-    test_state->reconnect_time = current_time;
+    log("\n[INFO] Reconnected at time %" PRId64 " ms\n", current_time);
+
     test_state->reconnect_done = 1;
 }
 
@@ -329,11 +332,7 @@ int run_auto_test(const char *ab_server_cmd) {
 
     /* initialize test state */
     auto_test_state.ab_server_cmd = ab_server_cmd;
-    auto_test_state.start_time = compat_time_ms();
-    auto_test_state.end_time = auto_test_state.start_time + FIRST_RUN_TIME + DISCONNECT_TIME_MS + SECOND_RUN_TIME;
-    auto_test_state.disconnect_time = auto_test_state.start_time + FIRST_RUN_TIME;
     auto_test_state.read_timeout_ms = READ_TIMEOUT;
-    auto_test_state.reconnect_time = auto_test_state.start_time + FIRST_RUN_TIME + DISCONNECT_TIME_MS;
     auto_test_state.test_passed = 0;
     auto_test_state.reconnect_done = 0;
 
@@ -344,9 +343,14 @@ int run_auto_test(const char *ab_server_cmd) {
 
     start_server(&auto_test_state);
 
+    /* now we start timing */
+    auto_test_state.start_time = compat_time_ms();
+    auto_test_state.disconnect_time = auto_test_state.start_time + FIRST_RUN_TIME;
+    auto_test_state.reconnect_time = auto_test_state.disconnect_time + DISCONNECT_TIME_MS;
+    auto_test_state.end_time = auto_test_state.reconnect_time + SECOND_RUN_TIME;
+
     /* set up the tag and set the callback */
     setup_tag(&auto_test_state, AUTO_SYNC_TAG_ATTRIBS);
-
 
     while((current_time = compat_time_ms()) < auto_test_state.disconnect_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
 
