@@ -66,16 +66,20 @@ echo Starting AB emulator for fast ControlLogix tests.
 echo ============================================================================
 echo.
 
-REM Start AB server for fast tests
-start /b "%TEST_DIR%\ab_server.exe" --debug --plc=ControlLogix --path=1,0 ^
+REM Start AB server for fast tests (non-blocking)
+cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=ControlLogix --path=1,0 ^
     "--tag=TestBigArray:DINT[2000]" ^
     "--tag=Test_Array_1:DINT[1000]" ^
     "--tag=Test_Array_2x3:DINT[2,3]" ^
     "--tag=Test_Array_2x3x4:DINT[2,3,4]" ^
-    > logix_fast_emulator.log 2>&1
+    > logix_fast_emulator.log 2>&1" ^
+    >nul 2>&1
 
 REM Give the server time to start and listen
-timeout /T 3 /nobreak
+timeout /T 3 /nobreak >nul
+
+echo Checking that ab_server.exe is running...
+tasklist /FI "IMAGENAME eq ab_server.exe" || echo ab_server.exe not found in tasklist
 
 REM Test 1: basic large tag read/write
 set /a TEST+=1
@@ -196,17 +200,18 @@ echo Starting AB emulator for functional/slow ControlLogix tests.
 echo ============================================================================
 echo.
 
-REM Start AB server for slow tests (with delay)
-start /b "%TEST_DIR%\ab_server.exe" --plc=ControlLogix --path=1,0 ^
+REM Start AB server for slow tests (with delay, non-blocking)
+cmd /c ""%TEST_DIR%\ab_server.exe" --plc=ControlLogix --path=1,0 ^
     "--tag=TestBigArray:DINT[2000]" ^
     "--tag=Test_Array_1:DINT[1000]" ^
     "--tag=Test_Array_2x3:DINT[2,3]" ^
     "--tag=Test_Array_2x3x4:DINT[2,3,4]" ^
     --delay=50 ^
-    > logix_slow_emulator.log 2>&1
+    > logix_slow_emulator.log 2>&1" ^
+    >nul 2>&1
 
 REM Give the server time to start and listen
-timeout /T 1 /nobreak
+timeout /T 1 /nobreak >nul
 
 REM Test 8: emulator test callbacks
 set /a TEST+=1
@@ -254,17 +259,18 @@ echo Starting AB emulator for Micro800 tests.
 echo ============================================================================
 echo.
 
-REM Start Micro800 emulator
-start /b "%TEST_DIR%\ab_server.exe" --debug --plc=Micro800 ^
+REM Start Micro800 emulator (non-blocking)
+cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=Micro800 ^
     --tag=TestDINTArray:DINT[10] ^
-    > micro800_emulator.log 2>&1
+    > micro800_emulator.log 2>&1" ^
+    >nul 2>&1
 
 if errorlevel 1 (
     echo Unable to start Micro800 emulator!
     exit /b 1
 )
 
-timeout /T 1 /nobreak
+timeout /T 1 /nobreak >nul
 
 REM Test 11: basic Micro800 read/write
 set /a TEST+=1
@@ -291,17 +297,18 @@ echo Starting AB emulator for Omron tests.
 echo ============================================================================
 echo.
 
-REM Start Omron emulator
-start /b "%TEST_DIR%\ab_server.exe" --debug --plc=Omron ^
+REM Start Omron emulator (non-blocking)
+cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=Omron ^
     --tag=TestDINTArray:DINT[10] ^
-    > omron_emulator.log 2>&1
+    > omron_emulator.log 2>&1" ^
+    >nul 2>&1
 
 if errorlevel 1 (
     echo Unable to start AB/Omron emulator!
     exit /b 1
 )
 
-timeout /T 1 /nobreak
+timeout /T 1 /nobreak >nul
 
 REM Test 12: basic Omron read/write
 set /a TEST+=1
@@ -328,19 +335,20 @@ echo Starting AB emulator for Micrologix tests.
 echo ============================================================================
 echo.
 
-REM Start Micrologix emulator
-start /b "%TEST_DIR%\ab_server.exe" --debug --plc=Micrologix ^
+REM Start Micrologix emulator (non-blocking)
+cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=Micrologix ^
     "--tag=B3[10]" ^
     "--tag=N7[10]" ^
     "--tag=L19[10]" ^
-    > micrologix_emulator.log 2>&1
+    > micrologix_emulator.log 2>&1" ^
+    >nul 2>&1
 
 if errorlevel 1 (
     echo Unable to start AB/Micrologix emulator!
     exit /b 1
 )
 
-timeout /T 1 /nobreak
+timeout /T 1 /nobreak >nul
 
 REM Test 13: B data file Micrologix tag read/write
 set /a TEST+=1
@@ -458,18 +466,19 @@ echo Starting AB emulator for PLC5 tests.
 echo ============================================================================
 echo.
 
-REM Start PLC5 emulator
-start /b "%TEST_DIR%\ab_server.exe" --debug --plc=PLC/5 ^
+REM Start PLC5 emulator (non-blocking)
+cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=PLC/5 ^
     "--tag=B3[10]" ^
     "--tag=N7[10]" ^
-    > plc5_emulator.log 2>&1
+    > plc5_emulator.log 2>&1" ^
+    >nul 2>&1
 
 if errorlevel 1 (
     echo Unable to start AB/PLC5 emulator!
     exit /b 1
 )
 
-timeout /T 1 /nobreak
+timeout /T 1 /nobreak >nul
 
 REM Test 20: B data file PLC5 tag read/write
 set /a TEST+=1
@@ -544,19 +553,20 @@ echo Starting Modbus server tests.
 echo ============================================================================
 echo.
 
-REM Start Modbus server
-start /b "%TEST_DIR%\modbus_server.exe" ^
+REM Start Modbus server (non-blocking)
+cmd /c ""%TEST_DIR%\modbus_server.exe" ^
     --listen=127.0.0.1:1502 ^
     --listen=127.0.0.1:2502 ^
     --debug=DETAIL ^
-    > modbus_server.log 2>&1
+    > modbus_server.log 2>&1" ^
+    >nul 2>&1
 
 if errorlevel 1 (
     echo Unable to start Modbus emulator!
     exit /b 1
 )
 
-timeout /T 3 /nobreak
+timeout /T 3 /nobreak >nul
 
 REM Test 24: test short reconnect with Modbus
 set /a TEST+=1

@@ -36,9 +36,9 @@ done
 
 
 echo "Starting AB emulator for fast ControlLogix tests."
-$TEST_DIR/ab_server --debug --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" > logix_fast_emulator.log 2>&1 &
+{ $TEST_DIR/ab_server --debug --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" > logix_fast_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
-if [ $? != 0 ]; then
+if [ $EMULATOR_PID -le 0 ]; then
     echo "Unable to start AB/ControlLogix emulator!"
     exit 1
 fi
@@ -144,9 +144,9 @@ fi
 
 
 echo "Starting AB emulator for functional/slow ControlLogix tests."
-$VALGRIND$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" --delay=50  > logix_slow_emulator.log 2>&1 &
+{ $VALGRIND$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" --delay=50  > logix_slow_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
-if [ $? != 0 ]; then
+if [ $EMULATOR_PID -le 0 ]; then
     echo "Unable to start AB/ControlLogix emulator!"
     exit 1
 fi
@@ -195,9 +195,9 @@ killall -TERM ab_server > /dev/null 2>&1
 
 
 echo "Starting AB emulator for Micro800 tests."
-$TEST_DIR/ab_server --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] > micro800_emulator.log 2>&1 &
+{ $TEST_DIR/ab_server --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] > micro800_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
-if [ $? != 0 ]; then
+if [ $EMULATOR_PID -le 0 ]; then
     # echo "FAILURE"
     echo "Unable to start Micro800 emulator!"
     exit 1
@@ -225,9 +225,9 @@ killall -TERM ab_server > /dev/null 2>&1
 
 
 echo "Starting AB emulator for Omron tests."
-$TEST_DIR/ab_server --debug --plc=Omron --tag=TestDINTArray:DINT[10] > omron_emulator.log 2>&1 &
+{ $TEST_DIR/ab_server --debug --plc=Omron --tag=TestDINTArray:DINT[10] > omron_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
-if [ $? != 0 ]; then
+if [ $EMULATOR_PID -le 0 ]; then
     # echo "FAILURE"
     echo "Unable to start AB/Omron emulator!"
     exit 1
@@ -254,9 +254,9 @@ killall -TERM ab_server > /dev/null 2>&1
 
 
 echo "Starting AB emulator for Micrologix tests."
-$TEST_DIR/ab_server --debug --plc=Micrologix '--tag=B3[10]' '--tag=N7[10]' '--tag=L19[10]' > micrologix_emulator.log 2>&1 &
+{ $TEST_DIR/ab_server --debug --plc=Micrologix '--tag=B3[10]' '--tag=N7[10]' '--tag=L19[10]' > micrologix_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
-if [ $? != 0 ]; then
+if [ $EMULATOR_PID -le 0 ]; then
     # echo "FAILURE"
     echo "Unable to start AB/Micrologix emulator!"
     exit 1
@@ -349,9 +349,9 @@ killall -TERM ab_server > /dev/null 2>&1
 
 
 echo "Starting AB emulator for PLC5 tests."
-$TEST_DIR/ab_server --debug --plc=PLC/5 '--tag=B3[10]' '--tag=N7[10]' > plc5_emulator.log 2>&1 &
+{ $TEST_DIR/ab_server --debug --plc=PLC/5 '--tag=B3[10]' '--tag=N7[10]' > plc5_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
-if [ $? != 0 ]; then
+if [ $EMULATOR_PID -le 0 ]; then
     # echo "FAILURE"
     echo "Unable to start AB/PLC5 emulator!"
     exit 1
@@ -417,7 +417,7 @@ sleep 2
 # echo -n "  Starting Modbus server $SCRIPT_DIR/modbus_server... "
 $TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1 &
 MODBUS_PID=$!
-if [ $? != 0 ]; then
+if [ $MODBUS_PID -le 0 ]; then
     # echo "FAILURE"
     echo "Unable to start Modbus emulator!"
     exit 1
