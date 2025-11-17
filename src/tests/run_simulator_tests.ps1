@@ -274,6 +274,17 @@ $micro800 = Start-Server -Name "Micro800" -Executable "ab_server.exe" `
 
 Start-Sleep -Seconds 1
 
+Write-Host "Checking if Micro800 server is running..."
+if ($micro800) {
+    if ($micro800.HasExited) {
+        Write-Host "WARNING: Micro800 server started but exited immediately (Exit Code: $($micro800.ExitCode)). Skipping tests." -ForegroundColor Yellow
+    } else {
+        Write-Host "Micro800 server is running (PID: $($micro800.Id))"
+    }
+} else {
+    Write-Host "WARNING: Micro800 server failed to start. Skipping tests." -ForegroundColor Yellow
+}
+
 if ($micro800 -and -not $micro800.HasExited) {
     # Test 10: Micro800 tag read/write
     Run-Test -Name "Micro800 tag read/write" -Executable "tag_rw2.exe" `
@@ -302,6 +313,17 @@ $omron = Start-Server -Name "Omron" -Executable "ab_server.exe" `
 
 Start-Sleep -Seconds 1
 
+Write-Host "Checking if Omron server is running..."
+if ($omron) {
+    if ($omron.HasExited) {
+        Write-Host "WARNING: Omron server started but exited immediately (Exit Code: $($omron.ExitCode)). Skipping tests." -ForegroundColor Yellow
+    } else {
+        Write-Host "Omron server is running (PID: $($omron.Id))"
+    }
+} else {
+    Write-Host "WARNING: Omron server failed to start. Skipping tests." -ForegroundColor Yellow
+}
+
 if ($omron -and -not $omron.HasExited) {
     # Test 11: Omron NJ/NX tag read/write
     Run-Test -Name "Omron NJ/NX tag read/write" -Executable "tag_rw2.exe" `
@@ -329,6 +351,17 @@ $micrologix = Start-Server -Name "Micrologix" -Executable "ab_server.exe" `
     -LogFile "micrologix_emulator.log"
 
 Start-Sleep -Seconds 1
+
+Write-Host "Checking if Micrologix server is running..."
+if ($micrologix) {
+    if ($micrologix.HasExited) {
+        Write-Host "WARNING: Micrologix server started but exited immediately (Exit Code: $($micrologix.ExitCode)). Skipping tests." -ForegroundColor Yellow
+    } else {
+        Write-Host "Micrologix server is running (PID: $($micrologix.Id))"
+    }
+} else {
+    Write-Host "WARNING: Micrologix server failed to start. Skipping tests." -ForegroundColor Yellow
+}
 
 if ($micrologix -and -not $micrologix.HasExited) {
     # Test 12: Micrologix B data file tag read/write
@@ -392,6 +425,17 @@ $plc5 = Start-Server -Name "PLC5" -Executable "ab_server.exe" `
     -LogFile "plc5_emulator.log"
 
 Start-Sleep -Seconds 1
+
+Write-Host "Checking if PLC5 server is running..."
+if ($plc5) {
+    if ($plc5.HasExited) {
+        Write-Host "WARNING: PLC5 server started but exited immediately (Exit Code: $($plc5.ExitCode)). Skipping tests." -ForegroundColor Yellow
+    } else {
+        Write-Host "PLC5 server is running (PID: $($plc5.Id))"
+    }
+} else {
+    Write-Host "WARNING: PLC5 server failed to start. Skipping tests." -ForegroundColor Yellow
+}
 
 if ($plc5 -and -not $plc5.HasExited) {
     # Test 18-24: PLC5 tests
