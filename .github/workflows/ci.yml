@@ -371,7 +371,7 @@ jobs:
     - name: Run Simulator Tests
       run: |
         cd ${{ github.workspace }}\src\tests
-        call run_simulator_tests.bat ${{ env.DIST }}
+        powershell -ExecutionPolicy Bypass -File .\run_simulator_tests.ps1 -TestDir "${{ env.DIST }}"
       shell: cmd
 
     - name: Upload test logs
