@@ -369,7 +369,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Run Simulator Tests
-      run: bash src/tests/run_simulator_tests.sh ${{ env.DIST }}
+      run: bash src/tests/run_simulator_tests.sh '${{ env.DIST }}'
       shell: bash
 
     - name: Upload test logs
