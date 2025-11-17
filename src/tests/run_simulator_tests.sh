@@ -4,8 +4,11 @@ TEST_DIR=$1
 
 # Convert Windows paths to Unix paths if running on Windows (Git Bash)
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
-    # Convert backslashes to forward slashes and handle drive letters
-    TEST_DIR=$(echo "$TEST_DIR" | sed 's/\\/\//g' | sed 's/^\([A-Za-z]\):/\/\1/')
+    # Convert D:\path\to\dir to /d/path/to/dir (lowercase drive letter)
+    # First replace backslashes with forward slashes
+    TEST_DIR="${TEST_DIR//\\//}"
+    # Then replace C: style drive letters with /c/ (lowercase)
+    TEST_DIR=$(echo "$TEST_DIR" | sed 's|^\([A-Za-z]\):|/\L\1|')
 fi
 
 # thanks to Stack Overflow
