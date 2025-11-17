@@ -528,12 +528,21 @@ echo.
 REM Start Modbus server (non-blocking)
 start "" "%TEST_DIR%\modbus_server.exe" --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1
 
+REM Give the process a moment to start
+timeout /T 2 /nobreak >nul
+
+REM Verify the process actually started
+tasklist /FI "IMAGENAME eq modbus_server.exe" | find /I "modbus_server.exe" >nul
 if errorlevel 1 (
-    echo Unable to start Modbus emulator!
+    echo ERROR: Modbus server failed to start or crashed!
+    echo.
+    echo Modbus server output:
+    type modbus_server.log
     exit /b 1
 )
 
-timeout /T 3 /nobreak >nul
+REM Give it a bit more time to fully bind to ports
+timeout /T 1 /nobreak >nul
 
 REM Test 24: test short reconnect with Modbus
 set /a TEST+=1
