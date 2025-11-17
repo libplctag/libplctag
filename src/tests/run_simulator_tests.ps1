@@ -132,10 +132,6 @@ function Start-Server {
         return $null
     }
 }
-        }
-        return $null
-    }
-}
 
 # Helper function to stop servers by name
 function Stop-Servers {
