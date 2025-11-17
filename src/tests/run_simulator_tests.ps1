@@ -77,9 +77,16 @@ function Run-Test {
     $stdoutLog = $LogFile
     $stderrLog = $LogFile -replace '\.log$', '_err.log'
     
-    $process = Start-Process -FilePath $exePath -ArgumentList $Arguments `
-        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog `
-        -NoNewWindow -Wait -PassThru
+    # Start-Process requires ArgumentList to be null or non-empty
+    if ($Arguments -and $Arguments.Count -gt 0) {
+        $process = Start-Process -FilePath $exePath -ArgumentList $Arguments `
+            -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog `
+            -NoNewWindow -Wait -PassThru
+    } else {
+        $process = Start-Process -FilePath $exePath `
+            -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog `
+            -NoNewWindow -Wait -PassThru
+    }
     
     # Merge stderr into main log file if it exists
     if (Test-Path $stderrLog) {
