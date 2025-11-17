@@ -47,7 +47,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -131,7 +131,7 @@ fi
 
 let TEST++
 echo -n "  Test $TEST: hard library shutdown... "
-$VALGRIND$TEST_DIR/test_shutdown > "${TEST}_shutdown.log" 2>&1
+$VALGRIND$TEST_DIR/test_shutdown_cip > "${TEST}_shutdown.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -440,7 +440,7 @@ kill_process modbus_server
 # wait for them to exit
 sleep 2
 
-# echo -n "  Starting Modbus server $SCRIPT_DIR/modbus_server... "
+echo "Starting Modbus server $SCRIPT_DIR/modbus_server."
 $TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1 &
 MODBUS_PID=$!
 if [ $MODBUS_PID -le 0 ]; then
@@ -454,7 +454,7 @@ else
 fi
 
 let TEST++
-echo -n "Test $TEST: test short reconnect with Modbus... "
+echo -n "  Test $TEST: test short reconnect with Modbus... "
 $VALGRIND$TEST_DIR/test_reconnect 3 > "${TEST}_modbus_reconnect_short_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -465,7 +465,7 @@ else
 fi
 
 let TEST++
-echo -n "Test $TEST: test long reconnect with Modbus... "
+echo -n "  Test $TEST: test long reconnect with Modbus... "
 $VALGRIND$TEST_DIR/test_reconnect 15 > "${TEST}_modbus_reconnect_long_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -477,7 +477,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: thread stress Modbus... "
+echo -n "  Test $TEST: thread stress Modbus... "
 $VALGRIND$TEST_DIR/thread_stress 10 'protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "${TEST}_modbus_stress_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -489,7 +489,7 @@ fi
 
 
 let TEST++
-echo -n "Test $TEST: callback events Modbus... "
+echo -n "  Test $TEST: callback events Modbus... "
 $VALGRIND$TEST_DIR/test_callback_ex_modbus > "${TEST}_test_callback_ex_modbus.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
@@ -499,8 +499,21 @@ else
     let SUCCESSES++
 fi
 
+
 let TEST++
-echo -n "Test $TEST: for Modbus reconnect bug... "
+echo -n "  Test $TEST: hard library shutdown... "
+$VALGRIND$TEST_DIR/test_shutdown_modbus > "${TEST}_shutdown.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "  Test $TEST: for Modbus reconnect bug... "
 TST_LOG="${TEST}_modbus_reconnect_bug_test.log"
 $VALGRIND$TEST_DIR/test_modbus_multiple > ${TST_LOG} 2>&1
 if [ $? != 0 ]; then
@@ -511,10 +524,11 @@ else
     let SUCCESSES++
 fi
 
+
 # Check that exactly 2 PLC objects were created during test 29.
 # This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
-echo -n "Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
+echo -n "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
 PLC_COUNT=$(grep -c "Creating new PLC connection\." ${TST_LOG})
 if [ "${PLC_COUNT}" = "2" ] ; then
     echo "OK (found ${PLC_COUNT} PLC creation entries in log file ${TST_LOG})"

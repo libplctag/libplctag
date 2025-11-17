@@ -51,7 +51,8 @@ endif()
   test_modbus_multiple
   test_raw_cip
   test_reconnect
-  test_shutdown
+  test_shutdown_cip
+  test_shutdown_modbus
   test_special
   test_string
   test_tag_attributes
