@@ -21,6 +21,18 @@
   #include <ws2tcpip.h>     // For getaddrinfo() on Windows
 #endif
 
+/*
+ * SIGPIPE Prevention Strategy:
+ * - BSD/macOS: Use SO_NOSIGPIPE socket option (set at creation time)
+ * - Linux: Use MSG_NOSIGNAL flag on send operations
+ * - Other POSIX: Define MSG_NOSIGNAL as 0 if unavailable (application must ignore SIGPIPE)
+ * - Windows: No SIGPIPE, not applicable
+ */
+#if !defined(_WIN32) && !defined(UTIL_BSD_OS_TYPE) && !defined(MSG_NOSIGNAL)
+  #define MSG_NOSIGNAL 0
+  #warning "MSG_NOSIGNAL not available on this platform. Application should ignore SIGPIPE signal."
+#endif
+
 /* Maximum number of IO vectors/buffers for scatter-gather operations */
 #define SOCKET_MAX_IOVECS 16
 
