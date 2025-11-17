@@ -71,9 +71,24 @@ function Run-Test {
     Write-Host "Test ${script:TestCount}: $Name..."
     
     $exePath = Join-Path $TestDir $Executable
+    
+    # PowerShell doesn't allow stdout and stderr to go to same file with Start-Process
+    # Use separate files and merge them after
+    $stdoutLog = $LogFile
+    $stderrLog = $LogFile -replace '\.log$', '_err.log'
+    
     $process = Start-Process -FilePath $exePath -ArgumentList $Arguments `
-        -RedirectStandardOutput "$LogFile" -RedirectStandardError "$LogFile" `
+        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog `
         -NoNewWindow -Wait -PassThru
+    
+    # Merge stderr into main log file if it exists
+    if (Test-Path $stderrLog) {
+        if ((Get-Item $stderrLog).Length -gt 0) {
+            Add-Content -Path $stdoutLog -Value "`n--- STDERR ---"
+            Get-Content $stderrLog | Add-Content -Path $stdoutLog
+        }
+        Remove-Item $stderrLog -Force -ErrorAction SilentlyContinue
+    }
     
     if ($process.ExitCode -eq 0) {
         Write-Host "OK" -ForegroundColor Green
@@ -97,8 +112,13 @@ function Start-Server {
     $exePath = Join-Path $TestDir $Executable
     
     try {
+        # PowerShell doesn't allow stdout and stderr to go to same file with Start-Process
+        # Use separate files and merge them after
+        $stdoutLog = $LogFile
+        $stderrLog = $LogFile -replace '\.log$', '_err.log'
+        
         $process = Start-Process -FilePath $exePath -ArgumentList $Arguments `
-            -RedirectStandardOutput $LogFile -RedirectStandardError $LogFile `
+            -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog `
             -NoNewWindow -PassThru -ErrorAction Stop
         
         return $process
@@ -108,6 +128,10 @@ function Start-Server {
         if ($Critical) {
             Write-Host "This is a critical server failure. Aborting tests." -ForegroundColor Red
             exit 1
+        }
+        return $null
+    }
+}
         }
         return $null
     }
