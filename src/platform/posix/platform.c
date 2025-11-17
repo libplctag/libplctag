@@ -1510,24 +1510,35 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     FD_ZERO(&write_set);
     FD_ZERO(&err_set);
 
-    /* calculate the maximum fd */
-    max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
-
-    /* add the wake fd */
-    FD_SET(sock->wake_read_fd, &read_set);
-
-    /* we always want to know about errors. */
-    FD_SET(sock->fd, &err_set);
-
-    /* add more depending on the mask. */
-    if(events & SOCK_EVENT_CAN_READ) {
-        FD_SET(sock->fd, &read_set);
-        pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
+    /* add the wake fd - defensive check for valid socket */
+    if(sock->wake_read_fd == INVALID_SOCKET) {
+        pdebug(DEBUG_WARN, "Wake socket is invalid, cannot wait for events!");
+        return PLCTAG_ERR_BAD_CONFIG;
     }
 
-    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
-        FD_SET(sock->fd, &write_set);
-        pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
+    FD_SET(sock->wake_read_fd, &read_set);
+
+    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
+    if(sock->fd != INVALID_SOCKET) {
+        /* calculate the maximum fd */
+        max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
+
+        /* we always want to know about errors. */
+        FD_SET(sock->fd, &err_set);
+
+        /* add more depending on the mask. */
+        if(events & SOCK_EVENT_CAN_READ) {
+            FD_SET(sock->fd, &read_set);
+            pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
+        }
+
+        if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
+            FD_SET(sock->fd, &write_set);
+            pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
+        }
+    } else {
+        /* Main socket invalid - only wake socket will be monitored (valid for reconnection) */
+        max_fd = sock->wake_read_fd;
     }
 
     pdebug(DEBUG_INFO, "socket_wait_event: events=0x%x, max_fd=%d, sock->fd=%d, timeout_ms=%d, calling select()", events, max_fd, sock->fd, timeout_ms);
@@ -1598,8 +1609,25 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
         /* is there an error? */
         if(FD_ISSET(sock->fd, &err_set)) {
-            pdebug(DEBUG_DETAIL, "Socket has error!");
-            result |= (events & SOCK_EVENT_ERROR);
+            /* On some platforms, FD_ISSET on err_set can return true spuriously.
+             * Verify the error is real by checking SO_ERROR. */
+            int sock_error = 0;
+            socklen_t sock_error_len = sizeof(sock_error);
+
+            if(getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_error, &sock_error_len) == 0) {
+                if(sock_error != 0) {
+                    /* There's a real socket error */
+                    pdebug(DEBUG_WARN, "Socket has real error %d!", sock_error);
+                    result |= (events & SOCK_EVENT_ERROR);
+                } else {
+                    /* FD_ISSET was spurious - there's no actual error */
+                    pdebug(DEBUG_DETAIL, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
+                }
+            } else {
+                /* Failed to get socket error state, assume there's an error */
+                pdebug(DEBUG_WARN, "Failed to check socket error state, treating as error.");
+                result |= (events & SOCK_EVENT_ERROR);
+            }
         }
     } else {
         /* error */
@@ -1673,6 +1701,14 @@ int socket_wake(sock_p sock) {
         rc = PLCTAG_STATUS_OK;
     } else {
         int err = errno;
+
+        /* If the write failed with EAGAIN/EWOULDBLOCK, the wake pipe is full.
+         * This means a wake is already pending, so return success. */
+        if(err == EAGAIN || err == EWOULDBLOCK) {
+            pdebug(DEBUG_DETAIL, "Wake pipe full (EAGAIN/EWOULDBLOCK), wake already pending.");
+            return PLCTAG_STATUS_OK;
+        }
+
         pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, err);
 
         /* If the write failed with EBADF (bad file descriptor), the wake pipe

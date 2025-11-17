@@ -1494,16 +1494,25 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     FD_ZERO(&write_set);
     FD_ZERO(&err_set);
 
-    /* add the wake fd */
-    FD_SET(sock->wake_read_fd, &read_set);
+    /* add the wake fd - defensive check for valid socket */
+    if(sock->wake_read_fd != INVALID_SOCKET) {
+        FD_SET(sock->wake_read_fd, &read_set);
+    } else {
+        pdebug(DEBUG_WARN, "Wake socket is invalid, cannot wait for events!");
+        return PLCTAG_ERR_BAD_CONFIG;
+    }
 
-    /* we always want to know about errors. */
-    FD_SET(sock->fd, &err_set);
+    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
+    if(sock->fd != INVALID_SOCKET) {
+        /* we always want to know about errors. */
+        FD_SET(sock->fd, &err_set);
 
-    /* add more depending on the mask. */
-    if(events & SOCK_EVENT_CAN_READ) { FD_SET(sock->fd, &read_set); }
+        /* add more depending on the mask. */
+        if(events & SOCK_EVENT_CAN_READ) { FD_SET(sock->fd, &read_set); }
 
-    if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) { FD_SET(sock->fd, &write_set); }
+        if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) { FD_SET(sock->fd, &write_set); }
+    }
+    /* else: main socket invalid - only wake socket will be monitored, which is valid for reconnection */
 
     /* calculate the timeout. */
     if(timeout_ms > 0) {

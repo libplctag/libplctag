@@ -138,6 +138,14 @@ static void rebuild_pollfds_for_socket(reactor_t *r, size_t index) {
     socket_entry_t *entry = &r->sockets[index];
     struct pollfd *pfd = &r->pollfds[index];
 
+    /* Defensive: ensure socket is valid before building poll events */
+    if (entry->sock == INVALID_SOCKET) {
+        pfd->fd = INVALID_SOCKET;
+        pfd->events = 0;
+        pfd->revents = 0;
+        return;
+    }
+
     pfd->fd = entry->sock;
     pfd->events = 0;
     pfd->revents = 0;
@@ -222,6 +230,14 @@ static void translate_pollevents(reactor_t *r, size_t index) {
     short previous = entry->last_revents.revents;
     entry->last_revents.revents = current;
 
+    /* POLLNVAL - invalid socket descriptor (socket closed/invalid) */
+    if (current & POLLNVAL) {
+        /* Socket is invalid - this is a fatal error */
+        entry->last_error = UTIL_EINTERNAL;
+        bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+        return;  /* Don't process other events on invalid socket */
+    }
+
     /* POLLERR - socket error (may be spurious on Windows) */
     if ((current & POLLERR) && !(previous & POLLERR)) {
         /* Verify this is a real error by checking SO_ERROR */
@@ -230,9 +246,18 @@ static void translate_pollevents(reactor_t *r, size_t index) {
         int optlen = sizeof(optval);
         if (getsockopt((SOCKET)entry->sock, SOL_SOCKET, SO_ERROR, (char *)&optval, &optlen) != SOCKET_ERROR) {
             if (optval != 0) {
-                /* Real socket error */
-                entry->last_error = util_err_from_errno(optval);
-                bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                /* Real socket error - check if this is a failed async connect */
+                if (entry->socket_type == SOCKET_TYPE_STREAM && !entry->connected) {
+                    /* Failed async connect */
+                    entry->last_error = util_err_from_errno(optval);
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                    /* Mark as "connected" to prevent further connect attempts */
+                    entry->connected = true;
+                } else {
+                    /* Generic socket error */
+                    entry->last_error = util_err_from_errno(optval);
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                }
                 /* Clear the error after reading it */
                 optval = 0;
                 setsockopt((SOCKET)entry->sock, SOL_SOCKET, SO_ERROR, (char *)&optval, sizeof(optval));
@@ -244,9 +269,18 @@ static void translate_pollevents(reactor_t *r, size_t index) {
         socklen_t optlen = sizeof(optval);
         if (getsockopt(entry->sock, SOL_SOCKET, SO_ERROR, &optval, &optlen) == 0) {
             if (optval != 0) {
-                /* Real socket error */
-                entry->last_error = util_err_from_errno(optval);
-                bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                /* Real socket error - check if this is a failed async connect */
+                if (entry->socket_type == SOCKET_TYPE_STREAM && !entry->connected) {
+                    /* Failed async connect */
+                    entry->last_error = util_err_from_errno(optval);
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                    /* Mark as "connected" to prevent further connect attempts */
+                    entry->connected = true;
+                } else {
+                    /* Generic socket error */
+                    entry->last_error = util_err_from_errno(optval);
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                }
             }
             /* else: spurious POLLERR, ignore */
         }
@@ -254,11 +288,29 @@ static void translate_pollevents(reactor_t *r, size_t index) {
         /* Don't return early - process other events too */
     }
 
+#ifdef POLLRDHUP
+    /* POLLRDHUP - peer closed write side (Linux half-close detection) */
+    if (entry->socket_type == SOCKET_TYPE_STREAM && (current & POLLRDHUP) && !(previous & POLLRDHUP)) {
+        /* Peer sent FIN - read side is closed but write side may still be open */
+        bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
+        /* Don't return early - there may be buffered data to read */
+    }
+#endif
+
     /* POLLHUP - peer closed (graceful close, only for TCP) */
     if (entry->socket_type == SOCKET_TYPE_STREAM && (current & POLLHUP) && !(previous & POLLHUP)) {
         bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
         /* Don't return early - there may be buffered data to read (POLLIN) */
     }
+
+#ifdef POLLPRI
+    /* POLLPRI - urgent/out-of-band data available */
+    if ((current & POLLPRI) && !(previous & POLLPRI)) {
+        /* OOB data available - treat as error condition since we don't handle OOB */
+        /* Most applications don't use OOB, so log and ignore rather than error */
+        log_detail("Socket %d has OOB data (POLLPRI), ignoring", (int)entry->sock);
+    }
+#endif
 
     /* POLLIN - readable or acceptable (edge-triggered) */
     if ((current & POLLIN) && !(previous & POLLIN)) {
@@ -482,12 +534,24 @@ static void deliver_pending_events(reactor_t *r) {
 static void tickle_wake_pipe(reactor_t *r) {
 #ifdef _WIN32
     uint8_t byte = 0;
-    send(r->wake_pipe_write, (const char *)&byte, 1, 0);
+    /* Non-blocking send - if pipe is full, wake already pending */
+    int result = send(r->wake_pipe_write, (const char *)&byte, 1, 0);
+    if (result == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        if (err == WSAEWOULDBLOCK) {
+            /* Wake pipe full - a wake is already pending, ignore */
+        }
+        /* Other errors don't matter - reactor will wake eventually */
+    }
 #else
     uint8_t byte = 0;
-    write(r->wake_pipe[1], &byte, 1);
+    /* Non-blocking write - if pipe is full, wake already pending */
+    ssize_t result = write(r->wake_pipe[1], &byte, 1);
+    if (result < 0 && errno == EAGAIN) {
+        /* Wake pipe full - a wake is already pending, ignore */
+    }
+    /* Other errors don't matter - reactor will wake eventually */
 #endif
-    /* Fire and forget - errors don't matter */
 }
 
 /* ================================================================

@@ -439,8 +439,21 @@ util_err_t socket_accept(socket_t server, socket_t *out_client,
     socket_t client = accept(server, (struct sockaddr *)&client_addr, &client_addr_len);
     if (client == INVALID_SOCKET) {
 #ifdef _WIN32
-        return util_err_from_wsa(WSAGetLastError());
+        int err = WSAGetLastError();
+        /* In non-blocking mode, no connection ready returns WSAEWOULDBLOCK */
+        if (err == WSAEWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        }
+        return util_err_from_wsa(err);
 #else
+        /* In non-blocking mode, no connection ready returns EAGAIN or EWOULDBLOCK */
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        }
+        /* EINTR can happen if interrupted by signal - treat as transient */
+        if (errno == EINTR) {
+            return UTIL_EAGAIN;
+        }
         return util_err_from_errno(errno);
 #endif
     }
