@@ -2,13 +2,18 @@
 
 TEST_DIR=$1
 
+# Debug: show what we received
+echo "Received TEST_DIR: $TEST_DIR"
+echo "OSTYPE: $OSTYPE"
+
 # Convert Windows paths to Unix paths if running on Windows (Git Bash)
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
     # Convert D:\path\to\dir to /d/path/to/dir (lowercase drive letter)
-    # First replace backslashes with forward slashes
-    TEST_DIR="${TEST_DIR//\\//}"
+    # First replace backslashes with forward slashes using tr
+    TEST_DIR=$(echo "$TEST_DIR" | tr '\\' '/')
     # Then replace C: style drive letters with /c/ (lowercase)
     TEST_DIR=$(echo "$TEST_DIR" | sed 's|^\([A-Za-z]\):|/\L\1|')
+    echo "After conversion: $TEST_DIR"
 fi
 
 # thanks to Stack Overflow
