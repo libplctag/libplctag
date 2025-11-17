@@ -19,6 +19,10 @@ fi
 # thanks to Stack Overflow
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
+# Change to the script directory so logs are created there
+cd "$SCRIPT_DIR"
+echo "Working directory: $(pwd)"
+
 TEST=0
 SUCCESSES=0
 FAILURES=0
