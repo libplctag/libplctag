@@ -1540,12 +1540,28 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
             byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
 
-            if(byte_read) {
+            if(byte_read > 0) {
                 pdebug(DEBUG_DETAIL, "Socket can read.");
                 result |= (events & SOCK_EVENT_CAN_READ);
-            } else {
-                pdebug(DEBUG_DETAIL, "Socket disconnected.");
+            } else if(byte_read == 0) {
+                /* recv() returned 0 - this means the connection was closed by the remote peer.
+                 * A healthy TCP socket that's just idle will not show as readable in select()
+                 * unless there's actual data waiting. If select() says readable but recv() gets 0,
+                 * the connection is truly closed. */
+                pdebug(DEBUG_DETAIL, "Socket disconnected (recv returned 0).");
                 result |= (events & SOCK_EVENT_DISCONNECT);
+            } else {
+                /* recv() returned -1, check the specific error */
+                int recv_err = WSAGetLastError();
+                if(recv_err == WSAEWOULDBLOCK) {
+                    /* This is a spurious wakeup - socket showed as readable but no data.
+                     * Don't report an error, just return no events. */
+                    pdebug(DEBUG_DETAIL, "Socket readable but no data available (WSAEWOULDBLOCK).");
+                } else {
+                    /* Some other error occurred on the socket */
+                    pdebug(DEBUG_WARN, "recv() with MSG_PEEK error %d on socket.", recv_err);
+                    result |= (events & SOCK_EVENT_ERROR);
+                }
             }
         }
 
@@ -1557,8 +1573,26 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
         /* is there an error? */
         if(FD_ISSET(sock->fd, &err_set)) {
-            pdebug(DEBUG_DETAIL, "Socket has error!");
-            result |= (events & SOCK_EVENT_ERROR);
+            /* On Windows, FD_ISSET on err_set can return true spuriously for idle sockets.
+             * We need to verify the error is real by checking the actual socket error state.
+             * Use getsockopt(SO_ERROR) to get the actual error code. */
+            int sock_error = 0;
+            socklen_t sock_error_len = sizeof(sock_error);
+
+            if(getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, (char *)&sock_error, &sock_error_len) == 0) {
+                if(sock_error != 0) {
+                    /* There's a real socket error */
+                    pdebug(DEBUG_WARN, "Socket has real error %d!", sock_error);
+                    result |= (events & SOCK_EVENT_ERROR);
+                } else {
+                    /* FD_ISSET was spurious - there's no actual error */
+                    pdebug(DEBUG_DETAIL, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
+                }
+            } else {
+                /* Failed to get socket error state, assume there's an error */
+                pdebug(DEBUG_WARN, "Failed to check socket error state, treating as error.");
+                result |= (events & SOCK_EVENT_ERROR);
+            }
         }
     } else {
         int err = WSAGetLastError();

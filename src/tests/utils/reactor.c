@@ -222,41 +222,96 @@ static void translate_pollevents(reactor_t *r, size_t index) {
     short previous = entry->last_revents.revents;
     entry->last_revents.revents = current;
 
-    /* POLLERR - socket error */
+    /* POLLERR - socket error (may be spurious on Windows) */
     if ((current & POLLERR) && !(previous & POLLERR)) {
-        /* Error occurred (transition) */
+        /* Verify this is a real error by checking SO_ERROR */
 #ifdef _WIN32
         int optval = 0;
         int optlen = sizeof(optval);
-        if (getsockopt((SOCKET)entry->sock, SOL_SOCKET, SO_ERROR, (char *)&optval, &optlen) != SOCKET_ERROR && optval != 0) {
-            entry->last_error = util_err_from_errno(optval);
+        if (getsockopt((SOCKET)entry->sock, SOL_SOCKET, SO_ERROR, (char *)&optval, &optlen) != SOCKET_ERROR) {
+            if (optval != 0) {
+                /* Real socket error */
+                entry->last_error = util_err_from_errno(optval);
+                bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                /* Clear the error after reading it */
+                optval = 0;
+                setsockopt((SOCKET)entry->sock, SOL_SOCKET, SO_ERROR, (char *)&optval, sizeof(optval));
+            }
+            /* else: spurious POLLERR, ignore */
         }
 #else
         int optval = 0;
         socklen_t optlen = sizeof(optval);
-        if (getsockopt(entry->sock, SOL_SOCKET, SO_ERROR, &optval, &optlen) == 0 && optval != 0) {
-            entry->last_error = util_err_from_errno(optval);
+        if (getsockopt(entry->sock, SOL_SOCKET, SO_ERROR, &optval, &optlen) == 0) {
+            if (optval != 0) {
+                /* Real socket error */
+                entry->last_error = util_err_from_errno(optval);
+                bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+            }
+            /* else: spurious POLLERR, ignore */
         }
 #endif
-        bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-        /* Store error status for delivery - we'll handle this in deliver_pending_events */
-        /* For now, queue the error with OK status; will be updated in deliver function */
-        return;
+        /* Don't return early - process other events too */
     }
 
-    /* POLLHUP - peer closed (graceful close) */
-    if ((current & POLLHUP) && !(previous & POLLHUP)) {
+    /* POLLHUP - peer closed (graceful close, only for TCP) */
+    if (entry->socket_type == SOCKET_TYPE_STREAM && (current & POLLHUP) && !(previous & POLLHUP)) {
         bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
-        return;
+        /* Don't return early - there may be buffered data to read (POLLIN) */
     }
 
     /* POLLIN - readable or acceptable (edge-triggered) */
     if ((current & POLLIN) && !(previous & POLLIN)) {
-        if (bitarray_test(&entry->enabled, REACTOR_EVENT_CAN_READ)) {
-            bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
-        }
+        /* For listening sockets, POLLIN means a connection is ready to accept */
         if (bitarray_test(&entry->enabled, REACTOR_EVENT_CAN_ACCEPT)) {
             bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_ACCEPT);
+        }
+        /* For connected sockets, verify data is actually available (not spurious) */
+        else if (bitarray_test(&entry->enabled, REACTOR_EVENT_CAN_READ)) {
+#ifdef _WIN32
+            /* On Windows, use MSG_PEEK to verify data is available and distinguish
+             * between readable data, peer disconnect, and spurious wakeup */
+            char peek_buf;
+            int peek_result = recv((SOCKET)entry->sock, &peek_buf, 1, MSG_PEEK);
+            if (peek_result > 0) {
+                /* Data is available */
+                bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
+            } else if (peek_result == 0) {
+                /* recv() returned 0 - peer closed connection gracefully */
+                if (entry->socket_type == SOCKET_TYPE_STREAM) {
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
+                }
+            } else {
+                /* recv() returned -1, check error */
+                int recv_err = WSAGetLastError();
+                if (recv_err == WSAEWOULDBLOCK) {
+                    /* Spurious wakeup - no data available, ignore */
+                } else {
+                    /* Real error on socket */
+                    entry->last_error = util_err_from_wsa(recv_err);
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                }
+            }
+#else
+            /* On Unix, trust POLLIN for stream sockets but verify for robustness */
+            if (entry->socket_type == SOCKET_TYPE_STREAM) {
+                char peek_buf;
+                ssize_t peek_result = recv(entry->sock, &peek_buf, 1, MSG_PEEK);
+                if (peek_result > 0) {
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
+                } else if (peek_result == 0) {
+                    /* Peer closed */
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
+                } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    /* Real error */
+                    entry->last_error = util_err_from_errno(errno);
+                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                }
+            } else {
+                /* UDP sockets - trust POLLIN */
+                bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
+            }
+#endif
         }
     }
 
@@ -269,9 +324,9 @@ static void translate_pollevents(reactor_t *r, size_t index) {
                 entry->connected = true;
                 bitarray_set(&entry->pending_events, REACTOR_EVENT_CONNECTED);
             } else {
-                /* Connect failed - raise ERROR with the connection error */
+                /* Connect failed */
+                entry->last_error = conn_err;
                 bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-                /* Store the error status somehow... need to rethink this */
             }
         } else if (bitarray_test(&entry->enabled, REACTOR_EVENT_CAN_WRITE)) {
             bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_WRITE);
