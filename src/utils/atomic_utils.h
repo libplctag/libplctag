@@ -56,6 +56,8 @@ typedef volatile int64_t atomic_int64_t;
 
 #include <stdatomic.h>
 
+#define ATOMIC_INT_STATIC_INIT 0
+
 typedef _Atomic(bool) atomic_bool;
 typedef _Atomic(int32_t) atomic_int32_t;
 typedef _Atomic(int64_t) atomic_int64_t;
