@@ -67,7 +67,8 @@ echo ===========================================================================
 echo.
 
 REM Start AB server for fast tests (non-blocking)
-start "" "%TEST_DIR%\ab_server.exe" --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --tag=Test_Array_1:DINT[1000] --tag=Test_Array_2x3:DINT[2,3] --tag=Test_Array_2x3x4:DINT[2,3,4] > logix_fast_emulator.log 2>&1
+REM Use cmd /c to properly handle output redirection with start command
+start "" cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --tag=Test_Array_1:DINT[1000] --tag=Test_Array_2x3:DINT[2,3] --tag=Test_Array_2x3x4:DINT[2,3,4] > logix_fast_emulator.log 2>&1"
 
 REM Give the server time to start and listen
 timeout /T 3 /nobreak >nul
@@ -195,7 +196,7 @@ echo ===========================================================================
 echo.
 
 REM Start AB server for slow tests (with delay, non-blocking)
-start "" "%TEST_DIR%\ab_server.exe" --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --tag=Test_Array_1:DINT[1000] --tag=Test_Array_2x3:DINT[2,3] --tag=Test_Array_2x3x4:DINT[2,3,4] --delay=50 > logix_slow_emulator.log 2>&1
+start "" cmd /c ""%TEST_DIR%\ab_server.exe" --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --tag=Test_Array_1:DINT[1000] --tag=Test_Array_2x3:DINT[2,3] --tag=Test_Array_2x3x4:DINT[2,3,4] --delay=50 > logix_slow_emulator.log 2>&1"
 
 REM Give the server time to start and listen
 timeout /T 1 /nobreak >nul
@@ -247,7 +248,7 @@ echo ===========================================================================
 echo.
 
 REM Start Micro800 emulator (non-blocking)
-start "" "%TEST_DIR%\ab_server.exe" --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] > micro800_emulator.log 2>&1
+start "" cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] > micro800_emulator.log 2>&1"
 
 if errorlevel 1 (
     echo Unable to start Micro800 emulator!
@@ -282,7 +283,7 @@ echo ===========================================================================
 echo.
 
 REM Start Omron emulator (non-blocking)
-start "" "%TEST_DIR%\ab_server.exe" --debug --plc=Omron --tag=TestDINTArray:DINT[10] > omron_emulator.log 2>&1
+start "" cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=Omron --tag=TestDINTArray:DINT[10] > omron_emulator.log 2>&1"
 
 if errorlevel 1 (
     echo Unable to start AB/Omron emulator!
@@ -317,7 +318,7 @@ echo ===========================================================================
 echo.
 
 REM Start Micrologix emulator (non-blocking)
-start "" "%TEST_DIR%\ab_server.exe" --debug --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10] > micrologix_emulator.log 2>&1
+start "" cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=Micrologix --tag=B3[10] --tag=N7[10] --tag=L19[10] > micrologix_emulator.log 2>&1"
 
 if errorlevel 1 (
     echo Unable to start AB/Micrologix emulator!
@@ -443,7 +444,7 @@ echo ===========================================================================
 echo.
 
 REM Start PLC5 emulator (non-blocking)
-start "" "%TEST_DIR%\ab_server.exe" --debug --plc=PLC/5 --tag=B3[10] --tag=N7[10] > plc5_emulator.log 2>&1
+start "" cmd /c ""%TEST_DIR%\ab_server.exe" --debug --plc=PLC/5 --tag=B3[10] --tag=N7[10] > plc5_emulator.log 2>&1"
 
 if errorlevel 1 (
     echo Unable to start AB/PLC5 emulator!
@@ -526,7 +527,8 @@ echo ===========================================================================
 echo.
 
 REM Start Modbus server (non-blocking)
-start "" "%TEST_DIR%\modbus_server.exe" --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1
+REM Pass entire command as a string to cmd /c to properly handle output redirection
+start "" cmd /c ""%TEST_DIR%\modbus_server.exe" --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1"
 
 REM Give the process a moment to start
 timeout /T 2 /nobreak >nul
