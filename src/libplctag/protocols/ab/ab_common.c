@@ -57,7 +57,6 @@
 #include <utils/debug.h>
 #include <utils/vector.h>
 
-
 /*
  * Externally visible global variables
  */

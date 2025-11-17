@@ -212,6 +212,9 @@ modbus_plc_p plcs = NULL;
 static atomic_int32_t plc_count;
 static cond_p plc_cleanup_cond = NULL;
 
+/* Track active handler threads for proper shutdown synchronization */
+static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
+
 
 /* helper functions */
 static int create_tag_object(attr attribs, modbus_tag_p *tag);
@@ -828,6 +831,9 @@ THREAD_FUNC(modbus_plc_handler) {
         THREAD_RETURN(0);
     }
 
+    /* Increment the count of active handler threads */
+    atomic_add_int32(&handler_threads_active, 1);
+
     while(!plc->flags.terminate && atomic_get_bool(&lib_active)) {
         rc = tickle_all_tags(plc);
         if(rc != PLCTAG_STATUS_OK) {
@@ -1075,6 +1081,9 @@ THREAD_FUNC(modbus_plc_handler) {
      * code is still running and trying to access the PLC (race condition).
      */
     pdebug(DEBUG_DETAIL, "Handler thread exiting without decrementing PLC reference (deferred cleanup will handle it).");
+
+    /* Decrement the count of active handler threads */
+    atomic_add_int32(&handler_threads_active, -1);
 
     THREAD_RETURN(0);
 }
@@ -2853,6 +2862,11 @@ int mb_set_int_attrib(plc_tag_p raw_tag, const char *attrib_name, int new_value)
 /****** Library level functions. *******/
 
 void mb_teardown(void) {
+    int64_t start_time = 0;
+    int64_t timeout_ms = 5000;
+    int active_count = 0;
+    int64_t elapsed = 0;
+
     pdebug(DEBUG_INFO, "Starting.");
 
     if(mb_mutex) {
@@ -2884,6 +2898,29 @@ void mb_teardown(void) {
         }
 
         pdebug(DEBUG_DETAIL, "All Modbus PLCs destroyed.");
+    }
+
+    /* Wait for all active handler threads to complete.
+     * Use an atomic counter to track active threads.
+     * Wait up to 5 seconds (5000 ms) with 20ms polling intervals.
+     */
+    pdebug(DEBUG_DETAIL, "Waiting for handler threads to complete.");
+    start_time = time_ms();
+
+    while((active_count = atomic_get_int32(&handler_threads_active)) > 0) {
+        elapsed = time_ms() - start_time;
+
+        if(elapsed >= timeout_ms) {
+            pdebug(DEBUG_WARN, "Timeout waiting for %d handler threads to complete.", active_count);
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL, "Waiting for %d handler threads to complete. Elapsed: %" PRId64 "ms", active_count, elapsed);
+        sleep_ms(20);
+    }
+
+    if(active_count == 0) {
+        pdebug(DEBUG_INFO, "All handler threads completed.");
     }
 
     if(mb_mutex) {

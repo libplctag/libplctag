@@ -46,6 +46,9 @@
 #include <utils/debug.h>
 #include <utils/random_utils.h>
 
+/* Track active session handler threads for proper shutdown synchronization */
+static atomic_int32_t session_handlers_active = ATOMIC_INT_STATIC_INIT;
+
 #define MAX_REQUESTS (400)
 
 #define EIP_CIP_PREFIX_SIZE (44) /* bytes of encap header and CFP connected header */
@@ -165,6 +168,10 @@ int session_startup(void) {
 
 void session_teardown(void) {
     int remaining_sessions = 0;
+    int64_t start_time = 0;
+    int64_t timeout_ms = 5000;
+    int active_count = 0;
+    int64_t elapsed = 0;
 
     pdebug(DEBUG_INFO, "Starting.");
 
@@ -211,6 +218,29 @@ void session_teardown(void) {
         vector_destroy(sessions);
 
         sessions = NULL;
+    }
+
+    /* Wait for all active session handler threads to complete.
+     * Use an atomic counter to track active handlers.
+     * Wait up to 5 seconds (5000 ms) with 20ms polling intervals.
+     */
+    pdebug(DEBUG_DETAIL, "Waiting for session handler threads to complete.");
+    start_time = time_ms();
+
+    while((active_count = atomic_get_int32(&session_handlers_active)) > 0) {
+        elapsed = time_ms() - start_time;
+
+        if(elapsed >= timeout_ms) {
+            pdebug(DEBUG_WARN, "Timeout waiting for %d session handler threads to complete.", active_count);
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL, "Waiting for %d session handler threads to complete. Elapsed: %" PRId64 "ms", active_count, elapsed);
+        sleep_ms(20);
+    }
+
+    if(active_count == 0) {
+        pdebug(DEBUG_INFO, "All session handler threads completed.");
     }
 
     pdebug(DEBUG_DETAIL, "Destroying session mutex.");
@@ -1252,6 +1282,9 @@ THREAD_FUNC(session_handler) {
 
     pdebug(DEBUG_INFO, "Starting thread for session %p", session);
 
+    /* Increment the count of active session handlers */
+    atomic_add_int32(&session_handlers_active, 1);
+
     while(!session->terminating && atomic_get_bool(&lib_active)) {
         now = time_ms();
 
@@ -1553,6 +1586,9 @@ THREAD_FUNC(session_handler) {
      * One last time before we exit.
      */
     critical_block(session->session_mutex) { purge_aborted_requests_unsafe(session); }
+
+    /* Decrement the count of active session handlers */
+    atomic_add_int32(&session_handlers_active, -1);
 
     THREAD_RETURN(0);
 }

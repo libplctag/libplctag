@@ -119,6 +119,9 @@ static int conn_request_increase_buffer(omron_request_p request, int new_capacit
 static volatile mutex_p conn_mutex = NULL;
 static volatile vector_p conns = NULL;
 
+/* Track active handler threads for proper shutdown synchronization */
+static atomic_int32_t handler_threads_active = ATOMIC_INT_STATIC_INIT;
+
 
 int conn_startup(void) {
     int rc = PLCTAG_STATUS_OK;
@@ -168,6 +171,32 @@ void conn_teardown(void) {
     if(conn_mutex) {
         mutex_destroy((mutex_p *)&conn_mutex);
         conn_mutex = NULL;
+    }
+
+    /* Wait for all active handler threads to complete.
+     * Use an atomic counter to track active threads.
+     * Wait up to 5 seconds (5000 ms) with 20ms polling intervals.
+     */
+    pdebug(DEBUG_DETAIL, "Waiting for handler threads to complete.");
+    int64_t start_time = time_ms();
+    int64_t timeout_ms = 5000;
+    int active_count = 0;
+    int64_t elapsed = 0;
+
+    while((active_count = atomic_get_int32(&handler_threads_active)) > 0) {
+        elapsed = time_ms() - start_time;
+
+        if(elapsed >= timeout_ms) {
+            pdebug(DEBUG_WARN, "Timeout waiting for %d handler threads to complete.", active_count);
+            break;
+        }
+
+        pdebug(DEBUG_DETAIL, "Waiting for %d handler threads to complete. Elapsed: %" PRId64 "ms", active_count, elapsed);
+        sleep_ms(20);
+    }
+
+    if(active_count == 0) {
+        pdebug(DEBUG_INFO, "All handler threads completed.");
     }
 
     pdebug(DEBUG_INFO, "Done.");
@@ -1039,6 +1068,9 @@ THREAD_FUNC(conn_handler) {
 
     pdebug(DEBUG_INFO, "Starting thread for conn %p", conn);
 
+    /* Increment the count of active handler threads */
+    atomic_add_int32(&handler_threads_active, 1);
+
     while(!conn->terminating && atomic_get_bool(&lib_active)) {
         /* how long should we wait if nothing wakes us? */
         wait_until_time = time_ms() + CONN_IDLE_WAIT_TIME;
@@ -1322,6 +1354,9 @@ THREAD_FUNC(conn_handler) {
      */
     pdebug(DEBUG_DETAIL, "Critical block.");
     critical_block(conn->mutex) { purge_aborted_requests_unsafe(conn); }
+
+    /* Decrement the count of active handler threads */
+    atomic_add_int32(&handler_threads_active, -1);
 
     THREAD_RETURN(0);
 }
