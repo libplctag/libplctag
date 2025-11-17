@@ -13,6 +13,18 @@ FAILURES=0
 # VALGRIND="valgrind --tool=memcheck --track-origins=yes --leak-check=full --show-leak-kinds=all --error-exitcode=1  "
 VALGRIND=""
 
+# Cross-platform process killing function
+kill_process() {
+    local process_name=$1
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+        # Windows (Git Bash)
+        taskkill //F //IM "${process_name}.exe" > /dev/null 2>&1
+    else
+        # Linux/macOS
+        killall -TERM "$process_name" > /dev/null 2>&1
+    fi
+}
+
 if [[ ! -d $TEST_DIR ]]; then
     # echo "Using $TEST_DIR for test executables."
 # else
@@ -116,7 +128,7 @@ fi
 
 
 # echo "  Killing AB emulator."
-killall -TERM ab_server > /dev/null 2>&1
+kill_process ab_server
 
 echo "Starting stand-alone tests."
 
@@ -191,7 +203,7 @@ fi
 
 
 echo "  Killing AB emulator."
-killall -TERM ab_server > /dev/null 2>&1
+kill_process ab_server
 
 
 echo "Starting AB emulator for Micro800 tests."
@@ -220,11 +232,11 @@ else
 fi
 
 
-echo "  Killing Micro800 emulator."
-killall -TERM ab_server > /dev/null 2>&1
+echo "  Killing Micrologix emulator."
+kill_process ab_server
 
 
-echo "Starting AB emulator for Omron tests."
+echo "Starting AB emulator for PLC5 tests."
 { $TEST_DIR/ab_server --debug --plc=Omron --tag=TestDINTArray:DINT[10] > omron_emulator.log 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
 if [ $EMULATOR_PID -le 0 ]; then
@@ -250,7 +262,7 @@ else
 fi
 
 echo "  Killing Omron emulator."
-killall -TERM ab_server > /dev/null 2>&1
+kill_process ab_server
 
 
 echo "Starting AB emulator for Micrologix tests."
@@ -344,7 +356,7 @@ fi
 
 
 echo "  Killing Micrologix emulator."
-killall -TERM ab_server > /dev/null 2>&1
+kill_process ab_server
 
 
 
@@ -407,9 +419,9 @@ else
 fi
 
 echo "  Killing emulators."
-killall -TERM ab_server > /dev/null 2>&1
+kill_process ab_server
 
-killall -TERM modbus_server > /dev/null 2>&1
+kill_process modbus_server
 
 # wait for them to exit
 sleep 2
@@ -499,10 +511,10 @@ else
 fi
 
 # echo "  Killing Modbus emulator."
-killall -TERM modbus_server > /dev/null 2>&1
+kill_process modbus_server
 
 # Make sure no ab_server instances are running before running auto_sync_reconnect test
-killall -TERM ab_server > /dev/null 2>&1
+kill_process ab_server
 
 # wait for them to exit
 sleep 2

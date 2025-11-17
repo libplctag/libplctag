@@ -369,10 +369,8 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Run Simulator Tests
-      run: |
-        cd ${{ github.workspace }}\src\tests
-        powershell -ExecutionPolicy Bypass -File .\run_simulator_tests.ps1 -TestDir "${{ env.DIST }}"
-      shell: cmd
+      run: bash src/tests/run_simulator_tests.sh ${{ env.DIST }}
+      shell: bash
 
     - name: Upload test logs
       if: always()
