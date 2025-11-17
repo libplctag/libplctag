@@ -2,6 +2,12 @@
 
 TEST_DIR=$1
 
+# Convert Windows paths to Unix paths if running on Windows (Git Bash)
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+    # Convert backslashes to forward slashes and handle drive letters
+    TEST_DIR=$(echo "$TEST_DIR" | sed 's/\\/\//g' | sed 's/^\([A-Za-z]\):/\/\1/')
+fi
+
 # thanks to Stack Overflow
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
