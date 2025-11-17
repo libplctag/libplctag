@@ -63,6 +63,7 @@ function Run-Test {
     param(
         [string]$Name,
         [string]$Executable,
+        [AllowNull()]
         [string[]]$Arguments,
         [string]$LogFile
     )
@@ -192,23 +193,23 @@ Run-Test -Name "basic large tag read/write" -Executable "tag_rw2.exe" `
 
 # Test 2: stress RC memory code
 Run-Test -Name "stress RC memory code" -Executable "stress_rc_mem.exe" `
-    -Arguments @() -LogFile "${script:TestCount}_stress_rc_mem_test.log"
+    -Arguments $null -LogFile "${script:TestCount}_stress_rc_mem_test.log"
 
 # Test 3: CIP thread stress
 Run-Test -Name "CIP thread stress" -Executable "thread_stress.exe" `
-    -Arguments @() -LogFile "${script:TestCount}_thread_stress_test.log"
+    -Arguments $null -LogFile "${script:TestCount}_thread_stress_test.log"
 
 # Test 4: auto sync
 Run-Test -Name "auto sync" -Executable "test_auto_sync.exe" `
-    -Arguments @() -LogFile "${script:TestCount}_auto_sync_test.log"
+    -Arguments $null -LogFile "${script:TestCount}_auto_sync_test.log"
 
 # Test 5: indexed tags
 Run-Test -Name "indexed tags" -Executable "test_indexed_tags.exe" `
-    -Arguments @() -LogFile "${script:TestCount}_indexed_tags_test.log"
+    -Arguments $null -LogFile "${script:TestCount}_indexed_tags_test.log"
 
 # Test 6: hard library shutdown
 Run-Test -Name "hard library shutdown" -Executable "test_shutdown.exe" `
-    -Arguments @() -LogFile "${script:TestCount}_shutdown_test.log"
+    -Arguments $null -LogFile "${script:TestCount}_shutdown_test.log"
 }
 
 Write-Host ""
@@ -251,7 +252,7 @@ Start-Sleep -Seconds 1
 if ($logixSlow -and -not $logixSlow.HasExited) {
     # Test 9: emulator test callbacks
     Run-Test -Name "emulator test callbacks" -Executable "test_callback.exe" `
-        -Arguments @() -LogFile "${script:TestCount}_callback_test.log"
+        -Arguments $null -LogFile "${script:TestCount}_callback_test.log"
 } else {
     Write-Host "WARNING: ControlLogix Slow server not running. Skipping tests." -ForegroundColor Yellow
 }
@@ -453,7 +454,7 @@ if (-not $modbusProcess) {
 
     # Test 25: Modbus multiple connections
     Run-Test -Name "Modbus multiple connections" -Executable "test_modbus_multiple.exe" `
-        -Arguments @() -LogFile "${script:TestCount}_modbus_multiple_test.log"
+        -Arguments $null -LogFile "${script:TestCount}_modbus_multiple_test.log"
 
     Write-Host ""
     Write-Host "Killing Modbus server."
