@@ -121,7 +121,7 @@ int main(void) {
     // NOLINTNEXTLINE
     fprintf(stderr, "Forcing library shutdown.\n");
 
-    plc_tag_set_debug_level(PLCTAG_DEBUG_INFO);
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
 
     plc_tag_shutdown();
 

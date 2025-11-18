@@ -1838,6 +1838,8 @@ int process_requests(ab_session_p session) {
 
                     /* punt if we got an overall error or it is not a partial/bundled error. */
                     if(resp->status != AB_EIP_OK && resp->status != AB_CIP_ERR_PARTIAL_ERROR) {
+                        pdebug(DEBUG_WARN, "Response status=%u", resp->status);
+                        pdebug(DEBUG_WARN, "Received CIP error %s (%s).", decode_cip_error_long(&resp->status), decode_cip_error_short(&resp->status));
                         rc = decode_cip_error_code(&(resp->status));
                         pdebug(DEBUG_WARN, "Command failed! (%d/%d) %s", resp->status, rc, plc_tag_decode_error(rc));
                         break;
