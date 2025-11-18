@@ -109,6 +109,12 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     # endif()
 endforeach()
 
+# Link math library for tests that use sqrt() and other math functions
+if(UNIX)
+    target_link_libraries(test_ab_fairness m)
+    target_link_libraries(test_modbus_fairness m)
+endif()
+
 # Install only the tag_rw2 tool into the devel component
 install(TARGETS tag_rw2
     RUNTIME DESTINATION bin
