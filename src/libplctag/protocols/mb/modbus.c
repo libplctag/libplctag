@@ -1293,9 +1293,9 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         i = (start_index + offset) % vector_len;
         if(vector_len == 0) break;
         
-        int tag_op_before = TAG_OP_NONE;
-        int tag_op_after = TAG_OP_NONE;
-        
+        tag_op_type_t tag_op_before = TAG_OP_IDLE;
+        tag_op_type_t tag_op_after = TAG_OP_IDLE;
+
         /* Get tag with PLC mutex */
         critical_block(plc->mutex) {
             if(i < vector_length(plc->tag_vector)) {
@@ -1308,6 +1308,11 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                     /* Calculate wait time while we have the tag pointer */
                     if(tag->auto_sync_read_ms > 0 && tag->auto_sync_next_read > 0) {
                         int64_t read_wait = tag->auto_sync_next_read - now;
+
+                        if(read_wait < 0) {
+                            read_wait = 0;
+                        }
+
                         if(read_wait > 0 && read_wait < min_wait_time) {
                             min_wait_time = read_wait;
                         }
@@ -1315,6 +1320,11 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 
                     if(tag->auto_sync_write_ms > 0 && tag->auto_sync_next_write > 0) {
                         int64_t write_wait = tag->auto_sync_next_write - now;
+
+                        if(write_wait < 0) {
+                            write_wait = 0;
+                        }
+                        
                         if(write_wait > 0 && write_wait < min_wait_time) {
                             min_wait_time = write_wait;
                         }
