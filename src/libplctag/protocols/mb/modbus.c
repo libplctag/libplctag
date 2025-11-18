@@ -77,6 +77,9 @@ struct modbus_plc_t {
     /* Count of tags currently attached to this PLC */
     atomic_int32_t tag_count;
 
+    /* Round-robin starting index for fair tag processing */
+    int tag_iteration_start;
+
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
     int64_t next_auto_sync_time_ms;
@@ -231,7 +234,6 @@ static THREAD_FUNC(modbus_plc_handler);
 static void wake_plc_thread(modbus_plc_p plc);
 static int connect_plc(modbus_plc_p plc);
 static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms);
-static int compare_tags_by_priority(const void *a, const void *b);
 static int tickle_tag(modbus_plc_p plc, modbus_tag_p tag);
 static int find_request_slot(modbus_plc_p plc, modbus_tag_p tag);
 static void clear_request_slot(modbus_plc_p plc, modbus_tag_p tag);
@@ -574,6 +576,9 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                     pdebug(DEBUG_WARN, "Unable to create tag vector!");
                     rc = PLCTAG_ERR_NO_MEM;
                 }
+
+                /* initialize round-robin starting index */
+                (*plc)->tag_iteration_start = 0;
 
                 /* initialize timestamp tracking */
                 (*plc)->last_packet_time_ms = time_ms();
@@ -1263,57 +1268,42 @@ int connect_plc(modbus_plc_p plc) {
 }
 
 
-static int compare_tags_by_priority(const void *a, const void *b) {
-    modbus_tag_p tag_a = *(modbus_tag_p *)a;
-    modbus_tag_p tag_b = *(modbus_tag_p *)b;
-
-    /* Handle NULL pointers */
-    if(!tag_a && !tag_b) return 0;
-    if(!tag_a) return 1;
-    if(!tag_b) return -1;
-
-    /* Priority 1: Tags with requests pending (higher priority) */
-    bool a_has_request = (tag_a->op == TAG_OP_READ_REQUEST || tag_a->op == TAG_OP_WRITE_REQUEST);
-    bool b_has_request = (tag_b->op == TAG_OP_READ_REQUEST || tag_b->op == TAG_OP_WRITE_REQUEST);
-
-    if(a_has_request && !b_has_request) return -1; /* a first */
-    if(!a_has_request && b_has_request) return 1;  /* b first */
-
-    /* Priority 2: Tags waiting for responses (lower priority) */
-    bool a_waiting = (tag_a->op == TAG_OP_READ_RESPONSE || tag_a->op == TAG_OP_WRITE_RESPONSE);
-    bool b_waiting = (tag_b->op == TAG_OP_READ_RESPONSE || tag_b->op == TAG_OP_WRITE_RESPONSE);
-
-    if(a_waiting && !b_waiting) return 1;  /* b first */
-    if(!a_waiting && b_waiting) return -1; /* a first */
-
-    /* Priority 3: Stable ordering by tag_id */
-    if(tag_a->tag_id < tag_b->tag_id) return -1;
-    if(tag_a->tag_id > tag_b->tag_id) return 1;
-    return 0;
-}
-
-
 int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
     int vector_len = 0;
+    int start_index = 0;
     int i = 0;
+    int processed_count = 0;
+    int last_response_index = -1;
     int64_t min_wait_time = MODBUS_IDLE_WAIT_TIMEOUT;
     int64_t now = time_ms();
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    /* Process all tags in vector, calculating wait time as we go */
-    while(i < vector_len || i == 0) {
-        /* Get current vector length and tag with PLC mutex */
-        critical_block(plc->mutex) {
-            vector_len = vector_length(plc->tag_vector);
+    /* Get starting index for round-robin processing */
+    critical_block(plc->mutex) {
+        start_index = plc->tag_iteration_start;
+        vector_len = vector_length(plc->tag_vector);
+    }
 
-            if(i < vector_len) {
+    /* Process all tags starting from round-robin position */
+    for(int offset = 0; offset < vector_len; offset++) {
+        /* Calculate actual index with wrap-around */
+        i = (start_index + offset) % vector_len;
+        if(vector_len == 0) break;
+        
+        int tag_op_before = TAG_OP_NONE;
+        int tag_op_after = TAG_OP_NONE;
+        
+        /* Get tag with PLC mutex */
+        critical_block(plc->mutex) {
+            if(i < vector_length(plc->tag_vector)) {
                 modbus_tag_p candidate = vector_get(plc->tag_vector, i);
                 /* Try to increment reference - skip if being destroyed */
                 if(candidate && rc_inc(candidate)) {
                     tag = candidate;
+                    tag_op_before = tag->op;
 
                     /* Calculate wait time while we have the tag pointer */
                     if(tag->auto_sync_read_ms > 0 && tag->auto_sync_next_read > 0) {
@@ -1332,8 +1322,6 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                 } else {
                     tag = NULL;
                 }
-            } else {
-                tag = NULL;
             }
         }
         /* PLC mutex released - tag holds reference so it's safe */
@@ -1351,6 +1339,9 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                     pdebug(DEBUG_WARN, "Error %s tickling tag!", plc_tag_decode_error(rc));
                 }
 
+                /* Check if tag transitioned to waiting for response */
+                tag_op_after = tag->op;
+                
                 mutex_unlock(tag->api_mutex);
             } else {
                 pdebug(DEBUG_DETAIL, "Tag API mutex is already taken, skipping tickle.");
@@ -1358,22 +1349,40 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 
             debug_set_tag_id(0);
 
+            /* Track if this tag transitioned to waiting for response */
+            if((tag_op_before != TAG_OP_READ_RESPONSE && tag_op_before != TAG_OP_WRITE_RESPONSE) &&
+               (tag_op_after == TAG_OP_READ_RESPONSE || tag_op_after == TAG_OP_WRITE_RESPONSE)) {
+                last_response_index = i;
+                pdebug(DEBUG_DETAIL, "Tag at index %d transitioned to waiting for response", i);
+            }
+
             /* Release our reference */
             rc_dec(tag);
             tag = NULL;
+            processed_count++;
         }
-
-        /* Move to next index */
-        i++;
     }
 
-    /* Sort the vector for next iteration */
+    /* Update starting index for next iteration - start after last tag that went into RESPONSE state */
     critical_block(plc->mutex) {
-        vector_sort(plc->tag_vector, compare_tags_by_priority);
-
-        /* Store for tracking */
+        vector_len = vector_length(plc->tag_vector);
+        
+        if(last_response_index >= 0) {
+            /* Start next iteration just after the last tag that transitioned to RESPONSE */
+            plc->tag_iteration_start = (last_response_index + 1) % (vector_len > 0 ? vector_len : 1);
+            pdebug(DEBUG_DETAIL, "Next iteration will start at index %d (after last response at %d)", 
+                   plc->tag_iteration_start, last_response_index);
+        } else if(vector_len > 0) {
+            /* No tags transitioned to RESPONSE, advance by 1 for round-robin */
+            plc->tag_iteration_start = (start_index + 1) % vector_len;
+            pdebug(DEBUG_DETAIL, "No response transitions, advancing start to index %d", plc->tag_iteration_start);
+        }
+        
+        /* Store auto-sync tracking info */
         plc->next_auto_sync_time_ms = (min_wait_time < MODBUS_IDLE_WAIT_TIMEOUT) ? (now + min_wait_time) : 0;
     }
+
+    pdebug(DEBUG_DETAIL, "Processed %d tags.", processed_count);
 
     /* Return calculated wait time */
     *out_wait_time_ms = min_wait_time;
