@@ -135,7 +135,7 @@ int main(void) {
     for (int i = 0; i < NUM_TAGS; i++) {
         snprintf(tag_string, sizeof(tag_string),
                  "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix"
-                 "&elem_count=1&name=TestDINT%d&auto_sync_read_ms=%d",
+                 "&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=%d",
                  i, AUTO_SYNC_MS);
         
         tags[i] = plc_tag_create_ex(tag_string, tag_callback, &stats, 5000);
