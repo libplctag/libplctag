@@ -39,6 +39,7 @@
 
 extern int util_sleep_ms(int ms);
 extern int64_t util_time_ms(void);
+extern int64_t util_time_us(void);
 
 extern void system_yield(void);
 
@@ -56,3 +57,8 @@ extern void slice_dump(slice_s s);
 
 #define RANDOM_U64_ERROR (UINT64_MAX)
 extern uint64_t random_u64(uint64_t upper_bound);
+
+/* Fairness tracking */
+struct plc_s;
+struct tag_def_s;
+extern void dump_fairness_stats(struct plc_s *plc);

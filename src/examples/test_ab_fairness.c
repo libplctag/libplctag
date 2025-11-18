@@ -56,12 +56,13 @@
 #define TEST_DURATION_MS 10000   /* 10 second test */
 
 typedef struct {
-    int32_t tag_id;
-    int32_t read_count;
-    int64_t last_read_time;
-    int64_t total_wait_time;
-    int64_t max_wait_time;
-    int64_t min_wait_time;
+    compat_atomic_int32_t tag_id;
+    compat_atomic_int32_t read_started_count;
+    compat_atomic_int32_t read_completed_count;
+    compat_atomic_int64_t last_read_time;
+    compat_atomic_int64_t total_wait_time;
+    compat_atomic_int64_t max_wait_time;
+    compat_atomic_int64_t min_wait_time;
 } tag_stats_t;
 
 /* Calculate standard deviation of read counts */
@@ -70,16 +71,16 @@ double calculate_std_dev(tag_stats_t *stats, int count) {
     double variance = 0.0;
     
     for (int i = 0; i < count; i++) {
-        mean += stats[i].read_count;
+        mean += compat_atomic_load_int32(&stats[i].read_completed_count);
     }
     mean /= count;
     
     for (int i = 0; i < count; i++) {
-        double diff = stats[i].read_count - mean;
+        double diff = compat_atomic_load_int32(&stats[i].read_completed_count) - mean;
         variance += diff * diff;
     }
-    variance /= count;
     
+    variance /= count;
     return sqrt(variance);
 }
 
@@ -88,28 +89,36 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     tag_stats_t *stats = (tag_stats_t *)userdata;
     int64_t now = compat_time_ms();
     
-    if (event == PLCTAG_EVENT_READ_COMPLETED && status == PLCTAG_STATUS_OK) {
-        /* Find this tag's stats */
-        for (int i = 0; i < NUM_TAGS; i++) {
-            if (stats[i].tag_id == tag_id) {
-                stats[i].read_count++;
+    /* Find this tag's stats by matching tag_id */
+    for (int i = 0; i < NUM_TAGS; i++) {
+        if (compat_atomic_load_int32(&stats[i].tag_id) == tag_id) {
+            if (event == PLCTAG_EVENT_READ_STARTED) {
+                compat_atomic_inc_int32(&stats[i].read_started_count);
+            } else if (event == PLCTAG_EVENT_READ_COMPLETED && status == PLCTAG_STATUS_OK) {
+                compat_atomic_inc_int32(&stats[i].read_completed_count);
                 
                 /* Calculate wait time since last read */
-                if (stats[i].last_read_time > 0) {
-                    int64_t wait = now - stats[i].last_read_time;
-                    stats[i].total_wait_time += wait;
+                int64_t last_time = compat_atomic_load_int64(&stats[i].last_read_time);
+                if (last_time > 0) {
+                    int64_t wait = now - last_time;
+                    compat_atomic_add_int64(&stats[i].total_wait_time, wait);
                     
-                    if (wait > stats[i].max_wait_time) {
-                        stats[i].max_wait_time = wait;
+                    /* Update max wait time if needed (simple store, race is benign) */
+                    int64_t current_max = compat_atomic_load_int64(&stats[i].max_wait_time);
+                    if (wait > current_max) {
+                        compat_atomic_store_int64(&stats[i].max_wait_time, wait);
                     }
-                    if (stats[i].min_wait_time == 0 || wait < stats[i].min_wait_time) {
-                        stats[i].min_wait_time = wait;
+                    
+                    /* Update min wait time if needed (simple store, race is benign) */
+                    int64_t current_min = compat_atomic_load_int64(&stats[i].min_wait_time);
+                    if (current_min == 0 || wait < current_min) {
+                        compat_atomic_store_int64(&stats[i].min_wait_time, wait);
                     }
                 }
                 
-                stats[i].last_read_time = now;
-                break;
+                compat_atomic_store_int64(&stats[i].last_read_time, now);
             }
+            break;
         }
     }
 }
@@ -121,6 +130,7 @@ int main(void) {
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time, end_time;
     
+    /* Clear entire stats structure first to ensure zeros */
     memset(stats, 0, sizeof(stats));
     memset(tags, 0, sizeof(tags));
     
@@ -144,12 +154,14 @@ int main(void) {
             return 1;
         }
         
-        stats[i].tag_id = tags[i];
-        stats[i].read_count = 0;
-        stats[i].last_read_time = 0;
-        stats[i].total_wait_time = 0;
-        stats[i].max_wait_time = 0;
-        stats[i].min_wait_time = 0;
+        /* Initialize stats atomically - tag_id set last so callback can safely check it */
+        compat_atomic_store_int32(&stats[i].read_started_count, 0);
+        compat_atomic_store_int32(&stats[i].read_completed_count, 0);
+        compat_atomic_store_int64(&stats[i].last_read_time, 0);
+        compat_atomic_store_int64(&stats[i].total_wait_time, 0);
+        compat_atomic_store_int64(&stats[i].max_wait_time, 0);
+        compat_atomic_store_int64(&stats[i].min_wait_time, 0);
+        compat_atomic_store_int32(&stats[i].tag_id, tags[i]);  /* Set tag_id last */
         
         if ((i + 1) % 10 == 0) {
             fprintf(stderr, "  Created %d tags...\n", i + 1);
@@ -171,19 +183,28 @@ int main(void) {
     fprintf(stderr, "Per-Tag Results:\n");
     fprintf(stderr, "----------------\n");
     int total_reads = 0;
+    int total_started = 0;
     int min_reads = 999999;
     int max_reads = 0;
     
     for (int i = 0; i < NUM_TAGS; i++) {
-        fprintf(stderr, "Tag %2d (ID=%d): reads=%d, avg_wait=%lld ms, min_wait=%lld ms, max_wait=%lld ms\n",
-               i, stats[i].tag_id, stats[i].read_count,
-               stats[i].read_count > 1 ? (long long)(stats[i].total_wait_time / (stats[i].read_count - 1)) : 0,
-               (long long)stats[i].min_wait_time,
-               (long long)stats[i].max_wait_time);
+        int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
+        int32_t started = compat_atomic_load_int32(&stats[i].read_started_count);
+        int32_t completed = compat_atomic_load_int32(&stats[i].read_completed_count);
+        int64_t total_wait = compat_atomic_load_int64(&stats[i].total_wait_time);
+        int64_t min_wait = compat_atomic_load_int64(&stats[i].min_wait_time);
+        int64_t max_wait = compat_atomic_load_int64(&stats[i].max_wait_time);
         
-        total_reads += stats[i].read_count;
-        if (stats[i].read_count < min_reads) min_reads = stats[i].read_count;
-        if (stats[i].read_count > max_reads) max_reads = stats[i].read_count;
+        fprintf(stderr, "Tag %2d (ID=%d): started=%d, completed=%d, avg_wait=%lld ms, min_wait=%lld ms, max_wait=%lld ms\n",
+               i, tag_id, started, completed,
+               completed > 1 ? (long long)(total_wait / (completed - 1)) : 0,
+               (long long)min_wait,
+               (long long)max_wait);
+        
+        total_reads += completed;
+        total_started += started;
+        if (completed < min_reads) min_reads = completed;
+        if (completed > max_reads) max_reads = completed;
     }
     
     /* Calculate fairness metrics */
@@ -195,7 +216,8 @@ int main(void) {
     double coefficient_variation = (std_dev / mean) * 100.0;
     double min_max_ratio = (min_reads > 0) ? ((double)min_reads / max_reads) : 0.0;
     
-    fprintf(stderr, "Total reads: %d\n", total_reads);
+    fprintf(stderr, "Total started: %d\n", total_started);
+    fprintf(stderr, "Total completed: %d\n", total_reads);
     fprintf(stderr, "Mean reads per tag: %.2f\n", mean);
     fprintf(stderr, "Min reads: %d\n", min_reads);
     fprintf(stderr, "Max reads: %d\n", max_reads);

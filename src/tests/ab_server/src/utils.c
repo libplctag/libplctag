@@ -33,7 +33,9 @@
 
 #include "utils.h"
 #include "compat.h"
+#include "plc.h"
 #include <errno.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -123,6 +125,21 @@ int64_t util_time_ms(void) {
     return res;
 }
 
+int64_t util_time_us(void) {
+    FILETIME ft;
+    int64_t res;
+
+    GetSystemTimeAsFileTime(&ft);
+
+    /* calculate time as 100ns increments since Jan 1, 1601. */
+    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
+
+    /* get time in microseconds */
+    res = res / 10;
+
+    return res;
+}
+
 #else
 
 
@@ -132,6 +149,14 @@ int64_t util_time_ms(void) {
     gettimeofday(&tv, NULL);
 
     return ((int64_t)tv.tv_sec * 1000) + ((int64_t)tv.tv_usec / 1000);
+}
+
+int64_t util_time_us(void) {
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    return ((int64_t)tv.tv_sec * 1000000) + (int64_t)tv.tv_usec;
 }
 
 #endif

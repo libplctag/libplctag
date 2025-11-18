@@ -544,6 +544,9 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
         slice_dump(cip_service_path);
         return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
+    
+    /* Record request arrival time for latency tracking */
+    atomic_store_int64(&tag->last_request_time_us, util_time_us());
 
     /* get the element count and the optional request byte offset. */
     parse_offset = 0;
@@ -643,6 +646,30 @@ slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice
 
     /* fill in the tag data type */
     slice_set_uint16_le(cip_response_type_info_slice, 0, tag->tag_type);
+    
+    /* Calculate and record request latency */
+    int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
+    if (request_start > 0) {
+        int64_t latency = util_time_us() - request_start;
+        atomic_inc_int32(&tag->request_count);
+        atomic_load_int64(&tag->total_latency_us);  /* Need atomic add, use workaround */
+        
+        /* Update min latency */
+        int64_t current_min = atomic_load_int64(&tag->min_latency_us);
+        if (current_min == 0 || latency < current_min) {
+            atomic_store_int64(&tag->min_latency_us, latency);
+        }
+        
+        /* Update max latency */
+        int64_t current_max = atomic_load_int64(&tag->max_latency_us);
+        if (latency > current_max) {
+            atomic_store_int64(&tag->max_latency_us, latency);
+        }
+        
+        /* Add to total - not perfectly atomic but good enough for statistics */
+        int64_t total = atomic_load_int64(&tag->total_latency_us);
+        atomic_store_int64(&tag->total_latency_us, total + latency);
+    }
 
     /* return the slice used */
     return slice_from_slice(output, 0,
@@ -691,6 +718,9 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
         slice_dump(cip_service_path);
         return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
     }
+    
+    /* Record request arrival time for latency tracking */
+    atomic_store_int64(&tag->last_request_time_us, util_time_us());
 
     /* are the number of indexes correct? */
     if(num_indexes > 0 && num_indexes != tag->num_dimensions) {
@@ -773,6 +803,29 @@ slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slic
     slice_set_uint8(cip_response_header_slice, 1, 0); /* reserved */
     slice_set_uint8(cip_response_header_slice, 2, CIP_OK); /* status */
     slice_set_uint8(cip_response_header_slice, 3, 0); /* no extended error */
+    
+    /* Calculate and record request latency */
+    int64_t request_start = atomic_load_int64(&tag->last_request_time_us);
+    if (request_start > 0) {
+        int64_t latency = util_time_us() - request_start;
+        atomic_inc_int32(&tag->request_count);
+        
+        /* Update min latency */
+        int64_t current_min = atomic_load_int64(&tag->min_latency_us);
+        if (current_min == 0 || latency < current_min) {
+            atomic_store_int64(&tag->min_latency_us, latency);
+        }
+        
+        /* Update max latency */
+        int64_t current_max = atomic_load_int64(&tag->max_latency_us);
+        if (latency > current_max) {
+            atomic_store_int64(&tag->max_latency_us, latency);
+        }
+        
+        /* Add to total - not perfectly atomic but good enough for statistics */
+        int64_t total = atomic_load_int64(&tag->total_latency_us);
+        atomic_store_int64(&tag->total_latency_us, total + latency);
+    }
 
     /* return the remaining output space */
     return cip_response_header_slice;

@@ -161,6 +161,9 @@ int main(int argc, const char **argv) {
 
     tcp_server_start(server, &done);
 
+    /* Dump fairness statistics before shutdown */
+    dump_fairness_stats(&plc);
+
     tcp_server_destroy(server);
 
     return 0;

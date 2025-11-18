@@ -67,6 +67,28 @@
     #define str_scanf sscanf
 #endif
 
+/* Atomic operations for fairness tracking */
+#ifdef IS_WINDOWS
+    #include <intrin.h>
+    typedef struct { volatile long value; } atomic_int32_t;
+    typedef struct { volatile long long value; } atomic_int64_t;
+    
+    #define atomic_load_int32(ptr) InterlockedCompareExchange((volatile LONG*)&(ptr)->value, 0, 0)
+    #define atomic_store_int32(ptr, val) InterlockedExchange((volatile LONG*)&(ptr)->value, (LONG)(val))
+    #define atomic_inc_int32(ptr) InterlockedIncrement((volatile LONG*)&(ptr)->value)
+    #define atomic_load_int64(ptr) InterlockedCompareExchange64((volatile LONG64*)&(ptr)->value, 0, 0)
+    #define atomic_store_int64(ptr, val) InterlockedExchange64((volatile LONG64*)&(ptr)->value, (LONG64)(val))
+#else
+    typedef struct { volatile int value; } atomic_int32_t;
+    typedef struct { volatile long long value; } atomic_int64_t;
+    
+    #define atomic_load_int32(ptr) __atomic_load_n(&(ptr)->value, __ATOMIC_SEQ_CST)
+    #define atomic_store_int32(ptr, val) __atomic_store_n(&(ptr)->value, (val), __ATOMIC_SEQ_CST)
+    #define atomic_inc_int32(ptr) __atomic_add_fetch(&(ptr)->value, 1, __ATOMIC_SEQ_CST)
+    #define atomic_load_int64(ptr) __atomic_load_n(&(ptr)->value, __ATOMIC_SEQ_CST)
+    #define atomic_store_int64(ptr, val) __atomic_store_n(&(ptr)->value, (val), __ATOMIC_SEQ_CST)
+#endif
+
 /* Define ssize_t */
 #ifdef IS_MSVC
     #include <BaseTsd.h>
