@@ -245,7 +245,6 @@ static int translate_modbus_error(uint8_t err_code);
 static const char *op_to_str(tag_op_type_t op);
 
 /* tag list functions */
-static void debug_ring(modbus_plc_p plc);
 static int add_tag(modbus_plc_p plc, modbus_tag_p tag);
 static int remove_tag(modbus_plc_p plc, modbus_tag_p tag);
 
