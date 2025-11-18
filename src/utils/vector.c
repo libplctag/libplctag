@@ -33,6 +33,7 @@
 
 #include <libplctag/lib/libplctag.h>
 #include <platform.h>
+#include <stdlib.h>
 #include <utils/debug.h>
 #include <utils/rc.h>
 #include <utils/vector.h>
@@ -247,6 +248,30 @@ int vector_destroy(vector_p vec) {
     mem_free(vec);
 
     pdebug(DEBUG_SPEW, "Done.");
+
+    return PLCTAG_STATUS_OK;
+}
+
+
+int vector_sort(vector_p vec, vector_compare_func compare) {
+    pdebug(DEBUG_SPEW, "Starting");
+
+    if(!vec) {
+        pdebug(DEBUG_WARN, "Null pointer to vector passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(!compare) {
+        pdebug(DEBUG_WARN, "Null comparison function passed!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+
+    if(vec->len > 1) {
+        /* Sort directly on internal array - no overhead */
+        qsort(vec->data, (size_t)vec->len, sizeof(void *), compare);
+    }
+
+    pdebug(DEBUG_SPEW, "Done");
 
     return PLCTAG_STATUS_OK;
 }
