@@ -205,11 +205,11 @@ jobs:
       matrix:
         include:
           - name: x64
-            runner: macos-13
+            runner: macos-15-intel
             cmake_arch: x86_64
             artifact_suffix: "macos_x64"
           - name: arm64
-            runner: macos-14
+            runner: macos-15
             cmake_arch: arm64
             artifact_suffix: "macos_aarch64"
 
