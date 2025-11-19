@@ -65,7 +65,6 @@ static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
 
 int main(void) {
     int rc = PLCTAG_STATUS_OK;
-    char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL) + 10] = {0};
     compat_thread_t read_threads[NUM_TAGS];
     compat_thread_t write_threads[NUM_TAGS];
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
@@ -93,8 +92,7 @@ int main(void) {
         int32_t tag_id = PLCTAG_ERR_CREATE;
 
         // NOLINTNEXTLINE
-        snprintf(tag_attr_str, sizeof(tag_attr_str), TAG_ATTRIBS_TMPL, (int32_t)i);
-        tag_id = plc_tag_create_ex(tag_attr_str, tag_callback, NULL, DATA_TIMEOUT);
+        tag_id = plc_tag_create_ex(TAG_ATTRIBS_TMPL, tag_callback, NULL, DATA_TIMEOUT);
 
         if(tag_id <= 0) {
             // NOLINTNEXTLINE

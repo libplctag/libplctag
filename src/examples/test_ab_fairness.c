@@ -44,6 +44,7 @@
  * Old ring rotation: Tags added later starve initially.
  */
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +60,7 @@ typedef struct {
     compat_atomic_int32_t tag_id;
     compat_atomic_int32_t read_started_count;
     compat_atomic_int32_t read_completed_count;
+    compat_atomic_int32_t read_failed_count;
     compat_atomic_int64_t last_read_time;
     compat_atomic_int64_t total_wait_time;
     compat_atomic_int64_t max_wait_time;
@@ -90,36 +92,31 @@ void tag_callback(int32_t tag_id, int event, int status, void *userdata) {
     int64_t now = compat_time_ms();
     
     /* Find this tag's stats by matching tag_id */
-    for (int i = 0; i < NUM_TAGS; i++) {
-        if (compat_atomic_load_int32(&stats[i].tag_id) == tag_id) {
-            if (event == PLCTAG_EVENT_READ_STARTED) {
-                compat_atomic_inc_int32(&stats[i].read_started_count);
-            } else if (event == PLCTAG_EVENT_READ_COMPLETED && status == PLCTAG_STATUS_OK) {
-                compat_atomic_inc_int32(&stats[i].read_completed_count);
-                
-                /* Calculate wait time since last read */
-                int64_t last_time = compat_atomic_load_int64(&stats[i].last_read_time);
-                if (last_time > 0) {
-                    int64_t wait = now - last_time;
-                    compat_atomic_add_int64(&stats[i].total_wait_time, wait);
-                    
-                    /* Update max wait time if needed (simple store, race is benign) */
-                    int64_t current_max = compat_atomic_load_int64(&stats[i].max_wait_time);
-                    if (wait > current_max) {
-                        compat_atomic_store_int64(&stats[i].max_wait_time, wait);
-                    }
-                    
-                    /* Update min wait time if needed (simple store, race is benign) */
-                    int64_t current_min = compat_atomic_load_int64(&stats[i].min_wait_time);
-                    if (current_min == 0 || wait < current_min) {
-                        compat_atomic_store_int64(&stats[i].min_wait_time, wait);
-                    }
-                }
-                
-                compat_atomic_store_int64(&stats[i].last_read_time, now);
+    if (event == PLCTAG_EVENT_READ_STARTED) {
+        compat_atomic_inc_int32(&stats->read_started_count);
+    } else if (event == PLCTAG_EVENT_READ_COMPLETED && status == PLCTAG_STATUS_OK) {
+        compat_atomic_inc_int32(&stats->read_completed_count);
+
+        /* Calculate wait time since last read */
+        int64_t last_time = compat_atomic_load_int64(&stats->last_read_time);
+        if (last_time > 0) {
+            int64_t wait = now - last_time;
+            compat_atomic_add_int64(&stats->total_wait_time, wait);
+
+            /* Update max wait time if needed (simple store, race is benign) */
+            int64_t current_max = compat_atomic_load_int64(&stats->max_wait_time);
+            if (wait > current_max) {
+                compat_atomic_store_int64(&stats->max_wait_time, wait);
             }
-            break;
+            
+            /* Update min wait time if needed (simple store, race is benign) */
+            int64_t current_min = compat_atomic_load_int64(&stats->min_wait_time);
+            if (current_min == 0 || wait < current_min) {
+                compat_atomic_store_int64(&stats->min_wait_time, wait);
+            }
         }
+
+        compat_atomic_store_int64(&stats->last_read_time, now);
     }
 }
 
@@ -129,6 +126,8 @@ int main(void) {
     char tag_string[256];
     int rc = PLCTAG_STATUS_OK;
     int64_t start_time, end_time;
+
+    plc_tag_set_debug_level(PLCTAG_DEBUG_DETAIL);
     
     /* Clear entire stats structure first to ensure zeros */
     memset(stats, 0, sizeof(stats));
@@ -147,21 +146,16 @@ int main(void) {
                  "protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix"
                  "&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=%d",
                  i, AUTO_SYNC_MS);
-        
-        tags[i] = plc_tag_create_ex(tag_string, tag_callback, &stats, 5000);
+
+        /* create the tags async */
+        tags[i] = plc_tag_create_ex(tag_string, tag_callback, &stats[i], 0);
         if (tags[i] < 0) {
             fprintf(stderr, "Failed to create tag %d: %s\n", i, plc_tag_decode_error(tags[i]));
             return 1;
         }
         
-        /* Initialize stats atomically - tag_id set last so callback can safely check it */
-        compat_atomic_store_int32(&stats[i].read_started_count, 0);
-        compat_atomic_store_int32(&stats[i].read_completed_count, 0);
-        compat_atomic_store_int64(&stats[i].last_read_time, 0);
-        compat_atomic_store_int64(&stats[i].total_wait_time, 0);
-        compat_atomic_store_int64(&stats[i].max_wait_time, 0);
-        compat_atomic_store_int64(&stats[i].min_wait_time, 0);
-        compat_atomic_store_int32(&stats[i].tag_id, tags[i]);  /* Set tag_id last */
+        /* initialize stats with tag ID - must be set AFTER tag creation */
+        compat_atomic_store_int32(&stats[i].tag_id, tags[i]);
         
         if ((i + 1) % 10 == 0) {
             fprintf(stderr, "  Created %d tags...\n", i + 1);
@@ -182,6 +176,7 @@ int main(void) {
     /* Collect final statistics */
     fprintf(stderr, "Per-Tag Results:\n");
     fprintf(stderr, "----------------\n");
+
     int total_reads = 0;
     int total_started = 0;
     int min_reads = 999999;
@@ -191,12 +186,13 @@ int main(void) {
         int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
         int32_t started = compat_atomic_load_int32(&stats[i].read_started_count);
         int32_t completed = compat_atomic_load_int32(&stats[i].read_completed_count);
+        int32_t failed = compat_atomic_load_int32(&stats[i].read_failed_count);
         int64_t total_wait = compat_atomic_load_int64(&stats[i].total_wait_time);
         int64_t min_wait = compat_atomic_load_int64(&stats[i].min_wait_time);
         int64_t max_wait = compat_atomic_load_int64(&stats[i].max_wait_time);
-        
-        fprintf(stderr, "Tag %2d (ID=%d): started=%d, completed=%d, avg_wait=%lld ms, min_wait=%lld ms, max_wait=%lld ms\n",
-               i, tag_id, started, completed,
+
+        fprintf(stderr, "Tag %2d (ID=%d): started=%d, completed=%d, failed=%d, avg_wait=%" PRId64 "ms, min_wait=%" PRId64 "ms, max_wait=%" PRId64 "ms\n",
+               i, tag_id, started, completed, failed,
                completed > 1 ? (long long)(total_wait / (completed - 1)) : 0,
                (long long)min_wait,
                (long long)max_wait);
