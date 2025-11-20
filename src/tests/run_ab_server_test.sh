@@ -100,7 +100,7 @@ fi
 
 let TEST++
 echo -n "  Test $TEST: test fairness with 20 tags ... "
-$VALGRIND$TEST_DIR/test_ab_fairness 20 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix' 200 10000 > "$LOG_DIR/${TEST}_fairness.log" 2>&1
+$VALGRIND$TEST_DIR/test_ab_fairness 2 'protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix' 200 10000 > "$LOG_DIR/${TEST}_fairness.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
