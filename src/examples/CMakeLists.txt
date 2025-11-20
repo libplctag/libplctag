@@ -34,7 +34,6 @@ endif()
   stress_test
   string_non_standard_udt
   string_standard
-  test_ab_fairness
   test_alternate_tag_listing
   test_array_notation
   test_auto_sync
@@ -48,8 +47,8 @@ endif()
   test_connection_group
   test_emulator_performance
   test_event
+  test_fairness
   test_indexed_tags
-  test_modbus_fairness
   test_modbus_multiple
   test_raw_cip
   test_reconnect
@@ -111,8 +110,7 @@ endforeach()
 
 # Link math library for tests that use sqrt() and other math functions
 if(UNIX)
-    target_link_libraries(test_ab_fairness m)
-    target_link_libraries(test_modbus_fairness m)
+    target_link_libraries(test_fairness m)
 endif()
 
 # Install only the tag_rw2 tool into the devel component
