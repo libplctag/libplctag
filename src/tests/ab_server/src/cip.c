@@ -441,7 +441,7 @@ slice_s handle_forward_open(uint8_t cip_service, slice_s cip_service_path, slice
     slice_dump(conn_path_slice);
 
     if(!slice_match_data_exact(conn_path_slice, &(plc->path[0]), plc->path_len)) {
-        slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
+        slice_s plc_path = slice_make(&(plc->path[0]), plc->path_len);
 
         info("Forward open request path did not match the path for this PLC!");
         info("FO path:");
@@ -583,7 +583,7 @@ slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_path, slic
     slice_dump(conn_path_slice);
 
     if(!slice_match_data_exact(conn_path_slice, &(plc->path[0]), plc->path_len)) {
-        slice_s plc_path = slice_make(&(plc->path[0]), (ssize_t)(size_t)(plc->path_len));
+        slice_s plc_path = slice_make(&(plc->path[0]), plc->path_len);
 
         info("Forward Cpen request path did not match the path for this PLC!");
         info("FC path:");

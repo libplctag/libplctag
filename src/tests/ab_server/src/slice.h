@@ -42,14 +42,14 @@
 #include "compat.h"
 
 typedef struct {
-    ssize_t len;
+    size_t len;
     uint8_t *data;
 } slice_s;
 
-inline static slice_s slice_make(const uint8_t *data, ssize_t len) { return (slice_s){ .len = len, .data = (uint8_t *)data }; }
-inline static slice_s slice_make_err(ssize_t err) { return slice_make(NULL, err); }
-inline static size_t slice_len(slice_s s) { return (size_t)s.len; }
-inline static bool slice_in_bounds(slice_s s, size_t index) { if(index < (size_t)s.len) { return true; } else { return false; } }
+inline static slice_s slice_make(const uint8_t *data, size_t len) { return (slice_s){ .len = len, .data = (uint8_t *)data }; }
+inline static slice_s slice_make_err(int err) { return slice_make(NULL, (size_t)err); }
+inline static size_t slice_len(slice_s s) { return s.len; }
+inline static bool slice_in_bounds(slice_s s, size_t index) { if(index < s.len) { return true; } else { return false; } }
 inline static uint8_t slice_get_uint8(slice_s s, size_t index) { if(slice_in_bounds(s, index)) { return s.data[index]; } else { return UINT8_MAX; } }
 inline static bool slice_set_uint8(slice_s s, size_t index, uint8_t val) { if(slice_in_bounds(s, index)) { s.data[index] = val; return true; } else { return false; } }
 inline static uint8_t *slice_get_bytes(slice_s s, size_t index) {  if(slice_in_bounds(s, index)) { return &s.data[index];} else { return NULL;} }
@@ -82,26 +82,25 @@ inline static bool slice_match_data_exact(slice_s s, const uint8_t *data, size_t
 }
 inline static bool slice_match_string_exact(slice_s s, const char *data) { return slice_match_data_exact(s, (const uint8_t*)data, strlen(data)); }
 inline static slice_s slice_from_slice(slice_s src, size_t start, size_t len) {
-    ssize_t actual_start;
-    ssize_t actual_len;
+    size_t actual_start;
+    size_t actual_len;
 
     if(slice_has_err(src)) {
         return src;
     }
 
-    /* from here on we know that the src length is zero or positive. */
-
-    if(start > (size_t)src.len) {
+    /* Handle case where start is beyond the source buffer */
+    if(start > src.len) {
         actual_start = src.len;
     } else {
-        actual_start = (ssize_t)start;
+        actual_start = start;
     }
 
-    if((ssize_t)len > (src.len - actual_start)) {
+    if(len > (src.len - actual_start)) {
         /* truncate the slice to fit. */
-        actual_len = (src.len - actual_start);
+        actual_len = src.len - actual_start;
     } else {
-        actual_len = (ssize_t)len;
+        actual_len = len;
     }
 
     return (slice_s){ .len = actual_len, .data = &(src.data[actual_start]) };
