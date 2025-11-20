@@ -35,6 +35,7 @@
 #include "cip.h"
 #include "eip.h"
 #include "utils.h"
+#include "log.h"
 #include <stdint.h>
 
 #define CPF_ITEM_NAI ((uint16_t)0x0000) /* NULL Address Item */
@@ -74,12 +75,12 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc) {
     slice_s result;
     cpf_uc_header_s header;
 
-    info("handle_cpf_unconnected(): got packet:");
-    slice_dump(input);
+    log_info("handle_cpf_unconnected(): got packet:");
+    log_info_slice(input);
 
     /* we must have some sort of payload. */
     if(slice_len(input) <= CPF_UCONN_HEADER_SIZE) {
-        info("Unusable size of unconnected CPF packet!");
+        log_info("Unusable size of unconnected CPF packet!");
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
@@ -90,7 +91,7 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc) {
 
     /* sanity check the number of items. */
     if(header.item_count != (uint16_t)2) {
-        info("Unsupported unconnected CPF packet, expected two items but found %u!", header.item_count);
+        log_info("Unsupported unconnected CPF packet, expected two items but found %u!", header.item_count);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
@@ -101,22 +102,22 @@ slice_s handle_cpf_unconnected(slice_s input, slice_s output, plc_s *plc) {
 
     /* sanity check the data. */
     if(header.item_addr_type != CPF_ITEM_NAI) {
-        info("Expected null address item but found %x!", header.item_addr_type);
+        log_info("Expected null address item but found %x!", header.item_addr_type);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     if(header.item_addr_length != 0) {
-        info("Expected zero address item length but found %d bytes!", header.item_addr_length);
+        log_info("Expected zero address item length but found %d bytes!", header.item_addr_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     if(header.item_data_type != CPF_ITEM_UDI) {
-        info("Expected unconnected data item but found %x!", header.item_data_type);
+        log_info("Expected unconnected data item but found %x!", header.item_data_type);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     if(header.item_data_length != (slice_len(input) - CPF_UCONN_HEADER_SIZE)) {
-        info("CPF unconnected payload length, %d, does not match passed length, %d!",
+        log_info("CPF unconnected payload length, %d, does not match passed length, %d!",
              (slice_len(input) - CPF_UCONN_HEADER_SIZE - 2), header.item_data_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
@@ -153,7 +154,7 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
 
     /* we must have some sort of payload. */
     if(slice_len(input) <= CPF_UCONN_HEADER_SIZE) {
-        info("Unusable size of connected CPF packet!");
+        log_info("Unusable size of connected CPF packet!");
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
@@ -164,7 +165,7 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
 
     /* sanity check the number of items. */
     if(header.item_count != (uint16_t)2) {
-        info("Unsupported connected CPF packet, expected two items but found %u!", header.item_count);
+        log_info("Unsupported connected CPF packet, expected two items but found %u!", header.item_count);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
@@ -177,27 +178,27 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
 
     /* sanity check the data. */
     if(header.item_addr_type != CPF_ITEM_CAI) {
-        info("Expected connected address item but found %x!", header.item_addr_type);
+        log_info("Expected connected address item but found %x!", header.item_addr_type);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     if(header.item_addr_length != 4) {
-        info("Expected address item length of 4 but found %d bytes!", header.item_addr_length);
+        log_info("Expected address item length of 4 but found %d bytes!", header.item_addr_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     if(header.conn_id != plc->server_connection_id) {
-        info("Expected connection ID %x but found connection ID %x!", plc->server_connection_id, header.conn_id);
+        log_info("Expected connection ID %x but found connection ID %x!", plc->server_connection_id, header.conn_id);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     if(header.item_data_type != CPF_ITEM_CDI) {
-        info("Expected connected data item but found %x!", header.item_data_type);
+        log_info("Expected connected data item but found %x!", header.item_data_type);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }
 
     if(header.item_data_length != (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2))) {
-        info("CPF payload length, %d, does not match passed length, %d!", (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2)),
+        log_info("CPF payload length, %d, does not match passed length, %d!", (slice_len(input) - (CPF_CONN_HEADER_SIZE - 2)),
              header.item_data_length);
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }

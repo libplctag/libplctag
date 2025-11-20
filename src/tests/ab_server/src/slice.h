@@ -171,10 +171,10 @@ inline static uint32_t slice_get_uint32_le(slice_s input_buf, size_t offset) {
     uint32_t res = 0;
 
     if(slice_in_bounds(input_buf, offset + 3)) {
-        res =  (uint32_t)(slice_get_uint8(input_buf, offset))
-             + (uint32_t)(slice_get_uint8(input_buf, offset + 1) << 8)
-             + (uint32_t)(slice_get_uint8(input_buf, offset + 2) << 16)
-             + (uint32_t)(slice_get_uint8(input_buf, offset + 3) << 24);
+        res =  ((uint32_t)slice_get_uint8(input_buf, offset))
+             + (((uint32_t)slice_get_uint8(input_buf, offset + 1)) << 8)
+             + (((uint32_t)slice_get_uint8(input_buf, offset + 2)) << 16)
+             + (((uint32_t)slice_get_uint8(input_buf, offset + 3)) << 24);
     }
 
     return res;
@@ -186,13 +186,13 @@ inline static uint64_t slice_get_uint64_le(slice_s input_buf, size_t offset) {
 
     if(slice_in_bounds(input_buf, offset + 7)) {
         res =  ((uint64_t)slice_get_uint8(input_buf, offset))
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 1) << 8)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 2) << 16)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 3) << 24)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 4) << 32)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 5) << 40)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 6) << 48)
-             + ((uint64_t)slice_get_uint8(input_buf, offset + 7) << 56);
+             + (((uint64_t)slice_get_uint8(input_buf, offset + 1)) << 8)
+             + (((uint64_t)slice_get_uint8(input_buf, offset + 2)) << 16)
+             + (((uint64_t)slice_get_uint8(input_buf, offset + 3)) << 24)
+             + (((uint64_t)slice_get_uint8(input_buf, offset + 4)) << 32)
+             + (((uint64_t)slice_get_uint8(input_buf, offset + 5)) << 40)
+             + (((uint64_t)slice_get_uint8(input_buf, offset + 6)) << 48)
+             + (((uint64_t)slice_get_uint8(input_buf, offset + 7)) << 56);
     }
 
     return res;

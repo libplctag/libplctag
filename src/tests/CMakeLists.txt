@@ -39,6 +39,8 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/thread.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/utils.c
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/utils.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/log.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/log.h
 )
 
 # Add ab_server executable

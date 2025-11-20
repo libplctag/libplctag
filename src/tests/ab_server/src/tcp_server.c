@@ -33,10 +33,12 @@
 
 #include "tcp_server.h"
 #include "err.h"
+#include "plc.h"
 #include "slice.h"
 #include "socket.h"
 #include "thread.h"
 #include "utils.h"
+#include "log.h"
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -78,7 +80,7 @@ tcp_server_p tcp_server_create(const char *host, const char *port,
         if(sock >= 0) {
             server->sock_fd = sock;
         } else {
-            error("ERROR: Unable to open TCP socket, error: %s", err_to_string((int)sock));
+            log_error("ERROR: Unable to open TCP socket, error: %s", err_to_string((int)sock));
         }
 
         server->handler = handler;
@@ -93,12 +95,13 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
     static bool done; /* static so it doesn't go out of scope, since it's passed to sub-threads. */
     done = false;     /* initialised every invocation for logic sake, even though that's once. */
 
-    info("Waiting for new client connection.");
+    log_info("Waiting for new client connection.");
 
     do {
-        SOCKET client_fd = socket_accept(server->sock_fd, 1000); /* MAGIC */
+        SOCKET client_fd = INVALID_SOCKET;
+        int accept_status = socket_accept(server->sock_fd, 1000, &client_fd); /* MAGIC */
 
-        if(client_fd >= 0) {
+        if(accept_status == ERR_OK) {
             struct client_session *session = NULL;
 
             /* The client thread is responsible for freeing these */
@@ -106,14 +109,14 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
             // FIXME - combine the allocations and use calloc or memset to get zeroed memory
             session = malloc(sizeof(struct client_session));
 
-            if(!session) { error("Unable to allocate memory for the session!"); }
+            if(!session) { log_error("Unable to allocate memory for the session!"); }
 
             // NOLINTNEXTLINE
             memset(session, 0, sizeof(*session));
 
             session->server_context = malloc(server->context_size);
 
-            if(!session->server_context) { error("Unable to allocate memory for the server context!"); }
+            if(!session->server_context) { log_error("Unable to allocate memory for the server context!"); }
 
             /* Make a copy of the server context so the thread can use it without threading concerns. */
             // NOLINTNEXTLINE
@@ -123,13 +126,13 @@ void tcp_server_start(tcp_server_p server, volatile sig_atomic_t *terminate) {
             session->server_done = &done;   /* reference to a flag that any thread can raise (and all must monitor) */
 
             if(thread_create(&(session->thread), conn_handler, 10 * 1024, session) != THREAD_STATUS_OK) {
-                error("ERROR: Unable to create connection handler thread!");
+                log_error("ERROR: Unable to create connection handler thread!");
             }
-        } else if(client_fd == ERR_SOCKET_TIMEOUT) {
-            info("Timed out waiting for new client connection.");
+        } else if(accept_status == ERR_SOCKET_TIMEOUT) {
+            log_info("Timed out waiting for new client connection.");
             continue;
         } else {
-            error("ERROR: Received error, %s, accepting new client connection!", err_to_string((int)client_fd));
+            log_error("ERROR: Received error, %s, accepting new client connection!", err_to_string(accept_status));
             done = true;
         }
 
@@ -162,8 +165,10 @@ THREAD_FUNC(conn_handler) {
     slice_s read_target = {0};       /* slice representing where to read next data */
     slice_s tmp_output = {0};
     int rc = TCP_SERVER_DONE;
+    plc_s *plc = (plc_s *)session->server_context;
 
-    info("Got new client connection, going into processing loop.");
+    log_info("Got new client connection, going into processing loop.");
+    log_info("server_to_client_max_packet = %zu", plc->server_to_client_max_packet);
 
     /* no one will join this thread, so clean ourselves up. */
     thread_detach();
@@ -180,10 +185,10 @@ THREAD_FUNC(conn_handler) {
         if(slice_has_err(new_data)) {
             int err = slice_get_err(new_data);
             if(err == ERR_SOCKET_TIMEOUT) {
-                info("Timed out waiting for client to send us a request.");
+                log_info("Timed out waiting for client to send us a request.");
                 continue;
             } else {
-                info("Error, %s, reading data from the client!", err_to_string(err));
+                log_info("Error, %s, reading data from the client!", err_to_string(err));
                 break;
             }
         }
@@ -192,30 +197,34 @@ THREAD_FUNC(conn_handler) {
         accumulated_data = slice_make(input_buf, slice_len(accumulated_data) + slice_len(new_data));
 
         /* try to process the packet. */
+        log_info("Handler input:");
+        log_info_slice(accumulated_data);
+
         tmp_output = server->handler(accumulated_data, tmp_output, session->server_context);
+
+        log_info("Handler output:");
+        log_info_slice(tmp_output);
 
         /* check the response. */
         if(!slice_has_err(tmp_output)) {
             slice_s write_res = socket_write(session->client_fd, tmp_output, 1000); /* MAGIC*/
 
             if(slice_has_err(write_res)) {
-                info("Error, %s, writing packet!", err_to_string(slice_get_err(write_res)));
+                log_info("Error, %s, writing packet!", err_to_string(slice_get_err(write_res)));
                 break;
             }
 
             /* all good. Reset the buffers etc. */
             accumulated_data = slice_make(input_buf, 0);
             read_target = slice_make(input_buf, sizeof(input_buf));
+            tmp_output = slice_make(output_buf, sizeof(output_buf));
             rc = ERR_TCP_PROCESSED;
         } else {
             /* there was some sort of error or exceptional condition. */
             switch((rc = slice_get_err(tmp_output))) {
                 case ERR_TCP_DONE:
-                    /* Note this is assumed atomic, which is not guaranteed. To be really sure it
-                       should be mutex protected or changed to a stdatomic. The former is messy
-                       and the latter requires C11. Since I think it might be actually a bug (why
-                       would deregistering a session kill the server?) I've not bothered for now. */
-                    *(session->server_done) = true;
+                    /* Connection is done, exit this handler thread but don't shut down the server.
+                       The server should continue accepting new connections. */
                     break;
 
                 case ERR_TCP_INCOMPLETE:
@@ -228,11 +237,11 @@ THREAD_FUNC(conn_handler) {
                 case ERR_TCP_PROCESSED: break;
 
                 case ERR_TCP_BAD_REQUEST:
-                    info("WARN: Bad request!");
-                    slice_dump(accumulated_data);
+                    log_info("WARN: Bad request!");
+                    log_info_slice(accumulated_data);
                     break;
 
-                default: info("WARN: Unsupported return code %d!", rc); break;
+                default: log_info("WARN: Unsupported return code %d!", rc); break;
             }
         }
     } while((rc == ERR_TCP_INCOMPLETE || rc == ERR_TCP_PROCESSED)

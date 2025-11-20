@@ -1,3 +1,5 @@
+#pragma once
+
 /***************************************************************************
  *   Copyright (C) 2025 by Kyle Hayes                                      *
  *   Author Kyle Hayes  kyle.hayes@gmail.com                               *
@@ -31,48 +33,65 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#pragma once
 
-#include "compat.h"
-#include "err.h"
-#include "slice.h"
-
-#include <stdint.h>
-
-#ifndef IS_WINDOWS
-typedef int SOCKET;
-#    define INVALID_SOCKET (-1)
-#else
-#    include <winsock2.h>
+#ifdef __cplusplus
+extern "C" {
 #endif
 
-/* ===== SOCKET API ===== */
+#include <stdarg.h>
+#include <stdint.h>
 
-/* Open a TCP client connection
- * Returns: Valid SOCKET file descriptor (>= 0) on success
- *          Negative error code (from err_t) on failure */
-extern SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port);
+typedef enum {
+    LOG_LEVEL_NONE = 0,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_WARN,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_DETAIL,
+    LOG_LEVEL_SPEW,
 
-/* Open a TCP server socket
- * Returns: Valid SOCKET file descriptor (>= 0) on success
- *          Negative error code (from err_t) on failure */
-extern SOCKET socket_open_tcp_server(const char *listening_port);
+    LOG_LEVEL_END
+} log_level_t;
 
-/* Close a socket */
-extern void socket_close(SOCKET sock);
+/**
+ * @brief Get the current log level.
+ *
+ * @return log_level_t
+ */
+log_level_t log_get_level(void);
 
-/* Accept an incoming connection
- * Returns: 0 on success, error code on failure
- *          On success, *out_client_fd contains the accepted socket
- *          On failure, *out_client_fd is set to INVALID_SOCKET */
-extern int socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd);
+/**
+ * @brief Set the current log level.
+ *
+ * @param level New log level
+ * @return log_level_t Previous log level
+ */
+log_level_t log_set_level(log_level_t level);
 
-/* Read from socket into buffer
- * Returns: slice_s with data read from socket
- *          On error: slice_has_err() is true, slice_get_err() returns negative error code */
-extern slice_s socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms);
+/**
+ * @brief Log a message.
+ *
+ * @param func name of the function in which the log is generated
+ * @param line_num line number in the source file
+ * @param lvl log level
+ * @param templ format string for the log message
+ * @param ... additional arguments for the format string
+ */
+void log_impl(const char *func, int line_num, log_level_t lvl, const char *templ, ...);
 
-/* Write to socket from buffer
- * Returns: slice_s with length set to bytes written
- *          On error: slice_has_err() is true, slice_get_err() returns negative error code */
-extern slice_s socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms);
+/* helper macros */
+
+#define log_error(...)   do { if((LOG_LEVEL_ERROR) <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_ERROR, __VA_ARGS__); } while(0)
+#define log_warn(...)    do { if((LOG_LEVEL_WARN)  <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_WARN,  __VA_ARGS__); } while(0)
+#define log_info(...)    do { if((LOG_LEVEL_INFO)  <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_INFO,  __VA_ARGS__); } while(0)
+#define log_detail(...)  do { if((LOG_LEVEL_DETAIL)<= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_DETAIL,__VA_ARGS__); } while(0)
+#define log_spew(...)    do { if((LOG_LEVEL_SPEW)  <= log_get_level()) \
+                            log_impl(__func__, __LINE__, LOG_LEVEL_SPEW,  __VA_ARGS__); } while(0)
+
+
+#ifdef __cplusplus
+}
+#endif
