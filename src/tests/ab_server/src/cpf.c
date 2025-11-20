@@ -204,7 +204,7 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
     }
 
     /* do we care about the sequence ID?   Should check. */
-    plc->server_connection_seq = header.conn_seq;
+    plc->client_connection_seq = header.conn_seq;
 
     /* dispatch and handle the result. */
     result = cip_dispatch_request(
@@ -214,18 +214,20 @@ slice_s handle_cpf_connected(slice_s input, slice_s output, plc_s *plc) {
 
     if(!slice_has_err(result)) {
         /* build outbound header. */
-        slice_set_uint16_le(output, 0, 2);            /* two items. */
-        slice_set_uint16_le(output, 2, CPF_ITEM_CAI); /* connected address type. */
-        slice_set_uint16_le(output, 4, 4);            /* connection ID is 4 bytes. */
-        slice_set_uint32_le(output, 6, plc->client_connection_id);
-        slice_set_uint16_le(output, 10, CPF_ITEM_CDI); /* connected data type */
-        slice_set_uint16_le(
-            output, 12,
-            (uint16_t)(slice_len(result) + 2)); /* result from CIP processing downstream.  Plus 2 bytes for sequence number. */
-        slice_set_uint16_le(output, 14, plc->client_connection_seq);
+        size_t offset = 0;
+        slice_set_uint32_le(output, offset, header.interface_handle); offset += 4;
+        slice_set_uint16_le(output, offset, header.router_timeout); offset += 2;
+        slice_set_uint16_le(output, offset, 2); offset += 2;           /* two items. */
+        slice_set_uint16_le(output, offset, CPF_ITEM_CAI); offset += 2; /* connected address type. */
+        slice_set_uint16_le(output, offset, 4); offset += 2;           /* connection ID is 4 bytes. */
+        slice_set_uint32_le(output, offset, plc->client_connection_id); offset += 4;
+        slice_set_uint16_le(output, offset, CPF_ITEM_CDI); offset += 2; /* connected data type */
+        slice_set_uint16_le(output, offset,
+            (uint16_t)(slice_len(result) + 2)); offset += 2; /* result from CIP processing downstream.  Plus 2 bytes for sequence number. */
+        slice_set_uint16_le(output, offset, header.conn_seq); offset += 2;
 
         /* create a new slice with the CPF header and the response packet in it. */
-        result = slice_from_slice(output, (size_t)0, (size_t)(slice_len(result) + CPF_CONN_HEADER_SIZE));
+        result = slice_from_slice(output, (size_t)0, (size_t)(slice_len(result) + offset));
     }
 
     /* errors are pass through. */

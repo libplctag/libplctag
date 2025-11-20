@@ -215,6 +215,10 @@ THREAD_FUNC(conn_handler) {
             }
 
             /* all good. Reset the buffers etc. */
+
+            memset(input_buf, 0, sizeof(input_buf));
+            memset(output_buf, 0, sizeof(output_buf));
+
             accumulated_data = slice_make(input_buf, 0);
             read_target = slice_make(input_buf, sizeof(input_buf));
             tmp_output = slice_make(output_buf, sizeof(output_buf));
@@ -234,7 +238,9 @@ THREAD_FUNC(conn_handler) {
                                                    sizeof(input_buf) - slice_len(accumulated_data));
                     break;
 
-                case ERR_TCP_PROCESSED: break;
+                case ERR_TCP_PROCESSED: 
+                
+                    break;
 
                 case ERR_TCP_BAD_REQUEST:
                     log_info("WARN: Bad request!");

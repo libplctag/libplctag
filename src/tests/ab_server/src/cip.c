@@ -225,7 +225,7 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
         return make_cip_log_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
     }
     
-    /* calculate the size of the possible multi-response payload */
+    /* calculate the overhead of the multi-response payload */
     size_t multi_response_overhead = 4                                              /* CIP response header size */
                                     + sizeof(uint16_t)                              /* service count */
                                     + (service_count * sizeof(uint16_t));           /* offsets array */
@@ -247,7 +247,8 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
     /* calculate the maximum slice of the multi-response payload */
     slice_s multi_response_payload = slice_from_slice(output, output_offset, slice_len(output) - output_offset);
 
-    log_info("Multi-service: at least %zu available for data", slice_len(multi_response_payload));
+    log_info("Response payload starts at offset %zu", output_offset);
+    log_info("Response payload length: %zu", slice_len(multi_response_payload));
 
     /* Track if any sub-response has an error status */
     bool any_error = false;
@@ -279,6 +280,8 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
         /* determine the maximum possible response size for this request */
         slice_s response_output = slice_from_slice(output, output_offset, (slice_len(output) - (output_offset + ((service_count - i) * CIP_MINIMAL_RESPONSE_SIZE))));
 
+        log_info("Response output slice starts at offset %zu with length %zu", output_offset, slice_len(response_output));
+
         log_info("Sub-request %zu:", i);
         log_info_slice(request);
 
@@ -302,6 +305,9 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
 
         output_offset += slice_len(response);
         offset_from_response_count += slice_len(response);
+
+        log_info("Output up to request %zu:", i);
+        log_info_slice(slice_from_slice(output, 0, output_offset));
     }
 
     /* Phase 4: Build multi-service response */
@@ -316,6 +322,9 @@ slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slic
     
     /* Multi-service response payload starts after CIP header */
     size_t multi_payload_start = response_offset_pos;
+
+    log_info("Filled in header:");
+    log_info_slice(slice_from_slice(output, 0, response_offset_pos + 2 + (service_count * 2)));
     
     /* Service count */
     slice_set_uint16_le(output, multi_payload_start, service_count);
