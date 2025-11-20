@@ -18,6 +18,8 @@ set(AB_SERVER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/cpf.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/eip.c
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/eip.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/err.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/err.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/fairness.c
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/fairness.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ab_server/src/main.c

@@ -33,8 +33,8 @@
 
 #include "eip.h"
 #include "cpf.h"
+#include "err.h"
 #include "slice.h"
-#include "tcp_server.h"
 #include "utils.h"
 #include <stdlib.h>
 
@@ -83,7 +83,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
     /* sanity checks */
     if(slice_len(input) != (size_t)(header.length + EIP_HEADER_SIZE)) {
         info("Illegal EIP packet.   Length should be %d but is %d!", header.length + EIP_HEADER_SIZE, slice_len(input));
-        return slice_make_err(TCP_SERVER_BAD_REQUEST);
+        return slice_make_err(ERR_TCP_BAD_REQUEST);
     }
 
     /* dispatch the request */
@@ -109,7 +109,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
                                             slice_from_slice(output, EIP_HEADER_SIZE, slice_len(output) - EIP_HEADER_SIZE), plc);
             break;
 
-        default: response = slice_make_err(TCP_SERVER_UNSUPPORTED); break;
+        default: response = slice_make_err(ERR_TCP_UNSUPPORTED); break;
     }
 
     if(!slice_has_err(response)) {
@@ -123,7 +123,7 @@ slice_s eip_dispatch_request(slice_s input, slice_s raw_output, plc_s *plc) {
 
         /* The payload is already in place. */
         return slice_from_slice(output, 0, EIP_HEADER_SIZE + slice_len(response));
-    } else if(slice_get_err(response) == TCP_SERVER_DONE) {
+    } else if(slice_get_err(response) == ERR_TCP_DONE) {
         /* just pass this through, normally not an error. */
         info("Done with connection.");
 
@@ -213,7 +213,7 @@ slice_s unregister_session(slice_s input, slice_s output, plc_s *plc, eip_header
     (void)header;
 
     if(header->session_handle == plc->session_handle) {
-        return slice_make_err(TCP_SERVER_DONE);
+        return slice_make_err(ERR_TCP_DONE);
     } else {
         return slice_make_err(EIP_ERR_BAD_REQUEST);
     }

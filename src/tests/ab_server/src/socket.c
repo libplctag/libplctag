@@ -58,6 +58,7 @@
 
 #include "slice.h"
 #include "socket.h"
+#include "err.h"
 #include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,7 +78,7 @@ typedef struct timeval TIMEVAL;
 #define LISTEN_QUEUE (10)
 
 
-socket_fd_result socket_open_tcp_client(const char *remote_host, const char *remote_port) {
+SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) {
     SOCKET sock = INVALID_SOCKET;
     int rc = 0;
     struct sockaddr_in serv_addr = {0};
@@ -91,7 +92,7 @@ socket_fd_result socket_open_tcp_client(const char *remote_host, const char *rem
 
     if(rc != NO_ERROR) {
         info("WSAStartup failed with error: %d\n", rc);
-        return socket_fd_result_err(SOCKET_ERR_STARTUP);
+        return ERR_SOCKET_STARTUP;
     }
 #endif
 
@@ -99,7 +100,7 @@ socket_fd_result socket_open_tcp_client(const char *remote_host, const char *rem
     sock = socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
     if(sock == INVALID_SOCKET) {
         info("ERROR: socket() failed: %s\n", gai_strerror(sock));
-        return socket_fd_result_err(SOCKET_ERR_CREATE);
+        return ERR_SOCKET_CREATE;
     }
 
 #ifdef SO_NOSIGPIPE
@@ -110,7 +111,7 @@ socket_fd_result socket_open_tcp_client(const char *remote_host, const char *rem
     if(rc) {
         socket_close(sock);
         info("ERROR: Setting SO_NOSIGPIPE on socket failed: %s\n", gai_strerror(rc));
-        return socket_fd_result_err(SOCKET_ERR_SETOPT);
+        return ERR_SOCKET_SETOPT;
     }
 #endif
 
@@ -121,14 +122,14 @@ socket_fd_result socket_open_tcp_client(const char *remote_host, const char *rem
     if(rc) {
         socket_close(sock);
         info("ERROR: Setting SO_RCVTIMEO on socket failed: %s\n", gai_strerror(rc));
-        return socket_fd_result_err(SOCKET_ERR_SETOPT);
+        return ERR_SOCKET_SETOPT;
     }
 
     rc = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
     if(rc) {
         socket_close(sock);
         info("ERROR: Setting SO_SNDTIMEO on socket failed: %s\n", gai_strerror(rc));
-        return socket_fd_result_err(SOCKET_ERR_SETOPT);
+        return ERR_SOCKET_SETOPT;
     }
 
     /* abort the connection on close. */
@@ -139,7 +140,7 @@ socket_fd_result socket_open_tcp_client(const char *remote_host, const char *rem
     if(rc) {
         socket_close(sock);
         info("ERROR: Setting SO_LINGER on socket failed: %s\n", gai_strerror(rc));
-        return socket_fd_result_err(SOCKET_ERR_SETOPT);
+        return ERR_SOCKET_SETOPT;
     }
 
     serv_addr.sin_family = AF_INET;
@@ -148,21 +149,21 @@ socket_fd_result socket_open_tcp_client(const char *remote_host, const char *rem
     if((rc = inet_pton(AF_INET, remote_host, &serv_addr.sin_addr)) <= 0) {
         socket_close(sock);
         info("ERROR: Getting IP address for remote server, %s, failed: %d\n", remote_host, rc);
-        return socket_fd_result_err(SOCKET_ERR_BAD_PARAM);
+        return ERR_SOCKET_BAD_PARAM;
     }
 
     /* now connect to the remote server */
     if(connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) {
         socket_close(sock);
         info("ERROR: Connecting to remote server, %s, failed: %d\n", remote_host, rc);
-        return socket_fd_result_err(SOCKET_ERR_CONNECT);
+        return ERR_SOCKET_CONNECT;
     }
 
-    return socket_fd_result_val(sock);
+    return sock;
 }
 
 
-socket_fd_result socket_open_tcp_server(const char *listening_port) {
+SOCKET socket_open_tcp_server(const char *listening_port) {
     struct sockaddr_in address = {0};
     SOCKET sock = INVALID_SOCKET;
     SOCKET sock_opt = 0;
@@ -175,7 +176,7 @@ socket_fd_result socket_open_tcp_server(const char *listening_port) {
 
     if(rc != NO_ERROR) {
         info("WSAStartup failed with error: %d\n", rc);
-        return socket_fd_result_err(SOCKET_ERR_CREATE);
+        return ERR_SOCKET_STARTUP;
     }
 #endif
 
@@ -183,7 +184,7 @@ socket_fd_result socket_open_tcp_server(const char *listening_port) {
     sock = socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
     if(sock == INVALID_SOCKET) {
         info("ERROR: socket() failed: %s\n", gai_strerror(sock));
-        return socket_fd_result_err(SOCKET_ERR_BAD_PARAM);
+        return ERR_SOCKET_CREATE;
     }
 
     address.sin_family = AF_INET;
@@ -196,13 +197,13 @@ socket_fd_result socket_open_tcp_server(const char *listening_port) {
     if(rc < 0) {
         perror("Error from bind(): ");
         printf("ERROR: Unable to bind() socket: %d\n", rc);
-        return socket_fd_result_err(SOCKET_ERR_BIND);
+        return ERR_SOCKET_BIND;
     }
 
     rc = listen(sock, LISTEN_QUEUE);
     if(rc < 0) {
         info("ERROR: Unable to call listen() on socket: %d\n", rc);
-        return socket_fd_result_err(SOCKET_ERR_LISTEN);
+        return ERR_SOCKET_LISTEN;
     }
 
     /* set up our socket to allow reuse if we crash suddenly. */
@@ -211,12 +212,10 @@ socket_fd_result socket_open_tcp_server(const char *listening_port) {
     if(rc) {
         socket_close(sock);
         info("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
-        return socket_fd_result_err(SOCKET_ERR_SETOPT);
+        return ERR_SOCKET_SETOPT;
     }
 
-    socket_fd_result result = socket_fd_result_val(sock);
-
-    return result;
+    return sock;
 }
 
 
@@ -231,7 +230,7 @@ void socket_close(SOCKET sock) {
 }
 
 
-socket_fd_result socket_accept(SOCKET sock, uint32_t timeout_ms) {
+SOCKET socket_accept(SOCKET sock, uint32_t timeout_ms) {
     fd_set accept_fd_set;
     TIMEVAL timeout;
     int num_accept_ready = 0;
@@ -255,21 +254,21 @@ socket_fd_result socket_accept(SOCKET sock, uint32_t timeout_ms) {
 
         client_fd = accept(sock, NULL, NULL);
         if(client_fd == INVALID_SOCKET) {
-            return socket_fd_result_err(SOCKET_ERR_ACCEPT);
+            return ERR_SOCKET_ACCEPT;
         } else {
-            return socket_fd_result_val(client_fd);
+            return client_fd;
         }
     } else if(num_accept_ready < 0) {
         info("Error selecting the listen socket!");
-        return socket_fd_result_err(SOCKET_ERR_SELECT);
+        return ERR_SOCKET_SELECT;
     } else {
         /* no client connection, timeout */
-        return socket_fd_result_err(SOCKET_ERR_TIMEOUT);
+        return ERR_SOCKET_TIMEOUT;
     }
 }
 
 
-socket_slice_result socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms) {
+slice_s socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms) {
     fd_set read_fd_set;
     TIMEVAL timeout;
     int num_read_ready = 0;
@@ -294,11 +293,11 @@ socket_slice_result socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms
         rc = (int)recv(sock, (char *)slice_get_bytes(in_buf, 0), (size_t)slice_len(in_buf), 0);
 #endif
         if(rc > 0) {
-            return socket_slice_result_val(slice_from_slice(in_buf, 0, (size_t)(unsigned int)rc));
+            return slice_from_slice(in_buf, 0, (size_t)(unsigned int)rc);
         } else if(rc == 0) {
             /* socket is closed. */
             info("Unable to read.  The socket is closed.");
-            return socket_slice_result_err(SOCKET_ERR_EOF);
+            return slice_make_err(ERR_SOCKET_EOF);
         } else {
 #ifdef IS_WINDOWS
             rc = WSAGetLastError();
@@ -309,25 +308,25 @@ socket_slice_result socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms
 #endif
                 /* the read was interrupted.  We will return as if it was a timeout. */
                 info("Read interrupted.");
-                return socket_slice_result_err(SOCKET_ERR_TIMEOUT);
+                return slice_make_err(ERR_SOCKET_TIMEOUT);
             } else {
                 info("Socket read error rc=%d.\n", rc);
-                return socket_slice_result_err(SOCKET_ERR_READ);
+                return slice_make_err(ERR_SOCKET_READ);
             }
         }
     } else if(num_read_ready == 0) {
         /* num_read_ready sockets is zero, so we timed out. */
         info("Timeout waiting for data to read.");
-        return socket_slice_result_err(SOCKET_ERR_TIMEOUT);
+        return slice_make_err(ERR_SOCKET_TIMEOUT);
     } else {
         info("Socket select error trying to read!\n");
-        return socket_slice_result_err(SOCKET_ERR_SELECT);
+        return slice_make_err(ERR_SOCKET_SELECT);
     }
 }
 
 
 /* this blocks until all the data is written or there is an error. */
-socket_slice_result socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms) {
+slice_s socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms) {
     fd_set write_fd_set;
     TIMEVAL timeout;
     int num_write_ready = 0;
@@ -352,12 +351,12 @@ socket_slice_result socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_
         rc = (int)send(sock, (char *)slice_get_bytes(out_buf, 0), (size_t)slice_len(out_buf), MSG_NOSIGNAL);
 #endif
         if(rc >= 0) {
-            return socket_slice_result_val(
-                slice_from_slice(out_buf, (size_t)(unsigned int)rc, (size_t)(slice_len(out_buf) - (size_t)(unsigned int)rc)));
+            /* Return remaining data to write (for caller that may need to retry) */
+            return slice_from_slice(out_buf, (size_t)(unsigned int)rc, (size_t)(slice_len(out_buf) - (size_t)(unsigned int)rc));
         } else if(rc == 0) {
             /* socket is closed. */
             info("Unable to write.  The socket is closed.");
-            return socket_slice_result_err(SOCKET_ERR_EOF);
+            return slice_make_err(ERR_SOCKET_EOF);
         } else {
 #ifdef IS_WINDOWS
             rc = WSAGetLastError();
@@ -368,18 +367,18 @@ socket_slice_result socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_
 #endif
                 /* the write was interrupted.  We will return as if it was a timeout. */
                 info("write interrupted.");
-                return socket_slice_result_err(SOCKET_ERR_TIMEOUT);
+                return slice_make_err(ERR_SOCKET_TIMEOUT);
             } else {
                 info("Socket write error rc=%d.\n", rc);
-                return socket_slice_result_err(SOCKET_ERR_WRITE);
+                return slice_make_err(ERR_SOCKET_WRITE);
             }
         }
     } else if(num_write_ready == 0) {
         /* num_write_ready sockets is zero, so we timed out. */
         info("Timeout waiting for data to write.");
-        return socket_slice_result_err(SOCKET_ERR_TIMEOUT);
+        return slice_make_err(ERR_SOCKET_TIMEOUT);
     } else {
         info("Socket select error trying to write!\n");
-        return socket_slice_result_err(SOCKET_ERR_SELECT);
+        return slice_make_err(ERR_SOCKET_SELECT);
     }
 }

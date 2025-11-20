@@ -1,0 +1,61 @@
+Received TEST_DIR: ../../build/bin_dist/
+Received LOG_DIR: .
+OSTYPE: darwin24
+Logs will be saved to: .
+Starting AB emulator for fast ControlLogix tests.
+  Test 1: basic large tag read/write... OK
+  Test 2: stress RC memory code ... OK
+  Test 3: CIP thread stress... OK
+  Test 4: auto sync... OK
+  Test 5: indexed tags ... OK
+  Test 6: AB/ControlLogix tag scheduling fairness... FAILURE
+  Test 7: hard library shutdown... OK
+Starting stand-alone tests.
+  Test 8: Test async reconnect after PLC outage... ./run_simulator_tests.sh: line 176: 27259 Terminated: 15          $TEST_DIR/ab_server --debug --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" > "$LOG_DIR/logix_fast_emulator.log" 2>&1
+OK
+  Test 9: Test sync reconnect after PLC outage... OK
+Starting AB emulator for functional/slow ControlLogix tests.
+  Test 10: emulator test callbacks... OK
+  Test 11: emulator test extended callbacks sync... OK
+  Test 12: emulator test extended callbacks async... OK
+  Killing AB emulator.
+Starting AB emulator for Micro800 tests.
+./run_simulator_tests.sh: line 259: 27663 Terminated: 15          $VALGRIND$TEST_DIR/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" --delay=100 > "$LOG_DIR/logix_slow_emulator.log" 2>&1
+  Test 13: basic Micro800 read/write... OK
+  Killing Micrologix emulator.
+Starting AB emulator for PLC5 tests.
+./run_simulator_tests.sh: line 289: 27676 Terminated: 15          $TEST_DIR/ab_server --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] > "$LOG_DIR/micro800_emulator.log" 2>&1
+  Test 14: basic Omron read/write... OK
+  Killing Omron emulator.
+Starting AB emulator for Micrologix tests.
+./run_simulator_tests.sh: line 318: 27685 Terminated: 15          $TEST_DIR/ab_server --debug --plc=Omron --tag=TestDINTArray:DINT[10] > "$LOG_DIR/omron_emulator.log" 2>&1
+  Test 15: B data file Micrologix tag read/write... OK
+  Test 16: B bit data file Micrologix tag read/write... OK
+  Test 17: N data file Micrologix tag read/write... OK
+  Test 18: N bit data file Micrologix tag read/write... OK
+  Test 19: L data file Micrologix tag read/write... OK
+  Test 20: L bit data file Micrologix tag read... OK
+  Test 21: L bit data file Micrologix tag write... OK
+  Killing Micrologix emulator.
+Starting AB emulator for PLC5 tests.
+./run_simulator_tests.sh: line 413: 27689 Terminated: 15          $TEST_DIR/ab_server --debug --plc=Micrologix '--tag=B3[10]' '--tag=N7[10]' '--tag=L19[10]' > "$LOG_DIR/micrologix_emulator.log" 2>&1
+  Test 22: B data file PLC5 tag read/write... OK
+  Test 23: B bit data file PLC5 tag read/write... OK
+  Test 24: N data file PLC5 tag read/write... OK
+  Test 25: N bit data file PLC5 tag read/write... OK
+  Killing emulators.
+./run_simulator_tests.sh: line 466: 27702 Terminated: 15          $TEST_DIR/ab_server --debug --plc=PLC/5 '--tag=B3[10]' '--tag=N7[10]' > "$LOG_DIR/plc5_emulator.log" 2>&1
+Starting Modbus server /Users/kyle/Projects/libplctag/src/tests/modbus_server.
+  Test 26: test short reconnect with Modbus... OK
+  Test 27: test long reconnect with Modbus... OK
+  Test 28: thread stress Modbus... OK
+  Test 29: callback events Modbus... OK
+  Test 30: hard library shutdown... OK
+  Test 31: Modbus tag scheduling fairness... FAILURE
+  Test 32: for Modbus reconnect bug... OK
+  Test 33: check for exactly 2 PLC creation entries in Modbus reconnect test log... OK (found 2 PLC creation entries in log file ./32_modbus_reconnect_bug_test.log)
+
+Results:
+ - 33 tests.
+ - 31 successes.
+ - 2 failures.

@@ -109,12 +109,11 @@ const uint8_t CIP_OBJ_CONNECTION_MANAGER[] = {0x20, 0x06, 0x24, 0x01};
 
 #define CIP_TAG_MAX_INDEXES ((uint32_t)3) /* should double check for OMRON */
 
+#define MAX_SUB_PACKETS ((uint16_t)1000) /* maximum number of sub-packets in a multi-service request */
 
-// typedef struct {
-//     uint8_t service_code;   /* why is the operation code _before_ the path? */
-//     uint8_t path_size;      /* size in 16-bit words of the path */
-//     slice_s path;           /* store this in a slice to avoid copying */
-// } cip_header_s;
+#define CIP_MINIMAL_RESPONSE_SIZE ((size_t)6) /* four bytes for header plus 2 for optional extended status. */
+
+
 
 
 static slice_s make_cip_error(slice_s output, uint8_t cip_cmd, uint8_t cip_err, bool extend, uint16_t extended_error);
@@ -126,6 +125,8 @@ static slice_s handle_forward_close(uint8_t cip_service, slice_s cip_service_pat
 static slice_s handle_read_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                    plc_s *plc);
 static slice_s handle_write_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
+                                    plc_s *plc);
+static slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
                                     plc_s *plc);
 
 static bool parse_cip_request(slice_s input, uint8_t *cip_service, slice_s *cip_service_path, slice_s *cip_service_payload);
@@ -156,6 +157,10 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
     slice_dump(cip_service_payload);
 
     switch(cip_service) {
+        case CIP_SRV_MULTI:
+            return handle_multi_request(cip_service, cip_service_path, cip_service_payload, output, plc);
+            break;
+
         case CIP_SRV_FORWARD_OPEN:
         case CIP_SRV_FORWARD_OPEN_EX:
             return handle_forward_open(cip_service, cip_service_path, cip_service_payload, output, plc);
@@ -179,6 +184,145 @@ slice_s cip_dispatch_request(slice_s input, slice_s output, plc_s *plc) {
 
         default: return make_cip_error(output, cip_service, CIP_ERR_UNSUPPORTED, false, 0); break;
     }
+}
+
+
+/* 
+ * Handle multi-service requests (service 0x0a)
+ * 
+ * We have to unpack and dispatch each sub-request, then repack the responses.
+ */
+slice_s handle_multi_request(uint8_t cip_service, slice_s cip_service_path, slice_s cip_service_payload, slice_s output,
+                             plc_s *plc) {
+    uint16_t service_count = 0;
+    size_t i = 0;
+
+    (void)cip_service_path; /* static for multi-service requests, but we should really check it. */
+
+    size_t output_offset = 0;
+    
+    info("Processing Multi-Service request");
+    
+    /* Phase 1: Parse request structure */
+    if(slice_len(cip_service_payload) < 2) {
+        info("Multi-service payload too small for service count");
+        return make_cip_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+    
+    service_count = slice_get_uint16_le(cip_service_payload, 0);
+    
+    info("Multi-service request contains %d services", service_count);
+    
+    if(service_count == 0 || service_count > MAX_SUB_PACKETS) {
+        info("Invalid service count: %d", service_count);
+        return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+    }
+    
+    /* Need space for offsets array */
+    if(slice_len(cip_service_payload) < (size_t)(2 + service_count * 2)) {
+        info("Multi-service payload too small for offset array");
+        return make_cip_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+    
+    /* calculate the size of the possible multi-response payload */
+    size_t multi_response_overhead = 4                                              /* CIP response header size */
+                                    + sizeof(uint16_t)                              /* service count */
+                                    + (service_count * sizeof(uint16_t));           /* offsets array */
+
+    /* do we have room? Guess using a minimal response size for all requests */
+    if(slice_len(output) < (multi_response_overhead + (service_count * CIP_MINIMAL_RESPONSE_SIZE))) {
+        info("Output buffer too small for multi-response header");
+        return make_cip_error(output, cip_service, CIP_ERR_INSUFFICIENT_DATA, false, 0);
+    }
+
+    /* start the offset at the beginning of the first response */
+    output_offset = multi_response_overhead;
+
+    /* calculate the offset from the response count word */
+    size_t offset_from_response_count =  sizeof(uint16_t)                       /* service count */
+                                    + (service_count * sizeof(uint16_t));  /* offsets array */
+
+
+    /* calculate the maximum slice of the multi-response payload */
+    slice_s multi_response_payload = slice_from_slice(output, output_offset, slice_len(output) - output_offset);
+
+    info("Multi-service: at least %zu available for data", slice_len(multi_response_payload));
+
+    /* Track if any sub-response has an error status */
+    bool any_error = false;
+
+    /* Phase 3: Process each request */
+    for(i = 0; i < service_count; i++) {
+        /* calculate the slice of the request */
+        uint16_t request_offset = slice_get_uint16_le(cip_service_payload, 2 + (i * 2));
+        /* Offsets are from the start of the multi-service payload (byte 0) */
+        size_t request_start = request_offset;
+        size_t next_request_start = (i + 1 < service_count) 
+            ? slice_get_uint16_le(cip_service_payload, 2 + (i + 1) * 2)
+            : slice_len(cip_service_payload);
+        
+        if(request_start >= slice_len(cip_service_payload)) {
+            info("Request %zu offset %u is out of bounds", i, request_offset);
+            return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+
+        /* Validate that offsets are in ascending order */
+        if(request_start >= next_request_start) {
+            info("Request %zu has invalid offset range: start=%zu >= next=%zu", i, request_start, next_request_start);
+            return make_cip_error(output, cip_service, CIP_ERR_INVALID_PARAM, false, 0);
+        }
+
+        /* Extract the individual request - it's a complete CIP request */
+        slice_s request = slice_from_slice(cip_service_payload, request_start, next_request_start - request_start);
+
+        /* determine the maximum possible response size for this request */
+        slice_s response_output = slice_from_slice(output, output_offset, (slice_len(output) - (output_offset + ((service_count - i) * CIP_MINIMAL_RESPONSE_SIZE))));
+
+        info("Sub-request %zu:", i);
+        slice_dump(request);
+
+        /* Process the request - each is a complete CIP request */
+        slice_s response = cip_dispatch_request(request, response_output, plc);
+
+        info("Sub-request %zu response:", i);
+        slice_dump(response);
+
+        /* Check the CIP status byte (byte 2) of the response - if non-zero, there's an error */
+        if(!slice_has_err(response) && slice_len(response) > 2) {
+            uint8_t cip_status = slice_get_uint8(response, 2);
+            if(cip_status != CIP_OK) {
+                info("Sub-request %zu returned CIP status error: 0x%02x", i, cip_status);
+                any_error = true;
+            }
+        }
+
+        /* fill in the offset array */
+        slice_set_uint16_le(output, 4 + 2 + (i * 2), (uint16_t)offset_from_response_count);
+
+        output_offset += slice_len(response);
+        offset_from_response_count += slice_len(response);
+    }
+
+    /* Phase 4: Build multi-service response */
+    size_t response_offset_pos = 0;
+
+    /* CIP response header (4 bytes) */
+    slice_set_uint8(output, response_offset_pos++, cip_service | CIP_DONE); /* 0x8a */
+    slice_set_uint8(output, response_offset_pos++, 0); /* reserved */
+    /* Status: 0x1E if any sub-request had an error, else CIP_OK (0x00) */
+    slice_set_uint8(output, response_offset_pos++, any_error ? 0x1E : CIP_OK);
+    slice_set_uint8(output, response_offset_pos++, 0); /* additional status size */
+    
+    /* Multi-service response payload starts after CIP header */
+    size_t multi_payload_start = response_offset_pos;
+    
+    /* Service count */
+    slice_set_uint16_le(output, multi_payload_start, service_count);
+
+    info("Multi-service response completed, total size %zu bytes", output_offset);
+    slice_dump(slice_from_slice(output, 0, output_offset));
+    
+    return slice_from_slice(output, 0, output_offset);
 }
 
 
