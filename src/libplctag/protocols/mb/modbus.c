@@ -116,7 +116,7 @@ struct modbus_plc_t {
         PLC_ERR_WAIT
     } state;
     int max_requests_in_flight;
-    int32_t tags_with_requests[MAX_MODBUS_REQUESTS];
+    int pending_request_count;
 
     /* comms timeout/disconnect. */
     int64_t inactivity_timeout_ms;
@@ -181,8 +181,8 @@ struct modbus_tag_t {
     uint16_t request_num;
     uint16_t seq_id;
 
-    /* which request slot are we using? */
-    int request_slot;
+    /* transaction ID of current pending request (0 = none) */
+    uint16_t pending_transaction_id;
 
     /* data for the tag. */
     int elem_count;
@@ -235,8 +235,6 @@ static void wake_plc_thread(modbus_plc_p plc);
 static int connect_plc(modbus_plc_p plc);
 static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms);
 static int tickle_tag(modbus_plc_p plc, modbus_tag_p tag);
-static int find_request_slot(modbus_plc_p plc, modbus_tag_p tag);
-static void clear_request_slot(modbus_plc_p plc, modbus_tag_p tag);
 static int receive_response(modbus_plc_p plc);
 static int send_request(modbus_plc_p plc);
 static int check_read_response(modbus_plc_p plc, modbus_tag_p tag);
@@ -397,8 +395,8 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
     /* set initial tag operation state. */
     (*tag)->op = TAG_OP_IDLE;
 
-    /* initialize the current request slot */
-    (*tag)->request_slot = -1;
+    /* initialize the pending transaction ID */
+    (*tag)->pending_transaction_id = 0;
 
     /* make sure the generic tag tickler thread does not call the generic tickler. */
     (*tag)->skip_tickler = 1;
@@ -780,7 +778,8 @@ static int reset_plc(modbus_plc_p plc) {
     pdebug(DEBUG_WARN, "MUTEX: Acquire. Resetting PLC.");
     critical_block(plc->mutex) {
         /* Clear all pending requests and reset tags to allow retry since the server may have been restarted */
-        pdebug(DEBUG_DETAIL, "Clearing all pending requests due to socket disconnect.");
+        pdebug(DEBUG_DETAIL, "Clearing all pending transaction IDs due to socket disconnect. In-flight was: %d",
+               plc->pending_request_count);
         int tag_count = vector_length(plc->tag_vector);
         for(int i = 0; i < tag_count; i++) {
             modbus_tag_p cur = vector_get(plc->tag_vector, i);
@@ -789,26 +788,25 @@ static int reset_plc(modbus_plc_p plc) {
             if(cur->op == TAG_OP_READ_RESPONSE || cur->op == TAG_OP_WRITE_RESPONSE) {
                 pdebug(DEBUG_DETAIL, "Resetting tag %" PRId32 " from %s to request state due to socket disconnect.",
                         cur->tag_id, op_to_str(cur->op));
-                /* Reset seq_id since we're not waiting for this response anymore */
-                cur->seq_id = 0;
-                cur->request_slot = -1;
+
+                /* If this tag had a pending request, clear it and decrement counter */
+                if(cur->pending_transaction_id != 0) {
+                    cur->pending_transaction_id = 0;
+                    if(plc->pending_request_count > 0) {
+                        plc->pending_request_count--;
+                    }
+                }
+
                 /* Reset to the corresponding REQUEST state to allow retry on reconnect */
                 if(cur->op == TAG_OP_READ_RESPONSE) {
                     cur->op = TAG_OP_READ_REQUEST;
                 } else {
                     cur->op = TAG_OP_WRITE_REQUEST;
                 }
-            } else if(cur->op == TAG_OP_READ_REQUEST || cur->op == TAG_OP_WRITE_REQUEST) {
-                /* Also clear request slots for tags in REQUEST state */
-                pdebug(DEBUG_DETAIL, "Clearing request slot for tag %" PRId32 " in %s state.",
-                        cur->tag_id, op_to_str(cur->op));
-                cur->request_slot = -1;
             }
         }
-        /* Clear all request slots */
-        for(int slot = 0; slot < plc->max_requests_in_flight; slot++) {
-            plc->tags_with_requests[slot] = 0;
-        }
+
+        pdebug(DEBUG_DETAIL, "After reset, in-flight count is: %d", plc->pending_request_count);
 
         if(plc->sock) {
             pdebug(DEBUG_DETAIL, "Closing socket due to error or disconnect.");
@@ -1406,39 +1404,63 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting read request operation for tag %d.", tag->tag_id);
+    pdebug(DEBUG_DETAIL, "Starting read request operation for tag %d. In-flight: %d/%d.",
+           tag->tag_id, plc->pending_request_count, plc->max_requests_in_flight);
 
-    if(find_request_slot(plc, tag) == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_DETAIL, "Read request starting in slot %d for tag %d.", tag->request_slot, tag->tag_id);
+    /* Pre-flight checks */
+    if(plc->flags.request_ready) {
+        pdebug(DEBUG_DETAIL, "Request already queued for sending.");
+        return PLCTAG_STATUS_PENDING;
+    }
 
-        rc = create_read_request(plc, tag);
-        if(rc == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Read request created.");
+    if(plc->state != PLC_READY) {
+        pdebug(DEBUG_DETAIL, "PLC not ready.");
+        return PLCTAG_STATUS_PENDING;
+    }
 
-            tag->op = TAG_OP_READ_RESPONSE;
-            plc->flags.request_ready = 1;
+    if(tag->tag_id == 0) {
+        pdebug(DEBUG_DETAIL, "Tag not ready.");
+        return PLCTAG_STATUS_PENDING;
+    }
 
-            rc = PLCTAG_STATUS_PENDING;
-        } else {
-            pdebug(DEBUG_WARN, "Error %s creating read request!", plc_tag_decode_error(rc));
+    /* Check if we've hit the concurrency limit */
+    if(plc->pending_request_count >= plc->max_requests_in_flight) {
+        pdebug(DEBUG_DETAIL, "Request concurrency limit reached (%d/%d). Waiting for response.",
+               plc->pending_request_count, plc->max_requests_in_flight);
+        return PLCTAG_STATUS_PENDING;
+    }
 
-            /* remove the tag from the request slot. */
-            clear_request_slot(plc, tag);
+    /* Create the read request (this sets tag->seq_id) */
+    rc = create_read_request(plc, tag);
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_DETAIL, "Read request created with transaction_id=%d.", tag->seq_id);
 
-            tag->op = TAG_OP_IDLE;
-            tag->read_complete = 1;
-            tag->read_in_flight = 0;
-            tag->status = (int8_t)rc;
+        /* Store the transaction ID in the tag for matching responses */
+        tag->pending_transaction_id = tag->seq_id;
 
-            tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
+        /* Increment in-flight counter */
+        plc->pending_request_count++;
+        pdebug(DEBUG_DETAIL, "Incremented request count to %d/%d.",
+               plc->pending_request_count, plc->max_requests_in_flight);
 
-            pdebug(DEBUG_DETAIL, "Read completed event raised for tag %d with status %s.", tag->tag_id, plc_tag_decode_error((int8_t)rc));
+        tag->op = TAG_OP_READ_RESPONSE;
+        plc->flags.request_ready = 1;
 
-            rc = PLCTAG_STATUS_OK;
-        }
-    } else {
-        pdebug(DEBUG_DETAIL, "Request already in flight or PLC not ready, waiting for next chance.");
         rc = PLCTAG_STATUS_PENDING;
+    } else {
+        pdebug(DEBUG_WARN, "Error %s creating read request!", plc_tag_decode_error(rc));
+
+        tag->op = TAG_OP_IDLE;
+        tag->read_complete = 1;
+        tag->read_in_flight = 0;
+        tag->status = (int8_t)rc;
+
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
+
+        pdebug(DEBUG_DETAIL, "Read completed event raised for tag %d with status %s.",
+               tag->tag_id, plc_tag_decode_error((int8_t)rc));
+
+        rc = PLCTAG_STATUS_OK;
     }
 
     return rc;
@@ -1475,12 +1497,20 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                 /* partial response, keep going */
                 pdebug(DEBUG_DETAIL, "Found our response, but we are not done.");
 
-                /* remove the tag from the request slot. */
-                clear_request_slot(plc, tag);
+                /* Decrement in-flight counter */
+                if(plc->pending_request_count > 0) {
+                    plc->pending_request_count--;
+                    pdebug(DEBUG_DETAIL, "Decremented request count to %d/%d.",
+                           plc->pending_request_count, plc->max_requests_in_flight);
+                } else {
+                    pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
+                }
 
                 critical_block(plc->mutex) {
                     plc->flags.response_ready = 0;
                 }
+
+                tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_READ_REQUEST;
 
                 rc = PLCTAG_STATUS_PENDING;
@@ -1507,12 +1537,20 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                     rc = PLCTAG_STATUS_OK;
                 }
 
-                /* remove the tag from the request slot. */
-                clear_request_slot(plc, tag);
+                /* Decrement in-flight counter */
+                if(plc->pending_request_count > 0) {
+                    plc->pending_request_count--;
+                    pdebug(DEBUG_DETAIL, "Decremented request count to %d/%d.",
+                           plc->pending_request_count, plc->max_requests_in_flight);
+                } else {
+                    pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
+                }
 
                 critical_block(plc->mutex) {
                     plc->flags.response_ready = 0;
                 }
+
+                tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_IDLE;
                 tag->read_in_flight = 0;
                 tag->read_complete = 1;
@@ -1520,7 +1558,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
                 tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
 
-                pdebug(DEBUG_DETAIL, "Read completed event raised for tag %d with status %s.", tag->tag_id, plc_tag_decode_error((int8_t)rc));
+                pdebug(DEBUG_DETAIL, "Read completed event raised for tag %d with status %s.",
+                       tag->tag_id, plc_tag_decode_error((int8_t)rc));
 
                 break;
         }
@@ -1536,37 +1575,63 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    if(find_request_slot(plc, tag) == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_DETAIL, "Write request starting in slot %d for tag %d.", tag->request_slot, tag->tag_id);
+    pdebug(DEBUG_DETAIL, "Starting write request operation for tag %d. In-flight: %d/%d.",
+           tag->tag_id, plc->pending_request_count, plc->max_requests_in_flight);
 
-        rc = create_write_request(plc, tag);
-        if(rc == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Write request created.");
+    /* Pre-flight checks */
+    if(plc->flags.request_ready) {
+        pdebug(DEBUG_DETAIL, "Request already queued for sending.");
+        return PLCTAG_STATUS_PENDING;
+    }
 
-            tag->op = TAG_OP_WRITE_RESPONSE;
-            plc->flags.request_ready = 1;
+    if(plc->state != PLC_READY) {
+        pdebug(DEBUG_DETAIL, "PLC not ready.");
+        return PLCTAG_STATUS_PENDING;
+    }
 
-            rc = PLCTAG_STATUS_PENDING;
-        } else {
-            pdebug(DEBUG_WARN, "Error %s creating write request!", plc_tag_decode_error(rc));
+    if(tag->tag_id == 0) {
+        pdebug(DEBUG_DETAIL, "Tag not ready.");
+        return PLCTAG_STATUS_PENDING;
+    }
 
-            /* remove the tag from the request slot. */
-            clear_request_slot(plc, tag);
+    /* Check if we've hit the concurrency limit */
+    if(plc->pending_request_count >= plc->max_requests_in_flight) {
+        pdebug(DEBUG_DETAIL, "Request concurrency limit reached (%d/%d). Waiting for response.",
+               plc->pending_request_count, plc->max_requests_in_flight);
+        return PLCTAG_STATUS_PENDING;
+    }
 
-            tag->op = TAG_OP_IDLE;
-            tag->write_complete = 1;
-            tag->write_in_flight = 0;
-            tag->status = (int8_t)rc;
+    /* Create the write request (this sets tag->seq_id) */
+    rc = create_write_request(plc, tag);
+    if(rc == PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_DETAIL, "Write request created with transaction_id=%d.", tag->seq_id);
 
-            tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc);
+        /* Store the transaction ID in the tag for matching responses */
+        tag->pending_transaction_id = tag->seq_id;
 
-            pdebug(DEBUG_DETAIL, "Write completed event raised for tag %d.", tag->tag_id);
+        /* Increment in-flight counter */
+        plc->pending_request_count++;
+        pdebug(DEBUG_DETAIL, "Incremented request count to %d/%d.",
+               plc->pending_request_count, plc->max_requests_in_flight);
 
-            rc = PLCTAG_STATUS_OK;
-        }
-    } else {
-        pdebug(DEBUG_SPEW, "Request already in flight or PLC not ready, waiting for next chance.");
+        tag->op = TAG_OP_WRITE_RESPONSE;
+        plc->flags.request_ready = 1;
+
         rc = PLCTAG_STATUS_PENDING;
+    } else {
+        pdebug(DEBUG_WARN, "Error %s creating write request!", plc_tag_decode_error(rc));
+
+        tag->op = TAG_OP_IDLE;
+        tag->write_complete = 1;
+        tag->write_in_flight = 0;
+        tag->status = (int8_t)rc;
+
+        tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, (int8_t)rc);
+
+        pdebug(DEBUG_DETAIL, "Write completed event raised for tag %d with status %s.",
+               tag->tag_id, plc_tag_decode_error((int8_t)rc));
+
+        rc = PLCTAG_STATUS_OK;
     }
 
     return rc;
@@ -1599,9 +1664,20 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                 /* partial response, keep going */
                 pdebug(DEBUG_DETAIL, "Found part of our response, but we are not done.");
 
+                /* Decrement in-flight counter */
+                if(plc->pending_request_count > 0) {
+                    plc->pending_request_count--;
+                    pdebug(DEBUG_DETAIL, "Decremented request count to %d/%d.",
+                           plc->pending_request_count, plc->max_requests_in_flight);
+                } else {
+                    pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
+                }
+
                 critical_block(plc->mutex) {
                     plc->flags.response_ready = 0;
                 }
+
+                tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_WRITE_REQUEST;
 
                 rc = PLCTAG_STATUS_PENDING;
@@ -1620,12 +1696,20 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                 pdebug(DEBUG_DETAIL, "Tag %d write response ready.", tag->tag_id);
                 /* fall through */
             default:
-                /* remove the tag from the request slot. */
-                clear_request_slot(plc, tag);
+                /* Decrement in-flight counter */
+                if(plc->pending_request_count > 0) {
+                    plc->pending_request_count--;
+                    pdebug(DEBUG_DETAIL, "Decremented request count to %d/%d.",
+                           plc->pending_request_count, plc->max_requests_in_flight);
+                } else {
+                    pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
+                }
 
                 critical_block(plc->mutex) {
                     plc->flags.response_ready = 0;
                 }
+
+                tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_IDLE;
                 tag->write_complete = 1;
                 tag->write_in_flight = 0;
@@ -1659,9 +1743,18 @@ static int check_tag_abort(modbus_plc_p plc, plc_tag_p base_tag) {
         /* clear the abort request */
         atomic_set_bool(&tag->abort_requested, false);
 
-        /* make sure that this tag is no longer in a request slot. */
-        clear_request_slot(plc, tag);
+        /* If the tag had a pending request, decrement counter */
+        if(tag->pending_transaction_id != 0) {
+            if(plc->pending_request_count > 0) {
+                plc->pending_request_count--;
+                pdebug(DEBUG_DETAIL, "Abort: Decremented request count to %d/%d.",
+                       plc->pending_request_count, plc->max_requests_in_flight);
+            } else {
+                pdebug(DEBUG_WARN, "Abort: Attempted to decrement request count below 0!");
+            }
+        }
 
+        tag->pending_transaction_id = 0;
         tag->status = (int8_t)PLCTAG_ERR_ABORT;
 
         switch(tag->op) {
@@ -1825,11 +1918,49 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
 
         case TAG_OP_READ_REQUEST: rc = tag_op_read_request(plc, tag); break;
 
-        case TAG_OP_READ_RESPONSE: rc = tag_op_read_response(plc, tag); break;
+        case TAG_OP_READ_RESPONSE:
+            /* Check if this tag's transaction ID matches the response */
+            if(plc->flags.response_ready && tag->pending_transaction_id != 0) {
+                /* Extract transaction ID from response (bytes 0-1, big-endian) */
+                uint16_t response_transaction_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
+
+                if(response_transaction_id == tag->pending_transaction_id) {
+                    pdebug(DEBUG_DETAIL, "Response matches tag %d (transaction_id=%d).",
+                           tag->tag_id, response_transaction_id);
+                    rc = tag_op_read_response(plc, tag);
+                } else {
+                    pdebug(DEBUG_SPEW, "Response transaction_id=%d does not match tag %d (expecting %d).",
+                           response_transaction_id, tag->tag_id, tag->pending_transaction_id);
+                    rc = PLCTAG_STATUS_PENDING;
+                }
+            } else {
+                /* No matching response yet, stay in RESPONSE state */
+                rc = PLCTAG_STATUS_PENDING;
+            }
+            break;
 
         case TAG_OP_WRITE_REQUEST: rc = tag_op_write_request(plc, tag); break;
 
-        case TAG_OP_WRITE_RESPONSE: rc = tag_op_write_response(plc, tag); break;
+        case TAG_OP_WRITE_RESPONSE:
+            /* Check if this tag's transaction ID matches the response */
+            if(plc->flags.response_ready && tag->pending_transaction_id != 0) {
+                /* Extract transaction ID from response (bytes 0-1, big-endian) */
+                uint16_t response_transaction_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
+
+                if(response_transaction_id == tag->pending_transaction_id) {
+                    pdebug(DEBUG_DETAIL, "Response matches tag %d (transaction_id=%d).",
+                           tag->tag_id, response_transaction_id);
+                    rc = tag_op_write_response(plc, tag);
+                } else {
+                    pdebug(DEBUG_SPEW, "Response transaction_id=%d does not match tag %d (expecting %d).",
+                           response_transaction_id, tag->tag_id, tag->pending_transaction_id);
+                    rc = PLCTAG_STATUS_PENDING;
+                }
+            } else {
+                /* No matching response yet, stay in RESPONSE state */
+                rc = PLCTAG_STATUS_PENDING;
+            }
+            break;
 
         default:
             pdebug(DEBUG_WARN, "Unknown tag operation %d!", op);
@@ -1858,74 +1989,6 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
     pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
-}
-
-
-int find_request_slot(modbus_plc_p plc, modbus_tag_p tag) {
-    pdebug(DEBUG_DETAIL, "Starting.");
-
-    if(plc->flags.request_ready) {
-        pdebug(DEBUG_DETAIL, "There is a request already queued for sending.");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    if(plc->state != PLC_READY) {
-        pdebug(DEBUG_DETAIL, "PLC not ready.");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    if(tag->tag_id == 0) {
-        pdebug(DEBUG_DETAIL, "Tag not ready.");
-        return PLCTAG_ERR_BUSY;
-    }
-
-    /* search for a slot. */
-    for(int slot = 0; slot < plc->max_requests_in_flight; slot++) {
-        if(plc->tags_with_requests[slot] == 0) {
-            pdebug(DEBUG_DETAIL, "Found request slot %d for tag %" PRId32 ".", slot, tag->tag_id);
-            plc->tags_with_requests[slot] = tag->tag_id;
-            tag->request_slot = slot;
-            return PLCTAG_STATUS_OK;
-        } else {
-            pdebug(DEBUG_DETAIL, "Slot %d is in use by tag %" PRId32 ".", slot, plc->tags_with_requests[slot]);
-        }
-    }
-
-    pdebug(DEBUG_DETAIL, "Done.");
-
-    return PLCTAG_ERR_NO_RESOURCES;
-}
-
-
-void clear_request_slot(modbus_plc_p plc, modbus_tag_p tag) {
-    pdebug(DEBUG_DETAIL, "Starting for tag %" PRId32 ".", tag->tag_id);
-
-    if(!plc) {
-        pdebug(DEBUG_WARN, "Connection pointer is NULL!");
-        return;
-    }
-
-    if(!tag) {
-        pdebug(DEBUG_WARN, "Tag pointer is NULL!");
-        return;
-    }
-
-    /* find the tag in the slots. */
-    for(int slot = 0; slot < plc->max_requests_in_flight; slot++) {
-        if(plc->tags_with_requests[slot] == tag->tag_id) {
-            pdebug(DEBUG_DETAIL, "Found tag %" PRId32 " in slot %d.", tag->tag_id, slot);
-
-            if(slot != tag->request_slot) { pdebug(DEBUG_DETAIL, "Tag was not in expected slot %d!", tag->request_slot); }
-
-            plc->tags_with_requests[slot] = 0;
-            tag->request_slot = -1;
-
-            /* there might be another tag waiting for a request slot */
-            wake_plc_thread(plc);
-        }
-    }
-
-    pdebug(DEBUG_DETAIL, "Done for tag %" PRId32 ".", tag->tag_id);
 }
 
 
@@ -2736,7 +2799,13 @@ int mb_abort(plc_tag_p p_tag) {
 
     /* Only access PLC if it hasn't been terminated */
     if(tag->plc && !tag->plc->flags.terminate) {
-        clear_request_slot(tag->plc, tag);
+        /* Clear pending transaction ID if the tag had one */
+        if(tag->pending_transaction_id != 0) {
+            tag->pending_transaction_id = 0;
+            if(tag->plc->pending_request_count > 0) {
+                tag->plc->pending_request_count--;
+            }
+        }
 
         /* wake the PLC loop if we need to. */
         wake_plc_thread(tag->plc);
