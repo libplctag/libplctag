@@ -122,7 +122,7 @@ echo "Terminating any existing Modbus server instances."
 kill_process modbus_server
 
 echo "Starting Modbus server."
-{ $TEST_DIR/modbus_server --debug > "$LOG_DIR/modbus_server.log" 2>&1 & } 2>/dev/null
+$TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > "$LOG_DIR/modbus_server.log" 2>&1 &
 MODBUS_PID=$!
 if [ $MODBUS_PID -le 0 ]; then
     echo "Unable to start Modbus server!"
@@ -133,7 +133,7 @@ sleep 3
 
 let TEST++
 echo -n "  Test $TEST: Modbus fairness test with 200 tags for 10 seconds ... "
-$VALGRIND$TEST_DIR/test_fairness "--tag=protocol=modbus&gateway=127.0.0.1&port=502&name=100&auto_sync_read_ms=200" --num-tags=200 --test-duration-secs=10 > "$LOG_DIR/${TEST}_modbus_fairness.log" 2>&1
+$VALGRIND$TEST_DIR/test_fairness "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10&auto_sync_read_ms=200" --num-tags=200 --test-duration-secs=10 > "$LOG_DIR/${TEST}_modbus_fairness_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
