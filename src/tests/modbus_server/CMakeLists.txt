@@ -19,6 +19,7 @@ set(SOURCES
     ../utils/socket.c
     ../utils/args.c
     ../utils/utils.c
+    ../utils/atomic_utils.c
 )
 
 # Include directories
