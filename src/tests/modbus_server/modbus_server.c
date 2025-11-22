@@ -40,10 +40,13 @@
 #include "err.h"
 #include "buf.h"
 #include "args.h"
+#include "atomic_utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <time.h>
+#include <sys/time.h>
 
 /* Forward declarations */
 typedef struct server_ctx_s server_ctx_t;
@@ -54,6 +57,13 @@ typedef struct listener_ctx_s listener_ctx_t;
 struct server_ctx_s {
     reactor_t *reactor;
     register_storage_t *storage;
+
+    /* Statistics tracking */
+    struct timeval start_time;
+    atomic_int64_t total_requests;
+    atomic_int64_t total_response_time_us;  /* Sum of all response times in microseconds */
+    atomic_int64_t min_response_time_us;
+    atomic_int64_t max_response_time_us;
 };
 
 /* Single static variable for signal handler - this is necessary because
@@ -167,6 +177,9 @@ struct client_ctx_s {
 
     /* Expected total message length */
     size_t expected_length;
+
+    /* Timestamp when request was received (for response time tracking) */
+    struct timeval request_start_time;
 };
 
 /* ============================================================================
@@ -175,6 +188,32 @@ struct client_ctx_s {
 
 static void signal_handler(int signum) {
     (void)signum;
+
+    /* Print statistics before stopping */
+    if (g_server) {
+        struct timeval end_time;
+        gettimeofday(&end_time, NULL);
+        double runtime_sec = (end_time.tv_sec - g_server->start_time.tv_sec) +
+                             (end_time.tv_usec - g_server->start_time.tv_usec) / 1000000.0;
+
+        int64_t total_reqs = atomic_get_int64(&g_server->total_requests);
+        int64_t total_time = atomic_get_int64(&g_server->total_response_time_us);
+        int64_t min_time = atomic_get_int64(&g_server->min_response_time_us);
+        int64_t max_time = atomic_get_int64(&g_server->max_response_time_us);
+
+        printf("\n=== Modbus Server Statistics ===\n");
+        printf("Runtime: %.2f seconds\n", runtime_sec);
+        printf("Total requests: %lld\n", (long long)total_reqs);
+        if (runtime_sec > 0) {
+            printf("Requests/sec: %.2f\n", total_reqs / runtime_sec);
+        }
+        if (total_reqs > 0) {
+            printf("Avg response time: %.2f us\n", (double)total_time / total_reqs);
+        }
+        printf("Min response time: %lld us\n", (long long)min_time);
+        printf("Max response time: %lld us\n", (long long)max_time);
+        printf("=================================\n");
+    }
 
     /* Stop the reactor if it's been created */
     if (g_server && g_server->reactor) {
@@ -333,6 +372,9 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
 
     client_ctx_t *client = (client_ctx_t *)user_data;
 
+    /* Capture timestamp when request processing starts */
+    gettimeofday(&client->request_start_time, NULL);
+
     /* Extract function code from received message */
     buf_t request_buf = client->recv_buf;
     request_buf.read = MBAP_HEADER_SIZE;  /* Skip MBAP header */
@@ -397,7 +439,43 @@ static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
         /* Partial send; the reactor event mask will stay set for CAN_WRITE
          * since we're still in SENDING state */
     } else {
-        /* All data sent, prepare for next request */
+        /* All data sent, calculate response time and update statistics */
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        int64_t response_time_us = (now.tv_sec - client->request_start_time.tv_sec) * 1000000LL +
+                                   (now.tv_usec - client->request_start_time.tv_usec);
+
+        /* Update atomic statistics */
+        atomic_add_int64(&client->server->total_requests, 1);
+        atomic_add_int64(&client->server->total_response_time_us, response_time_us);
+
+        /* Update min response time (use compare-and-swap loop) */
+        int64_t current_min;
+        do {
+            current_min = atomic_get_int64(&client->server->min_response_time_us);
+            if (current_min == 0 || response_time_us < current_min) {
+                if (atomic_compare_and_set_int64(&client->server->min_response_time_us, current_min, response_time_us) == current_min) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        } while (1);
+
+        /* Update max response time (use compare-and-swap loop) */
+        int64_t current_max;
+        do {
+            current_max = atomic_get_int64(&client->server->max_response_time_us);
+            if (response_time_us > current_max) {
+                if (atomic_compare_and_set_int64(&client->server->max_response_time_us, current_max, response_time_us) == current_max) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        } while (1);
+
+        /* Prepare for next request */
         fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
     }
 }
@@ -910,6 +988,9 @@ int main(int argc, char **argv) {
 
     /* Set global server pointer for signal handler */
     g_server = server;
+
+    /* Initialize statistics start time (atomics are already zeroed by calloc) */
+    gettimeofday(&server->start_time, NULL);
 
     /* Setup signal handlers */
     setup_signal_handlers();
