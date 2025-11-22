@@ -236,7 +236,7 @@ int plc_tag_tickler_wake_impl(const char *func, int line_num) {
 int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Starting. Called from %s:%d.", func, line_num);
 
     if(!tag) {
         pdebug(DEBUG_WARN, "Called from %s:%d when tag is NULL!", func, line_num);
@@ -255,7 +255,7 @@ int plc_tag_generic_wake_tag_impl(const char *func, int line_num, plc_tag_p tag)
         return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Done. Called from %s:%d.", func, line_num);
+    pdebug(DEBUG_SPEW, "Done. Called from %s:%d.", func, line_num);
 
     return rc;
 }
