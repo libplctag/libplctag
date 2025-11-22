@@ -108,6 +108,9 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     # endif()
 endforeach()
 
+# test_fairness needs stats.c for statistics calculations
+target_sources(test_fairness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stats.c")
+
 # Link math library for tests that use sqrt() and other math functions
 if(UNIX)
     target_link_libraries(test_fairness m)
