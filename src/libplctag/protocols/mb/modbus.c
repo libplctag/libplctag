@@ -65,6 +65,14 @@
 #define MODBUS_IDLE_WAIT_TIMEOUT (100) /* idle wait timeout in milliseconds */
 #define MAX_MODBUS_REQUESTS (16)       /* per the Modbus specification */
 
+/* Microsecond timing for performance analysis */
+#include <sys/time.h>
+static inline int64_t time_us(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((int64_t)tv.tv_sec * 1000000) + (int64_t)tv.tv_usec;
+}
+
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
 
@@ -76,9 +84,6 @@ struct modbus_plc_t {
 
     /* Count of tags currently attached to this PLC */
     atomic_int32_t tag_count;
-
-    /* Round-robin starting index for fair tag processing */
-    int tag_iteration_start;
 
     /* Timestamp tracking for inactivity detection */
     int64_t last_packet_time_ms;
@@ -117,6 +122,33 @@ struct modbus_plc_t {
     } state;
     int max_requests_in_flight;
     int pending_request_count;
+
+    /* Fairness counter - incremented each time a tag is serviced */
+    int64_t fairness_counter;
+
+    /* Timing statistics - queue time (request to send) and network time (send to response) */
+    int64_t queue_time_min;
+    int64_t queue_time_max;
+    int64_t queue_time_sum;
+    int64_t queue_time_sum_sq;
+    int64_t network_time_min;
+    int64_t network_time_max;
+    int64_t network_time_sum;
+    int64_t network_time_sum_sq;
+    int64_t timing_sample_count;
+    int64_t last_stats_report_time;
+    int64_t last_request_sent_time;  /* timestamp when last request was sent */
+
+    /* Cycle timing - measures where time is spent in the main loop (microseconds) */
+    int64_t cycle_tickle_time_sum_us;
+    int64_t cycle_wait_time_sum_us;
+    int64_t cycle_send_time_sum_us;
+    int64_t cycle_count;
+
+    /* Tickle breakdown timing (microseconds) */
+    int64_t tickle_sort_time_sum_us;
+    int64_t tickle_iter_time_sum_us;
+    int64_t tickle_overhead_time_sum_us;
 
     /* comms timeout/disconnect. */
     int64_t inactivity_timeout_ms;
@@ -183,6 +215,19 @@ struct modbus_tag_t {
 
     /* transaction ID of current pending request (0 = none) */
     uint16_t pending_transaction_id;
+
+    /* timestamp when the operation last changed (for fairness sorting) */
+    int64_t op_changed_time;
+
+    /* fairness ticket - set when tag is serviced, used for round-robin ordering */
+    int64_t fairness_ticket;
+
+    /* reads_completed counter - used to ensure all tags get at least one read before any gets a second */
+    int reads_completed;
+
+    /* request timing - tracks time from entering REQUEST state to receiving response */
+    int64_t request_start_time;
+    int64_t request_sent_time;  /* timestamp when request was sent over wire */
 
     /* data for the tag. */
     int elem_count;
@@ -398,6 +443,9 @@ int create_tag_object(attr attribs, modbus_tag_p *tag) {
     /* initialize the pending transaction ID */
     (*tag)->pending_transaction_id = 0;
 
+    /* initialize the operation changed time for fairness sorting */
+    (*tag)->op_changed_time = time_ms();
+
     /* make sure the generic tag tickler thread does not call the generic tickler. */
     (*tag)->skip_tickler = 1;
 
@@ -574,9 +622,6 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
                     pdebug(DEBUG_WARN, "Unable to create tag vector!");
                     rc = PLCTAG_ERR_NO_MEM;
                 }
-
-                /* initialize round-robin starting index */
-                (*plc)->tag_iteration_start = 0;
 
                 /* initialize timestamp tracking */
                 (*plc)->last_packet_time_ms = time_ms();
@@ -862,8 +907,13 @@ THREAD_FUNC(modbus_plc_handler) {
 
     while(!plc->flags.terminate && atomic_get_bool(&lib_active)) {
         int64_t wait_time_ms = MODBUS_IDLE_WAIT_TIMEOUT;
+        int64_t tickle_start_us, tickle_end_us;
 
+        tickle_start_us = time_us();
         rc = tickle_all_tags(plc, &wait_time_ms);
+        tickle_end_us = time_us();
+        plc->cycle_tickle_time_sum_us += (tickle_end_us - tickle_start_us);
+
         if(rc != PLCTAG_STATUS_OK) {
             pdebug(DEBUG_WARN, "Error %s tickling tags!", plc_tag_decode_error(rc));
             /* FIXME - what should we do here? */
@@ -956,7 +1006,11 @@ THREAD_FUNC(modbus_plc_handler) {
 
                 /* wait using calculated time from tickle_all_tags */
                 pdebug(DEBUG_DETAIL, "Waiting up to %" PRId64 "ms for socket events.", wait_time_ms);
-                sock_events = socket_wait_event(plc->sock, waitable_events, (int)wait_time_ms);
+                {
+                    int64_t wait_start_us = time_us();
+                    sock_events = socket_wait_event(plc->sock, waitable_events, (int)wait_time_ms);
+                    plc->cycle_wait_time_sum_us += (time_us() - wait_start_us);
+                }
                 if(sock_events & SOCK_EVENT_TIMEOUT) {
                     int64_t current_time = time_ms();
                     int64_t idle_time = current_time - plc->last_packet_time_ms;
@@ -1024,9 +1078,14 @@ THREAD_FUNC(modbus_plc_handler) {
                 debug_set_tag_id((int)plc->request_tag_id);
                 pdebug(DEBUG_DETAIL, "in PLC_SEND_REQUEST state.");
 
-                rc = send_request(plc);
+                {
+                    int64_t send_start_us = time_us();
+                    rc = send_request(plc);
+                    plc->cycle_send_time_sum_us += (time_us() - send_start_us);
+                }
                 if(rc == PLCTAG_STATUS_OK) {
                     pdebug(DEBUG_DETAIL, "Request sent, going to back to state PLC_READY.");
+                    plc->cycle_count++;
 
                     plc->flags.request_ready = 0;
                     plc->write_data_len = 0;
@@ -1266,33 +1325,93 @@ int connect_plc(modbus_plc_p plc) {
 }
 
 
+/*
+ * Tag comparison function for sorting.
+ *
+ * Three-level sort:
+ * 1. By reads_completed (fewer reads = higher priority)
+ *    - This ensures ALL tags get at least one read before any gets a second
+ * 2. By operation priority:
+ *    - Waiting for response (TAG_OP_READ_RESPONSE, TAG_OP_WRITE_RESPONSE) = highest priority
+ *    - Waiting for request (TAG_OP_READ_REQUEST, TAG_OP_WRITE_REQUEST) = medium priority
+ *    - Idle (TAG_OP_IDLE) = lowest priority
+ * 3. Within same reads_completed and priority, by fairness_ticket (lowest ticket first = round-robin)
+ *
+ * This ensures fairness: tags with fewer completed reads always get priority.
+ */
+static int tag_compare_for_sorting(const void *a, const void *b) {
+    modbus_tag_p tag_a = *((modbus_tag_p *)a);
+    modbus_tag_p tag_b = *((modbus_tag_p *)b);
+    int priority_a, priority_b;
+
+    /* FIRST: Sort by reads_completed (fewer reads = higher priority) */
+    if(tag_a->reads_completed != tag_b->reads_completed) {
+        return tag_a->reads_completed - tag_b->reads_completed;
+    }
+
+    /* Determine priority for tag A */
+    if(tag_a->op == TAG_OP_READ_RESPONSE || tag_a->op == TAG_OP_WRITE_RESPONSE) {
+        priority_a = 0; /* Highest priority - waiting for response */
+    } else if(tag_a->op == TAG_OP_READ_REQUEST || tag_a->op == TAG_OP_WRITE_REQUEST) {
+        priority_a = 1; /* Medium priority - waiting to make request */
+    } else {
+        priority_a = 2; /* Lowest priority - idle or other */
+    }
+
+    /* Determine priority for tag B */
+    if(tag_b->op == TAG_OP_READ_RESPONSE || tag_b->op == TAG_OP_WRITE_RESPONSE) {
+        priority_b = 0;
+    } else if(tag_b->op == TAG_OP_READ_REQUEST || tag_b->op == TAG_OP_WRITE_REQUEST) {
+        priority_b = 1;
+    } else {
+        priority_b = 2;
+    }
+
+    /* Second: sort by operation priority */
+    if(priority_a != priority_b) {
+        return priority_a - priority_b;
+    }
+
+    /* Third: Within same priority, sort by fairness_ticket (lowest first = round-robin) */
+    if(tag_a->fairness_ticket < tag_b->fairness_ticket) {
+        return -1;
+    } else if(tag_a->fairness_ticket > tag_b->fairness_ticket) {
+        return 1;
+    } else {
+        /* Tie-breaker: use tag_id for deterministic ordering */
+        return (tag_a->tag_id - tag_b->tag_id);
+    }
+}
+
+
 int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
     int vector_len = 0;
-    int start_index = 0;
     int i = 0;
     int processed_count = 0;
-    int last_response_index = -1;
     int64_t min_wait_time = MODBUS_IDLE_WAIT_TIMEOUT;
     int64_t now = time_ms();
+    int64_t tickle_start_us = time_us();
+    int64_t sort_start_us, sort_end_us, iter_start_us;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    /* Get starting index for round-robin processing */
+    /* Sort tags by priority and age before processing */
+    sort_start_us = time_us();
     critical_block(plc->mutex) {
-        start_index = plc->tag_iteration_start;
         vector_len = vector_length(plc->tag_vector);
+        if(vector_len > 1) {
+            vector_sort(plc->tag_vector, tag_compare_for_sorting);
+        }
     }
+    sort_end_us = time_us();
+    plc->tickle_sort_time_sum_us += (sort_end_us - sort_start_us);
 
-    /* Process all tags starting from round-robin position */
-    for(int offset = 0; offset < vector_len; offset++) {
-        /* Calculate actual index with wrap-around */
-        i = (start_index + offset) % vector_len;
+    /* Process all tags in sorted order */
+    iter_start_us = time_us();
+    for(i = 0; i < vector_len; i++) {
         if(vector_len == 0) break;
-        
-        tag_op_type_t tag_op_before = TAG_OP_IDLE;
-        tag_op_type_t tag_op_after = TAG_OP_IDLE;
 
         /* Get tag with PLC mutex */
         critical_block(plc->mutex) {
@@ -1301,7 +1420,6 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                 /* Try to increment reference - skip if being destroyed */
                 if(candidate && rc_inc(candidate)) {
                     tag = candidate;
-                    tag_op_before = tag->op;
 
                     /* Calculate wait time while we have the tag pointer */
                     if(tag->auto_sync_read_ms > 0 && tag->auto_sync_next_read > 0) {
@@ -1322,7 +1440,7 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                         if(write_wait < 0) {
                             write_wait = 0;
                         }
-                        
+
                         if(write_wait > 0 && write_wait < min_wait_time) {
                             min_wait_time = write_wait;
                         }
@@ -1347,22 +1465,12 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                     pdebug(DEBUG_WARN, "Error %s tickling tag!", plc_tag_decode_error(rc));
                 }
 
-                /* Check if tag transitioned to waiting for response */
-                tag_op_after = tag->op;
-                
                 mutex_unlock(tag->api_mutex);
             } else {
-                pdebug(DEBUG_DETAIL, "Tag API mutex is already taken, skipping tickle.");
+                pdebug(DEBUG_SPEW, "Tag API mutex is already taken, skipping tickle.");
             }
 
             debug_set_tag_id(0);
-
-            /* Track if this tag transitioned to waiting for response */
-            if((tag_op_before != TAG_OP_READ_RESPONSE && tag_op_before != TAG_OP_WRITE_RESPONSE) &&
-               (tag_op_after == TAG_OP_READ_RESPONSE || tag_op_after == TAG_OP_WRITE_RESPONSE)) {
-                last_response_index = i;
-                pdebug(DEBUG_DETAIL, "Tag at index %d transitioned to waiting for response", i);
-            }
 
             /* Release our reference */
             rc_dec(tag);
@@ -1370,32 +1478,46 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
             processed_count++;
         }
     }
+    plc->tickle_iter_time_sum_us += (time_us() - iter_start_us);
 
-    /* Update starting index for next iteration - start after last tag that went into RESPONSE state */
+    /* Calculate overhead (total tickle time minus sort and iter) */
+    {
+        int64_t tickle_end_us = time_us();
+        int64_t total_us = tickle_end_us - tickle_start_us;
+        int64_t sort_us = sort_end_us - sort_start_us;
+        int64_t iter_us = tickle_end_us - iter_start_us;  /* Use actual end, not running sum */
+        plc->tickle_overhead_time_sum_us += (total_us - sort_us - iter_us);
+    }
+
+    /* After iterating all tags, check if response_ready flag is still set.
+     * If it is, it means no tag matched the transaction ID in the response.
+     * In that case, discard the response and clear the flag for the next response.
+     * IMPORTANT: We must also decrement pending_request_count since this response
+     * corresponds to a request that was sent (and incremented the count). */
     critical_block(plc->mutex) {
-        vector_len = vector_length(plc->tag_vector);
-        
-        if(last_response_index >= 0) {
-            /* Start next iteration just after the last tag that transitioned to RESPONSE */
-            plc->tag_iteration_start = (last_response_index + 1) % (vector_len > 0 ? vector_len : 1);
-            pdebug(DEBUG_DETAIL, "Next iteration will start at index %d (after last response at %d)", 
-                   plc->tag_iteration_start, last_response_index);
-        } else if(vector_len > 0) {
-            /* No tags transitioned to RESPONSE, advance by 1 for round-robin */
-            plc->tag_iteration_start = (start_index + 1) % vector_len;
-            pdebug(DEBUG_DETAIL, "No response transitions, advancing start to index %d", plc->tag_iteration_start);
+        if(plc->flags.response_ready) {
+            pdebug(DEBUG_WARN, "Response_ready still set after processing all tags - no tag matched this response. Discarding.");
+            plc->flags.response_ready = 0;
+            plc->read_data_len = 0;
+
+            /* Decrement pending request count since we're discarding this response */
+            if(plc->pending_request_count > 0) {
+                plc->pending_request_count--;
+                pdebug(DEBUG_WARN, "Decremented pending_request_count to %d after discarding unmatched response.",
+                       plc->pending_request_count);
+            }
         }
-        
+
         /* Store auto-sync tracking info */
         plc->next_auto_sync_time_ms = (min_wait_time < MODBUS_IDLE_WAIT_TIMEOUT) ? (now + min_wait_time) : 0;
     }
 
-    pdebug(DEBUG_DETAIL, "Processed %d tags.", processed_count);
+    pdebug(DEBUG_SPEW, "Processed %d tags.", processed_count);
 
     /* Return calculated wait time */
     *out_wait_time_ms = min_wait_time;
 
-    pdebug(DEBUG_DETAIL, "Done: %s, wait time %" PRId64 "ms", plc_tag_decode_error(rc), min_wait_time);
+    pdebug(DEBUG_SPEW, "Done: %s, wait time %" PRId64 "ms", plc_tag_decode_error(rc), min_wait_time);
 
     return rc;
 }
@@ -1404,28 +1526,28 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting read request operation for tag %d. In-flight: %d/%d.",
+    pdebug(DEBUG_SPEW, "Starting read request operation for tag %d. In-flight: %d/%d.",
            tag->tag_id, plc->pending_request_count, plc->max_requests_in_flight);
 
     /* Pre-flight checks */
     if(plc->flags.request_ready) {
-        pdebug(DEBUG_DETAIL, "Request already queued for sending.");
+        pdebug(DEBUG_SPEW, "Request already queued for sending.");
         return PLCTAG_STATUS_PENDING;
     }
 
     if(plc->state != PLC_READY) {
-        pdebug(DEBUG_DETAIL, "PLC not ready.");
+        pdebug(DEBUG_SPEW, "PLC not ready.");
         return PLCTAG_STATUS_PENDING;
     }
 
     if(tag->tag_id == 0) {
-        pdebug(DEBUG_DETAIL, "Tag not ready.");
+        pdebug(DEBUG_SPEW, "Tag not ready.");
         return PLCTAG_STATUS_PENDING;
     }
 
     /* Check if we've hit the concurrency limit */
     if(plc->pending_request_count >= plc->max_requests_in_flight) {
-        pdebug(DEBUG_DETAIL, "Request concurrency limit reached (%d/%d). Waiting for response.",
+        pdebug(DEBUG_SPEW, "Request concurrency limit reached (%d/%d). Waiting for response.",
                plc->pending_request_count, plc->max_requests_in_flight);
         return PLCTAG_STATUS_PENDING;
     }
@@ -1433,17 +1555,21 @@ static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
     /* Create the read request (this sets tag->seq_id) */
     rc = create_read_request(plc, tag);
     if(rc == PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_DETAIL, "Read request created with transaction_id=%d.", tag->seq_id);
+        pdebug(DEBUG_SPEW, "Read request created with transaction_id=%d.", tag->seq_id);
 
         /* Store the transaction ID in the tag for matching responses */
         tag->pending_transaction_id = tag->seq_id;
 
         /* Increment in-flight counter */
         plc->pending_request_count++;
-        pdebug(DEBUG_DETAIL, "Incremented request count to %d/%d.",
+        pdebug(DEBUG_SPEW, "Incremented request count to %d/%d.",
                plc->pending_request_count, plc->max_requests_in_flight);
 
+        /* Assign fairness ticket - this tag just got serviced, goes to back of queue */
+        tag->fairness_ticket = plc->fairness_counter++;
+
         tag->op = TAG_OP_READ_RESPONSE;
+        tag->op_changed_time = time_ms();
         plc->flags.request_ready = 1;
 
         rc = PLCTAG_STATUS_PENDING;
@@ -1451,13 +1577,14 @@ static int tag_op_read_request(modbus_plc_p plc, modbus_tag_p tag) {
         pdebug(DEBUG_WARN, "Error %s creating read request!", plc_tag_decode_error(rc));
 
         tag->op = TAG_OP_IDLE;
+        tag->op_changed_time = time_ms();
         tag->read_complete = 1;
         tag->read_in_flight = 0;
         tag->status = (int8_t)rc;
 
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
 
-        pdebug(DEBUG_DETAIL, "Read completed event raised for tag %d with status %s.",
+        pdebug(DEBUG_SPEW, "Read completed event raised for tag %d with status %s.",
                tag->tag_id, plc_tag_decode_error((int8_t)rc));
 
         rc = PLCTAG_STATUS_OK;
@@ -1471,12 +1598,14 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     int response_ready = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting read response check operation for tag %d.", tag->tag_id);
+    pdebug(DEBUG_SPEW, "Starting read response check operation for tag %d.", tag->tag_id);
 
     /* cross check the state. */
     if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT) {
         pdebug(DEBUG_WARN, "PLC changed state, restarting request.");
         tag->op = TAG_OP_READ_REQUEST;
+        tag->op_changed_time = time_ms();
+        tag->request_start_time = time_ms();
         return PLCTAG_STATUS_OK;
     }
 
@@ -1512,15 +1641,15 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_READ_REQUEST;
+                tag->op_changed_time = time_ms();
+                tag->request_start_time = time_ms();
 
                 rc = PLCTAG_STATUS_PENDING;
                 break;
 
             case PLCTAG_ERR_NO_MATCH:
                 pdebug(DEBUG_SPEW, "Not our response.");
-                critical_block(plc->mutex) {
-                    plc->flags.response_ready = 0;
-                }
+                /* Do NOT clear response_ready - let other tags check for their response */
                 rc = PLCTAG_STATUS_PENDING;
                 break;
 
@@ -1552,9 +1681,71 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_IDLE;
+                tag->op_changed_time = time_ms();
                 tag->read_in_flight = 0;
                 tag->read_complete = 1;
+                tag->reads_completed++;
                 tag->status = (int8_t)rc;
+
+                /* Calculate and accumulate timing statistics */
+                {
+                    int64_t now = time_ms();
+                    int64_t queue_time = plc->last_request_sent_time - tag->request_start_time;
+                    int64_t network_time = now - plc->last_request_sent_time;
+
+                    /* Update statistics */
+                    if(plc->timing_sample_count == 0) {
+                        /* First sample - initialize min/max */
+                        plc->queue_time_min = queue_time;
+                        plc->queue_time_max = queue_time;
+                        plc->network_time_min = network_time;
+                        plc->network_time_max = network_time;
+                    } else {
+                        if(queue_time < plc->queue_time_min) plc->queue_time_min = queue_time;
+                        if(queue_time > plc->queue_time_max) plc->queue_time_max = queue_time;
+                        if(network_time < plc->network_time_min) plc->network_time_min = network_time;
+                        if(network_time > plc->network_time_max) plc->network_time_max = network_time;
+                    }
+                    plc->queue_time_sum += queue_time;
+                    plc->queue_time_sum_sq += queue_time * queue_time;
+                    plc->network_time_sum += network_time;
+                    plc->network_time_sum_sq += network_time * network_time;
+                    plc->timing_sample_count++;
+
+                    /* Report statistics every second */
+                    if(now - plc->last_stats_report_time >= 1000) {
+                        int64_t n = plc->timing_sample_count;
+                        if(n > 0) {
+                            int64_t q_avg = plc->queue_time_sum / n;
+                            int64_t n_avg = plc->network_time_sum / n;
+                            /* Variance = E[X^2] - E[X]^2 */
+                            int64_t q_var = (plc->queue_time_sum_sq / n) - (q_avg * q_avg);
+                            int64_t n_var = (plc->network_time_sum_sq / n) - (n_avg * n_avg);
+
+                            pdebug(DEBUG_INFO, "TIMING STATS (%" PRId64 " samples): Queue: min=%" PRId64 " max=%" PRId64 " avg=%" PRId64 " var=%" PRId64 "ms | Network: min=%" PRId64 " max=%" PRId64 " avg=%" PRId64 " var=%" PRId64 "ms",
+                                   n, plc->queue_time_min, plc->queue_time_max, q_avg, q_var,
+                                   plc->network_time_min, plc->network_time_max, n_avg, n_var);
+
+                            /* Report cycle timing breakdown in microseconds */
+                            if(plc->cycle_count > 0) {
+                                int64_t avg_tickle_us = plc->cycle_tickle_time_sum_us / plc->cycle_count;
+                                int64_t avg_wait_us = plc->cycle_wait_time_sum_us / plc->cycle_count;
+                                int64_t avg_send_us = plc->cycle_send_time_sum_us / plc->cycle_count;
+                                pdebug(DEBUG_INFO, "CYCLE BREAKDOWN (%" PRId64 " cycles): tickle=%" PRId64 "us wait=%" PRId64 "us send=%" PRId64 "us total=%" PRId64 "us",
+                                       plc->cycle_count, avg_tickle_us, avg_wait_us, avg_send_us, avg_tickle_us + avg_wait_us + avg_send_us);
+
+                                /* Report tickle breakdown: sort vs iteration */
+                                int64_t avg_sort_us = plc->tickle_sort_time_sum_us / plc->cycle_count;
+                                int64_t avg_iter_us = plc->tickle_iter_time_sum_us / plc->cycle_count;
+                                pdebug(DEBUG_INFO, "TICKLE BREAKDOWN: sort=%" PRId64 "us iter=%" PRId64 "us (sort %.1f%%, iter %.1f%%)",
+                                       avg_sort_us, avg_iter_us,
+                                       avg_tickle_us > 0 ? (100.0 * avg_sort_us / avg_tickle_us) : 0.0,
+                                       avg_tickle_us > 0 ? (100.0 * avg_iter_us / avg_tickle_us) : 0.0);
+                            }
+                        }
+                        plc->last_stats_report_time = now;
+                    }
+                }
 
                 tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, (int8_t)rc);
 
@@ -1611,10 +1802,14 @@ static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
 
         /* Increment in-flight counter */
         plc->pending_request_count++;
-        pdebug(DEBUG_DETAIL, "Incremented request count to %d/%d.",
+        pdebug(DEBUG_SPEW, "Incremented request count to %d/%d.",
                plc->pending_request_count, plc->max_requests_in_flight);
 
+        /* Assign fairness ticket - this tag just got serviced, goes to back of queue */
+        tag->fairness_ticket = plc->fairness_counter++;
+
         tag->op = TAG_OP_WRITE_RESPONSE;
+        tag->op_changed_time = time_ms();
         plc->flags.request_ready = 1;
 
         rc = PLCTAG_STATUS_PENDING;
@@ -1622,6 +1817,7 @@ static int tag_op_write_request(modbus_plc_p plc, modbus_tag_p tag) {
         pdebug(DEBUG_WARN, "Error %s creating write request!", plc_tag_decode_error(rc));
 
         tag->op = TAG_OP_IDLE;
+        tag->op_changed_time = time_ms();
         tag->write_complete = 1;
         tag->write_in_flight = 0;
         tag->status = (int8_t)rc;
@@ -1645,6 +1841,7 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
     if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT) {
         pdebug(DEBUG_WARN, "PLC changed state, restarting request.");
         tag->op = TAG_OP_WRITE_REQUEST;
+        tag->op_changed_time = time_ms();
         return PLCTAG_STATUS_OK;
     }
 
@@ -1679,6 +1876,7 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_WRITE_REQUEST;
+                tag->op_changed_time = time_ms();
 
                 rc = PLCTAG_STATUS_PENDING;
 
@@ -1686,9 +1884,7 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
 
             case PLCTAG_ERR_NO_MATCH:
                 pdebug(DEBUG_SPEW, "Not our response.");
-                critical_block(plc->mutex) {
-                    plc->flags.response_ready = 0;
-                }
+                /* Do NOT clear response_ready - let other tags check for their response */
                 rc = PLCTAG_STATUS_PENDING;
                 break;
 
@@ -1711,6 +1907,7 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_IDLE;
+                tag->op_changed_time = time_ms();
                 tag->write_complete = 1;
                 tag->write_in_flight = 0;
                 tag->status = (int8_t)rc;
@@ -1779,6 +1976,7 @@ static int check_tag_abort(modbus_plc_p plc, plc_tag_p base_tag) {
 
         /* force to IDLE state */
         tag->op = TAG_OP_IDLE;
+        tag->op_changed_time = time_ms();
 
         tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_ABORTED, (int8_t)PLCTAG_ERR_ABORT);
     }
@@ -1823,6 +2021,7 @@ static int check_tag_auto_write(modbus_plc_p plc, plc_tag_p base_tag) {
             tag->auto_sync_next_write = 0;
             tag->tag_is_dirty = false;
             tag->op = TAG_OP_WRITE_REQUEST;
+            tag->op_changed_time = time_ms();
 
             tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK);
 
@@ -1846,16 +2045,18 @@ static int check_tag_auto_read(modbus_plc_p plc, plc_tag_p base_tag) {
 
         /* make sure that there is not auto write pending */
         if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
-            pdebug(DEBUG_DETAIL, "Auto write is pending, skipping auto read.");
+            pdebug(DEBUG_SPEW, "Auto write is pending, skipping auto read.");
             return PLCTAG_STATUS_OK;
         }
 
         /* if we have passed the wait time */
         if(tag->auto_sync_next_read <= now) {
-            pdebug(DEBUG_DETAIL, "Auto read time reached, requesting auto read.");
+            pdebug(DEBUG_SPEW, "Auto read time reached, requesting auto read.");
 
             tag->auto_sync_next_read = tag->auto_sync_next_read == 0 ? now : tag->auto_sync_next_read + tag->auto_sync_read_ms;
             tag->op = TAG_OP_READ_REQUEST;
+            tag->op_changed_time = time_ms();
+            tag->request_start_time = time_ms();  /* Track when request started */
 
             tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
 
@@ -1884,20 +2085,20 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
     tag_op_type_t op = tag->op;
     bool event_raised = false;
 
-    pdebug(DEBUG_DETAIL, "Starting with tag %d.", tag->tag_id);
+    pdebug(DEBUG_SPEW, "Starting with tag %d.", tag->tag_id);
 
-    pdebug(DEBUG_DETAIL, "Current tag operation is %s.", op_to_str(tag->op));
+    pdebug(DEBUG_SPEW, "Current tag operation is %s.", op_to_str(tag->op));
 
     /* Check for aborts, auto writes, auto reads */
     if((rc = check_tag_abort(plc, (plc_tag_p)tag)) == PLCTAG_STATUS_PENDING) {
-        pdebug(DEBUG_DETAIL, "Tag operation aborted.");
+        pdebug(DEBUG_SPEW, "Tag operation aborted.");
         op = TAG_OP_IDLE;
     } else if((rc = check_tag_auto_write(plc, (plc_tag_p)tag)) == PLCTAG_STATUS_PENDING) {
-        pdebug(DEBUG_DETAIL, "Auto write requested.");
+        pdebug(DEBUG_SPEW, "Auto write requested.");
         op = TAG_OP_WRITE_REQUEST;
         event_raised = true;
     } else if((rc = check_tag_auto_read(plc, (plc_tag_p)tag)) == PLCTAG_STATUS_PENDING) {
-        pdebug(DEBUG_DETAIL, "Auto read requested.");
+        pdebug(DEBUG_SPEW, "Auto read requested.");
         op = TAG_OP_READ_REQUEST;
         event_raised = true;
     } else {
@@ -1906,8 +2107,9 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
     }
 
     if(op != tag->op) {
-        pdebug(DEBUG_DETAIL, "Tag operation changed from %s to %s.", op_to_str(tag->op), op_to_str(op));
+        pdebug(DEBUG_SPEW, "Tag operation changed from %s to %s.", op_to_str(tag->op), op_to_str(op));
         tag->op = op;
+        tag->op_changed_time = time_ms();
     }
 
     switch(op) {
@@ -1919,53 +2121,20 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
         case TAG_OP_READ_REQUEST: rc = tag_op_read_request(plc, tag); break;
 
         case TAG_OP_READ_RESPONSE:
-            /* Check if this tag's transaction ID matches the response */
-            if(plc->flags.response_ready && tag->pending_transaction_id != 0) {
-                /* Extract transaction ID from response (bytes 0-1, big-endian) */
-                uint16_t response_transaction_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
-
-                if(response_transaction_id == tag->pending_transaction_id) {
-                    pdebug(DEBUG_DETAIL, "Response matches tag %d (transaction_id=%d).",
-                           tag->tag_id, response_transaction_id);
-                    rc = tag_op_read_response(plc, tag);
-                } else {
-                    pdebug(DEBUG_SPEW, "Response transaction_id=%d does not match tag %d (expecting %d).",
-                           response_transaction_id, tag->tag_id, tag->pending_transaction_id);
-                    rc = PLCTAG_STATUS_PENDING;
-                }
-            } else {
-                /* No matching response yet, stay in RESPONSE state */
-                rc = PLCTAG_STATUS_PENDING;
-            }
+            rc = tag_op_read_response(plc, tag);
             break;
 
         case TAG_OP_WRITE_REQUEST: rc = tag_op_write_request(plc, tag); break;
 
         case TAG_OP_WRITE_RESPONSE:
-            /* Check if this tag's transaction ID matches the response */
-            if(plc->flags.response_ready && tag->pending_transaction_id != 0) {
-                /* Extract transaction ID from response (bytes 0-1, big-endian) */
-                uint16_t response_transaction_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
-
-                if(response_transaction_id == tag->pending_transaction_id) {
-                    pdebug(DEBUG_DETAIL, "Response matches tag %d (transaction_id=%d).",
-                           tag->tag_id, response_transaction_id);
-                    rc = tag_op_write_response(plc, tag);
-                } else {
-                    pdebug(DEBUG_SPEW, "Response transaction_id=%d does not match tag %d (expecting %d).",
-                           response_transaction_id, tag->tag_id, tag->pending_transaction_id);
-                    rc = PLCTAG_STATUS_PENDING;
-                }
-            } else {
-                /* No matching response yet, stay in RESPONSE state */
-                rc = PLCTAG_STATUS_PENDING;
-            }
+            rc = tag_op_write_response(plc, tag);
             break;
 
         default:
             pdebug(DEBUG_WARN, "Unknown tag operation %d!", op);
 
             tag->op = TAG_OP_IDLE;
+            tag->op_changed_time = time_ms();
             tag->status = (int8_t)PLCTAG_ERR_NOT_IMPLEMENTED;
 
             plc_tag_generic_wake_tag((plc_tag_p)tag);
@@ -1975,14 +2144,15 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
     }
 
     if(op != tag->op) {
-        pdebug(DEBUG_DETAIL, "Tag operation changed from %s to %s.", op_to_str(op), op_to_str(tag->op));
+        pdebug(DEBUG_SPEW, "Tag operation changed from %s to %s.", op_to_str(op), op_to_str(tag->op));
+        tag->op_changed_time = time_ms();
     }
 
     /* dispatch any events that were raised. */
     plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
     if(event_raised || tag->write_complete == 1 || tag->read_complete == 1) {
-        pdebug(DEBUG_SPEW, "Tag operation complete.", op);
+        pdebug(DEBUG_SPEW, "Tag operation complete.");
         plc_tag_generic_wake_tag((plc_tag_p)tag);
     }
 
@@ -2118,6 +2288,9 @@ int send_request(modbus_plc_p plc) {
 
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
+
+        /* Record when request was sent for timing statistics */
+        plc->last_request_sent_time = plc->last_packet_time_ms;
 
         // plc->flags.request_ready = 0;
         plc->write_data_len = 0;
@@ -2702,6 +2875,9 @@ int add_tag(modbus_plc_p plc, modbus_tag_p tag) {
         if(rc == PLCTAG_STATUS_OK) {
             /* Increment tag count */
             atomic_add_int32(&plc->tag_count, 1);
+
+            /* Initialize fairness ticket - new tags start at the back of the queue */
+            tag->fairness_ticket = plc->fairness_counter++;
         } else {
             pdebug(DEBUG_WARN, "Failed to add tag to vector: %s", plc_tag_decode_error(rc));
         }
@@ -2796,6 +2972,7 @@ int mb_abort(plc_tag_p p_tag) {
     tag->request_num = 0;
     tag->status = (int8_t)PLCTAG_STATUS_OK;
     tag->op = TAG_OP_IDLE;
+    tag->op_changed_time = time_ms();
 
     /* Only access PLC if it hasn't been terminated */
     if(tag->plc && !tag->plc->flags.terminate) {
@@ -2839,6 +3016,8 @@ int mb_read_start(plc_tag_p p_tag) {
      */
     if(tag->op == TAG_OP_IDLE) {
         tag->op = TAG_OP_READ_REQUEST;
+        tag->op_changed_time = time_ms();
+        tag->request_start_time = time_ms();
     } else {
         pdebug(DEBUG_WARN, "Operation in progress!");
         return PLCTAG_ERR_BUSY;
@@ -2907,6 +3086,7 @@ int mb_write_start(plc_tag_p p_tag) {
      */
     if(tag->op == TAG_OP_IDLE) {
         tag->op = TAG_OP_WRITE_REQUEST;
+        tag->op_changed_time = time_ms();
     } else {
         pdebug(DEBUG_WARN, "Operation in progress!");
         return PLCTAG_ERR_BUSY;
