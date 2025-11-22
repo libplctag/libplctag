@@ -66,12 +66,26 @@
 #define MAX_MODBUS_REQUESTS (16)       /* per the Modbus specification */
 
 /* Microsecond timing for performance analysis */
+#ifdef _WIN32
+/* windows.h already included by platform.h */
+static inline int64_t time_us(void) {
+    FILETIME ft;
+    int64_t res;
+    GetSystemTimeAsFileTime(&ft);
+    /* FILETIME is in 100ns increments since Jan 1, 1601 */
+    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
+    /* Convert to microseconds. Magic offset is for Jan 1, 1970 Unix epoch. */
+    res = (res - 116444736000000000) / 10;
+    return res;
+}
+#else
 #include <sys/time.h>
 static inline int64_t time_us(void) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return ((int64_t)tv.tv_sec * 1000000) + (int64_t)tv.tv_usec;
 }
+#endif
 
 typedef struct modbus_tag_t *modbus_tag_p;
 typedef struct modbus_tag_list_t *modbus_tag_list_p;
@@ -279,7 +293,7 @@ static THREAD_FUNC(modbus_plc_handler);
 static void wake_plc_thread(modbus_plc_p plc);
 static int connect_plc(modbus_plc_p plc);
 static int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms);
-static int tickle_tag(modbus_plc_p plc, modbus_tag_p tag);
+static int tickle_tag(modbus_plc_p plc, modbus_tag_p tag, int64_t now, int64_t *min_wait_time);
 static int receive_response(modbus_plc_p plc);
 static int send_request(modbus_plc_p plc);
 static int check_read_response(modbus_plc_p plc, modbus_tag_p tag);
@@ -1212,17 +1226,17 @@ void wake_plc_thread(modbus_plc_p plc) {
             return;
         }
 
-        pdebug(DEBUG_WARN, "MUTEX: Acquire. Waking PLC thread.");
-        critical_block(plc_ref->mutex) {
-            pdebug(DEBUG_DETAIL, "Waking PLC thread.");
-
-            if(plc_ref->sock) {
-               socket_wake(plc_ref->sock);
-            } else {
-                pdebug(DEBUG_DETAIL, "PLC socket pointer is NULL.");
-            }
+        /*
+         * No mutex needed here - reference counting ensures the socket won't be
+         * destroyed while we hold a reference. socket_destroy() is only called
+         * in the PLC destructor, which can't run until all references are released.
+         * Multiple threads calling socket_wake() concurrently is safe.
+         */
+        if(plc_ref->sock) {
+            socket_wake(plc_ref->sock);
+        } else {
+            pdebug(DEBUG_DETAIL, "PLC socket pointer is NULL.");
         }
-        pdebug(DEBUG_WARN, "MUTEX: Release. PLC thread woken.");
 
         /* Release the reference */
         plc_ref = rc_dec(plc_ref);
@@ -1325,178 +1339,98 @@ int connect_plc(modbus_plc_p plc) {
 }
 
 
-/*
- * Tag comparison function for sorting.
- *
- * Three-level sort:
- * 1. By reads_completed (fewer reads = higher priority)
- *    - This ensures ALL tags get at least one read before any gets a second
- * 2. By operation priority:
- *    - Waiting for response (TAG_OP_READ_RESPONSE, TAG_OP_WRITE_RESPONSE) = highest priority
- *    - Waiting for request (TAG_OP_READ_REQUEST, TAG_OP_WRITE_REQUEST) = medium priority
- *    - Idle (TAG_OP_IDLE) = lowest priority
- * 3. Within same reads_completed and priority, by fairness_ticket (lowest ticket first = round-robin)
- *
- * This ensures fairness: tags with fewer completed reads always get priority.
- */
-static int tag_compare_for_sorting(const void *a, const void *b) {
-    modbus_tag_p tag_a = *((modbus_tag_p *)a);
-    modbus_tag_p tag_b = *((modbus_tag_p *)b);
-    int priority_a, priority_b;
-
-    /* FIRST: Sort by reads_completed (fewer reads = higher priority) */
-    if(tag_a->reads_completed != tag_b->reads_completed) {
-        return tag_a->reads_completed - tag_b->reads_completed;
-    }
-
-    /* Determine priority for tag A */
-    if(tag_a->op == TAG_OP_READ_RESPONSE || tag_a->op == TAG_OP_WRITE_RESPONSE) {
-        priority_a = 0; /* Highest priority - waiting for response */
-    } else if(tag_a->op == TAG_OP_READ_REQUEST || tag_a->op == TAG_OP_WRITE_REQUEST) {
-        priority_a = 1; /* Medium priority - waiting to make request */
-    } else {
-        priority_a = 2; /* Lowest priority - idle or other */
-    }
-
-    /* Determine priority for tag B */
-    if(tag_b->op == TAG_OP_READ_RESPONSE || tag_b->op == TAG_OP_WRITE_RESPONSE) {
-        priority_b = 0;
-    } else if(tag_b->op == TAG_OP_READ_REQUEST || tag_b->op == TAG_OP_WRITE_REQUEST) {
-        priority_b = 1;
-    } else {
-        priority_b = 2;
-    }
-
-    /* Second: sort by operation priority */
-    if(priority_a != priority_b) {
-        return priority_a - priority_b;
-    }
-
-    /* Third: Within same priority, sort by fairness_ticket (lowest first = round-robin) */
-    if(tag_a->fairness_ticket < tag_b->fairness_ticket) {
-        return -1;
-    } else if(tag_a->fairness_ticket > tag_b->fairness_ticket) {
-        return 1;
-    } else {
-        /* Tie-breaker: use tag_id for deterministic ordering */
-        return (tag_a->tag_id - tag_b->tag_id);
-    }
-}
-
 
 int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
-    int vector_len = 0;
-    int i = 0;
     int processed_count = 0;
     int64_t min_wait_time = MODBUS_IDLE_WAIT_TIMEOUT;
     int64_t now = time_ms();
-    int64_t tickle_start_us = time_us();
-    int64_t sort_start_us, sort_end_us, iter_start_us;
+    int64_t iter_start_us;
 
     pdebug(DEBUG_DETAIL, "Starting.");
 
-    /* Sort tags by priority and age before processing */
-    sort_start_us = time_us();
-    critical_block(plc->mutex) {
-        vector_len = vector_length(plc->tag_vector);
-        if(vector_len > 1) {
-            vector_sort(plc->tag_vector, tag_compare_for_sorting);
-        }
-    }
-    sort_end_us = time_us();
-    plc->tickle_sort_time_sum_us += (sort_end_us - sort_start_us);
-
-    /* Process all tags in sorted order */
+    /*
+     * Process all tags within the PLC mutex for safety and fairness.
+     * Since wake_plc_thread() no longer requires the mutex, callbacks
+     * from tickle_tag() won't cause deadlock.
+     *
+     * Round-robin fairness: always process the first tag, then move it
+     * to the end of the list. This ensures each tag gets equal opportunity
+     * regardless of throughput limitations.
+     */
     iter_start_us = time_us();
-    for(i = 0; i < vector_len; i++) {
-        if(vector_len == 0) break;
+    critical_block(plc->mutex) {
+        int last_tag_index = vector_length(plc->tag_vector);
 
-        /* Get tag with PLC mutex */
-        critical_block(plc->mutex) {
-            if(i < vector_length(plc->tag_vector)) {
-                modbus_tag_p candidate = vector_get(plc->tag_vector, i);
-                /* Try to increment reference - skip if being destroyed */
-                if(candidate && rc_inc(candidate)) {
-                    tag = candidate;
+        for(int i = 0; i < last_tag_index; i++) {
+            /* Get tag at current index */
+            modbus_tag_p candidate = vector_get(plc->tag_vector, i);
 
-                    /* Calculate wait time while we have the tag pointer */
-                    if(tag->auto_sync_read_ms > 0 && tag->auto_sync_next_read > 0) {
-                        int64_t read_wait = tag->auto_sync_next_read - now;
+            /* Try to increment reference - skip if being destroyed */
+            if(candidate && rc_inc(candidate)) {
+                tag = candidate;
 
-                        if(read_wait < 0) {
-                            read_wait = 0;
-                        }
+                debug_set_tag_id(tag->tag_id);
 
-                        if(read_wait > 0 && read_wait < min_wait_time) {
-                            min_wait_time = read_wait;
-                        }
+                /* the tag mutex may be locked already, so avoid deadlock. */
+                if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+                    tag_op_type_t prev_op = tag->op;
+
+                    /* tickle_tag updates min_wait_time via check_tag_auto_read/write */
+                    rc = tickle_tag(plc, tag, now, &min_wait_time);
+                    if(rc == PLCTAG_STATUS_PENDING) {
+                        rc = PLCTAG_STATUS_OK;
+                    } else if(rc != PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_WARN, "Error %s tickling tag!", plc_tag_decode_error(rc));
                     }
 
-                    if(tag->auto_sync_write_ms > 0 && tag->auto_sync_next_write > 0) {
-                        int64_t write_wait = tag->auto_sync_next_write - now;
+                    /*
+                    * Move the tag to the end of the list for round-robin fairness.
+                    * This ensures tags that just got processed give other tags a chance.
+                    * Only do this if the tag's operation changed, to avoid unnecessary moves.
+                    * 
+                    * We really only care about moving tags that just completed a read or write response
+                    * back to idle, since those are the ones that just got serviced.
+                    */
+                    if(tag->op == TAG_OP_IDLE && (prev_op == TAG_OP_READ_RESPONSE || prev_op == TAG_OP_WRITE_RESPONSE)) {
+                        pdebug(DEBUG_DETAIL, "Moving tag %d to end of list for fairness (op changed from %s to %s).",
+                            tag->tag_id, op_to_str(prev_op), op_to_str(tag->op));
 
-                        if(write_wait < 0) {
-                            write_wait = 0;
-                        }
+                        /* remove the tag from the current location */
+                        vector_remove(plc->tag_vector, i);
 
-                        if(write_wait > 0 && write_wait < min_wait_time) {
-                            min_wait_time = write_wait;
-                        }
+                        /* append it to the end */
+                        vector_insert(plc->tag_vector, vector_length(plc->tag_vector), tag);
+
+                        i--; /* Adjust index since we removed current tag */
+
+                        last_tag_index--; /* move down the last tag index, so we do not process the tag twice */
                     }
+
+
+                    mutex_unlock(tag->api_mutex);
                 } else {
-                    tag = NULL;
-                }
-            }
-        }
-        /* PLC mutex released - tag holds reference so it's safe */
-
-        /* If we got a tag, process it */
-        if(tag) {
-            debug_set_tag_id(tag->tag_id);
-
-            /* the tag mutex may be locked already, so avoid deadlock. */
-            if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
-                rc = tickle_tag(plc, tag);
-                if(rc == PLCTAG_STATUS_PENDING) {
-                    rc = PLCTAG_STATUS_OK;
-                } else if(rc != PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_WARN, "Error %s tickling tag!", plc_tag_decode_error(rc));
+                    pdebug(DEBUG_SPEW, "Tag API mutex is already taken, skipping tickle.");
                 }
 
-                mutex_unlock(tag->api_mutex);
-            } else {
-                pdebug(DEBUG_SPEW, "Tag API mutex is already taken, skipping tickle.");
+                debug_set_tag_id(0);
+
+                /* Release our reference */
+                tag = rc_dec(tag);
             }
 
-            debug_set_tag_id(0);
-
-            /* Release our reference */
-            rc_dec(tag);
-            tag = NULL;
             processed_count++;
         }
-    }
-    plc->tickle_iter_time_sum_us += (time_us() - iter_start_us);
 
-    /* Calculate overhead (total tickle time minus sort and iter) */
-    {
-        int64_t tickle_end_us = time_us();
-        int64_t total_us = tickle_end_us - tickle_start_us;
-        int64_t sort_us = sort_end_us - sort_start_us;
-        int64_t iter_us = tickle_end_us - iter_start_us;  /* Use actual end, not running sum */
-        plc->tickle_overhead_time_sum_us += (total_us - sort_us - iter_us);
-    }
-
-    /* After iterating all tags, check if response_ready flag is still set.
-     * If it is, it means no tag matched the transaction ID in the response.
-     * In that case, discard the response and clear the flag for the next response.
-     * IMPORTANT: We must also decrement pending_request_count since this response
-     * corresponds to a request that was sent (and incremented the count). */
-    critical_block(plc->mutex) {
+        /* After iterating all tags, check if response_ready flag is still set.
+         * If it is, it means no tag matched the transaction ID in the response.
+         * In that case, discard the response and clear the flag for the next response.
+         * IMPORTANT: We must also decrement pending_request_count since this response
+         * corresponds to a request that was sent (and incremented the count). */
         if(plc->flags.response_ready) {
-            pdebug(DEBUG_WARN, "Response_ready still set after processing all tags - no tag matched this response. Discarding.");
+            pdebug(DEBUG_WARN, "No tag matched transaction ID %u. Discarding.", 
+                   (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0);
             plc->flags.response_ready = 0;
             plc->read_data_len = 0;
 
@@ -1511,6 +1445,7 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         /* Store auto-sync tracking info */
         plc->next_auto_sync_time_ms = (min_wait_time < MODBUS_IDLE_WAIT_TIMEOUT) ? (now + min_wait_time) : 0;
     }
+    plc->tickle_iter_time_sum_us += (time_us() - iter_start_us);
 
     pdebug(DEBUG_SPEW, "Processed %d tags.", processed_count);
 
@@ -1609,13 +1544,9 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
         return PLCTAG_STATUS_OK;
     }
 
-    /* Check response_ready flag with mutex held to prevent race condition
-     * where the flag is set by the handler thread while we're processing tags.
-     * We copy the flag value inside the critical section to ensure we see
-     * a consistent state. */
-    critical_block(plc->mutex) {
-        response_ready = plc->flags.response_ready;
-    }
+    /* Check response_ready flag - the PLC mutex is already held by the caller
+     * (tickle_all_tags) so we can access this directly. */
+    response_ready = plc->flags.response_ready;
 
     if(response_ready) {
         pdebug(DEBUG_DETAIL, "Read response ready for tag %d.", tag->tag_id);
@@ -1623,6 +1554,7 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
         rc = check_read_response(plc, tag);
         switch(rc) {
             case PLCTAG_ERR_PARTIAL:
+            /* FIXME - this is probably not correct.  Why would we reset the response_ready flag on a partial response? */
                 /* partial response, keep going */
                 pdebug(DEBUG_DETAIL, "Found our response, but we are not done.");
 
@@ -1635,9 +1567,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                     pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
                 }
 
-                critical_block(plc->mutex) {
-                    plc->flags.response_ready = 0;
-                }
+                /* PLC mutex already held by caller (tickle_all_tags) */
+                plc->flags.response_ready = 0;
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_READ_REQUEST;
@@ -1675,9 +1606,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                     pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
                 }
 
-                critical_block(plc->mutex) {
-                    plc->flags.response_ready = 0;
-                }
+                /* PLC mutex already held by caller (tickle_all_tags) */
+                plc->flags.response_ready = 0;
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_IDLE;
@@ -1845,13 +1775,9 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
         return PLCTAG_STATUS_OK;
     }
 
-    /* Check response_ready flag with mutex held to prevent race condition
-     * where the flag is set by the handler thread while we're processing tags.
-     * We copy the flag value inside the critical section to ensure we see
-     * a consistent state. */
-    critical_block(plc->mutex) {
-        response_ready = plc->flags.response_ready;
-    }
+    /* Check response_ready flag - the PLC mutex is already held by the caller
+     * (tickle_all_tags) so we can access this directly. */
+    response_ready = plc->flags.response_ready;
 
     if(response_ready) {
         rc = check_write_response(plc, tag);
@@ -1870,9 +1796,8 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                     pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
                 }
 
-                critical_block(plc->mutex) {
-                    plc->flags.response_ready = 0;
-                }
+                /* PLC mutex already held by caller (tickle_all_tags) */
+                plc->flags.response_ready = 0;
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_WRITE_REQUEST;
@@ -1901,9 +1826,8 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
                     pdebug(DEBUG_WARN, "Attempted to decrement request count below 0!");
                 }
 
-                critical_block(plc->mutex) {
-                    plc->flags.response_ready = 0;
-                }
+                /* PLC mutex already held by caller (tickle_all_tags) */
+                plc->flags.response_ready = 0;
 
                 tag->pending_transaction_id = 0;
                 tag->op = TAG_OP_IDLE;
@@ -1991,25 +1915,43 @@ static int check_tag_abort(modbus_plc_p plc, plc_tag_p base_tag) {
  * This function checks if the tag is marked for automatic writing based on its
  * configuration and current state.  If the tag is set for auto-write and is dirty,
  * it will determine if the appropriate time has passed to trigger a write operation.
- * 
+ *
  * This will supersede any auto-read that may be pending.
  *
- * @param plc The PLC instance.
+ * Also updates the minimum wait time for socket event timeout calculation.
+ *
+ * @param plc The PLC instance (unused).
  * @param base_tag The base tag to check.
+ * @param now The current time in milliseconds.
+ * @param min_wait_time Pointer to minimum wait time to update.
  * @return int The status of the operation.
  */
-static int check_tag_auto_write(modbus_plc_p plc, plc_tag_p base_tag) {
+static int check_tag_auto_write(modbus_plc_p plc, plc_tag_p base_tag, int64_t now, int64_t *min_wait_time) {
     modbus_tag_p tag = (modbus_tag_p)base_tag;
 
     (void)plc;
 
     /* if auto write is turned on and the tag is dirty */
     if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
-        int64_t now = time_ms();
+        /* Don't start a new write if there's already an operation in progress.
+         * This prevents orphaning pending responses when we overwrite seq_id. */
+        if(tag->op != TAG_OP_IDLE) {
+            pdebug(DEBUG_SPEW, "Tag already has operation in progress (%s), skipping auto write.",
+                   op_to_str(tag->op));
+            return PLCTAG_STATUS_OK;
+        }
 
         /* initialize the next write time if needed */
         if(tag->auto_sync_next_write == 0) {
             tag->auto_sync_next_write = now + tag->auto_sync_write_ms;
+        }
+
+        /* Calculate wait time for socket event timeout */
+        if(tag->auto_sync_next_write > now) {
+            int64_t write_wait = tag->auto_sync_next_write - now;
+            if(write_wait < *min_wait_time) {
+                *min_wait_time = write_wait;
+            }
         }
 
         /* if we have passed the wait time */
@@ -2021,7 +1963,7 @@ static int check_tag_auto_write(modbus_plc_p plc, plc_tag_p base_tag) {
             tag->auto_sync_next_write = 0;
             tag->tag_is_dirty = false;
             tag->op = TAG_OP_WRITE_REQUEST;
-            tag->op_changed_time = time_ms();
+            tag->op_changed_time = now;
 
             tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_STARTED, PLCTAG_STATUS_OK);
 
@@ -2034,19 +1976,47 @@ static int check_tag_auto_write(modbus_plc_p plc, plc_tag_p base_tag) {
 }
 
 
-static int check_tag_auto_read(modbus_plc_p plc, plc_tag_p base_tag) {
+/**
+ * @brief Check if the tag needs to be auto-read.
+ *
+ * This function checks if the tag is configured for automatic reading and
+ * determines if the appropriate time has passed to trigger a read operation.
+ *
+ * Also updates the minimum wait time for socket event timeout calculation.
+ *
+ * @param plc The PLC instance (unused).
+ * @param base_tag The base tag to check.
+ * @param now The current time in milliseconds.
+ * @param min_wait_time Pointer to minimum wait time to update.
+ * @return int The status of the operation.
+ */
+static int check_tag_auto_read(modbus_plc_p plc, plc_tag_p base_tag, int64_t now, int64_t *min_wait_time) {
     modbus_tag_p tag = (modbus_tag_p)base_tag;
 
     (void)plc;
 
     /* if auto read is turned on */
     if(tag->auto_sync_read_ms > 0) {
-        int64_t now = time_ms();
+        /* Don't start a new read if there's already an operation in progress.
+         * This prevents orphaning pending responses when we overwrite seq_id. */
+        if(tag->op != TAG_OP_IDLE) {
+            pdebug(DEBUG_SPEW, "Tag already has operation in progress (%s), skipping auto read.",
+                   op_to_str(tag->op));
+            return PLCTAG_STATUS_OK;
+        }
 
         /* make sure that there is not auto write pending */
         if(tag->auto_sync_write_ms > 0 && tag->tag_is_dirty) {
             pdebug(DEBUG_SPEW, "Auto write is pending, skipping auto read.");
             return PLCTAG_STATUS_OK;
+        }
+
+        /* Calculate wait time for socket event timeout */
+        if(tag->auto_sync_next_read > now) {
+            int64_t read_wait = tag->auto_sync_next_read - now;
+            if(read_wait < *min_wait_time) {
+                *min_wait_time = read_wait;
+            }
         }
 
         /* if we have passed the wait time */
@@ -2055,8 +2025,8 @@ static int check_tag_auto_read(modbus_plc_p plc, plc_tag_p base_tag) {
 
             tag->auto_sync_next_read = tag->auto_sync_next_read == 0 ? now : tag->auto_sync_next_read + tag->auto_sync_read_ms;
             tag->op = TAG_OP_READ_REQUEST;
-            tag->op_changed_time = time_ms();
-            tag->request_start_time = time_ms();  /* Track when request started */
+            tag->op_changed_time = now;
+            tag->request_start_time = now;
 
             tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_STARTED, PLCTAG_STATUS_OK);
 
@@ -2070,17 +2040,19 @@ static int check_tag_auto_read(modbus_plc_p plc, plc_tag_p base_tag) {
 
 /**
  * @brief tickle the tag to find out if it has work to do.
- * 
+ *
  * This will check for aborts, auto-reads, auto-writes, and existing operations.
- * 
+ *
  * It will wake the tag if the operation completes.
- * 
- * @param plc 
- * @param tag 
+ *
+ * @param plc The PLC instance.
+ * @param tag The tag to tickle.
+ * @param now The current time in milliseconds.
+ * @param min_wait_time Pointer to minimum wait time to update (for socket timeout).
  * @return int - PLCTAG_STATUS_OK if done, PLCTAG_STATUS_PENDING if still working, other
  *    on error.
  */
-int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
+int tickle_tag(modbus_plc_p plc, modbus_tag_p tag, int64_t now, int64_t *min_wait_time) {
     int rc = PLCTAG_STATUS_OK;
     tag_op_type_t op = tag->op;
     bool event_raised = false;
@@ -2093,11 +2065,11 @@ int tickle_tag(modbus_plc_p plc, modbus_tag_p tag) {
     if((rc = check_tag_abort(plc, (plc_tag_p)tag)) == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_SPEW, "Tag operation aborted.");
         op = TAG_OP_IDLE;
-    } else if((rc = check_tag_auto_write(plc, (plc_tag_p)tag)) == PLCTAG_STATUS_PENDING) {
+    } else if((rc = check_tag_auto_write(plc, (plc_tag_p)tag, now, min_wait_time)) == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_SPEW, "Auto write requested.");
         op = TAG_OP_WRITE_REQUEST;
         event_raised = true;
-    } else if((rc = check_tag_auto_read(plc, (plc_tag_p)tag)) == PLCTAG_STATUS_PENDING) {
+    } else if((rc = check_tag_auto_read(plc, (plc_tag_p)tag, now, min_wait_time)) == PLCTAG_STATUS_PENDING) {
         pdebug(DEBUG_SPEW, "Auto read requested.");
         op = TAG_OP_READ_REQUEST;
         event_raised = true;
