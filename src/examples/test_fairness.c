@@ -49,6 +49,7 @@
 #include <string.h>
 #include <math.h>
 #include "compat_utils.h"
+#include "stats.h"
 #include <libplctag/lib/libplctag.h>
 
 #define DEFAULT_NUM_TAGS 200           /* Number of tags to test */
@@ -82,25 +83,6 @@ void usage(const char *prog_name) {
         prog_name, DEFAULT_NUM_TAGS, DEFAULT_TEST_DURATION_SECS);
 
     exit(1);
-}
-
-/* Calculate standard deviation of read counts */
-double calculate_std_dev(tag_stats_t *stats, int count) {
-    double mean = 0.0;
-    double variance = 0.0;
-
-    for (int i = 0; i < count; i++) {
-        mean += compat_atomic_load_int32(&stats[i].read_completed_count);
-    }
-    mean /= count;
-
-    for (int i = 0; i < count; i++) {
-        double diff = compat_atomic_load_int32(&stats[i].read_completed_count) - mean;
-        variance += diff * diff;
-    }
-
-    variance /= count;
-    return sqrt(variance);
 }
 
 /* Event callback to track reads */
@@ -278,10 +260,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Per-Tag Results:\n");
     fprintf(stderr, "----------------\n");
 
-    int total_reads = 0;
     int total_started = 0;
-    int min_reads = 999999;
-    int max_reads = 0;
+    int *read_counts = malloc((size_t)num_tags * sizeof(int));
+    if (!read_counts) {
+        fprintf(stderr, "Error allocating read_counts array!\n");
+        free(stats);
+        return 1;
+    }
 
     for (int i = 0; i < num_tags; i++) {
         int32_t tag_id = compat_atomic_load_int32(&stats[i].tag_id);
@@ -298,54 +283,29 @@ int main(int argc, char **argv) {
                (long long)min_wait,
                (long long)max_wait);
 
-        total_reads += completed;
+        read_counts[i] = completed;
         total_started += started;
-        if (completed < min_reads) min_reads = completed;
-        if (completed > max_reads) max_reads = completed;
     }
 
-    /* Calculate fairness metrics */
-    fprintf(stderr, "\nFairness Metrics:\n");
-    fprintf(stderr, "-----------------\n");
+    /* Calculate and print fairness statistics */
+    stats_summary_t summary;
+    if (stats_calculate(read_counts, num_tags, &summary) != 0) {
+        fprintf(stderr, "Error calculating statistics!\n");
+        free(read_counts);
+        free(stats);
+        return 1;
+    }
 
-    double mean = (double)total_reads / num_tags;
-    double std_dev = calculate_std_dev(stats, num_tags);
-    double coefficient_variation = (std_dev / mean) * 100.0;
-    double min_max_ratio = (min_reads > 0) ? ((double)min_reads / max_reads) : 0.0;
+    fprintf(stderr, "\nTotal started: %d\n", total_started);
+    stats_print_summary(stderr, &summary);
+    stats_print_histogram(stderr, read_counts, num_tags, 0, 40);
 
-    fprintf(stderr, "Total started: %d\n", total_started);
-    fprintf(stderr, "Total completed: %d\n", total_reads);
-    fprintf(stderr, "Mean reads per tag: %.2f\n", mean);
-    fprintf(stderr, "Min reads: %d\n", min_reads);
-    fprintf(stderr, "Max reads: %d\n", max_reads);
-    fprintf(stderr, "Standard deviation: %.2f\n", std_dev);
-    fprintf(stderr, "Coefficient of variation: %.2f%%\n", coefficient_variation);
-    fprintf(stderr, "Min/Max ratio: %.3f\n", min_max_ratio);
-
-    /* Fairness assessment */
-    fprintf(stderr, "\nFairness Assessment:\n");
-    fprintf(stderr, "--------------------\n");
-    if (coefficient_variation < 5.0) {
-        fprintf(stderr, "EXCELLENT: Very fair distribution (CV < 5%%)\n");
-    } else if (coefficient_variation < 10.0) {
-        fprintf(stderr, "GOOD: Fair distribution (CV < 10%%)\n");
-    } else if (coefficient_variation < 20.0) {
-        fprintf(stderr, "ACCEPTABLE: Moderate fairness (CV < 20%%)\n");
-    } else {
-        fprintf(stderr, "POOR: Unfair distribution (CV >= 20%%)\n");
+    /* Assess fairness and set return code */
+    if (stats_assess_fairness(&summary, stderr) != 0) {
         rc = PLCTAG_ERR_BAD_STATUS;
     }
 
-    if (min_max_ratio > 0.9) {
-        fprintf(stderr, "EXCELLENT: Min/Max ratio > 0.9\n");
-    } else if (min_max_ratio > 0.8) {
-        fprintf(stderr, "GOOD: Min/Max ratio > 0.8\n");
-    } else if (min_max_ratio > 0.7) {
-        fprintf(stderr, "ACCEPTABLE: Min/Max ratio > 0.7\n");
-    } else {
-        fprintf(stderr, "POOR: Min/Max ratio <= 0.7\n");
-        rc = PLCTAG_ERR_BAD_STATUS;
-    }
+    free(read_counts);
 
     /* Cleanup */
     fprintf(stderr, "\nCleaning up...\n");
