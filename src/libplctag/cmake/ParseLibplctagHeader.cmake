@@ -13,9 +13,9 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     # Extract debug levels enum
     string(REGEX MATCH "typedef enum \\{[^}]*PLCTAG_DEBUG_SPEW[^}]*\\} plctag_debug_level_t" DEBUG_ENUM "${HEADER_CONTENT}")
     
-    # Extract all PLCTAG_MODULE_ defines (handles multi-line formatting)
-    string(REGEX MATCHALL "#define[ \t]+PLCTAG_MODULE_[A-Z_0-9]+[ \t\n]*\\(1ULL << [0-9]+\\)" MODULE_DEFINES "${HEADER_CONTENT}")
-    
+    # Extract debug module enum
+    string(REGEX MATCH "typedef enum \\{[^}]*PLCTAG_MODULE_PLATFORM[^}]*\\} plctag_debug_module_t" MODULE_ENUM "${HEADER_CONTENT}")
+
     # Parse error codes
     set(ERROR_CODE_ENTRIES "")
     string(REGEX MATCHALL "PLCTAG_[A-Z_]+ = -?[0-9]+" ERROR_MATCHES "${ERROR_ENUM}")
@@ -23,7 +23,7 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
         string(REGEX REPLACE "PLCTAG_" "" MATCH_STRIPPED "${MATCH}")
         set(ERROR_CODE_ENTRIES "${ERROR_CODE_ENTRIES}    ${MATCH_STRIPPED},\n")
     endforeach()
-    
+
     # Parse debug levels
     set(DEBUG_LEVEL_ENTRIES "")
     string(REGEX MATCHALL "PLCTAG_DEBUG_[A-Z_]+ = [0-9]+" DEBUG_MATCHES "${DEBUG_ENUM}")
@@ -31,19 +31,21 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
         string(REGEX REPLACE "PLCTAG_DEBUG_" "DEBUG_" MATCH_CONVERTED "${MATCH}")
         set(DEBUG_LEVEL_ENTRIES "${DEBUG_LEVEL_ENTRIES}    ${MATCH_CONVERTED},\n")
     endforeach()
-    
-    # Parse module defines and create enum
+
+    # Parse debug modules from enum and create internal representation
     set(MODULE_ENUM_ENTRIES "")
     set(MODULE_NAME_TABLE "")
     set(MODULE_COUNT 0)
-    foreach(MODULE_DEF ${MODULE_DEFINES})
-        # Extract module name and bit position
-        string(REGEX MATCH "PLCTAG_MODULE_([A-Z_0-9]+)" MODULE_NAME_MATCH "${MODULE_DEF}")
+    string(REGEX MATCHALL "PLCTAG_MODULE_[A-Z_0-9]+ = \\(1ULL << [0-9]+\\)" MODULE_MATCHES "${MODULE_ENUM}")
+    foreach(MATCH ${MODULE_MATCHES})
+        # Extract module name
+        string(REGEX MATCH "PLCTAG_MODULE_([A-Z_0-9]+)" MODULE_NAME_MATCH "${MATCH}")
         set(MODULE_NAME "${CMAKE_MATCH_1}")
-        
-        string(REGEX MATCH "1ULL << ([0-9]+)" BIT_MATCH "${MODULE_DEF}")
+
+        # Extract bit position
+        string(REGEX MATCH "1ULL << ([0-9]+)" BIT_MATCH "${MATCH}")
         set(BIT_POS "${CMAKE_MATCH_1}")
-        
+
         if(MODULE_NAME AND DEFINED BIT_POS)
             set(MODULE_ENUM_ENTRIES "${MODULE_ENUM_ENTRIES}    DEBUG_MODULE_${MODULE_NAME} = (1ULL << ${BIT_POS}),\n")
             set(MODULE_NAME_TABLE "${MODULE_NAME_TABLE}    [${BIT_POS}] = \"${MODULE_NAME}\",\n")

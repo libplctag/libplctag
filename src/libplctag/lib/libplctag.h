@@ -166,31 +166,33 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level);
  * Module IDs are generated from src/utils/debug_modules.def
  */
 
-/* Define MODULE IDs - these are 64-bit pre-shifted values for bitmask operations */
-#define PLCTAG_MODULE_LIB                    (1ULL << 0)
-#define PLCTAG_MODULE_INIT                   (1ULL << 1)
-#define PLCTAG_MODULE_VERSION                (1ULL << 2)
-#define PLCTAG_MODULE_UTILS                  (1ULL << 3)
-#define PLCTAG_MODULE_AB_SESSION             (1ULL << 4)
-#define PLCTAG_MODULE_AB_PCCC                (1ULL << 5)
-#define PLCTAG_MODULE_AB_CIP                 (1ULL << 6)
-#define PLCTAG_MODULE_AB_COMMON              (1ULL << 7)
-#define PLCTAG_MODULE_AB_EIP_CIP             (1ULL << 8)
-#define PLCTAG_MODULE_AB_EIP_CIP_SPECIAL     (1ULL << 9)
-#define PLCTAG_MODULE_AB_EIP_LGX_PCCC        (1ULL << 10)
-#define PLCTAG_MODULE_AB_EIP_PLC5_PCCC       (1ULL << 11)
-#define PLCTAG_MODULE_AB_EIP_PLC5_DHP        (1ULL << 12)
-#define PLCTAG_MODULE_AB_EIP_SLC_PCCC        (1ULL << 13)
-#define PLCTAG_MODULE_AB_EIP_SLC_DHP         (1ULL << 14)
-#define PLCTAG_MODULE_AB_ERROR               (1ULL << 15)
-#define PLCTAG_MODULE_OMRON_CONN             (1ULL << 16)
-#define PLCTAG_MODULE_OMRON_CIP              (1ULL << 17)
-#define PLCTAG_MODULE_OMRON_COMMON           (1ULL << 18)
-#define PLCTAG_MODULE_OMRON_STANDARD_TAG     (1ULL << 19)
-#define PLCTAG_MODULE_OMRON_RAW_TAG          (1ULL << 20)
-#define PLCTAG_MODULE_MODBUS                 (1ULL << 21)
-#define PLCTAG_MODULE_SYSTEM                 (1ULL << 22)
-#define PLCTAG_MODULE_PLATFORM               (1ULL << 23)
+/* Debug module IDs - these are 64-bit pre-shifted values for bitmask operations */
+typedef enum {
+    PLCTAG_MODULE_LIB                    = (1ULL << 0),
+    PLCTAG_MODULE_INIT                   = (1ULL << 1),
+    PLCTAG_MODULE_VERSION                = (1ULL << 2),
+    PLCTAG_MODULE_UTILS                  = (1ULL << 3),
+    PLCTAG_MODULE_AB_SESSION             = (1ULL << 4),
+    PLCTAG_MODULE_AB_PCCC                = (1ULL << 5),
+    PLCTAG_MODULE_AB_CIP                 = (1ULL << 6),
+    PLCTAG_MODULE_AB_COMMON              = (1ULL << 7),
+    PLCTAG_MODULE_AB_EIP_CIP             = (1ULL << 8),
+    PLCTAG_MODULE_AB_EIP_CIP_SPECIAL     = (1ULL << 9),
+    PLCTAG_MODULE_AB_EIP_LGX_PCCC        = (1ULL << 10),
+    PLCTAG_MODULE_AB_EIP_PLC5_PCCC       = (1ULL << 11),
+    PLCTAG_MODULE_AB_EIP_PLC5_DHP        = (1ULL << 12),
+    PLCTAG_MODULE_AB_EIP_SLC_PCCC        = (1ULL << 13),
+    PLCTAG_MODULE_AB_EIP_SLC_DHP         = (1ULL << 14),
+    PLCTAG_MODULE_AB_ERROR               = (1ULL << 15),
+    PLCTAG_MODULE_OMRON_CONN             = (1ULL << 16),
+    PLCTAG_MODULE_OMRON_CIP              = (1ULL << 17),
+    PLCTAG_MODULE_OMRON_COMMON           = (1ULL << 18),
+    PLCTAG_MODULE_OMRON_STANDARD_TAG     = (1ULL << 19),
+    PLCTAG_MODULE_OMRON_RAW_TAG          = (1ULL << 20),
+    PLCTAG_MODULE_MODBUS                 = (1ULL << 21),
+    PLCTAG_MODULE_SYSTEM                 = (1ULL << 22),
+    PLCTAG_MODULE_PLATFORM               = (1ULL << 23)
+} plctag_debug_module_t;
 
 
 /*
@@ -376,19 +378,17 @@ LIB_EXPORT void plc_tag_shutdown(void);
  * If all is successful, the function will return PLCTAG_STATUS_OK.
  */
 
-#define PLCTAG_EVENT_READ_STARTED       (1)
-#define PLCTAG_EVENT_READ_COMPLETED     (2)
-
-#define PLCTAG_EVENT_WRITE_STARTED      (3)
-#define PLCTAG_EVENT_WRITE_COMPLETED    (4)
-
-#define PLCTAG_EVENT_ABORTED            (5)
-
-#define PLCTAG_EVENT_DESTROYED          (6)
-
-#define PLCTAG_EVENT_CREATED            (7)
-
-#define PLCTAG_EVENT_MAX                (PLCTAG_EVENT_CREATED + 1)
+/* Tag event types */
+typedef enum {
+    PLCTAG_EVENT_READ_STARTED       = 1,
+    PLCTAG_EVENT_READ_COMPLETED     = 2,
+    PLCTAG_EVENT_WRITE_STARTED      = 3,
+    PLCTAG_EVENT_WRITE_COMPLETED    = 4,
+    PLCTAG_EVENT_ABORTED            = 5,
+    PLCTAG_EVENT_DESTROYED          = 6,
+    PLCTAG_EVENT_CREATED            = 7,
+    PLCTAG_EVENT_MAX                = 8
+} plctag_event_t;
 
 LIB_EXPORT int plc_tag_register_callback(int32_t tag_id, void (*tag_callback_func)(int32_t tag_id, int event, int status));
 
