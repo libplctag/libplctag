@@ -49,10 +49,8 @@ elseif(UNIX)
     endif()
 
     # Link math library (modbus_server uses sqrt)
-    find_library(MATH_LIBRARY m)
-    if(MATH_LIBRARY)
-        target_link_libraries(modbus_server ${MATH_LIBRARY})
-    endif()
+    # Use library name directly; CMake and linker will resolve it appropriately
+    target_link_libraries(modbus_server m)
 endif()
 
 # Compiler-specific warnings

@@ -48,10 +48,8 @@ add_executable(ab_server ${AB_SERVER_FILES})
 target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
 
 # Link math library for ab_server (fairness.c uses math.h)
-find_library(MATH_LIBRARY m)
-if(MATH_LIBRARY)
-    target_link_libraries(ab_server PRIVATE ${MATH_LIBRARY})
-endif()
+# Use library name directly; CMake and linker will resolve it appropriately
+target_link_libraries(ab_server PUBLIC m)
 
 # if(STATIC_LINK_OPTIONS)
 #     set(EXTRA_LINK_OPTIONS "${EXTRA_LINK_OPTIONS} ${STATIC_LINK_OPTIONS}")
