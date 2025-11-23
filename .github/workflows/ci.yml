@@ -566,6 +566,7 @@ jobs:
 
     env:
       ARTIFACT: ""
+      VERSION: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -1122,6 +1123,9 @@ jobs:
     needs: [ubuntu_matrix, macos_matrix, windows_msvc_matrix, ubuntu_arm_cross, alpine_native ]
     runs-on: ubuntu-22.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
+
+    env:
+      VERSION: ""
 
     steps:
     - name: Checkout repository
