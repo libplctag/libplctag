@@ -9,7 +9,7 @@ register_storage_t* register_storage_create(size_t num_coils,
                                             size_t num_input_registers) {
     register_storage_t *storage = calloc(1, sizeof(*storage));
     if (!storage) {
-        log_error("Failed to allocate register storage");
+        pdlog(LOG_MODULE_REGISTER_STORAGE, LOG_LEVEL_ERROR, "Failed to allocate register storage");
         return NULL;
     }
 
@@ -17,7 +17,7 @@ register_storage_t* register_storage_create(size_t num_coils,
     if (num_coils > 0) {
         storage->coils = modbus_bitarray_create(num_coils);
         if (!storage->coils) {
-            log_error("Failed to allocate coils (num_coils=%zu)", num_coils);
+            pdlog(LOG_MODULE_REGISTER_STORAGE, LOG_LEVEL_ERROR, "Failed to allocate coils (num_coils=%zu)", num_coils);
             free(storage);
             return NULL;
         }
@@ -27,7 +27,7 @@ register_storage_t* register_storage_create(size_t num_coils,
     if (num_discrete_inputs > 0) {
         storage->discrete_inputs = modbus_bitarray_create(num_discrete_inputs);
         if (!storage->discrete_inputs) {
-            log_error("Failed to allocate discrete inputs (num_discrete_inputs=%zu)", num_discrete_inputs);
+            pdlog(LOG_MODULE_REGISTER_STORAGE, LOG_LEVEL_ERROR, "Failed to allocate discrete inputs (num_discrete_inputs=%zu)", num_discrete_inputs);
             modbus_bitarray_destroy(storage->coils);
             free(storage);
             return NULL;
@@ -38,7 +38,7 @@ register_storage_t* register_storage_create(size_t num_coils,
     if (num_holding_registers > 0) {
         storage->holding_registers = calloc(num_holding_registers, sizeof(uint16_t));
         if (!storage->holding_registers) {
-            log_error("Failed to allocate holding registers (num_holding_registers=%zu)", num_holding_registers);
+            pdlog(LOG_MODULE_REGISTER_STORAGE, LOG_LEVEL_ERROR, "Failed to allocate holding registers (num_holding_registers=%zu)", num_holding_registers);
             modbus_bitarray_destroy(storage->coils);
             modbus_bitarray_destroy(storage->discrete_inputs);
             free(storage);
@@ -51,7 +51,7 @@ register_storage_t* register_storage_create(size_t num_coils,
     if (num_input_registers > 0) {
         storage->input_registers = calloc(num_input_registers, sizeof(uint16_t));
         if (!storage->input_registers) {
-            log_error("Failed to allocate input registers (num_input_registers=%zu)", num_input_registers);
+            pdlog(LOG_MODULE_REGISTER_STORAGE, LOG_LEVEL_ERROR, "Failed to allocate input registers (num_input_registers=%zu)", num_input_registers);
             modbus_bitarray_destroy(storage->coils);
             modbus_bitarray_destroy(storage->discrete_inputs);
             free(storage->holding_registers);
@@ -61,7 +61,7 @@ register_storage_t* register_storage_create(size_t num_coils,
         storage->num_input_registers = num_input_registers;
     }
 
-    log_detail("Register storage created: coils=%zu, di=%zu, hr=%zu, ir=%zu",
+    pdlog(LOG_MODULE_REGISTER_STORAGE, LOG_LEVEL_DETAIL, "Register storage created: coils=%zu, di=%zu, hr=%zu, ir=%zu",
                num_coils, num_discrete_inputs, num_holding_registers, num_input_registers);
 
     return storage;

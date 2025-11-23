@@ -475,7 +475,7 @@ util_err_t socket_accept(socket_t server, socket_t *out_client,
     int nosigpipe = 1;
     if (setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, sizeof(nosigpipe)) != 0) {
         /* Log warning but don't fail - socket is already accepted */
-        log_warn("Failed to set SO_NOSIGPIPE on accepted socket");
+        pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_WARN, "Failed to set SO_NOSIGPIPE on accepted socket");
     }
 #endif
 
@@ -535,8 +535,8 @@ util_err_t socket_send_buf(socket_t sock, buf_t *out) {
 
     const uint8_t *data = buf_read_ptr(out);
 
-    log_spew("socket_send_buf: Attempting to send %zu bytes", to_send);
-    log_bytes_spew(out);
+    pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, "socket_send_buf: Attempting to send %zu bytes", to_send);
+    pdlog_bytes(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, out);
 
 #ifdef _WIN32
     int sent = send(sock, (const char *)data, (int)to_send, 0);
@@ -547,12 +547,12 @@ util_err_t socket_send_buf(socket_t sock, buf_t *out) {
     /* Use MSG_NOSIGNAL to prevent SIGPIPE on Unix */
     ssize_t sent = send(sock, data, to_send, MSG_NOSIGNAL);
     if (sent < 0) {
-        log_error("socket_send_buf: send() failed with errno %d", errno);
+        pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_ERROR, "socket_send_buf: send() failed with errno %d", errno);
         return util_err_from_errno(errno);
     }
 #endif
 
-    log_spew("socket_send_buf: Successfully sent %zd bytes out of %zu", sent, to_send);
+    pdlog(LOG_MODULE_SOCKET, LOG_LEVEL_SPEW, "socket_send_buf: Successfully sent %zd bytes out of %zu", sent, to_send);
 
     /* Advance read cursor by amount actually sent */
     buf_read_advance(out, (size_t)sent);

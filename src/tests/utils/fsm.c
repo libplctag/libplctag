@@ -148,7 +148,7 @@ util_err_t fsm_queue_event(fsm_t *fsm, event_type_t event, util_err_t status, vo
         return UTIL_ENULL;
     }
 
-    log_info("FSM: Queueing event %u with status %s.", event, util_err_str(status));
+    pdlog(LOG_MODULE_FSM, LOG_LEVEL_INFO, "FSM: Queueing event %u with status %s.", event, util_err_str(status));
 
     /* enqueue the event */
     if (!enqueue_event(fsm, event, status, event_ctx)) {
@@ -178,7 +178,7 @@ util_err_t fsm_process_events(fsm_t *fsm) {
         return UTIL_ENULL;
     }
 
-    log_info("FSM: Processing events.");
+    pdlog(LOG_MODULE_FSM, LOG_LEVEL_INFO, "FSM: Processing events.");
 
     /* dequeue all the pending events in FIFO order. */
     while(dequeue_event(fsm, &current_event, &current_status, &current_ctx)) {
@@ -192,14 +192,14 @@ util_err_t fsm_process_events(fsm_t *fsm) {
 
         if (!trans) {
             /* No matching transition; ignore event */
-            log_warn("FSM: No transition for state %u, event %u!", fsm->current_state, current_event);
+            pdlog(LOG_MODULE_FSM, LOG_LEVEL_WARN, "FSM: No transition for state %u, event %u!", fsm->current_state, current_event);
             return UTIL_ENOTFOUND;
         }
 
         /* Execute action while still in current_state */
         fsm_state_id_t old_state = fsm->current_state;
         if (trans->action) {
-            log_detail("FSM: State %u --(%u)--> State %u", fsm->current_state, current_event, trans->next_state);
+            pdlog(LOG_MODULE_FSM, LOG_LEVEL_DETAIL, "FSM: State %u --(%u)--> State %u", fsm->current_state, current_event, trans->next_state);
 
             /* Time action execution */
             t0 = util_time_us();
@@ -207,7 +207,7 @@ util_err_t fsm_process_events(fsm_t *fsm) {
             t1 = util_time_us();
             g_fsm_stats.total_action_time_us += (t1 - t0);
         } else {
-            log_detail("FSM: State %u --(%u)--> State %u (no action)", fsm->current_state, current_event, trans->next_state);
+            pdlog(LOG_MODULE_FSM, LOG_LEVEL_DETAIL, "FSM: State %u --(%u)--> State %u (no action)", fsm->current_state, current_event, trans->next_state);
         }
 
         /* Commit state transition */
@@ -230,13 +230,13 @@ util_err_t fsm_process_events(fsm_t *fsm) {
             g_fsm_stats.total_state_change_cb_time_us += (t1 - t0);
 
             if (cb_rc != UTIL_OK) {
-                log_error("FSM: State change callback failed: %d", cb_rc);
+                pdlog(LOG_MODULE_FSM, LOG_LEVEL_ERROR, "FSM: State change callback failed: %d", cb_rc);
                 /* Continue processing despite callback failure */
             }
         }
     }
 
-    log_info("FSM: All events processed.");
+    pdlog(LOG_MODULE_FSM, LOG_LEVEL_INFO, "FSM: All events processed.");
 
     return UTIL_OK;
 }

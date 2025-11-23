@@ -32,7 +32,7 @@
  ***************************************************************************/
 
 #include "modbus_protocol.h"
-#include "log.h"
+#include "../utils/log.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -143,8 +143,8 @@ static util_err_t handle_read_coils(buf_t *request, buf_t *response,
     /* Allocate response buffer for coils */
     uint16_t tmp_byte_count = (count + 7) / 8;
 
-    if(tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
-        log_warn("Requested coil count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
+    if (tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
+        pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_WARN, "Requested coil count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
         return UTIL_EINVAL;
     }
 
@@ -174,7 +174,7 @@ static util_err_t handle_read_coils(buf_t *request, buf_t *response,
     }
 
     free(coil_data);
-    log_detail("Read %u coils from address %u", count, start_address);
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Read %u coils from address %u", count, start_address);
     return UTIL_OK;
 }
 
@@ -198,8 +198,8 @@ static util_err_t handle_read_discrete_inputs(buf_t *request, buf_t *response,
     /* Allocate response buffer for inputs */
     uint16_t tmp_byte_count = (count + 7) / 8;
 
-    if(tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
-        log_warn("Requested discrete input count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
+    if (tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
+        pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_WARN, "Requested discrete input count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
         return UTIL_EINVAL;
     }
 
@@ -228,7 +228,7 @@ static util_err_t handle_read_discrete_inputs(buf_t *request, buf_t *response,
     }
 
     free(input_data);
-    log_detail("Read %u discrete inputs from address %u", count, start_address);
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Read %u discrete inputs from address %u", count, start_address);
     return UTIL_OK;
 }
 
@@ -281,7 +281,7 @@ static util_err_t handle_read_holding_registers(buf_t *request, buf_t *response,
     }
 
     free(register_data);
-    log_detail("Read %u holding registers from address %u", count, start_address);
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Read %u holding registers from address %u", count, start_address);
     return UTIL_OK;
 }
 
@@ -334,7 +334,7 @@ static util_err_t handle_read_input_registers(buf_t *request, buf_t *response,
     }
 
     free(register_data);
-    log_detail("Read %u input registers from address %u", count, start_address);
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Read %u input registers from address %u", count, start_address);
     return UTIL_OK;
 }
 
@@ -372,7 +372,7 @@ static util_err_t handle_write_single_coil(buf_t *request, buf_t *response,
         return UTIL_EBOUNDS;
     }
 
-    log_detail("Wrote single coil at address %u = %s", address, coil_value ? "ON" : "OFF");
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Wrote single coil at address %u = %s", address, coil_value ? "ON" : "OFF");
     return UTIL_OK;
 }
 
@@ -403,7 +403,7 @@ static util_err_t handle_write_single_register(buf_t *request, buf_t *response,
         return UTIL_EBOUNDS;
     }
 
-    log_detail("Wrote single register at address %u = 0x%04X", address, value);
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Wrote single register at address %u = 0x%04X", address, value);
     return UTIL_OK;
 }
 
@@ -450,7 +450,7 @@ static util_err_t handle_write_multiple_coils(buf_t *request, buf_t *response,
         return UTIL_EBOUNDS;
     }
 
-    log_detail("Wrote %u coils starting at address %u", count, start_address);
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Wrote %u coils starting at address %u", count, start_address);
     return UTIL_OK;
 }
 
@@ -505,7 +505,7 @@ static util_err_t handle_write_multiple_registers(buf_t *request, buf_t *respons
         return UTIL_EBOUNDS;
     }
 
-    log_detail("Wrote %u registers starting at address %u", count, start_address);
+    pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Wrote %u registers starting at address %u", count, start_address);
     return UTIL_OK;
 }
 
@@ -555,7 +555,7 @@ util_err_t modbus_process_request(uint8_t function_code,
             break;
 
         default:
-            log_detail("Unsupported function code: 0x%02X", function_code);
+            pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_DETAIL, "Unsupported function code: 0x%02X", function_code);
             return UTIL_ENOTSUPPORTED;
     }
 

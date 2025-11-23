@@ -31,46 +31,23 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef CONFIG_H
-#define CONFIG_H
+/*
+ * X-macro list of all log modules.
+ * To add a new module, simply add a new LOG_MODULE_ENTRY line here.
+ * 
+ * Format: LOG_MODULE_ENTRY(name, bit_position)
+ * 
+ * The name will be used to create LOG_MODULE_<name> constants.
+ * The bit_position should be unique (0-63) and determines the bit in the mask.
+ */
 
-#include <stdbool.h>
-
-#define MAX_LISTEN_ENDPOINTS 10
-#define DEFAULT_REGISTER_COUNT 100
-
-/* Listening endpoint */
-typedef struct {
-    char host[64];
-    int port;
-} listen_endpoint_t;
-
-/* Server configuration */
-typedef struct {
-    /* Listening endpoints */
-    listen_endpoint_t listen_endpoints[MAX_LISTEN_ENDPOINTS];
-    int num_listen_endpoints;
-    
-    /* Register counts */
-    int num_coils;
-    int num_discrete_inputs;
-    int num_holding_registers;
-    int num_input_registers;
-    
-    /* Debug mode */
-    bool debug;
-} server_config_t;
-
-/* Initialize configuration with defaults */
-void config_init(server_config_t *config);
-
-/* Parse command line arguments */
-bool config_parse_args(server_config_t *config, int argc, char **argv);
-
-/* Print usage information */
-void config_print_usage(const char *program_name);
-
-/* Validate configuration */
-bool config_validate(const server_config_t *config);
-
-#endif /* CONFIG_H */
+LOG_MODULE_ENTRY(SOCKET,           0)
+LOG_MODULE_ENTRY(REACTOR,          1)
+LOG_MODULE_ENTRY(FSM,              2)
+LOG_MODULE_ENTRY(ARGS,             3)
+LOG_MODULE_ENTRY(BUF,              4)
+LOG_MODULE_ENTRY(UTILS,            5)
+LOG_MODULE_ENTRY(MODBUS_PROTOCOL,  6)
+LOG_MODULE_ENTRY(MODBUS_SERVER,    7)
+LOG_MODULE_ENTRY(REGISTER_STORAGE, 8)
+LOG_MODULE_ENTRY(CONFIG,           9)

@@ -332,7 +332,7 @@ static void translate_pollevents(reactor_t *r, size_t index) {
     if ((current & POLLPRI) && !(previous & POLLPRI)) {
         /* OOB data available - treat as error condition since we don't handle OOB */
         /* Most applications don't use OOB, so log and ignore rather than error */
-        log_detail("Socket %d has OOB data (POLLPRI), ignoring", (int)entry->sock);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Socket %d has OOB data (POLLPRI), ignoring", (int)entry->sock);
     }
 #endif
 
@@ -793,7 +793,7 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
     /* Find first available slot, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == INVALID_SOCKET) {
-            log_detail("reactor_add_socket: Adding socket fd=%d at index %zu", sock, i);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_add_socket: Adding socket fd=%d at index %zu", sock, i);
             r->sockets[i].sock = sock;
             r->sockets[i].callback = cb;
             r->sockets[i].context = ctx;
@@ -803,10 +803,10 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
             /* Use provided initial events, or enable all if not provided */
             if (initial_events != NULL) {
                 r->sockets[i].enabled = *initial_events;
-                log_detail("reactor_add_socket: Set initial event mask for socket at index %zu", i);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_add_socket: Set initial event mask for socket at index %zu", i);
             } else {
                 bitarray_set_all(&r->sockets[i].enabled);  /* All events enabled by default */
-                log_detail("reactor_add_socket: Enabled all events for socket at index %zu", i);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_add_socket: Enabled all events for socket at index %zu", i);
             }
 
             bitarray_clear_all(&r->sockets[i].pending_events);
@@ -852,7 +852,7 @@ util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
     /* Find socket, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == sock) {
-            log_detail("reactor_remove_socket: Removing socket fd=%d from index %zu", sock, i);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_remove_socket: Removing socket fd=%d from index %zu", sock, i);
             r->sockets[i].sock = INVALID_SOCKET;
             r->sockets[i].callback = NULL;
             r->sockets[i].context = NULL;
@@ -935,7 +935,7 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
 
             /* Time log_detail */
             t0 = util_time_us();
-            log_spew("reactor_set_event_mask: Found socket fd=%d at index %zu", sock, i);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "reactor_set_event_mask: Found socket fd=%d at index %zu", sock, i);
             t1 = util_time_us();
             g_set_mask_stats.log_time_us += (t1 - t0);
 
@@ -950,7 +950,7 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
 
             /* Time second log_detail */
             t0 = util_time_us();
-            log_spew("reactor_set_event_mask: Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "reactor_set_event_mask: Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
             t1 = util_time_us();
             g_set_mask_stats.log_time_us += (t1 - t0);
 
@@ -1034,13 +1034,13 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         /* Use poll_timeout_ms directly for TICK event generation */
         int timeout = (int)poll_timeout_ms;
 
-        log_detail("reactor_run: Calling poll() with %zu sockets, timeout=%dms", r->active_socket_count, timeout);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: Calling poll() with %zu sockets, timeout=%dms", r->active_socket_count, timeout);
 
         /* Log poll fd setup for listener sockets (typically indices 1 and 2) */
         for (size_t i = 1; i < r->active_socket_count && i < 3; i++) {
             if (r->sockets[i].sock != INVALID_SOCKET) {
                 bool has_events = bitarray_has_any(&r->sockets[i].enabled);
-                log_detail("reactor_run: Socket[%zu] fd=%d events=0x%x has_enabled=%d", i, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: Socket[%zu] fd=%d events=0x%x has_enabled=%d", i, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
             }
         }
 
@@ -1058,10 +1058,10 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         if (ret < 0) {
             /* EINTR is expected and should be retried */
             if (errno == EINTR) {
-                log_detail("reactor_run: poll() interrupted by signal, retrying");
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: poll() interrupted by signal, retrying");
                 continue;
             }
-            log_error("reactor_run: poll() returned error: %d (errno=%d)", ret, errno);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_ERROR, "reactor_run: poll() returned error: %d (errno=%d)", ret, errno);
             return util_err_from_errno(errno);
         }
 #endif
@@ -1070,7 +1070,7 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         g_reactor_stats.total_poll_calls++;
         g_reactor_stats.total_poll_time_us += (t1 - t0);
 
-        log_detail("reactor_run: poll() returned %d ready sockets", ret);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: poll() returned %d ready sockets", ret);
 
         /* Detect timeout to raise TICK events */
         bool poll_timeout_expired = (ret == 0);

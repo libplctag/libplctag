@@ -33,15 +33,15 @@
 
 #include "modbus_protocol.h"
 #include "register_storage.h"
-#include "log.h"
-#include "reactor.h"
-#include "fsm.h"
-#include "socket.h"
-#include "err.h"
-#include "buf.h"
-#include "args.h"
-#include "atomic_utils.h"
-#include "utils.h"
+#include "../utils/log.h"
+#include "../utils/reactor.h"
+#include "../utils/fsm.h"
+#include "../utils/socket.h"
+#include "../utils/err.h"
+#include "../utils/buf.h"
+#include "../utils/args.h"
+#include "../utils/atomic_utils.h"
+#include "../utils/utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -161,21 +161,21 @@ static const char* event_name(event_type_t event) {
  * @brief Dump event mask as readable bits with event names
  */
 static void dump_event_mask(const char *label, bitarray_t mask) {
-    log_spew("Event Mask [%s]: Enabled events:", label);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_SPEW, "Event Mask [%s]: Enabled events:", label);
 
     /* Check reactor events */
     for (int i = 0; i < REACTOR_EVENT_MAX; i++) {
         if (bitarray_test(&mask, (event_type_t)i)) {
-            log_spew("  - Bit %d: %s", i, event_name((event_type_t)i));
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_SPEW, "  - Bit %d: %s", i, event_name((event_type_t)i));
         }
     }
 
     /* Check application events */
     if (bitarray_test(&mask, (event_type_t)APP_EVENT_PROCESS)) {
-        log_spew("  - Bit %d: %s", APP_EVENT_PROCESS, event_name((event_type_t)APP_EVENT_PROCESS));
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_SPEW, "  - Bit %d: %s", APP_EVENT_PROCESS, event_name((event_type_t)APP_EVENT_PROCESS));
     }
     if (bitarray_test(&mask, (event_type_t)APP_EVENT_IDLE)) {
-        log_spew("  - Bit %d: %s", APP_EVENT_IDLE, event_name((event_type_t)APP_EVENT_IDLE));
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_SPEW, "  - Bit %d: %s", APP_EVENT_IDLE, event_name((event_type_t)APP_EVENT_IDLE));
     }
 }
 
@@ -476,7 +476,7 @@ static void print_statistics(server_ctx_t *server) {
         printf("║  state_name():       %8.2f us avg (%5.1f%%)                  \n",
                (double)g_state_cb_stats.state_name_time_us / g_state_cb_stats.calls,
                cb_total > 0 ? ((double)g_state_cb_stats.state_name_time_us / cb_total) * 100 : 0);
-        printf("║  log_info():         %8.2f us avg (%5.1f%%)                  \n",
+        printf("║  log(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, ):         %8.2f us avg (%5.1f%%)                  \n",
                (double)g_state_cb_stats.log_info_time_us / g_state_cb_stats.calls,
                cb_total > 0 ? ((double)g_state_cb_stats.log_info_time_us / cb_total) * 100 : 0);
         printf("║  dump_event_mask():  %8.2f us avg (%5.1f%%)                  \n",
@@ -554,7 +554,7 @@ static void print_statistics(server_ctx_t *server) {
                (double)sm_search / sm_calls, sm_total > 0 ? ((double)sm_search / sm_total) * 100 : 0);
         printf("║  Rebuild poll:       %8.2f us avg (%5.1f%%)                  \n",
                (double)sm_rebuild / sm_calls, sm_total > 0 ? ((double)sm_rebuild / sm_total) * 100 : 0);
-        printf("║  log_detail():       %8.2f us avg (%5.1f%%)                  \n",
+        printf("║  pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, ):       %8.2f us avg (%5.1f%%)                  \n",
                (double)sm_log / sm_calls, sm_total > 0 ? ((double)sm_log / sm_total) * 100 : 0);
         printf("║  Lock release:       %8.2f us avg (%5.1f%%)                  \n",
                (double)sm_unlock / sm_calls, sm_total > 0 ? ((double)sm_unlock / sm_total) * 100 : 0);
@@ -604,13 +604,13 @@ static util_err_t on_client_state_change(fsm_t *fsm, fsm_state_id_t old_state, f
 
     /* Time log_spew */
     t0 = util_time_us();
-    log_spew("Client %s FSM state transition: %s -> %s", client->client_address, old_name, new_name);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_SPEW, "Client %s FSM state transition: %s -> %s", client->client_address, old_name, new_name);
     t1 = util_time_us();
     g_state_cb_stats.log_info_time_us += (t1 - t0);
 
     /* Time dump_event_mask - only call if log level is SPEW */
     t0 = util_time_us();
-    if (log_get_level() >= LOG_LEVEL_SPEW) {
+    if (log_is_enabled(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_SPEW)) {
         dump_event_mask("FSM state change", new_event_mask);
     }
     t1 = util_time_us();
@@ -618,7 +618,7 @@ static util_err_t on_client_state_change(fsm_t *fsm, fsm_state_id_t old_state, f
 
     /* If socket is no longer valid (was closed by client_close_action), don't try to update reactor */
     if (client->socket == INVALID_SOCKET) {
-        log_detail("Socket already closed, skipping event mask update");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Socket already closed, skipping event mask update");
         return UTIL_OK;
     }
 
@@ -629,7 +629,7 @@ static util_err_t on_client_state_change(fsm_t *fsm, fsm_state_id_t old_state, f
     g_state_cb_stats.set_mask_time_us += (t1 - t0);
 
     if (rc != UTIL_OK) {
-        log_error("Failed to set event mask for client %s: %d", client->client_address, rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to set event mask for client %s: %d", client->client_address, rc);
         return rc;
     }
 
@@ -652,7 +652,7 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
     do {
         if (status != UTIL_OK) {
-            log_warn("Read event with error for %s: %d", client->client_address, status);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Read event with error for %s: %d", client->client_address, status);
             fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
             break;
         }
@@ -667,18 +667,18 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
         client->timing.total_recv_time_us += (recv_end - recv_start);
 
         if (rc == UTIL_ECLOSED) {
-            log_info("Client %s disconnected", client->client_address);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Client %s disconnected", client->client_address);
             fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
             break;
         }
 
         if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
-            log_error("Socket recv error from %s: %d", client->client_address, rc);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Socket recv error from %s: %d", client->client_address, rc);
             fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
             break;
         }
 
-        log_detail("Received data from %s, buffer has %zu bytes", client->client_address, buf_read_size(&client->recv_buf));
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Received data from %s, buffer has %zu bytes", client->client_address, buf_read_size(&client->recv_buf));
 
         /* In IDLE state: queue a CAN_READ to process the data in READING_HEADER state */
         if (current_state == APP_STATE_IDLE) {
@@ -707,19 +707,19 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
                     client->expected_length = MBAP_HEADER_SIZE + client->mbap_header.length - 1;
 
                     if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
-                        log_error("PDU too large from %s", client->client_address);
+                        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "PDU too large from %s", client->client_address);
                         fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
                         break;
                     }
 
-                    log_detail("MBAP header parsed, expecting %zu bytes total", client->expected_length);
+                    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "MBAP header parsed, expecting %zu bytes total", client->expected_length);
 
                     /* Queue a CAN_READ event to trigger READING_PDU processing.
                      * This will cause the FSM to transition to READING_PDU and then
                      * process the CAN_READ event in that state. */
                     fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
                 } else {
-                    log_error("Invalid MBAP header from %s", client->client_address);
+                    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Invalid MBAP header from %s", client->client_address);
                     fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
                 }
             }
@@ -731,7 +731,7 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
             if (buf_read_size(&client->recv_buf) >= client->expected_length) {
                 /* Mark recv complete time */
                 client->timing.recv_complete_us = util_time_us();
-                log_detail("Complete message received from %s (%zu bytes)",
+                pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Complete message received from %s (%zu bytes)",
                           client->client_address, buf_read_size(&client->recv_buf));
                 fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
             }
@@ -740,7 +740,7 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
         }
 
         /* Shouldn't reach here - unexpected state */
-        log_error("client_read_action called in unexpected state %u", current_state);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "client_read_action called in unexpected state %u", current_state);
     } while(0);
 
     g_action_stats.read_calls++;
@@ -768,12 +768,12 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
 
         uint8_t function_code;
         if (!buf_read_u8(&request_buf, "function_code", &function_code)) {
-            log_error("Failed to read function code from %s", client->client_address);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to read function code from %s", client->client_address);
             fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
             break;
         }
 
-        log_detail("Processing function code 0x%02X from %s", function_code, client->client_address);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Processing function code 0x%02X from %s", function_code, client->client_address);
 
         /* Process the request */
         util_err_t err = modbus_process_request(function_code, &request_buf,
@@ -783,7 +783,7 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
         client->timing.process_complete_us = util_time_us();
 
         if (err != UTIL_OK && err != UTIL_ENOTSUPPORTED) {
-            log_detail("Request processing returned error: %d", err);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Request processing returned error: %d", err);
         }
 
         /* Queue APP_EVENT_IDLE to trigger immediate transition to SENDING state
@@ -808,7 +808,7 @@ static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
     do {
         if (status != UTIL_OK) {
-            log_warn("Write event with error for %s: %d", client->client_address, status);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Write event with error for %s: %d", client->client_address, status);
             fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
             break;
         }
@@ -827,18 +827,18 @@ static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
         int64_t send_end = util_time_us();
 
         if (rc == UTIL_ECLOSED) {
-            log_info("Client %s connection closed during send", client->client_address);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Client %s connection closed during send", client->client_address);
             fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
             break;
         }
 
         if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
-            log_error("Socket send error to %s: %d", client->client_address, rc);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Socket send error to %s: %d", client->client_address, rc);
             fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
             break;
         }
 
-        log_detail("Sent response to %s", client->client_address);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Sent response to %s", client->client_address);
 
         /* Check if all data was sent */
         if (buf_read_size(&client->send_buf) > 0) {
@@ -906,7 +906,7 @@ static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
     /* Reset timing for next request */
     memset(&client->timing, 0, sizeof(client->timing));
 
-    log_detail("Client %s ready for next request", client->client_address);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client %s ready for next request", client->client_address);
 
     /* The FSM state change callback will update the reactor event mask
      * to enable CAN_READ when transitioning to IDLE state */
@@ -939,7 +939,7 @@ static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_
      * will be delivered to this client. The FSM and context will be cleaned up
      * by the reactor when it finishes processing all pending events. */
 
-    log_detail("Client socket closed");
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client socket closed");
 
     g_action_stats.close_calls++;
     g_action_stats.close_time_us += (util_time_us() - action_start);
@@ -997,7 +997,7 @@ static void socket_event_callback(reactor_t *reactor, socket_t socket,
     /* Context is client_ctx_t* */
     client_ctx_t *client = (client_ctx_t *)context;
     if (!client || !client->fsm) {
-        log_error("Invalid client context in socket event callback");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Invalid client context in socket event callback");
         return;
     }
 
@@ -1005,10 +1005,10 @@ static void socket_event_callback(reactor_t *reactor, socket_t socket,
     fsm_state_id_t current_state = fsm_get_state(client->fsm);
     const fsm_transition_t *trans = fsm_get_transition(client->fsm, current_state, event);
     if (trans && trans->state_name && trans->event_name) {
-        log_detail("Socket event for %s: State=%s, Event=%s, Status=%d",
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Socket event for %s: State=%s, Event=%s, Status=%d",
                    client->client_address, trans->state_name, trans->event_name, status);
     } else {
-        log_detail("Socket event for %s: State=%u, Event=%u, Status=%d",
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Socket event for %s: State=%u, Event=%u, Status=%d",
                    client->client_address, current_state, event, status);
     }
 
@@ -1026,7 +1026,7 @@ static void socket_event_callback(reactor_t *reactor, socket_t socket,
      * If the client close action was triggered, the socket will be INVALID_SOCKET,
      * and we should not attempt any more operations on the client. */
     if (client->socket == INVALID_SOCKET) {
-        log_detail("Client socket is closed, cleaning up client context");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client socket is closed, cleaning up client context");
         if (client->fsm) {
             fsm_destroy(client->fsm);
             client->fsm = NULL;
@@ -1047,12 +1047,12 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     listener_ctx_t *listener = (listener_ctx_t *)context;
 
     if (event != REACTOR_EVENT_CAN_ACCEPT) {
-        log_warn("Unexpected event on listener socket: %u", event);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Unexpected event on listener socket: %u", event);
         return;
     }
 
     if (status != UTIL_OK) {
-        log_warn("Listener socket error: %d", status);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Listener socket error: %d", status);
         return;
     }
 
@@ -1062,12 +1062,12 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     util_err_t rc = socket_accept(listener->listener_socket, &client_socket, &client_addr);
 
     if (rc != UTIL_OK) {
-        log_warn("Failed to accept connection on %s:%u: %d", listener->bind_address, listener->bind_port, rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Failed to accept connection on %s:%u: %d", listener->bind_address, listener->bind_port, rc);
         return;
     }
 
     if (client_socket == INVALID_SOCKET) {
-        log_warn("socket_accept returned INVALID_SOCKET on %s:%u", listener->bind_address, listener->bind_port);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "socket_accept returned INVALID_SOCKET on %s:%u", listener->bind_address, listener->bind_port);
         return;
     }
 
@@ -1075,12 +1075,12 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     char client_addr_str[256];
     socket_address_get_addr_str(&client_addr, client_addr_str, sizeof(client_addr_str));
     uint16_t client_port = socket_address_get_port(&client_addr);
-    log_info("Accepted connection from %s:%u", client_addr_str, client_port);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Accepted connection from %s:%u", client_addr_str, client_port);
 
     /* Create client context */
     client_ctx_t *client = calloc(1, sizeof(*client));
     if (!client) {
-        log_error("Failed to allocate client context");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to allocate client context");
         socket_close(client_socket);
         return;
     }
@@ -1099,7 +1099,7 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     client->fsm = fsm_create(client_transitions, num_client_transitions,
                             APP_STATE_READING_HEADER, 8, on_client_state_change, client);
     if (!client->fsm) {
-        log_error("Failed to create FSM for client");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create FSM for client");
         free(client);
         socket_close(client_socket);
         return;
@@ -1109,7 +1109,7 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     bitarray_t initial_event_mask = fsm_get_event_mask(client->fsm);
     rc = reactor_add_socket(listener->server->reactor, client_socket, socket_event_callback, client, &initial_event_mask);
     if (rc != UTIL_OK) {
-        log_error("Failed to register client socket with reactor: %d", rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to register client socket with reactor: %d", rc);
         fsm_destroy(client->fsm);
         free(client);
         socket_close(client_socket);
@@ -1121,7 +1121,7 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     bitarray_set(&listener_event_mask, REACTOR_EVENT_CAN_ACCEPT);
     rc = reactor_set_event_mask(listener->server->reactor, listener->listener_socket, listener_event_mask);
     if (rc != UTIL_OK) {
-        log_warn("Failed to re-enable listener socket events: %d", rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Failed to re-enable listener socket events: %d", rc);
     }
 }
 
@@ -1144,14 +1144,14 @@ static bool parse_listen_address(const char *listen_str, char *address, uint16_t
     /* Find the colon separating address and port */
     const char *colon = strchr(listen_str, ':');
     if (!colon) {
-        log_error("Invalid listen format (expected address:port): %s", listen_str);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Invalid listen format (expected address:port): %s", listen_str);
         return false;
     }
 
     /* Extract address */
     size_t addr_len = (size_t)(colon - listen_str);
     if (addr_len == 0 || addr_len >= 256) {
-        log_error("Invalid address in listen format: %s", listen_str);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Invalid address in listen format: %s", listen_str);
         return false;
     }
     strncpy(address, listen_str, addr_len);
@@ -1160,7 +1160,7 @@ static bool parse_listen_address(const char *listen_str, char *address, uint16_t
     /* Parse port */
     int port_num = atoi(colon + 1);
     if (port_num <= 0 || port_num > 65535) {
-        log_error("Invalid port in listen format (must be 1-65535): %s", listen_str);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Invalid port in listen format (must be 1-65535): %s", listen_str);
         return false;
     }
     *port = (uint16_t)port_num;
@@ -1171,7 +1171,7 @@ static bool parse_listen_address(const char *listen_str, char *address, uint16_t
 static listener_ctx_t* create_listener(server_ctx_t *server, const char *bind_address, uint16_t bind_port) {
     listener_ctx_t *listener = calloc(1, sizeof(*listener));
     if (!listener) {
-        log_error("Failed to allocate listener context");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to allocate listener context");
         return NULL;
     }
 
@@ -1184,7 +1184,7 @@ static listener_ctx_t* create_listener(server_ctx_t *server, const char *bind_ad
     socket_address_t addr;
     util_err_t rc = socket_address_init(&addr, bind_address, bind_port);
     if (rc != UTIL_OK) {
-        log_error("Failed to initialize socket address: %d", rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to initialize socket address: %d", rc);
         free(listener);
         return NULL;
     }
@@ -1192,19 +1192,19 @@ static listener_ctx_t* create_listener(server_ctx_t *server, const char *bind_ad
     /* Create listener socket */
     listener->listener_socket = socket_create_tcp_server(&addr, 5);
     if (listener->listener_socket == INVALID_SOCKET) {
-        log_error("Failed to create listener socket on %s:%u", bind_address, bind_port);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create listener socket on %s:%u", bind_address, bind_port);
         free(listener);
         return NULL;
     }
 
-    log_info("Listener socket created on %s:%u", bind_address, bind_port);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Listener socket created on %s:%u", bind_address, bind_port);
 
     /* Register listener socket with reactor, enabling only CAN_ACCEPT initially */
     bitarray_t listener_events = BITARRAY_ZERO();
     bitarray_set(&listener_events, REACTOR_EVENT_CAN_ACCEPT);
     rc = reactor_add_socket(server->reactor, listener->listener_socket, listener_event_callback, listener, &listener_events);
     if (rc != UTIL_OK) {
-        log_error("Failed to register listener socket with reactor: %d", rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to register listener socket with reactor: %d", rc);
         socket_close(listener->listener_socket);
         free(listener);
         return NULL;
@@ -1237,7 +1237,7 @@ int main(int argc, char **argv) {
     args_result_t args_result;
 
     /* Set log level for startup messages */
-    log_set_level(LOG_LEVEL_INFO);
+    log_set_all_modules(LOG_LEVEL_INFO);
 
     /* Define command-line arguments
      * Note: args.h uses --flag=value format
@@ -1352,7 +1352,7 @@ int main(int argc, char **argv) {
             return EXIT_FAILURE;
         }
     }
-    log_set_level(log_level);
+    log_set_all_modules(log_level);
 
     /* Extract listen addresses - if none specified, use default */
     size_t listen_count = args_get_count(&args_result, "listen");
@@ -1395,12 +1395,12 @@ int main(int argc, char **argv) {
     size_t num_holding_registers = (size_t)hr_val;
     size_t num_input_registers = (size_t)ir_val;
 
-    log_info("Modbus TCP Server starting...");
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus TCP Server starting...");
 
     /* Create server context */
     server_ctx_t *server = calloc(1, sizeof(*server));
     if (!server) {
-        log_error("Failed to allocate server context");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to allocate server context");
         return EXIT_FAILURE;
     }
 
@@ -1416,28 +1416,28 @@ int main(int argc, char **argv) {
     /* Initialize socket layer */
     util_err_t sock_rc = socket_init();
     if (sock_rc != UTIL_OK) {
-        log_error("Failed to initialize socket layer: %d", sock_rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to initialize socket layer: %d", sock_rc);
         goto cleanup;
     }
 
     /* Create reactor with max 100 sockets */
     server->reactor = reactor_create(100);
     if (!server->reactor) {
-        log_error("Failed to create reactor");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create reactor");
         goto cleanup;
     }
 
-    log_detail("Reactor created");
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Reactor created");
 
     /* Create register storage */
     server->storage = register_storage_create(num_coils, num_discrete_inputs,
                                        num_holding_registers, num_input_registers);
     if (!server->storage) {
-        log_error("Failed to create register storage");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create register storage");
         goto cleanup;
     }
 
-    log_detail("Register storage created: coils=%zu, di=%zu, hr=%zu, ir=%zu",
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Register storage created: coils=%zu, di=%zu, hr=%zu, ir=%zu",
               num_coils, num_discrete_inputs, num_holding_registers, num_input_registers);
 
     /* Create listeners for each listen address */
@@ -1458,7 +1458,7 @@ int main(int argc, char **argv) {
                     break;
                 }
                 if (!parse_listen_address(listen_val.value.string_val, listen_address, &listen_port)) {
-                    log_error("Failed to parse listen address: %s", listen_val.value.string_val);
+                    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to parse listen address: %s", listen_val.value.string_val);
                     goto cleanup;
                 }
             }
@@ -1466,35 +1466,35 @@ int main(int argc, char **argv) {
             /* Create listener for this address */
             listener_ctx_t *listener = create_listener(server, listen_address, listen_port);
             if (!listener) {
-                log_error("Failed to create listener for %s:%u", listen_address, listen_port);
+                pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create listener for %s:%u", listen_address, listen_port);
                 goto cleanup;
             }
 
             listeners[num_listeners++] = listener;
-            log_info("Modbus TCP Server listening on %s:%u", listen_address, listen_port);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus TCP Server listening on %s:%u", listen_address, listen_port);
         }
     } else {
         /* No listen addresses specified, use default */
         listener_ctx_t *listener = create_listener(server, "127.0.0.1", 502);
         if (!listener) {
-            log_error("Failed to create listener");
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create listener");
             goto cleanup;
         }
         listeners[num_listeners++] = listener;
-        log_info("Modbus TCP Server listening on 127.0.0.1:502");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus TCP Server listening on 127.0.0.1:502");
     }
 
     /* Main event loop - reactor_run() blocks until reactor_stop() is called */
     util_err_t reactor_rc = reactor_run(server->reactor, 1000);  /* 1 second TICK period */
     if (reactor_rc != UTIL_OK) {
-        log_error("Reactor error: %d", reactor_rc);
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Reactor error: %d", reactor_rc);
         goto cleanup;
     }
 
     rc = EXIT_SUCCESS;
 
 cleanup:
-    log_info("Cleaning up server");
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Cleaning up server");
 
     /* Destroy all listeners */
     for (size_t i = 0; i < num_listeners; i++) {
@@ -1503,7 +1503,7 @@ cleanup:
         }
     }
 
-    log_info("Server stopped");
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Server stopped");
 
     /* Print statistics after all logging is complete but before freeing server */
     print_statistics(server);

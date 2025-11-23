@@ -167,15 +167,15 @@ static bool parse_value(args_value_t *val, const char *str,
 util_err_t args_parse(int argc, const char *argv[],
                       const args_flag_def_t *flags, size_t flags_count,
                       args_result_t *result) {
-    log_info("args_parse: entry (argc=%d, flags_count=%zu)", argc, flags_count);
+    pdlog(LOG_MODULE_ARGS, LOG_LEVEL_INFO, "args_parse: entry (argc=%d, flags_count=%zu)", argc, flags_count);
 
     if (!argv || !flags || !result) {
-        log_error("args_parse: NULL argument");
+        pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: NULL argument");
         return UTIL_EINVAL;
     }
 
     if (flags_count == 0 || flags_count > ARGS_MAX_FLAGS) {
-        log_error("args_parse: invalid flags_count %zu", flags_count);
+        pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: invalid flags_count %zu", flags_count);
         return UTIL_EINVAL;
     }
 
@@ -189,7 +189,7 @@ util_err_t args_parse(int argc, const char *argv[],
     result->repeat_groups = calloc(flags_count, sizeof(args_repeated_t));
 
     if (!result->values || !result->repeat_groups) {
-        log_error("args_parse: allocation failed");
+        pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: allocation failed");
         args_free(result);
         result->error = UTIL_ERESOURCE;
         return UTIL_ERESOURCE;
@@ -201,7 +201,7 @@ util_err_t args_parse(int argc, const char *argv[],
             result->repeat_groups[i].values = malloc(
                 sizeof(args_value_t) * ARGS_MAX_REPETITIONS);
             if (!result->repeat_groups[i].values) {
-                log_error("args_parse: repeat group allocation failed");
+                pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: repeat group allocation failed");
                 args_free(result);
                 result->error = UTIL_ERESOURCE;
                 return UTIL_ERESOURCE;
@@ -212,11 +212,11 @@ util_err_t args_parse(int argc, const char *argv[],
     // Parse arguments
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
-        log_detail("args_parse: processing arg[%d]=%s", i, arg);
+        pdlog(LOG_MODULE_ARGS, LOG_LEVEL_DETAIL, "args_parse: processing arg[%d]=%s", i, arg);
 
         // Must start with --
         if (arg[0] != '-' || arg[1] != '-') {
-            log_error("args_parse: invalid format '%s'", arg);
+            pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: invalid format '%s'", arg);
             result->error = UTIL_EARGS_INVALID_FORMAT;
             result->error_detail = "arguments must start with '--'";
             result->error_flag_index = -1;
@@ -234,7 +234,7 @@ util_err_t args_parse(int argc, const char *argv[],
             // --flag=value
             size_t name_len = (size_t)(ptrdiff_t)(eq - name_start);
             if (name_len >= sizeof(flag_name)) {
-                log_error("args_parse: flag name too long");
+                pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: flag name too long");
                 result->error = UTIL_EARGS_INVALID_FORMAT;
                 result->error_detail = "flag name too long";
                 return UTIL_EARGS_INVALID_FORMAT;
@@ -245,7 +245,7 @@ util_err_t args_parse(int argc, const char *argv[],
         } else {
             // --flag (no value)
             if (strlen(name_start) >= sizeof(flag_name)) {
-                log_error("args_parse: flag name too long");
+                pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: flag name too long");
                 result->error = UTIL_EARGS_INVALID_FORMAT;
                 result->error_detail = "flag name too long";
                 return UTIL_EARGS_INVALID_FORMAT;
@@ -254,12 +254,12 @@ util_err_t args_parse(int argc, const char *argv[],
             flag_value = NULL;
         }
 
-        log_detail("args_parse: flag_name=%s value=%s", flag_name, flag_value ? flag_value : "(none)");
+        pdlog(LOG_MODULE_ARGS, LOG_LEVEL_DETAIL, "args_parse: flag_name=%s value=%s", flag_name, flag_value ? flag_value : "(none)");
 
         // Find flag definition
         int flag_index = find_flag_index(flags, flags_count, flag_name);
         if (flag_index < 0) {
-            log_error("args_parse: unknown flag '%s'", flag_name);
+            pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: unknown flag '%s'", flag_name);
             result->error = UTIL_EARGS_UNKNOWN_FLAG;
             result->error_detail = "flag not recognized";
             result->error_debug_name = flag_name;
@@ -268,12 +268,12 @@ util_err_t args_parse(int argc, const char *argv[],
         }
 
         const args_flag_def_t *flag_def = &flags[flag_index];
-        log_detail("args_parse: found flag at index %d, debug_name=%s",
+        pdlog(LOG_MODULE_ARGS, LOG_LEVEL_DETAIL, "args_parse: found flag at index %d, debug_name=%s",
                    flag_index, flag_def->debug_name);
 
         // Check for duplicate if ARGS_ONCE
         if (flag_def->repeat == ARGS_ONCE && result->values[flag_index].present) {
-            log_error("args_parse: flag '%s' appears multiple times but is ARGS_ONCE",
+            pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: flag '%s' appears multiple times but is ARGS_ONCE",
                       flag_name);
             result->error = UTIL_EARGS_DUPLICATE;
             result->error_detail = "flag cannot appear multiple times";
@@ -285,7 +285,7 @@ util_err_t args_parse(int argc, const char *argv[],
         // Parse value
         args_value_t val = {0};
         if (!parse_value(&val, flag_value, flag_def)) {
-            log_error("args_parse: failed to parse value '%s' for flag '%s'",
+            pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: failed to parse value '%s' for flag '%s'",
                       flag_value ? flag_value : "(none)", flag_name);
             result->error = UTIL_EARGS_INVALID_VALUE;
             result->error_detail = "value failed to parse for this type";
@@ -294,7 +294,7 @@ util_err_t args_parse(int argc, const char *argv[],
             return UTIL_EARGS_INVALID_VALUE;
         }
 
-        log_detail("args_parse: parsed value successfully for %s", flag_def->debug_name);
+        pdlog(LOG_MODULE_ARGS, LOG_LEVEL_DETAIL, "args_parse: parsed value successfully for %s", flag_def->debug_name);
 
         // Store value
         if (flag_def->repeat == ARGS_ONCE) {
@@ -303,7 +303,7 @@ util_err_t args_parse(int argc, const char *argv[],
             // ARGS_MULTIPLE: append to repeat group
             args_repeated_t *repeat = &result->repeat_groups[flag_index];
             if (repeat->count >= ARGS_MAX_REPETITIONS) {
-                log_error("args_parse: too many repetitions for flag '%s'", flag_name);
+                pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: too many repetitions for flag '%s'", flag_name);
                 result->error = UTIL_ERESOURCE;
                 result->error_detail = "too many values for repeated flag";
                 result->error_debug_name = flag_def->debug_name;
@@ -321,13 +321,13 @@ util_err_t args_parse(int argc, const char *argv[],
             if (!result->values[i].present) {
                 // Flag not provided - check for default or required
                 if (flags[i].default_value.has_default) {
-                    log_detail("args_parse: applying default for flag '%s'", flags[i].name);
+                    pdlog(LOG_MODULE_ARGS, LOG_LEVEL_DETAIL, "args_parse: applying default for flag '%s'", flags[i].name);
                     result->values[i].type = flags[i].type;
                     memcpy(&result->values[i].value, &flags[i].default_value.value,
                            sizeof(result->values[i].value));
                     result->values[i].present = true;
                 } else if (flags[i].required == ARGS_REQUIRED) {
-                    log_error("args_parse: required flag '%s' not provided", flags[i].name);
+                    pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: required flag '%s' not provided", flags[i].name);
                     result->error = UTIL_EARGS_MISSING_REQUIRED;
                     result->error_detail = "required flag not provided";
                     result->error_debug_name = flags[i].debug_name;
@@ -339,7 +339,7 @@ util_err_t args_parse(int argc, const char *argv[],
             // ARGS_MULTIPLE flag - check for missing required
             if (result->repeat_groups[i].count == 0) {
                 if (flags[i].required == ARGS_REQUIRED && !flags[i].default_value.has_default) {
-                    log_error("args_parse: required flag '%s' not provided", flags[i].name);
+                    pdlog(LOG_MODULE_ARGS, LOG_LEVEL_ERROR, "args_parse: required flag '%s' not provided", flags[i].name);
                     result->error = UTIL_EARGS_MISSING_REQUIRED;
                     result->error_detail = "required flag not provided";
                     result->error_debug_name = flags[i].debug_name;
@@ -351,7 +351,7 @@ util_err_t args_parse(int argc, const char *argv[],
         }
     }
 
-    log_info("args_parse: exit (success)");
+    pdlog(LOG_MODULE_ARGS, LOG_LEVEL_INFO, "args_parse: exit (success)");
     return UTIL_OK;
 }
 
@@ -571,7 +571,7 @@ void args_print_flags(const args_flag_def_t *flags, size_t flags_count) {
         return;
     }
 
-    log_info("args_print_flags: enter");
+    pdlog(LOG_MODULE_ARGS, LOG_LEVEL_INFO, "args_print_flags: enter");
 
     for (size_t i = 0; i < flags_count; i++) {
         const args_flag_def_t *flag = &flags[i];
@@ -583,5 +583,5 @@ void args_print_flags(const args_flag_def_t *flags, size_t flags_count) {
                flag->name, required_str, multiple_str, description);
     }
 
-    log_info("args_print_flags: exit");
+    pdlog(LOG_MODULE_ARGS, LOG_LEVEL_INFO, "args_print_flags: exit");
 }
