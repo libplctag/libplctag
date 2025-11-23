@@ -41,3 +41,7 @@ DEBUG_MODULE_ENTRY(MODBUS,                 21)
 
 /* System */
 DEBUG_MODULE_ENTRY(SYSTEM,                 22)
+
+/* Platform/HAL Code */
+DEBUG_MODULE_ENTRY(PLATFORM,               23)
+

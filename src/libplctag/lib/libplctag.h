@@ -155,7 +155,7 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level);
  * "LIB", "INIT", "VERSION", "UTILS", "AB_SESSION", "AB_PCCC", "AB_CIP", "AB_COMMON",
  * "AB_EIP_CIP", "AB_EIP_CIP_SPECIAL", "AB_EIP_LGX_PCCC", "AB_EIP_PLC5_PCCC", "AB_EIP_PLC5_DHP",
  * "AB_EIP_SLC_PCCC", "AB_EIP_SLC_DHP", "AB_ERROR", "OMRON_CONN", "OMRON_CIP", "OMRON_COMMON",
- * "OMRON_STANDARD_TAG", "OMRON_RAW_TAG", "MODBUS", "SYSTEM"
+ * "OMRON_STANDARD_TAG", "OMRON_RAW_TAG", "MODBUS", "SYSTEM", and "PLATFORM".
  *
  * The debug_level argument takes the same values as plc_tag_set_debug_level().
  *
