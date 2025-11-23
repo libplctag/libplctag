@@ -98,7 +98,7 @@ typedef enum {
 } plc_type_t;
 
 /* Define the context that is passed around. */
-typedef struct {
+typedef struct plc_s {
     plc_type_t plc_type;
     const char* port_str;
     uint8_t path[20];
