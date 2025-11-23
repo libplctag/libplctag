@@ -3,6 +3,13 @@ message("Building libplctag library.")
 # generate version file from CMake info.
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h" @ONLY)
 
+# Parse libplctag.h to generate internal debug constants
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ParseLibplctagHeader.cmake")
+parse_libplctag_header(
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_generated.h"
+)
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
     set(EXTRA_LINK_FLAGS "${EXTRA_LINK_FLAGS} ${EXTRA_LINK_FLAGS_DEBUG}")

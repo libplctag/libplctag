@@ -43,20 +43,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define DEBUG_NONE      (0)
-#define DEBUG_ERROR     (1)
-#define DEBUG_WARN      (2)
-#define DEBUG_INFO      (3)
-#define DEBUG_DETAIL    (4)
-#define DEBUG_SPEW      (5)
-#define DEBUG_END       (6)
-
-/* Module definitions - generated from debug_modules.def */
-typedef enum {
-#define DEBUG_MODULE_ENTRY(name, bit) DEBUG_MODULE_##name = (1ULL << bit),
-#include "debug_modules.def"
-#undef DEBUG_MODULE_ENTRY
-} debug_module_t;
+/* Generated debug constants - parsed from libplctag.h at build time */
+#include "debug_generated.h"
 
 typedef uint64_t debug_module_mask_t;
 

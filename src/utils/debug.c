@@ -56,16 +56,7 @@ static lock_t logger_callback_lock = LOCK_INIT;
 static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
 
 
-/*
- * Module name lookup table - generated from debug_modules.def
- */
-static const char *debug_module_names[] = {
-#define DEBUG_MODULE_ENTRY(name, bit) [bit] = #name,
-#include "debug_modules.def"
-#undef DEBUG_MODULE_ENTRY
-};
-
-#define DEBUG_MODULE_COUNT (sizeof(debug_module_names) / sizeof(debug_module_names[0]))
+/* Module name lookup table is now defined in debug_generated.h */
 
 /*
  * Per-module debug levels - array indexed by bit position
