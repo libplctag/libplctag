@@ -176,6 +176,26 @@ util_err_t fsm_process_events(fsm_t *fsm);
  */
 util_err_t fsm_dispatch_event(fsm_t *fsm, event_type_t event, util_err_t status, void *event_ctx);
 
+/**
+ * @brief Get FSM performance statistics.
+ *
+ * Returns accumulated timing statistics across all FSM instances.
+ * Any output parameter may be NULL to skip that statistic.
+ *
+ * @param events Total events processed
+ * @param lookup_us Total time in transition lookup (microseconds)
+ * @param action_us Total time in action execution (microseconds)
+ * @param mask_gen_us Total time in event mask generation (microseconds)
+ * @param state_cb_us Total time in state change callbacks (microseconds)
+ */
+void fsm_get_stats(int64_t *events, int64_t *lookup_us, int64_t *action_us,
+                   int64_t *mask_gen_us, int64_t *state_cb_us);
+
+/**
+ * @brief Reset FSM performance statistics to zero.
+ */
+void fsm_reset_stats(void);
+
 
 #ifdef __cplusplus
 }

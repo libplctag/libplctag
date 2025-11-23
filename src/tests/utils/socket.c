@@ -535,10 +535,8 @@ util_err_t socket_send_buf(socket_t sock, buf_t *out) {
 
     const uint8_t *data = buf_read_ptr(out);
 
-    log_info("socket_send_buf: Attempting to send %zu bytes", to_send);
-    log_info("Data to send (hex): %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-             data[0], data[1], data[2], data[3], data[4], data[5],
-             data[6], data[7], data[8], data[9], data[10], data[11]);
+    log_spew("socket_send_buf: Attempting to send %zu bytes", to_send);
+    log_bytes_spew(out);
 
 #ifdef _WIN32
     int sent = send(sock, (const char *)data, (int)to_send, 0);
@@ -554,7 +552,7 @@ util_err_t socket_send_buf(socket_t sock, buf_t *out) {
     }
 #endif
 
-    log_info("socket_send_buf: Successfully sent %zd bytes out of %zu", sent, to_send);
+    log_spew("socket_send_buf: Successfully sent %zd bytes out of %zu", sent, to_send);
 
     /* Advance read cursor by amount actually sent */
     buf_read_advance(out, (size_t)sent);

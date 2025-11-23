@@ -26,6 +26,30 @@
 #include <pthread.h>
 #endif
 
+/* Global reactor statistics for performance analysis */
+static struct {
+    int64_t total_poll_calls;
+    int64_t total_poll_time_us;
+    int64_t total_translate_time_us;
+    int64_t total_deliver_time_us;
+    int64_t total_events_delivered;
+    int64_t total_callback_time_us;
+} g_reactor_stats = {0};
+
+void reactor_get_stats(int64_t *poll_calls, int64_t *poll_us, int64_t *translate_us,
+                       int64_t *deliver_us, int64_t *events, int64_t *callback_us) {
+    if (poll_calls) *poll_calls = g_reactor_stats.total_poll_calls;
+    if (poll_us) *poll_us = g_reactor_stats.total_poll_time_us;
+    if (translate_us) *translate_us = g_reactor_stats.total_translate_time_us;
+    if (deliver_us) *deliver_us = g_reactor_stats.total_deliver_time_us;
+    if (events) *events = g_reactor_stats.total_events_delivered;
+    if (callback_us) *callback_us = g_reactor_stats.total_callback_time_us;
+}
+
+void reactor_reset_stats(void) {
+    memset(&g_reactor_stats, 0, sizeof(g_reactor_stats));
+}
+
 /* ================================================================
  * Internal Data Structures
  * ================================================================ */
@@ -431,7 +455,12 @@ static void deliver_event(reactor_t *r, size_t socket_index, event_type_t event,
     rebuild_pollfds_for_socket(r, socket_index);
 
     if (entry->callback != NULL) {
+        /* Time the callback execution */
+        int64_t cb_start = util_time_us();
         entry->callback(r, entry->sock, event, status, entry->context);
+        int64_t cb_end = util_time_us();
+        g_reactor_stats.total_events_delivered++;
+        g_reactor_stats.total_callback_time_us += (cb_end - cb_start);
     }
 }
 
@@ -853,40 +882,100 @@ util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
     return UTIL_ENOTFOUND;
 }
 
+/* Statistics for reactor_set_event_mask breakdown */
+static struct {
+    int64_t calls;
+    int64_t lock_time_us;
+    int64_t search_time_us;
+    int64_t rebuild_time_us;
+    int64_t log_time_us;
+    int64_t unlock_time_us;
+    int64_t wake_time_us;
+} g_set_mask_stats = {0};
+
+void reactor_get_set_mask_stats(int64_t *calls, int64_t *lock_us, int64_t *search_us,
+                                 int64_t *rebuild_us, int64_t *log_us, int64_t *unlock_us,
+                                 int64_t *wake_us) {
+    if (calls) *calls = g_set_mask_stats.calls;
+    if (lock_us) *lock_us = g_set_mask_stats.lock_time_us;
+    if (search_us) *search_us = g_set_mask_stats.search_time_us;
+    if (rebuild_us) *rebuild_us = g_set_mask_stats.rebuild_time_us;
+    if (log_us) *log_us = g_set_mask_stats.log_time_us;
+    if (unlock_us) *unlock_us = g_set_mask_stats.unlock_time_us;
+    if (wake_us) *wake_us = g_set_mask_stats.wake_time_us;
+}
+
 util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_mask) {
+    int64_t t0, t1;
+
     if (r == NULL || sock == INVALID_SOCKET) {
         return UTIL_EINVAL;
     }
 
+    g_set_mask_stats.calls++;
+
+    /* Time lock acquisition */
+    t0 = util_time_us();
 #ifdef _WIN32
     EnterCriticalSection(&r->lock);
 #else
     pthread_mutex_lock(&r->lock);
 #endif
+    t1 = util_time_us();
+    g_set_mask_stats.lock_time_us += (t1 - t0);
+
+    /* Time socket search */
+    t0 = util_time_us();
 
     /* Find socket, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == sock) {
-            log_detail("reactor_set_event_mask: Found socket fd=%d at index %zu", sock, i);
+            t1 = util_time_us();
+            g_set_mask_stats.search_time_us += (t1 - t0);
+
+            /* Time log_detail */
+            t0 = util_time_us();
+            log_spew("reactor_set_event_mask: Found socket fd=%d at index %zu", sock, i);
+            t1 = util_time_us();
+            g_set_mask_stats.log_time_us += (t1 - t0);
+
             /* Atomically replace the entire event mask */
             r->sockets[i].enabled = event_mask;
 
-            /* Rebuild poll events for this socket */
+            /* Time rebuild */
+            t0 = util_time_us();
             rebuild_pollfds_for_socket(r, i);
-            log_detail("reactor_set_event_mask: Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
+            t1 = util_time_us();
+            g_set_mask_stats.rebuild_time_us += (t1 - t0);
 
+            /* Time second log_detail */
+            t0 = util_time_us();
+            log_spew("reactor_set_event_mask: Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
+            t1 = util_time_us();
+            g_set_mask_stats.log_time_us += (t1 - t0);
+
+            /* Time unlock */
+            t0 = util_time_us();
 #ifdef _WIN32
             LeaveCriticalSection(&r->lock);
 #else
             pthread_mutex_unlock(&r->lock);
 #endif
+            t1 = util_time_us();
+            g_set_mask_stats.unlock_time_us += (t1 - t0);
 
-            /* Wake the reactor to restart poll() with the new event mask */
+            /* Time wake pipe */
+            t0 = util_time_us();
             tickle_wake_pipe(r);
+            t1 = util_time_us();
+            g_set_mask_stats.wake_time_us += (t1 - t0);
 
             return UTIL_OK;
         }
     }
+
+    t1 = util_time_us();
+    g_set_mask_stats.search_time_us += (t1 - t0);
 
 #ifdef _WIN32
     LeaveCriticalSection(&r->lock);
@@ -934,6 +1023,8 @@ util_err_t reactor_wake(reactor_t *r) {
  * ================================================================ */
 
 util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
+    int64_t t0, t1;
+
     if (r == NULL) {
         return UTIL_EINVAL;
     }
@@ -952,6 +1043,9 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
                 log_detail("reactor_run: Socket[%zu] fd=%d events=0x%x has_enabled=%d", i, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
             }
         }
+
+        /* Time the poll() call */
+        t0 = util_time_us();
 
         /* Poll for socket activity */
 #ifdef _WIN32
@@ -972,10 +1066,17 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         }
 #endif
 
+        t1 = util_time_us();
+        g_reactor_stats.total_poll_calls++;
+        g_reactor_stats.total_poll_time_us += (t1 - t0);
+
         log_detail("reactor_run: poll() returned %d ready sockets", ret);
 
         /* Detect timeout to raise TICK events */
         bool poll_timeout_expired = (ret == 0);
+
+        /* Time translate_pollevents */
+        t0 = util_time_us();
 
         /* Translate poll results to pending events */
         for (size_t i = 0; i < r->active_socket_count; i++) {
@@ -989,6 +1090,9 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
                 translate_pollevents(r, i);
             }
         }
+
+        t1 = util_time_us();
+        g_reactor_stats.total_translate_time_us += (t1 - t0);
 
         /* Raise TICK events for all sockets with TICK enabled (if poll timed out) */
         if (poll_timeout_expired) {
@@ -1009,8 +1113,14 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
 #endif
         }
 
+        /* Time event delivery */
+        t0 = util_time_us();
+
         /* Deliver pending events in priority order */
         deliver_pending_events(r);
+
+        t1 = util_time_us();
+        g_reactor_stats.total_deliver_time_us += (t1 - t0);
     }
 
     /* After shutdown, deliver SHUTDOWN events to all sockets */

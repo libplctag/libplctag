@@ -272,6 +272,42 @@ util_err_t reactor_stop(reactor_t *r);
  */
 util_err_t reactor_wake(reactor_t *r);
 
+/**
+ * @brief Get reactor performance statistics.
+ *
+ * Returns accumulated timing statistics for the reactor.
+ * Any output parameter may be NULL to skip that statistic.
+ *
+ * @param poll_calls Total number of poll() calls
+ * @param poll_us Total time in poll() (microseconds)
+ * @param translate_us Total time translating poll events (microseconds)
+ * @param deliver_us Total time in deliver_pending_events (microseconds)
+ * @param events Total events delivered to callbacks
+ * @param callback_us Total time in callbacks (microseconds)
+ */
+void reactor_get_stats(int64_t *poll_calls, int64_t *poll_us, int64_t *translate_us,
+                       int64_t *deliver_us, int64_t *events, int64_t *callback_us);
+
+/**
+ * @brief Reset reactor performance statistics to zero.
+ */
+void reactor_reset_stats(void);
+
+/**
+ * @brief Get detailed timing breakdown for reactor_set_event_mask().
+ *
+ * @param calls Total number of calls
+ * @param lock_us Time acquiring mutex lock
+ * @param search_us Time searching for socket
+ * @param rebuild_us Time rebuilding poll events
+ * @param log_us Time in log_detail calls
+ * @param unlock_us Time releasing mutex lock
+ * @param wake_us Time waking the reactor
+ */
+void reactor_get_set_mask_stats(int64_t *calls, int64_t *lock_us, int64_t *search_us,
+                                 int64_t *rebuild_us, int64_t *log_us, int64_t *unlock_us,
+                                 int64_t *wake_us);
+
 #ifdef __cplusplus
 }
 #endif

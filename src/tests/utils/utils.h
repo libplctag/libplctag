@@ -24,6 +24,13 @@ typedef uint32_t event_type_t;
  */
 extern uint64_t util_get_time_ms(void);
 
+/**
+ * @brief Get current time in microseconds.
+ *
+ * Used for performance analysis and latency measurements.
+ */
+extern int64_t util_time_us(void);
+
 
 
 #ifdef __cplusplus

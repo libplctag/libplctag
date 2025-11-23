@@ -41,17 +41,49 @@
 #include "buf.h"
 #include "args.h"
 #include "atomic_utils.h"
+#include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
-#include <time.h>
-#include <sys/time.h>
+#include <math.h>
 
 /* Forward declarations */
 typedef struct server_ctx_s server_ctx_t;
 typedef struct client_ctx_s client_ctx_t;
 typedef struct listener_ctx_s listener_ctx_t;
+
+/* Histogram bucket boundaries (in microseconds) */
+#define HIST_BUCKET_COUNT 8
+static const int64_t hist_boundaries[HIST_BUCKET_COUNT] = {
+    100,    /* 0-100us */
+    500,    /* 100-500us */
+    1000,   /* 500us-1ms */
+    2000,   /* 1-2ms */
+    5000,   /* 2-5ms */
+    10000,  /* 5-10ms */
+    50000,  /* 10-50ms */
+    INT64_MAX  /* >50ms */
+};
+
+/* Server statistics structure */
+typedef struct {
+    /* Total request count and timing */
+    atomic_int64_t total_requests;
+    atomic_int64_t total_response_time_us;
+    atomic_int64_t total_response_time_sq_us;  /* Sum of squares for std dev */
+    atomic_int64_t min_response_time_us;
+    atomic_int64_t max_response_time_us;
+
+    /* Per-component timing breakdown */
+    atomic_int64_t total_recv_time_us;
+    atomic_int64_t total_process_time_us;
+    atomic_int64_t total_send_time_us;
+    atomic_int64_t total_overhead_time_us;  /* FSM/dispatch overhead */
+
+    /* Histogram buckets for response time distribution */
+    atomic_int64_t hist_buckets[HIST_BUCKET_COUNT];
+} server_stats_t;
 
 /* Server context - holds reactor and storage (accessed via signal handler) */
 struct server_ctx_s {
@@ -59,11 +91,8 @@ struct server_ctx_s {
     register_storage_t *storage;
 
     /* Statistics tracking */
-    struct timeval start_time;
-    atomic_int64_t total_requests;
-    atomic_int64_t total_response_time_us;  /* Sum of all response times in microseconds */
-    atomic_int64_t min_response_time_us;
-    atomic_int64_t max_response_time_us;
+    int64_t start_time_us;
+    server_stats_t stats;
 };
 
 /* Single static variable for signal handler - this is necessary because
@@ -132,21 +161,21 @@ static const char* event_name(event_type_t event) {
  * @brief Dump event mask as readable bits with event names
  */
 static void dump_event_mask(const char *label, bitarray_t mask) {
-    log_detail("Event Mask [%s]: Enabled events:", label);
+    log_spew("Event Mask [%s]: Enabled events:", label);
 
     /* Check reactor events */
     for (int i = 0; i < REACTOR_EVENT_MAX; i++) {
         if (bitarray_test(&mask, (event_type_t)i)) {
-            log_detail("  - Bit %d: %s", i, event_name((event_type_t)i));
+            log_spew("  - Bit %d: %s", i, event_name((event_type_t)i));
         }
     }
 
     /* Check application events */
     if (bitarray_test(&mask, (event_type_t)APP_EVENT_PROCESS)) {
-        log_detail("  - Bit %d: %s", APP_EVENT_PROCESS, event_name((event_type_t)APP_EVENT_PROCESS));
+        log_spew("  - Bit %d: %s", APP_EVENT_PROCESS, event_name((event_type_t)APP_EVENT_PROCESS));
     }
     if (bitarray_test(&mask, (event_type_t)APP_EVENT_IDLE)) {
-        log_detail("  - Bit %d: %s", APP_EVENT_IDLE, event_name((event_type_t)APP_EVENT_IDLE));
+        log_spew("  - Bit %d: %s", APP_EVENT_IDLE, event_name((event_type_t)APP_EVENT_IDLE));
     }
 }
 
@@ -157,6 +186,19 @@ struct listener_ctx_s {
     char bind_address[256];
     uint16_t bind_port;
 };
+
+/* Per-request timing breakdown */
+typedef struct {
+    int64_t request_start_us;      /* When first byte received */
+    int64_t recv_complete_us;      /* When full request received */
+    int64_t process_start_us;      /* When processing started */
+    int64_t process_complete_us;   /* When processing completed */
+    int64_t send_start_us;         /* When send started */
+    int64_t send_complete_us;      /* When send completed */
+
+    /* Accumulated times for multi-recv scenarios */
+    int64_t total_recv_time_us;
+} request_timing_t;
 
 /* Client context - one per connected client */
 struct client_ctx_s {
@@ -178,47 +220,351 @@ struct client_ctx_s {
     /* Expected total message length */
     size_t expected_length;
 
-    /* Timestamp when request was received (for response time tracking) */
-    struct timeval request_start_time;
+    /* Per-request timing for latency breakdown */
+    request_timing_t timing;
 };
 
 /* ============================================================================
  * Signal Handling
  * ============================================================================ */
 
+/* Helper to get histogram bucket label */
+static const char* hist_bucket_label(int bucket) {
+    switch (bucket) {
+        case 0: return "0-100us";
+        case 1: return "100-500us";
+        case 2: return "500us-1ms";
+        case 3: return "1-2ms";
+        case 4: return "2-5ms";
+        case 5: return "5-10ms";
+        case 6: return "10-50ms";
+        case 7: return ">50ms";
+        default: return "unknown";
+    }
+}
+
+/* Helper to update histogram bucket */
+static void update_histogram(server_stats_t *stats, int64_t response_time_us) {
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        if (response_time_us <= hist_boundaries[i]) {
+            atomic_add_int64(&stats->hist_buckets[i], 1);
+            break;
+        }
+    }
+}
+
+/* Helper to atomically update minimum value */
+static void update_min(atomic_int64_t *min_val, int64_t new_val) {
+    int64_t current;
+    do {
+        current = atomic_get_int64(min_val);
+        if (current != 0 && new_val >= current) {
+            break;
+        }
+    } while (atomic_compare_and_set_int64(min_val, current, new_val) != current);
+}
+
+/* Helper to atomically update maximum value */
+static void update_max(atomic_int64_t *max_val, int64_t new_val) {
+    int64_t current;
+    do {
+        current = atomic_get_int64(max_val);
+        if (new_val <= current) {
+            break;
+        }
+    } while (atomic_compare_and_set_int64(max_val, current, new_val) != current);
+}
+
 static void signal_handler(int signum) {
     (void)signum;
-
-    /* Print statistics before stopping */
-    if (g_server) {
-        struct timeval end_time;
-        gettimeofday(&end_time, NULL);
-        double runtime_sec = (end_time.tv_sec - g_server->start_time.tv_sec) +
-                             (end_time.tv_usec - g_server->start_time.tv_usec) / 1000000.0;
-
-        int64_t total_reqs = atomic_get_int64(&g_server->total_requests);
-        int64_t total_time = atomic_get_int64(&g_server->total_response_time_us);
-        int64_t min_time = atomic_get_int64(&g_server->min_response_time_us);
-        int64_t max_time = atomic_get_int64(&g_server->max_response_time_us);
-
-        printf("\n=== Modbus Server Statistics ===\n");
-        printf("Runtime: %.2f seconds\n", runtime_sec);
-        printf("Total requests: %lld\n", (long long)total_reqs);
-        if (runtime_sec > 0) {
-            printf("Requests/sec: %.2f\n", total_reqs / runtime_sec);
-        }
-        if (total_reqs > 0) {
-            printf("Avg response time: %.2f us\n", (double)total_time / total_reqs);
-        }
-        printf("Min response time: %lld us\n", (long long)min_time);
-        printf("Max response time: %lld us\n", (long long)max_time);
-        printf("=================================\n");
-    }
 
     /* Stop the reactor if it's been created */
     if (g_server && g_server->reactor) {
         reactor_stop(g_server->reactor);
     }
+}
+
+/* Statistics for state change callback breakdown (defined here for print_statistics access) */
+static struct {
+    int64_t calls;
+    int64_t state_name_time_us;
+    int64_t log_info_time_us;
+    int64_t dump_mask_time_us;
+    int64_t set_mask_time_us;
+} g_state_cb_stats = {0};
+
+/* Statistics for action function timing breakdown */
+static struct {
+    int64_t read_calls;
+    int64_t read_time_us;
+    int64_t process_calls;
+    int64_t process_time_us;
+    int64_t send_calls;
+    int64_t send_time_us;
+    int64_t idle_calls;
+    int64_t idle_time_us;
+    int64_t close_calls;
+    int64_t close_time_us;
+} g_action_stats = {0};
+
+/* Print all performance statistics */
+static void print_statistics(server_ctx_t *server) {
+    if (!server) return;
+
+    int64_t end_time_us = util_time_us();
+    double runtime_sec = (double)(end_time_us - server->start_time_us) / 1000000.0;
+
+    server_stats_t *stats = &server->stats;
+    int64_t total_reqs = atomic_get_int64(&stats->total_requests);
+    int64_t total_time = atomic_get_int64(&stats->total_response_time_us);
+    int64_t total_time_sq = atomic_get_int64(&stats->total_response_time_sq_us);
+    int64_t min_time = atomic_get_int64(&stats->min_response_time_us);
+    int64_t max_time = atomic_get_int64(&stats->max_response_time_us);
+
+    /* Per-component times */
+    int64_t total_recv = atomic_get_int64(&stats->total_recv_time_us);
+    int64_t total_process = atomic_get_int64(&stats->total_process_time_us);
+    int64_t total_send = atomic_get_int64(&stats->total_send_time_us);
+    int64_t total_overhead = atomic_get_int64(&stats->total_overhead_time_us);
+
+    printf("\n");
+    printf("╔══════════════════════════════════════════════════════════════════╗\n");
+    printf("║             MODBUS SERVER PERFORMANCE STATISTICS                 ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║ Runtime: %.2f seconds                                            \n", runtime_sec);
+    printf("║ Total requests: %lld                                              \n", (long long)total_reqs);
+    if (runtime_sec > 0) {
+        printf("║ Throughput: %.2f requests/sec                                    \n", total_reqs / runtime_sec);
+    }
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║                     RESPONSE TIME SUMMARY                        ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    if (total_reqs > 0) {
+        double mean = (double)total_time / total_reqs;
+        double variance = ((double)total_time_sq / total_reqs) - (mean * mean);
+        double stddev = variance > 0 ? sqrt(variance) : 0.0;
+
+        printf("║ Average:  %8.2f us                                            \n", mean);
+        printf("║ Std Dev:  %8.2f us                                            \n", stddev);
+        printf("║ Minimum:  %8lld us                                            \n", (long long)min_time);
+        printf("║ Maximum:  %8lld us                                            \n", (long long)max_time);
+
+        printf("╠══════════════════════════════════════════════════════════════════╣\n");
+        printf("║                    LATENCY BREAKDOWN (avg)                       ║\n");
+        printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+        double avg_recv = (double)total_recv / total_reqs;
+        double avg_process = (double)total_process / total_reqs;
+        double avg_send = (double)total_send / total_reqs;
+        double avg_overhead = (double)total_overhead / total_reqs;
+        double total_avg = avg_recv + avg_process + avg_send + avg_overhead;
+
+        /* Sort components by time to find top 3 */
+        struct { const char *name; double time; double pct; } components[4] = {
+            {"Recv (socket)", avg_recv, total_avg > 0 ? (avg_recv / total_avg) * 100 : 0},
+            {"Process (modbus)", avg_process, total_avg > 0 ? (avg_process / total_avg) * 100 : 0},
+            {"Send (socket)", avg_send, total_avg > 0 ? (avg_send / total_avg) * 100 : 0},
+            {"Overhead (FSM)", avg_overhead, total_avg > 0 ? (avg_overhead / total_avg) * 100 : 0}
+        };
+
+        /* Simple bubble sort to rank by time */
+        for (int i = 0; i < 3; i++) {
+            for (int j = i + 1; j < 4; j++) {
+                if (components[j].time > components[i].time) {
+                    const char *tmp_name = components[i].name;
+                    double tmp_time = components[i].time;
+                    double tmp_pct = components[i].pct;
+                    components[i].name = components[j].name;
+                    components[i].time = components[j].time;
+                    components[i].pct = components[j].pct;
+                    components[j].name = tmp_name;
+                    components[j].time = tmp_time;
+                    components[j].pct = tmp_pct;
+                }
+            }
+        }
+
+        printf("║  TOP 3 LATENCY SOURCES:                                          \n");
+        for (int i = 0; i < 3; i++) {
+            printf("║    %d. %-18s %8.2f us (%5.1f%%)                       \n",
+                   i + 1, components[i].name, components[i].time, components[i].pct);
+        }
+
+        printf("║                                                                  \n");
+        printf("║  All components:                                                 \n");
+        printf("║    Recv:     %8.2f us (%5.1f%%)                               \n", avg_recv, total_avg > 0 ? (avg_recv / total_avg) * 100 : 0);
+        printf("║    Process:  %8.2f us (%5.1f%%)                               \n", avg_process, total_avg > 0 ? (avg_process / total_avg) * 100 : 0);
+        printf("║    Send:     %8.2f us (%5.1f%%)                               \n", avg_send, total_avg > 0 ? (avg_send / total_avg) * 100 : 0);
+        printf("║    Overhead: %8.2f us (%5.1f%%)                               \n", avg_overhead, total_avg > 0 ? (avg_overhead / total_avg) * 100 : 0);
+    }
+
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║                  RESPONSE TIME HISTOGRAM                         ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    int64_t max_bucket = 0;
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        int64_t count = atomic_get_int64(&stats->hist_buckets[i]);
+        if (count > max_bucket) max_bucket = count;
+    }
+
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        int64_t count = atomic_get_int64(&stats->hist_buckets[i]);
+        double pct = total_reqs > 0 ? (double)count / total_reqs * 100 : 0;
+        int bar_len = max_bucket > 0 ? (int)((double)count / max_bucket * 30) : 0;
+
+        printf("║  %-12s │", hist_bucket_label(i));
+        for (int j = 0; j < bar_len; j++) printf("█");
+        for (int j = bar_len; j < 30; j++) printf(" ");
+        printf("│ %6lld (%5.1f%%)\n", (long long)count, pct);
+    }
+
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║                      FSM BREAKDOWN                               ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    /* Get FSM statistics */
+    int64_t fsm_events, fsm_lookup_us, fsm_action_us, fsm_mask_us, fsm_cb_us;
+    fsm_get_stats(&fsm_events, &fsm_lookup_us, &fsm_action_us, &fsm_mask_us, &fsm_cb_us);
+
+    if (fsm_events > 0) {
+        int64_t fsm_total = fsm_lookup_us + fsm_action_us + fsm_mask_us + fsm_cb_us;
+        printf("║  Events processed: %lld                                        \n", (long long)fsm_events);
+        printf("║  Transition lookup:  %8.2f us avg (%5.1f%%)                  \n",
+               (double)fsm_lookup_us / fsm_events, fsm_total > 0 ? ((double)fsm_lookup_us / fsm_total) * 100 : 0);
+        printf("║  Action execution:   %8.2f us avg (%5.1f%%)                  \n",
+               (double)fsm_action_us / fsm_events, fsm_total > 0 ? ((double)fsm_action_us / fsm_total) * 100 : 0);
+        printf("║  Event mask gen:     %8.2f us avg (%5.1f%%)                  \n",
+               (double)fsm_mask_us / fsm_events, fsm_total > 0 ? ((double)fsm_mask_us / fsm_total) * 100 : 0);
+        printf("║  State change CB:    %8.2f us avg (%5.1f%%)                  \n",
+               (double)fsm_cb_us / fsm_events, fsm_total > 0 ? ((double)fsm_cb_us / fsm_total) * 100 : 0);
+    }
+
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║                    REACTOR BREAKDOWN                             ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    /* Get reactor statistics */
+    int64_t r_poll_calls, r_poll_us, r_translate_us, r_deliver_us, r_events, r_callback_us;
+    reactor_get_stats(&r_poll_calls, &r_poll_us, &r_translate_us, &r_deliver_us, &r_events, &r_callback_us);
+
+    if (r_poll_calls > 0) {
+        int64_t r_total = r_poll_us + r_translate_us + r_deliver_us;
+        printf("║  Poll calls: %lld                                              \n", (long long)r_poll_calls);
+        printf("║  Events delivered: %lld                                        \n", (long long)r_events);
+        printf("║  poll() time:        %8.2f us avg (%5.1f%% of loop)          \n",
+               (double)r_poll_us / r_poll_calls, r_total > 0 ? ((double)r_poll_us / r_total) * 100 : 0);
+        printf("║  translate time:     %8.2f us avg (%5.1f%% of loop)          \n",
+               (double)r_translate_us / r_poll_calls, r_total > 0 ? ((double)r_translate_us / r_total) * 100 : 0);
+        printf("║  deliver time:       %8.2f us avg (%5.1f%% of loop)          \n",
+               (double)r_deliver_us / r_poll_calls, r_total > 0 ? ((double)r_deliver_us / r_total) * 100 : 0);
+        if (r_events > 0) {
+            printf("║  callback time:      %8.2f us avg (per event)               \n",
+                   (double)r_callback_us / r_events);
+        }
+    }
+
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║              STATE CHANGE CALLBACK BREAKDOWN                     ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    if (g_state_cb_stats.calls > 0) {
+        int64_t cb_total = g_state_cb_stats.state_name_time_us + g_state_cb_stats.log_info_time_us +
+                           g_state_cb_stats.dump_mask_time_us + g_state_cb_stats.set_mask_time_us;
+        printf("║  Calls: %lld                                                    \n", (long long)g_state_cb_stats.calls);
+        printf("║  state_name():       %8.2f us avg (%5.1f%%)                  \n",
+               (double)g_state_cb_stats.state_name_time_us / g_state_cb_stats.calls,
+               cb_total > 0 ? ((double)g_state_cb_stats.state_name_time_us / cb_total) * 100 : 0);
+        printf("║  log_info():         %8.2f us avg (%5.1f%%)                  \n",
+               (double)g_state_cb_stats.log_info_time_us / g_state_cb_stats.calls,
+               cb_total > 0 ? ((double)g_state_cb_stats.log_info_time_us / cb_total) * 100 : 0);
+        printf("║  dump_event_mask():  %8.2f us avg (%5.1f%%)                  \n",
+               (double)g_state_cb_stats.dump_mask_time_us / g_state_cb_stats.calls,
+               cb_total > 0 ? ((double)g_state_cb_stats.dump_mask_time_us / cb_total) * 100 : 0);
+        printf("║  set_event_mask():   %8.2f us avg (%5.1f%%)                  \n",
+               (double)g_state_cb_stats.set_mask_time_us / g_state_cb_stats.calls,
+               cb_total > 0 ? ((double)g_state_cb_stats.set_mask_time_us / cb_total) * 100 : 0);
+        printf("║  TOTAL:              %8.2f us avg                            \n",
+               (double)cb_total / g_state_cb_stats.calls);
+    }
+
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║                   ACTION FUNCTION BREAKDOWN                      ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    int64_t total_action_calls = g_action_stats.read_calls + g_action_stats.process_calls +
+                                  g_action_stats.send_calls + g_action_stats.idle_calls +
+                                  g_action_stats.close_calls;
+    int64_t total_action_time = g_action_stats.read_time_us + g_action_stats.process_time_us +
+                                 g_action_stats.send_time_us + g_action_stats.idle_time_us +
+                                 g_action_stats.close_time_us;
+
+    printf("║  Total action calls: %lld                                        \n", (long long)total_action_calls);
+    if (total_action_calls > 0) {
+        printf("║  Total action time:  %8.2f us avg                            \n",
+               (double)total_action_time / total_action_calls);
+    }
+    printf("║                                                                  \n");
+    if (g_action_stats.read_calls > 0) {
+        printf("║  client_read_action:    %8.2f us avg (%5.1f%%) [%lld calls]   \n",
+               (double)g_action_stats.read_time_us / g_action_stats.read_calls,
+               total_action_time > 0 ? ((double)g_action_stats.read_time_us / total_action_time) * 100 : 0,
+               (long long)g_action_stats.read_calls);
+    }
+    if (g_action_stats.process_calls > 0) {
+        printf("║  client_process_action: %8.2f us avg (%5.1f%%) [%lld calls]   \n",
+               (double)g_action_stats.process_time_us / g_action_stats.process_calls,
+               total_action_time > 0 ? ((double)g_action_stats.process_time_us / total_action_time) * 100 : 0,
+               (long long)g_action_stats.process_calls);
+    }
+    if (g_action_stats.send_calls > 0) {
+        printf("║  client_send_action:    %8.2f us avg (%5.1f%%) [%lld calls]   \n",
+               (double)g_action_stats.send_time_us / g_action_stats.send_calls,
+               total_action_time > 0 ? ((double)g_action_stats.send_time_us / total_action_time) * 100 : 0,
+               (long long)g_action_stats.send_calls);
+    }
+    if (g_action_stats.idle_calls > 0) {
+        printf("║  client_idle_action:    %8.2f us avg (%5.1f%%) [%lld calls]   \n",
+               (double)g_action_stats.idle_time_us / g_action_stats.idle_calls,
+               total_action_time > 0 ? ((double)g_action_stats.idle_time_us / total_action_time) * 100 : 0,
+               (long long)g_action_stats.idle_calls);
+    }
+    if (g_action_stats.close_calls > 0) {
+        printf("║  client_close_action:   %8.2f us avg (%5.1f%%) [%lld calls]   \n",
+               (double)g_action_stats.close_time_us / g_action_stats.close_calls,
+               total_action_time > 0 ? ((double)g_action_stats.close_time_us / total_action_time) * 100 : 0,
+               (long long)g_action_stats.close_calls);
+    }
+
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║               reactor_set_event_mask() BREAKDOWN                 ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    /* Get set_event_mask statistics */
+    int64_t sm_calls, sm_lock, sm_search, sm_rebuild, sm_log, sm_unlock, sm_wake;
+    reactor_get_set_mask_stats(&sm_calls, &sm_lock, &sm_search, &sm_rebuild, &sm_log, &sm_unlock, &sm_wake);
+
+    if (sm_calls > 0) {
+        int64_t sm_total = sm_lock + sm_search + sm_rebuild + sm_log + sm_unlock + sm_wake;
+        printf("║  Calls: %lld                                                    \n", (long long)sm_calls);
+        printf("║  Lock acquire:       %8.2f us avg (%5.1f%%)                  \n",
+               (double)sm_lock / sm_calls, sm_total > 0 ? ((double)sm_lock / sm_total) * 100 : 0);
+        printf("║  Socket search:      %8.2f us avg (%5.1f%%)                  \n",
+               (double)sm_search / sm_calls, sm_total > 0 ? ((double)sm_search / sm_total) * 100 : 0);
+        printf("║  Rebuild poll:       %8.2f us avg (%5.1f%%)                  \n",
+               (double)sm_rebuild / sm_calls, sm_total > 0 ? ((double)sm_rebuild / sm_total) * 100 : 0);
+        printf("║  log_detail():       %8.2f us avg (%5.1f%%)                  \n",
+               (double)sm_log / sm_calls, sm_total > 0 ? ((double)sm_log / sm_total) * 100 : 0);
+        printf("║  Lock release:       %8.2f us avg (%5.1f%%)                  \n",
+               (double)sm_unlock / sm_calls, sm_total > 0 ? ((double)sm_unlock / sm_total) * 100 : 0);
+        printf("║  Wake pipe:          %8.2f us avg (%5.1f%%)                  \n",
+               (double)sm_wake / sm_calls, sm_total > 0 ? ((double)sm_wake / sm_total) * 100 : 0);
+        printf("║  TOTAL:              %8.2f us avg                            \n",
+               (double)sm_total / sm_calls);
+    }
+
+    printf("╚══════════════════════════════════════════════════════════════════╝\n");
 }
 
 static void setup_signal_handlers(void) {
@@ -244,17 +590,31 @@ static util_err_t on_client_state_change(fsm_t *fsm, fsm_state_id_t old_state, f
                                          bitarray_t new_event_mask, void *user_context) {
     (void)fsm;
     (void)old_state;
+    int64_t t0, t1;
 
     client_ctx_t *client = (client_ctx_t *)user_context;
+    g_state_cb_stats.calls++;
 
-    /* Get transition info for better logging - look up an event in the new state to get its name */
+    /* Time state_name lookups */
+    t0 = util_time_us();
     const char *old_name = state_name(old_state);
     const char *new_name = state_name(new_state);
+    t1 = util_time_us();
+    g_state_cb_stats.state_name_time_us += (t1 - t0);
 
-    log_info("Client %s FSM state transition: %s -> %s", client->client_address, old_name, new_name);
+    /* Time log_spew */
+    t0 = util_time_us();
+    log_spew("Client %s FSM state transition: %s -> %s", client->client_address, old_name, new_name);
+    t1 = util_time_us();
+    g_state_cb_stats.log_info_time_us += (t1 - t0);
 
-    /* Dump the new event mask being applied */
-    dump_event_mask("FSM state change", new_event_mask);
+    /* Time dump_event_mask - only call if log level is SPEW */
+    t0 = util_time_us();
+    if (log_get_level() >= LOG_LEVEL_SPEW) {
+        dump_event_mask("FSM state change", new_event_mask);
+    }
+    t1 = util_time_us();
+    g_state_cb_stats.dump_mask_time_us += (t1 - t0);
 
     /* If socket is no longer valid (was closed by client_close_action), don't try to update reactor */
     if (client->socket == INVALID_SOCKET) {
@@ -262,8 +622,12 @@ static util_err_t on_client_state_change(fsm_t *fsm, fsm_state_id_t old_state, f
         return UTIL_OK;
     }
 
-    /* Update the reactor with the new event mask for this socket */
+    /* Time reactor_set_event_mask */
+    t0 = util_time_us();
     util_err_t rc = reactor_set_event_mask(client->server->reactor, client->socket, new_event_mask);
+    t1 = util_time_us();
+    g_state_cb_stats.set_mask_time_us += (t1 - t0);
+
     if (rc != UTIL_OK) {
         log_error("Failed to set event mask for client %s: %d", client->client_address, rc);
         return rc;
@@ -283,83 +647,104 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
     (void)next_state;
     (void)fsm;
 
+    int64_t action_start = util_time_us();
     client_ctx_t *client = (client_ctx_t *)user_data;
 
-    if (status != UTIL_OK) {
-        log_warn("Read event with error for %s: %d", client->client_address, status);
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
+    do {
+        if (status != UTIL_OK) {
+            log_warn("Read event with error for %s: %d", client->client_address, status);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            break;
+        }
 
-    /* Read from socket using buf.h API */
-    util_err_t rc = socket_recv_buf(client->socket, &client->recv_buf);
+        /* Time the recv operation */
+        int64_t recv_start = util_time_us();
 
-    if (rc == UTIL_ECLOSED) {
-        log_info("Client %s disconnected", client->client_address);
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
+        /* Read from socket using buf.h API */
+        util_err_t rc = socket_recv_buf(client->socket, &client->recv_buf);
 
-    if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
-        log_error("Socket recv error from %s: %d", client->client_address, rc);
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
+        int64_t recv_end = util_time_us();
+        client->timing.total_recv_time_us += (recv_end - recv_start);
 
-    log_detail("Received data from %s, buffer has %zu bytes", client->client_address, buf_read_size(&client->recv_buf));
+        if (rc == UTIL_ECLOSED) {
+            log_info("Client %s disconnected", client->client_address);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            break;
+        }
 
-    /* In IDLE state: queue a CAN_READ to process the data in READING_HEADER state */
-    if (current_state == APP_STATE_IDLE) {
-        /* The data is already in the buffer from socket_recv_buf.
-         * Queue CAN_READ to trigger processing after transition to READING_HEADER. */
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
-        return;
-    }
+        if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
+            log_error("Socket recv error from %s: %d", client->client_address, rc);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            break;
+        }
 
-    /* In READING_HEADER state: check if we have the MBAP header */
-    if (current_state == APP_STATE_READING_HEADER) {
-        if (buf_read_size(&client->recv_buf) >= MBAP_HEADER_SIZE) {
-            /* Parse MBAP header */
-            buf_t header_buf = client->recv_buf;
-            header_buf.write = MBAP_HEADER_SIZE;  /* Only read header */
+        log_detail("Received data from %s, buffer has %zu bytes", client->client_address, buf_read_size(&client->recv_buf));
 
-            if (modbus_parse_mbap_header(&header_buf, &client->mbap_header) == UTIL_OK) {
-                /* Calculate total expected message length */
-                client->expected_length = MBAP_HEADER_SIZE + client->mbap_header.length - 1;
+        /* In IDLE state: queue a CAN_READ to process the data in READING_HEADER state */
+        if (current_state == APP_STATE_IDLE) {
+            /* Mark the start of this request - first bytes received */
+            client->timing.request_start_us = recv_start;
+            /* The data is already in the buffer from socket_recv_buf.
+             * Queue CAN_READ to trigger processing after transition to READING_HEADER. */
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
+            break;
+        }
 
-                if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
-                    log_error("PDU too large from %s", client->client_address);
-                    fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-                    return;
-                }
-
-                log_detail("MBAP header parsed, expecting %zu bytes total", client->expected_length);
-
-                /* Queue a CAN_READ event to trigger READING_PDU processing.
-                 * This will cause the FSM to transition to READING_PDU and then
-                 * process the CAN_READ event in that state. */
-                fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
-            } else {
-                log_error("Invalid MBAP header from %s", client->client_address);
-                fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+        /* In READING_HEADER state: check if we have the MBAP header */
+        if (current_state == APP_STATE_READING_HEADER) {
+            /* If this is our first recv for this request, record start time */
+            if (client->timing.request_start_us == 0) {
+                client->timing.request_start_us = recv_start;
             }
-        }
-        return;
-    }
 
-    /* In READING_PDU state: check if we have the complete message */
-    if (current_state == APP_STATE_READING_PDU) {
-        if (buf_read_size(&client->recv_buf) >= client->expected_length) {
-            log_detail("Complete message received from %s (%zu bytes)",
-                      client->client_address, buf_read_size(&client->recv_buf));
-            fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
-        }
-        /* No explicit re-enable needed; reactor event mask is controlled by FSM state transitions */
-        return;
-    }
+            if (buf_read_size(&client->recv_buf) >= MBAP_HEADER_SIZE) {
+                /* Parse MBAP header */
+                buf_t header_buf = client->recv_buf;
+                header_buf.write = MBAP_HEADER_SIZE;  /* Only read header */
 
-    /* Shouldn't reach here - unexpected state */
-    log_error("client_read_action called in unexpected state %u", current_state);
+                if (modbus_parse_mbap_header(&header_buf, &client->mbap_header) == UTIL_OK) {
+                    /* Calculate total expected message length */
+                    client->expected_length = MBAP_HEADER_SIZE + client->mbap_header.length - 1;
+
+                    if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
+                        log_error("PDU too large from %s", client->client_address);
+                        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+                        break;
+                    }
+
+                    log_detail("MBAP header parsed, expecting %zu bytes total", client->expected_length);
+
+                    /* Queue a CAN_READ event to trigger READING_PDU processing.
+                     * This will cause the FSM to transition to READING_PDU and then
+                     * process the CAN_READ event in that state. */
+                    fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CAN_READ, UTIL_OK, client);
+                } else {
+                    log_error("Invalid MBAP header from %s", client->client_address);
+                    fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+                }
+            }
+            break;
+        }
+
+        /* In READING_PDU state: check if we have the complete message */
+        if (current_state == APP_STATE_READING_PDU) {
+            if (buf_read_size(&client->recv_buf) >= client->expected_length) {
+                /* Mark recv complete time */
+                client->timing.recv_complete_us = util_time_us();
+                log_detail("Complete message received from %s (%zu bytes)",
+                          client->client_address, buf_read_size(&client->recv_buf));
+                fsm_queue_event(client->fsm, APP_EVENT_PROCESS, UTIL_OK, client);
+            }
+            /* No explicit re-enable needed; reactor event mask is controlled by FSM state transitions */
+            break;
+        }
+
+        /* Shouldn't reach here - unexpected state */
+        log_error("client_read_action called in unexpected state %u", current_state);
+    } while(0);
+
+    g_action_stats.read_calls++;
+    g_action_stats.read_time_us += (util_time_us() - action_start);
 }
 
 static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -370,36 +755,45 @@ static void client_process_action(fsm_t *fsm, fsm_state_id_t current_state, even
     (void)fsm;
     (void)status;
 
+    int64_t action_start = util_time_us();
     client_ctx_t *client = (client_ctx_t *)user_data;
 
-    /* Capture timestamp when request processing starts */
-    gettimeofday(&client->request_start_time, NULL);
+    do {
+        /* Record process start time */
+        client->timing.process_start_us = util_time_us();
 
-    /* Extract function code from received message */
-    buf_t request_buf = client->recv_buf;
-    request_buf.read = MBAP_HEADER_SIZE;  /* Skip MBAP header */
+        /* Extract function code from received message */
+        buf_t request_buf = client->recv_buf;
+        request_buf.read = MBAP_HEADER_SIZE;  /* Skip MBAP header */
 
-    uint8_t function_code;
-    if (!buf_read_u8(&request_buf, "function_code", &function_code)) {
-        log_error("Failed to read function code from %s", client->client_address);
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
+        uint8_t function_code;
+        if (!buf_read_u8(&request_buf, "function_code", &function_code)) {
+            log_error("Failed to read function code from %s", client->client_address);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            break;
+        }
 
-    log_detail("Processing function code 0x%02X from %s", function_code, client->client_address);
+        log_detail("Processing function code 0x%02X from %s", function_code, client->client_address);
 
-    /* Process the request */
-    util_err_t err = modbus_process_request(function_code, &request_buf,
-                                            &client->send_buf, &client->mbap_header, client->server->storage);
+        /* Process the request */
+        util_err_t err = modbus_process_request(function_code, &request_buf,
+                                                &client->send_buf, &client->mbap_header, client->server->storage);
 
-    if (err != UTIL_OK && err != UTIL_ENOTSUPPORTED) {
-        log_detail("Request processing returned error: %d", err);
-    }
+        /* Record process complete time */
+        client->timing.process_complete_us = util_time_us();
 
-    /* Queue APP_EVENT_IDLE to trigger immediate transition to SENDING state
-     * and attempt to send the response. If socket is not writable yet,
-     * the reactor will send REACTOR_EVENT_CAN_WRITE when it becomes writable. */
-    fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
+        if (err != UTIL_OK && err != UTIL_ENOTSUPPORTED) {
+            log_detail("Request processing returned error: %d", err);
+        }
+
+        /* Queue APP_EVENT_IDLE to trigger immediate transition to SENDING state
+         * and attempt to send the response. If socket is not writable yet,
+         * the reactor will send REACTOR_EVENT_CAN_WRITE when it becomes writable. */
+        fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
+    } while(0);
+
+    g_action_stats.process_calls++;
+    g_action_stats.process_time_us += (util_time_us() - action_start);
 }
 
 static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -409,75 +803,88 @@ static void client_send_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
     (void)next_state;
     (void)fsm;
 
+    int64_t action_start = util_time_us();
     client_ctx_t *client = (client_ctx_t *)user_data;
 
-    if (status != UTIL_OK) {
-        log_warn("Write event with error for %s: %d", client->client_address, status);
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
+    do {
+        if (status != UTIL_OK) {
+            log_warn("Write event with error for %s: %d", client->client_address, status);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            break;
+        }
 
-    /* Send response using buf.h API */
-    util_err_t rc = socket_send_buf(client->socket, &client->send_buf);
+        /* Record send start time (only on first send attempt for this request) */
+        if (client->timing.send_start_us == 0) {
+            client->timing.send_start_us = util_time_us();
+        }
 
-    if (rc == UTIL_ECLOSED) {
-        log_info("Client %s connection closed during send", client->client_address);
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
+        /* Time the send operation */
+        int64_t send_start = util_time_us();
 
-    if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
-        log_error("Socket send error to %s: %d", client->client_address, rc);
-        fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
-        return;
-    }
+        /* Send response using buf.h API */
+        util_err_t rc = socket_send_buf(client->socket, &client->send_buf);
 
-    log_detail("Sent response to %s", client->client_address);
+        int64_t send_end = util_time_us();
 
-    /* Check if all data was sent */
-    if (buf_read_size(&client->send_buf) > 0) {
-        /* Partial send; the reactor event mask will stay set for CAN_WRITE
-         * since we're still in SENDING state */
-    } else {
-        /* All data sent, calculate response time and update statistics */
-        struct timeval now;
-        gettimeofday(&now, NULL);
-        int64_t response_time_us = (now.tv_sec - client->request_start_time.tv_sec) * 1000000LL +
-                                   (now.tv_usec - client->request_start_time.tv_usec);
+        if (rc == UTIL_ECLOSED) {
+            log_info("Client %s connection closed during send", client->client_address);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            break;
+        }
 
-        /* Update atomic statistics */
-        atomic_add_int64(&client->server->total_requests, 1);
-        atomic_add_int64(&client->server->total_response_time_us, response_time_us);
+        if (rc != UTIL_OK && rc != UTIL_EAGAIN) {
+            log_error("Socket send error to %s: %d", client->client_address, rc);
+            fsm_queue_event(client->fsm, (event_type_t)REACTOR_EVENT_CLOSED, UTIL_OK, client);
+            break;
+        }
 
-        /* Update min response time (use compare-and-swap loop) */
-        int64_t current_min;
-        do {
-            current_min = atomic_get_int64(&client->server->min_response_time_us);
-            if (current_min == 0 || response_time_us < current_min) {
-                if (atomic_compare_and_set_int64(&client->server->min_response_time_us, current_min, response_time_us) == current_min) {
-                    break;
-                }
-            } else {
-                break;
-            }
-        } while (1);
+        log_detail("Sent response to %s", client->client_address);
 
-        /* Update max response time (use compare-and-swap loop) */
-        int64_t current_max;
-        do {
-            current_max = atomic_get_int64(&client->server->max_response_time_us);
-            if (response_time_us > current_max) {
-                if (atomic_compare_and_set_int64(&client->server->max_response_time_us, current_max, response_time_us) == current_max) {
-                    break;
-                }
-            } else {
-                break;
-            }
-        } while (1);
+        /* Check if all data was sent */
+        if (buf_read_size(&client->send_buf) > 0) {
+            /* Partial send; the reactor event mask will stay set for CAN_WRITE
+             * since we're still in SENDING state */
+        } else {
+            /* All data sent - record completion time */
+            client->timing.send_complete_us = send_end;
 
-        /* Prepare for next request */
-        fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
-    }
+            /* Calculate timing breakdown */
+            int64_t total_response_time = client->timing.send_complete_us - client->timing.request_start_us;
+            int64_t recv_time = client->timing.total_recv_time_us;
+            int64_t process_time = client->timing.process_complete_us - client->timing.process_start_us;
+            int64_t send_time = send_end - send_start;
+            int64_t overhead_time = total_response_time - recv_time - process_time - send_time;
+
+            /* Clamp overhead to 0 if negative (timing anomaly) */
+            if (overhead_time < 0) overhead_time = 0;
+
+            /* Update statistics */
+            server_stats_t *stats = &client->server->stats;
+
+            atomic_add_int64(&stats->total_requests, 1);
+            atomic_add_int64(&stats->total_response_time_us, total_response_time);
+            atomic_add_int64(&stats->total_response_time_sq_us, total_response_time * total_response_time);
+
+            /* Per-component times */
+            atomic_add_int64(&stats->total_recv_time_us, recv_time);
+            atomic_add_int64(&stats->total_process_time_us, process_time);
+            atomic_add_int64(&stats->total_send_time_us, send_time);
+            atomic_add_int64(&stats->total_overhead_time_us, overhead_time);
+
+            /* Update min/max */
+            update_min(&stats->min_response_time_us, total_response_time);
+            update_max(&stats->max_response_time_us, total_response_time);
+
+            /* Update histogram */
+            update_histogram(stats, total_response_time);
+
+            /* Prepare for next request */
+            fsm_queue_event(client->fsm, APP_EVENT_IDLE, UTIL_OK, client);
+        }
+    } while(0);
+
+    g_action_stats.send_calls++;
+    g_action_stats.send_time_us += (util_time_us() - action_start);
 }
 
 static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -488,6 +895,7 @@ static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
     (void)fsm;
     (void)status;
 
+    int64_t action_start = util_time_us();
     client_ctx_t *client = (client_ctx_t *)user_data;
 
     /* Reset for next request */
@@ -495,10 +903,16 @@ static void client_idle_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
     buf_reset(&client->send_buf);
     client->expected_length = MBAP_HEADER_SIZE;
 
+    /* Reset timing for next request */
+    memset(&client->timing, 0, sizeof(client->timing));
+
     log_detail("Client %s ready for next request", client->client_address);
 
     /* The FSM state change callback will update the reactor event mask
      * to enable CAN_READ when transitioning to IDLE state */
+
+    g_action_stats.idle_calls++;
+    g_action_stats.idle_time_us += (util_time_us() - action_start);
 }
 
 static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_type_t event,
@@ -509,6 +923,7 @@ static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_
     (void)fsm;
     (void)status;
 
+    int64_t action_start = util_time_us();
     client_ctx_t *client = (client_ctx_t *)user_data;
 
     if (client->socket != INVALID_SOCKET) {
@@ -525,6 +940,9 @@ static void client_close_action(fsm_t *fsm, fsm_state_id_t current_state, event_
      * by the reactor when it finishes processing all pending events. */
 
     log_detail("Client socket closed");
+
+    g_action_stats.close_calls++;
+    g_action_stats.close_time_us += (util_time_us() - action_start);
 }
 
 /* ============================================================================
@@ -990,7 +1408,7 @@ int main(int argc, char **argv) {
     g_server = server;
 
     /* Initialize statistics start time (atomics are already zeroed by calloc) */
-    gettimeofday(&server->start_time, NULL);
+    server->start_time_us = util_time_us();
 
     /* Setup signal handlers */
     setup_signal_handlers();
@@ -1085,6 +1503,11 @@ cleanup:
         }
     }
 
+    log_info("Server stopped");
+
+    /* Print statistics after all logging is complete but before freeing server */
+    print_statistics(server);
+
     if (server) {
         if (server->storage) {
             register_storage_destroy(server->storage);
@@ -1103,6 +1526,5 @@ cleanup:
     socket_cleanup();
     args_free(&args_result);
 
-    log_info("Server stopped");
     return rc;
 }

@@ -1,7 +1,32 @@
 #include "fsm.h"
 #include "log.h"
+#include "utils.h"
 #include <stdlib.h>
 #include <string.h>
+
+/* Global FSM statistics for performance analysis */
+static struct {
+    int64_t total_events_processed;
+    int64_t total_lookup_time_us;
+    int64_t total_action_time_us;
+    int64_t total_mask_gen_time_us;
+    int64_t total_state_change_cb_time_us;
+    int64_t total_queue_time_us;
+    int64_t total_dequeue_time_us;
+} g_fsm_stats = {0};
+
+void fsm_get_stats(int64_t *events, int64_t *lookup_us, int64_t *action_us,
+                   int64_t *mask_gen_us, int64_t *state_cb_us) {
+    if (events) *events = g_fsm_stats.total_events_processed;
+    if (lookup_us) *lookup_us = g_fsm_stats.total_lookup_time_us;
+    if (action_us) *action_us = g_fsm_stats.total_action_time_us;
+    if (mask_gen_us) *mask_gen_us = g_fsm_stats.total_mask_gen_time_us;
+    if (state_cb_us) *state_cb_us = g_fsm_stats.total_state_change_cb_time_us;
+}
+
+void fsm_reset_stats(void) {
+    memset(&g_fsm_stats, 0, sizeof(g_fsm_stats));
+}
 
 typedef struct {
     event_type_t event;
@@ -147,6 +172,7 @@ util_err_t fsm_process_events(fsm_t *fsm) {
     event_type_t current_event;
     util_err_t current_status;
     void *current_ctx;
+    int64_t t0, t1;
 
     if (!fsm) {
         return UTIL_ENULL;
@@ -156,7 +182,13 @@ util_err_t fsm_process_events(fsm_t *fsm) {
 
     /* dequeue all the pending events in FIFO order. */
     while(dequeue_event(fsm, &current_event, &current_status, &current_ctx)) {
+        g_fsm_stats.total_events_processed++;
+
+        /* Time transition lookup */
+        t0 = util_time_us();
         const fsm_transition_t *trans = fsm_lookup_transition(fsm, fsm->current_state, current_event);
+        t1 = util_time_us();
+        g_fsm_stats.total_lookup_time_us += (t1 - t0);
 
         if (!trans) {
             /* No matching transition; ignore event */
@@ -169,7 +201,11 @@ util_err_t fsm_process_events(fsm_t *fsm) {
         if (trans->action) {
             log_detail("FSM: State %u --(%u)--> State %u", fsm->current_state, current_event, trans->next_state);
 
+            /* Time action execution */
+            t0 = util_time_us();
             trans->action(fsm, fsm->current_state, current_event, current_status, trans->next_state, fsm->fsm_ctx);
+            t1 = util_time_us();
+            g_fsm_stats.total_action_time_us += (t1 - t0);
         } else {
             log_detail("FSM: State %u --(%u)--> State %u (no action)", fsm->current_state, current_event, trans->next_state);
         }
@@ -177,15 +213,22 @@ util_err_t fsm_process_events(fsm_t *fsm) {
         /* Commit state transition */
         fsm->current_state = trans->next_state;
 
-        /* Generate new event mask for the new state */
+        /* Time event mask generation */
+        t0 = util_time_us();
         fsm->current_event_mask = fsm_generate_event_mask_for_state(
             fsm->table, fsm->table_size, trans->next_state
         );
+        t1 = util_time_us();
+        g_fsm_stats.total_mask_gen_time_us += (t1 - t0);
 
         /* Invoke state change callback if registered */
         if (fsm->on_state_change) {
+            t0 = util_time_us();
             util_err_t cb_rc = fsm->on_state_change(fsm, old_state, trans->next_state,
                                                      fsm->current_event_mask, fsm->fsm_ctx);
+            t1 = util_time_us();
+            g_fsm_stats.total_state_change_cb_time_us += (t1 - t0);
+
             if (cb_rc != UTIL_OK) {
                 log_error("FSM: State change callback failed: %d", cb_rc);
                 /* Continue processing despite callback failure */
