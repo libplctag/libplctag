@@ -69,10 +69,10 @@
 
 /* Atomic operations for fairness tracking */
 #ifdef IS_WINDOWS
-    #include <intrin.h>
-    typedef struct { volatile long value; } atomic_int32_t;
-    typedef struct { volatile long long value; } atomic_int64_t;
-    
+    #include <windows.h>
+    typedef struct { volatile LONG value; } atomic_int32_t;
+    typedef struct { volatile LONG64 value; } atomic_int64_t;
+
     #define atomic_load_int32(ptr) InterlockedCompareExchange((volatile LONG*)&(ptr)->value, 0, 0)
     #define atomic_store_int32(ptr, val) InterlockedExchange((volatile LONG*)&(ptr)->value, (LONG)(val))
     #define atomic_inc_int32(ptr) InterlockedIncrement((volatile LONG*)&(ptr)->value)
