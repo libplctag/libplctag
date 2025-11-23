@@ -41,6 +41,7 @@ jobs:
             artifact_suffix: "ubuntu_arm64"
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -214,6 +215,7 @@ jobs:
             artifact_suffix: "macos_aarch64"
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -323,6 +325,7 @@ jobs:
             artifact_suffix: "windows_x86_MinGW"
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -427,6 +430,7 @@ jobs:
             target_arch: armhf
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -561,6 +565,7 @@ jobs:
             runner: ubuntu-22.04-arm
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
