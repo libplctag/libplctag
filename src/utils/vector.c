@@ -52,21 +52,21 @@ static int ensure_capacity(vector_p vec, int capacity);
 vector_p vector_create(int capacity, int max_inc) {
     vector_p vec = NULL;
 
-    pdebug(DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
     if(capacity <= 0) {
-        pdebug(DEBUG_WARN, "Called with negative capacity!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Called with negative capacity!");
         return NULL;
     }
 
     if(max_inc <= 0) {
-        pdebug(DEBUG_WARN, "Called with negative maximum size increment!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Called with negative maximum size increment!");
         return NULL;
     }
 
     vec = mem_alloc((int)sizeof(struct vector_t));
     if(!vec) {
-        pdebug(DEBUG_ERROR, "Unable to allocate memory for vector!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to allocate memory for vector!");
         return NULL;
     }
 
@@ -76,27 +76,27 @@ vector_p vector_create(int capacity, int max_inc) {
 
     vec->data = mem_alloc(capacity * (int)sizeof(void *));
     if(!vec->data) {
-        pdebug(DEBUG_ERROR, "Unable to allocate memory for vector data!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to allocate memory for vector data!");
         vector_destroy(vec);
         return NULL;
     }
 
-    pdebug(DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
     return vec;
 }
 
 
 int vector_length(vector_p vec) {
-    pdebug(DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
     /* check to see if the vector ref is valid */
     if(!vec) {
-        pdebug(DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    pdebug(DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
     return vec->len;
 }
@@ -104,17 +104,17 @@ int vector_length(vector_p vec) {
 int vector_insert(vector_p vec, int index, void *data) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
     do {
         if(!vec) {
-            pdebug(DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
             rc = PLCTAG_ERR_NULL_PTR;
             break;
         }
 
         if(index < 0) {
-            pdebug(DEBUG_WARN, "Index is negative!");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Index is negative!");
             rc = PLCTAG_ERR_OUT_OF_BOUNDS;
             break;
         }
@@ -128,7 +128,7 @@ int vector_insert(vector_p vec, int index, void *data) {
         /* make sure we have room */
         rc = ensure_capacity(vec, vec->len + 1);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_WARN, "Unable to ensure capacity!");
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Unable to ensure capacity!");
             break;
         }
 
@@ -142,7 +142,7 @@ int vector_insert(vector_p vec, int index, void *data) {
         vec->len++;
     } while(0);
 
-    pdebug(DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
     return rc;
 }
@@ -151,22 +151,22 @@ int vector_insert(vector_p vec, int index, void *data) {
 int vector_set(vector_p vec, int index, void *data) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
     /* check to see if the vector ref is valid */
     if(!vec) {
-        pdebug(DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(index < 0) {
-        pdebug(DEBUG_WARN, "Index is negative!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Index is negative!");
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
     rc = ensure_capacity(vec, index + 1);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to ensure capacity!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Unable to ensure capacity!");
         return rc;
     }
 
@@ -176,27 +176,27 @@ int vector_set(vector_p vec, int index, void *data) {
     /* adjust the length, if needed */
     if(index >= vec->len) { vec->len = index + 1; }
 
-    pdebug(DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
     return rc;
 }
 
 
 void *vector_get(vector_p vec, int index) {
-    pdebug(DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
     /* check to see if the vector ref is valid */
     if(!vec) {
-        pdebug(DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
         return NULL;
     }
 
     if(index < 0 || index >= vec->len) {
-        pdebug(DEBUG_WARN, "Index is out of bounds!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Index is out of bounds!");
         return NULL;
     }
 
-    pdebug(DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
     return vec->data[index];
 }
@@ -205,16 +205,16 @@ void *vector_get(vector_p vec, int index) {
 void *vector_remove(vector_p vec, int index) {
     void *result = NULL;
 
-    pdebug(DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
     /* check to see if the vector ref is valid */
     if(!vec) {
-        pdebug(DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
         return NULL;
     }
 
     if(index < 0 || index >= vec->len) {
-        pdebug(DEBUG_WARN, "Index is out of bounds!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Index is out of bounds!");
         return NULL;
     }
 
@@ -230,39 +230,39 @@ void *vector_remove(vector_p vec, int index) {
     /* adjust the length to the new size */
     vec->len--;
 
-    pdebug(DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
     return result;
 }
 
 
 int vector_destroy(vector_p vec) {
-    pdebug(DEBUG_SPEW, "Starting.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting.");
 
     if(!vec) {
-        pdebug(DEBUG_WARN, "Null pointer passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     mem_free(vec->data);
     mem_free(vec);
 
-    pdebug(DEBUG_SPEW, "Done.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
 
 
 int vector_sort(vector_p vec, vector_compare_func compare) {
-    pdebug(DEBUG_SPEW, "Starting");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Starting");
 
     if(!vec) {
-        pdebug(DEBUG_WARN, "Null pointer to vector passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer to vector passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
     if(!compare) {
-        pdebug(DEBUG_WARN, "Null comparison function passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null comparison function passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -271,7 +271,7 @@ int vector_sort(vector_p vec, vector_compare_func compare) {
         qsort(vec->data, (size_t)vec->len, sizeof(void *), compare);
     }
 
-    pdebug(DEBUG_SPEW, "Done");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_SPEW, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -287,7 +287,7 @@ int ensure_capacity(vector_p vec, int capacity) {
     void **new_data = NULL;
 
     if(!vec) {
-        pdebug(DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Null pointer or invalid pointer to vector passed!");
         return PLCTAG_ERR_NULL_PTR;
     }
 
@@ -311,7 +311,7 @@ int ensure_capacity(vector_p vec, int capacity) {
     /* allocate the new data area */
     new_data = (void **)mem_alloc((int)((sizeof(void *) * (size_t)(vec->capacity + new_inc))));
     if(!new_data) {
-        pdebug(DEBUG_ERROR, "Unable to allocate new data area!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to allocate new data area!");
         return PLCTAG_ERR_NO_MEM;
     }
 

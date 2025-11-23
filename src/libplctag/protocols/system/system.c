@@ -94,15 +94,15 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     system_tag_p tag = NULL;
     const char *name = attr_get_str(attribs, "name", NULL);
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, "Starting.");
 
     /* check the name, if none given, punt. */
     if(!name || str_length(name) < 1) {
-        pdebug(DEBUG_ERROR, "System tag name is empty or missing!");
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_ERROR, "System tag name is empty or missing!");
         return PLC_TAG_P_NULL;
     }
 
-    pdebug(DEBUG_DETAIL, "Creating special tag %s", name);
+    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, "Creating special tag %s", name);
 
     /*
      * allocate memory for the new tag.  Do this first so that
@@ -112,7 +112,7 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     tag = (system_tag_p)rc_alloc(sizeof(struct system_tag_t), (rc_cleanup_func)system_tag_destroy);
 
     if(!tag) {
-        pdebug(DEBUG_ERROR, "Unable to allocate memory for system tag!");
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_ERROR, "Unable to allocate memory for system tag!");
         return PLC_TAG_P_NULL;
     }
 
@@ -125,8 +125,8 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     /* set up the generic parts. */
     rc = plc_tag_generic_init_tag((plc_tag_p)tag, attribs, tag_callback_func, userdata);
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to initialize generic tag parts!");
-        pdebug(DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, "Unable to initialize generic tag parts!");
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, "rc_dec: Releasing reference to tag %" PRId32 ".", tag->tag_id);
         rc_dec(tag);
         return (plc_tag_p)NULL;
     }
@@ -142,7 +142,7 @@ plc_tag_p system_tag_create(attr attribs, void (*tag_callback_func)(int32_t tag_
     tag->data = &tag->backing_data[0];
     tag->size = (int)sizeof(tag->backing_data);
 
-    pdebug(DEBUG_INFO, "Done");
+    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, "Done");
 
     return (plc_tag_p)tag;
 }
@@ -179,12 +179,12 @@ static int system_tag_read(plc_tag_p ptag) {
     system_tag_p tag = (system_tag_p)ptag;
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, "Starting.");
 
     if(!tag) { return PLCTAG_ERR_NULL_PTR; }
 
     if(str_cmp_i(&tag->name[0], "version") == 0) {
-        pdebug(DEBUG_DETAIL, "Version is %s", VERSION);
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_DETAIL, "Version is %s", VERSION);
         str_copy((char *)(&tag->data[0]), MAX_SYSTEM_TAG_SIZE, VERSION);
         tag->data[str_length(VERSION)] = 0;
         rc = PLCTAG_STATUS_OK;
@@ -196,7 +196,7 @@ static int system_tag_read(plc_tag_p ptag) {
         tag->data[3] = (uint8_t)((debug_level >> 24) & 0xFF);
         rc = PLCTAG_STATUS_OK;
     } else {
-        pdebug(DEBUG_WARN, "Unsupported system tag %s!", tag->name);
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, "Unsupported system tag %s!", tag->name);
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
@@ -205,7 +205,7 @@ static int system_tag_read(plc_tag_p ptag) {
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_READ_COMPLETED, PLCTAG_STATUS_OK);
     plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, "Done.");
 
     return rc;
 }
@@ -237,14 +237,14 @@ static int system_tag_write(plc_tag_p ptag) {
     } else if(str_cmp_i(&tag->name[0], "version") == 0) {
         rc = PLCTAG_ERR_NOT_IMPLEMENTED;
     } else {
-        pdebug(DEBUG_WARN, "Unsupported system tag %s!", tag->name);
+        pdebug(DEBUG_MODULE_SYSTEM, DEBUG_WARN, "Unsupported system tag %s!", tag->name);
         rc = PLCTAG_ERR_UNSUPPORTED;
     }
 
     tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_WRITE_COMPLETED, PLCTAG_STATUS_OK);
     plc_tag_generic_handle_event_callbacks((plc_tag_p)tag);
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_SYSTEM, DEBUG_INFO, "Done.");
 
     return rc;
 }

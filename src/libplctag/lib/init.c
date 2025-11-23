@@ -95,7 +95,7 @@ tag_create_function find_tag_create_func(attr attributes) {
     if(protocol && str_length(protocol) > 0) {
         for(i = 0; i < num_entries; i++) {
             if(tag_type_map[i].protocol && str_cmp(tag_type_map[i].protocol, protocol) == 0) {
-                pdebug(DEBUG_INFO, "Matched protocol=%s", protocol);
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched protocol=%s", protocol);
                 return tag_type_map[i].tag_constructor;
             }
         }
@@ -103,24 +103,24 @@ tag_create_function find_tag_create_func(attr attributes) {
         /* match make/family/model */
         for(i = 0; i < num_entries; i++) {
             if(tag_type_map[i].make && make && str_cmp_i(tag_type_map[i].make, make) == 0) {
-                pdebug(DEBUG_INFO, "Matched make=%s", make);
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s", make);
                 if(tag_type_map[i].family) {
                     if(family && str_cmp_i(tag_type_map[i].family, family) == 0) {
-                        pdebug(DEBUG_INFO, "Matched make=%s family=%s", make, family);
+                        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=%s", make, family);
                         if(tag_type_map[i].model) {
                             if(model && str_cmp_i(tag_type_map[i].model, model) == 0) {
-                                pdebug(DEBUG_INFO, "Matched make=%s family=%s model=%s", make, family, model);
+                                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=%s model=%s", make, family, model);
                                 return tag_type_map[i].tag_constructor;
                             }
                         } else {
                             /* matches until a NULL */
-                            pdebug(DEBUG_INFO, "Matched make=%s family=%s model=NULL", make, family);
+                            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=%s model=NULL", make, family);
                             return tag_type_map[i].tag_constructor;
                         }
                     }
                 } else {
                     /* matched until a NULL, so we matched */
-                    pdebug(DEBUG_INFO, "Matched make=%s family=NULL model=NULL", make);
+                    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Matched make=%s family=NULL model=NULL", make);
                     return tag_type_map[i].tag_constructor;
                 }
             }
@@ -141,25 +141,25 @@ tag_create_function find_tag_create_func(attr attributes) {
 
 void destroy_modules(void) {
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting.");
 
-    pdebug(DEBUG_INFO, "Tearing down AB module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down AB module.");
     ab_teardown();
 
-    pdebug(DEBUG_INFO, "Tearing down Modbus module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down Modbus module.");
     mb_teardown();
 
-    pdebug(DEBUG_INFO, "Tearing down Omron module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down Omron module.");
     omron_teardown();
 
-    pdebug(DEBUG_INFO, "Tearing down library module.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down library module.");
     lib_teardown();
 
     /* last so that we continue to process deferred destructors until the end. */
-    pdebug(DEBUG_INFO, "Tearing down refcount infrastructure.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down refcount infrastructure.");
     refcount_teardown();
 
-    pdebug(DEBUG_INFO, "Tearing down library mutex.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down library mutex.");
     spin_block(&library_initialization_lock) {
         if(lib_mutex != NULL) {
             /* FIXME casting to get rid of volatile is WRONG */
@@ -168,10 +168,10 @@ void destroy_modules(void) {
         }
     }
 
-    pdebug(DEBUG_INFO, "Unregistering logger.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Unregistering logger.");
     plc_tag_unregister_logger();
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done.");
 
     library_initialized = 0;
 }
@@ -187,11 +187,11 @@ void destroy_modules(void) {
 int initialize_modules(void) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting.");
 
     /* fast path once the library is up and running. */
     if(library_initialized) {
-        pdebug(DEBUG_INFO, "Library already initialized, returning.");
+        pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Library already initialized, returning.");
         return PLCTAG_STATUS_OK;
     }
 
@@ -202,7 +202,7 @@ int initialize_modules(void) {
      */
     spin_block(&library_initialization_lock) {
         if(lib_mutex == NULL) {
-            pdebug(DEBUG_INFO, "Creating library mutex.");
+            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Creating library mutex.");
             /* FIXME - casting to get rid of volatile is WRONG */
             rc = mutex_create((mutex_p *)&lib_mutex);
         }
@@ -210,7 +210,7 @@ int initialize_modules(void) {
 
     /* check the status outside the lock. */
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to initialize library mutex!  Error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize library mutex!  Error %s!", plc_tag_decode_error(rc));
         return rc;
     } else {
         /*
@@ -224,35 +224,35 @@ int initialize_modules(void) {
                 srand((unsigned int)time_ms());
 
                 /* Start the refcount cleanup thread first, as other subsystems may need it */
-                pdebug(DEBUG_INFO, "Starting refcount cleanup infrastructure.");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting refcount cleanup infrastructure.");
                 rc = refcount_startup();
-                if(rc != PLCTAG_STATUS_OK) { pdebug(DEBUG_ERROR, "Unable to start refcount cleanup infrastructure!"); }
+                if(rc != PLCTAG_STATUS_OK) { pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to start refcount cleanup infrastructure!"); }
 
-                pdebug(DEBUG_INFO, "Initializing library modules.");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing library modules.");
                 if(rc == PLCTAG_STATUS_OK) { rc = lib_init();
                     if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_ERROR, "Unable to initialize library module!");
+                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize library module!");
                     }
                 }
 
-                pdebug(DEBUG_INFO, "Initializing AB module.");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing AB module.");
                 if(rc == PLCTAG_STATUS_OK) { rc = ab_init(); 
                     if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_ERROR, "Unable to initialize AB module!");
+                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize AB module!");
                     }
                 }
 
-                pdebug(DEBUG_INFO, "Initializing Modbus module.");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Modbus module.");
                 if(rc == PLCTAG_STATUS_OK) { rc = mb_init(); 
                     if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_ERROR, "Unable to initialize Modbus module!");
+                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Modbus module!");
                     }
                 }
 
-                pdebug(DEBUG_INFO, "Initializing Omron module.");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Omron module.");
                 if(rc == PLCTAG_STATUS_OK) { rc = omron_init(); 
                     if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_ERROR, "Unable to initialize Omron module!");
+                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Omron module!");
                     }
                 }
 
@@ -262,12 +262,12 @@ int initialize_modules(void) {
                 /* do this last */
                 library_initialized = 1;
 
-                pdebug(DEBUG_INFO, "Done initializing library modules.");
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done initializing library modules.");
             }
         }
     }
 
-    pdebug(DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done.");
 
     return rc;
 }

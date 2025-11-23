@@ -89,7 +89,7 @@ int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path,
     // uint8_t tmp_conn_path[MAX_CONN_PATH + MAX_IP_ADDR_SEG_LEN];
     size_t max_conn_path_size = (size_t)(*tmp_conn_path_size) - (size_t)MAX_IP_ADDR_SEG_LEN;
 
-    pdebug(DEBUG_DETAIL, "Starting");
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Starting");
 
     *is_dhp = 0;
 
@@ -101,19 +101,19 @@ int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path,
 
         if(path[path_index] == ',') {
             /* skip separators. */
-            pdebug(DEBUG_DETAIL, "Skipping separator character '%c'.", (char)path[path_index]);
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Skipping separator character '%c'.", (char)path[path_index]);
 
             path_index++;
         } else if(match_numeric_segment(path, &path_index, tmp_conn_path, &conn_path_index) == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Found numeric segment.");
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Found numeric segment.");
         } else if(match_ip_addr_segment(path, &path_index, tmp_conn_path, &conn_path_index) == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Found IP address segment.");
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Found IP address segment.");
         } else if(match_dhp_addr_segment(path, &path_index, &dhp_port, &dhp_src_node, &dhp_dest_node) == PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_DETAIL, "Found DH+ address segment.");
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Found DH+ address segment.");
 
             /* check if it is last. */
             if(path_index < path_len) {
-                pdebug(DEBUG_WARN, "DH+ address must be the last segment in a path! %d %d", (int)(ssize_t)path_index,
+                pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "DH+ address must be the last segment in a path! %d %d", (int)(ssize_t)path_index,
                        (int)(ssize_t)path_len);
                 return PLCTAG_ERR_BAD_PARAM;
             }
@@ -121,19 +121,19 @@ int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path,
             *is_dhp = 1;
         } else {
             /* unknown, cannot parse this! */
-            pdebug(DEBUG_WARN, "Unable to parse remaining path string from position %d, \"%s\".", (int)(ssize_t)path_index,
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Unable to parse remaining path string from position %d, \"%s\".", (int)(ssize_t)path_index,
                    (char *)&path[path_index]);
             return PLCTAG_ERR_BAD_PARAM;
         }
     }
 
     if(conn_path_index >= max_conn_path_size) {
-        pdebug(DEBUG_WARN, "Encoded connection path is too long (%d >= %d).", (int)(ssize_t)conn_path_index, max_conn_path_size);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Encoded connection path is too long (%d >= %d).", (int)(ssize_t)conn_path_index, max_conn_path_size);
         return PLCTAG_ERR_TOO_LARGE;
     }
 
     if(*needs_connection) {
-        pdebug(DEBUG_DETAIL, "PLC needs connection, adding path to the router object.");
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "PLC needs connection, adding path to the router object.");
 
         /*
          * we do a generic path to the router
@@ -154,7 +154,7 @@ int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path,
      * zero pad the path to a multiple of 16-bit
      * words.
      */
-    pdebug(DEBUG_DETAIL, "IOI size before %d", conn_path_index);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "IOI size before %d", conn_path_index);
     if(conn_path_index & 0x01) {
         tmp_conn_path[conn_path_index] = 0;
         conn_path_index++;
@@ -162,7 +162,7 @@ int encode_path(const char *path, int *needs_connection, uint8_t *tmp_conn_path,
 
     *tmp_conn_path_size = (uint8_t)conn_path_index;
 
-    pdebug(DEBUG_DETAIL, "Done");
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Done");
 
     return PLCTAG_STATUS_OK;
 }
@@ -173,7 +173,7 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     size_t p_index = *path_index;
     size_t c_index = *conn_path_index;
 
-    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
 
     while(isdigit(path[p_index])) {
         val = (val * 10) + (path[p_index] - '0');
@@ -182,13 +182,13 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* did we match anything? */
     if(p_index == *path_index) {
-        pdebug(DEBUG_DETAIL, "Did not find numeric path segment at position %d.", (int)(ssize_t)p_index);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Did not find numeric path segment at position %d.", (int)(ssize_t)p_index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
     /* was the numeric segment valid? */
     if(val < 0 || val > 0x0F) {
-        pdebug(DEBUG_WARN, "Numeric segment in path at position %d is out of bounds!", (int)(ssize_t)(*path_index));
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Numeric segment in path at position %d is out of bounds!", (int)(ssize_t)(*path_index));
         return PLCTAG_ERR_OUT_OF_BOUNDS;
     }
 
@@ -200,12 +200,12 @@ int match_numeric_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     /* skip trailing spaces */
     while(path[p_index] == ' ') { p_index++; }
 
-    pdebug(DEBUG_DETAIL, "Remaining path \"%s\".", &path[p_index]);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Remaining path \"%s\".", &path[p_index]);
 
     /* bump past our last read character. */
     *path_index = p_index;
 
-    pdebug(DEBUG_DETAIL, "Done. Found numeric segment %d.", val);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Done. Found numeric segment %d.", val);
 
     return PLCTAG_STATUS_OK;
 }
@@ -223,7 +223,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     size_t p_index = *path_index;
     size_t c_index = *conn_path_index;
 
-    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
 
     /* first part, the extended address marker*/
     val = 0;
@@ -233,14 +233,14 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val != 18 && val != 19) {
-        pdebug(DEBUG_DETAIL, "Path segment at %d does not match IP address segment.", (int)(ssize_t)*path_index);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Path segment at %d does not match IP address segment.", (int)(ssize_t)*path_index);
         return PLCTAG_ERR_NOT_FOUND;
     }
 
     if(val == 18) {
-        pdebug(DEBUG_DETAIL, "Extended address on port A.");
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Extended address on port A.");
     } else {
-        pdebug(DEBUG_DETAIL, "Extended address on port B.");
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Extended address on port B.");
     }
 
     /* skip spaces */
@@ -248,7 +248,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
 
     /* is the next character a comma? */
     if(path[p_index] != ',') {
-        pdebug(DEBUG_DETAIL, "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".",
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Not an IP address segment starting at position %d of path.  Remaining: \"%s\".",
                (int)(ssize_t)p_index, &path[p_index]);
         return PLCTAG_ERR_NOT_FOUND;
     }
@@ -278,18 +278,18 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "First IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "First IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    pdebug(DEBUG_DETAIL, "First IP segment: %d.", val);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "First IP segment: %d.", val);
 
     /* skip spaces */
     while(path[p_index] == ' ') { p_index++; }
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
-        pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in first IP address part.", path[p_index], p_index);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in first IP address part.", path[p_index], p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -313,18 +313,18 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Second IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Second IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    pdebug(DEBUG_DETAIL, "Second IP segment: %d.", val);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Second IP segment: %d.", val);
 
     /* skip spaces */
     while(path[p_index] == ' ') { p_index++; }
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
-        pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in second IP address part.", path[p_index], p_index);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in second IP address part.", path[p_index], p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -348,18 +348,18 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Third IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Third IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    pdebug(DEBUG_DETAIL, "Third IP segment: %d.", val);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Third IP segment: %d.", val);
 
     /* skip spaces */
     while(path[p_index] == ' ') { p_index++; }
 
     /* is the next character a dot? */
     if(path[p_index] != '.') {
-        pdebug(DEBUG_DETAIL, "Unexpected character '%c' found at position %d in third IP address part.", path[p_index], p_index);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Unexpected character '%c' found at position %d in third IP address part.", path[p_index], p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -383,11 +383,11 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     }
 
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Fourth IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Fourth IP address part is out of bounds (0 <= %d < 256) for an IPv4 octet.", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
-    pdebug(DEBUG_DETAIL, "Fourth IP segment: %d.", val);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Fourth IP segment: %d.", val);
 
     /* We need to zero pad if the length is not a multiple of two. */
     if((*addr_seg_len) & (uint8_t)0x01) {
@@ -402,7 +402,7 @@ int match_ip_addr_segment(const char *path, size_t *path_index, uint8_t *conn_pa
     *path_index = p_index;
     *conn_path_index = c_index;
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -420,7 +420,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     int val = 0;
     size_t p_index = *path_index;
 
-    pdebug(DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Starting at position %d in string %s.", (int)(ssize_t)*path_index, path);
 
     /* Get the port part. */
     switch(path[p_index]) {
@@ -437,7 +437,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
         case '3': *port = 2; break;
 
         default:
-            pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match start of DH+ segment.", path[p_index],
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Character '%c' at position %d does not match start of DH+ segment.", path[p_index],
                    (int)(ssize_t)p_index);
             return PLCTAG_ERR_NOT_FOUND;
             break;
@@ -450,7 +450,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* is the next character a colon? */
     if(path[p_index] != ':') {
-        pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match first colon expected in DH+ segment.", path[p_index],
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Character '%c' at position %d does not match first colon expected in DH+ segment.", path[p_index],
                (int)(ssize_t)p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -469,7 +469,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* is the source node a valid number? */
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Source node DH+ address part is out of bounds (0 <= %d < 256).", val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Source node DH+ address part is out of bounds (0 <= %d < 256).", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -480,7 +480,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* is the next character a colon? */
     if(path[p_index] != ':') {
-        pdebug(DEBUG_DETAIL, "Character '%c' at position %d does not match the second colon expected in DH+ segment.",
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Character '%c' at position %d does not match the second colon expected in DH+ segment.",
                path[p_index], (int)(ssize_t)p_index);
         return PLCTAG_ERR_BAD_PARAM;
     }
@@ -499,7 +499,7 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
 
     /* is the destination node a valid number? */
     if(val < 0 || val > 255) {
-        pdebug(DEBUG_WARN, "Destination node DH+ address part is out of bounds (0 <= %d < 256).", val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Destination node DH+ address part is out of bounds (0 <= %d < 256).", val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -509,10 +509,10 @@ int match_dhp_addr_segment(const char *path, size_t *path_index, uint8_t *port, 
     *dest_node = (uint8_t)(unsigned int)val;
     *path_index = p_index;
 
-    pdebug(DEBUG_DETAIL, "Found DH+ path port:%d, source node:%d, destination node:%d.", (int)(unsigned int)*port,
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Found DH+ path port:%d, source node:%d, destination node:%d.", (int)(unsigned int)*port,
            (int)(unsigned int)*src_node, (int)(unsigned int)*dest_node);
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -549,7 +549,7 @@ int encode_tag_name(omron_tag_p tag, const char *name) {
 
     /* names must start with a symbolic segment. */
     if(parse_symbolic_segment(tag, name, &encoded_index, &name_index) != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_WARN, "Unable to parse initial symbolic segment in tag name %s!", name);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Unable to parse initial symbolic segment in tag name %s!", name);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -561,15 +561,15 @@ int encode_tag_name(omron_tag_p tag, const char *name) {
             if(parse_symbolic_segment(tag, name, &encoded_index, &name_index) != PLCTAG_STATUS_OK) {
                 /* try a bit identifier. */
                 if(parse_bit_segment(tag, name, &name_index) == PLCTAG_STATUS_OK) {
-                    pdebug(DEBUG_DETAIL, "Found bit identifier %u.", tag->bit);
+                    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Found bit identifier %u.", tag->bit);
                     break;
                 } else {
-                    pdebug(DEBUG_WARN, "Expected a symbolic segment or a bit identifier at position %d in tag name %s",
+                    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Expected a symbolic segment or a bit identifier at position %d in tag name %s",
                            name_index, name);
                     return PLCTAG_ERR_BAD_PARAM;
                 }
             } else {
-                pdebug(DEBUG_DETAIL, "Found symbolic segment ending at %d", name_index);
+                pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Found symbolic segment ending at %d", name_index);
             }
         } else if(name[name_index] == '[') {
             int num_dimensions = 0;
@@ -585,20 +585,20 @@ int encode_tag_name(omron_tag_p tag, const char *name) {
 
             /* must terminate with a closing ']' */
             if(name[name_index] != ']') {
-                pdebug(DEBUG_WARN, "Bad tag name format, expected closing array bracket at %d in tag name %s!", name_index, name);
+                pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Bad tag name format, expected closing array bracket at %d in tag name %s!", name_index, name);
                 return PLCTAG_ERR_BAD_PARAM;
             }
 
             /* step past the closing bracket. */
             name_index++;
         } else {
-            pdebug(DEBUG_WARN, "Unexpected character at position %d in name string %s!", name_index, name);
+            pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Unexpected character at position %d in name string %s!", name_index, name);
             break;
         }
     }
 
     if(name_index != name_len) {
-        pdebug(DEBUG_WARN, "Bad tag name format.  Tag must end with a bit identifier if one is present.");
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Bad tag name format.  Tag must end with a bit identifier if one is present.");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -622,7 +622,7 @@ int parse_bit_segment(omron_tag_p tag, const char *name, int *name_index) {
     const char *p, *q;
     long val;
 
-    pdebug(DEBUG_DETAIL, "Starting with name index=%d.", *name_index);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Starting with name index=%d.", *name_index);
 
     p = &name[*name_index];
     q = p;
@@ -632,17 +632,17 @@ int parse_bit_segment(omron_tag_p tag, const char *name, int *name_index) {
     /* sanity checks. */
     if(p == q) {
         /* no number. */
-        pdebug(DEBUG_WARN, "Expected bit identifier or symbolic segment at position %d in tag name %s!", *name_index, name);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Expected bit identifier or symbolic segment at position %d in tag name %s!", *name_index, name);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
     if((val < 0) || (val >= 65536)) {
-        pdebug(DEBUG_WARN, "Bit identifier must be between 0 and 255, inclusive, was %d!", (int)val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Bit identifier must be between 0 and 255, inclusive, was %d!", (int)val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
     if(tag->elem_count != 1) {
-        pdebug(DEBUG_WARN, "Bit tags must have only one element!");
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Bit tags must have only one element!");
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -662,11 +662,11 @@ int parse_symbolic_segment(omron_tag_p tag, const char *name, int *encoded_index
     int seg_len_index = 0;
     int seg_len = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", name_i, encoded_i);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", name_i, encoded_i);
 
     /* a symbolic segment must start with an alphabetic character or @, then can have digits or underscores. */
     if(!isalpha(name[name_i]) && name[name_i] != ':' && name[name_i] != '_' && name[name_i] != '@') {
-        pdebug(DEBUG_DETAIL, "tag name at position %d is not the start of a symbolic segment.", name_i);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "tag name at position %d is not the start of a symbolic segment.", name_i);
         return PLCTAG_ERR_NO_MATCH;
     }
 
@@ -701,7 +701,7 @@ int parse_symbolic_segment(omron_tag_p tag, const char *name, int *encoded_index
     *encoded_index = encoded_i;
     *name_index = name_i;
 
-    pdebug(DEBUG_DETAIL, "Parsed symbolic segment \"%.*s\" in tag name.", seg_len, &name[name_start]);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Parsed symbolic segment \"%.*s\" in tag name.", seg_len, &name[name_start]);
 
     return PLCTAG_STATUS_OK;
 }
@@ -711,7 +711,7 @@ int parse_numeric_segment(omron_tag_p tag, const char *name, int *encoded_index,
     const char *p, *q;
     long val;
 
-    pdebug(DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", *name_index, *encoded_index);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Starting with name index=%d and encoded name index=%d.", *name_index, *encoded_index);
 
     p = &name[*name_index];
     q = p;
@@ -721,12 +721,12 @@ int parse_numeric_segment(omron_tag_p tag, const char *name, int *encoded_index,
     /* sanity checks. */
     if(p == q) {
         /* no number. */
-        pdebug(DEBUG_WARN, "Expected numeric segment at position %d in tag name %s!", *name_index, name);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Expected numeric segment at position %d in tag name %s!", *name_index, name);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
     if(val < 0) {
-        pdebug(DEBUG_WARN, "Numeric segment must be greater than or equal to zero, was %d!", (int)val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_WARN, "Numeric segment must be greater than or equal to zero, was %d!", (int)val);
         return PLCTAG_ERR_BAD_PARAM;
     }
 
@@ -750,7 +750,7 @@ int parse_numeric_segment(omron_tag_p tag, const char *name, int *encoded_index,
         tag->encoded_name[*encoded_index] = (uint8_t)((val >> 24) & 0xFF);
         (*encoded_index)++;
 
-        pdebug(DEBUG_DETAIL, "Parsed 4-byte numeric segment of value %u.", (uint32_t)val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Parsed 4-byte numeric segment of value %u.", (uint32_t)val);
     } else if(val > 0xFF) {
         tag->encoded_name[*encoded_index] = (uint8_t)0x29; /* 2-byte segment value. */
         (*encoded_index)++;
@@ -763,7 +763,7 @@ int parse_numeric_segment(omron_tag_p tag, const char *name, int *encoded_index,
         tag->encoded_name[*encoded_index] = (uint8_t)((val >> 8) & 0xFF);
         (*encoded_index)++;
 
-        pdebug(DEBUG_DETAIL, "Parsed 2-byte numeric segment of value %u.", (uint32_t)val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Parsed 2-byte numeric segment of value %u.", (uint32_t)val);
     } else {
         tag->encoded_name[*encoded_index] = (uint8_t)0x28; /* 1-byte segment value. */
         (*encoded_index)++;
@@ -771,10 +771,10 @@ int parse_numeric_segment(omron_tag_p tag, const char *name, int *encoded_index,
         tag->encoded_name[*encoded_index] = (uint8_t)val & 0xFF;
         (*encoded_index)++;
 
-        pdebug(DEBUG_DETAIL, "Parsed 1-byte numeric segment of value %u.", (uint32_t)val);
+        pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Parsed 1-byte numeric segment of value %u.", (uint32_t)val);
     }
 
-    pdebug(DEBUG_DETAIL, "Done with name index=%d and encoded name index=%d.", *name_index, *encoded_index);
+    pdebug(DEBUG_MODULE_OMRON_CIP, DEBUG_DETAIL, "Done with name index=%d and encoded name index=%d.", *name_index, *encoded_index);
 
     return PLCTAG_STATUS_OK;
 }

@@ -147,6 +147,60 @@ LIB_EXPORT const char *plc_tag_decode_error(int err);
 LIB_EXPORT void plc_tag_set_debug_level(int debug_level);
 
 
+/*
+ * Set the debug level for a specific module.
+ *
+ * This function allows fine-grained control over debug output by setting the debug level
+ * for a specific module. Module names are case-insensitive strings like:
+ * "LIB", "INIT", "VERSION", "UTILS", "AB_SESSION", "AB_PCCC", "AB_CIP", "AB_COMMON",
+ * "AB_EIP_CIP", "AB_EIP_CIP_SPECIAL", "AB_EIP_LGX_PCCC", "AB_EIP_PLC5_PCCC", "AB_EIP_PLC5_DHP",
+ * "AB_EIP_SLC_PCCC", "AB_EIP_SLC_DHP", "AB_ERROR", "OMRON_CONN", "OMRON_CIP", "OMRON_COMMON",
+ * "OMRON_STANDARD_TAG", "OMRON_RAW_TAG", "MODBUS", "SYSTEM"
+ *
+ * The debug_level argument takes the same values as plc_tag_set_debug_level().
+ *
+ * Returns PLCTAG_STATUS_OK on success, PLCTAG_ERR_NOT_FOUND if the module name is not recognized.
+ */
+LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug_level);
+
+
+/*
+ * Get the debug level for a specific module.
+ *
+ * Returns the current debug level for the specified module, or PLCTAG_ERR_NOT_FOUND if
+ * the module name is not recognized.
+ */
+LIB_EXPORT int plc_tag_get_debug_module_level(const char *module_name);
+
+
+/*
+ * Get the current global debug level.
+ *
+ * Returns the current global debug level set by plc_tag_set_debug_level().
+ */
+LIB_EXPORT int plc_tag_get_debug_level(void);
+
+
+/*
+ * Convert a debug module name to a module ID.
+ *
+ * This function takes a string like "AB_SESSION" or "OMRON_CONN" and returns
+ * the corresponding module ID. Returns 0 if the module name is not recognized.
+ * Module names are case-insensitive.
+ */
+LIB_EXPORT uint64_t plc_tag_debug_module_id(const char *module_name);
+
+
+/*
+ * Convert a debug level name to a debug level ID.
+ *
+ * This function takes a string like "ERROR", "DEBUG_DETAIL", "SPEW", etc.
+ * and returns the corresponding debug level ID. Returns -1 if the level name
+ * is not recognized. Level names are case-insensitive and can be prefixed with
+ * "DEBUG_" or used without it.
+ */
+LIB_EXPORT int plc_tag_debug_level_id(const char *level_name);
+
 
 /*
  * Check that the library supports the required API version.
