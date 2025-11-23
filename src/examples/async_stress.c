@@ -63,24 +63,6 @@ typedef struct {
     int read_count;
 } tag_stats_t;
 
-/* Calculate standard deviation of read counts */
-static double calculate_std_dev(tag_stats_t *stats, int count) {
-    double mean = 0.0;
-    double variance = 0.0;
-
-    for(int i = 0; i < count; i++) {
-        mean += stats[i].read_count;
-    }
-    mean /= count;
-
-    for(int i = 0; i < count; i++) {
-        double diff = stats[i].read_count - mean;
-        variance += diff * diff;
-    }
-
-    variance /= count;
-    return sqrt(variance);
-}
 
 void usage(void) {
     printf(
