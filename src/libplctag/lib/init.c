@@ -171,6 +171,9 @@ void destroy_modules(void) {
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Unregistering logger.");
     plc_tag_unregister_logger();
 
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Flushing debug output.");
+    debug_flush();
+
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done.");
 
     library_initialized = 0;

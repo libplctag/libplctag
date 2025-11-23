@@ -79,3 +79,4 @@ extern void pdebug_dump_bytes_impl(const char *func, int line_num, int debug_lev
 
 extern int debug_register_logger(void (*log_callback_func)(int32_t tag_id, int debug_level, const char *message));
 extern int debug_unregister_logger(void);
+extern void debug_flush(void);

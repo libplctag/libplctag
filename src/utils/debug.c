@@ -55,6 +55,11 @@ static volatile uint32_t thread_num = 1;
 static lock_t logger_callback_lock = LOCK_INIT;
 static void (*volatile log_callback_func)(int32_t tag_id, int debug_level, const char *message);
 
+/* Buffering control for stderr logging performance */
+static volatile int stderr_buffering_initialized = 0;
+static lock_t stderr_init_lock = LOCK_INIT;
+static volatile int log_call_count = 0;
+
 
 /* Module name lookup table is now defined in debug_generated.h */
 
@@ -185,6 +190,19 @@ static void format_module_names(debug_module_mask_t modules, char *buf, size_t b
 
 static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO", "DETAIL", "SPEW"};
 
+static void ensure_stderr_buffering(void) {
+    /* Initialize stderr buffering once for better performance */
+    if(!stderr_buffering_initialized) {
+        spin_block(&stderr_init_lock) {
+            if(!stderr_buffering_initialized) {
+                /* Set stderr to full buffering with 8KB buffer for better performance */
+                setvbuf(stderr, NULL, _IOFBF, 8192);
+                stderr_buffering_initialized = 1;
+            }
+        }
+    }
+}
+
 extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_module_mask_t modules, const char *templ, ...) {
     va_list va;
     struct tm t;
@@ -194,6 +212,9 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     char module_buf[256];
     char prefix[1000]; /* MAGIC */
     char output[1000];
+
+    /* Ensure stderr buffering is set up (one-time initialization) */
+    ensure_stderr_buffering();
 
     /* format the module names */
     format_module_names(modules, module_buf, sizeof(module_buf));
@@ -226,6 +247,13 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
         log_callback_func(tag_id, debug_level, output);
     } else {
         fputs(output, stderr);
+        
+        /* Flush periodically for better performance while ensuring timely output */
+        log_call_count++;
+        if(debug_level <= DEBUG_ERROR || (log_call_count % 100) == 0) {
+            /* Flush on errors (critical info) or every 100 log entries */
+            fflush(stderr);
+        }
     }
 
     va_end(va);
@@ -292,6 +320,14 @@ int debug_unregister_logger(void) {
     }
 
     return rc;
+}
+
+
+void debug_flush(void) {
+    /* Flush stderr to ensure all buffered log output is written */
+    if(!log_callback_func) {
+        fflush(stderr);
+    }
 }
 
 
