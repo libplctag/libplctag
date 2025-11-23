@@ -1387,15 +1387,12 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 
                     /*
                     * Move the tag to the end of the list for round-robin fairness.
-                    * This ensures tags that just got processed give other tags a chance.
-                    * Only do this if the tag's operation changed, to avoid unnecessary moves.
-                    * 
-                    * We really only care about moving tags that just completed a read or write response
-                    * back to idle, since those are the ones that just got serviced.
+                    * This ensures tags that just started an operation give other tags a chance.
+                    * Only do this when starting a new operation (IDLE -> READ_REQUEST or WRITE_REQUEST).
                     */
-                    if(tag->op == TAG_OP_IDLE && (prev_op == TAG_OP_READ_RESPONSE || prev_op == TAG_OP_WRITE_RESPONSE)) {
-                        pdebug(DEBUG_DETAIL, "Moving tag %d to end of list for fairness (op changed from %s to %s).",
-                            tag->tag_id, op_to_str(prev_op), op_to_str(tag->op));
+                    if(prev_op == TAG_OP_IDLE && (tag->op == TAG_OP_READ_REQUEST || tag->op == TAG_OP_WRITE_REQUEST)) {
+                        pdebug(DEBUG_DETAIL, "Moving tag %d to end of list for fairness (started %s).",
+                            tag->tag_id, op_to_str(tag->op));
 
                         /* remove the tag from the current location */
                         vector_remove(plc->tag_vector, i);
