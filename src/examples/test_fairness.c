@@ -279,9 +279,9 @@ int main(int argc, char **argv) {
 
         fprintf(stderr, "Tag %2d (ID=%d): started=%d, completed=%d, failed=%d, avg_wait=%" PRId64 "ms, min_wait=%" PRId64 "ms, max_wait=%" PRId64 "ms\n",
                i, tag_id, started, completed, failed,
-               completed > 1 ? (long long)(total_wait / (completed - 1)) : 0,
-               (long long)min_wait,
-               (long long)max_wait);
+               completed > 1 ? (total_wait / (completed - 1)) : 0,
+               min_wait,
+               max_wait);
 
         read_counts[i] = completed;
         total_started += started;
