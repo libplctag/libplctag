@@ -13,9 +13,6 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     # Extract debug levels enum
     string(REGEX MATCH "typedef enum \\{[^}]*PLCTAG_DEBUG_SPEW[^}]*\\} plctag_debug_level_t" DEBUG_ENUM "${HEADER_CONTENT}")
     
-    # Extract debug module enum
-    string(REGEX MATCH "typedef enum \\{[^}]*PLCTAG_MODULE_PLATFORM[^}]*\\} plctag_debug_module_t" MODULE_ENUM "${HEADER_CONTENT}")
-
     # Parse error codes
     set(ERROR_CODE_ENTRIES "")
     string(REGEX MATCHALL "PLCTAG_[A-Z_]+ = -?[0-9]+" ERROR_MATCHES "${ERROR_ENUM}")
@@ -32,11 +29,13 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
         set(DEBUG_LEVEL_ENTRIES "${DEBUG_LEVEL_ENTRIES}    ${MATCH_CONVERTED},\n")
     endforeach()
 
-    # Parse debug modules from enum and create internal representation
+    # Parse debug modules from header and create internal representation
+    # Note: Extract directly from HEADER_CONTENT because CMake regex doesn't match newlines across groups
+    # Pattern accounts for alignment spacing between name and = sign
     set(MODULE_ENUM_ENTRIES "")
     set(MODULE_NAME_TABLE "")
     set(MODULE_COUNT 0)
-    string(REGEX MATCHALL "PLCTAG_MODULE_[A-Z_0-9]+ = \\(1ULL << [0-9]+\\)" MODULE_MATCHES "${MODULE_ENUM}")
+    string(REGEX MATCHALL "PLCTAG_MODULE_[A-Z_0-9]+[ \t]*=[ \t]*\\(1ULL << [0-9]+\\)" MODULE_MATCHES "${HEADER_CONTENT}")
     foreach(MATCH ${MODULE_MATCHES})
         # Extract module name
         string(REGEX MATCH "PLCTAG_MODULE_([A-Z_0-9]+)" MODULE_NAME_MATCH "${MATCH}")
