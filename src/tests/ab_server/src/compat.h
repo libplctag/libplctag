@@ -69,6 +69,11 @@
 
 /* Atomic operations for fairness tracking */
 #ifdef IS_WINDOWS
+    /* Include winsock2.h before windows.h to avoid conflicts with old winsock.h */
+    #ifndef _WINSOCKAPI_
+        #define _WINSOCKAPI_
+    #endif
+    #include <winsock2.h>
     #include <windows.h>
     typedef struct { volatile LONG value; } atomic_int32_t;
     typedef struct { volatile LONG64 value; } atomic_int64_t;

@@ -31,6 +31,7 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
+#include "compat.h"
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -41,14 +42,10 @@
 #include <time.h>
 #include "log.h"
 
-#if defined(_WIN32) && !defined(_MSC_VER)
-#include <windows.h>
-#endif
-
 /* Guard for MSVC which doesn't support C11 stdatomic.h */
 #if defined(_MSC_VER)
     /* Microsoft Visual C++ compiler */
-    #include <windows.h>
+    /* windows.h is already included in compat.h */
     /* Define atomic types and operations for MSVC */
     #define _Atomic volatile
     #define atomic_fetch_add(obj, arg) InterlockedExchangeAdd(obj, arg)

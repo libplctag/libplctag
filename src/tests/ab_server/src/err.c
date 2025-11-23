@@ -31,16 +31,12 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#include "err.h"
 #include "compat.h"
+#include "err.h"
 #include "log.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
-
-#ifdef IS_WINDOWS
-#include <winsock2.h>
-#endif
 
 /* ===== PROTOCOL ERROR STRINGS ===== */
 
