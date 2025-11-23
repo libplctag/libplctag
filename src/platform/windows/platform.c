@@ -1173,7 +1173,7 @@ static int socket_lib_init(void) {
 extern int socket_create(sock_p *s) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_INFO, "Starting.");
 
     if(!socket_lib_init()) {
         pdebug(DEBUG_WARN, "error initializing Windows Sockets.");
@@ -1196,14 +1196,14 @@ extern int socket_create(sock_p *s) {
     (*s)->wake_read_fd = INVALID_SOCKET;
     (*s)->wake_write_fd = INVALID_SOCKET;
 
-    pdebug(DEBUG_DETAIL, "Setting up wake pipe.");
+    pdebug(DEBUG_SPEW, "Setting up wake pipe.");
     rc = sock_create_event_wakeup_channel((*s));
     if(rc != PLCTAG_STATUS_OK) {
         pdebug(DEBUG_WARN, "Unable to create wake channel, error %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_INFO, "Done.");
 
     return PLCTAG_STATUS_OK;
 }
@@ -1222,7 +1222,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     struct timeval timeout; /* used for timing out connections etc. */
     struct linger so_linger;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     /* Open a socket for communication with the gateway. */
     fd = socket(AF_INET, SOCK_STREAM, 0 /*IPPROTO_TCP*/);
@@ -1263,7 +1263,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     if(setsockopt(fd, SOL_SOCKET, SO_LINGER, (char *)&so_linger, (int)sizeof(so_linger))) {
         closesocket(fd);
-        pdebug(DEBUG_ERROR, "Error setting socket close linger option, errno: %d", errno);
+        pdebug(DEBUG_WARN, "Error setting socket close linger option, errno: %d", errno);
         return PLCTAG_ERR_OPEN;
     }
 
@@ -1271,7 +1271,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     /* try a numeric IP address conversion first. */
     if(inet_pton(AF_INET, host, (struct in_addr *)ips) > 0) {
-        pdebug(DEBUG_DETAIL, "Found numeric IP address: %s", host);
+        pdebug(DEBUG_SPEW, "Found numeric IP address: %s", host);
         num_ips = 1;
     } else {
         struct addrinfo hints;
@@ -1304,7 +1304,7 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
 
     /* set the socket to non-blocking. */
     if(ioctlsocket(fd, (long)FIONBIO, &non_blocking)) {
-        /*pdebug("Error getting socket options, errno: %d", errno);*/
+        pdebug(DEBUG_WARN, "Error getting socket options, errno: %d", errno);
         closesocket(fd);
         return PLCTAG_ERR_OPEN;
     }
@@ -1373,7 +1373,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     struct timeval tv;
     int select_rc = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!sock) {
         pdebug(DEBUG_WARN, "Null socket pointer passed!");
@@ -1393,7 +1393,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     select_rc = select((int)(sock->fd) + 1, NULL, &write_set, &err_set, &tv);
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
-            pdebug(DEBUG_DETAIL, "Socket is connected.");
+            pdebug(DEBUG_SPEW, "Socket is connected.");
             rc = PLCTAG_STATUS_OK;
         } else if(FD_ISSET(sock->fd, &err_set)) {
             pdebug(DEBUG_WARN, "Error connecting!");
@@ -1403,7 +1403,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
             return PLCTAG_ERR_OPEN;
         }
     } else if(select_rc == 0) {
-        pdebug(DEBUG_DETAIL, "Socket connection not done yet.");
+        pdebug(DEBUG_SPEW, "Socket connection not done yet.");
         rc = PLCTAG_ERR_TIMEOUT;
     } else {
         int err = WSAGetLastError();
@@ -1453,7 +1453,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -1466,7 +1466,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     fd_set err_set;
     int num_sockets = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!sock) {
         pdebug(DEBUG_WARN, "Null socket pointer passed!");
@@ -1537,7 +1537,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             /* empty the socket. */
             while((bytes_read = (int)recv(sock->wake_read_fd, (char *)&buf[0], sizeof(buf), 0)) > 0) {}
 
-            pdebug(DEBUG_DETAIL, "Socket woken up.");
+            pdebug(DEBUG_SPEW, "Socket woken up.");
 
             result |= (events & SOCK_EVENT_WAKE_UP);
         }
@@ -1550,14 +1550,14 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
 
             if(byte_read > 0) {
-                pdebug(DEBUG_DETAIL, "Socket can read.");
+                pdebug(DEBUG_SPEW, "Socket can read.");
                 result |= (events & SOCK_EVENT_CAN_READ);
             } else if(byte_read == 0) {
                 /* recv() returned 0 - this means the connection was closed by the remote peer.
                  * A healthy TCP socket that's just idle will not show as readable in select()
                  * unless there's actual data waiting. If select() says readable but recv() gets 0,
                  * the connection is truly closed. */
-                pdebug(DEBUG_DETAIL, "Socket disconnected (recv returned 0).");
+                pdebug(DEBUG_WARN, "Socket disconnected (recv returned 0).");
                 result |= (events & SOCK_EVENT_DISCONNECT);
             } else {
                 /* recv() returned -1, check the specific error */
@@ -1565,7 +1565,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
                 if(recv_err == WSAEWOULDBLOCK) {
                     /* This is a spurious wakeup - socket showed as readable but no data.
                      * Don't report an error, just return no events. */
-                    pdebug(DEBUG_DETAIL, "Socket readable but no data available (WSAEWOULDBLOCK).");
+                    pdebug(DEBUG_SPEW, "Socket readable but no data available (WSAEWOULDBLOCK).");
                 } else {
                     /* Some other error occurred on the socket */
                     pdebug(DEBUG_WARN, "recv() with MSG_PEEK error %d on socket.", recv_err);
@@ -1576,7 +1576,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
         /* is write ready for the main fd? */
         if(FD_ISSET(sock->fd, &write_set)) {
-            pdebug(DEBUG_DETAIL, "Socket can write or just connected.");
+            pdebug(DEBUG_SPEW, "Socket can write or just connected.");
             result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
         }
 
@@ -1595,7 +1595,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
                     result |= (events & SOCK_EVENT_ERROR);
                 } else {
                     /* FD_ISSET was spurious - there's no actual error */
-                    pdebug(DEBUG_DETAIL, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
+                    pdebug(DEBUG_SPEW, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
                 }
             } else {
                 /* Failed to get socket error state, assume there's an error */
@@ -1651,7 +1651,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return result;
 }
@@ -1682,7 +1682,7 @@ int socket_wake(sock_p sock) {
         int err = WSAGetLastError();
 
         if(err == WSAEWOULDBLOCK) {
-            pdebug(DEBUG_DETAIL, "Write wrote no data.");
+            pdebug(DEBUG_SPEW, "Write wrote no data.");
 
             rc = PLCTAG_STATUS_OK;
         } else if(err == WSAEBADF) {
@@ -1698,7 +1698,7 @@ int socket_wake(sock_p sock) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return rc;
 }
@@ -1707,7 +1707,7 @@ int socket_wake(sock_p sock) {
 int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
@@ -1736,9 +1736,9 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
         if(err == WSAEWOULDBLOCK) {
             if(timeout_ms > 0) {
-                pdebug(DEBUG_DETAIL, "Immediate read attempt did not succeed, now wait for select().");
+                pdebug(DEBUG_SPEW, "Immediate read attempt did not succeed, now wait for select().");
             } else {
-                pdebug(DEBUG_DETAIL, "Read resulted in no data.");
+                pdebug(DEBUG_SPEW, "Read resulted in no data.");
             }
 
             rc = 0;
@@ -1764,13 +1764,13 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         select_rc = select(1, &read_set, NULL, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &read_set)) {
-                pdebug(DEBUG_DETAIL, "Socket can read data.");
+                pdebug(DEBUG_SPEW, "Socket can read data.");
             } else {
                 pdebug(DEBUG_WARN, "select() returned but socket is not ready to read data!");
                 return PLCTAG_ERR_BAD_REPLY;
             }
         } else if(select_rc == 0) {
-            pdebug(DEBUG_DETAIL, "Socket read timed out.");
+            pdebug(DEBUG_SPEW, "Socket read timed out.");
             return PLCTAG_ERR_TIMEOUT;
         } else {
             int err = WSAGetLastError();
@@ -1834,7 +1834,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done: result = %d.", rc);
+    pdebug(DEBUG_SPEW, "Done: result = %d.", rc);
 
     return rc;
 }
@@ -1843,7 +1843,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
@@ -1871,9 +1871,9 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
         if(err == WSAEWOULDBLOCK) {
             if(timeout_ms > 0) {
-                pdebug(DEBUG_DETAIL, "Immediate write attempt did not succeed, now wait for select().");
+                pdebug(DEBUG_SPEW, "Immediate write attempt did not succeed, now wait for select().");
             } else {
-                pdebug(DEBUG_DETAIL, "Write wrote no data.");
+                pdebug(DEBUG_SPEW, "Write wrote no data.");
             }
 
             rc = 0;
@@ -1899,13 +1899,13 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         select_rc = select(1, NULL, &write_set, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &write_set)) {
-                pdebug(DEBUG_DETAIL, "Socket can write data.");
+                pdebug(DEBUG_SPEW, "Socket can write data.");
             } else {
                 pdebug(DEBUG_WARN, "select() returned but socket is not ready to write data!");
                 return PLCTAG_ERR_BAD_REPLY;
             }
         } else if(select_rc == 0) {
-            pdebug(DEBUG_DETAIL, "Socket write timed out.");
+            pdebug(DEBUG_SPEW, "Socket write timed out.");
             return PLCTAG_ERR_TIMEOUT;
         } else {
             int err = WSAGetLastError();
@@ -1961,7 +1961,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
             int err = WSAGetLastError();
 
             if(err == WSAEWOULDBLOCK) {
-                pdebug(DEBUG_DETAIL, "No data written.");
+                pdebug(DEBUG_SPEW, "No data written.");
                 rc = 0;
             } else {
                 pdebug(DEBUG_WARN, "socket write error rc=%d, errno=%d", rc, err);
@@ -1970,7 +1970,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done: result = %d.", rc);
+    pdebug(DEBUG_SPEW, "Done: result = %d.", rc);
 
     return rc;
 }
@@ -2053,7 +2053,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
     u_long non_blocking = 1;
     SOCKET wake_fds[2];
 
-    pdebug(DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_DETAIL, "Starting.");
 
     wake_fds[0] = INVALID_SOCKET;
     wake_fds[1] = INVALID_SOCKET;
@@ -2198,7 +2198,7 @@ int sock_create_event_wakeup_channel(sock_p sock) {
         sock->wake_read_fd = wake_fds[0];
         sock->wake_write_fd = wake_fds[1];
 
-        pdebug(DEBUG_INFO, "Done.");
+        pdebug(DEBUG_DETAIL, "Done.");
     }
 
     return rc;

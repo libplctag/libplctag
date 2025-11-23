@@ -1360,10 +1360,10 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
 
     FD_SET(sock->fd, &write_set);
 
-    pdebug(DEBUG_INFO, "socket_connect_tcp_check: calling select() on fd=%d with timeout_ms=%d", sock->fd, timeout_ms);
+    pdebug(DEBUG_SPEW, "socket_connect_tcp_check: calling select() on fd=%d with timeout_ms=%d", sock->fd, timeout_ms);
     select_rc = select(sock->fd + 1, NULL, &write_set, NULL, &tv);
 
-    pdebug(DEBUG_INFO, "socket_connect_tcp_check: select() returned %d, write_set fd_isset=%d", select_rc, FD_ISSET(sock->fd, &write_set));
+    pdebug(DEBUG_SPEW, "socket_connect_tcp_check: select() returned %d, write_set fd_isset=%d", select_rc, FD_ISSET(sock->fd, &write_set));
 
     if(select_rc == 1) {
         if(FD_ISSET(sock->fd, &write_set)) {
@@ -1415,7 +1415,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     int getpeer_rc = getpeername(sock->fd, (struct sockaddr *)&peer_addr, &peer_addr_len);
 
     if(getpeer_rc == 0) {
-        pdebug(DEBUG_INFO, "socket_connect_tcp_check: getpeername() succeeded, socket is truly connected to %s:%d",
+        pdebug(DEBUG_SPEW, "socket_connect_tcp_check: getpeername() succeeded, socket is truly connected to %s:%d",
                inet_ntoa(peer_addr.sin_addr), ntohs(peer_addr.sin_port));
     } else {
         pdebug(DEBUG_WARN, "socket_connect_tcp_check: getpeername() failed with errno=%d, socket is NOT connected!", errno);
@@ -1482,7 +1482,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     int max_fd = 0;
     int num_sockets = 0;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!sock) {
         pdebug(DEBUG_WARN, "Null socket pointer passed!");
@@ -1529,19 +1529,19 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         /* add more depending on the mask. */
         if(events & SOCK_EVENT_CAN_READ) {
             FD_SET(sock->fd, &read_set);
-            pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
+            pdebug(DEBUG_SPEW, "socket_wait_event: Adding sock->fd=%d to read_set for SOCK_EVENT_CAN_READ", sock->fd);
         }
 
         if((events & SOCK_EVENT_CONNECT) || (events & SOCK_EVENT_CAN_WRITE)) {
             FD_SET(sock->fd, &write_set);
-            pdebug(DEBUG_INFO, "socket_wait_event: Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
+            pdebug(DEBUG_SPEW, "socket_wait_event: Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
         }
     } else {
         /* Main socket invalid - only wake socket will be monitored (valid for reconnection) */
         max_fd = sock->wake_read_fd;
     }
 
-    pdebug(DEBUG_INFO, "socket_wait_event: events=0x%x, max_fd=%d, sock->fd=%d, timeout_ms=%d, calling select()", events, max_fd, sock->fd, timeout_ms);
+    pdebug(DEBUG_SPEW, "socket_wait_event: events=0x%x, max_fd=%d, sock->fd=%d, timeout_ms=%d, calling select()", events, max_fd, sock->fd, timeout_ms);
 
     /* calculate the timeout. */
     if(timeout_ms > 0) {
@@ -1550,14 +1550,14 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         tv.tv_sec = (time_t)(timeout_ms / 1000);
         tv.tv_usec = (suseconds_t)(timeout_ms % 1000) * (suseconds_t)(1000);
 
-        pdebug(DEBUG_INFO, "socket_wait_event: calling select with timeout tv_sec=%ld tv_usec=%ld", tv.tv_sec, tv.tv_usec);
+        pdebug(DEBUG_SPEW, "socket_wait_event: calling select with timeout tv_sec=%ld tv_usec=%ld", tv.tv_sec, tv.tv_usec);
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, &tv);
     } else {
-        pdebug(DEBUG_INFO, "socket_wait_event: calling select with infinite timeout");
+        pdebug(DEBUG_SPEW, "socket_wait_event: calling select with infinite timeout");
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
     }
 
-    pdebug(DEBUG_INFO, "socket_wait_event: select() returned num_sockets=%d for sock->fd=%d, read_set has fd=%d, write_set has fd=%d, err_set has fd=%d",
+    pdebug(DEBUG_SPEW, "socket_wait_event: select() returned num_sockets=%d for sock->fd=%d, read_set has fd=%d, write_set has fd=%d, err_set has fd=%d",
            num_sockets, sock->fd, FD_ISSET(sock->fd, &read_set), FD_ISSET(sock->fd, &write_set), FD_ISSET(sock->fd, &err_set));
 
     if(num_sockets == 0) {
@@ -1570,7 +1570,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             /* empty the socket. */
             while((int)read(sock->wake_read_fd, &buf[0], sizeof(buf)) > 0) {}
 
-            pdebug(DEBUG_DETAIL, "Socket woken up.");
+            pdebug(DEBUG_SPEW, "Socket woken up.");
             result |= (events & SOCK_EVENT_WAKE_UP);
         }
 
@@ -1581,18 +1581,18 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
             byte_read = (int)recv(sock->fd, &buf, sizeof(buf), MSG_PEEK);
 
-            pdebug(DEBUG_INFO, "socket_wait_event: recv(MSG_PEEK) returned %d, errno=%d", byte_read, errno);
+            pdebug(DEBUG_SPEW, "socket_wait_event: recv(MSG_PEEK) returned %d, errno=%d", byte_read, errno);
 
             if(byte_read > 0) {
-                pdebug(DEBUG_DETAIL, "Socket can read.");
+                pdebug(DEBUG_SPEW, "Socket can read.");
                 result |= (events & SOCK_EVENT_CAN_READ);
             } else if(byte_read == 0) {
-                pdebug(DEBUG_DETAIL, "Socket disconnected (recv returned 0).");
+                pdebug(DEBUG_WARN, "Socket disconnected (recv returned 0).");
                 result |= (events & SOCK_EVENT_DISCONNECT);
             } else {
-                pdebug(DEBUG_INFO, "socket_wait_event: recv(MSG_PEEK) error: errno=%d", errno);
+                pdebug(DEBUG_SPEW, "socket_wait_event: recv(MSG_PEEK) error: errno=%d", errno);
                 if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                    pdebug(DEBUG_DETAIL, "Socket not ready (EAGAIN/EWOULDBLOCK), will retry.");
+                    pdebug(DEBUG_SPEW, "Socket not ready (EAGAIN/EWOULDBLOCK), will retry.");
                     /* Don't report anything, will wait for next event */
                 } else {
                     pdebug(DEBUG_WARN, "Socket recv error: %d", errno);
@@ -1603,7 +1603,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
         /* is write ready for the main fd? */
         if(FD_ISSET(sock->fd, &write_set)) {
-            pdebug(DEBUG_DETAIL, "Socket can write or just connected.");
+            pdebug(DEBUG_SPEW, "Socket can write or just connected.");
             result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
         }
 
@@ -1621,7 +1621,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
                     result |= (events & SOCK_EVENT_ERROR);
                 } else {
                     /* FD_ISSET was spurious - there's no actual error */
-                    pdebug(DEBUG_DETAIL, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
+                    pdebug(DEBUG_SPEW, "FD_ISSET indicated error but SO_ERROR is 0 (spurious error flag).");
                 }
             } else {
                 /* Failed to get socket error state, assume there's an error */
@@ -1663,7 +1663,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done.");
+    pdebug(DEBUG_SPEW, "Done.");
 
     return result;
 }
@@ -1732,7 +1732,7 @@ int socket_wake(sock_p sock) {
 int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
@@ -1764,9 +1764,9 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             if(timeout_ms > 0) {
-                pdebug(DEBUG_DETAIL, "Immediate read attempt did not succeed, now wait for select().");
+                pdebug(DEBUG_SPEW, "Immediate read attempt did not succeed, now wait for select().");
             } else {
-                pdebug(DEBUG_DETAIL, "Read resulted in no data.");
+                pdebug(DEBUG_SPEW, "Read resulted in no data.");
             }
 
             rc = 0;
@@ -1792,13 +1792,13 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         select_rc = select(s->fd + 1, &read_set, NULL, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &read_set)) {
-                pdebug(DEBUG_DETAIL, "Socket can read data.");
+                pdebug(DEBUG_SPEW, "Socket can read data.");
             } else {
                 pdebug(DEBUG_WARN, "select() returned but socket is not ready to read data!");
                 return PLCTAG_ERR_BAD_REPLY;
             }
         } else if(select_rc == 0) {
-            pdebug(DEBUG_DETAIL, "Socket read timed out.");
+            pdebug(DEBUG_SPEW, "Socket read timed out.");
             return PLCTAG_ERR_TIMEOUT;
         } else {
             pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
@@ -1837,7 +1837,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         rc = (int)read(s->fd, buf, (size_t)size);
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                pdebug(DEBUG_DETAIL, "No data read.");
+                pdebug(DEBUG_SPEW, "No data read.");
                 rc = 0;
             } else {
                 pdebug(DEBUG_WARN, "Socket read error: rc=%d, errno=%d", rc, errno);
@@ -1846,7 +1846,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done: result %d.", rc);
+    pdebug(DEBUG_SPEW, "Done: result %d.", rc);
 
     return rc;
 }
@@ -1855,7 +1855,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
     int rc;
 
-    pdebug(DEBUG_DETAIL, "Starting.");
+    pdebug(DEBUG_SPEW, "Starting.");
 
     if(!s) {
         pdebug(DEBUG_WARN, "Socket pointer is null!");
@@ -1885,12 +1885,12 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
      * call select().
      */
 
-    pdebug(DEBUG_INFO, "socket_write: About to write %d bytes on fd=%d", size, s->fd);
+    pdebug(DEBUG_SPEW, "socket_write: About to write %d bytes on fd=%d", size, s->fd);
 
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
     rc = (int)write(s->fd, buf, (size_t)size);
-    pdebug(DEBUG_INFO, "socket_write: write() returned %d for fd=%d", rc, s->fd);
+    pdebug(DEBUG_SPEW, "socket_write: write() returned %d for fd=%d", rc, s->fd);
 #else
     /* on Linux, we use MSG_NOSIGNAL */
     rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
@@ -1921,13 +1921,13 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         select_rc = select(s->fd + 1, NULL, &write_set, NULL, &tv);
         if(select_rc == 1) {
             if(FD_ISSET(s->fd, &write_set)) {
-                pdebug(DEBUG_DETAIL, "Socket can write data.");
+                pdebug(DEBUG_SPEW, "Socket can write data.");
             } else {
                 pdebug(DEBUG_WARN, "select() returned but socket is not ready to write data!");
                 return PLCTAG_ERR_BAD_REPLY;
             }
         } else if(select_rc == 0) {
-            pdebug(DEBUG_DETAIL, "Socket write timed out.");
+            pdebug(DEBUG_SPEW, "Socket write timed out.");
             return PLCTAG_ERR_TIMEOUT;
         } else {
             pdebug(DEBUG_WARN, "select() returned status %d!", select_rc);
@@ -1973,7 +1973,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                pdebug(DEBUG_DETAIL, "No data written.");
+                pdebug(DEBUG_SPEW, "No data written.");
                 rc = 0;
             } else {
                 pdebug(DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
@@ -1982,7 +1982,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
     }
 
-    pdebug(DEBUG_DETAIL, "Done: result = %d.", rc);
+    pdebug(DEBUG_SPEW, "Done: result = %d.", rc);
 
     return rc;
 }
