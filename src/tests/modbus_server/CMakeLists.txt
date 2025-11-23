@@ -47,6 +47,12 @@ elseif(UNIX)
             target_link_libraries(modbus_server ${RT_LIBRARY})
         endif()
     endif()
+
+    # Link math library (modbus_server uses sqrt)
+    find_library(MATH_LIBRARY m)
+    if(MATH_LIBRARY)
+        target_link_libraries(modbus_server ${MATH_LIBRARY})
+    endif()
 endif()
 
 # Compiler-specific warnings

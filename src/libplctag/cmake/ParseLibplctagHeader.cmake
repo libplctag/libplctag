@@ -1,7 +1,7 @@
 # ParseLibplctagHeader.cmake
 # Parses libplctag.h to extract enum definitions and generate internal headers
 
-function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER)
+function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     message(STATUS "Parsing ${INPUT_HEADER} to generate ${OUTPUT_HEADER}")
     
     # Read the entire header file
@@ -74,22 +74,36 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER)
     set(GENERATED_HEADER "${GENERATED_HEADER}} debug_module_t;\n\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}typedef uint64_t debug_module_mask_t;\n\n")
     
-    # Module name table
+    # Module name table - declaration (in header)
     set(GENERATED_HEADER "${GENERATED_HEADER}/* Module name lookup table */\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}static const char *debug_module_names[] = {\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}${MODULE_NAME_TABLE}")
-    set(GENERATED_HEADER "${GENERATED_HEADER}};\n\n")
-    set(GENERATED_HEADER "${GENERATED_HEADER}#define DEBUG_MODULE_COUNT (sizeof(debug_module_names) / sizeof(debug_module_names[0]))\n\n")
-    
+    set(GENERATED_HEADER "${GENERATED_HEADER}extern const char *debug_module_names[];\n\n")
+    set(GENERATED_HEADER "${GENERATED_HEADER}#define DEBUG_MODULE_COUNT ${MODULE_COUNT}\n\n")
+
     # Error codes (for potential use)
     set(GENERATED_HEADER "${GENERATED_HEADER}/* Error codes - generated from plctag_error_code_t enum */\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}/* (Available if needed for internal error handling) */\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}/* typedef enum {\n")
     set(GENERATED_HEADER "${GENERATED_HEADER}${ERROR_CODE_ENTRIES}")
     set(GENERATED_HEADER "${GENERATED_HEADER}} internal_error_code_t; */\n")
-    
-    # Write the generated file
+
+    # Write the header file
     file(WRITE "${OUTPUT_HEADER}" "${GENERATED_HEADER}")
-    
+
+    # Generate the .c file with the actual array definition
+    set(GENERATED_C "/*\n")
+    set(GENERATED_C "${GENERATED_C} * AUTO-GENERATED FILE - DO NOT EDIT\n")
+    set(GENERATED_C "${GENERATED_C} * Generated from ${INPUT_HEADER}\n")
+    set(GENERATED_C "${GENERATED_C} * by ParseLibplctagHeader.cmake\n")
+    set(GENERATED_C "${GENERATED_C} */\n\n")
+    set(GENERATED_C "${GENERATED_C}#include <stdint.h>\n\n")
+    set(GENERATED_C "${GENERATED_C}/* Module name lookup table - defined once */\n")
+    set(GENERATED_C "${GENERATED_C}const char *debug_module_names[] = {\n")
+    set(GENERATED_C "${GENERATED_C}${MODULE_NAME_TABLE}")
+    set(GENERATED_C "${GENERATED_C}};\n")
+
+    # Write the .c file
+    file(WRITE "${OUTPUT_NAMES_C}" "${GENERATED_C}")
+
     message(STATUS "Generated ${OUTPUT_HEADER} with ${MODULE_COUNT} modules")
+    message(STATUS "Generated ${OUTPUT_NAMES_C} with module names array")
 endfunction()

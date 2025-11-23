@@ -8,6 +8,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ParseLibplctagHeader.cmake")
 parse_libplctag_header(
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_generated.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_module_names.c"
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -83,6 +84,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/byteorder.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.h"
+                     "${CMAKE_CURRENT_LIST_DIR}/../utils/debug_module_names.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hash.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hash.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hashtable.c"
