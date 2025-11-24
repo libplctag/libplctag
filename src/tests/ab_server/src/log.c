@@ -136,10 +136,6 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
     char prefix[1000]; /* MAGIC */
     char output[1000];
 
-    /* Defensive checks for null pointers */
-    if(!func) func = "<null func>";
-    if(!templ) templ = "<null templ>";
-
     /* Gather current time in milliseconds since Unix epoch */
     int64_t epoch_ms = 0;
 #if defined(_WIN32)
@@ -173,13 +169,10 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
 #endif
 
     /* Build log prefix with timestamp, thread id, level, and site */
-    /* Add bounds checking for debug_level to prevent array out-of-bounds */
     const char *level_str = "UNKNOWN";
     if(debug_level >= 0 && debug_level < LOG_LEVEL_END) {
         level_str = log_level_name[debug_level];
     }
-
-    fputs("LOG 1!\n", stderr);
 
     // NOLINTNEXTLINE
     snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) %s %s:%d %s\n",
@@ -187,8 +180,6 @@ extern void log_impl(const char *func, int line_num, log_level_t debug_level, co
              t.tm_hour, t.tm_min, t.tm_sec, remainder_ms,
              get_thread_id(), level_str, func, line_num, templ);
     prefix[sizeof(prefix) - 1] = 0;
-
-    fputs("LOG 2!\n", stderr);
 
     /* Format and emit the final message */
     va_start(va, templ);
