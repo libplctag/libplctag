@@ -56,7 +56,7 @@
  */
 
 static volatile log_level_t global_debug_level = LOG_LEVEL_NONE;
-static volatile int thread_num_lock = 0;  /* 0 = unlocked, 1 = locked */
+static volatile unsigned char thread_num_lock = 0;  /* Used with __atomic_test_and_set/__atomic_clear */
 static volatile uint32_t thread_num = 1;
 
 /*
@@ -100,7 +100,7 @@ static uint32_t get_thread_id(void) {
         /* Release the lock */
         InterlockedExchange((volatile LONG*)&thread_num_lock, 0);
 #else
-        /* POSIX: Use GCC __atomic builtins for musl compatibility */
+        /* POSIX: Use GCC __atomic builtins on unsigned char for proper semantics */
         while(__atomic_test_and_set(&thread_num_lock, __ATOMIC_SEQ_CST)) {
             /* Busy wait - spinlock */
         }
