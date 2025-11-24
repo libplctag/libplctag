@@ -10,6 +10,8 @@
 /* Cross-platform compatibility for strcasecmp */
 #ifdef _WIN32
   #define strcasecmp _stricmp
+#else
+  #include <strings.h>  /* POSIX standard for strcasecmp on Unix/Linux/macOS */
 #endif
 
 /* ================================================================
