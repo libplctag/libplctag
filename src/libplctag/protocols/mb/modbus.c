@@ -964,6 +964,9 @@ THREAD_FUNC(modbus_plc_handler) {
                     /* reset err_delay */
                     err_delay = PLC_SOCKET_ERR_START_DELAY;
 
+                    /* Update timestamp for inactivity tracking now that we're connected */
+                    plc->last_packet_time_ms = time_ms();
+
                     plc->state = PLC_READY;
                 } else {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Error %s received while starting socket connection.", plc_tag_decode_error(rc));
@@ -986,6 +989,9 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     /* we just connected, keep the connection open for a few seconds. */
                     plc->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
+
+                    /* Update timestamp for inactivity tracking now that we're connected */
+                    plc->last_packet_time_ms = time_ms();
 
                     /* reset err_delay */
                     err_delay = PLC_SOCKET_ERR_START_DELAY;
