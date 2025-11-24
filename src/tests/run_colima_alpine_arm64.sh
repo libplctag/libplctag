@@ -170,7 +170,7 @@ fi
 chmod +x src/tests/*.sh 2>/dev/null || true
 
 echo "Building libplctag (ARM64 Alpine with musl)..."
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DUSE_SANITIZERS=OFF
 echo "Compiling..."
 cmake --build build 2>&1 | tail -100
 
