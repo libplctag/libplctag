@@ -19,7 +19,7 @@ jobs:
             libc: glibc
             runner: ubuntu-22.04
             cmake_flags: ""
-            apt_packages: "build-essential cmake libmodbus5 libmodbus-dev"
+            apt_packages: "build-essential cmake"
             artifact_suffix: "ubuntu_x64"
           - arch: x86_64
             libc: musl
@@ -637,103 +637,13 @@ jobs:
           echo "=== CMAKE BUILD COMPLETED ==="
 
           # Run tests inside container if binaries exist
-          # NOTE: Tests are currently SKIPPED for Alpine to ensure package creation succeeds
-          # The other CI jobs (Ubuntu, macOS, Windows) run comprehensive tests
-          SKIP_ALPINE_TESTS=true
-          if [ "${SKIP_ALPINE_TESTS:-false}" != "true" ] && [ -f /workspace/build/bin_dist/ab_server ]; then
-            echo "=== RUNNING TESTS ==="
-            cd /workspace/build/bin_dist
-
-            # Test Basic Functions
-            echo "start up simulator..."
-            ./ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
-            sleep 2
-            echo "test simple get/set tag."
-            ./simple
-            echo "test callback use."
-            ./test_callback
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Micro800
-            echo "start up simulator..."
-            ./ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
-            sleep 2
-            echo "test getting a tag on a Micro800."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Omron NJ/NX
-            echo "start up simulator..."
-            ./ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
-            sleep 2
-            echo "test getting a tag on an Omron NJ/NX."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test PLC/5
-            echo "start up simulator..."
-            ./ab_server --plc=PLC/5 --tag=N7[10] --debug &
-            sleep 2
-            echo "test getting a tag on a PLC/5."
-            ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test SLC 500
-            echo "start up simulator..."
-            ./ab_server --plc=SLC500 --tag=N7[10] --debug &
-            sleep 2
-            echo "test getting a tag on a SLC 500."
-            ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Duplicate Connection ID
-            echo "start up simulator..."
-            ./ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
-            sleep 2
-            echo "test getting a tag with connection failures."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Large Tags
-            echo "start up simulator..."
-            ./ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --debug &
-            sleep 2
-            echo "test getting a large tag."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Array Notation Read/Write
-            echo "start up simulator..."
-            ./ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" &
-            sleep 2
-            echo "test array notation read/write"
-            ./test_indexed_tags
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Reconnect After Outage
-            echo "Test reconnect after outage"
-            ./test_reconnect_after_outage ./ab_server
-            sleep 2
-
+          if [ -f /workspace/build/bin_dist/ab_server ]; then
+            echo "=== RUNNING SIMULATOR TESTS ==="
+            mkdir -p /workspace/logs
+            bash /workspace/src/tests/run_simulator_tests.sh /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
             cd /workspace/build
           else
-            echo "=== TESTS SKIPPED (SKIP_ALPINE_TESTS=true) ==="
+            echo "=== TESTS SKIPPED (ab_server binary not found) ==="
           fi
 
           # Install into controlled staging prefix inside workspace
@@ -1000,6 +910,15 @@ jobs:
         
         echo "Fallback README created. This build may have issues."
         ls -la "${{ env.BUILD }}/release_packages"
+
+    - name: Upload Alpine test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-alpine_native_${{ matrix.arch }}
+        path: logs/*.log
+        if-no-files-found: warn
+        retention-days: 7
 
     - name: Upload Alpine package artifacts
       uses: actions/upload-artifact@v4
