@@ -89,9 +89,9 @@ static inline void modbus_bitarray_set(modbus_bitarray_t *arr, size_t bit_index,
     unsigned int bit_offset = bit_index % 8;
 
     if (value) {
-        arr->bytes[byte_idx] |= (1 << bit_offset);
+        arr->bytes[byte_idx] |= (uint8_t)(1 << bit_offset);
     } else {
-        arr->bytes[byte_idx] &= ~(1 << bit_offset);
+        arr->bytes[byte_idx] &= (uint8_t)~(1 << bit_offset);
     }
 }
 

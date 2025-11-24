@@ -475,16 +475,16 @@ static void print_statistics(server_ctx_t *server) {
         printf("║  Calls: %lld                                                    \n", (long long)g_state_cb_stats.calls);
         printf("║  state_name():       %8.2f us avg (%5.1f%%)                  \n",
                (double)g_state_cb_stats.state_name_time_us / g_state_cb_stats.calls,
-               cb_total > 0 ? ((double)g_state_cb_stats.state_name_time_us / cb_total) * 100 : 0);
+               cb_total > 0 ? ((double)g_state_cb_stats.state_name_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  log(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, ):         %8.2f us avg (%5.1f%%)                  \n",
                (double)g_state_cb_stats.log_info_time_us / g_state_cb_stats.calls,
-               cb_total > 0 ? ((double)g_state_cb_stats.log_info_time_us / cb_total) * 100 : 0);
+               cb_total > 0 ? ((double)g_state_cb_stats.log_info_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  dump_event_mask():  %8.2f us avg (%5.1f%%)                  \n",
                (double)g_state_cb_stats.dump_mask_time_us / g_state_cb_stats.calls,
-               cb_total > 0 ? ((double)g_state_cb_stats.dump_mask_time_us / cb_total) * 100 : 0);
+               cb_total > 0 ? ((double)g_state_cb_stats.dump_mask_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  set_event_mask():   %8.2f us avg (%5.1f%%)                  \n",
                (double)g_state_cb_stats.set_mask_time_us / g_state_cb_stats.calls,
-               cb_total > 0 ? ((double)g_state_cb_stats.set_mask_time_us / cb_total) * 100 : 0);
+               cb_total > 0 ? ((double)g_state_cb_stats.set_mask_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  TOTAL:              %8.2f us avg                            \n",
                (double)cb_total / g_state_cb_stats.calls);
     }

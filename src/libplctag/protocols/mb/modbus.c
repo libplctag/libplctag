@@ -1672,8 +1672,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
                                 int64_t avg_iter_us = plc->tickle_iter_time_sum_us / plc->cycle_count;
                                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "TICKLE BREAKDOWN: sort=%" PRId64 "us iter=%" PRId64 "us (sort %.1f%%, iter %.1f%%)",
                                        avg_sort_us, avg_iter_us,
-                                       avg_tickle_us > 0 ? (100.0 * avg_sort_us / avg_tickle_us) : 0.0,
-                                       avg_tickle_us > 0 ? (100.0 * avg_iter_us / avg_tickle_us) : 0.0);
+                                       avg_tickle_us > 0 ? (100.0 * (double)avg_sort_us / (double)avg_tickle_us) : 0.0,
+                                       avg_tickle_us > 0 ? (100.0 * (double)avg_iter_us / (double)avg_tickle_us) : 0.0);
                             }
                         }
                         plc->last_stats_report_time = now;
