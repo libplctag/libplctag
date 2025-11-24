@@ -123,6 +123,10 @@ endmacro()
 # shared library
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
+# Link atomic library for 64-bit atomic operations on 32-bit ARM
+if(UNIX AND NOT APPLE)
+    target_link_libraries(plctag_dyn atomic)
+endif()
 set_target_properties(plctag_dyn PROPERTIES
     VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}"
     SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}"
@@ -144,6 +148,10 @@ install(TARGETS plctag_dyn
 # static library
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
+# Link atomic library for 64-bit atomic operations on 32-bit ARM
+if(UNIX AND NOT APPLE)
+    target_link_libraries(plctag_static atomic)
+endif()
 set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
 target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)
 
