@@ -1408,19 +1408,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
     }
 
     /* now make absolutely sure that the connection is ready. */
-    /* First, try getpeername to validate the connection is truly established */
-    struct sockaddr_in peer_addr;
-    socklen_t peer_addr_len = sizeof(peer_addr);
-    int getpeer_rc = getpeername(sock->fd, (struct sockaddr *)&peer_addr, &peer_addr_len);
-
-    if(getpeer_rc == 0) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_connect_tcp_check: getpeername() succeeded, socket is truly connected to %s:%d",
-               inet_ntoa(peer_addr.sin_addr), ntohs(peer_addr.sin_port));
-    } else {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "socket_connect_tcp_check: getpeername() failed with errno=%d, socket is NOT connected!", errno);
-        return PLCTAG_ERR_OPEN;
-    }
-
+    /* Use getsockopt to check socket connection status (standard POSIX method) */
     rc = getsockopt(sock->fd, SOL_SOCKET, SO_ERROR, &sock_err, &sock_err_len);
     if(rc == 0) {
         /* sock_err has the error. */
