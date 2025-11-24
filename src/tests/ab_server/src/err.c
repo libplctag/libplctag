@@ -300,7 +300,7 @@ int err_from_errno(int posix_errno) {
 
 #ifdef IS_WINDOWS
 int err_from_winsock(int winsock_error) {
-    if(winsock_error == 0 || winsock_error == WSAOK) {
+    if(winsock_error == 0) {
         return ERR_OK;
     }
     /* Map Winsock error to internal error code */
