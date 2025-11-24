@@ -90,11 +90,11 @@ fi
 WORKSPACE="/workspace/libplctag"
 
 BUILD_COMMAND=$(cat <<'EOF'
-set -euo pipefail
+set -e
 export DEBIAN_FRONTEND=noninteractive
 
 echo "Updating apt metadata..."
-apt-get update >/dev/null
+apt-get update >/dev/null 2>&1
 apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -105,12 +105,12 @@ apt-get install -y --no-install-recommends \
     ca-certificates \
     rsync \
     psmisc \
-    gdb >/dev/null
+    gdb >/dev/null 2>&1
 rm -rf /var/lib/apt/lists/*
 
 # Enable coredump generation for debugging segfaults
 ulimit -c unlimited
-echo "core" > /proc/sys/kernel/core_pattern
+# Note: /proc/sys/kernel/core_pattern is read-only in Docker containers, so we skip it
 
 mkdir -p "${WORKSPACE}"
 rsync -a --delete \
@@ -122,14 +122,20 @@ cd "${WORKSPACE}"
 git config --global --add safe.directory "${WORKSPACE}" >/dev/null 2>&1 || true
 
 echo "Building libplctag (ARM64)..."
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null
-cmake --build build
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+echo "Building libplctag..."
+cmake --build build 2>&1 | tail -50
 
 cd "${WORKSPACE}"
 WORKSPACE_LOG_DIR="${WORKSPACE}/test_logs"
 mkdir -p "${WORKSPACE_LOG_DIR}"
 echo "Running simulator tests..."
-./src/tests/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}" || TEST_FAILED=1
+if ./src/tests/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}"; then
+    TEST_RESULT=0
+else
+    TEST_RESULT=$?
+    echo "Tests exited with code $TEST_RESULT"
+fi
 
 echo "Syncing build artifacts back to host..."
 mkdir -p "${HOST_BIN_DIST}"
@@ -143,8 +149,9 @@ find "${WORKSPACE}" -maxdepth 1 -name '*.log' -exec rsync -a --chown="${HOST_UID
 find . -maxdepth 1 -name 'core' -exec rsync -a --chown="${HOST_UID}:${HOST_GID}" {} "${HOST_LOG_DIR}/" \; 2>/dev/null || true
 chown "${HOST_UID}:${HOST_GID}" "${HOST_BIN_DIST}" "${HOST_LOG_DIR}" >/dev/null 2>&1 || true
 
-if [ "${TEST_FAILED:-0}" = "1" ]; then
-    echo "Tests failed, but logs have been collected for analysis."
+echo "Logs collected in ${HOST_LOG_DIR}"
+if [ "${TEST_RESULT:-0}" != "0" ]; then
+    echo "Tests failed with exit code $TEST_RESULT. Check logs for details."
     exit 1
 fi
 EOF
