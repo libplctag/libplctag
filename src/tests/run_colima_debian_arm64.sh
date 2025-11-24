@@ -104,8 +104,13 @@ apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
     rsync \
-    psmisc >/dev/null
+    psmisc \
+    gdb >/dev/null
 rm -rf /var/lib/apt/lists/*
+
+# Enable coredump generation for debugging segfaults
+ulimit -c unlimited
+echo "core" > /proc/sys/kernel/core_pattern
 
 mkdir -p "${WORKSPACE}"
 rsync -a --delete \
@@ -121,8 +126,10 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo >/dev/null
 cmake --build build
 
 cd "${WORKSPACE}"
+WORKSPACE_LOG_DIR="${WORKSPACE}/test_logs"
+mkdir -p "${WORKSPACE_LOG_DIR}"
 echo "Running simulator tests..."
-./src/tests/run_simulator_tests.sh build/bin_dist
+./src/tests/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}" || TEST_FAILED=1
 
 echo "Syncing build artifacts back to host..."
 mkdir -p "${HOST_BIN_DIST}"
@@ -130,15 +137,23 @@ rsync -a --delete --chown="${HOST_UID}:${HOST_GID}" build/bin_dist/ "${HOST_BIN_
 
 echo "Collecting logs..."
 mkdir -p "${HOST_LOG_DIR}"
-find "${HOST_LOG_DIR}" -type f -name '*.log' -delete 2>/dev/null || true
+find "${HOST_LOG_DIR}" -type f \( -name '*.log' -o -name 'core' \) -delete 2>/dev/null || true
+rsync -a --chown="${HOST_UID}:${HOST_GID}" "${WORKSPACE_LOG_DIR}/" "${HOST_LOG_DIR}/" 2>/dev/null || true
 find "${WORKSPACE}" -maxdepth 1 -name '*.log' -exec rsync -a --chown="${HOST_UID}:${HOST_GID}" {} "${HOST_LOG_DIR}/" \; 2>/dev/null || true
+find . -maxdepth 1 -name 'core' -exec rsync -a --chown="${HOST_UID}:${HOST_GID}" {} "${HOST_LOG_DIR}/" \; 2>/dev/null || true
 chown "${HOST_UID}:${HOST_GID}" "${HOST_BIN_DIST}" "${HOST_LOG_DIR}" >/dev/null 2>&1 || true
+
+if [ "${TEST_FAILED:-0}" = "1" ]; then
+    echo "Tests failed, but logs have been collected for analysis."
+    exit 1
+fi
 EOF
 )
 
 echo "Launching Debian ${DEBIAN_IMAGE} container on ${DOCKER_PLATFORM}..."
 docker "${DOCKER_CONTEXT_ARGS[@]}" run --rm \
     --platform "${DOCKER_PLATFORM}" \
+    --ulimit core=-1 \
     -v "${REPO_ROOT}:${SOURCE_MOUNT}:rw" \
     -e SOURCE_MOUNT="${SOURCE_MOUNT}" \
     -e WORKSPACE="${WORKSPACE}" \
