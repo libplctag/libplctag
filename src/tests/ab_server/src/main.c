@@ -544,7 +544,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* allocate the tag data array. */
-    log_info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
+    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
         // NOLINTNEXTLINE
@@ -553,7 +553,7 @@ void parse_pccc_tag(const char *tag_str, plc_s *plc) {
         exit(1);
     }
 
-    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%d, %d, %d).", tag_str, tag->name, tag->tag_type,
+    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
          tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
 
     /* add the tag to the list. */
@@ -744,7 +744,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
     }
 
     /* allocate the tag data array. */
-    log_info("allocating %d elements of %d bytes each.", tag->elem_count, tag->elem_size);
+    log_info("allocating %zu elements of %zu bytes each.", tag->elem_count, tag->elem_size);
     tag->data = calloc(tag->elem_count, (size_t)tag->elem_size);
     if(!tag->data) {
         // NOLINTNEXTLINE
@@ -753,7 +753,7 @@ void parse_cip_tag(const char *tag_str, plc_s *plc) {
         exit(1);
     }
 
-    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%d, %d, %d).", tag_str, tag->name, tag->tag_type,
+    log_info("Processed \"%s\" into tag %s of type %x with dimensions (%zu, %zu, %zu).", tag_str, tag->name, tag->tag_type,
          tag->dimensions[0], tag->dimensions[1], tag->dimensions[2]);
 
     /* add the tag to the list. */
