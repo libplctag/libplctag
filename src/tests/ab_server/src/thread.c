@@ -74,7 +74,7 @@ struct thread_t {
 extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg) {
     log_info("DETAIL: Starting.");
 
-    log_info("DETAIL: Warning: ignoring stacksize (%d) parameter.", stacksize);
+    (void)stacksize; /* Note: We now set a fixed 1MB stack size on POSIX systems */
 
     if(!t) {
         log_info("WARN: null thread pointer.");
@@ -108,7 +108,15 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
     /* mark as initialized */
     (*t)->initialized = 1; /* note this is never used and not even set in the posix version */
 #else
-    if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    /* Set stack size to 1MB to rule out stack size issues */
+    pthread_attr_setstacksize(&attr, 1024 * 1024);
+
+    int rc = pthread_create(&((*t)->p_thread), &attr, func, arg);
+    pthread_attr_destroy(&attr);
+
+    if(rc) {
         log_error("ERROR: error creating thread.");
         return THREAD_ERR_THREAD_CREATE;
     }
