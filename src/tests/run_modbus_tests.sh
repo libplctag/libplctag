@@ -36,9 +36,9 @@ done
 
 
 echo "  Killing emulators."
-killall -TERM ab_server > /dev/null 2>&1
+killall -15 ab_server > /dev/null 2>&1
 
-killall -TERM modbus_server > /dev/null 2>&1
+killall -15 modbus_server > /dev/null 2>&1
 
 # wait for them to exit
 sleep 2
@@ -126,10 +126,10 @@ fi
 
 
 # echo "  Killing Modbus emulator."
-killall -TERM modbus_server > /dev/null 2>&1
+killall -15 modbus_server > /dev/null 2>&1
 
 # Make sure no ab_server instances are running before running auto_sync_reconnect test
-killall -TERM ab_server > /dev/null 2>&1
+killall -15 ab_server > /dev/null 2>&1
 
 # wait for them to exit
 sleep 2
