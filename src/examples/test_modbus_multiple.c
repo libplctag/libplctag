@@ -211,7 +211,7 @@ int main(void) {
 
         current_time = compat_time_ms();
         if((current_time - start_time) % 2000 < DATA_TIMEOUT) {  /* Print roughly every 2 seconds */
-            printf("PHASE 5: Read/write loop... elapsed %lld ms\n", current_time - start_time);
+            printf("PHASE 5: Read/write loop... elapsed %" PRId64 " ms\n", current_time - start_time);
         }
 
         compat_sleep_ms(DATA_TIMEOUT, NULL);
