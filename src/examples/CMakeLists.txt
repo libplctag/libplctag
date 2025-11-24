@@ -112,8 +112,10 @@ endforeach()
 target_sources(test_fairness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stats.c")
 
 # Link math library for tests that use sqrt() and other math functions
-# Use library name directly; CMake and linker will resolve it appropriately
-target_link_libraries(test_fairness m)
+# Math functions are in libm on Unix but in the C runtime on Windows
+if(UNIX)
+    target_link_libraries(test_fairness m)
+endif()
 
 # Install only the tag_rw2 tool into the devel component
 install(TARGETS tag_rw2

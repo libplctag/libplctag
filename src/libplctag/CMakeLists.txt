@@ -124,8 +124,13 @@ endmacro()
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
+# Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
     target_link_libraries(plctag_dyn atomic)
+    target_link_libraries(plctag_dyn m)
+elseif(UNIX)
+    # macOS: link math library
+    target_link_libraries(plctag_dyn m)
 endif()
 set_target_properties(plctag_dyn PROPERTIES
     VERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}.${libplctag_VERSION_PATCH}"
@@ -149,8 +154,13 @@ install(TARGETS plctag_dyn
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
+# Link math library (main library may use sqrt in some places)
 if(UNIX AND NOT APPLE)
     target_link_libraries(plctag_static atomic)
+    target_link_libraries(plctag_static m)
+elseif(UNIX)
+    # macOS: link math library
+    target_link_libraries(plctag_static m)
 endif()
 set_target_properties(plctag_static PROPERTIES SOVERSION "${libplctag_VERSION_MAJOR}.${libplctag_VERSION_MINOR}" OUTPUT_NAME "plctag_static")
 target_compile_definitions(plctag_static PUBLIC -DLIBPLCTAG_STATIC=1)

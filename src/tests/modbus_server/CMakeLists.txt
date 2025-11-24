@@ -53,7 +53,7 @@ elseif(UNIX)
     endif()
 
     # Link math library (modbus_server uses sqrt)
-    # Use library name directly; CMake and linker will resolve it appropriately
+    # Math functions are in libm on Unix but in the C runtime on Windows
     target_link_libraries(modbus_server m)
 endif()
 

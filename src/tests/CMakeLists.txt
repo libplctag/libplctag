@@ -48,8 +48,10 @@ add_executable(ab_server ${AB_SERVER_FILES})
 target_link_libraries(ab_server PUBLIC ${EXTRA_LINKER_LIBS})
 
 # Link math library for ab_server (fairness.c uses math.h)
-# Use library name directly; CMake and linker will resolve it appropriately
-target_link_libraries(ab_server PUBLIC m)
+# Math functions are in libm on Unix but in the C runtime on Windows
+if(UNIX)
+    target_link_libraries(ab_server PUBLIC m)
+endif()
 
 # if(STATIC_LINK_OPTIONS)
 #     set(EXTRA_LINK_OPTIONS "${EXTRA_LINK_OPTIONS} ${STATIC_LINK_OPTIONS}")
