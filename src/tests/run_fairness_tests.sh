@@ -48,7 +48,7 @@ kill_process() {
         taskkill //F //IM "${process_name}.exe" > /dev/null 2>&1
     else
         # Linux/macOS (including Alpine with BusyBox)
-        killall -15 "$process_name" > /dev/null 2>&1
+        killall -TERM "$process_name" > /dev/null 2>&1
     fi
 }
 

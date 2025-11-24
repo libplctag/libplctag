@@ -427,7 +427,7 @@ fi
 
 
 # echo "  Killing AB emulator."
-killall -15 ab_server > /dev/null 2>&1
+killall -TERM ab_server > /dev/null 2>&1
 
 let TEST++
 echo -n "Test $TEST: Test reconnect after PLC outage... "
@@ -487,7 +487,7 @@ fi
 
 
 # echo "  Killing AB emulator."
-killall -15 ab_server > /dev/null 2>&1
+killall -TERM ab_server > /dev/null 2>&1
 
 
 # echo -n "  Starting AB emulator for Micro800 tests... "
@@ -515,7 +515,7 @@ fi
 
 
 # echo "  Killing Micro800 emulator."
-killall -15 ab_server > /dev/null 2>&1
+killall -TERM ab_server > /dev/null 2>&1
 
 
 # echo -n "  Starting AB emulator for Omron tests... "
@@ -542,9 +542,9 @@ else
 fi
 
 # echo "  Killing Omron emulator."
-killall -15 ab_server > /dev/null 2>&1
+killall -TERM ab_server > /dev/null 2>&1
 
-killall -15 modbus_server > /dev/null 2>&1
+killall -TERM modbus_server > /dev/null 2>&1
 
 # echo -n "  Starting Modbus server $SCRIPT_DIR/modbus_server... "
 $TEST_DIR/modbus_server --listen 127.0.0.1:1502 --listen 127.0.0.1:2502 > modbus_server.log 2>&1 &
@@ -629,10 +629,10 @@ else
 fi
 
 # echo "  Killing Modbus emulator."
-killall -15 modbus_server > /dev/null 2>&1
+killall -TERM modbus_server > /dev/null 2>&1
 
 # Make sure no ab_server instances are running before running auto_sync_reconnect test
-killall -15 ab_server > /dev/null 2>&1
+killall -TERM ab_server > /dev/null 2>&1
 
 # wait for them to exit
 sleep 2
