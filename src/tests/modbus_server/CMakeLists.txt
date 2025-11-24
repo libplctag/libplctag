@@ -46,15 +46,15 @@ elseif(UNIX)
         if(RT_LIBRARY)
             target_link_libraries(modbus_server ${RT_LIBRARY})
         endif()
+
+        # Link atomic library for 64-bit atomic operations on 32-bit ARM
+        # (atomic_utils.c uses __atomic_store_8, __atomic_load_8, etc.)
+        target_link_libraries(modbus_server atomic)
     endif()
 
     # Link math library (modbus_server uses sqrt)
     # Use library name directly; CMake and linker will resolve it appropriately
     target_link_libraries(modbus_server m)
-
-    # Link atomic library for 64-bit atomic operations on 32-bit ARM
-    # (atomic_utils.c uses __atomic_store_8, __atomic_load_8, etc.)
-    target_link_libraries(modbus_server atomic)
 endif()
 
 # Compiler-specific warnings
