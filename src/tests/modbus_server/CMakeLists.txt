@@ -49,7 +49,10 @@ elseif(UNIX)
 
         # Link atomic library for 64-bit atomic operations on 32-bit ARM
         # (atomic_utils.c uses __atomic_store_8, __atomic_load_8, etc.)
-        target_link_libraries(modbus_server atomic)
+        # Only needed on ARM platforms; x86_64 has native atomic instructions
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|ARM)")
+            target_link_libraries(modbus_server atomic)
+        endif()
     endif()
 
     # Link math library (modbus_server uses sqrt)
