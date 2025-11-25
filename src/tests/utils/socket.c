@@ -649,7 +649,7 @@ util_err_t socket_sendv_buf(socket_t sock, buf_t **segments, size_t segment_coun
     struct msghdr msg;
     memset(&msg, 0, sizeof(msg));
     msg.msg_iov = vecs;
-    msg.msg_iovlen = (int)vec_count;
+    msg.msg_iovlen = (size_t)vec_count;
     /* MSG_NOSIGNAL is Linux-specific */
     ssize_t sent = sendmsg(sock, &msg, MSG_NOSIGNAL);
 #endif
@@ -817,7 +817,7 @@ util_err_t socket_sendtov_buf(socket_t sock, socket_address_t *addr, buf_t **seg
     msg.msg_name = (void*)&addr->addr;
     msg.msg_namelen = addr->addr_len;
     msg.msg_iov = vecs;
-    msg.msg_iovlen = (int)vec_count;
+    msg.msg_iovlen = (size_t)vec_count;
 
 #ifdef UTIL_BSD_OS_TYPE
     /* On BSD/macOS, SO_NOSIGPIPE was set at socket creation */

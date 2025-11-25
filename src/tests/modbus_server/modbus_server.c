@@ -42,6 +42,7 @@
 #include "../utils/args.h"
 #include "../utils/atomic_utils.h"
 #include "../utils/utils.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -334,15 +335,15 @@ static void print_statistics(server_ctx_t *server) {
     printf("║ Runtime: %.2f seconds                                            \n", runtime_sec);
     printf("║ Total requests: %lld                                              \n", (long long)total_reqs);
     if (runtime_sec > 0) {
-        printf("║ Throughput: %.2f requests/sec                                    \n", total_reqs / runtime_sec);
+        printf("║ Throughput: %.2f requests/sec                                    \n", (double)total_reqs / (double)runtime_sec);
     }
     printf("╠══════════════════════════════════════════════════════════════════╣\n");
     printf("║                     RESPONSE TIME SUMMARY                        ║\n");
     printf("╠══════════════════════════════════════════════════════════════════╣\n");
 
     if (total_reqs > 0) {
-        double mean = (double)total_time / total_reqs;
-        double variance = ((double)total_time_sq / total_reqs) - (mean * mean);
+        double mean = (double)total_time / (double)total_reqs;
+        double variance = ((double)total_time_sq / (double)total_reqs) - (mean * mean);
         double stddev = variance > 0 ? sqrt(variance) : 0.0;
 
         printf("║ Average:  %8.2f us                                            \n", mean);
@@ -354,10 +355,10 @@ static void print_statistics(server_ctx_t *server) {
         printf("║                    LATENCY BREAKDOWN (avg)                       ║\n");
         printf("╠══════════════════════════════════════════════════════════════════╣\n");
 
-        double avg_recv = (double)total_recv / total_reqs;
-        double avg_process = (double)total_process / total_reqs;
-        double avg_send = (double)total_send / total_reqs;
-        double avg_overhead = (double)total_overhead / total_reqs;
+        double avg_recv = (double)total_recv / (double)total_reqs;
+        double avg_process = (double)total_process / (double)total_reqs;
+        double avg_send = (double)total_send / (double)total_reqs;
+        double avg_overhead = (double)total_overhead / (double)total_reqs;
         double total_avg = avg_recv + avg_process + avg_send + avg_overhead;
 
         /* Sort components by time to find top 3 */
@@ -411,8 +412,8 @@ static void print_statistics(server_ctx_t *server) {
 
     for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
         int64_t count = atomic_get_int64(&stats->hist_buckets[i]);
-        double pct = total_reqs > 0 ? (double)count / total_reqs * 100 : 0;
-        int bar_len = max_bucket > 0 ? (int)((double)count / max_bucket * 30) : 0;
+        double pct = total_reqs > 0 ? (double)count / (double)total_reqs * 100 : 0;
+        int bar_len = max_bucket > 0 ? (int)((double)count / (double)max_bucket * 30) : 0;
 
         printf("║  %-12s │", hist_bucket_label(i));
         for (int j = 0; j < bar_len; j++) printf("█");
@@ -432,13 +433,13 @@ static void print_statistics(server_ctx_t *server) {
         int64_t fsm_total = fsm_lookup_us + fsm_action_us + fsm_mask_us + fsm_cb_us;
         printf("║  Events processed: %lld                                        \n", (long long)fsm_events);
         printf("║  Transition lookup:  %8.2f us avg (%5.1f%%)                  \n",
-               (double)fsm_lookup_us / fsm_events, fsm_total > 0 ? ((double)fsm_lookup_us / fsm_total) * 100 : 0);
+               (double)fsm_lookup_us / (double)fsm_events, fsm_total > 0 ? ((double)fsm_lookup_us / (double)fsm_total) * 100 : 0);
         printf("║  Action execution:   %8.2f us avg (%5.1f%%)                  \n",
-               (double)fsm_action_us / fsm_events, fsm_total > 0 ? ((double)fsm_action_us / fsm_total) * 100 : 0);
+               (double)fsm_action_us / (double)fsm_events, fsm_total > 0 ? ((double)fsm_action_us / (double)fsm_total) * 100 : 0);
         printf("║  Event mask gen:     %8.2f us avg (%5.1f%%)                  \n",
-               (double)fsm_mask_us / fsm_events, fsm_total > 0 ? ((double)fsm_mask_us / fsm_total) * 100 : 0);
+               (double)fsm_mask_us / (double)fsm_events, fsm_total > 0 ? ((double)fsm_mask_us / (double)fsm_total) * 100 : 0);
         printf("║  State change CB:    %8.2f us avg (%5.1f%%)                  \n",
-               (double)fsm_cb_us / fsm_events, fsm_total > 0 ? ((double)fsm_cb_us / fsm_total) * 100 : 0);
+               (double)fsm_cb_us / (double)fsm_events, fsm_total > 0 ? ((double)fsm_cb_us / (double)fsm_total) * 100 : 0);
     }
 
     printf("╠══════════════════════════════════════════════════════════════════╣\n");
@@ -454,14 +455,14 @@ static void print_statistics(server_ctx_t *server) {
         printf("║  Poll calls: %lld                                              \n", (long long)r_poll_calls);
         printf("║  Events delivered: %lld                                        \n", (long long)r_events);
         printf("║  poll() time:        %8.2f us avg (%5.1f%% of loop)          \n",
-               (double)r_poll_us / r_poll_calls, r_total > 0 ? ((double)r_poll_us / r_total) * 100 : 0);
+               (double)r_poll_us / (double)r_poll_calls, r_total > 0 ? ((double)r_poll_us / (double)r_total) * 100 : 0);
         printf("║  translate time:     %8.2f us avg (%5.1f%% of loop)          \n",
-               (double)r_translate_us / r_poll_calls, r_total > 0 ? ((double)r_translate_us / r_total) * 100 : 0);
+               (double)r_translate_us / (double)r_poll_calls, r_total > 0 ? ((double)r_translate_us / (double)r_total) * 100 : 0);
         printf("║  deliver time:       %8.2f us avg (%5.1f%% of loop)          \n",
-               (double)r_deliver_us / r_poll_calls, r_total > 0 ? ((double)r_deliver_us / r_total) * 100 : 0);
+               (double)r_deliver_us / (double)r_poll_calls, r_total > 0 ? ((double)r_deliver_us / (double)r_total) * 100 : 0);
         if (r_events > 0) {
             printf("║  callback time:      %8.2f us avg (per event)               \n",
-                   (double)r_callback_us / r_events);
+                   (double)r_callback_us / (double)r_events);
         }
     }
 
@@ -474,19 +475,19 @@ static void print_statistics(server_ctx_t *server) {
                            g_state_cb_stats.dump_mask_time_us + g_state_cb_stats.set_mask_time_us;
         printf("║  Calls: %lld                                                    \n", (long long)g_state_cb_stats.calls);
         printf("║  state_name():       %8.2f us avg (%5.1f%%)                  \n",
-               (double)g_state_cb_stats.state_name_time_us / g_state_cb_stats.calls,
+               (double)g_state_cb_stats.state_name_time_us / (double)g_state_cb_stats.calls,
                cb_total > 0 ? ((double)g_state_cb_stats.state_name_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  log(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, ):         %8.2f us avg (%5.1f%%)                  \n",
-               (double)g_state_cb_stats.log_info_time_us / g_state_cb_stats.calls,
+               (double)g_state_cb_stats.log_info_time_us / (double)g_state_cb_stats.calls,
                cb_total > 0 ? ((double)g_state_cb_stats.log_info_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  dump_event_mask():  %8.2f us avg (%5.1f%%)                  \n",
-               (double)g_state_cb_stats.dump_mask_time_us / g_state_cb_stats.calls,
+               (double)g_state_cb_stats.dump_mask_time_us / (double)g_state_cb_stats.calls,
                cb_total > 0 ? ((double)g_state_cb_stats.dump_mask_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  set_event_mask():   %8.2f us avg (%5.1f%%)                  \n",
-               (double)g_state_cb_stats.set_mask_time_us / g_state_cb_stats.calls,
+               (double)g_state_cb_stats.set_mask_time_us / (double)g_state_cb_stats.calls,
                cb_total > 0 ? ((double)g_state_cb_stats.set_mask_time_us / (double)cb_total) * 100.0 : 0.0);
         printf("║  TOTAL:              %8.2f us avg                            \n",
-               (double)cb_total / g_state_cb_stats.calls);
+               (double)cb_total / (double)g_state_cb_stats.calls);
     }
 
     printf("╠══════════════════════════════════════════════════════════════════╣\n");
@@ -503,37 +504,37 @@ static void print_statistics(server_ctx_t *server) {
     printf("║  Total action calls: %lld                                        \n", (long long)total_action_calls);
     if (total_action_calls > 0) {
         printf("║  Total action time:  %8.2f us avg                            \n",
-               (double)total_action_time / total_action_calls);
+               (double)total_action_time / (double)total_action_calls);
     }
     printf("║                                                                  \n");
     if (g_action_stats.read_calls > 0) {
         printf("║  client_read_action:    %8.2f us avg (%5.1f%%) [%lld calls]   \n",
-               (double)g_action_stats.read_time_us / g_action_stats.read_calls,
-               total_action_time > 0 ? ((double)g_action_stats.read_time_us / total_action_time) * 100 : 0,
+               (double)g_action_stats.read_time_us / (double)g_action_stats.read_calls,
+               total_action_time > 0 ? ((double)g_action_stats.read_time_us / (double)total_action_time) * 100 : 0,
                (long long)g_action_stats.read_calls);
     }
     if (g_action_stats.process_calls > 0) {
         printf("║  client_process_action: %8.2f us avg (%5.1f%%) [%lld calls]   \n",
-               (double)g_action_stats.process_time_us / g_action_stats.process_calls,
-               total_action_time > 0 ? ((double)g_action_stats.process_time_us / total_action_time) * 100 : 0,
+               (double)g_action_stats.process_time_us / (double)g_action_stats.process_calls,
+               total_action_time > 0 ? ((double)g_action_stats.process_time_us / (double)total_action_time) * 100 : 0,
                (long long)g_action_stats.process_calls);
     }
     if (g_action_stats.send_calls > 0) {
         printf("║  client_send_action:    %8.2f us avg (%5.1f%%) [%lld calls]   \n",
-               (double)g_action_stats.send_time_us / g_action_stats.send_calls,
-               total_action_time > 0 ? ((double)g_action_stats.send_time_us / total_action_time) * 100 : 0,
+               (double)g_action_stats.send_time_us / (double)g_action_stats.send_calls,
+               total_action_time > 0 ? ((double)g_action_stats.send_time_us / (double)total_action_time) * 100 : 0,
                (long long)g_action_stats.send_calls);
     }
     if (g_action_stats.idle_calls > 0) {
         printf("║  client_idle_action:    %8.2f us avg (%5.1f%%) [%lld calls]   \n",
-               (double)g_action_stats.idle_time_us / g_action_stats.idle_calls,
-               total_action_time > 0 ? ((double)g_action_stats.idle_time_us / total_action_time) * 100 : 0,
+               (double)g_action_stats.idle_time_us / (double)g_action_stats.idle_calls,
+               total_action_time > 0 ? ((double)g_action_stats.idle_time_us / (double)total_action_time) * 100 : 0,
                (long long)g_action_stats.idle_calls);
     }
     if (g_action_stats.close_calls > 0) {
         printf("║  client_close_action:   %8.2f us avg (%5.1f%%) [%lld calls]   \n",
-               (double)g_action_stats.close_time_us / g_action_stats.close_calls,
-               total_action_time > 0 ? ((double)g_action_stats.close_time_us / total_action_time) * 100 : 0,
+               (double)g_action_stats.close_time_us / (double)g_action_stats.close_calls,
+               total_action_time > 0 ? ((double)g_action_stats.close_time_us / (double)total_action_time) * 100 : 0,
                (long long)g_action_stats.close_calls);
     }
 
@@ -549,19 +550,19 @@ static void print_statistics(server_ctx_t *server) {
         int64_t sm_total = sm_lock + sm_search + sm_rebuild + sm_log + sm_unlock + sm_wake;
         printf("║  Calls: %lld                                                    \n", (long long)sm_calls);
         printf("║  Lock acquire:       %8.2f us avg (%5.1f%%)                  \n",
-               (double)sm_lock / sm_calls, sm_total > 0 ? ((double)sm_lock / sm_total) * 100 : 0);
+               (double)sm_lock / (double)sm_calls, sm_total > 0 ? ((double)sm_lock / (double)sm_total) * 100 : 0);
         printf("║  Socket search:      %8.2f us avg (%5.1f%%)                  \n",
-               (double)sm_search / sm_calls, sm_total > 0 ? ((double)sm_search / sm_total) * 100 : 0);
+               (double)sm_search / (double)sm_calls, sm_total > 0 ? ((double)sm_search / (double)sm_total) * 100 : 0);
         printf("║  Rebuild poll:       %8.2f us avg (%5.1f%%)                  \n",
-               (double)sm_rebuild / sm_calls, sm_total > 0 ? ((double)sm_rebuild / sm_total) * 100 : 0);
+               (double)sm_rebuild / (double)sm_calls, sm_total > 0 ? ((double)sm_rebuild / (double)sm_total) * 100 : 0);
         printf("║  pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, ):       %8.2f us avg (%5.1f%%)                  \n",
-               (double)sm_log / sm_calls, sm_total > 0 ? ((double)sm_log / sm_total) * 100 : 0);
+               (double)sm_log / (double)sm_calls, sm_total > 0 ? ((double)sm_log / (double)sm_total) * 100 : 0);
         printf("║  Lock release:       %8.2f us avg (%5.1f%%)                  \n",
-               (double)sm_unlock / sm_calls, sm_total > 0 ? ((double)sm_unlock / sm_total) * 100 : 0);
+               (double)sm_unlock / (double)sm_calls, sm_total > 0 ? ((double)sm_unlock / (double)sm_total) * 100 : 0);
         printf("║  Wake pipe:          %8.2f us avg (%5.1f%%)                  \n",
-               (double)sm_wake / sm_calls, sm_total > 0 ? ((double)sm_wake / sm_total) * 100 : 0);
+               (double)sm_wake / (double)sm_calls, sm_total > 0 ? ((double)sm_wake / (double)sm_total) * 100 : 0);
         printf("║  TOTAL:              %8.2f us avg                            \n",
-               (double)sm_total / sm_calls);
+               (double)sm_total / (double)sm_calls);
     }
 
     printf("╚══════════════════════════════════════════════════════════════════╝\n");
@@ -704,7 +705,7 @@ static void client_read_action(fsm_t *fsm, fsm_state_id_t current_state, event_t
 
                 if (modbus_parse_mbap_header(&header_buf, &client->mbap_header) == UTIL_OK) {
                     /* Calculate total expected message length */
-                    client->expected_length = MBAP_HEADER_SIZE + client->mbap_header.length - 1;
+                    client->expected_length = (size_t)MBAP_HEADER_SIZE + (size_t)client->mbap_header.length - (size_t)1;
 
                     if (client->expected_length > MODBUS_MAX_ADU_SIZE) {
                         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "PDU too large from %s", client->client_address);
@@ -1072,10 +1073,10 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     }
 
     /* Get client address string */
-    char client_addr_str[256];
+    char client_addr_str[128];
     socket_address_get_addr_str(&client_addr, client_addr_str, sizeof(client_addr_str));
     uint16_t client_port = socket_address_get_port(&client_addr);
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Accepted connection from %s:%u", client_addr_str, client_port);
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Accepted connection from %s:%" PRIu16, client_addr_str, client_port);
 
     /* Create client context */
     client_ctx_t *client = calloc(1, sizeof(*client));
@@ -1088,7 +1089,7 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     /* Initialize client context */
     client->server = listener->server;
     client->socket = client_socket;
-    snprintf(client->client_address, sizeof(client->client_address), "%s:%u", client_addr_str, client_port);
+    snprintf(client->client_address, sizeof(client->client_address), "%s:%" PRIu16, &client_addr_str[0], client_port);
 
     /* Initialize buffers */
     client->recv_buf = buf_init(client->recv_buffer, sizeof(client->recv_buffer));

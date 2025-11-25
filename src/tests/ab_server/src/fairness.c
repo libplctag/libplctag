@@ -181,7 +181,7 @@ void dump_fairness_stats(plc_s *plc) {
     fprintf(stderr, "  Latency std deviation:       %.2f us\n", latency_std_dev);
     fprintf(stderr, "  Latency CV:                  %.2f%%\n", latency_cv);
     if (global_max_latency > 0 && global_min_latency < INT64_MAX) {
-        fprintf(stderr, "  Min/Max latency ratio:       %.3f\n", (double)global_min_latency / global_max_latency);
+        fprintf(stderr, "  Min/Max latency ratio:       %.3f\n", (double)global_min_latency / (double)global_max_latency);
     }
     
     fprintf(stderr, "\nFairness Assessment:\n");

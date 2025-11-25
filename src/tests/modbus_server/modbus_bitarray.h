@@ -120,7 +120,7 @@ static inline bool modbus_bitarray_read_bits(const modbus_bitarray_t *arr,
         if (modbus_bitarray_get(arr, start_bit + i)) {
             size_t out_byte_idx = i / 8;
             unsigned int out_bit_offset = i % 8;
-            out_bytes[out_byte_idx] |= (1 << out_bit_offset);
+            out_bytes[out_byte_idx] |= (uint8_t)(1 << out_bit_offset);
         }
     }
 

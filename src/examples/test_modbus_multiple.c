@@ -112,7 +112,7 @@ int main(void) {
     printf("PHASE 1: All read tags created.\n");
 
     /* ===== PHASE 2: Read tags 11-18 every DATA_TIMEOUT ms until READ_PHASE_TIME_MS ===== */
-    printf("PHASE 2: Starting read loop for %"PRId64" ms.\n", (long long)READ_PHASE_TIME_MS);
+    printf("PHASE 2: Starting read loop for %d ms.\n", (int)READ_PHASE_TIME_MS);
 
     read_phase_end_time = compat_time_ms() + READ_PHASE_TIME_MS;
     write_phase_start_time = read_phase_end_time + WRITE_PHASE_DELAY_MS;
@@ -122,7 +122,7 @@ int main(void) {
         /* Issue reads on all 8 read tags */
         for(i = 0; i < 8; i++) {
             if(plc_tag_read(read_tags[i], 0) != PLCTAG_STATUS_PENDING) {
-                printf("ERROR: Could not start read on tag %d (time=%lld)!\n", i + 11, compat_time_ms() - start_time);
+                printf("ERROR: Could not start read on tag %d (time=%" PRId64 " ms)!\n", i + 11, compat_time_ms() - start_time);
                 goto cleanup;
             }
         }
@@ -168,7 +168,7 @@ int main(void) {
     printf("PHASE 4: All write tags created.\n");
 
     /* ===== PHASE 5: Read/write loop for WRITE_PHASE_TIME_MS in batch mode ===== */
-    printf("PHASE 5: Starting read/write loop for %"PRId64" ms.\n", (long long)WRITE_PHASE_TIME_MS);
+    printf("PHASE 5: Starting read/write loop for %" PRId64 " ms.\n", (int64_t)WRITE_PHASE_TIME_MS);
 
     uint16_t write_value = 0x01;
     int write_toggle = 0;

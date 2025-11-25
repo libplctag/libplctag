@@ -141,7 +141,7 @@ static util_err_t handle_read_coils(buf_t *request, buf_t *response,
     }
 
     /* Allocate response buffer for coils */
-    uint16_t tmp_byte_count = (count + 7) / 8;
+    uint16_t tmp_byte_count = (uint16_t)(((uint16_t)count + (uint16_t)7) / (uint16_t)8);
 
     if (tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
         pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_WARN, "Requested coil count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
@@ -196,7 +196,7 @@ static util_err_t handle_read_discrete_inputs(buf_t *request, buf_t *response,
     }
 
     /* Allocate response buffer for inputs */
-    uint16_t tmp_byte_count = (count + 7) / 8;
+    uint16_t tmp_byte_count = (uint16_t)(((uint16_t)count + (uint16_t)7) / (uint16_t)8);
 
     if (tmp_byte_count > MODBUS_MAX_READ_RESPONSE_BYTES) {
         pdlog(LOG_MODULE_MODBUS_PROTOCOL, LOG_LEVEL_WARN, "Requested discrete input count %u results in byte count %u exceeding %d bytes", count, tmp_byte_count, MODBUS_MAX_READ_RESPONSE_BYTES);
