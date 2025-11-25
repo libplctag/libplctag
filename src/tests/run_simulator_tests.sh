@@ -47,8 +47,8 @@ kill_process() {
         # Windows (Git Bash)
         taskkill //F //IM "${process_name}.exe" > /dev/null 2>&1
     else
-        # Linux/macOS (including Alpine with BusyBox)
-        killall -s TERM "$process_name" > /dev/null 2>&1
+        # Linux/macOS/Alpine - pkill has consistent syntax across platforms
+        pkill -TERM "$process_name" > /dev/null 2>&1
     fi
 }
 

@@ -64,7 +64,7 @@
 #    define SERVER_STOP "taskkill /IM ab_server.exe /F"
 #else
 #    define SERVER_START "%s --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[10] --debug > ab_server.log 2>&1 &"
-#    define SERVER_STOP "killall -s TERM ab_server"
+#    define SERVER_STOP "pkill -TERM ab_server"
 #endif
 
 #define log(...)                         \
