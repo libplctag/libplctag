@@ -56,7 +56,11 @@
  */
 
 static volatile log_level_t global_debug_level = LOG_LEVEL_NONE;
+#if defined(_MSC_VER)
+static volatile LONG thread_num_lock = 0;  /* Used with InterlockedCompareExchange (requires 4 bytes) */
+#else
 static volatile unsigned char thread_num_lock = 0;  /* Used with __atomic_test_and_set/__atomic_clear */
+#endif
 static volatile uint32_t thread_num = 1;
 
 /*
@@ -87,7 +91,8 @@ static uint32_t get_thread_id(void) {
         /* MSVC uses InterlockedCompareExchange */
         int expected = 0;
         int desired = 1;
-        while(InterlockedCompareExchange((volatile LONG*)&thread_num_lock, desired, expected) != expected) {
+        int actual = 0;
+        while((actual = InterlockedCompareExchange((volatile LONG*)&thread_num_lock, desired, expected)) != expected) {
             /* Busy wait - spinlock */
         }
 
