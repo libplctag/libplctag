@@ -181,7 +181,7 @@ int process_line(const char *line) {
         /* if we dropped out of the for loop, we still need to drop out of the do/while. */
         if(rc != PLCTAG_STATUS_OK) { break; }
 
-        tags[num_tags].name = strdup(parts[0]);
+        tags[num_tags].name = compat_strdup(parts[0]);
 
         if(compat_strcasecmp("dint", parts[1]) == 0) {
             tags[num_tags].data_type = i32_type;
@@ -334,7 +334,7 @@ int make_prefix(char *prefix_buf, int prefix_buf_size) {
     remainder_ms = (int)(epoch_ms % 1000);
 
     /* FIXME - should capture error return! */
-    localtime_r(&epoch, &t);
+    compat_localtime_r(&epoch, &t);
 
     /* create the prefix and format for the file entry. */
     // NOLINTNEXTLINE

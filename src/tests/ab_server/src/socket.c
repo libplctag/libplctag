@@ -93,15 +93,15 @@ SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) 
 
     if(rc != NO_ERROR) {
         log_info("WSAStartup failed with error: %d\n", rc);
-        return ERR_SOCKET_STARTUP;
+        return (SOCKET)ERR_SOCKET_STARTUP;
     }
 #endif
 
     /* create the socket */
     sock = socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
     if(sock == INVALID_SOCKET) {
-        log_info("ERROR: socket() failed: %s\n", gai_strerror(sock));
-        return ERR_SOCKET_CREATE;
+        log_info("ERROR: socket() failed: %s\n", gai_strerror((int)sock));
+        return (SOCKET)ERR_SOCKET_CREATE;
     }
 
 #ifdef SO_NOSIGPIPE
@@ -112,7 +112,7 @@ SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) 
     if(rc) {
         socket_close(sock);
         log_info("ERROR: Setting SO_NOSIGPIPE on socket failed: %s\n", gai_strerror(rc));
-        return ERR_SOCKET_SETOPT;
+        return (SOCKET)ERR_SOCKET_SETOPT;
     }
 #endif
 
@@ -123,14 +123,14 @@ SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) 
     if(rc) {
         socket_close(sock);
         log_info("ERROR: Setting SO_RCVTIMEO on socket failed: %s\n", gai_strerror(rc));
-        return ERR_SOCKET_SETOPT;
+        return (SOCKET)ERR_SOCKET_SETOPT;
     }
 
     rc = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&timeout, sizeof(timeout));
     if(rc) {
         socket_close(sock);
         log_info("ERROR: Setting SO_SNDTIMEO on socket failed: %s\n", gai_strerror(rc));
-        return ERR_SOCKET_SETOPT;
+        return (SOCKET)ERR_SOCKET_SETOPT;
     }
 
     /* abort the connection on close. */
@@ -141,7 +141,7 @@ SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) 
     if(rc) {
         socket_close(sock);
         log_info("ERROR: Setting SO_LINGER on socket failed: %s\n", gai_strerror(rc));
-        return ERR_SOCKET_SETOPT;
+        return (SOCKET)ERR_SOCKET_SETOPT;
     }
 
     serv_addr.sin_family = AF_INET;
@@ -150,14 +150,14 @@ SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port) 
     if((rc = inet_pton(AF_INET, remote_host, &serv_addr.sin_addr)) <= 0) {
         socket_close(sock);
         log_info("ERROR: Getting IP address for remote server, %s, failed: %d\n", remote_host, rc);
-        return ERR_SOCKET_BAD_PARAM;
+        return (SOCKET)ERR_SOCKET_BAD_PARAM;
     }
 
     /* now connect to the remote server */
     if(connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr))) {
         socket_close(sock);
         log_info("ERROR: Connecting to remote server, %s, failed: %d\n", remote_host, rc);
-        return ERR_SOCKET_CONNECT;
+        return (SOCKET)ERR_SOCKET_CONNECT;
     }
 
     return sock;
@@ -177,15 +177,15 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
 
     if(rc != NO_ERROR) {
         log_info("WSAStartup failed with error: %d\n", rc);
-        return ERR_SOCKET_STARTUP;
+        return (SOCKET)ERR_SOCKET_STARTUP;
     }
 #endif
 
     /* create the socket */
     sock = socket(AF_INET, SOCK_STREAM, 0 /* IP protocol */);
     if(sock == INVALID_SOCKET) {
-        log_info("ERROR: socket() failed: %s\n", gai_strerror(sock));
-        return ERR_SOCKET_CREATE;
+        log_info("ERROR: socket() failed: %s\n", gai_strerror((int)sock));
+        return (SOCKET)ERR_SOCKET_CREATE;
     }
 
     address.sin_family = AF_INET;
@@ -198,13 +198,13 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
     if(rc < 0) {
         perror("Error from bind(): ");
         printf("ERROR: Unable to bind() socket: %d\n", rc);
-        return ERR_SOCKET_BIND;
+        return (SOCKET)ERR_SOCKET_BIND;
     }
 
     rc = listen(sock, LISTEN_QUEUE);
     if(rc < 0) {
         log_info("ERROR: Unable to call listen() on socket: %d\n", rc);
-        return ERR_SOCKET_LISTEN;
+        return (SOCKET)ERR_SOCKET_LISTEN;
     }
 
     /* set up our socket to allow reuse if we crash suddenly. */
@@ -213,7 +213,7 @@ SOCKET socket_open_tcp_server(const char *listening_port) {
     if(rc) {
         socket_close(sock);
         log_info("ERROR: Setting SO_REUSEADDR on socket failed: %s\n", gai_strerror(rc));
-        return ERR_SOCKET_SETOPT;
+        return (SOCKET)ERR_SOCKET_SETOPT;
     }
 
     return sock;
@@ -237,7 +237,7 @@ int socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd) {
     int num_accept_ready = 0;
 
     if(!out_client_fd) {
-        return ERR_SOCKET_BAD_PARAM;
+        return (SOCKET)ERR_SOCKET_BAD_PARAM;
     }
 
     *out_client_fd = INVALID_SOCKET;

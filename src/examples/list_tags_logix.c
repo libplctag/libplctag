@@ -431,7 +431,7 @@ char *setup_tag_string(int argc, char **argv) {
         fprintf(stderr, "Using tag string \"%s\".\n", tag_string);
     }
 
-    return strdup(tag_string);
+    return compat_strdup(tag_string);
 }
 
 

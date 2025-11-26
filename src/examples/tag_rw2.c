@@ -384,7 +384,7 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
         usage();
     }
 
-    tmp_vals = strdup(write_vals);
+    tmp_vals = compat_strdup(write_vals);
     if(!tmp_vals) {
         printf("ERROR: Unable to copy write value(s) string!\n");
         cleanup(args);
@@ -733,7 +733,7 @@ void parse_write_vals(char *write_vals, struct run_args *args) {
                 if(val_start == -1 && tmp_vals[i] != 0) {
                     val_start = i;
 
-                    if((args->write_vals.string[elem_index] = strdup(&tmp_vals[val_start])) == NULL) {
+                    if((args->write_vals.string[elem_index] = compat_strdup(&tmp_vals[val_start])) == NULL) {
                         printf("ERROR: Unable to allocate string copy for write argument %d!\n", elem_index);
                         cleanup(args);
                         usage();

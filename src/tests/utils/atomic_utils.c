@@ -63,7 +63,10 @@ bool atomic_set_bool(atomic_bool *a, bool new_val) {
 bool atomic_compare_and_set_bool(atomic_bool *a, bool old_val, bool new_val) {
 #    ifdef _WIN32
     /* Windows does not have a native single byte atomic */
-    return InterlockedCompareExchange16(a, new_val, old_val) == old_val;
+    volatile SHORT old_short = (SHORT)old_val;
+    volatile SHORT new_short = (SHORT)new_val;
+    volatile SHORT result = InterlockedCompareExchange16((volatile SHORT *)a, new_short, old_short);
+    return (bool)(result == old_short);
 #    else
     bool expected = old_val;
     return __atomic_compare_exchange_n(a, &expected, new_val, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);

@@ -113,7 +113,7 @@ util_err_t socket_address_init(socket_address_t *out_addr,
     /* Use the first result */
     if (result != NULL) {
         memcpy(&out_addr->addr, result->ai_addr, result->ai_addrlen);
-        out_addr->addr_len = result->ai_addrlen;
+        out_addr->addr_len = (socklen_t)result->ai_addrlen;
         freeaddrinfo(result);
         return UTIL_OK;
     }

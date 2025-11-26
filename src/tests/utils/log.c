@@ -51,7 +51,7 @@
     #include <windows.h>
     /* Define atomic types and operations for MSVC */
     #define _Atomic volatile
-    #define atomic_fetch_add(obj, arg) InterlockedExchangeAdd(obj, arg)
+    #define atomic_fetch_add(obj, arg) InterlockedExchangeAdd((volatile LONG *)(obj), arg)
     #define LOCK_INIT false
 #else
     /* Standard C11 atomics for other compilers */
