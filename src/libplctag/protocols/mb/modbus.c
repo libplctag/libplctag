@@ -822,7 +822,7 @@ void modbus_plc_destructor(void *plc_arg) {
  * @return int Status code indicating success or failure.
  */
 static int reset_plc(modbus_plc_p plc) {
-    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "Starting.");
+    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Starting reset_plc() - connection will be closed.");
 
     if(!plc) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Null PLC pointer passed!");
@@ -951,6 +951,7 @@ THREAD_FUNC(modbus_plc_handler) {
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "in PLC_CONNECT_START state.");
 
                 /* reset the PLC to initial state, including closing the socket */
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "Calling reset_plc() from PLC_CONNECT_START state.");
                 reset_plc(plc);
 
                 /* connect to the PLC */
@@ -966,6 +967,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     /* Update timestamp for inactivity tracking now that we're connected */
                     plc->last_packet_time_ms = time_ms();
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "Updated last_packet_time_ms=%" PRId64 " (connection succeeded immediately in PLC_CONNECT_START).", plc->last_packet_time_ms);
 
                     plc->state = PLC_READY;
                 } else {
@@ -992,6 +994,7 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     /* Update timestamp for inactivity tracking now that we're connected */
                     plc->last_packet_time_ms = time_ms();
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "Updated last_packet_time_ms=%" PRId64 " (connection established in PLC_CONNECT_WAIT).", plc->last_packet_time_ms);
 
                     /* reset err_delay */
                     err_delay = PLC_SOCKET_ERR_START_DELAY;
@@ -1039,7 +1042,8 @@ THREAD_FUNC(modbus_plc_handler) {
 
                     /* Only disconnect if truly idle for full timeout period */
                     if(idle_time >= MODBUS_IDLE_WAIT_TIMEOUT) {
-                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Inactivity timeout reached, going to PLC_IDLE_WAIT.");
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Inactivity timeout reached after %" PRId64 "ms idle (threshold=%dms). current_time=%" PRId64 ", last_packet_time=%" PRId64 ". Calling reset_plc() and going to PLC_IDLE_WAIT.",
+                               idle_time, MODBUS_IDLE_WAIT_TIMEOUT, current_time, plc->last_packet_time_ms);
 
                         /* reset the PLC state */
                         reset_plc(plc);
@@ -2203,6 +2207,7 @@ int receive_response(modbus_plc_p plc) {
 
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "Updated last_packet_time_ms=%" PRId64 " (received full packet).", plc->last_packet_time_ms);
 
         plc->flags.response_ready = 1;
 
@@ -2263,6 +2268,7 @@ int send_request(modbus_plc_p plc) {
 
         /* Update packet timestamp for inactivity tracking */
         plc->last_packet_time_ms = time_ms();
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "Updated last_packet_time_ms=%" PRId64 " (sent full packet).", plc->last_packet_time_ms);
 
         /* Record when request was sent for timing statistics */
         plc->last_request_sent_time = plc->last_packet_time_ms;
