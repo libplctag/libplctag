@@ -76,7 +76,7 @@ uint64_t random_u64(uint64_t upper_bound) {
 
 
 #elif defined(_WIN32) || defined(_WIN64)
-#include <Windows.h>
+#include <windows.h>
 
 #include <wincrypt.h>
 

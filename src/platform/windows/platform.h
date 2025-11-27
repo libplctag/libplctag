@@ -47,11 +47,11 @@ extern "C"
 */
 
 /* KEEP THE SPACES BETWEEN LINES!  The order is required! */
-#include <Winsock2.h>
+#include <winsock2.h>
 
 #include <windows.h>
 
-#include <Ws2tcpip.h>
+#include <ws2tcpip.h>
 
 
 #include <tchar.h>

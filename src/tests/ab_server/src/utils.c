@@ -62,9 +62,9 @@
 #    define PLATFORM_WINDOWS
 
 /* Windows include file order is important! */
-#    include <Winsock2.h>
-#    include <Windows.h>
-#    include <Ws2tcpip.h>
+#    include <winsock2.h>
+#    include <windows.h>
+#    include <ws2tcpip.h>
 #    include <io.h>
 #    include <tchar.h>
 #    include <strsafe.h>

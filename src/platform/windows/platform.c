@@ -38,11 +38,11 @@
 #include <platform.h>
 
 /* KEEP THE SPACES BETWEEN THE INCLUDES.  The order is required! */
-#include <Winsock2.h>
+#include <winsock2.h>
 
-#include <Windows.h>
+#include <windows.h>
 
-#include <Ws2tcpip.h>
+#include <ws2tcpip.h>
 
 #include <errno.h>
 #include <io.h>
