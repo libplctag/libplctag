@@ -1473,11 +1473,6 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!sock->is_open) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_READ;
-    }
-
     if(timeout_ms < 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be zero or positive!");
         return PLCTAG_ERR_BAD_PARAM;
@@ -1503,7 +1498,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
     }
 
     /* Only monitor main socket if it's valid (it may be closed during reconnection) */
-    if(sock->fd != INVALID_SOCKET) {
+    if(sock->fd != INVALID_SOCKET && sock->is_open) {
         /* we always want to know about errors. */
         FD_SET(sock->fd, &err_set);
 
@@ -1521,9 +1516,12 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         tv.tv_sec = (long)(timeout_ms / 1000);
         tv.tv_usec = (long)(timeout_ms % 1000) * (long)(1000);
 
-        num_sockets = select(2, &read_set, &write_set, &err_set, &tv);
+        /* Note: On Windows, the first parameter (nfds) to select() is ignored.
+         * Windows select() determines which sockets to check from the fd_sets themselves.
+         * The value 0 is used here since it's ignored anyway. */
+        num_sockets = select(0, &read_set, &write_set, &err_set, &tv);
     } else {
-        num_sockets = select(2, &read_set, &write_set, &err_set, NULL);
+        num_sockets = select(0, &read_set, &write_set, &err_set, NULL);
     }
 
     if(num_sockets == 0) {

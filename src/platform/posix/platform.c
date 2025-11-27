@@ -1476,11 +1476,6 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!sock->is_open) {
-        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket is not open!");
-        return PLCTAG_ERR_READ;
-    }
-
     if(timeout_ms < 0) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Timeout must be zero or positive!");
         return PLCTAG_ERR_BAD_PARAM;
@@ -1505,8 +1500,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
     FD_SET(sock->wake_read_fd, &read_set);
 
-    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
-    if(sock->fd != INVALID_SOCKET) {
+    /* Only monitor main socket if it's valid and open (it may be closed during reconnection) */
+    if(sock->fd != INVALID_SOCKET && sock->is_open) {
         /* calculate the maximum fd */
         max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
 
@@ -1524,7 +1519,7 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_wait_event: Adding sock->fd=%d to write_set for SOCK_EVENT_CONNECT or SOCK_EVENT_CAN_WRITE", sock->fd);
         }
     } else {
-        /* Main socket invalid - only wake socket will be monitored (valid for reconnection) */
+        /* Main socket invalid or closed - only wake socket will be monitored (valid for reconnection/idle) */
         max_fd = sock->wake_read_fd;
     }
 
