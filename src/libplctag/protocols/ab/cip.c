@@ -1017,7 +1017,7 @@ static struct cip_type_lookup_entry_t cip_type_lookup[] = {
     /* 0xdc */ {PLCTAG_STATUS_OK, 2, 0},  /* EPATH: CIP path segment(s) */
     /* 0xdd */ {PLCTAG_STATUS_OK, 2, 2},  /* ENGUNIT: Engineering units */
     /* 0xde */ {PLCTAG_STATUS_OK, 2, 0},  /* STRINGI: International character string (encoding?) */
-    /* 0xdf */ {PLCTAG_ERR_NO_MATCH, 0, 0},
+    /* 0xdf */ {PLCTAG_STATUS_OK, 2, 8},  /* LTIME: Large time value */
     /* 0xe0 */ {PLCTAG_ERR_NO_MATCH, 0, 0},
     /* 0xe1 */ {PLCTAG_ERR_NO_MATCH, 0, 0},
     /* 0xe2 */ {PLCTAG_ERR_NO_MATCH, 0, 0},
