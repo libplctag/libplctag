@@ -1542,8 +1542,8 @@ static int tag_op_read_response(modbus_plc_p plc, modbus_tag_p tag) {
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Starting read response check operation for tag %d.", tag->tag_id);
 
-    /* cross check the state. */
-    if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT) {
+    /* cross check the state. PLC_IDLE_WAIT is included because the connection was closed due to inactivity. */
+    if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT || plc->state == PLC_IDLE_WAIT) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "PLC changed state, restarting request.");
         tag->op = TAG_OP_READ_REQUEST;
         tag->op_changed_time = time_ms();
@@ -1775,7 +1775,8 @@ static int tag_op_write_response(modbus_plc_p plc, modbus_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
     int response_ready = 0;
 
-    if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT) {
+    /* PLC_IDLE_WAIT is included because the connection was closed due to inactivity. */
+    if(plc->state == PLC_CONNECT_START || plc->state == PLC_CONNECT_WAIT || plc->state == PLC_ERR_WAIT || plc->state == PLC_IDLE_WAIT) {
         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "PLC changed state, restarting request.");
         tag->op = TAG_OP_WRITE_REQUEST;
         tag->op_changed_time = time_ms();
