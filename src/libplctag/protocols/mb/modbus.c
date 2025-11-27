@@ -1041,9 +1041,9 @@ THREAD_FUNC(modbus_plc_handler) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Socket wait timed out. Idle for %" PRId64 "ms.", idle_time);
 
                     /* Only disconnect if truly idle for full timeout period */
-                    if(idle_time >= MODBUS_IDLE_WAIT_TIMEOUT) {
+                    if(idle_time >= MODBUS_INACTIVITY_TIMEOUT) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Inactivity timeout reached after %" PRId64 "ms idle (threshold=%dms). current_time=%" PRId64 ", last_packet_time=%" PRId64 ". Calling reset_plc() and going to PLC_IDLE_WAIT.",
-                               idle_time, MODBUS_IDLE_WAIT_TIMEOUT, current_time, plc->last_packet_time_ms);
+                                 idle_time, MODBUS_INACTIVITY_TIMEOUT, current_time, plc->last_packet_time_ms);
 
                         /* reset the PLC state */
                         reset_plc(plc);
