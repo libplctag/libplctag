@@ -462,9 +462,33 @@ jobs:
         # Add target architecture
         sudo dpkg --add-architecture ${{ matrix.target_arch }}
 
-        # Modify existing sources.list to exclude ARM architectures from main repos
-        sudo sed -i 's/^deb /deb [arch=amd64,i386] /' /etc/apt/sources.list
-        sudo sed -i 's/^deb-src /deb-src [arch=amd64,i386] /' /etc/apt/sources.list
+        # Ubuntu 24.04 uses DEB822 format in /etc/apt/sources.list.d/ubuntu.sources
+        # We need to restrict the main repos to amd64/i386 only, then add ports for ARM
+        
+        # Check for DEB822 format sources file (Ubuntu 24.04+)
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+          echo "Detected DEB822 format apt sources (Ubuntu 24.04+)"
+          # Add architecture restriction to existing sources
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64 i386/' /etc/apt/sources.list.d/ubuntu.sources
+          
+          # Remove any azure-specific sources that might cause issues
+          sudo rm -f /etc/apt/sources.list.d/azure*.list /etc/apt/sources.list.d/azure*.sources 2>/dev/null || true
+        else
+          # Traditional sources.list format (older Ubuntu)
+          sudo sed -i 's/^deb /deb [arch=amd64,i386] /' /etc/apt/sources.list
+          sudo sed -i 's/^deb-src /deb-src [arch=amd64,i386] /' /etc/apt/sources.list
+        fi
+        
+        # Also handle any other .list files in sources.list.d that might not have arch restrictions
+        for f in /etc/apt/sources.list.d/*.list; do
+          if [ -f "$f" ]; then
+            # Skip our own ARM sources file
+            if [[ "$f" != *"${{ matrix.target_arch }}.list"* ]]; then
+              sudo sed -i 's/^deb http/deb [arch=amd64,i386] http/' "$f" 2>/dev/null || true
+              sudo sed -i 's/^deb https/deb [arch=amd64,i386] https/' "$f" 2>/dev/null || true
+            fi
+          fi
+        done
 
         # Add ARM ports repository for the target architecture
         cat << EOF | sudo tee /etc/apt/sources.list.d/${{ matrix.target_arch }}.list
