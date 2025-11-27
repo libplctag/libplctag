@@ -1540,8 +1540,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             result |= (events & SOCK_EVENT_WAKE_UP);
         }
 
-        /* is read ready for the main fd? */
-        if(FD_ISSET(sock->fd, &read_set)) {
+        /* is read ready for the main fd? Guard against INVALID_SOCKET */
+        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &read_set)) {
             char buf;
             int byte_read = 0;
 
@@ -1572,14 +1572,14 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             }
         }
 
-        /* is write ready for the main fd? */
-        if(FD_ISSET(sock->fd, &write_set)) {
+        /* is write ready for the main fd? Guard against INVALID_SOCKET */
+        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &write_set)) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can write or just connected.");
             result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
         }
 
-        /* is there an error? */
-        if(FD_ISSET(sock->fd, &err_set)) {
+        /* is there an error? Guard against INVALID_SOCKET */
+        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &err_set)) {
             /* On Windows, FD_ISSET on err_set can return true spuriously for idle sockets.
              * We need to verify the error is real by checking the actual socket error state.
              * Use getsockopt(SO_ERROR) to get the actual error code. */

@@ -1539,8 +1539,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
         num_sockets = select(max_fd + 1, &read_set, &write_set, &err_set, NULL);
     }
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_wait_event: select() returned num_sockets=%d for sock->fd=%d, read_set has fd=%d, write_set has fd=%d, err_set has fd=%d",
-           num_sockets, sock->fd, FD_ISSET(sock->fd, &read_set), FD_ISSET(sock->fd, &write_set), FD_ISSET(sock->fd, &err_set));
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_wait_event: select() returned num_sockets=%d for sock->fd=%d",
+           num_sockets, sock->fd);
 
     if(num_sockets == 0) {
         result |= (events & SOCK_EVENT_TIMEOUT);
@@ -1556,8 +1556,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             result |= (events & SOCK_EVENT_WAKE_UP);
         }
 
-        /* is read ready for the main fd? */
-        if(FD_ISSET(sock->fd, &read_set)) {
+        /* is read ready for the main fd? Guard against INVALID_SOCKET (-1) which causes undefined behavior in FD_ISSET */
+        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &read_set)) {
             char buf;
             int byte_read = 0;
 
@@ -1583,14 +1583,14 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
             }
         }
 
-        /* is write ready for the main fd? */
-        if(FD_ISSET(sock->fd, &write_set)) {
+        /* is write ready for the main fd? Guard against INVALID_SOCKET (-1) */
+        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &write_set)) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Socket can write or just connected.");
             result |= ((events & SOCK_EVENT_CAN_WRITE) | (events & SOCK_EVENT_CONNECT));
         }
 
-        /* is there an error? */
-        if(FD_ISSET(sock->fd, &err_set)) {
+        /* is there an error? Guard against INVALID_SOCKET (-1) */
+        if(sock->fd != INVALID_SOCKET && FD_ISSET(sock->fd, &err_set)) {
             /* On some platforms, FD_ISSET on err_set can return true spuriously.
              * Verify the error is real by checking SO_ERROR. */
             int sock_error = 0;
