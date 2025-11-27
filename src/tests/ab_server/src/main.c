@@ -41,7 +41,7 @@
 #include <time.h>
 
 #if defined(IS_WINDOWS)
-#    include <Windows.h>
+#    include <windows.h>
 #else
 /* assume it is POSIX of some sort... */
 #    include <signal.h>
