@@ -17,25 +17,25 @@ jobs:
         include:
           - arch: x86_64
             libc: glibc
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             cmake_flags: ""
             apt_packages: "build-essential cmake"
             artifact_suffix: "ubuntu_x64"
           - arch: x86_64
             libc: musl
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             cmake_flags: ""
             apt_packages: "build-essential cmake musl-tools musl-dev"
             artifact_suffix: "ubuntu_x64_musl"
           - arch: x86
             libc: glibc
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
             apt_packages: "gcc-multilib g++-multilib"
             artifact_suffix: "ubuntu_x86"
           - arch: arm64
             libc: glibc
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-24.04-arm
             cmake_flags: ""
             apt_packages: "build-essential cmake zip"
             artifact_suffix: "ubuntu_arm64"
@@ -413,7 +413,7 @@ jobs:
   
 
   ubuntu_arm_cross:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
@@ -468,10 +468,10 @@ jobs:
 
         # Add ARM ports repository for the target architecture
         cat << EOF | sudo tee /etc/apt/sources.list.d/${{ matrix.target_arch }}.list
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-backports main restricted universe multiverse
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble-backports main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble-security main restricted universe multiverse
         EOF
 
         # Single apt update after adding repositories
@@ -560,9 +560,9 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - arch: aarch64
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-24.04-arm
 
     env:
       ARTIFACT: ""
@@ -928,7 +928,7 @@ jobs:
         if-no-files-found: warn
 
   debug_context:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -1010,7 +1010,7 @@ jobs:
 
   debug_artifacts:
     needs: [ubuntu_matrix, macos_matrix, windows_msvc_matrix, ubuntu_arm_cross, alpine_native ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -1040,7 +1040,7 @@ jobs:
 
   create_release:
     needs: [ubuntu_matrix, macos_matrix, windows_msvc_matrix, ubuntu_arm_cross, alpine_native ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
 
     env:
