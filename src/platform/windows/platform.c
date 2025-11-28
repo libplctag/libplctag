@@ -1402,9 +1402,11 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
             rc = PLCTAG_STATUS_OK;
         } else if(FD_ISSET(sock->fd, &err_set)) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error connecting!");
+            socket_close(sock);
             return PLCTAG_ERR_OPEN;
         } else {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned a 1, but no sockets are selected!");
+            socket_close(sock);
             return PLCTAG_ERR_OPEN;
         }
     } else if(select_rc == 0) {
@@ -1414,6 +1416,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
         int err = WSAGetLastError();
 
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() has error %d!", err);
+        socket_close(sock);
 
         switch(err) {
             case WSAENETDOWN: /* The network subsystem is down */

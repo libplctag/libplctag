@@ -1376,6 +1376,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Socket is probably connected.");
         } else {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned but socket is not connected!");
+            socket_close(sock);
             return PLCTAG_ERR_BAD_REPLY;
         }
     } else if(select_rc == 0) {
@@ -1383,6 +1384,7 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
         return PLCTAG_ERR_TIMEOUT;
     } else {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "select() returned status %d!", select_rc);
+        socket_close(sock);
 
         switch(errno) {
             case EBADF: /* bad file descriptor */
@@ -1423,41 +1425,49 @@ int socket_connect_tcp_check(sock_p sock, int timeout_ms) {
 
             case EBADF:
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket fd is not valid!");
+                socket_close(sock);
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case EFAULT:
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The address passed to getsockopt() is not a valid user address!");
+                socket_close(sock);
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case EINVAL:
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The size of the socket error result is invalid!");
+                socket_close(sock);
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case ENOPROTOOPT:
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The option SO_ERROR is not understood at the SOL_SOCKET level!");
+                socket_close(sock);
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case ENOTSOCK:
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "The FD is not a socket!");
+                socket_close(sock);
                 return PLCTAG_ERR_OPEN;
                 break;
 
             case ECONNREFUSED:
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Connection refused!");
+                socket_close(sock);
                 return PLCTAG_ERR_OPEN;
                 break;
 
             default:
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Unexpected error %d returned!", sock_err);
+                socket_close(sock);
                 return PLCTAG_ERR_OPEN;
                 break;
         }
     } else {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error %d getting socket connection status!", errno);
+        socket_close(sock);
         return PLCTAG_ERR_OPEN;
     }
 
