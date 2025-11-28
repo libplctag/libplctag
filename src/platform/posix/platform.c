@@ -1118,7 +1118,6 @@ struct sock_t {
     int wake_read_fd;
     int wake_write_fd;
     int port;
-    int is_open;
 };
 
 
@@ -1337,8 +1336,6 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
     s->fd = fd;
     s->port = port;
 
-    s->is_open = 1;
-
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_DETAIL, "Done with status %s.", plc_tag_decode_error(rc));
 
     return rc;
@@ -1509,8 +1506,8 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
     FD_SET(sock->wake_read_fd, &read_set);
 
-    /* Only monitor main socket if it's valid and open (it may be closed during reconnection) */
-    if(sock->fd != INVALID_SOCKET && sock->is_open) {
+    /* Only monitor main socket if it's valid (it may be closed during reconnection) */
+    if(sock->fd != INVALID_SOCKET) {
         /* calculate the maximum fd */
         max_fd = (sock->fd > sock->wake_read_fd ? sock->fd : sock->wake_read_fd);
 
@@ -1746,7 +1743,7 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
+    if(s->fd == INVALID_SOCKET) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_READ;
     }
@@ -1876,7 +1873,7 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         return PLCTAG_ERR_NULL_PTR;
     }
 
-    if(!s->is_open) {
+    if(s->fd == INVALID_SOCKET) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket is not open!");
         return PLCTAG_ERR_WRITE;
     }
@@ -2029,8 +2026,6 @@ int socket_close(sock_p s) {
 
         s->fd = INVALID_SOCKET;
     }
-
-    s->is_open = 0;
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Done.");
 
