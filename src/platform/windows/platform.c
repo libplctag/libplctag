@@ -1302,6 +1302,14 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
         freeaddrinfo(res_head);
     }
 
+    /* set no delay for TCP connections.  Send immediately. */
+    sock_opt = 1;
+    if(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&sock_opt, sizeof(sock_opt))) {
+        closesocket(fd);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting TCP_NODELAY option, errno: %d", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
     /* set the socket to non-blocking. */
     if(ioctlsocket(fd, (long)FIONBIO, &non_blocking)) {
         pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error getting socket options, errno: %d", errno);
@@ -2171,6 +2179,19 @@ int sock_create_event_wakeup_channel(sock_p sock) {
         /* writer */
         if(ioctlsocket(wake_fds[1], (long)FIONBIO, &non_blocking)) {
             pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error %d setting reader socket to non-blocking!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+
+        /* set TCP no delay on both sides to avoid delays */
+        int flag = 1;
+        if(setsockopt(wake_fds[0], IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(int)) < 0) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error %d setting TCP_NODELAY on wake read socket!", WSAGetLastError());
+            rc = PLCTAG_ERR_WINSOCK;
+            break;
+        }
+        if(setsockopt(wake_fds[1], IPPROTO_TCP, TCP_NODELAY, (const char *)&flag, sizeof(int)) < 0) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Error %d setting TCP_NODELAY on wake write socket!", WSAGetLastError());
             rc = PLCTAG_ERR_WINSOCK;
             break;
         }

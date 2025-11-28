@@ -599,29 +599,32 @@ reactor_t* reactor_create(size_t max_sockets) {
 
     memset(r, 0, sizeof(*r));
 
-    /* Allocate socket registry */
-    r->sockets = (socket_entry_t *)malloc(max_sockets * sizeof(socket_entry_t));
+    /* Initialize reactor fields */
+    r->max_sockets = max_sockets + 1;  /* +1 for wake pipe */
+    r->active_socket_count = 1;        /* Start with wake pipe registered */
+    r->shutdown = false;
+    
+    /* Allocate socket registry, one extra for wake pipe */
+    r->sockets = (socket_entry_t *)malloc(r->max_sockets * sizeof(socket_entry_t));
     if (r->sockets == NULL) {
         free(r);
         return NULL;
     }
-    memset(r->sockets, 0, max_sockets * sizeof(socket_entry_t));
+    memset(r->sockets, 0, r->max_sockets * sizeof(socket_entry_t));
 
     /* Initialize all socket fields to INVALID_SOCKET */
-    for (size_t i = 0; i < max_sockets; i++) {
+    for (size_t i = 0; i < r->max_sockets; i++) {
         r->sockets[i].sock = INVALID_SOCKET;
     }
 
     /* Allocate poll array */
-    r->pollfds = (struct pollfd *)malloc(max_sockets * sizeof(struct pollfd));
+    r->pollfds = (struct pollfd *)malloc(r->max_sockets * sizeof(struct pollfd));
     if (r->pollfds == NULL) {
         free(r->sockets);
         free(r);
         return NULL;
     }
-    memset(r->pollfds, 0, max_sockets * sizeof(struct pollfd));
-
-    r->max_sockets = max_sockets;
+    memset(r->pollfds, 0, r->max_sockets * sizeof(struct pollfd));
 
     /* Initialize synchronization */
 #ifdef _WIN32
@@ -641,6 +644,8 @@ reactor_t* reactor_create(size_t max_sockets) {
         free(r);
         return NULL;
     }
+
+    r->wake_pipe_read = listen_sock;
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -669,6 +674,30 @@ reactor_t* reactor_create(size_t max_sockets) {
         return NULL;
     }
 
+    /* Set listen socket non-blocking */
+    if (socket_set_nonblocking(r->listen_sock, true) != UTIL_OK) {
+        close(r->listen_sock);
+        close(r->send_sock);
+        free(r->pollfds);
+        free(r->sockets);
+        pthread_mutex_destroy(&r->lock);
+        free(r);
+        return NULL;
+    }
+
+    /* set listen socket no delay */
+    if(socket_set_nodelay(r->listen_sock, true) != UTIL_OK) {
+        close(r->listen_sock);
+        close(r->send_sock);
+        free(r->pollfds);
+        free(r->sockets);
+        pthread_mutex_destroy(&r->lock);
+        free(r);
+        return NULL;
+    }
+
+
+
     /* Create socket that will send to listen_sock */
     SOCKET send_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (send_sock == INVALID_SOCKET) {
@@ -680,9 +709,29 @@ reactor_t* reactor_create(size_t max_sockets) {
         return NULL;
     }
 
-    /* Set non-blocking */
-    u_long mode = 1;
-    ioctlsocket(listen_sock, FIONBIO, &mode);
+    r->wake_pipe_read = send_sock;
+
+    /* set send socket non-blocking */*/
+    if(socket_set_nonblocking(send_sock) != UTIL_OK) {
+        close(r->listen_sock);
+        close(r->send_sock);
+        free(r->pollfds);
+        free(r->sockets);
+        pthread_mutex_destroy(&r->lock);
+        free(r);
+        return NULL;
+    }   
+
+    /* set send socket no delay */
+    if(socket_set_nodelay(send_sock) != UTIL_OK) {
+        close(r->listen_sock);
+        close(r->send_sock);
+        free(r->pollfds);
+        free(r->sockets);
+        pthread_mutex_destroy(&r->lock);
+        free(r);
+        return NULL;
+    }
 
     r->wake_pipe_read = listen_sock;
     r->wake_pipe_write = send_sock;
@@ -696,8 +745,37 @@ reactor_t* reactor_create(size_t max_sockets) {
     }
 
     /* Set read end to non-blocking */
-    int flags = fcntl(r->wake_pipe[0], F_GETFL, 0);
-    if (flags == -1 || fcntl(r->wake_pipe[0], F_SETFL, flags | O_NONBLOCK) == -1) {
+    if (socket_set_nonblocking(r->wake_pipe[0], true) != UTIL_OK) {
+        close(r->wake_pipe[0]);
+        close(r->wake_pipe[1]);
+        free(r->pollfds);
+        free(r->sockets);
+        pthread_mutex_destroy(&r->lock);
+        free(r);
+        return NULL;
+    }
+
+    if(socket_set_nodelay(r->wake_pipe[1], true) != UTIL_OK) {
+        close(r->wake_pipe[0]);
+        close(r->wake_pipe[1]);
+        free(r->pollfds);
+        free(r->sockets);
+        pthread_mutex_destroy(&r->lock);
+        free(r);
+        return NULL;
+    }   
+
+    if(socket_set_nonblocking(r->wake_pipe[1], true) != UTIL_OK) {
+        close(r->wake_pipe[0]);
+        close(r->wake_pipe[1]);
+        free(r->pollfds);
+        free(r->sockets);
+        pthread_mutex_destroy(&r->lock);
+        free(r);
+        return NULL;
+    }
+
+    if(socket_set_nodelay(r->wake_pipe[1], true) != UTIL_OK) {
         close(r->wake_pipe[0]);
         close(r->wake_pipe[1]);
         free(r->pollfds);
@@ -761,39 +839,60 @@ void reactor_destroy(reactor_t *r) {
 util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
                              reactor_socket_cb_t cb, void *ctx,
                              const bitarray_t *initial_events) {
-    if (r == NULL || sock == INVALID_SOCKET || cb == NULL) {
-        return UTIL_EINVAL;
+    util_err_t rc = UTIL_OK;
+
+    if(r == NULL) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Invalid reactor instance (NULL)");
+        return UTIL_ENULL;
     }
 
-    /* Set socket to non-blocking for reactor use */
-#ifdef _WIN32
-    u_long mode = 1;
-    if (ioctlsocket(sock, FIONBIO, &mode) != 0) {
-        return util_err_from_wsa(WSAGetLastError());
+    if(cb == NULL) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Invalid socket callback (NULL) for socket fd=%d", sock);
+        return UTIL_ENULL;
     }
-#else
-    int flags = fcntl(sock, F_GETFL, 0);
-    if (flags == -1) {
-        return util_err_from_errno(errno);
+
+    if(sock == INVALID_SOCKET) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Invalid socket descriptor (INVALID_SOCKET)");
+        return UTIL_EINVAL;
+    }  
+
+    /* set socket to non-blocking for reactor use */
+    if((rc = socket_set_nonblocking(sock, true)) != UTIL_OK) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to set socket fd=%d non-blocking.  Error %s.", sock, util_err_str(rc));
+        return rc;
     }
-    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) == -1) {
-        return util_err_from_errno(errno);
+
+    if((rc = socket_set_nodelay(sock, true)) != UTIL_OK) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to set socket fd=%d no-delay.  Error %s.", sock, util_err_str(rc));
+        return rc;
     }
-#endif
 
     /* Detect socket type */
     socket_type_t sock_type = get_socket_type(sock);
 
+    int mutex_rc = 0;
+
 #ifdef _WIN32
-    EnterCriticalSection(&r->lock);
+    mutex_rc = EnterCriticalSection(&r->lock);
+    if(mutex_rc == 0) {
+        rc = util_err_from_wsa(GetLastError());
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to add socket fd=%d.  Error %s.", sock, util_err_str(rc));
+        return rc;
+    }
 #else
-    pthread_mutex_lock(&r->lock);
+    mutex_rc = pthread_mutex_lock(&r->lock);
+    if(mutex_rc != 0) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to add socket fd=%d.  Error %s.", sock, util_err_str(util_err_from_errno(mutex_rc)));
+        return util_err_from_errno(mutex_rc);
+    }
 #endif
+
+    rc = UTIL_ERESOURCE;
 
     /* Find first available slot, skipping index 0 (reserved for wake pipe) */
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock == INVALID_SOCKET) {
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_add_socket: Adding socket fd=%d at index %zu", sock, i);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Adding socket fd=%d at index %zu", sock, i);
             r->sockets[i].sock = sock;
             r->sockets[i].callback = cb;
             r->sockets[i].context = ctx;
@@ -803,10 +902,10 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
             /* Use provided initial events, or enable all if not provided */
             if (initial_events != NULL) {
                 r->sockets[i].enabled = *initial_events;
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_add_socket: Set initial event mask for socket at index %zu", i);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Set initial event mask for socket at index %zu", i);
             } else {
                 bitarray_set_all(&r->sockets[i].enabled);  /* All events enabled by default */
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_add_socket: Enabled all events for socket at index %zu", i);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Enabled all events for socket at index %zu", i);
             }
 
             bitarray_clear_all(&r->sockets[i].pending_events);
@@ -821,12 +920,9 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
 
             r->active_socket_count++;
 
-#ifdef _WIN32
-            LeaveCriticalSection(&r->lock);
-#else
-            pthread_mutex_unlock(&r->lock);
-#endif
-            return UTIL_OK;
+            rc = UTIL_OK;
+
+            break;
         }
     }
 
@@ -835,7 +931,12 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
 #else
     pthread_mutex_unlock(&r->lock);
 #endif
-    return UTIL_ERESOURCE;
+
+    if(rc != UTIL_OK) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "No available slots to add socket fd=%d", sock);
+    }
+
+    return rc;
 }
 
 util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
@@ -843,10 +944,22 @@ util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
         return UTIL_EINVAL;
     }
 
+    int mutex_rc = 0;
+
 #ifdef _WIN32
-    EnterCriticalSection(&r->lock);
+    mutex_rc = EnterCriticalSection(&r->lock);
+    if(mutex_rc == 0) {
+        util_err_t rc = util_err_from_wsa(GetLastError());
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to remove socket fd=%d.  Error %s.", sock, util_err_str(rc));
+        return rc;
+    }
 #else
-    pthread_mutex_lock(&r->lock);
+    mutex_rc = pthread_mutex_lock(&r->lock);
+    if(mutex_rc != 0) {
+        util_err_t rc = util_err_from_errno(mutex_rc);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to remove socket fd=%d.  Error %s.", sock, util_err_str(rc));
+        return rc;
+    }
 #endif
 
     /* Find socket, skipping index 0 (reserved for wake pipe) */
@@ -914,13 +1027,27 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
 
     g_set_mask_stats.calls++;
 
-    /* Time lock acquisition */
+    int mutex_rc = 0;
+
+    /* Time lock acquisition start*/
     t0 = util_time_us();
 #ifdef _WIN32
-    EnterCriticalSection(&r->lock);
+    mutex_rc = EnterCriticalSection(&r->lock);
+    if(mutex_rc == 0) {
+        int rc = util_err_from_wsa(GetLastError());
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set event mask for socket fd=%d.  Error %s.", sock, util_err_str(rc));
+        return rc;
+    }
 #else
-    pthread_mutex_lock(&r->lock);
+    mutex_rc = pthread_mutex_lock(&r->lock);
+    if(mutex_rc != 0) {
+        util_err_t rc = util_err_from_errno(mutex_rc);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set event mask for socket fd=%d.  Error %s.", sock, util_err_str(rc));
+        return rc;
+    }
 #endif
+
+    /* Time lock acquisition end */
     t1 = util_time_us();
     g_set_mask_stats.lock_time_us += (t1 - t0);
 
@@ -935,7 +1062,7 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
 
             /* Time log_detail */
             t0 = util_time_us();
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "reactor_set_event_mask: Found socket fd=%d at index %zu", sock, i);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "Found socket fd=%d at index %zu", sock, i);
             t1 = util_time_us();
             g_set_mask_stats.log_time_us += (t1 - t0);
 
@@ -950,7 +1077,7 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
 
             /* Time second log_detail */
             t0 = util_time_us();
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "reactor_set_event_mask: Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
             t1 = util_time_us();
             g_set_mask_stats.log_time_us += (t1 - t0);
 
@@ -991,10 +1118,21 @@ util_err_t reactor_stop(reactor_t *r) {
         return UTIL_EINVAL;
     }
 
+    int mutex_rc = 0;
+
 #ifdef _WIN32
-    EnterCriticalSection(&r->lock);
+    if((mutex_rc = EnterCriticalSection(&r->lock)) == 0) {
+        int rc = util_err_from_wsa(GetLastError());
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to stop reactor.  Error %s.", util_err_str(rc));
+        return rc;
+    }
 #else
-    pthread_mutex_lock(&r->lock);
+    mutex_rc = pthread_mutex_lock(&r->lock);
+    if(mutex_rc != 0) {
+        util_err_t rc = util_err_from_errno(mutex_rc);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to stop reactor.  Error %s.", util_err_str(rc));
+        return rc;
+    }
 #endif
 
     r->shutdown = true;
@@ -1015,6 +1153,7 @@ util_err_t reactor_wake(reactor_t *r) {
     }
 
     tickle_wake_pipe(r);
+
     return UTIL_OK;
 }
 
@@ -1024,6 +1163,7 @@ util_err_t reactor_wake(reactor_t *r) {
 
 util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
     int64_t t0, t1;
+    int mutex_rc = 0;
 
     if (r == NULL) {
         return UTIL_EINVAL;
@@ -1034,13 +1174,13 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         /* Use poll_timeout_ms directly for TICK event generation */
         int timeout = (int)poll_timeout_ms;
 
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: Calling poll() with %zu sockets, timeout=%dms", r->active_socket_count, timeout);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Calling poll() with %zu sockets, timeout=%dms", r->active_socket_count, timeout);
 
         /* Log poll fd setup for listener sockets (typically indices 1 and 2) */
         for (size_t i = 1; i < r->active_socket_count && i < 3; i++) {
             if (r->sockets[i].sock != INVALID_SOCKET) {
                 bool has_events = bitarray_has_any(&r->sockets[i].enabled);
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: Socket[%zu] fd=%d events=0x%x has_enabled=%d", i, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Socket[%zu] fd=%d events=0x%x has_enabled=%d", i, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
             }
         }
 
@@ -1058,10 +1198,10 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         if (ret < 0) {
             /* EINTR is expected and should be retried */
             if (errno == EINTR) {
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: poll() interrupted by signal, retrying");
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "poll() interrupted by signal, retrying");
                 continue;
             }
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_ERROR, "reactor_run: poll() returned error: %d (errno=%d)", ret, errno);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "poll() returned error: %d (errno=%d)", ret, errno);
             return util_err_from_errno(errno);
         }
 #endif
@@ -1070,7 +1210,7 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         g_reactor_stats.total_poll_calls++;
         g_reactor_stats.total_poll_time_us += (t1 - t0);
 
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_run: poll() returned %d ready sockets", ret);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "poll() returned %d ready sockets", ret);
 
         /* Detect timeout to raise TICK events */
         bool poll_timeout_expired = (ret == 0);
@@ -1097,9 +1237,17 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         /* Raise TICK events for all sockets with TICK enabled (if poll timed out) */
         if (poll_timeout_expired) {
 #ifdef _WIN32
-            EnterCriticalSection(&r->lock);
+            if((mutex_rc = EnterCriticalSection(&r->lock)) == 0) {
+                int rc = util_err_from_wsa(GetLastError());
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set TICK events.  Error %s.", util_err_str(rc));
+                return rc;
+            }
 #else
-            pthread_mutex_lock(&r->lock);
+            if((mutex_rc = pthread_mutex_lock(&r->lock)) != 0) {
+                util_err_t rc = util_err_from_errno(mutex_rc);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set TICK events.  Error %s.", util_err_str(rc));
+                return rc;
+            }
 #endif
             for (size_t i = 1; i < r->max_sockets; i++) {
                 if (r->sockets[i].sock != INVALID_SOCKET && bitarray_test(&r->sockets[i].enabled, REACTOR_EVENT_TICK)) {
@@ -1125,15 +1273,25 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
 
     /* After shutdown, deliver SHUTDOWN events to all sockets */
 #ifdef _WIN32
-    EnterCriticalSection(&r->lock);
+    if((mutex_rc = EnterCriticalSection(&r->lock)) == 0) {
+        int rc = util_err_from_wsa(GetLastError());
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set SHUTDOWN events.  Error %s.", util_err_str(rc));
+        return rc;
+    }
 #else
-    pthread_mutex_lock(&r->lock);
+    if((mutex_rc = pthread_mutex_lock(&r->lock)) != 0) {
+        util_err_t rc = util_err_from_errno(mutex_rc);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set SHUTDOWN events.  Error %s.", util_err_str(rc));
+        return rc;
+    }
 #endif
+
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock != INVALID_SOCKET) {
             bitarray_set(&r->sockets[i].pending_events, REACTOR_EVENT_SHUTDOWN);
         }
     }
+
 #ifdef _WIN32
     LeaveCriticalSection(&r->lock);
 #else

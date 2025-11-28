@@ -43,6 +43,7 @@
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <platform.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -1236,6 +1237,14 @@ int socket_connect_tcp_start(sock_p s, const char *host, int port) {
         return PLCTAG_ERR_OPEN;
     }
 
+    /* set no delay for TCP connections.  Send immediately. */
+    sock_opt = 1;
+    if(setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&sock_opt, sizeof(sock_opt))) {
+        close(fd);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_ERROR, "Error setting TCP_NODELAY option, errno: %d", errno);
+        return PLCTAG_ERR_OPEN;
+    }
+
     /* figure out what address we are connecting to. */
 
     /* try a numeric IP address conversion first. */
@@ -1646,6 +1655,18 @@ int socket_wait_event(sock_p sock, int events, int timeout_ms) {
 
     pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Done.");
 
+    /* Log result at INFO level for visibility */
+    if(result != SOCK_EVENT_NONE) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "fd=%d returning events=0x%x (requested=0x%x) %s%s%s%s%s%s",
+               sock->fd, result, events,
+               (result & SOCK_EVENT_CAN_READ) ? "CAN_READ " : "",
+               (result & SOCK_EVENT_CAN_WRITE) ? "CAN_WRITE " : "",
+               (result & SOCK_EVENT_CONNECT) ? "CONNECT " : "",
+               (result & SOCK_EVENT_DISCONNECT) ? "DISCONNECT " : "",
+               (result & SOCK_EVENT_ERROR) ? "ERROR " : "",
+               (result & SOCK_EVENT_TIMEOUT) ? "TIMEOUT " : "");
+    }
+
     return result;
 }
 
@@ -1742,19 +1763,27 @@ int socket_read(sock_p s, uint8_t *buf, int size, int timeout_ms) {
 
     /* The socket is non-blocking. */
     rc = (int)read(s->fd, buf, (size_t)size);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "read() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
+
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
             if(timeout_ms > 0) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Immediate read attempt did not succeed, now wait for select().");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Would block, will wait for select() on fd=%d", s->fd);
             } else {
                 pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "Read resulted in no data.");
             }
 
             rc = 0;
         } else {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket read error: rc=%d, errno=%d", rc, errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket read error: rc=%d, errno=%d (%s)", rc, errno, strerror(errno));
             return PLCTAG_ERR_READ;
         }
+    } else if(rc == 0) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Connection closed by peer (read returned 0) on fd=%d", s->fd);
+    } else if(rc > 0 && rc < size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Partial read on fd=%d: read %d of %d bytes", s->fd, rc, size);
+    } else if(rc == size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Complete read on fd=%d: read all %d bytes", s->fd, size);
     }
 
     /* only wait if we have a timeout and no error and no data. */
@@ -1865,24 +1894,30 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
      * call select().
      */
 
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_write: About to write %d bytes on fd=%d", size, s->fd);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "About to write %d bytes on fd=%d", size, s->fd);
 
 #ifdef BSD_OS_TYPE
     /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
     rc = (int)write(s->fd, buf, (size_t)size);
-    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "socket_write: write() returned %d for fd=%d", rc, s->fd);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "write() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #else
     /* on Linux, we use MSG_NOSIGNAL */
     rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
+    pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "send() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #endif
 
     if(rc < 0) {
         if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Would block, no immediate data written on fd=%d", s->fd);
             rc = 0;
         } else {
-            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket write error: rc=%d, errno=%d (%s)", rc, errno, strerror(errno));
             return PLCTAG_ERR_WRITE;
         }
+    } else if(rc > 0 && rc < size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Partial write on fd=%d: wrote %d of %d bytes", s->fd, rc, size);
+    } else if(rc == size) {
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "Complete write on fd=%d: wrote all %d bytes", s->fd, size);
     }
 
     /* only wait if we have a timeout and no error and wrote no data. */
@@ -1942,22 +1977,29 @@ int socket_write(sock_p s, uint8_t *buf, int size, int timeout_ms) {
         }
 
         /* select() passed and said we can write, so try. */
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "select() indicated fd=%d ready for write, attempting write", s->fd);
 #ifdef BSD_OS_TYPE
         /* On *BSD and macOS, the socket option is set to prevent SIGPIPE. */
         rc = (int)write(s->fd, buf, (size_t)size);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), write() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #else
         /* on Linux, we use MSG_NOSIGNAL */
         rc = (int)send(s->fd, buf, (size_t)size, MSG_NOSIGNAL);
+        pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), send() returned %d for fd=%d (requested %d bytes)", rc, s->fd, size);
 #endif
 
         if(rc < 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_SPEW, "No data written.");
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "After select(), still would block on fd=%d", s->fd);
                 rc = 0;
             } else {
-                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket write error: rc=%d, errno=%d", rc, errno);
+                pdebug(DEBUG_MODULE_PLATFORM, DEBUG_WARN, "Socket write error after select: rc=%d, errno=%d (%s)", rc, errno, strerror(errno));
                 return PLCTAG_ERR_WRITE;
             }
+        } else if(rc > 0 && rc < size) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), partial write on fd=%d: wrote %d of %d bytes", s->fd, rc, size);
+        } else if(rc == size) {
+            pdebug(DEBUG_MODULE_PLATFORM, DEBUG_INFO, "After select(), complete write on fd=%d: wrote all %d bytes", s->fd, size);
         }
     }
 
