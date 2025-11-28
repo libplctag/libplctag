@@ -675,23 +675,23 @@ reactor_t* reactor_create(size_t max_sockets) {
     }
 
     /* Set listen socket non-blocking */
-    if (socket_set_nonblocking(r->listen_sock, true) != UTIL_OK) {
-        close(r->listen_sock);
-        close(r->send_sock);
+    if (socket_set_nonblocking(listen_sock, true) != UTIL_OK) {
+        closesocket(listen_sock);
+        closesocket(send_sock);
         free(r->pollfds);
         free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
+        DeleteCriticalSection(&r->lock);
         free(r);
         return NULL;
     }
 
     /* set listen socket no delay */
-    if(socket_set_nodelay(r->listen_sock, true) != UTIL_OK) {
-        close(r->listen_sock);
-        close(r->send_sock);
+    if(socket_set_nodelay(listen_sock, true) != UTIL_OK) {
+        closesocket(listen_sock);
+        closesocket(send_sock);
         free(r->pollfds);
         free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
+        DeleteCriticalSection(&r->lock);
         free(r);
         return NULL;
     }
@@ -711,24 +711,24 @@ reactor_t* reactor_create(size_t max_sockets) {
 
     r->wake_pipe_read = send_sock;
 
-    /* set send socket non-blocking */*/
-    if(socket_set_nonblocking(send_sock) != UTIL_OK) {
-        close(r->listen_sock);
-        close(r->send_sock);
+    /* set send socket non-blocking */
+    if(socket_set_nonblocking(send_sock, true) != UTIL_OK) {
+        closesocket(listen_sock);
+        closesocket(send_sock);
         free(r->pollfds);
         free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
+        DeleteCriticalSection(&r->lock);
         free(r);
         return NULL;
     }   
 
     /* set send socket no delay */
-    if(socket_set_nodelay(send_sock) != UTIL_OK) {
-        close(r->listen_sock);
-        close(r->send_sock);
+    if(socket_set_nodelay(send_sock, true) != UTIL_OK) {
+        closesocket(listen_sock);
+        closesocket(send_sock);
         free(r->pollfds);
         free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
+        DeleteCriticalSection(&r->lock);
         free(r);
         return NULL;
     }
@@ -755,27 +755,8 @@ reactor_t* reactor_create(size_t max_sockets) {
         return NULL;
     }
 
-    if(socket_set_nodelay(r->wake_pipe[1], true) != UTIL_OK) {
-        close(r->wake_pipe[0]);
-        close(r->wake_pipe[1]);
-        free(r->pollfds);
-        free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
-        free(r);
-        return NULL;
-    }   
-
+    /* Set write end to non-blocking */
     if(socket_set_nonblocking(r->wake_pipe[1], true) != UTIL_OK) {
-        close(r->wake_pipe[0]);
-        close(r->wake_pipe[1]);
-        free(r->pollfds);
-        free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    if(socket_set_nodelay(r->wake_pipe[1], true) != UTIL_OK) {
         close(r->wake_pipe[0]);
         close(r->wake_pipe[1]);
         free(r->pollfds);
