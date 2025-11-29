@@ -150,6 +150,8 @@ void check_library_version(void) {
 
 
 void setup_tag(test_state_t *test_state, const char *tag_attribs) {
+    log("[DEBUG] setup_tag: starting tag creation\n");
+
     /* create tag */
     test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, READ_TIMEOUT);
     if(test_state->tag < 0) {
@@ -157,11 +159,13 @@ void setup_tag(test_state_t *test_state, const char *tag_attribs) {
         exit(1);
     }
 
+    log("[DEBUG] setup_tag: tag created with ID %d\n", test_state->tag);
     log("Tag created with ID %d, status %s.\n", test_state->tag, plc_tag_decode_error(plc_tag_status(test_state->tag)));
 
     /* verify auto_sync_read_ms setting is correctly set */
     int auto_sync_read_ms = plc_tag_get_int_attribute(test_state->tag, "auto_sync_read_ms", 0);
     log("Tag auto_sync_read_ms setting: %d ms\n", auto_sync_read_ms);
+    log("[DEBUG] setup_tag: complete\n");
 }
 
 
@@ -220,6 +224,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             if(status != PLCTAG_STATUS_OK && status != PLCTAG_STATUS_PENDING) {
                 fputs("RSe ", stderr);
                 fflush(stderr);
+                compat_fprintf(stderr, "[CALLBACK] READ_STARTED error: %s\n", plc_tag_decode_error(status));
             } else {
                 fputs("RS ", stderr);
                 fflush(stderr);
@@ -239,21 +244,24 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
 
                 fputs("RCe ", stderr);
                 fflush(stderr);
+                compat_fprintf(stderr, "[CALLBACK] READ_COMPLETED error: %s\n", plc_tag_decode_error(status));
             }
             break;
 
-        default: break;
+        default:
+            compat_fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status));
+            break;
     }
 }
 
 
 void do_disconnect(int64_t current_time, test_state_t *test_state) {
-    (void)current_time;
-
     test_state->errors_before_disconnect = test_state->read_error_count;
 
+    log("[DEBUG] do_disconnect: stopping server at time %" PRId64 "ms\n", current_time);
     /* kill the ab_server to truly simulate disconnect */
     stop_server();
+    log("[DEBUG] do_disconnect: complete at time %" PRId64 "ms\n", current_time);
 }
 
 
@@ -265,8 +273,10 @@ void do_reconnect(int64_t current_time, test_state_t *test_state) {
     test_state->errors_during_disconnect =
         (test_state->errors_after_reconnect - test_state->errors_before_disconnect) + pending_reads;
 
+    log("[DEBUG] do_reconnect: starting server at time %" PRId64 "ms\n", current_time);
     /* start a new ab_server to simulate reconnect */
     start_server(test_state);
+    log("[DEBUG] do_reconnect: complete at time %" PRId64 "ms\n", current_time);
 
     test_state->reconnect_time = current_time;
     test_state->reconnect_done = 1;
@@ -327,6 +337,7 @@ int run_manual_test(const char *ab_server_cmd) {
     int64_t wait_until_ms = 0;
     test_state_t manual_test_state = {0};
 
+    log("[DEBUG] run_manual_test: starting\n");
     log("Manual tag test running for %dms...\n", TEST_DURATION_MS);
 
     /* initialize test state */
@@ -344,20 +355,31 @@ int run_manual_test(const char *ab_server_cmd) {
     log("[INFO] Reconnect time in %" PRId64 " ms\n", manual_test_state.reconnect_time - manual_test_state.start_time);
     log("[INFO] Test ending at in time %" PRId64 " ms\n", manual_test_state.end_time - manual_test_state.start_time);
 
+    log("[DEBUG] Starting AB server...\n");
     start_server(&manual_test_state);
+    log("[DEBUG] AB server started\n");
 
     /* set up the tag and set the callback */
+    log("[DEBUG] Setting up tag...\n");
     setup_tag(&manual_test_state, MANUAL_SYNC_TAG_ATTRIBS);
+    log("[DEBUG] Tag setup complete\n");
 
+    log("[DEBUG] Entering Phase 1 - reading until disconnect at %" PRId64 "ms\n", manual_test_state.disconnect_time - manual_test_state.start_time);
     while((current_time = compat_time_ms()) < manual_test_state.disconnect_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
-        plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+        log("[DEBUG] Phase 1: plc_tag_read at offset %" PRId64 "ms (target disconnect at %" PRId64 "ms), reads so far: %d\n",
+            current_time - manual_test_state.start_time,
+            manual_test_state.disconnect_time - manual_test_state.start_time,
+            manual_test_state.read_success_count);
+        int read_rc = plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+        log("[DEBUG] Phase 1: plc_tag_read returned %s\n", plc_tag_decode_error(read_rc));
 
         /* wait at least the timeout time */
         wait_until_time_ms(wait_until_ms);
     }
 
+    log("[DEBUG] Phase 1 complete - disconnect starting\n");
     int before_disconnect_read_success_count = manual_test_state.read_success_count;
     int read_error_before_disconnect = manual_test_state.read_error_count;
 
@@ -367,15 +389,21 @@ int run_manual_test(const char *ab_server_cmd) {
     fputs("\nD\n", stderr);
     fflush(stderr);
 
+    log("[DEBUG] Entering Phase 2 - waiting while disconnected until %" PRId64 "ms\n", manual_test_state.reconnect_time - manual_test_state.start_time);
     while((current_time = compat_time_ms()) < manual_test_state.reconnect_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
-        plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+        log("[DEBUG] Phase 2: plc_tag_read at offset %" PRId64 "ms (target reconnect at %" PRId64 "ms)\n",
+            current_time - manual_test_state.start_time,
+            manual_test_state.reconnect_time - manual_test_state.start_time);
+        int read_rc = plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+        log("[DEBUG] Phase 2: plc_tag_read returned %s\n", plc_tag_decode_error(read_rc));
 
         /* wait at least the timeout time */
         wait_until_time_ms(wait_until_ms);
     }
 
+    log("[DEBUG] Phase 2 complete - reconnect starting\n");
     int after_disconnect_read_success_count = manual_test_state.read_success_count - before_disconnect_read_success_count;
     int read_error_after_disconnect = manual_test_state.read_error_count - read_error_before_disconnect;
 
@@ -386,14 +414,21 @@ int run_manual_test(const char *ab_server_cmd) {
 
     manual_test_state.reconnect_done = 1;
 
+    log("[DEBUG] Entering Phase 3 - reading after reconnect until %" PRId64 "ms\n", manual_test_state.end_time - manual_test_state.start_time);
     while((current_time = compat_time_ms()) < manual_test_state.end_time) {
         if(wait_until_ms < current_time) { wait_until_ms = current_time + READ_TIMEOUT; }
 
-        plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+        log("[DEBUG] Phase 3: plc_tag_read at offset %" PRId64 "ms (target end at %" PRId64 "ms), reads after reconnect: %d\n",
+            current_time - manual_test_state.start_time,
+            manual_test_state.end_time - manual_test_state.start_time,
+            manual_test_state.read_success_after_reconnect);
+        int read_rc = plc_tag_read(manual_test_state.tag, READ_TIMEOUT);
+        log("[DEBUG] Phase 3: plc_tag_read returned %s\n", plc_tag_decode_error(read_rc));
 
         /* wait at least the timeout time */
         wait_until_time_ms(wait_until_ms);
     }
+    log("[DEBUG] Phase 3 complete - test ending\n");
 
     int after_reconnect_read_success_count =
         manual_test_state.read_success_count - (before_disconnect_read_success_count + after_disconnect_read_success_count);
@@ -407,11 +442,19 @@ int run_manual_test(const char *ab_server_cmd) {
     manual_test_state.errors_after_reconnect = read_error_after_reconnect;
     manual_test_state.read_success_after_reconnect = after_reconnect_read_success_count;
 
+    log("[DEBUG] About to destroy tag (ID %d)\n", manual_test_state.tag);
     plc_tag_destroy(manual_test_state.tag);
+    log("[DEBUG] Tag destroyed\n");
 
+    log("[DEBUG] About to stop server\n");
     stop_server();
+    log("[DEBUG] Server stopped\n");
 
-    return calc_test_stats(&manual_test_state);
+    log("[DEBUG] About to calculate test statistics\n");
+    int result = calc_test_stats(&manual_test_state);
+    log("[DEBUG] Test statistics calculated, returning %d\n", result);
+
+    return result;
 }
 
 

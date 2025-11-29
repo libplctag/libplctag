@@ -149,6 +149,8 @@ void check_library_version(void) {
 
 
 void setup_tag(test_state_t *test_state, const char *tag_attribs) {
+    log("[DEBUG] setup_tag: starting tag creation\n");
+
     /* create tag */
     test_state->tag = plc_tag_create_ex(tag_attribs, tag_callback, test_state, READ_TIMEOUT);
     if(test_state->tag < 0) {
@@ -156,11 +158,13 @@ void setup_tag(test_state_t *test_state, const char *tag_attribs) {
         exit(1);
     }
 
+    log("[DEBUG] setup_tag: tag created with ID %d\n", test_state->tag);
     log("Tag created with ID %d, status %s.\n", test_state->tag, plc_tag_decode_error(plc_tag_status(test_state->tag)));
 
     /* verify auto_sync_read_ms setting is correctly set */
     int auto_sync_read_ms = plc_tag_get_int_attribute(test_state->tag, "auto_sync_read_ms", 0);
     log("Tag auto_sync_read_ms setting: %d ms\n", auto_sync_read_ms);
+    log("[DEBUG] setup_tag: complete\n");
 }
 
 
@@ -219,6 +223,7 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
             if(status != PLCTAG_STATUS_OK && status != PLCTAG_STATUS_PENDING) {
                 fputs("RSe ", stderr);
                 fflush(stderr);
+                compat_fprintf(stderr, "[CALLBACK] READ_STARTED error: %s\n", plc_tag_decode_error(status));
             } else {
                 fputs("RS ", stderr);
                 fflush(stderr);
@@ -238,10 +243,13 @@ void tag_callback(int32_t tag_id, int event, int status, void *data) {
 
                 fputs("RCe ", stderr);
                 fflush(stderr);
+                compat_fprintf(stderr, "[CALLBACK] READ_COMPLETED error: %s\n", plc_tag_decode_error(status));
             }
             break;
 
-        default: break;
+        default:
+            compat_fprintf(stderr, "[CALLBACK] Unknown event %d, status=%s\n", event, plc_tag_decode_error(status));
+            break;
     }
 }
 
@@ -328,6 +336,7 @@ int run_auto_test(const char *ab_server_cmd) {
     int64_t current_time = 0;
     test_state_t auto_test_state = {0};
 
+    log("[DEBUG] run_auto_test: starting\n");
     log("Auto tag test running for %dms...\n", TEST_DURATION_MS);
 
     /* initialize test state */
@@ -341,7 +350,9 @@ int run_auto_test(const char *ab_server_cmd) {
     log("[INFO] Reconnect time %" PRId64 " ms\n", auto_test_state.reconnect_time);
     log("[INFO] Test ending at time %" PRId64 " ms\n", auto_test_state.end_time);
 
+    log("[DEBUG] Starting AB server...\n");
     start_server(&auto_test_state);
+    log("[DEBUG] AB server started\n");
 
     /* now we start timing */
     auto_test_state.start_time = compat_time_ms();
@@ -349,11 +360,24 @@ int run_auto_test(const char *ab_server_cmd) {
     auto_test_state.reconnect_time = auto_test_state.disconnect_time + DISCONNECT_TIME_MS;
     auto_test_state.end_time = auto_test_state.reconnect_time + SECOND_RUN_TIME;
 
+    log("[DEBUG] Test timeline: start=%" PRId64 ", disconnect=%" PRId64 ", reconnect=%" PRId64 ", end=%" PRId64 "\n",
+        auto_test_state.start_time, auto_test_state.disconnect_time, auto_test_state.reconnect_time, auto_test_state.end_time);
+
     /* set up the tag and set the callback */
+    log("[DEBUG] Setting up tag...\n");
     setup_tag(&auto_test_state, AUTO_SYNC_TAG_ATTRIBS);
+    log("[DEBUG] Tag setup complete\n");
 
-    while((current_time = compat_time_ms()) < auto_test_state.disconnect_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
+    log("[DEBUG] Entering first phase - waiting for disconnect time (%" PRId64 "ms)...\n", auto_test_state.disconnect_time - auto_test_state.start_time);
+    while((current_time = compat_time_ms()) < auto_test_state.disconnect_time) {
+        compat_sleep_ms(READ_TIMEOUT, NULL);
+        log("[DEBUG] Phase 1: current=%" PRId64 "ms, disconnect=%" PRId64 "ms, reads=%d\n",
+            current_time - auto_test_state.start_time,
+            auto_test_state.disconnect_time - auto_test_state.start_time,
+            auto_test_state.read_success_count);
+    }
 
+    log("[DEBUG] Phase 1 complete - disconnect starting\n");
     int before_disconnect_read_success_count = auto_test_state.read_success_count;
     int read_error_before_disconnect = auto_test_state.read_error_count;
 
@@ -363,11 +387,16 @@ int run_auto_test(const char *ab_server_cmd) {
     fputs("\nD\n", stderr);
     fflush(stderr);
 
+    log("[DEBUG] Entering second phase - waiting for reconnect time (%" PRId64 "ms)...\n", auto_test_state.reconnect_time - auto_test_state.start_time);
     while((current_time = compat_time_ms()) < auto_test_state.reconnect_time) {
         compat_sleep_ms(1000, NULL);
+        log("[DEBUG] Phase 2: current=%" PRId64 "ms, reconnect=%" PRId64 "ms\n",
+            current_time - auto_test_state.start_time,
+            auto_test_state.reconnect_time - auto_test_state.start_time);
         fputs(".", stderr); fflush(stderr);
     }
 
+    log("[DEBUG] Phase 2 complete - reconnect starting\n");
     int after_disconnect_read_success_count = auto_test_state.read_success_count - before_disconnect_read_success_count;
     int read_error_after_disconnect = auto_test_state.read_error_count - read_error_before_disconnect;
 
@@ -378,7 +407,16 @@ int run_auto_test(const char *ab_server_cmd) {
 
     auto_test_state.reconnect_done = 1;
 
-    while(compat_time_ms() < auto_test_state.end_time) { compat_sleep_ms(READ_TIMEOUT, NULL); }
+    log("[DEBUG] Entering third phase - waiting for test end time (%" PRId64 "ms)...\n", auto_test_state.end_time - auto_test_state.start_time);
+    while(compat_time_ms() < auto_test_state.end_time) {
+        compat_sleep_ms(READ_TIMEOUT, NULL);
+        int64_t debug_time = compat_time_ms();
+        log("[DEBUG] Phase 3: current=%" PRId64 "ms, end=%" PRId64 "ms, reads=%d\n",
+            debug_time - auto_test_state.start_time,
+            auto_test_state.end_time - auto_test_state.start_time,
+            auto_test_state.read_success_count);
+    }
+    log("[DEBUG] Phase 3 complete - test ending\n");
 
     int after_reconnect_read_success_count =
         auto_test_state.read_success_count - (before_disconnect_read_success_count + after_disconnect_read_success_count);
@@ -392,11 +430,19 @@ int run_auto_test(const char *ab_server_cmd) {
     auto_test_state.errors_after_reconnect = read_error_after_reconnect;
     auto_test_state.read_success_after_reconnect = after_reconnect_read_success_count;
 
+    log("[DEBUG] About to destroy tag (ID %d)\n", auto_test_state.tag);
     log("[STATUS] Test completed.\n");
 
     plc_tag_destroy(auto_test_state.tag);
+    log("[DEBUG] Tag destroyed\n");
 
+    log("[DEBUG] About to stop server\n");
     stop_server();
+    log("[DEBUG] Server stopped\n");
 
-    return calc_test_stats(&auto_test_state);
+    log("[DEBUG] About to calculate test statistics\n");
+    int result = calc_test_stats(&auto_test_state);
+    log("[DEBUG] Test statistics calculated, returning %d\n", result);
+
+    return result;
 }
