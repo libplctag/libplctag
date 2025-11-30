@@ -192,7 +192,7 @@ void *vector_get(vector_p vec, int index) {
     }
 
     if(index < 0 || index >= vec->len) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Index %d is out of bounds", index);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Index %d is out of bounds.", index);
         return NULL;
     }
 
@@ -214,7 +214,7 @@ void *vector_remove(vector_p vec, int index) {
     }
 
     if(index < 0 || index >= vec->len) {
-        pdebug(DEBUG_MODULE_UTILS, DEBUG_WARN, "Index is out of bounds!");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_DETAIL, "Index %d is out of bounds.", index);
         return NULL;
     }
 
