@@ -64,12 +64,13 @@
 #define WRITE_PHASE_TIME_MS 5000    /* 5 seconds for write phase */
 #define WRITE_PERIOD_MS 500 /* Write every 500 ms */
 
-static void wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms);
+static int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms);
 
 
 int main(void) {
     int32_t read_tags[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     int32_t write_tags[2] = {0, 0};
+    int rc = PLCTAG_STATUS_OK;
     int i;
     const char *read_tag_paths[8] = {
         TAG_READ_11, TAG_READ_12, TAG_READ_13, TAG_READ_14,
@@ -81,10 +82,12 @@ int main(void) {
     int version_patch = plc_tag_get_int_attribute(0, "version_patch", 0);
 
     /* check the library version. */
-    if(plc_tag_check_lib_version(REQUIRED_VERSION) != PLCTAG_STATUS_OK) {
+    rc = plc_tag_check_lib_version(REQUIRED_VERSION);
+    if(rc != PLCTAG_STATUS_OK) {
         printf("Required compatible library version %d.%d.%d not available, found %d.%d.%d!\n", REQUIRED_VERSION, version_major,
                version_minor, version_patch);
-        return 1;
+        printf("FAILURE!\n");
+        return (rc < 0) ? -rc : 1;
     }
 
     printf("Starting with library version %d.%d.%d.\n", version_major, version_minor, version_patch);
@@ -99,16 +102,21 @@ int main(void) {
         read_tags[i] = plc_tag_create(read_tag_paths[i], 0);
         if(read_tags[i] < 0) {
             printf("ERROR %s: Could not create read tag %d!\n", plc_tag_decode_error(read_tags[i]), i + 11);
+            rc = read_tags[i];
             for(int j = 0; j < i; j++) {
                 plc_tag_destroy(read_tags[j]);
             }
-            return 1;
+            goto cleanup;
         }
         printf("  Created read tag %d (index %d).\n", i + 11, i);
     }
 
     printf("PHASE 1: Waiting for all read tags to complete creation.\n");
-    wait_for_ok(read_tags, 8, DATA_TIMEOUT);
+    rc = wait_for_ok(read_tags, 8, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAILURE: Read tags did not complete creation. Status: %s\n", plc_tag_decode_error(rc));
+        goto cleanup;
+    }
     printf("PHASE 1: All read tags created.\n");
 
     /* ===== PHASE 2: Read tags 11-18 every DATA_TIMEOUT ms until READ_PHASE_TIME_MS ===== */
@@ -129,7 +137,11 @@ int main(void) {
 
         /* Wait for all reads to complete */
         printf("PHASE 2: Waiting for all read tags to complete read.\n");
-        wait_for_ok(read_tags, 8, DATA_TIMEOUT);
+        rc = wait_for_ok(read_tags, 8, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("FAILURE: Read tags did not complete read. Status: %s\n", plc_tag_decode_error(rc));
+            goto cleanup;
+        }
         printf("PHASE 2: All read tags completed read.\n");
 
         current_time = compat_time_ms();
@@ -154,6 +166,7 @@ int main(void) {
     write_tags[0] = plc_tag_create(TAG_WRITE_19, 0);
     if(write_tags[0] < 0) {
         printf("ERROR %s: Could not create write tag 19!\n", plc_tag_decode_error(write_tags[0]));
+        rc = write_tags[0];
         goto cleanup;
     }
     printf("  Created write tag 19.\n");
@@ -161,12 +174,17 @@ int main(void) {
     write_tags[1] = plc_tag_create(TAG_WRITE_20, 0);
     if(write_tags[1] < 0) {
         printf("ERROR %s: Could not create write tag 20!\n", plc_tag_decode_error(write_tags[1]));
+        rc = write_tags[1];
         goto cleanup;
     }
     printf("  Created write tag 20.\n");
 
     printf("PHASE 4: Waiting for all write tags to complete creation.\n");
-    wait_for_ok(write_tags, 2, DATA_TIMEOUT);
+    rc = wait_for_ok(write_tags, 2, DATA_TIMEOUT);
+    if(rc != PLCTAG_STATUS_OK) {
+        printf("FAILURE: Write tags did not complete creation. Status: %s\n", plc_tag_decode_error(rc));
+        goto cleanup;
+    }
     printf("PHASE 4: All write tags created.\n");
 
     /* ===== PHASE 5: Read/write loop for WRITE_PHASE_TIME_MS in batch mode ===== */
@@ -188,28 +206,35 @@ int main(void) {
 
         /* Issue reads on all 8 read tags */
         for(i = 0; i < 8; i++) {
-            if(plc_tag_read(read_tags[i], 0) != PLCTAG_STATUS_PENDING) {
-                printf("ERROR: Could not start read on tag %d!\n", i + 11);
+            rc = plc_tag_read(read_tags[i], 0);
+            if(rc != PLCTAG_STATUS_PENDING) {
+                printf("ERROR: Could not start read on tag %d. Status: %s\n", i + 11, plc_tag_decode_error(rc));
                 goto cleanup;
             }
         }
 
         /* Issue writes on both write tags */
         plc_tag_set_uint16(write_tags[0], 0, write_value++);
-        if(plc_tag_write(write_tags[0], 0) != PLCTAG_STATUS_PENDING) {
-            printf("ERROR: Could not start write on tag 19!\n");
+        rc = plc_tag_write(write_tags[0], 0);
+        if(rc != PLCTAG_STATUS_PENDING) {
+            printf("ERROR: Could not start write on tag 19. Status: %s\n", plc_tag_decode_error(rc));
             goto cleanup;
         }
 
         write_toggle ^= 1;
         plc_tag_set_bit(write_tags[1], 0, write_toggle);
-        if(plc_tag_write(write_tags[1], 0) != PLCTAG_STATUS_PENDING) {
-            printf("ERROR: Could not start write on tag 20!\n");
+        rc = plc_tag_write(write_tags[1], 0);
+        if(rc != PLCTAG_STATUS_PENDING) {
+            printf("ERROR: Could not start write on tag 20. Status: %s\n", plc_tag_decode_error(rc));
             goto cleanup;
         }
 
         /* Wait for all tags (reads + writes) to complete in batch */
-        wait_for_ok(all_tags, all_tags_count, DATA_TIMEOUT);
+        rc = wait_for_ok(all_tags, all_tags_count, DATA_TIMEOUT);
+        if(rc != PLCTAG_STATUS_OK) {
+            printf("FAILURE: Tags did not complete read/write. Status: %s\n", plc_tag_decode_error(rc));
+            goto cleanup;
+        }
 
         current_time = compat_time_ms();
         if((current_time - start_time) % 2000 < DATA_TIMEOUT) {  /* Print roughly every 2 seconds */
@@ -236,14 +261,19 @@ cleanup:
     }
 
     printf("PHASE 6: All tags destroyed.\n");
-    printf("SUCCESS!\n");
 
-    return 0;
+    if(rc == PLCTAG_STATUS_OK) {
+        printf("SUCCESS!\n");
+        return 0;
+    } else {
+        printf("FAILURE!\n");
+        return (rc < 0) ? -rc : 1;
+    }
 }
 
 
 
-void wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
+int wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
     int rc = PLCTAG_STATUS_OK;
     int64_t timeout_time = timeout_ms + compat_time_ms();
     size_t i;
@@ -251,7 +281,7 @@ void wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
 
     do {
         all_ok = true;
-        
+
         /* Check all tags */
         for(i = 0; i < num_tags; i++) {
             rc = plc_tag_status(tags[i]);
@@ -260,7 +290,7 @@ void wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
                 all_ok = false;
             } else if(rc != PLCTAG_STATUS_OK) {
                 fprintf(stderr, "wait_for_ok(): Error %s returned on tag %zu operation!\n", plc_tag_decode_error(rc), i);
-                exit(1);
+                return rc;
             }
         }
 
@@ -272,9 +302,11 @@ void wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms) {
         /* Check timeout */
         if(timeout_time < compat_time_ms()) {
             fprintf(stderr, "wait_for_ok(): Timeout waiting for tags.\n");
-            exit(1);
+            return PLCTAG_ERR_TIMEOUT;
         }
     } while(!all_ok);
+
+    return PLCTAG_STATUS_OK;
 }
 
 
