@@ -1038,10 +1038,10 @@ THREAD_FUNC(modbus_plc_handler) {
                     int64_t current_time = time_ms();
                     int64_t idle_time = current_time - plc->last_packet_time_ms;
 
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Socket wait timed out. Idle for %" PRId64 "ms.", idle_time);
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Socket wait timed out. Idle for %" PRId64 "ms. Pending requests: %d", idle_time, plc->pending_request_count);
 
-                    /* Only disconnect if truly idle for full timeout period */
-                    if(idle_time >= MODBUS_INACTIVITY_TIMEOUT) {
+                    /* Only disconnect if truly idle AND no pending responses expected */
+                    if(idle_time >= MODBUS_INACTIVITY_TIMEOUT && plc->pending_request_count == 0) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Inactivity timeout reached after %" PRId64 "ms idle (threshold=%dms). current_time=%" PRId64 ", last_packet_time=%" PRId64 ". Calling reset_plc() and going to PLC_IDLE_WAIT.",
                                  idle_time, MODBUS_INACTIVITY_TIMEOUT, current_time, plc->last_packet_time_ms);
 
@@ -1050,6 +1050,9 @@ THREAD_FUNC(modbus_plc_handler) {
 
                         /* go to the state where we wait for something to happen. */
                         plc->state = PLC_IDLE_WAIT;
+                    } else if(plc->pending_request_count > 0) {
+                        /* Timeout while waiting for responses, just continue waiting */
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Socket timeout while waiting for %d pending response(s) (idle %" PRId64 "ms), continuing to wait.", plc->pending_request_count, idle_time);
                     } else {
                         /* Timeout was for auto-sync, continue immediately */
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Auto-sync timeout, continuing.");
@@ -1397,12 +1400,14 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 
                     /*
                     * Move the tag to the end of the list for round-robin fairness.
-                    * This ensures tags that just started an operation give other tags a chance.
-                    * Only do this when starting a new operation (IDLE -> READ_REQUEST or WRITE_REQUEST).
+                    * This ensures tags that have completed their operation give other waiting
+                    * tags a chance to send their requests.
+                    * Move when exiting RESPONSE state (back to IDLE) so waiting tags go next.
                     */
-                    if(prev_op == TAG_OP_IDLE && (tag->op == TAG_OP_READ_REQUEST || tag->op == TAG_OP_WRITE_REQUEST)) {
-                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Moving tag %d to end of list for fairness (started %s).",
-                            tag->tag_id, op_to_str(tag->op));
+                    if((prev_op == TAG_OP_READ_RESPONSE || prev_op == TAG_OP_WRITE_RESPONSE) &&
+                       tag->op == TAG_OP_IDLE) {
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Moving tag %d to end of list for fairness (completed %s).",
+                            tag->tag_id, op_to_str(prev_op));
 
                         /* remove the tag from the current location */
                         vector_remove(plc->tag_vector, i);
