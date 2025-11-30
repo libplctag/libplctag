@@ -156,18 +156,18 @@ git config --global --add safe.directory "${WORKSPACE}" >/dev/null 2>&1 || true
 
 # Ensure test scripts are executable (rsync may not preserve permissions across volumes)
 echo "Verifying test scripts were copied..."
-if [ -f "src/tests/run_simulator_tests.sh" ]; then
+if [ -f "src/tests/scripts/run_simulator_tests.sh" ]; then
     echo "  ✓ run_simulator_tests.sh found"
-    chmod +x src/tests/run_simulator_tests.sh
+    chmod +x src/tests/scripts/run_simulator_tests.sh
 else
     echo "  ✗ run_simulator_tests.sh NOT found!"
     echo "  Current directory: $(pwd)"
-    echo "  Contents of src/tests/:"
-    ls -la src/tests/ 2>/dev/null || echo "  src/tests/ directory does not exist!"
+    echo "  Contents of src/tests/scripts/:"
+    ls -la src/tests/scripts/ 2>/dev/null || echo "  src/tests/scripts/ directory does not exist!"
     exit 1
 fi
 
-chmod +x src/tests/*.sh 2>/dev/null || true
+chmod +x src/tests/*.sh src/tests/scripts/*.sh 2>/dev/null || true
 
 echo "Building libplctag (ARM64 Alpine with musl)..."
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DUSE_SANITIZERS=OFF
@@ -180,7 +180,7 @@ mkdir -p "${WORKSPACE_LOG_DIR}"
 
 echo "Running simulator tests (with core dump collection)..."
 echo "Core dumps will be written to: ${COREDUMP_DIR}"
-if ./src/tests/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}"; then
+if ./src/tests/scripts/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}"; then
     TEST_RESULT=0
 else
     TEST_RESULT=$?

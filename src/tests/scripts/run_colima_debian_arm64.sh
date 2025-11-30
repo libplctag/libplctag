@@ -130,7 +130,7 @@ cd "${WORKSPACE}"
 WORKSPACE_LOG_DIR="${WORKSPACE}/test_logs"
 mkdir -p "${WORKSPACE_LOG_DIR}"
 echo "Running simulator tests..."
-if ./src/tests/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}"; then
+if ./src/tests/scripts/run_simulator_tests.sh build/bin_dist "${WORKSPACE_LOG_DIR}"; then
     TEST_RESULT=0
 else
     TEST_RESULT=$?

@@ -115,7 +115,7 @@ jobs:
     - name: Run Simulator Tests
       run: |
         cd ${{ github.workspace }}
-        bash src/tests/run_simulator_tests.sh ${{ env.DIST }} logs
+        bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
 
     - name: Upload test logs
       if: always()
@@ -252,7 +252,7 @@ jobs:
     - name: Run Simulator Tests
       run: |
         cd ${{ github.workspace }}
-        bash src/tests/run_simulator_tests.sh ${{ env.DIST }} logs
+        bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
 
     - name: Upload test logs
       if: always()
@@ -664,7 +664,7 @@ jobs:
           if [ -f /workspace/build/bin_dist/ab_server ]; then
             echo "=== RUNNING SIMULATOR TESTS ==="
             mkdir -p /workspace/logs
-            bash /workspace/src/tests/run_simulator_tests.sh /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
+            bash /workspace/src/tests/scripts/run_simulator_tests.sh /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
             cd /workspace/build
           else
             echo "=== TESTS SKIPPED (ab_server binary not found) ==="
