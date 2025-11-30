@@ -57,11 +57,11 @@
 #define TAG_WRITE_19 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=hr0&elem_count=1"
 #define TAG_WRITE_20 "protocol=modbus_tcp&gateway=127.0.0.1:1502&path=0&name=co0&elem_count=1"
 
-#define DATA_TIMEOUT 500
-#define READ_PHASE_TIME_MS 5000  /* ~5 seconds for read phase */
+#define DATA_TIMEOUT 1000
+#define READ_PHASE_TIME_MS 5000  /* 5 seconds for read phase */
 #define READ_PERIOD_MS 250  /* Read every 250 ms */
-#define WRITE_PHASE_DELAY_MS 12000  /* ~12 seconds before switching to write phase */
-#define WRITE_PHASE_TIME_MS 5000    /* ~5 seconds for write phase */
+#define WRITE_PHASE_DELAY_MS 12000  /* 12 seconds before switching to write phase */
+#define WRITE_PHASE_TIME_MS 5000    /* 5 seconds for write phase */
 #define WRITE_PERIOD_MS 500 /* Write every 500 ms */
 
 static void wait_for_ok(int32_t tags[], size_t num_tags, int32_t timeout_ms);
@@ -128,10 +128,12 @@ int main(void) {
         }
 
         /* Wait for all reads to complete */
+        printf("PHASE 2: Waiting for all read tags to complete read.\n");
         wait_for_ok(read_tags, 8, DATA_TIMEOUT);
+        printf("PHASE 2: All read tags completed read.\n");
 
         current_time = compat_time_ms();
-        if((current_time - start_time) % 2000 < DATA_TIMEOUT) {  /* Print roughly every 2 seconds */
+        if((current_time - start_time) % 2000 < READ_PERIOD_MS) {  /* Print roughly every 2 seconds */
             printf("PHASE 2: Read phase running... elapsed %"PRId64" ms\n", current_time - start_time);
         }
 
@@ -214,7 +216,7 @@ int main(void) {
             printf("PHASE 5: Read/write loop... elapsed %" PRId64 " ms\n", current_time - start_time);
         }
 
-        compat_sleep_ms(DATA_TIMEOUT, NULL);
+        compat_sleep_ms(WRITE_PERIOD_MS, NULL);
     }
 
     printf("PHASE 5: Read/write phase complete at %"PRId64" ms.\n", compat_time_ms() - start_time);
