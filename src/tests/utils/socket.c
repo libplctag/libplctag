@@ -60,6 +60,14 @@ void socket_cleanup(void) {
 #endif
 }
 
+util_err_t socket_get_err(void) {
+#ifdef _WIN32
+    return util_err_from_wsa(WSAGetLastError());
+#else
+    return util_err_from_errno(errno);
+#endif
+}
+
 /* ================================================================
  * Address manipulation
  * ================================================================ */
@@ -379,15 +387,9 @@ util_err_t socket_set_reuseaddr(socket_t sock, bool reuse) {
     }
 
     int opt = reuse ? 1 : 0;
-#ifdef _WIN32
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) != 0) {
-        return util_err_from_wsa(WSAGetLastError());
+        return socket_get_err();
     }
-#else
-    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) != 0) {
-        return util_err_from_errno(errno);
-    }
-#endif
 
     return UTIL_OK;
 }
@@ -398,15 +400,9 @@ util_err_t socket_set_nodelay(socket_t sock, bool nodelay) {
     }
 
     int opt = nodelay ? 1 : 0;
-#ifdef _WIN32
     if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&opt, sizeof(opt)) != 0) {
-        return util_err_from_wsa(WSAGetLastError());
+        return socket_get_err();
     }
-#else
-    if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) != 0) {
-        return util_err_from_errno(errno);
-    }
-#endif
 
     return UTIL_OK;
 }
@@ -418,15 +414,9 @@ util_err_t socket_set_broadcast(socket_t sock, bool broadcast) {
 
 #ifdef SO_BROADCAST
     int opt = broadcast ? 1 : 0;
-#ifdef _WIN32
     if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char *)&opt, sizeof(opt)) != 0) {
-        return util_err_from_wsa(WSAGetLastError());
+        return socket_get_err();
     }
-#else
-    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt)) != 0) {
-        return util_err_from_errno(errno);
-    }
-#endif
     return UTIL_OK;
 #else
     /* Platform does not support SO_BROADCAST */
