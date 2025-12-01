@@ -32,7 +32,6 @@
  ***************************************************************************/
 
 #include <utils/atomic_utils.h>
-#include <utils/debug.h>
 
 /* This is all cobbled together from many Internet sources such as
  * GitHub, StackExchange, Microsoft's site etc.
