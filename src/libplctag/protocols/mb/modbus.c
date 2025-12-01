@@ -137,6 +137,9 @@ struct modbus_plc_t {
     int max_requests_in_flight;
     int pending_request_count;
 
+    /* Count of tags needing connection (in REQUEST or RESPONSE states) */
+    size_t tags_needing_connection;
+
     /* Fairness counter - incremented each time a tag is serviced */
     int64_t fairness_counter;
 
@@ -652,6 +655,7 @@ int find_or_create_plc(attr attribs, modbus_plc_p *plc) {
 
                     /* Initialize PLC state before making it visible to other threads */
                     (*plc)->state = PLC_CONNECT_START;
+                    (*plc)->tags_needing_connection = 0;
                     (*plc)->inactivity_timeout_ms = MODBUS_INACTIVITY_TIMEOUT + time_ms();
 
                     /* Add the new PLC to the global list. We already have the mutex,
@@ -1161,13 +1165,18 @@ THREAD_FUNC(modbus_plc_handler) {
             case PLC_IDLE_WAIT:
                 pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "in PLC_IDLE_WAIT state.");
 
+                /* Check if any tags need connection (are not IDLE) */
+                if(plc->tags_needing_connection > 0) {
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_INFO, "PLC has %zu tag(s) needing connection, transitioning to PLC_CONNECT_START.",
+                           plc->tags_needing_connection);
+                    plc->state = PLC_CONNECT_START;
+                    break;
+                }
+
                 /* wait until something happens. */
                 sock_events = socket_wait_event(plc->sock, SOCK_EVENT_DEFAULT_MASK, MODBUS_IDLE_WAIT_TIMEOUT);
 
-                if(sock_events & SOCK_EVENT_WAKE_UP) {
-                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "PLC woke up.");
-                    plc->state = PLC_CONNECT_START;
-                } else if(sock_events & SOCK_EVENT_TIMEOUT) {
+                if(sock_events & SOCK_EVENT_TIMEOUT) {
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "PLC idle wait timed out.");
                 }
 
@@ -1356,6 +1365,7 @@ int connect_plc(modbus_plc_p plc) {
 int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
     int rc = PLCTAG_STATUS_OK;
     modbus_tag_p tag = NULL;
+    modbus_tag_p deferred_response_tag = NULL;  /* Tag whose mutex we couldn't acquire but matches pending response */
     int processed_count = 0;
     int64_t min_wait_time = MODBUS_IDLE_WAIT_TIMEOUT;
     int64_t now = time_ms();
@@ -1375,6 +1385,15 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
     iter_start_us = time_us();
     critical_block(plc->mutex) {
         int last_tag_index = vector_length(plc->tag_vector);
+        uint16_t response_transaction_id = 0;
+
+        /* Reset count of tags needing connection - will be recalculated below */
+        plc->tags_needing_connection = 0;
+
+        /* Get the transaction ID from the pending response, if any */
+        if(plc->flags.response_ready && plc->read_data_len >= 2) {
+            response_transaction_id = (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8));
+        }
 
         for(int i = 0; i < last_tag_index; i++) {
             /* Get tag at current index */
@@ -1396,6 +1415,11 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
                         rc = PLCTAG_STATUS_OK;
                     } else if(rc != PLCTAG_STATUS_OK) {
                         pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Error %s tickling tag!", plc_tag_decode_error(rc));
+                    }
+
+                    /* Count tags that are not idle (need PLC to be active/connected) */
+                    if(tag->op != TAG_OP_IDLE) {
+                        plc->tags_needing_connection++;
                     }
 
                     /*
@@ -1422,14 +1446,37 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 
 
                     mutex_unlock(tag->api_mutex);
+
+                    /* Release our reference */
+                    tag = rc_dec(tag);
                 } else {
+                    /*
+                     * Could not acquire tag mutex. Check if there's a pending response
+                     * that matches this tag's transaction ID. If so, save it for deferred
+                     * processing after we release the PLC mutex.
+                     *
+                     * We read pending_transaction_id without holding the tag mutex. This is
+                     * safe because:
+                     * 1. pending_transaction_id is only modified while holding the tag mutex
+                     * 2. We will re-verify the match after acquiring the tag mutex later
+                     * 3. The worst case is a false positive match, which we handle by re-checking
+                     */
+                    if(plc->flags.response_ready && deferred_response_tag == NULL &&
+                       response_transaction_id != 0 && tag->pending_transaction_id == response_transaction_id) {
+                        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
+                               "Tag %d mutex locked but matches response transaction ID %u. Deferring.",
+                               tag->tag_id, response_transaction_id);
+                        deferred_response_tag = tag;
+                        /* Do NOT release reference - we need it for deferred processing */
+                    } else {
+                        /* Release our reference */
+                        tag = rc_dec(tag);
+                    }
+
                     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Tag API mutex is already taken, skipping tickle.");
                 }
 
                 debug_set_tag_id(0);
-
-                /* Release our reference */
-                tag = rc_dec(tag);
             }
 
             processed_count++;
@@ -1437,10 +1484,10 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
 
         /* After iterating all tags, check if response_ready flag is still set.
          * If it is, it means no tag matched the transaction ID in the response.
-         * In that case, discard the response and clear the flag for the next response.
+         * If we have a deferred tag, don't discard - we'll try to match it below.
          * IMPORTANT: We must also decrement pending_request_count since this response
          * corresponds to a request that was sent (and incremented the count). */
-        if(plc->flags.response_ready) {
+        if(plc->flags.response_ready && deferred_response_tag == NULL) {
             pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "No tag matched transaction ID %u. Discarding.", 
                    (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0);
             plc->flags.response_ready = 0;
@@ -1458,6 +1505,80 @@ int tickle_all_tags(modbus_plc_p plc, int64_t *out_wait_time_ms) {
         plc->next_auto_sync_time_ms = (min_wait_time < MODBUS_IDLE_WAIT_TIMEOUT) ? (now + min_wait_time) : 0;
     }
     plc->tickle_iter_time_sum_us += (time_us() - iter_start_us);
+
+    /*
+     * Deferred response processing: If we found a tag that matches the pending response
+     * but couldn't acquire its mutex, try again now that we've released the PLC mutex.
+     * This avoids deadlock (PLC mutex -> tag mutex order vs tag mutex -> PLC mutex).
+     */
+    if(deferred_response_tag != NULL) {
+        pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL, "Processing deferred response for tag %d.", deferred_response_tag->tag_id);
+
+        debug_set_tag_id(deferred_response_tag->tag_id);
+
+        /* Now we can safely block on the tag mutex - we don't hold the PLC mutex */
+        mutex_lock(deferred_response_tag->api_mutex);
+
+        /*
+         * Re-verify the transaction ID match. It may have changed if:
+         * - The tag was aborted while we were waiting
+         * - A timeout occurred
+         * - Some other state change happened
+         */
+        if(plc->flags.response_ready && deferred_response_tag->pending_transaction_id != 0) {
+            uint16_t response_tid = (plc->read_data_len >= 2) ?
+                (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0;
+
+            if(response_tid == deferred_response_tag->pending_transaction_id) {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
+                       "Deferred match confirmed for tag %d, transaction ID %u.",
+                       deferred_response_tag->tag_id, response_tid);
+
+                /* Process the tag - this will handle the response */
+                rc = tickle_tag(plc, deferred_response_tag, time_ms(), &min_wait_time);
+                if(rc == PLCTAG_STATUS_PENDING) {
+                    rc = PLCTAG_STATUS_OK;
+                } else if(rc != PLCTAG_STATUS_OK) {
+                    pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN, "Error %s tickling deferred tag!", plc_tag_decode_error(rc));
+                }
+            } else {
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
+                       "Deferred match failed for tag %d: tag transaction ID %u != response %u (aborted?).",
+                       deferred_response_tag->tag_id, deferred_response_tag->pending_transaction_id, response_tid);
+            }
+        } else {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_DETAIL,
+                   "Deferred response no longer valid (response_ready=%d, pending_transaction_id=%u).",
+                   plc->flags.response_ready, deferred_response_tag->pending_transaction_id);
+        }
+
+        mutex_unlock(deferred_response_tag->api_mutex);
+
+        debug_set_tag_id(0);
+
+        /* Release the reference we held for deferred processing */
+        deferred_response_tag = rc_dec(deferred_response_tag);
+
+        /*
+         * If the response is still pending after deferred processing (match failed),
+         * we need to discard it to avoid blocking future responses.
+         */
+        if(plc->flags.response_ready) {
+            pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
+                   "Response still pending after deferred processing. Discarding transaction ID %u.",
+                   (plc->read_data_len >= 2) ? (uint16_t)((uint16_t)plc->read_data[1] + (uint16_t)(plc->read_data[0] << 8)) : 0);
+            plc->flags.response_ready = 0;
+            plc->read_data_len = 0;
+
+            /* Decrement pending request count since we're discarding this response */
+            if(plc->pending_request_count > 0) {
+                plc->pending_request_count--;
+                pdebug(DEBUG_MODULE_MODBUS, DEBUG_WARN,
+                       "Decremented pending_request_count to %d after discarding unmatched deferred response.",
+                       plc->pending_request_count);
+            }
+        }
+    }
 
     pdebug(DEBUG_MODULE_MODBUS, DEBUG_SPEW, "Processed %d tags.", processed_count);
 
