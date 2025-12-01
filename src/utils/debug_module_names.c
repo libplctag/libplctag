@@ -1,7 +1,5 @@
 /*
  * AUTO-GENERATED FILE - DO NOT EDIT
- * Generated from C:/Users/kyleh/Projects/libplctag_vscode/src/libplctag/lib/libplctag.h
- * by ParseLibplctagHeader.cmake
  */
 
 #include <stdint.h>
