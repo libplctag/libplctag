@@ -179,12 +179,13 @@ void reactor_destroy(reactor_t *r);
  *
  * @param r - Pointer to the reactor instance
  * @param sock - The socket to register (will be set to non-blocking)
+ * @param name - Human-readable name for logging (e.g., peer address). May be NULL.
  * @param cb - Callback to invoke for socket events
  * @param ctx - User context associated with the socket
  * @param initial_events - Bitarray of initial enabled events (or NULL for all enabled)
  * @return util_err_t - Error code indicating success or failure
  */
-util_err_t reactor_add_socket(reactor_t *r, socket_t sock, reactor_socket_cb_t cb, void *ctx, const bitarray_t *initial_events);
+util_err_t reactor_add_socket(reactor_t *r, socket_t sock, const char *name, reactor_socket_cb_t cb, void *ctx, const bitarray_t *initial_events);
 
 /**
  * @brief Remove a socket from the reactor.
