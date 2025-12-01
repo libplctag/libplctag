@@ -117,3 +117,13 @@ static inline void bitarray_assign(bitarray_t *dst, const bitarray_t *src) {
 static inline bitarray_t bitarray_and(const bitarray_t *a, const bitarray_t *b) {
     return (bitarray_t){a->bits & b->bits};
 }
+
+/**
+ * @brief Check if two bitarrays are equal.
+ * @param a First bitarray
+ * @param b Second bitarray
+ * @return true if all bits are identical, false otherwise
+ */
+static inline bool bitarray_equal(const bitarray_t *a, const bitarray_t *b) {
+    return a->bits == b->bits;
+}
