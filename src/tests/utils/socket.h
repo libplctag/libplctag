@@ -41,20 +41,30 @@ extern "C" {
 
 /**
  * @brief Initialize the socket module.
- * 
+ *
  * This function must be called before using any other socket functions.
- * 
- * @return util_err_t 
+ *
+ * @return util_err_t
  */
 util_err_t socket_init(void);
 
 /**
  * @brief Cleanup the socket module.
- * 
+ *
  * This function should be called when socket operations are no longer needed,
  * to release any resources allocated by the module.
  */
 void socket_cleanup(void);
+
+/**
+ * @brief Get the last socket error and translate it to util_err_t.
+ *
+ * On Windows, gets WSAGetLastError() and translates it.
+ * On POSIX systems, gets errno and translates it.
+ *
+ * @return util_err_t - The translated error code
+ */
+util_err_t socket_get_err(void);
 
 /* Address manipulation */
 
