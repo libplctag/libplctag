@@ -513,7 +513,7 @@ static void translate_pollevents(reactor_t *r, size_t index) {
              * between readable data, peer disconnect, and spurious wakeup */
             if (entry->socket_type == SOCKET_TYPE_STREAM) {
                 char peek_buf;
-                int peek_result = recv(entry->sock, &peek_buf, 1, MSG_PEEK);
+                int peek_result = (int)recv(entry->sock, &peek_buf, 1, MSG_PEEK);
                 if (peek_result > 0) {
                     /* Data is available */
                     bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
@@ -559,7 +559,7 @@ static void drain_wake_pipe(reactor_t *r) {
 
     /* Use recv() on both platforms since wake_pipe is now a socket on both */
     do {
-        received = recv(r->wake_pipe[0], (char *)buf, sizeof(buf), 0);
+        received = (int)recv(r->wake_pipe[0], (char *)buf, sizeof(buf), 0);
         if (received > 0) {
             total_drained += received;
         }
@@ -771,7 +771,7 @@ static void deliver_pending_events(reactor_t *r) {
 static void tickle_wake_pipe(reactor_t *r) {
     uint8_t byte = 0;
     /* Non-blocking send - if socket is full, wake already pending */
-    int result = send(r->wake_pipe[1], (const char *)&byte, 1, 0);
+    int result = (int)send(r->wake_pipe[1], (const char *)&byte, 1, 0);
     if (result < 0) {
         util_err_t err = socket_get_err();
         if (err == UTIL_EAGAIN) {
@@ -901,12 +901,14 @@ static util_err_t create_wake_pipe(socket_t wake_pipe[2]) {
     /* On POSIX, use socketpair() for consistency with Windows */
     int sock_fds[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sock_fds) != 0) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "socketpair() failed: %s", strerror(errno));
         return util_err_from_errno(errno);
     }
 
     /* Set read end to non-blocking */
     util_err_t rc = socket_set_nonblocking((socket_t)sock_fds[0], true);
     if (rc != UTIL_OK) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to set wake pipe read end non-blocking: %s", util_err_str(rc));
         close(sock_fds[0]);
         close(sock_fds[1]);
         return rc;
@@ -915,26 +917,29 @@ static util_err_t create_wake_pipe(socket_t wake_pipe[2]) {
     /* Set write end to non-blocking */
     rc = socket_set_nonblocking((socket_t)sock_fds[1], true);
     if (rc != UTIL_OK) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to set wake pipe write end non-blocking: %s", util_err_str(rc));
         close(sock_fds[0]);
         close(sock_fds[1]);
         return rc;
     }
 
-    /* Set TCP_NODELAY on read end to avoid latency */
-    rc = socket_set_nodelay((socket_t)sock_fds[0], true);
-    if (rc != UTIL_OK) {
-        close(sock_fds[0]);
-        close(sock_fds[1]);
-        return rc;
-    }
+    // /* Set TCP_NODELAY on read end to avoid latency */
+    // rc = socket_set_nodelay((socket_t)sock_fds[0], true);
+    // if (rc != UTIL_OK) {
+    //     pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to set wake pipe read end TCP_NODELAY: %s", util_err_str(rc));
+    //     close(sock_fds[0]);
+    //     close(sock_fds[1]);
+    //     return rc;
+    // }
 
-    /* Set TCP_NODELAY on write end to avoid latency */
-    rc = socket_set_nodelay((socket_t)sock_fds[1], true);
-    if (rc != UTIL_OK) {
-        close(sock_fds[0]);
-        close(sock_fds[1]);
-        return rc;
-    }
+    // /* Set TCP_NODELAY on write end to avoid latency */
+    // rc = socket_set_nodelay((socket_t)sock_fds[1], true);
+    // if (rc != UTIL_OK) {
+    //     pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to set wake pipe write end TCP_NODELAY: %s", util_err_str(rc));
+    //     close(sock_fds[0]);
+    //     close(sock_fds[1]);
+    //     return rc;
+    // }
 
     /* Success - assign to output array */
     wake_pipe[0] = (socket_t)sock_fds[0];
