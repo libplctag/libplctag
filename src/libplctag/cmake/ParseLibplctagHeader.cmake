@@ -1,9 +1,51 @@
 # ParseLibplctagHeader.cmake
 # Parses libplctag.h to extract enum definitions and generate internal headers
+#
+# Usage:
+#   include("path/to/ParseLibplctagHeader.cmake")
+#   parse_libplctag_header(INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
+#
+# This creates:
+#   - add_custom_command that regenerates outputs when INPUT_HEADER changes
+#   - Sets OUTPUT_HEADER and OUTPUT_NAMES_C in parent scope for use in target sources
+#   - Creates 'generate_debug_headers' target for targets that only need the header
+#
+# For targets that include OUTPUT_NAMES_C in their sources, CMake automatically
+# tracks the dependency. For targets that only #include the header, use:
+#   add_dependencies(my_target generate_debug_headers)
+
+# Save the script path at include time (CMAKE_CURRENT_LIST_DIR changes inside functions)
+set(_PARSE_LIBPLCTAG_SCRIPT "${CMAKE_CURRENT_LIST_FILE}")
 
 function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
+    # Custom command regenerates outputs when INPUT_HEADER changes
+    add_custom_command(
+        OUTPUT "${OUTPUT_HEADER}" "${OUTPUT_NAMES_C}"
+        COMMAND ${CMAKE_COMMAND}
+            -DINPUT_HEADER=${INPUT_HEADER}
+            -DOUTPUT_HEADER=${OUTPUT_HEADER}
+            -DOUTPUT_NAMES_C=${OUTPUT_NAMES_C}
+            -P ${_PARSE_LIBPLCTAG_SCRIPT}
+        DEPENDS "${INPUT_HEADER}"
+        COMMENT "Generating debug headers from libplctag.h"
+        VERBATIM
+    )
+
+    # Export paths to parent scope so they can be added to target sources
+    set(DEBUG_GENERATED_HEADER "${OUTPUT_HEADER}" PARENT_SCOPE)
+    set(DEBUG_GENERATED_NAMES_C "${OUTPUT_NAMES_C}" PARENT_SCOPE)
+
+    # Custom target for targets that only need the header (not the .c file)
+    # Targets that include the .c file in their sources don't need this
+    add_custom_target(generate_debug_headers
+        DEPENDS "${OUTPUT_HEADER}" "${OUTPUT_NAMES_C}"
+    )
+endfunction()
+
+# Internal function used by the script mode (called via -P)
+function(parse_libplctag_header_impl INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     message(STATUS "Parsing ${INPUT_HEADER} to generate ${OUTPUT_HEADER}")
-    
+
     # Read the entire header file
     file(READ "${INPUT_HEADER}" HEADER_CONTENT)
     
@@ -108,3 +150,8 @@ function(parse_libplctag_header INPUT_HEADER OUTPUT_HEADER OUTPUT_NAMES_C)
     message(STATUS "Generated ${OUTPUT_HEADER} with ${MODULE_COUNT} modules")
     message(STATUS "Generated ${OUTPUT_NAMES_C} with module names array")
 endfunction()
+
+# Script mode entry point (when called with cmake -P)
+if(CMAKE_SCRIPT_MODE_FILE)
+    parse_libplctag_header_impl("${INPUT_HEADER}" "${OUTPUT_HEADER}" "${OUTPUT_NAMES_C}")
+endif()

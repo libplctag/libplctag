@@ -4,12 +4,15 @@ message("Building libplctag library.")
 CONFIGURE_FILE("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h.in" "${CMAKE_CURRENT_SOURCE_DIR}/lib/version.h" @ONLY)
 
 # Parse libplctag.h to generate internal debug constants
+# This creates add_custom_command for debug_generated.h and debug_module_names.c
+# The .c file is included in libplctag_SRCS below, so CMake tracks the dependency automatically
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ParseLibplctagHeader.cmake")
 parse_libplctag_header(
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/libplctag.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_generated.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_module_names.c"
 )
+# DEBUG_GENERATED_NAMES_C is now set and used in libplctag_SRCS
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
@@ -84,7 +87,7 @@ set ( libplctag_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/lib/init.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/byteorder.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/debug.h"
-                     "${CMAKE_CURRENT_LIST_DIR}/../utils/debug_module_names.c"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/../utils/debug_module_names.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hash.c"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hash.h"
                      "${CMAKE_CURRENT_LIST_DIR}/../utils/hashtable.c"
@@ -121,6 +124,7 @@ endmacro()
 # print_all_ar_link_variables()
 
 # shared library
+# Note: No add_dependencies needed - DEBUG_GENERATED_NAMES_C in sources triggers generation automatically
 add_library(plctag_dyn SHARED ${libplctag_SRCS} )
 target_link_libraries(plctag_dyn ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
@@ -151,6 +155,7 @@ install(TARGETS plctag_dyn
     COMPONENT runtime)
 
 # static library
+# Note: No add_dependencies needed - DEBUG_GENERATED_NAMES_C in sources triggers generation automatically
 add_library(plctag_static STATIC ${libplctag_SRCS} )
 target_link_libraries(plctag_static ${EXTRA_LINKER_LIBS})
 # Link atomic library for 64-bit atomic operations on 32-bit ARM
