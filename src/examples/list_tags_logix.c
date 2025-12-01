@@ -627,6 +627,7 @@ void print_element_type(uint16_t element_type) {
         const char *type = NULL;
 
         switch(atomic_type) {
+            case 0xC0: type = "DT: Date and time. 64-bit storage; units are in microseconds."; break;
             case 0xC1: type = "BOOL: Boolean value"; break;
             case 0xC2: type = "SINT: Signed 8-bit integer value"; break;
             case 0xC3: type = "INT: Signed 16-bit integer value"; break;
