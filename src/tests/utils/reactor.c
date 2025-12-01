@@ -57,7 +57,8 @@ void reactor_reset_stats(void) {
 /* Socket type */
 typedef enum {
     SOCKET_TYPE_UNKNOWN,
-    SOCKET_TYPE_STREAM,     /* TCP */
+    SOCKET_TYPE_STREAM,     /* TCP socket (client or accepted connection) */
+    SOCKET_TYPE_LISTENER,   /* TCP listening socket */
     SOCKET_TYPE_DGRAM,      /* UDP */
 } socket_type_t;
 
@@ -65,6 +66,7 @@ typedef enum {
 typedef struct {
     socket_type_t socket_type;                          /* STREAM (TCP) or DGRAM (UDP) */
     socket_t sock;                                      /* Socket descriptor (INVALID_SOCKET if unused) */
+    char *name;                                         /* Human-readable name for logging */
     reactor_socket_cb_t callback;                       /* User callback function */
     void *context;                                      /* User context data */
     bitarray_t enabled;                                 /* Bitmask of enabled events */
@@ -72,6 +74,7 @@ typedef struct {
     struct pollfd last_revents;                         /* Last poll revents for edge-triggered detection */
     util_err_t last_error;                              /* Last error status for ERROR event */
     bool connected;                                     /* For TCP sockets: true if connected or CONNECTED event fired */
+    bool pending_removal;                               /* Socket marked for removal (deferred until safe) */
 } socket_entry_t;
 
 /* Reactor instance */
@@ -85,22 +88,20 @@ struct reactor_s {
     size_t active_socket_count;                 /* Number of registered sockets (includes wake pipe) */
 
     /* Wake pipe for interrupting poll */
-#ifdef _WIN32
-    SOCKET wake_pipe_read;
-    SOCKET wake_pipe_write;
-#else
-    int wake_pipe[2];                           /* [0] = read, [1] = write */
-#endif
+    socket_t wake_pipe[2];                      /* [0] = read, [1] = write */
 
     /* Synchronization */
 #ifdef _WIN32
     CRITICAL_SECTION lock;
+    DWORD reactor_thread_id;                    /* Thread ID of reactor loop (0 if not running) */
 #else
     pthread_mutex_t lock;
+    pthread_t reactor_thread_id;                /* Thread ID of reactor loop (0 if not running) */
 #endif
 
     /* Control flags */
-    bool shutdown;  /* Signal reactor to stop */
+    bool shutdown;              /* Signal reactor to stop */
+    bool pollfds_dirty;         /* pollfds array needs rebuild before next poll() */
 };
 
 
@@ -108,6 +109,61 @@ struct reactor_s {
 /* ================================================================
  * Helper Functions
  * ================================================================ */
+
+/* Forward declaration */
+static util_err_t create_wake_pipe(socket_t wake_pipe[2]);
+
+/**
+ * @brief Lock the reactor mutex.
+ *
+ * @param r - Pointer to the reactor instance
+ * @return util_err_t - UTIL_OK on success, error code on failure
+ */
+static inline util_err_t reactor_lock(reactor_t *r) {
+#ifdef _WIN32
+    EnterCriticalSection(&r->lock);
+    return UTIL_OK;
+#else
+    int rc = pthread_mutex_lock(&r->lock);
+    if (rc != 0) {
+        return util_err_from_errno(rc);
+    }
+    return UTIL_OK;
+#endif
+}
+
+/**
+ * @brief Unlock the reactor mutex.
+ *
+ * @param r - Pointer to the reactor instance
+ * @return util_err_t - UTIL_OK on success, error code on failure
+ */
+static inline util_err_t reactor_unlock(reactor_t *r) {
+#ifdef _WIN32
+    LeaveCriticalSection(&r->lock);
+    return UTIL_OK;
+#else
+    int rc = pthread_mutex_unlock(&r->lock);
+    if (rc != 0) {
+        return util_err_from_errno(rc);
+    }
+    return UTIL_OK;
+#endif
+}
+
+/**
+ * @brief Check if the current thread is the reactor thread.
+ *
+ * @param r - Pointer to the reactor instance
+ * @return true if current thread is running reactor_run, false otherwise
+ */
+static inline bool is_reactor_thread(reactor_t *r) {
+#ifdef _WIN32
+    return r->reactor_thread_id != 0 && GetCurrentThreadId() == r->reactor_thread_id;
+#else
+    return r->reactor_thread_id != 0 && pthread_equal(pthread_self(), r->reactor_thread_id);
+#endif
+}
 
 /**
  * @brief Determine socket type (STREAM=TCP or DGRAM=UDP).
@@ -147,21 +203,16 @@ static inline bool socket_has_pending_events(socket_entry_t *entry) {
 }
 
 
-
-
 /**
- * @brief Rebuild poll events for a single socket based on enabled[] mask.
+ * @brief Build poll events for a single socket entry.
  *
- * Called after reactor_set_event_enable_mask() to update the pollfd entry.
+ * Helper function that sets up the pollfd entry based on the socket's
+ * enabled events mask.
+ *
+ * @param entry Socket entry
+ * @param pfd Poll fd entry to populate
  */
-static void rebuild_pollfds_for_socket(reactor_t *r, size_t index) {
-    if (index >= r->max_sockets) {
-        return;
-    }
-
-    socket_entry_t *entry = &r->sockets[index];
-    struct pollfd *pfd = &r->pollfds[index];
-
+static void build_pollfd_for_entry(socket_entry_t *entry, struct pollfd *pfd) {
     /* Defensive: ensure socket is valid before building poll events */
     if (entry->sock == INVALID_SOCKET) {
         pfd->fd = INVALID_SOCKET;
@@ -173,6 +224,13 @@ static void rebuild_pollfds_for_socket(reactor_t *r, size_t index) {
     pfd->fd = entry->sock;
     pfd->events = 0;
     pfd->revents = 0;
+
+    /* For TCP client sockets pending async connection, always watch for both POLLIN and POLLOUT
+     * to detect connection completion (POLLOUT) or connection failure (POLLERR/POLLIN) */
+    if (entry->socket_type == SOCKET_TYPE_STREAM && !entry->connected) {
+        pfd->events = POLLIN | POLLOUT;
+        return;
+    }
 
     /* Build poll events from enabled bitarray */
     for (unsigned int i = 0; i < REACTOR_EVENT_MAX; i++) {
@@ -192,6 +250,89 @@ static void rebuild_pollfds_for_socket(reactor_t *r, size_t index) {
             }
         }
     }
+}
+
+/**
+ * @brief Rebuild the pollfds array if needed.
+ *
+ * This function checks the pollfds_dirty flag and if set:
+ * 1. Compacts the arrays by removing any sockets marked for removal
+ *    (pending_removal == true) or with INVALID_SOCKET
+ * 2. Rebuilds the poll events for all remaining sockets
+ *
+ * If pollfds_dirty is false, this function does nothing.
+ *
+ * MUST be called from the reactor thread before poll().
+ * This function acquires the reactor lock internally.
+ *
+ * @param r Reactor instance
+ */
+static void rebuild_pollfds(reactor_t *r) {
+    util_err_t rc = reactor_lock(r);
+    if (rc != UTIL_OK) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "rebuild_pollfds: Failed to acquire lock");
+        return;
+    }
+
+    if (!r->pollfds_dirty) {
+        reactor_unlock(r);
+        return;
+    }
+
+    size_t write_idx = 1;  /* Start at 1, index 0 is wake pipe */
+
+    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "rebuild_pollfds: Rebuilding pollfds array (active_count=%zu)", r->active_socket_count);
+
+    /* First pass: compact the sockets array by removing marked/invalid entries */
+    for (size_t read_idx = 1; read_idx < r->active_socket_count; read_idx++) {
+        socket_entry_t *entry = &r->sockets[read_idx];
+
+        /* Skip sockets marked for removal or already invalid */
+        if (entry->pending_removal || entry->sock == INVALID_SOCKET) {
+            const char *name = entry->name ? entry->name : "(unnamed)";
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "rebuild_pollfds: Removing socket[%s] at index %zu", name, read_idx);
+            
+            /* Free the name if allocated */
+            if (entry->name) {
+                free(entry->name);
+                entry->name = NULL;
+            }
+            continue;
+        }
+
+        /* If we need to move this entry to a lower index, do so */
+        if (write_idx != read_idx) {
+            r->sockets[write_idx] = r->sockets[read_idx];
+            /* Clear the old slot */
+            memset(&r->sockets[read_idx], 0, sizeof(socket_entry_t));
+            r->sockets[read_idx].sock = INVALID_SOCKET;
+        }
+
+        write_idx++;
+    }
+
+    /* Update active count */
+    size_t old_count = r->active_socket_count;
+    r->active_socket_count = write_idx;
+
+    /* Clear any remaining slots */
+    for (size_t i = write_idx; i < old_count; i++) {
+        memset(&r->sockets[i], 0, sizeof(socket_entry_t));
+        r->sockets[i].sock = INVALID_SOCKET;
+        r->pollfds[i].fd = INVALID_SOCKET;
+        r->pollfds[i].events = 0;
+        r->pollfds[i].revents = 0;
+    }
+
+    /* Second pass: rebuild pollfds for all active sockets */
+    for (size_t i = 0; i < r->active_socket_count; i++) {
+        build_pollfd_for_entry(&r->sockets[i], &r->pollfds[i]);
+    }
+
+    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "rebuild_pollfds: Done (new active_count=%zu)", r->active_socket_count);
+
+    r->pollfds_dirty = false;
+    reactor_unlock(r);
 }
 
 /**
@@ -262,6 +403,48 @@ static void translate_pollevents(reactor_t *r, size_t index) {
         return;  /* Don't process other events on invalid socket */
     }
 
+    /* For TCP sockets pending connection, handle connection completion specially */
+    if (entry->socket_type == SOCKET_TYPE_STREAM && !entry->connected) {
+        /* Check for connection error first via POLLERR or SO_ERROR */
+        bool connection_failed = false;
+        util_err_t conn_err = UTIL_OK;
+
+        if (current & POLLERR) {
+            /* Explicit error flag - check SO_ERROR */
+            conn_err = check_connect_completion(entry);
+            if (conn_err != UTIL_OK) {
+                connection_failed = true;
+            }
+        } else if ((current & POLLOUT) || (current & POLLIN)) {
+            /* POLLOUT usually means connected, but check SO_ERROR to be sure.
+             * On some platforms, POLLIN can also indicate connection failure. */
+            conn_err = check_connect_completion(entry);
+            if (conn_err != UTIL_OK) {
+                connection_failed = true;
+            } else if (current & POLLOUT) {
+                /* Connection succeeded */
+                entry->connected = true;
+                bitarray_set(&entry->pending_events, REACTOR_EVENT_CONNECTED);
+                
+                /* Mark pollfds dirty so it gets rebuilt before next poll() */
+                r->pollfds_dirty = true;
+                
+                /* Reset last_revents since we're transitioning to connected state.
+                 * This prevents spurious edge-triggered events on first poll after connect. */
+                entry->last_revents.revents = 0;
+            }
+        }
+
+        if (connection_failed) {
+            entry->last_error = conn_err;
+            bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+            entry->connected = true;  /* Prevent further connect attempts */
+        }
+
+        /* Don't process other events until connected */
+        return;
+    }
+
     /* POLLERR - socket error (may be spurious on Windows) */
     if ((current & POLLERR) && !(previous & POLLERR)) {
         /* Verify this is a real error by checking SO_ERROR */
@@ -270,18 +453,9 @@ static void translate_pollevents(reactor_t *r, size_t index) {
         int optlen = sizeof(optval);
         if (getsockopt((SOCKET)entry->sock, SOL_SOCKET, SO_ERROR, (char *)&optval, &optlen) != SOCKET_ERROR) {
             if (optval != 0) {
-                /* Real socket error - check if this is a failed async connect */
-                if (entry->socket_type == SOCKET_TYPE_STREAM && !entry->connected) {
-                    /* Failed async connect */
-                    entry->last_error = util_err_from_errno(optval);
-                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-                    /* Mark as "connected" to prevent further connect attempts */
-                    entry->connected = true;
-                } else {
-                    /* Generic socket error */
-                    entry->last_error = util_err_from_errno(optval);
-                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-                }
+                /* Real socket error */
+                entry->last_error = util_err_from_errno(optval);
+                bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
                 /* Clear the error after reading it */
                 optval = 0;
                 setsockopt((SOCKET)entry->sock, SOL_SOCKET, SO_ERROR, (char *)&optval, sizeof(optval));
@@ -293,18 +467,9 @@ static void translate_pollevents(reactor_t *r, size_t index) {
         socklen_t optlen = sizeof(optval);
         if (getsockopt(entry->sock, SOL_SOCKET, SO_ERROR, &optval, &optlen) == 0) {
             if (optval != 0) {
-                /* Real socket error - check if this is a failed async connect */
-                if (entry->socket_type == SOCKET_TYPE_STREAM && !entry->connected) {
-                    /* Failed async connect */
-                    entry->last_error = util_err_from_errno(optval);
-                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-                    /* Mark as "connected" to prevent further connect attempts */
-                    entry->connected = true;
-                } else {
-                    /* Generic socket error */
-                    entry->last_error = util_err_from_errno(optval);
-                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-                }
+                /* Real socket error */
+                entry->last_error = util_err_from_errno(optval);
+                bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
             }
             /* else: spurious POLLERR, ignore */
         }
@@ -313,7 +478,7 @@ static void translate_pollevents(reactor_t *r, size_t index) {
     }
 
 #ifdef POLLRDHUP
-    /* POLLRDHUP - peer closed write side (Linux half-close detection) */
+    /* POLLRDHUP - peer closed write side (Linux half-close detection, only for TCP client sockets) */
     if (entry->socket_type == SOCKET_TYPE_STREAM && (current & POLLRDHUP) && !(previous & POLLRDHUP)) {
         /* Peer sent FIN - read side is closed but write side may still be open */
         bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
@@ -321,7 +486,7 @@ static void translate_pollevents(reactor_t *r, size_t index) {
     }
 #endif
 
-    /* POLLHUP - peer closed (graceful close, only for TCP) */
+    /* POLLHUP - peer closed (graceful close, only for TCP client sockets) */
     if (entry->socket_type == SOCKET_TYPE_STREAM && (current & POLLHUP) && !(previous & POLLHUP)) {
         bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
         /* Don't return early - there may be buffered data to read (POLLIN) */
@@ -344,67 +509,38 @@ static void translate_pollevents(reactor_t *r, size_t index) {
         }
         /* For connected sockets, verify data is actually available (not spurious) */
         else if (bitarray_test(&entry->enabled, REACTOR_EVENT_CAN_READ)) {
-#ifdef _WIN32
-            /* On Windows, use MSG_PEEK to verify data is available and distinguish
+            /* Use MSG_PEEK to verify data is available and distinguish
              * between readable data, peer disconnect, and spurious wakeup */
-            char peek_buf;
-            int peek_result = recv((SOCKET)entry->sock, &peek_buf, 1, MSG_PEEK);
-            if (peek_result > 0) {
-                /* Data is available */
-                bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
-            } else if (peek_result == 0) {
-                /* recv() returned 0 - peer closed connection gracefully */
-                if (entry->socket_type == SOCKET_TYPE_STREAM) {
-                    bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
-                }
-            } else {
-                /* recv() returned -1, check error */
-                int recv_err = WSAGetLastError();
-                if (recv_err == WSAEWOULDBLOCK) {
-                    /* Spurious wakeup - no data available, ignore */
-                } else {
-                    /* Real error on socket */
-                    entry->last_error = util_err_from_wsa(recv_err);
-                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-                }
-            }
-#else
-            /* On Unix, trust POLLIN for stream sockets but verify for robustness */
             if (entry->socket_type == SOCKET_TYPE_STREAM) {
                 char peek_buf;
-                ssize_t peek_result = recv(entry->sock, &peek_buf, 1, MSG_PEEK);
+                int peek_result = recv(entry->sock, &peek_buf, 1, MSG_PEEK);
                 if (peek_result > 0) {
+                    /* Data is available */
                     bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
                 } else if (peek_result == 0) {
-                    /* Peer closed */
+                    /* recv() returned 0 - peer closed connection gracefully */
                     bitarray_set(&entry->pending_events, REACTOR_EVENT_CLOSED);
-                } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    /* Real error */
-                    entry->last_error = util_err_from_errno(errno);
-                    bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                } else {
+                    /* recv() returned -1, check error */
+                    util_err_t recv_err = socket_get_err();
+                    if (recv_err != UTIL_EAGAIN) {
+                        /* Real error on socket */
+                        entry->last_error = recv_err;
+                        bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
+                    }
+                    /* EAGAIN means spurious wakeup - no data available, ignore */
                 }
             } else {
                 /* UDP sockets - trust POLLIN */
                 bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_READ);
             }
-#endif
         }
     }
 
     /* POLLOUT - writable (edge-triggered) */
     if ((current & POLLOUT) && !(previous & POLLOUT)) {
-        /* First check if this is a pending connect completion for TCP sockets */
-        if (entry->socket_type == SOCKET_TYPE_STREAM && !entry->connected) {
-            util_err_t conn_err = check_connect_completion(entry);
-            if (conn_err == UTIL_OK) {
-                entry->connected = true;
-                bitarray_set(&entry->pending_events, REACTOR_EVENT_CONNECTED);
-            } else {
-                /* Connect failed */
-                entry->last_error = conn_err;
-                bitarray_set(&entry->pending_events, REACTOR_EVENT_ERROR);
-            }
-        } else if (bitarray_test(&entry->enabled, REACTOR_EVENT_CAN_WRITE)) {
+        /* Connection already handled above for unconnected sockets */
+        if (bitarray_test(&entry->enabled, REACTOR_EVENT_CAN_WRITE)) {
             bitarray_set(&entry->pending_events, REACTOR_EVENT_CAN_WRITE);
         }
     }
@@ -418,20 +554,28 @@ static void translate_pollevents(reactor_t *r, size_t index) {
  */
 static void drain_wake_pipe(reactor_t *r) {
     uint8_t buf[64];
+    int total_drained = 0;
+    int received;
 
-#ifdef _WIN32
-    SOCKET wake_sock = r->wake_pipe_read;
-    int received = recv(wake_sock, (char *)buf, sizeof(buf), 0);
-    while (received > 0) {
-        received = recv(wake_sock, (char *)buf, sizeof(buf), 0);
+    /* Use recv() on both platforms since wake_pipe is now a socket on both */
+    do {
+        received = recv(r->wake_pipe[0], (char *)buf, sizeof(buf), 0);
+        if (received > 0) {
+            total_drained += received;
+        }
+    } while (received > 0);
+
+    /* Check for unexpected errors (anything other than would-block) */
+    if (received < 0) {
+        util_err_t err = socket_get_err();
+        if (err != UTIL_EAGAIN) {
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Unexpected error draining wake pipe: %s", util_err_str(err));
+        }
     }
-#else
-    int fd = r->wake_pipe[0];
-    ssize_t received = read(fd, buf, sizeof(buf));
-    while (received > 0) {
-        received = read(fd, buf, sizeof(buf));
+
+    if (total_drained > 0) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Drained %d bytes from wake pipe", total_drained);
     }
-#endif
 }
 
 
@@ -451,8 +595,8 @@ static void deliver_event(reactor_t *r, size_t socket_index, event_type_t event,
     /* Clear the enabled flag BEFORE calling callback (one-shot) */
     bitarray_clear(&entry->enabled, event);
 
-    /* Rebuild poll events to reflect the disabled event */
-    rebuild_pollfds_for_socket(r, socket_index);
+    /* Mark pollfds dirty so it gets rebuilt before next poll() */
+    r->pollfds_dirty = true;
 
     if (entry->callback != NULL) {
         /* Time the callback execution */
@@ -470,14 +614,22 @@ static void deliver_event(reactor_t *r, size_t socket_index, event_type_t event,
  *
  * Iterates through sockets and delivers exactly one event per socket
  * per call, respecting priority (FATAL > STATE > DATA > PERIODIC).
+ * 
+ * NOTE: Callbacks may call reactor_remove_socket(), which compacts the arrays.
+ * We handle this by tracking the socket fd and checking if it changed after
+ * each event delivery.
  */
 static void deliver_pending_events(reactor_t *r) {
-    /* Process sockets starting at index 1 (skip wake pipe at index 0) */
-    for (size_t i = 1; i < r->max_sockets; i++) {
+    /* Process sockets starting at index 1 (skip wake pipe at index 0) 
+     * Use a while loop since active_socket_count may change during iteration */
+    size_t i = 1;
+    while (i < r->active_socket_count) {
         socket_entry_t *entry = &r->sockets[i];
+        socket_t current_sock = entry->sock;
 
-        if (entry->sock == INVALID_SOCKET) {
-            continue;  /* Unused socket slot */
+        if (current_sock == INVALID_SOCKET) {
+            i++;
+            continue;  /* Shouldn't happen with compacted arrays, but be safe */
         }
 
         /* Process all pending events for this socket, one at a time */
@@ -488,6 +640,12 @@ static void deliver_pending_events(reactor_t *r) {
                 bitarray_clear_all(&entry->pending_events);
 
                 deliver_event(r, i, REACTOR_EVENT_SHUTDOWN, UTIL_OK);
+                
+                /* Check if socket was removed (array compacted) */
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    /* Socket was removed, don't increment i - a new socket slid into this slot */
+                    break;
+                }
                 continue;
             }
 
@@ -497,7 +655,11 @@ static void deliver_pending_events(reactor_t *r) {
 
                 /* TODO: Need to track error status per socket - for now use UTIL_EINTERNAL */
                 deliver_event(r, i, REACTOR_EVENT_ERROR, entry->last_error);
-
+                
+                /* Check if socket was removed (array compacted) */
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    break;
+                }
                 continue;
             }
 
@@ -505,12 +667,20 @@ static void deliver_pending_events(reactor_t *r) {
             if (bitarray_test(&entry->pending_events, REACTOR_EVENT_CAN_ACCEPT)) {
                 bitarray_clear(&entry->pending_events, REACTOR_EVENT_CAN_ACCEPT);
                 deliver_event(r, i, REACTOR_EVENT_CAN_ACCEPT, UTIL_OK);
+                
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    break;
+                }
                 continue;
             }
 
             if (bitarray_test(&entry->pending_events, REACTOR_EVENT_CONNECTED)) {
                 bitarray_clear(&entry->pending_events, REACTOR_EVENT_CONNECTED);
                 deliver_event(r, i, REACTOR_EVENT_CONNECTED, UTIL_OK);
+                
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    break;
+                }
                 continue;
             }
 
@@ -519,6 +689,10 @@ static void deliver_pending_events(reactor_t *r) {
                 bitarray_clear(&entry->pending_events, REACTOR_EVENT_CAN_READ);
                 /* Edge-triggered: event stays enabled, will fire again on next state transition */
                 deliver_event(r, i, REACTOR_EVENT_CAN_READ, UTIL_OK);
+                
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    break;
+                }
                 continue;
             }
 
@@ -526,12 +700,20 @@ static void deliver_pending_events(reactor_t *r) {
                 bitarray_clear(&entry->pending_events, REACTOR_EVENT_CAN_WRITE);
                 /* Edge-triggered: event stays enabled */
                 deliver_event(r, i, REACTOR_EVENT_CAN_WRITE, UTIL_OK);
+                
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    break;
+                }
                 continue;
             }
 
             if (bitarray_test(&entry->pending_events, REACTOR_EVENT_WRITTEN)) {
                 bitarray_clear(&entry->pending_events, REACTOR_EVENT_WRITTEN);
                 deliver_event(r, i, REACTOR_EVENT_WRITTEN, UTIL_OK);
+                
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    break;
+                }
                 continue;
             }
 
@@ -539,6 +721,10 @@ static void deliver_pending_events(reactor_t *r) {
             if (bitarray_test(&entry->pending_events, REACTOR_EVENT_TICK)) {
                 bitarray_clear(&entry->pending_events, REACTOR_EVENT_TICK);
                 deliver_event(r, i, REACTOR_EVENT_TICK, UTIL_OK);
+                
+                if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                    break;
+                }
                 continue;
             }
 
@@ -548,9 +734,31 @@ static void deliver_pending_events(reactor_t *r) {
                 if (bitarray_test(&entry->pending_events, evt)) {
                     bitarray_clear(&entry->pending_events, evt);
                     deliver_event(r, i, evt, UTIL_OK);
+                    
+                    if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                        break;
+                    }
                 }
             }
+            
+            /* Check again after app events */
+            if (i >= r->active_socket_count || r->sockets[i].sock != current_sock) {
+                break;
+            }
         }
+        
+        /* Only increment if we didn't break out due to socket removal.
+         * If socket was removed, a new socket slid into slot i, so we
+         * need to process it without incrementing. */
+        if (i < r->active_socket_count && r->sockets[i].sock == current_sock) {
+            i++;
+        }
+        /* If socket was removed (current_sock no longer at i), don't increment -
+         * either a new socket is now at i, or i >= active_socket_count */
+        else if (i >= r->active_socket_count) {
+            break;  /* No more sockets to process */
+        }
+        /* else: socket was removed and a new one slid into place, loop will process it */
     }
 }
 
@@ -561,25 +769,177 @@ static void deliver_pending_events(reactor_t *r) {
  * reactor if it's blocked in poll().
  */
 static void tickle_wake_pipe(reactor_t *r) {
-#ifdef _WIN32
     uint8_t byte = 0;
-    /* Non-blocking send - if pipe is full, wake already pending */
-    int result = send(r->wake_pipe_write, (const char *)&byte, 1, 0);
-    if (result == SOCKET_ERROR) {
-        int err = WSAGetLastError();
-        if (err == WSAEWOULDBLOCK) {
+    /* Non-blocking send - if socket is full, wake already pending */
+    int result = send(r->wake_pipe[1], (const char *)&byte, 1, 0);
+    if (result < 0) {
+        util_err_t err = socket_get_err();
+        if (err == UTIL_EAGAIN) {
             /* Wake pipe full - a wake is already pending, ignore */
         }
         /* Other errors don't matter - reactor will wake eventually */
     }
-#else
-    uint8_t byte = 0;
-    /* Non-blocking write - if pipe is full, wake already pending */
-    ssize_t result = write(r->wake_pipe[1], &byte, 1);
-    if (result < 0 && errno == EAGAIN) {
-        /* Wake pipe full - a wake is already pending, ignore */
+}
+
+/**
+ * @brief Create and configure a wake pipe for the reactor.
+ *
+ * On Windows, creates a pair of TCP sockets connected via loopback.
+ * On POSIX, creates a socketpair using AF_UNIX.
+ * Both socket ends are set to non-blocking mode.
+ *
+ * @param wake_pipe Array to store the wake pipe descriptors [0]=read, [1]=write
+ * @return util_err_t UTIL_OK on success, error code on failure (wake_pipe unchanged on error)
+ */
+static util_err_t create_wake_pipe(socket_t wake_pipe[2]) {
+#ifdef _WIN32
+    /* On Windows, create a TCP socket pair using connect/accept pattern.
+     * This is more secure than UDP as only the connected socket can wake the reactor. */
+    SOCKET listener = INVALID_SOCKET;
+    SOCKET read_sock = INVALID_SOCKET;
+    SOCKET write_sock = INVALID_SOCKET;
+    util_err_t rc = UTIL_OK;
+
+    do {
+        /* Create listener socket */
+        listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (listener == INVALID_SOCKET) {
+            rc = util_err_from_wsa(WSAGetLastError());
+            break;
+        }
+
+        /* Bind to loopback with ephemeral port */
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = 0;
+
+        if (bind(listener, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+            rc = util_err_from_wsa(WSAGetLastError());
+            break;
+        }
+
+        /* Get bound address and port */
+        int addr_len = sizeof(addr);
+        if (getsockname(listener, (struct sockaddr *)&addr, &addr_len) != 0) {
+            rc = util_err_from_wsa(WSAGetLastError());
+            break;
+        }
+
+        /* Listen for connections */
+        if (listen(listener, 1) != 0) {
+            rc = util_err_from_wsa(WSAGetLastError());
+            break;
+        }
+
+        /* Create read-side socket and connect to listener */
+        read_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (read_sock == INVALID_SOCKET) {
+            rc = util_err_from_wsa(WSAGetLastError());
+            break;
+        }
+
+        if (connect(read_sock, (struct sockaddr *)&addr, addr_len) != 0) {
+            rc = util_err_from_wsa(WSAGetLastError());
+            break;
+        }
+
+        /* Accept the connection - this becomes the write side */
+        write_sock = accept(listener, NULL, NULL);
+        if (write_sock == INVALID_SOCKET) {
+            rc = util_err_from_wsa(WSAGetLastError());
+            break;
+        }
+
+        /* Set both sockets to non-blocking */
+        rc = socket_set_nonblocking(read_sock, true);
+        if (rc != UTIL_OK) {
+            break;
+        }
+
+        rc = socket_set_nonblocking(write_sock, true);
+        if (rc != UTIL_OK) {
+            break;
+        }
+
+        /* Set TCP_NODELAY to avoid latency */
+        rc = socket_set_nodelay(read_sock, true);
+        if (rc != UTIL_OK) {
+            break;
+        }
+
+        rc = socket_set_nodelay(write_sock, true);
+        if (rc != UTIL_OK) {
+            break;
+        }
+
+        /* Success - assign to output array */
+        wake_pipe[0] = read_sock;
+        wake_pipe[1] = write_sock;
+
+    } while (0);
+
+    /* Clean up listener socket (no longer needed) */
+    if (listener != INVALID_SOCKET) {
+        socket_close(listener);
     }
-    /* Other errors don't matter - reactor will wake eventually */
+
+    /* Clean up on failure */
+    if (rc != UTIL_OK) {
+        if (read_sock != INVALID_SOCKET) {
+            socket_close(read_sock);
+        }
+        if (write_sock != INVALID_SOCKET) {
+            socket_close(write_sock);
+        }
+    }
+
+    return rc;
+
+#else
+    /* On POSIX, use socketpair() for consistency with Windows */
+    int sock_fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sock_fds) != 0) {
+        return util_err_from_errno(errno);
+    }
+
+    /* Set read end to non-blocking */
+    util_err_t rc = socket_set_nonblocking((socket_t)sock_fds[0], true);
+    if (rc != UTIL_OK) {
+        close(sock_fds[0]);
+        close(sock_fds[1]);
+        return rc;
+    }
+
+    /* Set write end to non-blocking */
+    rc = socket_set_nonblocking((socket_t)sock_fds[1], true);
+    if (rc != UTIL_OK) {
+        close(sock_fds[0]);
+        close(sock_fds[1]);
+        return rc;
+    }
+
+    /* Set TCP_NODELAY on read end to avoid latency */
+    rc = socket_set_nodelay((socket_t)sock_fds[0], true);
+    if (rc != UTIL_OK) {
+        close(sock_fds[0]);
+        close(sock_fds[1]);
+        return rc;
+    }
+
+    /* Set TCP_NODELAY on write end to avoid latency */
+    rc = socket_set_nodelay((socket_t)sock_fds[1], true);
+    if (rc != UTIL_OK) {
+        close(sock_fds[0]);
+        close(sock_fds[1]);
+        return rc;
+    }
+
+    /* Success - assign to output array */
+    wake_pipe[0] = (socket_t)sock_fds[0];
+    wake_pipe[1] = (socket_t)sock_fds[1];
+    return UTIL_OK;
 #endif
 }
 
@@ -634,147 +994,21 @@ reactor_t* reactor_create(size_t max_sockets) {
 #endif
 
     /* Create wake pipe */
+    if (create_wake_pipe(r->wake_pipe) != UTIL_OK) {
+        free(r->pollfds);
+        free(r->sockets);
 #ifdef _WIN32
-    /* On Windows, create a UDP socket pair for waking */
-    SOCKET listen_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (listen_sock == INVALID_SOCKET) {
-        free(r->pollfds);
-        free(r->sockets);
         DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    r->wake_pipe_read = listen_sock;
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0;
-
-    if (bind(listen_sock, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        closesocket(listen_sock);
-        free(r->pollfds);
-        free(r->sockets);
-        DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    /* Get bound address */
-    struct sockaddr_in bound_addr;
-    int addr_len = sizeof(bound_addr);
-    if (getsockname(listen_sock, (struct sockaddr *)&bound_addr, &addr_len) != 0) {
-        closesocket(listen_sock);
-        free(r->pollfds);
-        free(r->sockets);
-        DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    /* Set listen socket non-blocking */
-    if (socket_set_nonblocking(listen_sock, true) != UTIL_OK) {
-        closesocket(listen_sock);
-        closesocket(send_sock);
-        free(r->pollfds);
-        free(r->sockets);
-        DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    /* set listen socket no delay */
-    if(socket_set_nodelay(listen_sock, true) != UTIL_OK) {
-        closesocket(listen_sock);
-        closesocket(send_sock);
-        free(r->pollfds);
-        free(r->sockets);
-        DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-
-
-    /* Create socket that will send to listen_sock */
-    SOCKET send_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (send_sock == INVALID_SOCKET) {
-        closesocket(listen_sock);
-        free(r->pollfds);
-        free(r->sockets);
-        DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    r->wake_pipe_read = send_sock;
-
-    /* set send socket non-blocking */
-    if(socket_set_nonblocking(send_sock, true) != UTIL_OK) {
-        closesocket(listen_sock);
-        closesocket(send_sock);
-        free(r->pollfds);
-        free(r->sockets);
-        DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }   
-
-    /* set send socket no delay */
-    if(socket_set_nodelay(send_sock, true) != UTIL_OK) {
-        closesocket(listen_sock);
-        closesocket(send_sock);
-        free(r->pollfds);
-        free(r->sockets);
-        DeleteCriticalSection(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    r->wake_pipe_read = listen_sock;
-    r->wake_pipe_write = send_sock;
 #else
-    if (pipe(r->wake_pipe) != 0) {
-        free(r->pollfds);
-        free(r->sockets);
         pthread_mutex_destroy(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    /* Set read end to non-blocking */
-    if (socket_set_nonblocking(r->wake_pipe[0], true) != UTIL_OK) {
-        close(r->wake_pipe[0]);
-        close(r->wake_pipe[1]);
-        free(r->pollfds);
-        free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
-        free(r);
-        return NULL;
-    }
-
-    /* Set write end to non-blocking */
-    if(socket_set_nonblocking(r->wake_pipe[1], true) != UTIL_OK) {
-        close(r->wake_pipe[0]);
-        close(r->wake_pipe[1]);
-        free(r->pollfds);
-        free(r->sockets);
-        pthread_mutex_destroy(&r->lock);
-        free(r);
-        return NULL;
-    }
 #endif
+        free(r);
+        return NULL;
+    }
 
     /* Register wake pipe as socket 0 */
-#ifdef _WIN32
-    r->sockets[0].sock = r->wake_pipe_read;
-    r->pollfds[0].fd = r->wake_pipe_read;
-#else
-    r->sockets[0].sock = (socket_t)r->wake_pipe[0];
+    r->sockets[0].sock = r->wake_pipe[0];
     r->pollfds[0].fd = r->wake_pipe[0];
-#endif
     r->sockets[0].callback = NULL;  /* No callback, just drains */
     r->sockets[0].context = r;
     bitarray_set(&r->sockets[0].enabled, REACTOR_EVENT_CAN_READ);
@@ -783,6 +1017,8 @@ reactor_t* reactor_create(size_t max_sockets) {
     r->pollfds[0].revents = 0;
 
     r->active_socket_count = 1;  /* Start with wake pipe */
+
+    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Wake pipe created: read_fd=%d, write_fd=%d", (int)r->wake_pipe[0], (int)r->wake_pipe[1]);
 
     /* Initialize shutdown flag */
     r->shutdown = false;
@@ -798,17 +1034,13 @@ void reactor_destroy(reactor_t *r) {
     /* Signal to stop if running */
     reactor_stop(r);
 
-#ifdef _WIN32
     /* Close wake pipe */
-    closesocket(r->wake_pipe_read);
-    closesocket(r->wake_pipe_write);
+    socket_close(r->wake_pipe[0]);
+    socket_close(r->wake_pipe[1]);
 
+#ifdef _WIN32
     DeleteCriticalSection(&r->lock);
 #else
-    /* Close wake pipe */
-    close(r->wake_pipe[0]);
-    close(r->wake_pipe[1]);
-
     pthread_mutex_destroy(&r->lock);
 #endif
 
@@ -817,7 +1049,7 @@ void reactor_destroy(reactor_t *r) {
     free(r);
 }
 
-util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
+util_err_t reactor_add_socket(reactor_t *r, socket_t sock, const char *name,
                              reactor_socket_cb_t cb, void *ctx,
                              const bitarray_t *initial_events) {
     util_err_t rc = UTIL_OK;
@@ -835,7 +1067,9 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
     if(sock == INVALID_SOCKET) {
         pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Invalid socket descriptor (INVALID_SOCKET)");
         return UTIL_EINVAL;
-    }  
+    }
+
+    const char *sock_name = name ? name : "(unnamed)";
 
     /* set socket to non-blocking for reactor use */
     if((rc = socket_set_nonblocking(sock, true)) != UTIL_OK) {
@@ -848,76 +1082,73 @@ util_err_t reactor_add_socket(reactor_t *r, socket_t sock,
         return rc;
     }
 
-    /* Detect socket type */
+    /* Detect socket type and connection status */
     socket_type_t sock_type = get_socket_type(sock);
+    bool already_connected = false;
 
-    int mutex_rc = 0;
+    if (sock_type == SOCKET_TYPE_STREAM) {
+        /* For STREAM sockets, determine if listener or client (outbound/accepted) */
+        if (initial_events != NULL && bitarray_test(initial_events, REACTOR_EVENT_CAN_ACCEPT)) {
+            /* Has CAN_ACCEPT enabled - this is a listening socket */
+            sock_type = SOCKET_TYPE_LISTENER;
+            already_connected = true;  /* Listeners don't need to connect */
+        } else if (initial_events == NULL || !bitarray_test(initial_events, REACTOR_EVENT_CONNECTED)) {
+            /* CONNECTED event NOT enabled - socket is already connected (from accept() or pre-connected) */
+            already_connected = true;
+        } else {
+            /* CONNECTED event IS enabled - this is an outbound client socket pending async connect */
+            already_connected = false;
+        }
+    } else if (sock_type == SOCKET_TYPE_DGRAM) {
+        already_connected = true;  /* UDP doesn't have connection state */
+    }
 
-#ifdef _WIN32
-    mutex_rc = EnterCriticalSection(&r->lock);
-    if(mutex_rc == 0) {
-        rc = util_err_from_wsa(GetLastError());
+    rc = reactor_lock(r);
+    if(rc != UTIL_OK) {
         pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to add socket fd=%d.  Error %s.", sock, util_err_str(rc));
         return rc;
     }
-#else
-    mutex_rc = pthread_mutex_lock(&r->lock);
-    if(mutex_rc != 0) {
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to add socket fd=%d.  Error %s.", sock, util_err_str(util_err_from_errno(mutex_rc)));
-        return util_err_from_errno(mutex_rc);
-    }
-#endif
 
-    rc = UTIL_ERESOURCE;
-
-    /* Find first available slot, skipping index 0 (reserved for wake pipe) */
-    for (size_t i = 1; i < r->max_sockets; i++) {
-        if (r->sockets[i].sock == INVALID_SOCKET) {
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Adding socket fd=%d at index %zu", sock, i);
-            r->sockets[i].sock = sock;
-            r->sockets[i].callback = cb;
-            r->sockets[i].context = ctx;
-            r->sockets[i].socket_type = sock_type;
-            r->sockets[i].connected = (sock_type == SOCKET_TYPE_DGRAM);  /* UDP is always "connected" */
-
-            /* Use provided initial events, or enable all if not provided */
-            if (initial_events != NULL) {
-                r->sockets[i].enabled = *initial_events;
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Set initial event mask for socket at index %zu", i);
-            } else {
-                bitarray_set_all(&r->sockets[i].enabled);  /* All events enabled by default */
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Enabled all events for socket at index %zu", i);
-            }
-
-            bitarray_clear_all(&r->sockets[i].pending_events);
-            memset(&r->sockets[i].last_revents, 0, sizeof(r->sockets[i].last_revents));
-
-            r->pollfds[i].fd = sock;
-            r->pollfds[i].events = 0;
-            r->pollfds[i].revents = 0;
-
-            /* Rebuild poll events */
-            rebuild_pollfds_for_socket(r, i);
-
-            r->active_socket_count++;
-
-            rc = UTIL_OK;
-
-            break;
-        }
+    /* With compacted arrays, new sockets go at active_socket_count */
+    if (r->active_socket_count >= r->max_sockets) {
+        reactor_unlock(r);
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "No available slots to add socket fd=%d (active=%zu, max=%zu)", sock, r->active_socket_count, r->max_sockets);
+        return UTIL_ERESOURCE;
     }
 
-#ifdef _WIN32
-    LeaveCriticalSection(&r->lock);
-#else
-    pthread_mutex_unlock(&r->lock);
-#endif
+    size_t i = r->active_socket_count;
+    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Adding socket[%s] fd=%d at index %zu", sock_name, sock, i);
+    r->sockets[i].sock = sock;
+    r->sockets[i].name = name ? strdup(name) : NULL;
+    r->sockets[i].callback = cb;
+    r->sockets[i].context = ctx;
+    r->sockets[i].socket_type = sock_type;
+    r->sockets[i].connected = already_connected;
 
-    if(rc != UTIL_OK) {
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "No available slots to add socket fd=%d", sock);
+    /* Use provided initial events, or enable all if not provided */
+    if (initial_events != NULL) {
+        r->sockets[i].enabled = *initial_events;
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Set initial event mask for socket[%s] at index %zu", sock_name, i);
+    } else {
+        bitarray_set_all(&r->sockets[i].enabled);  /* All events enabled by default */
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Enabled all events for socket[%s] at index %zu", sock_name, i);
     }
 
-    return rc;
+    bitarray_clear_all(&r->sockets[i].pending_events);
+    memset(&r->sockets[i].last_revents, 0, sizeof(r->sockets[i].last_revents));
+
+    r->pollfds[i].fd = sock;
+    r->pollfds[i].events = 0;
+    r->pollfds[i].revents = 0;
+
+    /* Mark pollfds dirty so it gets rebuilt before next poll() */
+    r->pollfds_dirty = true;
+
+    r->active_socket_count++;
+
+    reactor_unlock(r);
+
+    return UTIL_OK;
 }
 
 util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
@@ -925,54 +1156,42 @@ util_err_t reactor_remove_socket(reactor_t *r, socket_t sock) {
         return UTIL_EINVAL;
     }
 
-    int mutex_rc = 0;
-
-#ifdef _WIN32
-    mutex_rc = EnterCriticalSection(&r->lock);
-    if(mutex_rc == 0) {
-        util_err_t rc = util_err_from_wsa(GetLastError());
+    util_err_t rc = reactor_lock(r);
+    if(rc != UTIL_OK) {
         pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to remove socket fd=%d.  Error %s.", sock, util_err_str(rc));
         return rc;
     }
-#else
-    mutex_rc = pthread_mutex_lock(&r->lock);
-    if(mutex_rc != 0) {
-        util_err_t rc = util_err_from_errno(mutex_rc);
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to remove socket fd=%d.  Error %s.", sock, util_err_str(rc));
-        return rc;
-    }
-#endif
 
     /* Find socket, skipping index 0 (reserved for wake pipe) */
-    for (size_t i = 1; i < r->max_sockets; i++) {
+    for (size_t i = 1; i < r->active_socket_count; i++) {
         if (r->sockets[i].sock == sock) {
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_remove_socket: Removing socket fd=%d from index %zu", sock, i);
-            r->sockets[i].sock = INVALID_SOCKET;
-            r->sockets[i].callback = NULL;
-            r->sockets[i].context = NULL;
-            bitarray_clear_all(&r->sockets[i].pending_events);
+            const char *sock_name = r->sockets[i].name ? r->sockets[i].name : "(unnamed)";
+            
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "reactor_remove_socket: Marking socket[%s] fd=%d for removal", sock_name, sock);
+            
+            /* Mark for removal - rebuild_pollfds will handle compaction */
+            r->sockets[i].pending_removal = true;
+            
+            /* Disable all events so poll() won't report events for this socket */
             bitarray_clear_all(&r->sockets[i].enabled);
-
-            r->pollfds[i].fd = INVALID_SOCKET;
             r->pollfds[i].events = 0;
-            r->pollfds[i].revents = 0;
+            
+            /* Set dirty flag so rebuild_pollfds will compact the arrays */
+            r->pollfds_dirty = true;
+            
+            /* If not on reactor thread, wake it so rebuild happens promptly */
+            if (!is_reactor_thread(r)) {
+                reactor_unlock(r);
+                tickle_wake_pipe(r);
+                return UTIL_OK;
+            }
 
-            r->active_socket_count--;
-
-#ifdef _WIN32
-            LeaveCriticalSection(&r->lock);
-#else
-            pthread_mutex_unlock(&r->lock);
-#endif
+            reactor_unlock(r);
             return UTIL_OK;
         }
     }
 
-#ifdef _WIN32
-    LeaveCriticalSection(&r->lock);
-#else
-    pthread_mutex_unlock(&r->lock);
-#endif
+    reactor_unlock(r);
     return UTIL_ENOTFOUND;
 }
 
@@ -1008,25 +1227,13 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
 
     g_set_mask_stats.calls++;
 
-    int mutex_rc = 0;
-
     /* Time lock acquisition start*/
     t0 = util_time_us();
-#ifdef _WIN32
-    mutex_rc = EnterCriticalSection(&r->lock);
-    if(mutex_rc == 0) {
-        int rc = util_err_from_wsa(GetLastError());
+    util_err_t rc = reactor_lock(r);
+    if(rc != UTIL_OK) {
         pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set event mask for socket fd=%d.  Error %s.", sock, util_err_str(rc));
         return rc;
     }
-#else
-    mutex_rc = pthread_mutex_lock(&r->lock);
-    if(mutex_rc != 0) {
-        util_err_t rc = util_err_from_errno(mutex_rc);
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set event mask for socket fd=%d.  Error %s.", sock, util_err_str(rc));
-        return rc;
-    }
-#endif
 
     /* Time lock acquisition end */
     t1 = util_time_us();
@@ -1041,42 +1248,64 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
             t1 = util_time_us();
             g_set_mask_stats.search_time_us += (t1 - t0);
 
+            const char *sock_name = r->sockets[i].name ? r->sockets[i].name : "(unnamed)";
+
             /* Time log_detail */
             t0 = util_time_us();
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "Found socket fd=%d at index %zu", sock, i);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "Found socket[%s] fd=%d at index %zu", sock_name, sock, i);
             t1 = util_time_us();
             g_set_mask_stats.log_time_us += (t1 - t0);
+
+            /* Check if the mask is actually changing - if not, skip update entirely */
+            if (bitarray_equal(&r->sockets[i].enabled, &event_mask)) {
+                /* Mask unchanged - no need to update or wake */
+                reactor_unlock(r);
+                return UTIL_OK;
+            }
+
+            /* Detect newly enabled events (transitioning from 0→1) to clear last_revents */
+            bool read_newly_enabled = (bitarray_test(&event_mask, REACTOR_EVENT_CAN_READ) && !bitarray_test(&r->sockets[i].enabled, REACTOR_EVENT_CAN_READ)) ||
+                                      (bitarray_test(&event_mask, REACTOR_EVENT_CAN_ACCEPT) && !bitarray_test(&r->sockets[i].enabled, REACTOR_EVENT_CAN_ACCEPT));
+            bool write_newly_enabled = (bitarray_test(&event_mask, REACTOR_EVENT_CAN_WRITE) && !bitarray_test(&r->sockets[i].enabled, REACTOR_EVENT_CAN_WRITE)) ||
+                                       (bitarray_test(&event_mask, REACTOR_EVENT_CONNECTED) && !bitarray_test(&r->sockets[i].enabled, REACTOR_EVENT_CONNECTED));
+
+            /* Clear last_revents bits for newly enabled events to allow edge retrigger */
+            if (read_newly_enabled) {
+                r->sockets[i].last_revents.revents &= ~POLLIN;
+            }
+            if (write_newly_enabled) {
+                r->sockets[i].last_revents.revents &= ~POLLOUT;
+            }
 
             /* Atomically replace the entire event mask */
             r->sockets[i].enabled = event_mask;
 
-            /* Time rebuild */
-            t0 = util_time_us();
-            rebuild_pollfds_for_socket(r, i);
-            t1 = util_time_us();
-            g_set_mask_stats.rebuild_time_us += (t1 - t0);
+            /* Mark pollfds dirty so it gets rebuilt before next poll() */
+            r->pollfds_dirty = true;
 
             /* Time second log_detail */
             t0 = util_time_us();
-            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "Rebuilt events for socket at index %zu, new events=0x%x", i, r->pollfds[i].events);
+            pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_SPEW, "Set event mask for socket[%s] at index %zu", sock_name, i);
             t1 = util_time_us();
             g_set_mask_stats.log_time_us += (t1 - t0);
 
             /* Time unlock */
             t0 = util_time_us();
-#ifdef _WIN32
-            LeaveCriticalSection(&r->lock);
-#else
-            pthread_mutex_unlock(&r->lock);
-#endif
+            reactor_unlock(r);
             t1 = util_time_us();
             g_set_mask_stats.unlock_time_us += (t1 - t0);
 
-            /* Time wake pipe */
-            t0 = util_time_us();
-            tickle_wake_pipe(r);
-            t1 = util_time_us();
-            g_set_mask_stats.wake_time_us += (t1 - t0);
+            /* Only tickle wake pipe if called from outside the reactor thread.
+             * If we're on the reactor thread (inside a callback), the changes 
+             * will be picked up on the next poll iteration without needing to 
+             * wake ourselves - avoiding a busy loop. */
+            if (!is_reactor_thread(r)) {
+                /* Time wake pipe */
+                t0 = util_time_us();
+                tickle_wake_pipe(r);
+                t1 = util_time_us();
+                g_set_mask_stats.wake_time_us += (t1 - t0);
+            }
 
             return UTIL_OK;
         }
@@ -1085,11 +1314,7 @@ util_err_t reactor_set_event_mask(reactor_t *r, socket_t sock, bitarray_t event_
     t1 = util_time_us();
     g_set_mask_stats.search_time_us += (t1 - t0);
 
-#ifdef _WIN32
-    LeaveCriticalSection(&r->lock);
-#else
-    pthread_mutex_unlock(&r->lock);
-#endif
+    reactor_unlock(r);
     return UTIL_ENOTFOUND;
 }
 
@@ -1099,36 +1324,23 @@ util_err_t reactor_stop(reactor_t *r) {
         return UTIL_EINVAL;
     }
 
-    int mutex_rc = 0;
-
-#ifdef _WIN32
-    if((mutex_rc = EnterCriticalSection(&r->lock)) == 0) {
-        int rc = util_err_from_wsa(GetLastError());
+    util_err_t rc = reactor_lock(r);
+    if(rc != UTIL_OK) {
         pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to stop reactor.  Error %s.", util_err_str(rc));
         return rc;
     }
-#else
-    mutex_rc = pthread_mutex_lock(&r->lock);
-    if(mutex_rc != 0) {
-        util_err_t rc = util_err_from_errno(mutex_rc);
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to stop reactor.  Error %s.", util_err_str(rc));
-        return rc;
-    }
-#endif
 
     r->shutdown = true;
 
-#ifdef _WIN32
-    LeaveCriticalSection(&r->lock);
-#else
-    pthread_mutex_unlock(&r->lock);
-#endif
+    reactor_unlock(r);
 
     tickle_wake_pipe(r);
     return UTIL_OK;
 }
 
 util_err_t reactor_wake(reactor_t *r) {
+    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Waking reactor");
+
     if (r == NULL) {
         return UTIL_EINVAL;
     }
@@ -1144,14 +1356,29 @@ util_err_t reactor_wake(reactor_t *r) {
 
 util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
     int64_t t0, t1;
-    int mutex_rc = 0;
 
     if (r == NULL) {
         return UTIL_EINVAL;
     }
 
+    /* Record reactor thread ID so we can detect calls from within callbacks.
+     * This prevents unnecessary wake pipe tickles when reactor_set_event_mask 
+     * is called from within callbacks running on this thread. */
+#ifdef _WIN32
+    r->reactor_thread_id = GetCurrentThreadId();
+#else
+    r->reactor_thread_id = pthread_self();
+#endif
+
     /* Main event loop: runs continuously until reactor_stop() is called */
     while (!r->shutdown) {
+        /* Rebuild pollfds array if needed.
+         * This handles: compacting arrays after socket removal,
+         * updating poll events after mask changes, and cleaning up
+         * sockets marked for deferred removal.
+         * MUST happen before poll() so the arrays are valid. */
+        rebuild_pollfds(r);
+
         /* Use poll_timeout_ms directly for TICK event generation */
         int timeout = (int)poll_timeout_ms;
 
@@ -1160,8 +1387,9 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         /* Log poll fd setup for listener sockets (typically indices 1 and 2) */
         for (size_t i = 1; i < r->active_socket_count && i < 3; i++) {
             if (r->sockets[i].sock != INVALID_SOCKET) {
+                const char *sock_name = r->sockets[i].name ? r->sockets[i].name : "(unnamed)";
                 bool has_events = bitarray_has_any(&r->sockets[i].enabled);
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Socket[%zu] fd=%d events=0x%x has_enabled=%d", i, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
+                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Socket[%s] fd=%d events=0x%x has_enabled=%d", sock_name, r->pollfds[i].fd, r->pollfds[i].events, has_events ? 1 : 0);
             }
         }
 
@@ -1193,6 +1421,16 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
 
         pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "poll() returned %d ready sockets", ret);
 
+        /* Log which sockets have events */
+        if (ret > 0) {
+            for (size_t i = 0; i < r->active_socket_count; i++) {
+                if (r->pollfds[i].revents != 0) {
+                    const char *sock_name = r->sockets[i].name ? r->sockets[i].name : "(unnamed)";
+                    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Socket[%s] fd=%d has revents=0x%x", sock_name, (int)r->pollfds[i].fd, r->pollfds[i].revents);
+                }
+            }
+        }
+
         /* Detect timeout to raise TICK events */
         bool poll_timeout_expired = (ret == 0);
 
@@ -1204,7 +1442,9 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
             if (i == 0) {
                 /* Wake pipe: special handling */
                 if (r->pollfds[i].revents & POLLIN) {
+                    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Draining wake pipe fd=%d", (int)r->wake_pipe[0]);
                     drain_wake_pipe(r);
+                    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_DETAIL, "Wake pipe drained");
                 }
             } else {
                 /* Regular socket */
@@ -1217,29 +1457,17 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
 
         /* Raise TICK events for all sockets with TICK enabled (if poll timed out) */
         if (poll_timeout_expired) {
-#ifdef _WIN32
-            if((mutex_rc = EnterCriticalSection(&r->lock)) == 0) {
-                int rc = util_err_from_wsa(GetLastError());
+            util_err_t rc = reactor_lock(r);
+            if(rc != UTIL_OK) {
                 pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set TICK events.  Error %s.", util_err_str(rc));
                 return rc;
             }
-#else
-            if((mutex_rc = pthread_mutex_lock(&r->lock)) != 0) {
-                util_err_t rc = util_err_from_errno(mutex_rc);
-                pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set TICK events.  Error %s.", util_err_str(rc));
-                return rc;
-            }
-#endif
             for (size_t i = 1; i < r->max_sockets; i++) {
                 if (r->sockets[i].sock != INVALID_SOCKET && bitarray_test(&r->sockets[i].enabled, REACTOR_EVENT_TICK)) {
                     bitarray_set(&r->sockets[i].pending_events, REACTOR_EVENT_TICK);
                 }
             }
-#ifdef _WIN32
-            LeaveCriticalSection(&r->lock);
-#else
-            pthread_mutex_unlock(&r->lock);
-#endif
+            reactor_unlock(r);
         }
 
         /* Time event delivery */
@@ -1253,19 +1481,11 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
     }
 
     /* After shutdown, deliver SHUTDOWN events to all sockets */
-#ifdef _WIN32
-    if((mutex_rc = EnterCriticalSection(&r->lock)) == 0) {
-        int rc = util_err_from_wsa(GetLastError());
+    util_err_t rc = reactor_lock(r);
+    if(rc != UTIL_OK) {
         pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set SHUTDOWN events.  Error %s.", util_err_str(rc));
         return rc;
     }
-#else
-    if((mutex_rc = pthread_mutex_lock(&r->lock)) != 0) {
-        util_err_t rc = util_err_from_errno(mutex_rc);
-        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to acquire reactor lock to set SHUTDOWN events.  Error %s.", util_err_str(rc));
-        return rc;
-    }
-#endif
 
     for (size_t i = 1; i < r->max_sockets; i++) {
         if (r->sockets[i].sock != INVALID_SOCKET) {
@@ -1273,13 +1493,16 @@ util_err_t reactor_run(reactor_t *r, uint32_t poll_timeout_ms) {
         }
     }
 
-#ifdef _WIN32
-    LeaveCriticalSection(&r->lock);
-#else
-    pthread_mutex_unlock(&r->lock);
-#endif
+    reactor_unlock(r);
 
     deliver_pending_events(r);
+
+    /* Clear reactor thread ID before returning */
+#ifdef _WIN32
+    r->reactor_thread_id = 0;
+#else
+    r->reactor_thread_id = 0;
+#endif
 
     return UTIL_OK;
 }
