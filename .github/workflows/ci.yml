@@ -372,7 +372,7 @@ jobs:
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
     - name: Run Simulator Tests
-      run: bash src/tests/run_simulator_tests.sh '${{ env.DIST }}' logs
+      run: bash src/tests/scripts/run_simulator_tests.sh '${{ env.DIST }}' logs
       shell: bash
 
     - name: Upload test logs
@@ -564,10 +564,7 @@ jobs:
       with:
         name: test-logs-ubuntu_${{ matrix.artifact_suffix }}
         path: |
-          ${{ env.DIST }}/*_test.log
-          ${{ env.DIST }}/*_emulator.log
-          ${{ env.DIST }}/modbus_server.log
-          ${{ env.DIST }}/test_modbus_multiple.log
+          logs/*.log
         retention-days: 7
 
     - name: Upload ZIP artifacts
