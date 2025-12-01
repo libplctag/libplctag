@@ -948,12 +948,15 @@ static util_err_t create_wake_pipe(socket_t wake_pipe[2]) {
  * ================================================================ */
 
 reactor_t* reactor_create(size_t max_sockets) {
+    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_INFO, "Creating reactor with max_sockets=%zu", max_sockets);
     if (max_sockets == 0) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Invalid max_sockets=0");
         return NULL;
     }
 
     reactor_t *r = (reactor_t *)malloc(sizeof(reactor_t));
     if (r == NULL) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_ERROR, "Failed to allocate reactor instance");
         return NULL;
     }
 
@@ -967,6 +970,7 @@ reactor_t* reactor_create(size_t max_sockets) {
     /* Allocate socket registry, one extra for wake pipe */
     r->sockets = (socket_entry_t *)malloc(r->max_sockets * sizeof(socket_entry_t));
     if (r->sockets == NULL) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_ERROR, "Failed to allocate reactor socket registry");
         free(r);
         return NULL;
     }
@@ -980,6 +984,7 @@ reactor_t* reactor_create(size_t max_sockets) {
     /* Allocate poll array */
     r->pollfds = (struct pollfd *)malloc(r->max_sockets * sizeof(struct pollfd));
     if (r->pollfds == NULL) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_ERROR, "Failed to allocate reactor pollfd array");
         free(r->sockets);
         free(r);
         return NULL;
@@ -995,6 +1000,7 @@ reactor_t* reactor_create(size_t max_sockets) {
 
     /* Create wake pipe */
     if (create_wake_pipe(r->wake_pipe) != UTIL_OK) {
+        pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_WARN, "Failed to create reactor wake pipe");
         free(r->pollfds);
         free(r->sockets);
 #ifdef _WIN32
@@ -1022,6 +1028,8 @@ reactor_t* reactor_create(size_t max_sockets) {
 
     /* Initialize shutdown flag */
     r->shutdown = false;
+
+    pdlog(LOG_MODULE_REACTOR, LOG_LEVEL_INFO, "Reactor created successfully");
 
     return r;
 }
