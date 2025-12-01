@@ -66,7 +66,7 @@ typedef pthread_cond_t compat_cond_t;
 
 #    define WIN32_LEAN_AND_MEAN
 
-#    include <Windows.h>
+#    include <windows.h>
 
 #    include <time.h>
 

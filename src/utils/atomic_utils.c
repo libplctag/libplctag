@@ -47,7 +47,7 @@
 
 #    ifdef _WIN32
 #       define WIN32_LEAN_AND_MEAN
-#       include <Windows.h>
+#       include <windows.h>
 #    endif
 
 void atomic_init_bool(atomic_bool *a, bool new_val) { *a = new_val; }
