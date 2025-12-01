@@ -41,8 +41,7 @@
 
 
 #define REQUIRED_VERSION 2, 5, 5
-#define TAG_ATTRIBS_TMPL \
-    "protocol=ab_eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_type=DINT&elem_count=1&name=TestBigArray[%d]&auto_sync_read_ms=200&auto_sync_write_ms=20"
+#define TAG_ATTRIBS_TMPL "protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=1&name=hr5&auto_sync_read_ms=200&auto_sync_write_ms=20"
 #define DATA_TIMEOUT (5000)
 #define RUN_PERIOD (10000)
 #define READ_SLEEP_MS (100)
@@ -66,7 +65,6 @@ static void tag_callback(int32_t tag_id, int event, int status, void *not_used);
 
 int main(void) {
     int rc = PLCTAG_STATUS_OK;
-    char tag_attr_str[sizeof(TAG_ATTRIBS_TMPL) + 10] = {0};
     compat_thread_t read_threads[NUM_TAGS];
     compat_thread_t write_threads[NUM_TAGS];
     int version_major = plc_tag_get_int_attribute(0, "version_major", 0);
@@ -94,8 +92,7 @@ int main(void) {
         int32_t tag_id = PLCTAG_ERR_CREATE;
 
         // NOLINTNEXTLINE
-        snprintf(tag_attr_str, sizeof(tag_attr_str), TAG_ATTRIBS_TMPL, (int32_t)i);
-        tag_id = plc_tag_create_ex(tag_attr_str, tag_callback, NULL, DATA_TIMEOUT);
+        tag_id = plc_tag_create_ex(TAG_ATTRIBS_TMPL, tag_callback, NULL, DATA_TIMEOUT);
 
         if(tag_id <= 0) {
             // NOLINTNEXTLINE
@@ -127,14 +124,46 @@ int main(void) {
 
     // NOLINTNEXTLINE
     fprintf(stderr, "Waiting for threads to quit.\n");
+    fflush(stderr);
+
+    /* Join all threads with periodic status logging */
+    int threads_remaining = NUM_TAGS * 2;
+    int64_t wait_start = compat_time_ms();
+    int64_t wait_timeout = 30000;  /* 30 second timeout */
 
     for(int i = 0; i < NUM_TAGS; i++) {
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Joining reader thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
+        fflush(stderr);
         compat_thread_join(read_threads[i], NULL);
+        threads_remaining--;
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Reader thread %d joined. Threads remaining: %d\n", i, threads_remaining);
+        fflush(stderr);
+
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Joining writer thread for tag %d at time %" PRId64 "ms\n", i, compat_time_ms() - wait_start);
+        fflush(stderr);
         compat_thread_join(write_threads[i], NULL);
+        threads_remaining--;
+        // NOLINTNEXTLINE
+        fprintf(stderr, "Writer thread %d joined. Threads remaining: %d\n", i, threads_remaining);
+        fflush(stderr);
+
+        /* Check if we're taking too long */
+        int64_t elapsed = compat_time_ms() - wait_start;
+        if (elapsed > wait_timeout) {
+            // NOLINTNEXTLINE
+            fprintf(stderr, "ERROR: Thread join timeout after %" PRId64 "ms with %d threads still remaining!\n",
+                    elapsed, threads_remaining);
+            fflush(stderr);
+            break;
+        }
     }
 
     // NOLINTNEXTLINE
-    fprintf(stderr, "Done.\n");
+    fprintf(stderr, "Done at time %" PRId64 "ms.\n", compat_time_ms() - wait_start);
+    fflush(stderr);
 
     return rc;
 }

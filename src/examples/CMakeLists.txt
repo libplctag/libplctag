@@ -37,7 +37,9 @@ endif()
   test_alternate_tag_listing
   test_array_notation
   test_auto_sync
-  test_reconnect_after_outage
+  test_auto_sync_modbus
+  test_reconnect_after_outage_async
+  test_reconnect_after_outage_sync
   test_callback
   test_callback_ex
   test_callback_ex_logix
@@ -45,11 +47,13 @@ endif()
   test_connection_group
   test_emulator_performance
   test_event
+  test_fairness
   test_indexed_tags
   test_modbus_multiple
   test_raw_cip
   test_reconnect
-  test_shutdown
+  test_shutdown_cip
+  test_shutdown_modbus
   test_special
   test_string
   test_tag_attributes
@@ -103,6 +107,15 @@ foreach(example ${EXAMPLE_EXECUTABLES})
     #     target_link_options(${example} PRIVATE ${EXTRA_LINK_OPTIONS})
     # endif()
 endforeach()
+
+# test_fairness needs stats.c for statistics calculations
+target_sources(test_fairness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/stats.c")
+
+# Link math library for tests that use sqrt() and other math functions
+# Math functions are in libm on Unix but in the C runtime on Windows
+if(UNIX)
+    target_link_libraries(test_fairness m)
+endif()
 
 # Install only the tag_rw2 tool into the devel component
 install(TARGETS tag_rw2

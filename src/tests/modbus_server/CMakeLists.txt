@@ -9,12 +9,21 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Source files
 set(SOURCES
     modbus_server.c
-    logger.c
-    socket_utils.c
-    config.c
     register_storage.c
     modbus_protocol.c
+    ../utils/buf.c
+    ../utils/err.c
+    ../utils/fsm.c
+    ../utils/log.c
+    ../utils/reactor.c
+    ../utils/socket.c
+    ../utils/args.c
+    ../utils/utils.c
+    ../utils/atomic_utils.c
 )
+
+# Include directories
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../utils)
 
 # Create executable
 add_executable(modbus_server ${SOURCES})
@@ -37,7 +46,18 @@ elseif(UNIX)
         if(RT_LIBRARY)
             target_link_libraries(modbus_server ${RT_LIBRARY})
         endif()
+
+        # Link atomic library for 64-bit atomic operations on 32-bit ARM
+        # (atomic_utils.c uses __atomic_store_8, __atomic_load_8, etc.)
+        # Only needed on ARM platforms; x86_64 has native atomic instructions
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|ARM)")
+            target_link_libraries(modbus_server atomic)
+        endif()
     endif()
+
+    # Link math library (modbus_server uses sqrt)
+    # Math functions are in libm on Unix but in the C runtime on Windows
+    target_link_libraries(modbus_server m)
 endif()
 
 # Compiler-specific warnings

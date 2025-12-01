@@ -31,82 +31,70 @@
  *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
  ***************************************************************************/
 
-#ifndef SOCKET_UTILS_H
-#define SOCKET_UTILS_H
+#pragma once
 
-#include <stdbool.h>
-#include <stdint.h>
+#include <stdio.h>
 
-/* Cross-platform socket type and definitions */
-#ifdef _WIN32
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    typedef SOCKET socket_t;
-    typedef unsigned int nfds_t;
-    #define INVALID_SOCKET_VALUE INVALID_SOCKET
-    #define SOCKET_ERROR_VALUE SOCKET_ERROR
-    typedef int socklen_t;
-#else
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <netinet/tcp.h>
-    #include <arpa/inet.h>
-    #include <unistd.h>
-    #include <fcntl.h>
-    #include <poll.h>
-    #include <errno.h>
-    typedef int socket_t;
-    #define INVALID_SOCKET_VALUE (-1)
-    #define SOCKET_ERROR_VALUE (-1)
-    #define closesocket close
-#endif
+/*
+ * Statistics utility functions for analyzing distributions.
+ *
+ * These functions help measure fairness and detect clustering in
+ * distributions of values (e.g., read counts per tag).
+ */
 
-/* Unified invalid socket value */
-#define LIBPLCTAG_INVALID_SOCKET INVALID_SOCKET_VALUE
+/* Summary statistics structure */
+typedef struct {
+    int count;          /* Number of values */
+    int min;            /* Minimum value */
+    int max;            /* Maximum value */
+    double mean;        /* Arithmetic mean */
+    double variance;    /* Population variance */
+    double std_dev;     /* Population standard deviation */
+    double cv;          /* Coefficient of variation (std_dev/mean * 100) */
+    double min_max_ratio; /* min/max ratio (1.0 = perfect equality) */
+    int q1;             /* First quartile (25th percentile) */
+    int median;         /* Median (50th percentile) */
+    int q3;             /* Third quartile (75th percentile) */
+    int iqr;            /* Interquartile range (Q3 - Q1) */
+} stats_summary_t;
 
-/* Poll events wrapper */
-#ifdef _WIN32
-    typedef WSAPOLLFD pollfd_t;
-    #define poll_wrapper WSAPoll
-#else
-    typedef struct pollfd pollfd_t;
-    #define poll_wrapper poll
-#endif
+/*
+ * Calculate summary statistics for an array of integer values.
+ *
+ * @param values    Array of integer values to analyze
+ * @param count     Number of values in the array
+ * @param summary   Output structure to fill with statistics
+ *
+ * @return 0 on success, -1 on error (null pointer or count <= 0)
+ */
+int stats_calculate(const int *values, int count, stats_summary_t *summary);
 
-/* Initialize socket library (Windows WSAStartup) */
-bool socket_init(void);
+/*
+ * Print summary statistics to a file stream.
+ *
+ * @param stream    Output stream (e.g., stderr)
+ * @param summary   Statistics to print
+ */
+void stats_print_summary(FILE *stream, const stats_summary_t *summary);
 
-/* Cleanup socket library (Windows WSACleanup) */
-void socket_cleanup(void);
+/*
+ * Print a histogram of values to a file stream.
+ *
+ * @param stream        Output stream (e.g., stderr)
+ * @param values        Array of integer values
+ * @param count         Number of values
+ * @param num_buckets   Number of histogram buckets (0 for auto)
+ * @param max_bar_width Maximum width of histogram bars in characters
+ */
+void stats_print_histogram(FILE *stream, const int *values, int count,
+                           int num_buckets, int max_bar_width);
 
-/* Create a listening socket */
-socket_t socket_create_listener(const char *ip, int port);
-
-/* Set socket to non-blocking mode */
-bool socket_set_nonblocking(socket_t sock);
-
-/* Set SO_REUSEADDR option */
-bool socket_set_reuseaddr(socket_t sock);
-
-/* Accept a connection and format client info as "IP:PORT" */
-socket_t socket_accept(socket_t listener, char *client_info, size_t info_len);
-
-/* Close a socket */
-void socket_close(socket_t sock);
-
-/* Send data on socket */
-int socket_send(socket_t sock, const void *buffer, int length);
-
-/* Receive data from socket */
-int socket_recv(socket_t sock, void *buffer, int length);
-
-/* Get last socket error */
-int socket_get_last_error(void);
-
-/* Get error string for error code */
-const char* socket_get_error_string(int error_code);
-
-/* Check if socket is valid */
-bool socket_is_valid(socket_t sock);
-
-#endif /* SOCKET_UTILS_H */
+/*
+ * Assess fairness based on statistics.
+ *
+ * @param summary   Statistics to assess
+ * @param stream    Output stream for assessment (can be NULL for no output)
+ *
+ * @return 0 if fair (CV < 20% AND min/max > 0.7), -1 if unfair
+ */
+int stats_assess_fairness(const stats_summary_t *summary, FILE *stream);

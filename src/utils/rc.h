@@ -45,3 +45,7 @@ extern void *rc_inc_impl(const char *func, int line_num, void *ref);
 
 #define rc_dec(ref) rc_dec_impl(__func__, __LINE__, ref)
 extern void *rc_dec_impl(const char *func, int line_num, void *ref);
+
+/* Refcount cleanup thread management */
+extern int refcount_startup(void);
+extern int refcount_teardown(void);

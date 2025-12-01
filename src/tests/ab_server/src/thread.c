@@ -49,6 +49,7 @@
 #include "memory.h"
 #include "thread.h"
 #include "utils.h"
+#include "log.h"
 
 
 struct thread_t {
@@ -71,19 +72,19 @@ struct thread_t {
  */
 
 extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *arg) {
-    info("DETAIL: Starting.");
+    log_info("DETAIL: Starting.");
 
-    info("DETAIL: Warning: ignoring stacksize (%d) parameter.", stacksize);
+    (void)stacksize; /* Note: We now set a fixed 1MB stack size on POSIX systems */
 
     if(!t) {
-        info("WARN: null thread pointer.");
+        log_info("WARN: null thread pointer.");
         return THREAD_ERR_NULL_PTR;
     }
 
     *t = (thread_p)mem_alloc(sizeof(struct thread_t));
 
     if(!*t) {
-        error("ERROR: Failed to allocate memory for thread.");
+        log_error("ERROR: Failed to allocate memory for thread.");
         return THREAD_ERR_NULL_PTR;
     }
 
@@ -97,7 +98,7 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
                                   NULL); /* do not need thread ID       */
 
     if(!(*t)->h_thread) {
-        info("WARN: error creating thread.");
+        log_info("WARN: error creating thread.");
         mem_free(*t);
         *t = NULL;
 
@@ -107,13 +108,21 @@ extern int thread_create(thread_p *t, thread_func_t func, int stacksize, void *a
     /* mark as initialized */
     (*t)->initialized = 1; /* note this is never used and not even set in the posix version */
 #else
-    if(pthread_create(&((*t)->p_thread), NULL, func, arg)) {
-        error("ERROR: error creating thread.");
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    /* Set stack size to 1MB to rule out stack size issues */
+    pthread_attr_setstacksize(&attr, 1024 * 1024);
+
+    int rc = pthread_create(&((*t)->p_thread), &attr, func, arg);
+    pthread_attr_destroy(&attr);
+
+    if(rc) {
+        log_error("ERROR: error creating thread.");
         return THREAD_ERR_THREAD_CREATE;
     }
 #endif
 
-    info("DETAIL: Done.");
+    log_info("DETAIL: Done.");
 
     return THREAD_STATUS_OK;
 }
@@ -165,10 +174,10 @@ int thread_join(thread_p t) {
     void *unused;
 #endif
 
-    info("DETAIL: Starting.");
+    log_info("DETAIL: Starting.");
 
     if(!t) {
-        info("WARN: null thread pointer.");
+        log_info("WARN: null thread pointer.");
         return THREAD_ERR_NULL_PTR;
     }
 
@@ -178,11 +187,11 @@ int thread_join(thread_p t) {
 #else
     if(pthread_join(t->p_thread, &unused)) {
 #endif
-        error("ERROR: Error joining thread.");
+        log_error("ERROR: Error joining thread.");
         return THREAD_ERR_THREAD_JOIN;
     }
 
-    info("DETAIL: Done.");
+    log_info("DETAIL: Done.");
 
     return THREAD_STATUS_OK;
 }
@@ -212,10 +221,10 @@ extern int thread_detach(void) {
  * question must be dead first!
  */
 extern int thread_destroy(thread_p *t) {
-    info("DETAIL: Starting.");
+    log_info("DETAIL: Starting.");
 
     if(!t || !*t) {
-        info("WARN: null thread pointer.");
+        log_info("WARN: null thread pointer.");
         return THREAD_ERR_NULL_PTR;
     }
 
@@ -227,7 +236,7 @@ extern int thread_destroy(thread_p *t) {
 
     *t = NULL;
 
-    info("DETAIL: Done.");
+    log_info("DETAIL: Done.");
 
     return THREAD_STATUS_OK;
 }

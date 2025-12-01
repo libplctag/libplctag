@@ -36,15 +36,15 @@ done
 
 
 echo "  Killing emulators."
-killall -TERM ab_server > /dev/null 2>&1
+pkill -TERM ab_server > /dev/null 2>&1
 
-killall -TERM modbus_server > /dev/null 2>&1
+pkill -TERM modbus_server > /dev/null 2>&1
 
 # wait for them to exit
 sleep 2
 
 # echo -n "  Starting Modbus server $SCRIPT_DIR/modbus_server... "
-$TEST_DIR/modbus_server --listen 127.0.0.1:1502 --listen 127.0.0.1:2502 --debug > modbus_server.log 2>&1 &
+$TEST_DIR/modbus_server --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > modbus_server.log 2>&1 &
 MODBUS_PID=$!
 if [ $? != 0 ]; then
     # echo "FAILURE"
@@ -52,7 +52,7 @@ if [ $? != 0 ]; then
     exit 1
 else
     # sleep to let the server start up all the way
-    sleep 2
+    sleep 3
     # echo "Modbus server started"
 fi
 
@@ -69,7 +69,7 @@ fi
 
 let TEST++
 echo -n "Test $TEST: test long reconnect with Modbus... "
-$VALGRIND$TEST_DIR/test_reconnect 10 > "${TEST}_modbus_reconnect_long_test.log" 2>&1
+$VALGRIND$TEST_DIR/test_reconnect 15 > "${TEST}_modbus_reconnect_long_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -103,7 +103,8 @@ fi
 
 let TEST++
 echo -n "Test $TEST: for Modbus reconnect bug... "
-$VALGRIND$TEST_DIR/test_modbus_multiple > "${TEST}_test_modbus_multiple.log" 2>&1
+TST_LOG="${TEST}_modbus_reconnect_bug_test.log"
+$VALGRIND$TEST_DIR/test_modbus_multiple > ${TST_LOG} 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -115,20 +116,20 @@ fi
 # make sure that there is no thread(5) in the log file.
 let TEST++
 echo -n "Test $TEST: check for thread(5) in Modbus multiple test log... "
-if grep -q "thread(5)" "${TEST}_test_modbus_multiple.log" ; then
-    echo "FAILURE (found thread(5) in log file)"
+if grep -q "thread(5)" ${TST_LOG} ; then
+    echo "FAILURE (found thread(5) in log file ${TST_LOG})"
     let FAILURES++
 else
-    echo "OK (no thread(5) found in log file)"
+    echo "OK (no thread(5) found in log file ${TST_LOG})"
     let SUCCESSES++
 fi
 
 
 # echo "  Killing Modbus emulator."
-killall -TERM modbus_server > /dev/null 2>&1
+pkill -TERM modbus_server > /dev/null 2>&1
 
 # Make sure no ab_server instances are running before running auto_sync_reconnect test
-killall -TERM ab_server > /dev/null 2>&1
+pkill -TERM ab_server > /dev/null 2>&1
 
 # wait for them to exit
 sleep 2

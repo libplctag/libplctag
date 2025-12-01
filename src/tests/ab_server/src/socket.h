@@ -34,29 +34,10 @@
 #pragma once
 
 #include "compat.h"
-
-#include "result.h"
+#include "err.h"
 #include "slice.h"
 
 #include <stdint.h>
-
-typedef enum {
-    SOCKET_STATUS_OK = 0,
-    SOCKET_ERR_ACCEPT,
-    SOCKET_ERR_BAD_PARAM,
-    SOCKET_ERR_BIND,
-    SOCKET_ERR_CONNECT,
-    SOCKET_ERR_CREATE,
-    SOCKET_ERR_EOF,
-    SOCKET_ERR_LISTEN,
-    SOCKET_ERR_OPEN,
-    SOCKET_ERR_READ,
-    SOCKET_ERR_SELECT,
-    SOCKET_ERR_SETOPT,
-    SOCKET_ERR_STARTUP,
-    SOCKET_ERR_TIMEOUT,
-    SOCKET_ERR_WRITE
-} socket_err_t;
 
 #ifndef IS_WINDOWS
 typedef int SOCKET;
@@ -65,14 +46,33 @@ typedef int SOCKET;
 #    include <winsock2.h>
 #endif
 
-RESULT_DEF(socket_fd_result, SOCKET)
+/* ===== SOCKET API ===== */
 
-RESULT_DEF(socket_slice_result, slice_s)
+/* Open a TCP client connection
+ * Returns: Valid SOCKET file descriptor (>= 0) on success
+ *          Negative error code (from err_t) on failure */
+extern SOCKET socket_open_tcp_client(const char *remote_host, const char *remote_port);
 
+/* Open a TCP server socket
+ * Returns: Valid SOCKET file descriptor (>= 0) on success
+ *          Negative error code (from err_t) on failure */
+extern SOCKET socket_open_tcp_server(const char *listening_port);
 
-extern socket_fd_result socket_open_tcp_client(const char *remote_host, const char *remote_port);
-extern socket_fd_result socket_open_tcp_server(const char *listening_port);
+/* Close a socket */
 extern void socket_close(SOCKET sock);
-extern socket_fd_result socket_accept(SOCKET sock, uint32_t timeout_ms);
-extern socket_slice_result socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms);
-extern socket_slice_result socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms);
+
+/* Accept an incoming connection
+ * Returns: 0 on success, error code on failure
+ *          On success, *out_client_fd contains the accepted socket
+ *          On failure, *out_client_fd is set to INVALID_SOCKET */
+extern int socket_accept(SOCKET sock, uint32_t timeout_ms, SOCKET *out_client_fd);
+
+/* Read from socket into buffer
+ * Returns: slice_s with data read from socket
+ *          On error: slice_has_err() is true, slice_get_err() returns negative error code */
+extern slice_s socket_read(SOCKET sock, slice_s in_buf, uint32_t timeout_ms);
+
+/* Write to socket from buffer
+ * Returns: slice_s with length set to bytes written
+ *          On error: slice_has_err() is true, slice_get_err() returns negative error code */
+extern slice_s socket_write(SOCKET sock, slice_s out_buf, uint32_t timeout_ms);

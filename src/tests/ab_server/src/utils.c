@@ -33,7 +33,10 @@
 
 #include "utils.h"
 #include "compat.h"
+#include "plc.h"
+#include "log.h"
 #include <errno.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -123,6 +126,21 @@ int64_t util_time_ms(void) {
     return res;
 }
 
+int64_t util_time_us(void) {
+    FILETIME ft;
+    int64_t res;
+
+    GetSystemTimeAsFileTime(&ft);
+
+    /* calculate time as 100ns increments since Jan 1, 1601. */
+    res = (int64_t)(ft.dwLowDateTime) + ((int64_t)(ft.dwHighDateTime) << 32);
+
+    /* get time in microseconds */
+    res = res / 10;
+
+    return res;
+}
+
 #else
 
 
@@ -132,6 +150,14 @@ int64_t util_time_ms(void) {
     gettimeofday(&tv, NULL);
 
     return ((int64_t)tv.tv_sec * 1000) + ((int64_t)tv.tv_usec / 1000);
+}
+
+int64_t util_time_us(void) {
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    return ((int64_t)tv.tv_sec * 1000000) + (int64_t)tv.tv_usec;
 }
 
 #endif
@@ -234,6 +260,49 @@ void slice_dump(slice_s s) {
         /* output it, finally */
         // NOLINTNEXTLINE
         fprintf(stderr, "%s\n", row_buf);
+    }
+}
+
+
+/* new logging API functions for slices */
+
+void log_slice_impl_func(const char *func, int line, log_level_t lvl, slice_s s) {
+    size_t max_row, row, column;
+    char row_buf[300]; /* MAGIC */
+
+    /* determine the number of rows we will need to print. */
+    max_row = (slice_len(s) + (COLUMNS - 1)) / COLUMNS;
+
+    /* diagnostic: log the slice length */
+    fprintf(stderr, "[DEBUG] log_slice_impl_func called: func=%s, line=%d, lvl=%d, slice_len=%zu, max_row=%zu\n",
+            func, line, lvl, slice_len(s), max_row);
+
+    for(row = 0; row < max_row; row++) {
+        size_t offset = (row * COLUMNS);
+        size_t row_offset;
+
+        /* print the prefix and address */
+        // NOLINTNEXTLINE
+        row_offset = (size_t)snprintf(&row_buf[0], sizeof(row_buf), "%03zu", offset);
+
+        for(column = 0; column < COLUMNS && ((row * COLUMNS) + column) < slice_len(s) && row_offset < (int)sizeof(row_buf);
+            column++) {
+            offset = (row * COLUMNS) + column;
+            row_offset +=
+                // NOLINTNEXTLINE
+                (size_t)snprintf(&row_buf[row_offset], sizeof(row_buf) - row_offset, " %02x", slice_get_uint8(s, offset));
+        }
+
+        /* zero terminate */
+        if(row_offset < sizeof(row_buf)) {
+            row_buf[row_offset] = (char)0;
+        } else {
+            /* this might truncate the string, but it is safe. */
+            row_buf[sizeof(row_buf) - 1] = (char)0;
+        }
+
+        /* output it, finally - use the caller's function and line number */
+        log_impl(func, line, lvl, row_buf);
     }
 }
 

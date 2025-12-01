@@ -117,6 +117,38 @@ int compat_mutex_unlock(compat_mutex_t *mutex) { return pthread_mutex_unlock(mut
 
 int compat_mutex_destroy(compat_mutex_t *mutex) { return pthread_mutex_destroy(mutex); }
 
+
+/* atomic operations - POSIX */
+
+int32_t compat_atomic_load_int32(compat_atomic_int32_t *atomic) {
+    return __atomic_load_n(&atomic->value, __ATOMIC_SEQ_CST);
+}
+
+void compat_atomic_store_int32(compat_atomic_int32_t *atomic, int32_t value) {
+    __atomic_store_n(&atomic->value, value, __ATOMIC_SEQ_CST);
+}
+
+int32_t compat_atomic_add_int32(compat_atomic_int32_t *atomic, int32_t delta) {
+    return __atomic_fetch_add(&atomic->value, delta, __ATOMIC_SEQ_CST);
+}
+
+int32_t compat_atomic_inc_int32(compat_atomic_int32_t *atomic) {
+    return __atomic_fetch_add(&atomic->value, 1, __ATOMIC_SEQ_CST);
+}
+
+int64_t compat_atomic_load_int64(compat_atomic_int64_t *atomic) {
+    return __atomic_load_n(&atomic->value, __ATOMIC_SEQ_CST);
+}
+
+void compat_atomic_store_int64(compat_atomic_int64_t *atomic, int64_t value) {
+    __atomic_store_n(&atomic->value, value, __ATOMIC_SEQ_CST);
+}
+
+int64_t compat_atomic_add_int64(compat_atomic_int64_t *atomic, int64_t delta) {
+    return __atomic_fetch_add(&atomic->value, delta, __ATOMIC_SEQ_CST);
+}
+
+
 /* condition variables */
 int compat_cond_init(compat_cond_t *cond) { return pthread_cond_init(cond, NULL); }
 
@@ -297,6 +329,37 @@ int compat_mutex_trylock(compat_mutex_t *mutex) {
 int compat_mutex_unlock(compat_mutex_t *mutex) {
     LeaveCriticalSection(mutex); /* FIXME- what happens if the mutex was not locked? */
     return 0;
+}
+
+
+/* atomic operations - Windows */
+
+int32_t compat_atomic_load_int32(compat_atomic_int32_t *atomic) {
+    return (int32_t)InterlockedCompareExchange((volatile LONG *)&atomic->value, 0, 0);
+}
+
+void compat_atomic_store_int32(compat_atomic_int32_t *atomic, int32_t value) {
+    InterlockedExchange((volatile LONG *)&atomic->value, (LONG)value);
+}
+
+int32_t compat_atomic_add_int32(compat_atomic_int32_t *atomic, int32_t delta) {
+    return (int32_t)InterlockedExchangeAdd((volatile LONG *)&atomic->value, (LONG)delta);
+}
+
+int32_t compat_atomic_inc_int32(compat_atomic_int32_t *atomic) {
+    return (int32_t)InterlockedIncrement((volatile LONG *)&atomic->value) - 1;
+}
+
+int64_t compat_atomic_load_int64(compat_atomic_int64_t *atomic) {
+    return (int64_t)InterlockedCompareExchange64((volatile LONG64 *)&atomic->value, 0, 0);
+}
+
+void compat_atomic_store_int64(compat_atomic_int64_t *atomic, int64_t value) {
+    InterlockedExchange64((volatile LONG64 *)&atomic->value, (LONG64)value);
+}
+
+int64_t compat_atomic_add_int64(compat_atomic_int64_t *atomic, int64_t delta) {
+    return (int64_t)InterlockedExchangeAdd64((volatile LONG64 *)&atomic->value, (LONG64)delta);
 }
 
 

@@ -148,21 +148,21 @@ int parse_args(int argc, char *argv[]) {
 }
 
 void print_request(void) {
-    pdebug(DEBUG_INFO, "Running with params:");
-    pdebug(DEBUG_INFO, "Protocol: %s", cli_request.protocol);
-    pdebug(DEBUG_INFO, "IP: %s", cli_request.ip);
-    pdebug(DEBUG_INFO, "Path: %s", cli_request.path);
-    pdebug(DEBUG_INFO, "PLC: %s", cli_request.plc);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Running with params:");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Protocol: %s", cli_request.protocol);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "IP: %s", cli_request.ip);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Path: %s", cli_request.path);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "PLC: %s", cli_request.plc);
     switch(cli_request.operation) {
-        case READ: pdebug(DEBUG_INFO, "Operation: READ."); break;
-        case WRITE: pdebug(DEBUG_INFO, "Operation: WRITE."); break;
-        case WATCH: pdebug(DEBUG_INFO, "Operation: WATCH."); break;
-        default: pdebug(DEBUG_INFO, "Operation: INVALID."); break;
+        case READ: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Operation: READ."); break;
+        case WRITE: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Operation: WRITE."); break;
+        case WATCH: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Operation: WATCH."); break;
+        default: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Operation: INVALID."); break;
     }
-    pdebug(DEBUG_INFO, "Interval: %d", cli_request.interval);
-    pdebug(DEBUG_INFO, "Debug Level: %d", cli_request.debug_level);
-    pdebug(DEBUG_INFO, "Additional Attributes: %s", cli_request.attributes);
-    pdebug(DEBUG_INFO, "Offline: %s", btoa(cli_request.offline));
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Interval: %d", cli_request.interval);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Debug Level: %d", cli_request.debug_level);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Additional Attributes: %s", cli_request.attributes);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Offline: %s", btoa(cli_request.offline));
 }
 
 int is_comment(const char *line) {
@@ -277,7 +277,7 @@ int validate_line(tag_line_parts_t tag_line_parts) {
             ++j;
         }
         if(!found) {
-            pdebug(DEBUG_ERROR, "Line missing: %s", req_params[i]);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Line missing: %s", req_params[i]);
             return -1;
         }
         found = false;
@@ -288,26 +288,26 @@ int validate_line(tag_line_parts_t tag_line_parts) {
 }
 
 void print_tag(tag_t *tag) {
-    pdebug(DEBUG_INFO, "Tag created:");
-    pdebug(DEBUG_INFO, "Key: %s", tag->key);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Tag created:");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Key: %s", tag->key);
     switch(tag->type) {
-        case t_UINT64: pdebug(DEBUG_INFO, "Type: uint64."); break;
-        case t_INT64: pdebug(DEBUG_INFO, "Type: int64."); break;
-        case t_UINT32: pdebug(DEBUG_INFO, "Type: uint32."); break;
-        case t_INT32: pdebug(DEBUG_INFO, "Type: int32."); break;
-        case t_UINT16: pdebug(DEBUG_INFO, "Type: uint16."); break;
-        case t_INT16: pdebug(DEBUG_INFO, "Type: int16."); break;
-        case t_UINT8: pdebug(DEBUG_INFO, "Type: uint8."); break;
-        case t_INT8: pdebug(DEBUG_INFO, "Type: int8."); break;
-        case t_FLOAT64: pdebug(DEBUG_INFO, "Type: float64."); break;
-        case t_FLOAT32: pdebug(DEBUG_INFO, "Type: float32."); break;
-        case t_BOOL: pdebug(DEBUG_INFO, "Type: bool."); break;
-        default: pdebug(DEBUG_INFO, "Type: INVALID."); break;
+        case t_UINT64: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: uint64."); break;
+        case t_INT64: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: int64."); break;
+        case t_UINT32: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: uint32."); break;
+        case t_INT32: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: int32."); break;
+        case t_UINT16: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: uint16."); break;
+        case t_INT16: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: int16."); break;
+        case t_UINT8: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: uint8."); break;
+        case t_INT8: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: int8."); break;
+        case t_FLOAT64: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: float64."); break;
+        case t_FLOAT32: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: float32."); break;
+        case t_BOOL: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: bool."); break;
+        default: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Type: INVALID."); break;
     }
-    pdebug(DEBUG_INFO, "Path: %s", tag->path);
-    pdebug(DEBUG_INFO, "Bit: %d", tag->bit);
-    pdebug(DEBUG_INFO, "Offset: %d", tag->offset);
-    pdebug(DEBUG_INFO, "Watch: %s", btoa(tag->watch));
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Path: %s", tag->path);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Bit: %d", tag->bit);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Offset: %d", tag->offset);
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Watch: %s", btoa(tag->watch));
 }
 
 int process_line(const char *line, tag_t *tag) {
@@ -317,17 +317,17 @@ int process_line(const char *line, tag_t *tag) {
 
     tag_line_parts = split_string(line, ",");
     if(tag_line_parts.num_parts < 0) {
-        pdebug(DEBUG_ERROR, "Splitting string failed for string %s!", line);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Splitting string failed for string %s!", line);
         return -1;
     }
 
     /* check if the relevant parameters are there or not */
     if(validate_line(tag_line_parts) != 0) {
-        pdebug(DEBUG_ERROR, "Line does not contain enough parts. Line: %s", line);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Line does not contain enough parts. Line: %s", line);
         return -1;
     }
 
-    pdebug(DEBUG_INFO, "Line validated!");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Line validated!");
 
     /* setup all the associated tag values here. */
 
@@ -335,7 +335,7 @@ int process_line(const char *line, tag_t *tag) {
     tag->bit = -1;
     tag->offset = 0;
     tag->watch = false;
-    pdebug(DEBUG_INFO, "Tag defaults set!");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Tag defaults set!");
 
     /* loop through all the val pairs now */
     char *type = NULL;
@@ -347,10 +347,10 @@ int process_line(const char *line, tag_t *tag) {
     char *val = NULL;
     while(i < tag_line_parts.num_parts) {
         part = strdup(tag_line_parts.parts[i]);
-        pdebug(DEBUG_INFO, "Part: %s", part);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Part: %s", part);
         param = strtok(part, "=");
         val = strtok(NULL, "");
-        pdebug(DEBUG_INFO, "[Param, Value]: [%s, %s]", param, val);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "[Param, Value]: [%s, %s]", param, val);
 
         if(!strcmp("key", param)) {
             tag->key = strdup(val);
@@ -367,14 +367,14 @@ int process_line(const char *line, tag_t *tag) {
         } else if(!strcmp("path", param)) {
             tag->path = strdup(val);
         } else {
-            pdebug(DEBUG_ERROR, "Unknown param %s!", param);
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unknown param %s!", param);
             return -1;
         }
 
         ++i;
     }
 
-    pdebug(DEBUG_INFO, "Parsing tag type now...");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Parsing tag type now...");
     if(!strcmp("uint64", type)) {
         tag->type = t_UINT64;
         if(cli_request.operation == WRITE) {
@@ -445,13 +445,13 @@ int process_line(const char *line, tag_t *tag) {
             }
         }
     } else {
-        pdebug(DEBUG_ERROR, "Unknown data type for %s!", type);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unknown data type for %s!", type);
         return -1;
     }
 
     free(tag_line_parts.parts);
     print_tag(tag);
-    pdebug(DEBUG_INFO, "Line processed!");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Line processed!");
 
     return 0;
 }
@@ -474,7 +474,7 @@ int check_tags(void) {
         rc = plc_tag_status(t->tag_handle);
 
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_INFO, "(%d) TAG STATUS NOT OK! Tag Status: %s.", t->tag_handle, plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "(%d) TAG STATUS NOT OK! Tag Status: %s.", t->tag_handle, plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -494,7 +494,7 @@ int process_tags(void) {
 
         tag_t tag;
         trim_line(line);
-        pdebug(DEBUG_INFO, "Trimmed Line: %s", line);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Trimmed Line: %s", line);
         /* ignore lines that can't be processed */
         if(process_line(line, &tag) == -1) { continue; }
 
@@ -511,10 +511,10 @@ int process_tags(void) {
                 break;
         }
 
-        pdebug(DEBUG_INFO, "%s", tag_path);
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "%s", tag_path);
         int tag_handle = plc_tag_create(tag_path, 0);
         if(tag_handle < 0) {
-            pdebug(DEBUG_ERROR, "Error, %s, creating tag %s with string %s!", plc_tag_decode_error(tag_handle), tag.key,
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Error, %s, creating tag %s with string %s!", plc_tag_decode_error(tag_handle), tag.key,
                    tag_path);
             free(tag_path);
             free(line);
@@ -526,7 +526,7 @@ int process_tags(void) {
 
     free(tag_path);
     free(line);
-    pdebug(DEBUG_INFO, "DONE processing tags.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "DONE processing tags.");
     return 0;
 }
 
@@ -725,21 +725,21 @@ int read_tags(void) {
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = plc_tag_read(t->tag_handle, 0);
         if(rc != PLCTAG_STATUS_PENDING) {
-            pdebug(DEBUG_ERROR, "Unable to read tag %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to read tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING) {
-        pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Waiting for tags to be ready...");
         thrd_sleep_ms(10, NULL);
     }
 
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = get_tag(t->tag_handle, &t->tag);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to parse value of tag %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to parse value of tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -780,67 +780,67 @@ int verify_write_tags(void) {
         switch(t->tag.type) {
             case t_UINT64:
                 if(t->tag.last_val.UINT64_val != t->tag.write_val.UINT64_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_INT64:
                 if(t->tag.last_val.INT64_val != t->tag.write_val.INT64_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_UINT32:
                 if(t->tag.last_val.UINT32_val != t->tag.write_val.UINT32_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_INT32:
                 if(t->tag.last_val.INT32_val != t->tag.write_val.INT32_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_UINT16:
                 if(t->tag.last_val.UINT16_val != t->tag.write_val.UINT16_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_INT16:
                 if(t->tag.last_val.INT16_val != t->tag.write_val.INT16_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_UINT8:
                 if(t->tag.last_val.UINT8_val != t->tag.write_val.UINT8_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_INT8:
                 if(t->tag.last_val.INT8_val != t->tag.write_val.INT8_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_FLOAT64:
                 if(t->tag.last_val.FLOAT64_val != t->tag.write_val.FLOAT64_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_FLOAT32:
                 if(t->tag.last_val.FLOAT32_val != t->tag.write_val.FLOAT32_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
             case t_BOOL:
                 if(t->tag.last_val.BOOL_val != t->tag.write_val.BOOL_val) {
-                    pdebug(DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
+                    pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value of tag %s!", t->tag.key);
                     return PLCTAG_ERR_BAD_STATUS;
                 }
                 break;
@@ -858,19 +858,19 @@ int write_tags(void) {
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = set_tag(t->tag_handle, &t->tag);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to set value of tag %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to set value of tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
         rc = plc_tag_write(t->tag_handle, 0);
         if(rc != PLCTAG_STATUS_PENDING) {
-            pdebug(DEBUG_ERROR, "Unable to read tag %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to read tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING) {
-        pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Waiting for tags to be ready...");
         thrd_sleep_ms(10, NULL);
     }
 
@@ -878,7 +878,7 @@ int write_tags(void) {
 
     rc = verify_write_tags();
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Unable to write value to tags %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to write value to tags %s!", plc_tag_decode_error(rc));
         return rc;
     }
 
@@ -892,16 +892,16 @@ void tag_callback(int32_t tag_handle, int event, int status) {
 
     /* handle the events. */
     switch(event) {
-        case PLCTAG_EVENT_ABORTED: pdebug(DEBUG_INFO, "tag(%s): Tag operation was aborted!", t->tag.key); break;
-        case PLCTAG_EVENT_DESTROYED: pdebug(DEBUG_INFO, "tag(%s): Tag was destroyed.", t->tag.key); break;
+        case PLCTAG_EVENT_ABORTED: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag operation was aborted!", t->tag.key); break;
+        case PLCTAG_EVENT_DESTROYED: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag was destroyed.", t->tag.key); break;
         case PLCTAG_EVENT_READ_COMPLETED:
             get_tag(tag_handle, &t->tag);
-            pdebug(DEBUG_INFO, "tag(%s): Tag read operation completed with status %s.", t->tag.key, plc_tag_decode_error(status));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag read operation completed with status %s.", t->tag.key, plc_tag_decode_error(status));
             break;
-        case PLCTAG_EVENT_READ_STARTED: pdebug(DEBUG_INFO, "tag(%s): Tag read operation started.", t->tag.key); break;
+        case PLCTAG_EVENT_READ_STARTED: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Tag read operation started.", t->tag.key); break;
         case PLCTAG_EVENT_WRITE_COMPLETED: break;
         case PLCTAG_EVENT_WRITE_STARTED: break;
-        default: pdebug(DEBUG_INFO, "tag(%s): Unexpected event %d!", t->tag.key, event); break;
+        default: pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "tag(%s): Unexpected event %d!", t->tag.key, event); break;
     }
 }
 
@@ -914,7 +914,7 @@ int watch_tags(void) {
         t->tag.watch = true;
         rc = plc_tag_register_callback(t->tag_handle, tag_callback);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to register callback for tag %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to register callback for tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -931,7 +931,7 @@ int destroy_tags(void) {
     for(t = tags; t != NULL; t = t->hh.next) {
         rc = plc_tag_destroy(t->tag_handle);
         if(rc != PLCTAG_STATUS_OK) {
-            pdebug(DEBUG_ERROR, "Unable to destroy tag %s!", plc_tag_decode_error(rc));
+            pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Unable to destroy tag %s!", plc_tag_decode_error(rc));
             return rc;
         }
     }
@@ -943,7 +943,7 @@ int do_offline(void) {
     struct tags *t = tags;
     int val = 0;
 
-    pdebug(DEBUG_INFO, "Running offline!");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Running offline!");
 
     switch(cli_request.operation) {
         case READ:
@@ -986,7 +986,7 @@ int main(int argc, char *argv[]) {
     print_request();
 
     if(process_tags() != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_ERROR, "Could not process tags.");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Could not process tags.");
         exit(1);
     }
 
@@ -994,26 +994,26 @@ int main(int argc, char *argv[]) {
 
     /* wait for all tags to be ready */
     while(check_tags() == PLCTAG_STATUS_PENDING) {
-        pdebug(DEBUG_INFO, "Waiting for tags to be ready...");
+        pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "Waiting for tags to be ready...");
         thrd_sleep_ms(10, NULL);
     }
 
     switch(cli_request.operation) {
         case READ:
             if(read_tags() != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_ERROR, "Tag read failed.");
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Tag read failed.");
                 exit(1);
             }
             break;
         case WRITE:
             if(write_tags() != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_ERROR, "Tag write failed.");
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Tag write failed.");
                 exit(1);
             }
             break;
         case WATCH:
             if(read_tags() != PLCTAG_STATUS_OK) {
-                pdebug(DEBUG_ERROR, "Tag read failed.");
+                pdebug(DEBUG_MODULE_UTILS, DEBUG_ERROR, "Tag read failed.");
                 exit(1);
             }
             watch_tags();
@@ -1024,7 +1024,7 @@ int main(int argc, char *argv[]) {
     destroy_tags();
     plc_tag_shutdown();
 
-    pdebug(DEBUG_INFO, "DONE.");
+    pdebug(DEBUG_MODULE_UTILS, DEBUG_INFO, "DONE.");
     exit(0);
 }
 // NOLINTNEXTLINE

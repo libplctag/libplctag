@@ -157,7 +157,7 @@ void parse_args(int argc, char **argv) {
         } else if(!strcmp(argv[i], "-w")) {
             i++;
             if(i < argc) {
-                write_str = strdup(argv[i]);
+                write_str = compat_strdup(argv[i]);
             } else {
                 printf("ERROR: you must have a value to write after -w\n");
                 usage();
@@ -166,7 +166,7 @@ void parse_args(int argc, char **argv) {
         } else if(!strcmp(argv[i], "-p")) {
             i++;
             if(i < argc) {
-                path = strdup(argv[i]);
+                path = compat_strdup(argv[i]);
             } else {
                 printf("ERROR: you must have a tag string after -p\n");
                 usage();

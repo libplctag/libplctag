@@ -17,30 +17,31 @@ jobs:
         include:
           - arch: x86_64
             libc: glibc
-            runner: ubuntu-22.04
-            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=On"
-            apt_packages: "build-essential cmake libmodbus5 libmodbus-dev"
+            runner: ubuntu-24.04
+            cmake_flags: ""
+            apt_packages: "build-essential cmake"
             artifact_suffix: "ubuntu_x64"
           - arch: x86_64
             libc: musl
-            runner: ubuntu-22.04
-            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
+            runner: ubuntu-24.04
+            cmake_flags: ""
             apt_packages: "build-essential cmake musl-tools musl-dev"
             artifact_suffix: "ubuntu_x64_musl"
           - arch: x86
             libc: glibc
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             cmake_flags: "-DBUILD_32_BIT=1 -DCMAKE_SYSTEM_PROCESSOR=x86"
             apt_packages: "gcc-multilib g++-multilib"
             artifact_suffix: "ubuntu_x86"
           - arch: arm64
             libc: glibc
-            runner: ubuntu-22.04-arm
-            cmake_flags: "-DBUILD_MODBUS_EMULATOR:BOOL=Off"
+            runner: ubuntu-24.04-arm
+            cmake_flags: ""
             apt_packages: "build-essential cmake zip"
             artifact_suffix: "ubuntu_arm64"
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -111,151 +112,28 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
-    - name: Test Basic Functions
+    - name: Run Simulator Tests
       run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
-        sleep 2
-        echo "test simple get/set tag."
-        ${{ env.DIST }}/simple
-        echo "test callback use."
-        ${{ env.DIST }}/test_callback
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
+        cd ${{ github.workspace }}
+        bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
 
-    - name: Test Micro800
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=Micro800 '--tag=TestDINTArray:DINT[10]' --debug &
-        sleep 2
-        echo "test getting a tag on a Micro800."
-        ${{ env.DIST }}/tag_rw2 --type=sint32  '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
-
-    - name: Test Omron NJ/NX
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=Omron '--tag=TestDINTArray:DINT[10]' --debug  &
-        sleep 2
-        echo "test getting a tag on an Omron NJ/NX."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
-
-    - name: Test PLC/5
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug  &
-        sleep 3
-        echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
-
-    - name: Test SLC 500
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
-        sleep 3
-        echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
-
-    - name: Test Duplicate Connection ID
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
-        sleep 2
-        echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
-
-    - name: Test Large Tags
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] &
-        sleep 2
-        echo "test getting a large tag."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
-
-    - name: Test Array Notation Read/Write
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" &
-        sleep 2
-        echo "test array notation read/write"
-        ${{ env.DIST }}/test_indexed_tags
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null
-        sleep 3
-
-    - name: Test Reconnect After Outage
-      run: |
-        cd ${{ env.DIST }}
-        echo "Test reconnect after outage"
-        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
-        sleep 3
-
-    - name: Test Modbus
-      if: matrix.arch == 'x86_64' && matrix.libc == 'glibc'
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/modbus_server --listen 127.0.0.1:1502 --listen 127.0.0.1:2502 > modbus_server.log 2>&1 &
-        sleep 2
-        
-        echo "test short reconnect with Modbus"
-        ${{ env.DIST }}/test_reconnect 3
-
-        echo "test long reconnect with Modbus"
-        ${{ env.DIST }}/test_reconnect 10
-
-        echo "test thread stress Modbus"
-        ${{ env.DIST }}/thread_stress 10 'protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10'
-
-        echo "test Modbus callbacks and read/write"
-        ${{ env.DIST }}/test_callback_ex_modbus
-
-        echo "test Modbus multiple connections with timeouts"
-        ${{ env.DIST }}/test_modbus_multiple > test_modbus_multiple.log 2>&1
-        if grep -q "thread(5)" test_modbus_multiple.log; then
-          echo "FAILURE: found thread(5) in log file"
-          exit 1
-        else
-          echo "OK: no thread(5) found in log file"
-        fi
-        echo "shut down server."
-        killall modbus_server -TERM &> /dev/null
-        sleep 3
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.artifact_suffix }}
+        path: |
+          logs/*.log
+        retention-days: 7
 
     - name: Create ZIP artifacts
       run: |
         cd ${{ env.DIST }}
-        
+
         if [ "${{ matrix.arch }}" = "x86_64" ] && [ "${{ matrix.libc }}" = "glibc" ]; then
           # Create dev ZIP with only library files (for backward compatibility)
           zip -r "../${{ env.ARTIFACT }}_dev.zip" libplctag.*
-          
+
           # Create tools ZIP with library and tools (for backward compatibility)
           zip -r "../${{ env.ARTIFACT }}_tools.zip" libplctag.* ab_server list_tags_logix list_tags_micro8x0
         else
@@ -297,14 +175,14 @@ jobs:
         cpack -G RPM -V \
           -D CPACK_RPM_PACKAGE_LICENSE="LGPL-2.0 OR MPL-2.0"
         
-        # Move packages to release directory and add _EXPERIMENTAL suffix
+        # Move packages to release directory and add _EXP suffix
         mkdir -p packages
         for file in *.deb *.rpm; do
           if [ -f "$file" ]; then
-            # Insert _EXPERIMENTAL before the file extension
+            # Insert _EXP before the file extension
             filename="${file%.*}"
             extension="${file##*.}"
-            mv "$file" "packages/${filename}_EXPERIMENTAL.${extension}"
+            mv "$file" "packages/${filename}_EXP.${extension}"
           fi
         done
         
@@ -328,15 +206,16 @@ jobs:
       matrix:
         include:
           - name: x64
-            runner: macos-13
+            runner: macos-15-intel
             cmake_arch: x86_64
             artifact_suffix: "macos_x64"
           - name: arm64
-            runner: macos-14
+            runner: macos-15
             cmake_arch: arm64
             artifact_suffix: "macos_aarch64"
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -370,131 +249,19 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose
 
-    - name: Test Basic Functions
+    - name: Run Simulator Tests
       run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
-        sleep 2
-        echo "test simple get/set tag."
-        ${{ env.DIST }}/simple
-        echo "test callback use."
-        ${{ env.DIST }}/test_callback
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
+        cd ${{ github.workspace }}
+        bash src/tests/scripts/run_simulator_tests.sh ${{ env.DIST }} logs
 
-    - name: Test Micro800
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --debug --plc=Micro800 --tag=TestDINTArray:DINT[10] &
-        sleep 2
-        echo "test getting a tag on a Micro800."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
-
-    - name: Test Omron NJ/NX
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
-        sleep 2
-        echo "test getting a tag on an Omron NJ/NX."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
-
-    - name: Test PLC/5
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=PLC/5 --tag=N7[10] --debug &
-        sleep 2
-        echo "test getting a tag on a PLC/5."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
-
-    - name: Test SLC 500
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=SLC500 --tag=N7[10] --debug &
-        sleep 2
-        echo "test getting a tag on a SLC 500."
-        ${{ env.DIST }}/tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
-
-    - name: Test Duplicate Connection ID
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
-        sleep 2
-        echo "test getting a tag with connection failures."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
-
-    - name: Test Large Tags
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --debug &
-        sleep 2
-        echo "test getting a large tag."
-        ${{ env.DIST }}/tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
-
-    - name: Test Array Notation Read/Write
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5] &
-        sleep 2
-        echo "test array notation read/write"
-        ${{ env.DIST }}/test_array_notation 127.0.0.1 1,0 TestBigArray 5 2000
-        echo "shut down server."
-        killall ab_server -INT &> /dev/null || true
-
-    - name: Test Reconnect After Outage
-      run: |
-        cd ${{ env.DIST }}
-        echo "Test reconnect after outage"
-        ${{ env.DIST }}/test_reconnect_after_outage ./ab_server
-
-    - name: Test Modbus
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        ${{ env.DIST }}/modbus_server --listen 127.0.0.1:1502 --listen 127.0.0.1:2502 > modbus_server.log 2>&1 &
-        sleep 2
-        echo "test short reconnect with Modbus"
-        ${{ env.DIST }}/test_reconnect 3
-
-        echo "test long reconnect with Modbus"
-        ${{ env.DIST }}/test_reconnect 10
-
-        echo "test thread stress Modbus"
-        ${{ env.DIST }}/thread_stress 10 'protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10'
-
-        echo "test Modbus callbacks and read/write"
-        ${{ env.DIST }}/test_callback_ex_modbus
-
-        echo "test Modbus multiple connections with timeouts"
-        ${{ env.DIST }}/test_modbus_multiple > test_modbus_multiple.log 2>&1
-        if grep -q "thread(5)" test_modbus_multiple.log; then
-          echo "FAILURE: found thread(5) in log file"
-          exit 1
-        else
-          echo "OK: no thread(5) found in log file"
-        fi
-        echo "shut down server."
-        killall modbus_server -TERM &> /dev/null
-        sleep 3
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.artifact_suffix }}
+        path: |
+          logs/*.log
+        retention-days: 7
 
     - name: Create ZIP artifacts
       run: |
@@ -558,6 +325,7 @@ jobs:
             artifact_suffix: "windows_x86_MinGW"
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}\\build"
       DIST: "${{ github.workspace }}\\build\\bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -603,114 +371,18 @@ jobs:
     - name: Build
       run: cd ${{ env.BUILD }}; cmake --build . --verbose --config MinSizeRel
 
-    - name: Test Basic Functions
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator."
-        start /b .\ab_server.exe --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50
-        echo "waiting for simulator to start up..."
-        timeout /T 5
-        echo "test simple get/set tag."
-        .\simple
-        echo "test callback use."
-        .\test_callback
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-      shell: cmd
+    - name: Run Simulator Tests
+      run: bash src/tests/scripts/run_simulator_tests.sh '${{ env.DIST }}' logs
+      shell: bash
 
-    - name: Test Micro800
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        start /b .\ab_server.exe --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug
-        timeout /T 5
-        echo "test getting a tag on a Micro800."
-        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]" --debug=2
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-      shell: cmd
-
-    - name: Test Omron NJ/NX
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        start /b .\ab_server.exe --plc=Omron --tag=TestDINTArray:DINT[10] --debug
-        timeout /T 5
-        echo "test getting a tag on an Omron NJ/NX."
-        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray" --debug=2
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-      shell: cmd
-
-    - name: Test PLC/5
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        start /b .\ab_server.exe --plc=PLC/5 --tag=N7[10] --debug
-        timeout /T 5
-        echo "test getting a tag on a PLC/5."
-        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0" --debug=2
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-      shell: cmd
-
-    - name: Test SLC 500
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        start /b .\ab_server.exe --plc=SLC500 --tag=N7[10] --debug
-        timeout /T 5
-        echo "test getting a tag on a SLC 500."
-        .\tag_rw2.exe --type=sint16 "--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0" --debug=2
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-      shell: cmd
-
-    - name: Test Duplicate Connection ID
-      run: |
-        cd ${{ env.DIST }}
-        dir
-        echo "start up simulator..."
-        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug
-        timeout /T 5
-        echo "test getting a tag with connection failures."
-        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray" --debug=2
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-      shell: cmd
-
-    - name: Test Large Tags
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000]
-        timeout /T 5
-        echo "test getting a large tag."
-        .\tag_rw2.exe --type=sint32 "--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray" --debug=2
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-      shell: cmd
-
-    - name: Test Array Notation Read/Write
-      run: |
-        cd ${{ env.DIST }}
-        echo "start up simulator..."
-        start /b .\ab_server.exe --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[5]
-        timeout /T 5
-        echo "test array notation read/write"
-        .\test_array_notation.exe 127.0.0.1 1,0 TestBigArray 5 2000
-        set test_result=%errorlevel%
-        echo "shut down server."
-        taskkill /F /IM ab_server.exe
-        exit /b %test_result%
-      shell: cmd
-
-    - name: Test Reconnect After Outage
-      run: |
-        cd ${{ env.DIST }}
-        echo "Test reconnect after outage."
-        .\test_reconnect_after_outage .\ab_server.exe
-      shell: cmd
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.artifact_suffix }}
+        path: |
+          logs/*.log
+        retention-days: 7
 
     - name: Create ZIP artifacts (MSVC only)
       if: matrix.toolchain == 'msvc'
@@ -741,7 +413,7 @@ jobs:
   
 
   ubuntu_arm_cross:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
@@ -758,6 +430,7 @@ jobs:
             target_arch: armhf
 
     env:
+      ARTIFACT: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -789,16 +462,40 @@ jobs:
         # Add target architecture
         sudo dpkg --add-architecture ${{ matrix.target_arch }}
 
-        # Modify existing sources.list to exclude ARM architectures from main repos
-        sudo sed -i 's/^deb /deb [arch=amd64,i386] /' /etc/apt/sources.list
-        sudo sed -i 's/^deb-src /deb-src [arch=amd64,i386] /' /etc/apt/sources.list
+        # Ubuntu 24.04 uses DEB822 format in /etc/apt/sources.list.d/ubuntu.sources
+        # We need to restrict the main repos to amd64/i386 only, then add ports for ARM
+        
+        # Check for DEB822 format sources file (Ubuntu 24.04+)
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+          echo "Detected DEB822 format apt sources (Ubuntu 24.04+)"
+          # Add architecture restriction to existing sources
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64 i386/' /etc/apt/sources.list.d/ubuntu.sources
+          
+          # Remove any azure-specific sources that might cause issues
+          sudo rm -f /etc/apt/sources.list.d/azure*.list /etc/apt/sources.list.d/azure*.sources 2>/dev/null || true
+        else
+          # Traditional sources.list format (older Ubuntu)
+          sudo sed -i 's/^deb /deb [arch=amd64,i386] /' /etc/apt/sources.list
+          sudo sed -i 's/^deb-src /deb-src [arch=amd64,i386] /' /etc/apt/sources.list
+        fi
+        
+        # Also handle any other .list files in sources.list.d that might not have arch restrictions
+        for f in /etc/apt/sources.list.d/*.list; do
+          if [ -f "$f" ]; then
+            # Skip our own ARM sources file
+            if [[ "$f" != *"${{ matrix.target_arch }}.list"* ]]; then
+              sudo sed -i 's/^deb http/deb [arch=amd64,i386] http/' "$f" 2>/dev/null || true
+              sudo sed -i 's/^deb https/deb [arch=amd64,i386] https/' "$f" 2>/dev/null || true
+            fi
+          fi
+        done
 
         # Add ARM ports repository for the target architecture
         cat << EOF | sudo tee /etc/apt/sources.list.d/${{ matrix.target_arch }}.list
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-backports main restricted universe multiverse
-        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble-backports main restricted universe multiverse
+        deb [arch=${{ matrix.target_arch }}] http://ports.ubuntu.com/ubuntu-ports/ noble-security main restricted universe multiverse
         EOF
 
         # Single apt update after adding repositories
@@ -861,6 +558,15 @@ jobs:
         mkdir -p release_zips
         mv *.zip release_zips/
 
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-ubuntu_${{ matrix.artifact_suffix }}
+        path: |
+          logs/*.log
+        retention-days: 7
+
     - name: Upload ZIP artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -875,11 +581,13 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - arch: aarch64
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-24.04-arm
 
     env:
+      ARTIFACT: ""
+      VERSION: ""
       BUILD: "${{ github.workspace }}/build"
       DIST: "${{ github.workspace }}/build/bin_dist"
       BRANCH: ${{ github.head_ref || github.ref_name }}
@@ -950,103 +658,13 @@ jobs:
           echo "=== CMAKE BUILD COMPLETED ==="
 
           # Run tests inside container if binaries exist
-          # NOTE: Tests are currently SKIPPED for Alpine to ensure package creation succeeds
-          # The other CI jobs (Ubuntu, macOS, Windows) run comprehensive tests
-          SKIP_ALPINE_TESTS=true
-          if [ "${SKIP_ALPINE_TESTS:-false}" != "true" ] && [ -f /workspace/build/bin_dist/ab_server ]; then
-            echo "=== RUNNING TESTS ==="
-            cd /workspace/build/bin_dist
-
-            # Test Basic Functions
-            echo "start up simulator..."
-            ./ab_server --debug --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --delay=50 &
-            sleep 2
-            echo "test simple get/set tag."
-            ./simple
-            echo "test callback use."
-            ./test_callback
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Micro800
-            echo "start up simulator..."
-            ./ab_server --plc=Micro800 --tag=TestDINTArray:DINT[10] --debug &
-            sleep 2
-            echo "test getting a tag on a Micro800."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab_eip&gateway=127.0.0.1&cpu=micro800&elem_size=4&elem_count=1&name=TestDINTArray[0]' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Omron NJ/NX
-            echo "start up simulator..."
-            ./ab_server --plc=Omron --tag=TestDINTArray:DINT[10] --debug &
-            sleep 2
-            echo "test getting a tag on an Omron NJ/NX."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=18,127.0.0.1&plc=omron-njnx&name=TestDINTArray' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test PLC/5
-            echo "start up simulator..."
-            ./ab_server --plc=PLC/5 --tag=N7[10] --debug &
-            sleep 2
-            echo "test getting a tag on a PLC/5."
-            ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=plc5&elem_size=2&elem_count=10&name=N7:0' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test SLC 500
-            echo "start up simulator..."
-            ./ab_server --plc=SLC500 --tag=N7[10] --debug &
-            sleep 2
-            echo "test getting a tag on a SLC 500."
-            ./tag_rw2 --type=sint16 '--tag=protocol=ab_eip&gateway=127.0.0.1&plc=slc&elem_size=2&elem_count=10&name=N7:0' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Duplicate Connection ID
-            echo "start up simulator..."
-            ./ab_server --plc=ControlLogix --path=1,0 --tag=TestDINTArray:DINT[10] --reject-fo=5 --debug &
-            sleep 2
-            echo "test getting a tag with connection failures."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&name=TestDINTArray' --debug=2
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Large Tags
-            echo "start up simulator..."
-            ./ab_server --plc=ControlLogix --path=1,0 --tag=TestBigArray:DINT[2000] --debug &
-            sleep 2
-            echo "test getting a large tag."
-            ./tag_rw2 --type=sint32 '--tag=protocol=ab-eip&gateway=127.0.0.1&path=1,0&plc=ControlLogix&elem_count=2000&name=TestBigArray'
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Array Notation Read/Write
-            echo "start up simulator..."
-            ./ab_server --plc=ControlLogix --path=1,0 "--tag=TestBigArray:DINT[2000]" "--tag=Test_Array_1:DINT[1000]" "--tag=Test_Array_2x3:DINT[2,3]" "--tag=Test_Array_2x3x4:DINT[2,3,4]" &
-            sleep 2
-            echo "test array notation read/write"
-            ./test_indexed_tags
-            echo "shut down server."
-            killall ab_server -INT &> /dev/null || true
-            sleep 2
-
-            # Test Reconnect After Outage
-            echo "Test reconnect after outage"
-            ./test_reconnect_after_outage ./ab_server
-            sleep 2
-
+          if [ -f /workspace/build/bin_dist/ab_server ]; then
+            echo "=== RUNNING SIMULATOR TESTS ==="
+            mkdir -p /workspace/logs
+            bash /workspace/src/tests/scripts/run_simulator_tests.sh /workspace/build/bin_dist /workspace/logs || { echo "WARNING: Some tests failed, continuing with packaging" >&2; true; }
             cd /workspace/build
           else
-            echo "=== TESTS SKIPPED (SKIP_ALPINE_TESTS=true) ==="
+            echo "=== TESTS SKIPPED (ab_server binary not found) ==="
           fi
 
           # Install into controlled staging prefix inside workspace
@@ -1122,12 +740,12 @@ jobs:
 
           # Create APKs (tarballs with .PKGINFO and usr/)
           echo "PACKAGE_BUILD: creating runtime APK"
-          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0_EXPERIMENTAL.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create runtime APK" >&2; ls -R "$RUNTIME_ROOT" || true; exit 1; }
+          ( cd "$RUNTIME_ROOT" && tar -czf /workspace/build/libplctag-$VERSION-r0_EXP.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create runtime APK" >&2; ls -R "$RUNTIME_ROOT" || true; exit 1; }
           echo "PACKAGE_BUILD: creating devel APK"
-          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0_EXPERIMENTAL.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create devel APK" >&2; ls -R "$DEVEL_ROOT" || true; exit 1; }
+          ( cd "$DEVEL_ROOT" && tar -czf /workspace/build/libplctag-dev-$VERSION-r0_EXP.apk .PKGINFO usr/ ) || { echo "ERROR: failed to create devel APK" >&2; ls -R "$DEVEL_ROOT" || true; exit 1; }
 
           # Verify APKs
-          for f in /workspace/build/libplctag-$VERSION-r0_EXPERIMENTAL.apk /workspace/build/libplctag-dev-$VERSION-r0_EXPERIMENTAL.apk; do
+          for f in /workspace/build/libplctag-$VERSION-r0_EXP.apk /workspace/build/libplctag-dev-$VERSION-r0_EXP.apk; do
             if [ -f "$f" ]; then
               echo "PACKAGE_VERIFY: $(basename "$f") size=$(wc -c < "$f") bytes";
               sha256sum "$f" || true
@@ -1314,6 +932,15 @@ jobs:
         echo "Fallback README created. This build may have issues."
         ls -la "${{ env.BUILD }}/release_packages"
 
+    - name: Upload Alpine test logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-alpine_native_${{ matrix.arch }}
+        path: logs/*.log
+        if-no-files-found: warn
+        retention-days: 7
+
     - name: Upload Alpine package artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -1322,7 +949,7 @@ jobs:
         if-no-files-found: warn
 
   debug_context:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -1404,7 +1031,7 @@ jobs:
 
   debug_artifacts:
     needs: [ubuntu_matrix, macos_matrix, windows_msvc_matrix, ubuntu_arm_cross, alpine_native ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -1434,8 +1061,11 @@ jobs:
 
   create_release:
     needs: [ubuntu_matrix, macos_matrix, windows_msvc_matrix, ubuntu_arm_cross, alpine_native ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: (github.base_ref == 'release' && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true) || (github.event_name == 'push' && github.ref == 'refs/heads/release')
+
+    env:
+      VERSION: ""
 
     steps:
     - name: Checkout repository
@@ -1497,6 +1127,20 @@ jobs:
       with:
         path: ./release_artifacts
 
+    - name: Prepare release artifacts (exclude test logs)
+      run: |
+        echo "=== Artifacts to be released ==="
+        find ./release_artifacts -name "*_zips" -type d | while read dir; do
+          echo "From $dir:"
+          find "$dir" -name "*.zip" -type f
+        done
+
+        echo ""
+        echo "=== Artifacts NOT being released (test logs) ==="
+        find ./release_artifacts -name "test-logs-*" -type d | while read dir; do
+          echo "Skipped: $dir (test logs only)"
+        done
+
     - name: Create and push tag
       run: |
         git config user.name "github-actions[bot]"
@@ -1510,7 +1154,12 @@ jobs:
         tag_name: "v${{ env.VERSION }}"
         name: ${{ steps.get_pr_details.outputs.pr_title }}
         body: ${{ steps.get_pr_details.outputs.pr_body }}
-        files: ./release_artifacts/**/*.zip
+        files: |
+          ./release_artifacts/**/*.zip
+          ./release_artifacts/**/*.deb
+          ./release_artifacts/**/*.rpm
+          ./release_artifacts/**/*.apk
+          ./release_artifacts/**/*.tar.gz
         draft: false
         prerelease: false
       env:
