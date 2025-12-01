@@ -657,6 +657,7 @@ void print_element_type(uint16_t element_type) {
             case 0xDC: type = "CIP path segment(s)"; break;
             case 0xDD: type = "Engineering units"; break;
             case 0xDE: type = "International character string (encoding?)"; break;
+            case 0xDF: type = "LTIME: Long duration of time. 64-bit storage; units are in nanoseconds."; break;
         }
 
         if(type) {
