@@ -1096,8 +1096,12 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
     client->send_buf = buf_init(client->send_buffer, sizeof(client->send_buffer));
     client->expected_length = MBAP_HEADER_SIZE;
 
+    /* Build client name with prefix for logging */
+    char client_name[80];
+    snprintf(client_name, sizeof(client_name), "client:%s", client->client_address);
+
     /* Create FSM for client with state change callback */
-    client->fsm = fsm_create(client_transitions, num_client_transitions,
+    client->fsm = fsm_create(client_name, client_transitions, num_client_transitions,
                             APP_STATE_READING_HEADER, 8, on_client_state_change, client);
     if (!client->fsm) {
         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create FSM for client");
@@ -1108,7 +1112,7 @@ static void listener_event_callback(reactor_t *reactor, socket_t socket,
 
     /* Register client socket with reactor, enabling only events for current FSM state (READING_HEADER) */
     bitarray_t initial_event_mask = fsm_get_event_mask(client->fsm);
-    rc = reactor_add_socket(listener->server->reactor, client_socket, socket_event_callback, client, &initial_event_mask);
+    rc = reactor_add_socket(listener->server->reactor, client_socket, client_name, socket_event_callback, client, &initial_event_mask);
     if (rc != UTIL_OK) {
         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to register client socket with reactor: %d", rc);
         fsm_destroy(client->fsm);
@@ -1200,10 +1204,14 @@ static listener_ctx_t* create_listener(server_ctx_t *server, const char *bind_ad
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Listener socket created on %s:%u", bind_address, bind_port);
 
+    /* Build listener name for logging */
+    char listener_name[64];
+    snprintf(listener_name, sizeof(listener_name), "listener:%s:%u", bind_address, bind_port);
+
     /* Register listener socket with reactor, enabling only CAN_ACCEPT initially */
     bitarray_t listener_events = BITARRAY_ZERO();
     bitarray_set(&listener_events, REACTOR_EVENT_CAN_ACCEPT);
-    rc = reactor_add_socket(server->reactor, listener->listener_socket, listener_event_callback, listener, &listener_events);
+    rc = reactor_add_socket(server->reactor, listener->listener_socket, listener_name, listener_event_callback, listener, &listener_events);
     if (rc != UTIL_OK) {
         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to register listener socket with reactor: %d", rc);
         socket_close(listener->listener_socket);
