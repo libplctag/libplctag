@@ -680,22 +680,32 @@ static int plc_tag_abort_impl(plc_tag_p tag) {
         tag->read_cache_expire = (uint64_t)0;
 
         /* Is the abort flag still set? This may be synchronous. */
-        if(atomic_get_bool(&tag->abort_requested) && tag->vtable && tag->vtable->abort) {
-            rc = tag->vtable->abort(tag);
+        if(atomic_get_bool(&tag->abort_requested)) {
+            if(tag->vtable && tag->vtable->abort) {
+                rc = tag->vtable->abort(tag);
+            } else {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag does not have an abort function.");
+                rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+            }
 
             /* release the kraken... or tickler */
-            plc_tag_tickler_wake();
+            // plc_tag_tickler_wake();
+
+            /* Clear the abort flag so the tickler won't process it again */
+            atomic_set_bool(&tag->abort_requested, false);
         } else {
-            pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "Tag does not have an abort function.");
-            rc = PLCTAG_ERR_NOT_IMPLEMENTED;
+            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "Abort flag is not set, so abort already completed.");
+            rc = PLCTAG_STATUS_OK;
         }
 
+        /* Clean up in-flight flags - protocol-specific abort functions don't do this */
         tag->read_in_flight = 0;
         tag->read_complete = 0;
         tag->write_in_flight = 0;
         tag->write_complete = 0;
 
-        tag_raise_event(tag, PLCTAG_EVENT_ABORTED, PLCTAG_ERR_ABORT);
+        /* Raise abort event - protocol-specific functions don't always do this */
+        tag_raise_event(tag, PLCTAG_EVENT_ABORTED, (int8_t)rc);
     }
 
     plc_tag_generic_handle_event_callbacks(tag);
