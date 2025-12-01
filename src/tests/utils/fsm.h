@@ -80,6 +80,7 @@ typedef struct {
 /**
  * @brief Create a new finite state machine (FSM).
  *
+ * @param name Human-readable name for the FSM (for logging). Will be copied. May be NULL.
  * @param transition_table Array of state transition definitions.
  * @param transition_count Number of transitions in the table.
  * @param initial_state Initial state of the FSM.
@@ -89,7 +90,7 @@ typedef struct {
  *                action functions and the state change callback.
  * @return fsm_t* Pointer to the created FSM instance or NULL on failure.
  */
-fsm_t* fsm_create(fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, size_t pending_queue_size, fsm_on_state_change_fn on_state_change, void *fsm_ctx);
+fsm_t* fsm_create(const char *name, fsm_transition_t *transition_table, size_t transition_count, fsm_state_id_t initial_state, size_t pending_queue_size, fsm_on_state_change_fn on_state_change, void *fsm_ctx);
 
 /**
  * @brief Destroy a finite state machine.
@@ -105,6 +106,14 @@ void fsm_destroy(fsm_t *fsm);
  * @return void* Context data pointer, or NULL if not set.
  */
 void *fsm_get_ctx(fsm_t *fsm);
+
+/**
+ * @brief Get the name of the FSM.
+ *
+ * @param fsm Pointer to the FSM instance.
+ * @return const char* FSM name, or "(unnamed)" if not set.
+ */
+const char *fsm_get_name(const fsm_t *fsm);
 
 /**
  * @brief Get the current state of the FSM.
