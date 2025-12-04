@@ -54,6 +54,7 @@ endif()
   test_reconnect
   test_shutdown_cip
   test_shutdown_modbus
+  test_shutdown_restart
   test_special
   test_string
   test_tag_attributes
