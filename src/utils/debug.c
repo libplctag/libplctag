@@ -43,6 +43,12 @@
 #include <time.h>
 #include <utils/debug.h>
 
+#if defined(_WIN32) || defined(_WIN64)
+    #include <windows.h>
+#else
+    #include <sys/time.h>
+#endif
+
 
 /*
  * Debugging support.
@@ -190,6 +196,36 @@ static void format_module_names(debug_module_mask_t modules, char *buf, size_t b
 
 static const char *debug_level_name[DEBUG_END] = {"NONE", "ERROR", "WARN", "INFO", "DETAIL", "SPEW"};
 
+
+/*
+ * Get current epoch time in microseconds.
+ * Works on Linux, BSD, macOS, and Windows.
+ */
+static int64_t time_us(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    /* Windows implementation using GetSystemTimePreciseAsFileTime (Windows 8+) */
+    FILETIME ft;
+    ULARGE_INTEGER uli;
+    
+    GetSystemTimePreciseAsFileTime(&ft);
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+    
+    /* FILETIME is in 100-nanosecond intervals since Jan 1, 1601 */
+    /* Convert to microseconds and adjust to Unix epoch (Jan 1, 1970) */
+    /* Difference is 11644473600 seconds = 11644473600000000 microseconds */
+    return (int64_t)((uli.QuadPart / 10) - 11644473600000000LL);
+#else
+    /* POSIX implementation using gettimeofday (Linux, BSD, macOS) */
+    struct timeval tv;
+    
+    gettimeofday(&tv, NULL);
+    
+    return (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
+#endif
+}
+
+
 static void ensure_stderr_buffering(void) {
     /* Initialize stderr buffering once for better performance */
     if(!stderr_buffering_initialized) {
@@ -207,8 +243,8 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     va_list va;
     struct tm t;
     time_t epoch;
-    int64_t epoch_ms;
-    int remainder_ms;
+    int64_t epoch_us;
+    int remainder_us;
     char module_buf[256];
     char prefix[1000]; /* MAGIC */
     char output[1000];
@@ -220,18 +256,18 @@ extern void pdebug_impl(const char *func, int line_num, int debug_level, debug_m
     format_module_names(modules, module_buf, sizeof(module_buf));
 
     /* get the time parts */
-    epoch_ms = time_ms();
-    epoch = (time_t)(epoch_ms / 1000);
-    remainder_ms = (int)(epoch_ms % 1000);
+    epoch_us = time_us();
+    epoch = (time_t)(epoch_us / 1000000);
+    remainder_us = (int)(epoch_us % 1000000);
 
     /* FIXME - should capture error return! */
     localtime_r(&epoch, &t);
 
     /* build the output string template */
     // NOLINTNEXTLINE
-    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%03d thread(%u) tag(%" PRId32 ") [%s] %s %s:%d %s\n",
+    snprintf(prefix, sizeof(prefix), "%04d-%02d-%02d %02d:%02d:%02d.%06d thread(%u) tag(%" PRId32 ") [%s] %s %s:%d %s\n",
              t.tm_year + 1900, t.tm_mon + 1, /* month is 0-11? */
-             t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_ms, get_thread_id(), tag_id, module_buf, debug_level_name[debug_level], func,
+             t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, remainder_us, get_thread_id(), tag_id, module_buf, debug_level_name[debug_level], func,
              line_num, templ);
 
     /* make sure it is zero terminated */

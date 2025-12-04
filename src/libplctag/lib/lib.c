@@ -68,7 +68,7 @@ static volatile int32_t next_tag_id = 10; /* MAGIC */
 static volatile hashtable_p tags = NULL;
 static mutex_p tag_lookup_mutex = NULL;
 
-atomic_bool lib_active = true;
+atomic_bool lib_active = false;
 
 static thread_p tag_tickler_thread = NULL;
 static cond_p tag_tickler_wait = NULL;
@@ -724,13 +724,18 @@ static int plc_tag_status_impl(plc_tag_p tag) {
 
         if(tag->vtable && tag->vtable->status) {
             rc = tag->vtable->status(tag);
+            pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "vtable->status returned %d (%s)", rc, plc_tag_decode_error(rc));
         } else {
             rc = PLCTAG_ERR_NOT_IMPLEMENTED;
         }
 
         if(rc == PLCTAG_STATUS_OK) {
-            if(tag->read_in_flight || tag->write_in_flight) { rc = PLCTAG_STATUS_PENDING; }
+            if(tag->read_in_flight || tag->write_in_flight) {
+                pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "rc was OK but read_in_flight=%d write_in_flight=%d, changing to PENDING", tag->read_in_flight, tag->write_in_flight);
+                rc = PLCTAG_STATUS_PENDING;
+            }
         }
+        pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "final rc=%d (%s)", rc, plc_tag_decode_error(rc));
     }
 
     return rc;
@@ -997,11 +1002,11 @@ LIB_EXPORT int32_t plc_tag_create_ex(const char *attrib_str,
 
     pdebug(DEBUG_MODULE_LIB, DEBUG_INFO, "Starting");
 
-    /* check to see if the library is initialized. */
-    if(!atomic_get_bool(&lib_active)) {
-        pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "The plctag library is in the process of shutting down!");
-        return PLCTAG_ERR_NOT_ALLOWED;
-    }
+    // /* check to see if the library is initialized. */
+    // if(!atomic_get_bool(&lib_active)) {
+    //     pdebug(DEBUG_MODULE_LIB, DEBUG_WARN, "The plctag library is in the process of shutting down!");
+    //     return PLCTAG_ERR_NOT_ALLOWED;
+    // }
 
     /* make sure that all modules are initialized. */
     if((rc = initialize_modules()) != PLCTAG_STATUS_OK) {

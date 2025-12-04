@@ -1382,13 +1382,21 @@ void encode_data(uint8_t *data, int *index, int val) {
 int pccc_tag_status(ab_tag_p tag) {
     if(!tag->session) {
         /* this is not OK.  This is fatal! */
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, "pccc_tag_status: returning PLCTAG_ERR_CREATE (no session)");
         return PLCTAG_ERR_CREATE;
     }
 
-    if(tag->read_in_progress) { return PLCTAG_STATUS_PENDING; }
+    if(tag->read_in_progress) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "pccc_tag_status: read_in_progress=1, returning PENDING");
+        return PLCTAG_STATUS_PENDING;
+    }
 
-    if(tag->write_in_progress) { return PLCTAG_STATUS_PENDING; }
+    if(tag->write_in_progress) {
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "pccc_tag_status: write_in_progress=1, returning PENDING");
+        return PLCTAG_STATUS_PENDING;
+    }
 
+    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "pccc_tag_status: returning tag->status=%d (%s)", tag->status, plc_tag_decode_error(tag->status));
     return tag->status;
 }
 
@@ -1414,6 +1422,8 @@ int pccc_tag_tickler(ab_tag_p tag) {
                 tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
             }
 
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "Read complete with status %s.", plc_tag_decode_error(tag->status));
+
             tag->read_complete = 1;
         }
 
@@ -1421,12 +1431,18 @@ int pccc_tag_tickler(ab_tag_p tag) {
     }
 
     if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Write in progress.");
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "Write in progress.");
         rc = pccc_check_write_status(tag);
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "pccc_check_write_status returned %d (%s)", rc, plc_tag_decode_error(rc));
         tag->status = (int8_t)rc;
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "set tag->status=%d, write_in_progress=%d, write_complete=%d", tag->status, tag->write_in_progress, tag->write_complete);
 
         /* check to see if the write finished. */
-        if(!tag->write_in_progress) { tag->write_complete = 1; }
+        if(!tag->write_in_progress) { 
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "Write complete with status %s.", plc_tag_decode_error(tag->status));
+            
+            tag->write_complete = 1; 
+        }
 
         return rc;
     }
@@ -1690,13 +1706,14 @@ int pccc_check_read_status(ab_tag_p tag) {
         /* copy data into the tag. */
         mem_copy(tag->data, data, (int)(data_end - data));
 
-        tag->read_in_progress = 0;
-        tag->read_complete = 1;
-
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
     ab_tag_abort_request(tag);
+
+    /* Read is complete whether it succeeded or failed */
+    tag->read_in_progress = 0;
+    tag->read_complete = 1;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Done with status %s.", plc_tag_decode_error(rc));
 
@@ -2268,7 +2285,7 @@ int slc_tag_write_bit_start(ab_tag_p tag) {
  * Fragments are not supported.
  */
 int pccc_check_write_status(ab_tag_p tag) {
-    pccc_resp *pccc;
+    pccc_resp *pccc = NULL;
     int rc = PLCTAG_STATUS_OK;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Starting.");
@@ -2292,13 +2309,14 @@ int pccc_check_write_status(ab_tag_p tag) {
             break;
         }
 
-        tag->write_in_progress = 0;
-        tag->write_complete = 1;
-
         rc = PLCTAG_STATUS_OK;
     } while(0);
 
     ab_tag_abort_request(tag);
+
+    /* Write is complete whether it succeeded or failed */
+    tag->write_in_progress = 0;
+    tag->write_complete = 1;
 
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Done with status %s.", plc_tag_decode_error(rc));
 

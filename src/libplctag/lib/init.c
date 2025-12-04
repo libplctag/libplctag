@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <utils/attr.h>
 #include <utils/debug.h>
+#include <utils/atomic_utils.h>
 
 
 /*
@@ -66,9 +67,13 @@ struct {
     {.protocol= "modbus_tcp", .make = NULL, .family = NULL, .model = NULL, .tag_constructor = mb_tag_create}
 };
 
-static lock_t library_initialization_lock = LOCK_INIT;
-static volatile int library_initialized = 0;
-static volatile mutex_p lib_mutex = NULL;
+/* Library state machine */
+#define LIB_STATE_UNINITIALIZED  ((int32_t)0)
+#define LIB_STATE_INITIALIZING   ((int32_t)1)
+#define LIB_STATE_RUNNING        ((int32_t)2)
+#define LIB_STATE_SHUTTING_DOWN  ((int32_t)3)
+
+static atomic_int32_t library_state = ATOMIC_INT_STATIC_INIT;
 
 
 /*
@@ -140,8 +145,20 @@ tag_create_function find_tag_create_func(attr attributes) {
  */
 
 void destroy_modules(void) {
+    int32_t old_state;
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting.");
+
+    /* 
+     * Try to transition from RUNNING to SHUTTING_DOWN.
+     * atomic_compare_and_set_int32() returns the old value.
+     * If it returns RUNNING, the swap succeeded.
+     */
+    old_state = atomic_compare_and_set_int32(&library_state, LIB_STATE_RUNNING, LIB_STATE_SHUTTING_DOWN);
+    if(old_state != LIB_STATE_RUNNING) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_WARN, "Cannot shutdown - library state is %" PRId32 ", not RUNNING.", old_state);
+        return;
+    }
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down AB module.");
     ab_teardown();
@@ -159,24 +176,16 @@ void destroy_modules(void) {
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down refcount infrastructure.");
     refcount_teardown();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Tearing down library mutex.");
-    spin_block(&library_initialization_lock) {
-        if(lib_mutex != NULL) {
-            /* FIXME casting to get rid of volatile is WRONG */
-            mutex_destroy((mutex_p *)&lib_mutex);
-            lib_mutex = NULL;
-        }
-    }
-
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Unregistering logger.");
     plc_tag_unregister_logger();
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Flushing debug output.");
     debug_flush();
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done.");
+    /* Mark as uninitialized - ready for potential re-initialization */
+    atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
 
-    library_initialized = 0;
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done.");
 }
 
 
@@ -189,88 +198,103 @@ void destroy_modules(void) {
 
 int initialize_modules(void) {
     int rc = PLCTAG_STATUS_OK;
+    int32_t old_state;
 
     pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting.");
 
-    /* fast path once the library is up and running. */
-    if(library_initialized) {
+    /* Fast path: already running */
+    if(atomic_get_int32(&library_state) == LIB_STATE_RUNNING) {
         pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Library already initialized, returning.");
         return PLCTAG_STATUS_OK;
     }
 
-    /*
-     * Try to keep busy waiting to a minimum.
-     * If there is no mutex set up, then create one.
-     * Only one thread allowed at a time through this gate.
+    /* 
+     * Try to transition from UNINITIALIZED to INITIALIZING.
+     * Only one thread can win this race.
+     * 
+     * atomic_compare_and_set_int32() returns the old value.
+     * If it returns UNINITIALIZED, the swap succeeded.
      */
-    spin_block(&library_initialization_lock) {
-        if(lib_mutex == NULL) {
-            pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Creating library mutex.");
-            /* FIXME - casting to get rid of volatile is WRONG */
-            rc = mutex_create((mutex_p *)&lib_mutex);
+    while((old_state = atomic_compare_and_set_int32(&library_state, LIB_STATE_UNINITIALIZED, LIB_STATE_INITIALIZING)) != LIB_STATE_UNINITIALIZED) {
+
+        switch(old_state) {
+            case LIB_STATE_RUNNING:
+                /* Another thread finished initialization */
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Library initialized by another thread.");
+                return PLCTAG_STATUS_OK;
+
+            case LIB_STATE_INITIALIZING:
+                /* Another thread is initializing, wait for it */
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Waiting for another thread to complete initialization...");
+                sleep_ms(10);
+                break;
+
+            case LIB_STATE_SHUTTING_DOWN:
+                /* Shutdown in progress, wait for it to complete */
+                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Waiting for library shutdown to complete...");
+                sleep_ms(10);
+                break;
+
+            default:
+                pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unknown library state %" PRId32 "!", old_state);
+                return PLCTAG_ERR_BAD_STATUS;
         }
     }
 
-    /* check the status outside the lock. */
+    /* We won the CAS - we are now responsible for initialization */
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "This thread will initialize the library.");
+
+    /* initialize a random seed value. */
+    srand((unsigned int)time_ms());
+
+    /* Start the refcount cleanup thread first */
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting refcount cleanup infrastructure.");
+    rc = refcount_startup();
     if(rc != PLCTAG_STATUS_OK) {
-        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize library mutex!  Error %s!", plc_tag_decode_error(rc));
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to start refcount cleanup infrastructure!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
         return rc;
-    } else {
-        /*
-         * guard library initialization with a mutex.
-         *
-         * This prevents busy waiting as would happen with just a spin lock.
-         */
-        critical_block(lib_mutex) {
-            if(!library_initialized) {
-                /* initialize a random seed value. */
-                srand((unsigned int)time_ms());
-
-                /* Start the refcount cleanup thread first, as other subsystems may need it */
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Starting refcount cleanup infrastructure.");
-                rc = refcount_startup();
-                if(rc != PLCTAG_STATUS_OK) { pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to start refcount cleanup infrastructure!"); }
-
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing library modules.");
-                if(rc == PLCTAG_STATUS_OK) { rc = lib_init();
-                    if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize library module!");
-                    }
-                }
-
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing AB module.");
-                if(rc == PLCTAG_STATUS_OK) { rc = ab_init(); 
-                    if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize AB module!");
-                    }
-                }
-
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Modbus module.");
-                if(rc == PLCTAG_STATUS_OK) { rc = mb_init(); 
-                    if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Modbus module!");
-                    }
-                }
-
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Omron module.");
-                if(rc == PLCTAG_STATUS_OK) { rc = omron_init(); 
-                    if(rc != PLCTAG_STATUS_OK) {
-                        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Omron module!");
-                    }
-                }
-
-                /* hook the destructor */
-                atexit(plc_tag_shutdown);
-
-                /* do this last */
-                library_initialized = 1;
-
-                pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done initializing library modules.");
-            }
-        }
     }
 
-    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done.");
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing library modules.");
+    rc = lib_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize library module!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
 
-    return rc;
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing AB module.");
+    rc = ab_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize AB module!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Modbus module.");
+    rc = mb_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Modbus module!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Initializing Omron module.");
+    rc = omron_init();
+    if(rc != PLCTAG_STATUS_OK) {
+        pdebug(DEBUG_MODULE_INIT, DEBUG_ERROR, "Unable to initialize Omron module!");
+        atomic_set_int32(&library_state, LIB_STATE_UNINITIALIZED);
+        return rc;
+    }
+
+    /* hook the destructor */
+    atexit(plc_tag_shutdown);
+
+    /* Transition to RUNNING - initialization complete */
+    atomic_set_int32(&library_state, LIB_STATE_RUNNING);
+
+    pdebug(DEBUG_MODULE_INIT, DEBUG_INFO, "Done initializing library modules.");
+
+    return PLCTAG_STATUS_OK;
 }
