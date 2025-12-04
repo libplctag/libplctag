@@ -1404,7 +1404,8 @@ int pccc_tag_status(ab_tag_p tag) {
 int pccc_tag_tickler(ab_tag_p tag) {
     int rc = PLCTAG_STATUS_OK;
 
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Starting.");
+    /* FIXME DEBUG */
+    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "Starting.");
 
     rc = check_request_status(tag);
     if(rc != PLCTAG_STATUS_OK) { 

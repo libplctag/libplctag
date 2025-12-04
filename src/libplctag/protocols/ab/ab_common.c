@@ -1085,17 +1085,19 @@ int check_request_status(ab_tag_p tag) {
     ab_request_p request = NULL;
     eip_encap *eip_header = NULL;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Starting.");
-
+    /* FIXME DEBUG */
+    if(tag) {
+        debug_set_tag_id(tag->tag_id);
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Checking status of tag %" PRId32 ".", tag->tag_id);
+    } else {
+        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Called with null tag pointer!");
+        return PLCTAG_ERR_NULL_PTR;
+    }
+    
     do {
-        if(!tag) {
-            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Called with null tag pointer!");
-            rc = PLCTAG_ERR_NULL_PTR;
-            break;
-        }
-
         /* do we have an abort outstanding? */
         if(atomic_get_bool(&tag->abort_requested)) {
+            pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Abort requested on tag %" PRId32 ".", tag->tag_id);
             ab_tag_abort_request(tag);
             atomic_set_bool(&tag->abort_requested, false);
             rc = PLCTAG_ERR_ABORT;
@@ -1130,6 +1132,7 @@ int check_request_status(ab_tag_p tag) {
 
             /* check to see if it was an abort on the session side. */
             if(request->status != PLCTAG_STATUS_OK) {
+                pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Request completed with error status %s.", plc_tag_decode_error(request->status));
                 rc = request->status;
                 break;
             }
@@ -1154,8 +1157,8 @@ int check_request_status(ab_tag_p tag) {
         }
 
         switch(le2h16(eip_header->encap_command)) {
-            case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Received a connected send EIP packet."); break;
-            case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Received an unconnected send EIP packet."); break;
+            case AB_EIP_CONNECTED_SEND: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Received a connected send EIP packet."); break;
+            case AB_EIP_UNCONNECTED_SEND: pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Received an unconnected send EIP packet."); break;
             default:
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Request pointer %p, header pointer %p.", request, eip_header);
                 pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Received an unknown EIP packet type %04" PRIx16 ".", le2h16(eip_header->encap_command));
@@ -1176,9 +1179,13 @@ int check_request_status(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_INFO, "Response not OK with status %s.", plc_tag_decode_error(rc));
     }
 
-    tag->status = (int8_t)rc;
+    /* FIXME - This is not correct */
+    // tag->status = (int8_t)rc;
 
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Done.");
+    /* FIXME DEBUG */
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Done with tag status %s.", plc_tag_decode_error(rc));
+
+    debug_set_tag_id(0);
 
     return rc;
 }
