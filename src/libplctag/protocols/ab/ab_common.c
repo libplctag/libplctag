@@ -1085,15 +1085,14 @@ int check_request_status(ab_tag_p tag) {
     ab_request_p request = NULL;
     eip_encap *eip_header = NULL;
 
-    /* FIXME DEBUG */
-    if(tag) {
-        debug_set_tag_id(tag->tag_id);
-        pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Checking status of tag %" PRId32 ".", tag->tag_id);
-    } else {
+    /* check early for null pointers */
+    if(!tag) {
         pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_WARN, "Called with null tag pointer!");
         return PLCTAG_ERR_NULL_PTR;
     }
     
+    debug_set_tag_id(tag->tag_id);
+
     do {
         /* do we have an abort outstanding? */
         if(atomic_get_bool(&tag->abort_requested)) {
@@ -1182,8 +1181,7 @@ int check_request_status(ab_tag_p tag) {
     /* FIXME - This is not correct */
     // tag->status = (int8_t)rc;
 
-    /* FIXME DEBUG */
-    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_DETAIL, "Done with tag status %s.", plc_tag_decode_error(rc));
+    pdebug(DEBUG_MODULE_AB_COMMON, DEBUG_SPEW, "Done with tag status %s.", plc_tag_decode_error(rc));
 
     debug_set_tag_id(0);
 
