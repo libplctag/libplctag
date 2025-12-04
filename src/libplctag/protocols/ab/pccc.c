@@ -1422,6 +1422,8 @@ int pccc_tag_tickler(ab_tag_p tag) {
                 tag_raise_event((plc_tag_p)tag, PLCTAG_EVENT_CREATED, PLCTAG_STATUS_OK);
             }
 
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "Read complete with status %s.", plc_tag_decode_error(tag->status));
+
             tag->read_complete = 1;
         }
 
@@ -1436,7 +1438,11 @@ int pccc_tag_tickler(ab_tag_p tag) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "set tag->status=%d, write_in_progress=%d, write_complete=%d", tag->status, tag->write_in_progress, tag->write_complete);
 
         /* check to see if the write finished. */
-        if(!tag->write_in_progress) { tag->write_complete = 1; }
+        if(!tag->write_in_progress) { 
+            pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "Write complete with status %s.", plc_tag_decode_error(tag->status));
+            
+            tag->write_complete = 1; 
+        }
 
         return rc;
     }
