@@ -760,8 +760,8 @@ static int plc_tag_status_impl(plc_tag_p tag) {
  * plc_tag_decode_error()
  *
  * This takes an integer error value and turns it into a printable string.
- *
- * TODO - this should produce better errors than this!
+ * 
+ * Returns a pointer to a static string.
  */
 
 
@@ -838,7 +838,6 @@ LIB_EXPORT void plc_tag_set_debug_level(int debug_level) {
  * Returns PLCTAG_STATUS_OK on success, PLCTAG_ERR_NOT_FOUND if the module name is not recognized.
  */
 LIB_EXPORT int plc_tag_set_debug_module_level(const char *module_name, int debug_level) {
-    /* Module enum values generated from debug_modules.def */
     /* We need to map module names to their enum values and call debug_module_set_level */
     
     if(!module_name || debug_level < PLCTAG_DEBUG_NONE || debug_level > PLCTAG_DEBUG_SPEW) {
