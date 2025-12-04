@@ -1382,21 +1382,21 @@ void encode_data(uint8_t *data, int *index, int val) {
 int pccc_tag_status(ab_tag_p tag) {
     if(!tag->session) {
         /* this is not OK.  This is fatal! */
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, "pccc_tag_status: returning PLCTAG_ERR_CREATE (no session)");
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_WARN, "returning PLCTAG_ERR_CREATE (no session)");
         return PLCTAG_ERR_CREATE;
     }
 
     if(tag->read_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "pccc_tag_status: read_in_progress=1, returning PENDING");
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "read_in_progress=1, returning PENDING");
         return PLCTAG_STATUS_PENDING;
     }
 
     if(tag->write_in_progress) {
-        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "pccc_tag_status: write_in_progress=1, returning PENDING");
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "write_in_progress=1, returning PENDING");
         return PLCTAG_STATUS_PENDING;
     }
 
-    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "pccc_tag_status: returning tag->status=%d (%s)", tag->status, plc_tag_decode_error(tag->status));
+    pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_INFO, "returning tag->status=%d (%s)", tag->status, plc_tag_decode_error(tag->status));
     return tag->status;
 }
 
@@ -1407,7 +1407,10 @@ int pccc_tag_tickler(ab_tag_p tag) {
     pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Starting.");
 
     rc = check_request_status(tag);
-    if(rc != PLCTAG_STATUS_OK) { return rc; }
+    if(rc != PLCTAG_STATUS_OK) { 
+        pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_DETAIL, "check_request_status returned %s.", plc_tag_decode_error(rc));
+        return rc; 
+    }
 
     if(tag->read_in_progress) {
         pdebug(DEBUG_MODULE_AB_PCCC, DEBUG_SPEW, "Read in progress.");

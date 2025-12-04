@@ -558,16 +558,22 @@ THREAD_FUNC(tag_tickler_func) {
 
                     /* try to hold the tag API mutex while all this goes on. */
                     if(mutex_try_lock(tag->api_mutex) == PLCTAG_STATUS_OK) {
+                        pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "calling generic tag tickler for tag %" PRId32 ".", tag->tag_id);
                         plc_tag_generic_tickler(tag);
 
                         /* call the tickler function if we can. */
                         if(tag->vtable && tag->vtable->tickler) {
                             /* call the tickler on the tag. */
+
+                            /* TEMP DEBUG */
+                            pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Calling protocol-specific tickler for tag %d.", tag->tag_id);
                             tag->vtable->tickler(tag);
 
                             if(tag->read_complete) {
                                 tag->read_complete = 0;
                                 tag->read_in_flight = 0;
+
+                                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising read complete event for tag %d.", tag->tag_id);
 
                                 // tag->event_read_complete = 1;
                                 tag_raise_event(tag, PLCTAG_EVENT_READ_COMPLETED, tag->status);
@@ -581,6 +587,8 @@ THREAD_FUNC(tag_tickler_func) {
                                 tag->write_complete = 0;
                                 tag->write_in_flight = 0;
                                 tag->auto_sync_next_write = 0;
+
+                                pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Raising write complete event for tag %d.", tag->tag_id);
 
                                 // tag->event_write_complete = 1;
                                 tag_raise_event(tag, PLCTAG_EVENT_WRITE_COMPLETED, tag->status);
@@ -607,6 +615,7 @@ THREAD_FUNC(tag_tickler_func) {
                         /* call callbacks */
                         plc_tag_generic_handle_event_callbacks(tag);
                     } else {
+
                         pdebug(DEBUG_MODULE_LIB, DEBUG_DETAIL, "Skipping tag as it is already locked.");
                     }
 
