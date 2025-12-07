@@ -67,6 +67,11 @@ endif()
 message("Building Modbus TCP server.")
 add_subdirectory("modbus_server")
 
+# Build the coroutine-based Modbus TCP server (using coro_net)
+# This is a lighter-weight implementation using the coro_net event-based reactor
+message("Building Modbus TCP server (coro_net version).")
+add_subdirectory("modbus_server_coro")
+
 # Register CTest tests for modbus_server
 # Test that modbus_server binary exists and is executable
 add_test(NAME modbus_server_binary_exists
