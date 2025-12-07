@@ -10,8 +10,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Note: Uses coro_net instead of fsm, reactor, and socket
 set(SOURCES
     modbus_server_coro.c
-    ../modbus_server/register_storage.c
-    ../modbus_server/modbus_protocol.c
+    register_storage.c
+    modbus_protocol.c
     ../utils/buf.c
     ../utils/err.c
     ../utils/log.c
@@ -23,7 +23,6 @@ set(SOURCES
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../utils)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../modbus_server)
 
 # Create executable
 add_executable(modbus_server_coro ${SOURCES})
