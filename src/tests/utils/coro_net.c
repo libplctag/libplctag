@@ -109,8 +109,9 @@ void coro_run(void) {
         if (nfds == 0) break;
 
         // 2. Wait (Uses portable coro_poll alias)
+        // Use 100ms timeout so handlers get periodic opportunities to run even without events
         int64_t poll_start = util_time_us();
-        int poll_result = coro_poll(pfds, nfds, -1);
+        int poll_result = coro_poll(pfds, nfds, 100);
         int64_t poll_time = util_time_us() - poll_start;
 
         if (poll_result < 0) {
