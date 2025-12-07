@@ -49,6 +49,9 @@
 #include "buf.h"
 #include "args.h"
 #include "utils.h"
+#include "atomic_utils.h"
+#include <inttypes.h>
+#include <math.h>
 
 /* ============================================================================
  * Forward Declarations and Constants
@@ -60,6 +63,49 @@ typedef struct modbus_client_s modbus_client_t;
 #define MODBUS_RECV_BUFFER_SIZE 512
 #define MODBUS_SEND_BUFFER_SIZE 512
 
+/* Histogram bucket boundaries (in microseconds) */
+#define HIST_BUCKET_COUNT 8
+static const int64_t hist_boundaries[HIST_BUCKET_COUNT] = {
+    100,    /* 0-100us */
+    500,    /* 100-500us */
+    1000,   /* 500us-1ms */
+    2000,   /* 1-2ms */
+    5000,   /* 2-5ms */
+    10000,  /* 5-10ms */
+    50000,  /* 10-50ms */
+    INT64_MAX  /* >50ms */
+};
+
+/* Server statistics structure */
+typedef struct {
+    /* Total request count and timing */
+    atomic_int64_t total_requests;
+    atomic_int64_t total_response_time_us;
+    atomic_int64_t total_response_time_sq_us;  /* Sum of squares for std dev */
+    atomic_int64_t min_response_time_us;
+    atomic_int64_t max_response_time_us;
+
+    /* Per-component timing breakdown */
+    atomic_int64_t total_recv_time_us;
+    atomic_int64_t total_process_time_us;
+    atomic_int64_t total_send_time_us;
+    atomic_int64_t total_overhead_time_us;
+
+    /* Histogram buckets for response time distribution */
+    atomic_int64_t hist_buckets[HIST_BUCKET_COUNT];
+} server_stats_t;
+
+/* Per-request timing breakdown */
+typedef struct {
+    int64_t request_start_us;      /* When first byte received */
+    int64_t recv_complete_us;      /* When full request received */
+    int64_t process_start_us;      /* When processing started */
+    int64_t process_complete_us;   /* When processing completed */
+    int64_t send_start_us;         /* When send started */
+    int64_t send_complete_us;      /* When send completed */
+    int64_t total_recv_time_us;    /* Accumulated times for multi-recv scenarios */
+} request_timing_t;
+
 static server_ctx_t *g_server = NULL;
 
 /* ============================================================================
@@ -69,6 +115,8 @@ static server_ctx_t *g_server = NULL;
 struct server_ctx_s {
     register_storage_t *storage;
     volatile int running;
+    int64_t start_time_us;
+    server_stats_t stats;
 };
 
 /* ============================================================================
@@ -84,7 +132,136 @@ struct modbus_client_s {
     buf_t send_buf;
     mbap_header_t mbap_header;
     uint16_t expected_pdu_length;
+    request_timing_t timing;
 };
+
+/* ============================================================================
+ * Statistics Helpers
+ * ============================================================================ */
+
+static const char* hist_bucket_label(int bucket) {
+    switch (bucket) {
+        case 0: return "0-100us";
+        case 1: return "100-500us";
+        case 2: return "500us-1ms";
+        case 3: return "1-2ms";
+        case 4: return "2-5ms";
+        case 5: return "5-10ms";
+        case 6: return "10-50ms";
+        case 7: return ">50ms";
+        default: return "unknown";
+    }
+}
+
+static void update_histogram(server_stats_t *stats, int64_t response_time_us) {
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        if (response_time_us <= hist_boundaries[i]) {
+            atomic_add_int64(&stats->hist_buckets[i], 1);
+            break;
+        }
+    }
+}
+
+static void update_min(atomic_int64_t *min_val, int64_t new_val) {
+    int64_t current;
+    do {
+        current = atomic_get_int64(min_val);
+        if (current != 0 && new_val >= current) {
+            break;
+        }
+    } while (atomic_compare_and_set_int64(min_val, current, new_val) != current);
+}
+
+static void update_max(atomic_int64_t *max_val, int64_t new_val) {
+    int64_t current;
+    do {
+        current = atomic_get_int64(max_val);
+        if (new_val <= current) {
+            break;
+        }
+    } while (atomic_compare_and_set_int64(max_val, current, new_val) != current);
+}
+
+static void print_statistics(server_ctx_t *server) {
+    if (!server) return;
+
+    int64_t end_time_us = util_time_us();
+    double runtime_sec = (double)(end_time_us - server->start_time_us) / 1000000.0;
+
+    server_stats_t *stats = &server->stats;
+    int64_t total_reqs = atomic_get_int64(&stats->total_requests);
+    int64_t total_time = atomic_get_int64(&stats->total_response_time_us);
+    int64_t total_time_sq = atomic_get_int64(&stats->total_response_time_sq_us);
+    int64_t min_time = atomic_get_int64(&stats->min_response_time_us);
+    int64_t max_time = atomic_get_int64(&stats->max_response_time_us);
+
+    int64_t total_recv = atomic_get_int64(&stats->total_recv_time_us);
+    int64_t total_process = atomic_get_int64(&stats->total_process_time_us);
+    int64_t total_send = atomic_get_int64(&stats->total_send_time_us);
+    int64_t total_overhead = atomic_get_int64(&stats->total_overhead_time_us);
+
+    printf("\n");
+    printf("╔══════════════════════════════════════════════════════════════════╗\n");
+    printf("║        MODBUS SERVER (COROUTINE) PERFORMANCE STATISTICS          ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║ Runtime: %.2f seconds                                            \n", runtime_sec);
+    printf("║ Total requests: %lld                                              \n", (long long)total_reqs);
+    if (runtime_sec > 0) {
+        printf("║ Throughput: %.2f requests/sec                                    \n", (double)total_reqs / (double)runtime_sec);
+    }
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║                     RESPONSE TIME SUMMARY                        ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    if (total_reqs > 0) {
+        double mean = (double)total_time / (double)total_reqs;
+        double variance = ((double)total_time_sq / (double)total_reqs) - (mean * mean);
+        double stddev = variance > 0 ? sqrt(variance) : 0.0;
+
+        printf("║ Average:  %8.2f us                                            \n", mean);
+        printf("║ Std Dev:  %8.2f us                                            \n", stddev);
+        printf("║ Minimum:  %8lld us                                            \n", (long long)min_time);
+        printf("║ Maximum:  %8lld us                                            \n", (long long)max_time);
+
+        printf("╠══════════════════════════════════════════════════════════════╣\n");
+        printf("║                    LATENCY BREAKDOWN (avg)                       ║\n");
+        printf("╠══════════════════════════════════════════════════════════════╣\n");
+
+        double avg_recv = (double)total_recv / (double)total_reqs;
+        double avg_process = (double)total_process / (double)total_reqs;
+        double avg_send = (double)total_send / (double)total_reqs;
+        double avg_overhead = (double)total_overhead / (double)total_reqs;
+        double total_avg = avg_recv + avg_process + avg_send + avg_overhead;
+
+        printf("║  Recv (socket):   %8.2f us (%5.1f%%)                           \n", avg_recv, total_avg > 0 ? (avg_recv / total_avg) * 100 : 0);
+        printf("║  Process (modbus):%8.2f us (%5.1f%%)                           \n", avg_process, total_avg > 0 ? (avg_process / total_avg) * 100 : 0);
+        printf("║  Send (socket):   %8.2f us (%5.1f%%)                           \n", avg_send, total_avg > 0 ? (avg_send / total_avg) * 100 : 0);
+        printf("║  Overhead (coro): %8.2f us (%5.1f%%)                           \n", avg_overhead, total_avg > 0 ? (avg_overhead / total_avg) * 100 : 0);
+    }
+
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    printf("║                  RESPONSE TIME HISTOGRAM                         ║\n");
+    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+
+    int64_t max_bucket = 0;
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        int64_t count = atomic_get_int64(&stats->hist_buckets[i]);
+        if (count > max_bucket) max_bucket = count;
+    }
+
+    for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
+        int64_t count = atomic_get_int64(&stats->hist_buckets[i]);
+        double pct = total_reqs > 0 ? (double)count / (double)total_reqs * 100 : 0;
+        int bar_len = max_bucket > 0 ? (int)((double)count / (double)max_bucket * 30) : 0;
+
+        printf("║  %-12s │", hist_bucket_label(i));
+        for (int j = 0; j < bar_len; j++) printf("█");
+        for (int j = bar_len; j < 30; j++) printf(" ");
+        printf("│ %6lld (%5.1f%%)\n", (long long)count, pct);
+    }
+
+    printf("╚══════════════════════════════════════════════════════════════════╝\n");
+}
 
 /* ============================================================================
  * Signal Handling
@@ -102,9 +279,36 @@ static void signal_handler(int signum) {
  * Client Coroutine Handler - SIMPLIFIED VERSION
  * ============================================================================ */
 
+static util_err_t modbus_frame_check(buf_t *buf) {
+    /* Check if we have enough data for the MBAP header */
+    if (buf_read_size(buf) < MBAP_HEADER_SIZE) {
+        return UTIL_EAGAIN;
+    }
+
+    /* make local copy of buffer */
+    buf_t header_buf = *buf;
+
+    /* Peek at the length field in the MBAP header */
+    uint16_t length = 0;
+    buf_read_advance(&header_buf, 4); /* Skip Transaction ID and Protocol ID */
+
+    if (!buf_read_u16_be(&header_buf, "length", &length)) {
+        return buf_get_error(&header_buf);
+    }
+
+    /* Total required size is MBAP header + length field - 1 for the unit byte */
+    if (buf_read_size(buf) < (MBAP_HEADER_SIZE + length - 1)) {
+        return UTIL_EAGAIN;
+    }
+
+    return UTIL_OK;
+}
+
+
+
+
 static void client_handler(Task *t) {
     modbus_client_t *client = (modbus_client_t *)t->context;
-    ssize_t bytes_received;
     uint8_t function_code;
     util_err_t err;
 
@@ -112,58 +316,29 @@ static void client_handler(Task *t) {
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client handler started");
 
-    /* Read data into buffer */
     while (1) {
-        /* Attempt to read more data */
-        ssize_t r = recv(t->fd, client->recv_buffer + client->recv_buf.write,
-                        MODBUS_RECV_BUFFER_SIZE - client->recv_buf.write, 0);
+        /* Capture request start time */
+        if (client->timing.request_start_us == 0) {
+            client->timing.request_start_us = util_time_us();
+        }
 
-        if (r < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                CR_YIELD(t, POLLIN);
-                continue;
-            } else {
-                pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "recv() failed: %d", errno);
-                break;
-            }
-        } else if (r == 0) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client disconnected");
+        /* Read MBAP header */
+
+        /* clear the receive buffer */
+        buf_reset(&client->recv_buf);
+
+        /* read until we get enough data for a full APU */
+        while((err = cr_buf_read(t, &client->recv_buf, modbus_frame_check)) == UTIL_EAGAIN) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Waiting for more data to complete request");
+            CR_YIELD(t, POLLIN);
+        }
+
+        if(err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Client error %s during APU read", util_err_str(err));
             break;
         }
 
-        client->recv_buf.write += r;
-
-        /* Check if we have at least the MBAP header */
-        if (client->recv_buf.write < MBAP_HEADER_SIZE) {
-            continue;
-        }
-
-        /* Parse MBAP header if not done yet */
-        if (client->recv_buf.read == 0) {
-            buf_t header_buf = client->recv_buf;
-            header_buf.write = MBAP_HEADER_SIZE;
-
-            err = modbus_parse_mbap_header(&header_buf, &client->mbap_header);
-            if (err != UTIL_OK) {
-                pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Failed to parse MBAP header");
-                break;
-            }
-
-            client->expected_pdu_length = client->mbap_header.length - 1;
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "MBAP header: txn_id=%u, length=%u",
-                            client->mbap_header.transaction_id,
-                            client->mbap_header.length);
-        }
-
-        /* Check if we have the complete PDU */
-        size_t expected_total = MBAP_HEADER_SIZE + client->expected_pdu_length;
-        if (client->recv_buf.write < expected_total) {
-            continue;
-        }
-
-        /* We have a complete request, process it */
-        buf_reset(&client->recv_buf);
-        client->recv_buf.write = client->recv_buf.read + expected_total;
+        /* we got at least enough data for a full packet */
 
         /* Skip the MBAP header in the request buffer */
         buf_read_advance(&client->recv_buf, MBAP_HEADER_SIZE);
@@ -176,6 +351,9 @@ static void client_handler(Task *t) {
 
         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Processing function code 0x%02x", function_code);
 
+        /* Capture process start time */
+        client->timing.process_start_us = util_time_us();
+
         /* Reset send buffer and generate response */
         buf_reset(&client->send_buf);
         err = modbus_process_request(
@@ -186,41 +364,62 @@ static void client_handler(Task *t) {
             client->server->storage
         );
 
+        /* Capture process complete time */
+        client->timing.process_complete_us = util_time_us();
+
         if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Request processing failed");
-            buf_reset(&client->send_buf);
+
             modbus_build_exception_response(
                 &client->send_buf,
                 &client->mbap_header,
                 function_code,
                 err
             );
+        } else {
+
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Request processed successfully");
         }
+
+        /* Capture send start time */
+        client->timing.send_start_us = util_time_us();
 
         /* Send response */
-        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", client->send_buf.write);
-
-        while (client->send_buf.read < client->send_buf.write) {
-            ssize_t s = send(t->fd, client->send_buf.data + client->send_buf.read,
-                           client->send_buf.write - client->send_buf.read, 0);
-
-            if (s < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    CR_YIELD(t, POLLOUT);
-                    continue;
-                } else {
-                    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "send() failed: %d", errno);
-                    break;
-                }
-            }
-
-            client->send_buf.read += s;
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
+        while(err = cr_buf_write(t, &client->send_buf), err == UTIL_EAGAIN) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Waiting to send more data");
+            CR_YIELD(t, POLLOUT);
         }
 
-        /* Reset for next request */
-        buf_reset(&client->recv_buf);
-        buf_reset(&client->send_buf);
-        client->expected_pdu_length = 0;
+        /* Capture send complete time and calculate statistics */
+        client->timing.send_complete_us = util_time_us();
+
+        /* Calculate response time and component times */
+        int64_t total_response_time = client->timing.send_complete_us - client->timing.request_start_us;
+        int64_t process_time = client->timing.process_complete_us - client->timing.process_start_us;
+        int64_t send_time = client->timing.send_complete_us - client->timing.send_start_us;
+        int64_t overhead_time = total_response_time - client->timing.total_recv_time_us - process_time - send_time;
+
+        /* Update statistics atomically */
+        server_stats_t *stats = &client->server->stats;
+        atomic_add_int64(&stats->total_requests, 1);
+        atomic_add_int64(&stats->total_response_time_us, total_response_time);
+        atomic_add_int64(&stats->total_response_time_sq_us, total_response_time * total_response_time);
+        atomic_add_int64(&stats->total_recv_time_us, client->timing.total_recv_time_us);
+        atomic_add_int64(&stats->total_process_time_us, process_time);
+        atomic_add_int64(&stats->total_send_time_us, send_time);
+        atomic_add_int64(&stats->total_overhead_time_us, overhead_time);
+
+        update_min(&stats->min_response_time_us, total_response_time);
+        update_max(&stats->max_response_time_us, total_response_time);
+        update_histogram(stats, total_response_time);
+
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL,
+              "Request completed: total=%lldus, recv=%lldus, process=%lldus, send=%lldus, overhead=%lldus",
+              (long long)total_response_time, (long long)client->timing.total_recv_time_us,
+              (long long)process_time, (long long)send_time, (long long)overhead_time);
+
+        memset(&client->timing, 0, sizeof(client->timing));
     }
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client handler closing");
@@ -247,9 +446,12 @@ static void listener_handler(Task *t) {
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Listener started on %s:%u", listener->bind_address, listener->bind_port);
 
     while (listener->server->running) {
-        CR_ACCEPT(t, client_fd);
+        util_err_t err = cr_accept(t, &client_fd);
 
-        if (client_fd == (CSOCKET)-1) {
+        if (err == UTIL_EAGAIN) {
+            CR_YIELD(t, POLLIN);
+            continue;
+        } else if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to accept connection");
             break;
         }
@@ -392,6 +594,8 @@ int main(int argc, char *argv[]) {
     }
     log_set_all_modules(log_level);
 
+    server.start_time_us = util_time_us();
+
     int64_t coils_val = args_get_int(&args_result, "coils");
     int64_t di_val = args_get_int(&args_result, "discrete-inputs");
     int64_t hr_val = args_get_int(&args_result, "holding-registers");
@@ -519,6 +723,7 @@ int main(int argc, char *argv[]) {
     coro_run();
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server shutting down");
+    print_statistics(&server);
     args_free(&args_result);
     register_storage_destroy(temp_storage);
 

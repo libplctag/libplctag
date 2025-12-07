@@ -78,88 +78,132 @@ void coro_set_buffer(Task *t, buf_t *rx, buf_t *tx);
 #define CR_END(t) } CS_CLOSE((t)->fd); (t)->fd = (CSOCKET)-1; (t)->line = 0;
 
 
-// --- I/O MACROS ---
+// --- I/O functions and MACROS ---
 
-// Reads data into the provided buffer until capacity is reached.
-#define CR_BUF_READ(t, buf) \
-    do { \
-        ssize_t r; \
-        while ((buf)->write_pos < (buf)->capacity) { \
-            size_t bytes_to_read = (buf)->capacity - (buf)->write_pos; \
-            r = recv((t)->fd, (buf)->data + (buf)->write_pos, bytes_to_read, 0); \
-            if (r < 0) { \
-                if (errno == CS_EAGAIN || errno == EWOULDBLOCK) { CR_YIELD(t, POLLIN); } \
-                else break; /* Error */ \
-            } else if (r == 0) { \
-                break; /* EOF/Disconnection */ \
-            } \
-            (buf)->write_pos += r; \
-        } \
-    } while(0)
+/**
+ * @brief Reads data into the provided buffer until a frame is reached.  
+ * 
+ * The frame_func is a function pointer that takes a buf_t* and returns
+ * UTIL_OK when a complete frame is available, UTIL_EAGAIN if more data
+ * 
+ * 
+ * 
+ * @param t 
+ * @param buf 
+ * @param frame_func 
+ */
+static inline util_err_t cr_buf_read(Task *t, buf_t *buf, util_err_t (*frame_func)(buf_t *)) {
+    ssize_t r;
+    util_err_t rc = UTIL_OK;
+    do {
+        r = recv(t->fd, buf_write_ptr(buf), buf_write_size(buf), 0);
+        if (r < 0) {
+            if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+                return UTIL_EAGAIN;
+            } else {
+                util_err_t err = util_err_from_errno(errno);
+                buf_set_error(buf, err, "socket read");
+                return err;
+            }
+        } else if (r == 0) {
+            buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+            return UTIL_ECLOSED;
+        }
 
-// Sends data from the buffer until all data (up to write_pos) is sent.
-#define CR_BUF_WRITE(t, buf) \
-    do { \
-        ssize_t r; \
-        while ((buf)->read_pos < (buf)->write_pos) { \
-            size_t bytes_to_send = (buf)->write_pos - (buf)->read_pos; \
-            r = send((t)->fd, (buf)->data + (buf)->read_pos, bytes_to_send, 0); \
-            if (r < 0) { \
-                if (errno == CS_EAGAIN || errno == EWOULDBLOCK) { CR_YIELD(t, POLLOUT); } \
-                else break; /* Error */ \
-            } else if (r == 0) { \
-                break; /* Error/Disconnection */ \
-            } \
-            (buf)->read_pos += r; \
-        } \
-    } while(0)
+        if(r > buf_write_size(buf)) {
+            buf_set_error(buf, UTIL_EBOUNDS, "buffer overflow");
+            return UTIL_EBOUNDS;
+        }
+
+        buf_write_advance(buf, (size_t)r);
+    } while (frame_func && (rc = frame_func(buf)) == UTIL_EAGAIN);
+
+    return rc;
+}
+
+
+static inline util_err_t cr_buf_write(Task *t, buf_t *buf) {
+    ssize_t r;
+    do {
+        r = send(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0);
+        if (r < 0) {
+            if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+                return UTIL_EAGAIN;
+            } else {
+                util_err_t err = util_err_from_errno(errno);
+                buf_set_error(buf, err, "socket write");
+                return err;
+            }
+        } else {
+            buf_read_advance(buf, (size_t)r);
+        }
+    } while(buf_read_size(buf));
+
+    return UTIL_OK;
+}
+
 
 // Pseudo-blocking accept() call
-#define CR_ACCEPT(t, new_fd) \
-    do { \
-        do { \
-            (new_fd) = accept((t)->fd, NULL, NULL); \
-            if ((new_fd) == (CSOCKET)-1 && (errno == CS_EAGAIN || errno == EWOULDBLOCK)) { \
-                CR_YIELD(t, POLLIN); \
-            } else break; \
-        } while(1); \
-    } while(0)
+static inline util_err_t cr_accept(Task *t, CSOCKET *new_fd) {
+    *new_fd = accept(t->fd, NULL, NULL);
+    if (*new_fd == (CSOCKET)-1) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        } else {
+            return util_err_from_errno(errno);
+        }
+    }
+    return UTIL_OK;
+}
 
 // UDP: Pseudo-blocking recvfrom()
-#define CR_RECVFROM(t, buf) \
-    do { \
-        ssize_t r; \
-        (t)->addrlen = sizeof((t)->addr); \
-        while ((buf)->write_pos < (buf)->capacity) { \
-            size_t bytes_to_read = (buf)->capacity - (buf)->write_pos; \
-            r = recvfrom((t)->fd, (buf)->data + (buf)->write_pos, bytes_to_read, 0, \
-                         (struct sockaddr *)&(t)->addr, &(t)->addrlen); \
-            if (r < 0) { \
-                if (errno == CS_EAGAIN || errno == EWOULDBLOCK) { CR_YIELD(t, POLLIN); } \
-                else break; /* Error */ \
-            } else { \
-                (buf)->write_pos += r; \
-                break; /* UDP is datagram-based; exit after one packet */ \
-            } \
-        } \
-    } while(0)
+static inline util_err_t cr_recvfrom(Task *t, buf_t *buf) {
+    ssize_t r;
+    t->addrlen = sizeof(t->addr);
+    r = recvfrom(t->fd, buf_write_ptr(buf), buf_write_size(buf), 0,
+                 (struct sockaddr *)&t->addr, &t->addrlen);
+    if (r < 0) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        } else {
+            util_err_t err = util_err_from_errno(errno);
+            buf_set_error(buf, err, "socket recvfrom");
+            return err;
+        }
+    } else if (r == 0) {
+        buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+        return UTIL_ECLOSED;
+    } else {
+        if ((size_t)r > buf_write_size(buf)) {
+            buf_set_error(buf, UTIL_EBOUNDS, "buffer overflow");
+            return UTIL_EBOUNDS;
+        }
+        buf_write_advance(buf, (size_t)r);
+        return UTIL_OK;  /* UDP is datagram-based; exit after one packet */
+    }
+}
 
 // UDP: Pseudo-blocking sendto()
-#define CR_SENDTO(t, buf) \
-    do { \
-        ssize_t r; \
-        while ((buf)->read_pos < (buf)->write_pos) { \
-            size_t bytes_to_send = (buf)->write_pos - (buf)->read_pos; \
-            r = sendto((t)->fd, (buf)->data + (buf)->read_pos, bytes_to_send, 0, \
-                       (struct sockaddr *)&(t)->addr, (t)->addrlen); \
-            if (r < 0) { \
-                if (errno == CS_EAGAIN || errno == EWOULDBLOCK) { CR_YIELD(t, POLLOUT); } \
-                else break; /* Error */ \
-            } else { \
-                (buf)->read_pos += r; \
-            } \
-        } \
-    } while(0)
+static inline util_err_t cr_sendto(Task *t, buf_t *buf) {
+    ssize_t r;
+    r = sendto(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0,
+               (struct sockaddr *)&t->addr, t->addrlen);
+    if (r < 0) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        } else {
+            util_err_t err = util_err_from_errno(errno);
+            buf_set_error(buf, err, "socket sendto");
+            return err;
+        }
+    } else if (r == 0) {
+        buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+        return UTIL_ECLOSED;
+    } else {
+        buf_read_advance(buf, (size_t)r);
+        return UTIL_OK;
+    }
+}
 
 #endif
 

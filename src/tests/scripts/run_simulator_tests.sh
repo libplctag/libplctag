@@ -287,7 +287,7 @@ echo "  Killing Micrologix emulator."
 kill_process ab_server
 
 
-echo "Starting AB emulator for PLC5 tests."
+echo "Starting AB emulator for Omron tests."
 { $TEST_DIR/ab_server --debug --plc=Omron --tag=TestDINTArray:DINT[10] > "$LOG_DIR/omron_emulator.log" 2>&1 & } 2>/dev/null
 EMULATOR_PID=$!
 if [ $EMULATOR_PID -le 0 ]; then

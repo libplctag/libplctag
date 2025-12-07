@@ -1,5 +1,6 @@
 #include "coro_net.h"
 #include "log.h"
+#include "utils.h"
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
@@ -50,6 +51,7 @@ void coro_stop(void) {
 
 void coro_add(CSOCKET fd, void (*handler)(Task*), void *context) {
     set_non_blocking(fd);
+    set_no_delay(fd);
 
     for (int i = 0; i < MAX_TASKS; i++) {
         if (tasks[i].fd == (CSOCKET)-1) {
@@ -88,10 +90,11 @@ void coro_run(void) {
     running = true;
 
     while (running) {
-        int nfds = 0;
+        unsigned int nfds = 0;
         int task_map[MAX_TASKS];
 
         // 1. Rebuild Poll List
+        int64_t rebuild_start = util_time_us();
         for (int i = 0; i < MAX_TASKS; i++) {
             if (tasks[i].fd != (CSOCKET)-1) {
                 pfds[nfds].fd = tasks[i].fd;
@@ -101,11 +104,16 @@ void coro_run(void) {
                 nfds++;
             }
         }
+        int64_t rebuild_time = util_time_us() - rebuild_start;
 
         if (nfds == 0) break;
 
         // 2. Wait (Uses portable coro_poll alias)
-        if (coro_poll(pfds, nfds, -1) < 0) {
+        int64_t poll_start = util_time_us();
+        int poll_result = coro_poll(pfds, nfds, -1);
+        int64_t poll_time = util_time_us() - poll_start;
+
+        if (poll_result < 0) {
 #ifdef _WIN32
             // Check for interruption/error
             if (WSAGetLastError() != WSAEINTR) {
@@ -120,12 +128,17 @@ void coro_run(void) {
         }
 
         // 3. Dispatch
+        int64_t dispatch_start = util_time_us();
         for (int i = 0; i < nfds; i++) {
             if (pfds[i].revents) {
                 int ti = task_map[i];
                 tasks[ti].handler(&tasks[ti]);
             }
         }
+        int64_t dispatch_time = util_time_us() - dispatch_start;
+
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_SPEW, "Loop iteration: rebuild=%lldus, poll=%lldus, dispatch=%lldus, nfds=%u",
+              (long long)rebuild_time, (long long)poll_time, (long long)dispatch_time, nfds);
     }
 #ifdef _WIN32
     WSACleanup();
