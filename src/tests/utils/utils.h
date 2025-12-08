@@ -31,7 +31,21 @@ extern uint64_t util_get_time_ms(void);
  */
 extern int64_t util_time_us(void);
 
+/**
+ * @brief Set the interrupt handler function
+ * 
+ * @param handler Function pointer to the handler called when ^C or signals occur.
+ * @return int 
+ */
+extern int util_set_interrupt_handler(void (*handler)(void));
 
+
+/**
+ * @brief  Sleep for the specified number of milliseconds.
+ * 
+ * @param ms The number of milliseconds to sleep.
+ */
+extern void util_sleep_ms(int ms);
 
 #ifdef __cplusplus
 }
