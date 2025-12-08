@@ -86,7 +86,9 @@ typedef struct {
     atomic_int64_t max_response_time_us;
 
     /* Per-component timing breakdown */
-    atomic_int64_t total_recv_time_us;
+    atomic_int64_t total_recv_time_us;         /* Total time from recv_start to recv_complete (includes polling) */
+    atomic_int64_t total_poll_overhead_us;     /* Time spent waiting for first byte (polling overhead) */
+    atomic_int64_t total_actual_io_time_us;    /* Time for actual socket I/O after first byte arrives */
     atomic_int64_t total_process_time_us;
     atomic_int64_t total_send_time_us;
     atomic_int64_t total_overhead_time_us;
@@ -97,13 +99,17 @@ typedef struct {
 
 /* Per-request timing breakdown */
 typedef struct {
-    int64_t request_start_us;      /* When first byte received */
+    int64_t request_start_us;      /* When we start attempting to receive (includes polling) */
+    int64_t first_byte_us;         /* When first byte actually received (key timing point) */
+    int64_t recv_start_us;         /* When recv started */
     int64_t recv_complete_us;      /* When full request received */
     int64_t process_start_us;      /* When processing started */
     int64_t process_complete_us;   /* When processing completed */
     int64_t send_start_us;         /* When send started */
     int64_t send_complete_us;      /* When send completed */
     int64_t total_recv_time_us;    /* Accumulated times for multi-recv scenarios */
+    int64_t total_process_time_us; /* Accumulated times for multi-process scenarios */
+    int64_t total_send_time_us;    /* Accumulated times for multi-send scenarios */
 } request_timing_t;
 
 static server_ctx_t *g_server = NULL;
@@ -124,7 +130,7 @@ struct server_ctx_s {
  * ============================================================================ */
 
 struct modbus_client_s {
-    Task base;
+    task_t base;
     server_ctx_t *server;
     uint8_t recv_buffer[MODBUS_RECV_BUFFER_SIZE];
     uint8_t send_buffer[MODBUS_SEND_BUFFER_SIZE];
@@ -196,36 +202,41 @@ static void print_statistics(server_ctx_t *server) {
     int64_t max_time = atomic_get_int64(&stats->max_response_time_us);
 
     int64_t total_recv = atomic_get_int64(&stats->total_recv_time_us);
+    int64_t total_poll_overhead = atomic_get_int64(&stats->total_poll_overhead_us);
+    int64_t total_actual_io = atomic_get_int64(&stats->total_actual_io_time_us);
     int64_t total_process = atomic_get_int64(&stats->total_process_time_us);
     int64_t total_send = atomic_get_int64(&stats->total_send_time_us);
     int64_t total_overhead = atomic_get_int64(&stats->total_overhead_time_us);
 
-    printf("\n");
-    printf("╔══════════════════════════════════════════════════════════════════╗\n");
-    printf("║        MODBUS SERVER (COROUTINE) PERFORMANCE STATISTICS          ║\n");
-    printf("╠══════════════════════════════════════════════════════════════════╣\n");
-    printf("║ Runtime: %.2f seconds                                            \n", runtime_sec);
-    printf("║ Total requests: %lld                                              \n", (long long)total_reqs);
+    /* flush the rest of the log out */
+    fflush(stderr);
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "╔══════════════════════════════════════════════════════════════════╗\n");
+    fprintf(stderr, "║        MODBUS SERVER (COROUTINE) PERFORMANCE STATISTICS          ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║ Runtime: %.2f seconds                                            \n", runtime_sec);
+    fprintf(stderr, "║ Total requests: %" PRId64 "                                              \n", (long long)total_reqs);
     if (runtime_sec > 0) {
-        printf("║ Throughput: %.2f requests/sec                                    \n", (double)total_reqs / (double)runtime_sec);
+        fprintf(stderr, "║ Throughput: %.2f requests/sec                                    \n", (double)total_reqs / (double)runtime_sec);
     }
-    printf("╠══════════════════════════════════════════════════════════════════╣\n");
-    printf("║                     RESPONSE TIME SUMMARY                        ║\n");
-    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║                     RESPONSE TIME SUMMARY                        ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
 
     if (total_reqs > 0) {
         double mean = (double)total_time / (double)total_reqs;
         double variance = ((double)total_time_sq / (double)total_reqs) - (mean * mean);
         double stddev = variance > 0 ? sqrt(variance) : 0.0;
 
-        printf("║ Average:  %8.2f us                                            \n", mean);
-        printf("║ Std Dev:  %8.2f us                                            \n", stddev);
-        printf("║ Minimum:  %8lld us                                            \n", (long long)min_time);
-        printf("║ Maximum:  %8lld us                                            \n", (long long)max_time);
+        fprintf(stderr, "║ Average:  %8.2f us                                            \n", mean);
+        fprintf(stderr, "║ Std Dev:  %8.2f us                                            \n", stddev);
+        fprintf(stderr, "║ Minimum:  %8lld us                                            \n", (long long)min_time);
+        fprintf(stderr, "║ Maximum:  %8lld us                                            \n", (long long)max_time);
 
-        printf("╠══════════════════════════════════════════════════════════════╣\n");
-        printf("║                    LATENCY BREAKDOWN (avg)                       ║\n");
-        printf("╠══════════════════════════════════════════════════════════════╣\n");
+        fprintf(stderr, "╠══════════════════════════════════════════════════════════════╣\n");
+        fprintf(stderr, "║                    LATENCY BREAKDOWN (avg)                       ║\n");
+        fprintf(stderr, "╠══════════════════════════════════════════════════════════════╣\n");
 
         double avg_recv = (double)total_recv / (double)total_reqs;
         double avg_process = (double)total_process / (double)total_reqs;
@@ -233,15 +244,20 @@ static void print_statistics(server_ctx_t *server) {
         double avg_overhead = (double)total_overhead / (double)total_reqs;
         double total_avg = avg_recv + avg_process + avg_send + avg_overhead;
 
-        printf("║  Recv (socket):   %8.2f us (%5.1f%%)                           \n", avg_recv, total_avg > 0 ? (avg_recv / total_avg) * 100 : 0);
-        printf("║  Process (modbus):%8.2f us (%5.1f%%)                           \n", avg_process, total_avg > 0 ? (avg_process / total_avg) * 100 : 0);
-        printf("║  Send (socket):   %8.2f us (%5.1f%%)                           \n", avg_send, total_avg > 0 ? (avg_send / total_avg) * 100 : 0);
-        printf("║  Overhead (coro): %8.2f us (%5.1f%%)                           \n", avg_overhead, total_avg > 0 ? (avg_overhead / total_avg) * 100 : 0);
+        double avg_poll_overhead = (double)total_poll_overhead / (double)total_reqs;
+        double avg_actual_io = (double)total_actual_io / (double)total_reqs;
+
+        fprintf(stderr, "║  Recv (socket):   %8.2f us (%5.1f%%)                           \n", avg_recv, total_avg > 0 ? (avg_recv / total_avg) * 100 : 0);
+        fprintf(stderr, "║    - Poll overhead: %6.2f us (%5.1f%% of recv)                  \n", avg_poll_overhead, avg_recv > 0 ? (avg_poll_overhead / avg_recv) * 100 : 0);
+        fprintf(stderr, "║    - Actual I/O:    %6.2f us (%5.1f%% of recv)                  \n", avg_actual_io, avg_recv > 0 ? (avg_actual_io / avg_recv) * 100 : 0);
+        fprintf(stderr, "║  Process (modbus):%8.2f us (%5.1f%%)                           \n", avg_process, total_avg > 0 ? (avg_process / total_avg) * 100 : 0);
+        fprintf(stderr, "║  Send (socket):   %8.2f us (%5.1f%%)                           \n", avg_send, total_avg > 0 ? (avg_send / total_avg) * 100 : 0);
+        fprintf(stderr, "║  Overhead (coro): %8.2f us (%5.1f%%)                           \n", avg_overhead, total_avg > 0 ? (avg_overhead / total_avg) * 100 : 0);
     }
 
-    printf("╠══════════════════════════════════════════════════════════════════╣\n");
-    printf("║                  RESPONSE TIME HISTOGRAM                         ║\n");
-    printf("╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║                  RESPONSE TIME HISTOGRAM                         ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
 
     int64_t max_bucket = 0;
     for (int i = 0; i < HIST_BUCKET_COUNT; i++) {
@@ -254,21 +270,22 @@ static void print_statistics(server_ctx_t *server) {
         double pct = total_reqs > 0 ? (double)count / (double)total_reqs * 100 : 0;
         int bar_len = max_bucket > 0 ? (int)((double)count / (double)max_bucket * 30) : 0;
 
-        printf("║  %-12s │", hist_bucket_label(i));
-        for (int j = 0; j < bar_len; j++) printf("█");
-        for (int j = bar_len; j < 30; j++) printf(" ");
-        printf("│ %6lld (%5.1f%%)\n", (long long)count, pct);
+        fprintf(stderr, "║  %-12s │", hist_bucket_label(i));
+        for (int j = 0; j < bar_len; j++) fprintf(stderr, "█");
+        for (int j = bar_len; j < 30; j++) fprintf(stderr, " ");
+        fprintf(stderr, "│ %6lld (%5.1f%%)\n", (long long)count, pct);
     }
 
-    printf("╚══════════════════════════════════════════════════════════════════╝\n");
+    fprintf(stderr, "╚══════════════════════════════════════════════════════════════════╝\n");
+    fflush(stderr);
 }
 
 /* ============================================================================
  * Signal Handling
  * ============================================================================ */
 
-static void signal_handler(int signum) {
-    (void)signum;
+/* FIXME - I don't this this actually works. It is in a signal thread/process/context */
+static void signal_handler(void) {
     if (g_server) {
         g_server->running = 0;
         coro_stop();
@@ -280,8 +297,10 @@ static void signal_handler(int signum) {
  * ============================================================================ */
 
 static util_err_t modbus_frame_check(buf_t *buf) {
+    pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Checking for complete Modbus frame");
     /* Check if we have enough data for the MBAP header */
     if (buf_read_size(buf) < MBAP_HEADER_SIZE) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Not enough data for MBAP header");
         return UTIL_EAGAIN;
     }
 
@@ -293,11 +312,13 @@ static util_err_t modbus_frame_check(buf_t *buf) {
     buf_read_advance(&header_buf, 4); /* Skip Transaction ID and Protocol ID */
 
     if (!buf_read_u16_be(&header_buf, "length", &length)) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Failed to read length field from MBAP header");
         return buf_get_error(&header_buf);
     }
 
     /* Total required size is MBAP header + length field - 1 for the unit byte */
     if (buf_read_size(buf) < (MBAP_HEADER_SIZE + length - 1)) {
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Not enough data for complete Modbus frame");
         return UTIL_EAGAIN;
     }
 
@@ -305,52 +326,78 @@ static util_err_t modbus_frame_check(buf_t *buf) {
 }
 
 
-
-
-static void client_handler(Task *t) {
+static void client_handler(task_t *t) {
     modbus_client_t *client = (modbus_client_t *)t->context;
     uint8_t function_code;
     util_err_t err;
 
     CR_START(t);
 
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client handler started");
+    pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler started");
 
     while (1) {
-        /* Capture request start time */
-        if (client->timing.request_start_us == 0) {
-            client->timing.request_start_us = util_time_us();
-        }
-
         /* Read MBAP header */
 
         /* clear the receive buffer */
         buf_reset(&client->recv_buf);
 
+        /* Capture request start time - right before we start receiving */
+        client->timing.request_start_us = util_time_us();
+        client->timing.first_byte_us = 0;  /* Reset for new request */
+
         /* read until we get enough data for a full APU */
+        client->timing.recv_start_us = util_time_us();
+
+        /* Track whether buffer had data before the first read attempt */
+        bool had_data_before_read = (buf_read_size(&client->recv_buf) > 0);
+
         while((err = cr_buf_read(t, &client->recv_buf, modbus_frame_check)) == UTIL_EAGAIN) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Waiting for more data to complete request");
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Waiting for more data to complete request");
+
+            /* Capture first byte arrival time on first successful read */
+            if (client->timing.first_byte_us == 0 && buf_read_size(&client->recv_buf) > 0 && !had_data_before_read) {
+                client->timing.first_byte_us = util_time_us();
+                had_data_before_read = true;  /* Mark that we've captured first byte timestamp */
+            }
+
             CR_YIELD(t, POLLIN);
+        }
+        client->timing.recv_complete_us = util_time_us();
+
+        /* If we got data but didn't capture first_byte_us yet (e.g., all data arrived before first EAGAIN),
+         * capture it now. Also handles case where buffer had pre-existing data. */
+        if (client->timing.first_byte_us == 0) {
+            client->timing.first_byte_us = client->timing.recv_start_us;
         }
 
         if(err != UTIL_OK) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Client error %s during APU read", util_err_str(err));
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Client error %s during APU read", util_err_str(err));
             break;
         }
 
         /* we got at least enough data for a full packet */
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Received complete Modbus request of %zu bytes:", buf_read_size(&client->recv_buf));
+        pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->recv_buf);
 
-        /* Skip the MBAP header in the request buffer */
-        buf_read_advance(&client->recv_buf, MBAP_HEADER_SIZE);
+        /* get the header info */
+        modbus_parse_mbap_header(&client->recv_buf, &client->mbap_header);
+
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
+              "MBAP Header - Transaction ID: %u, Protocol ID: %u, Length: %u, Unit ID: %u",
+              client->mbap_header.transaction_id,
+              client->mbap_header.protocol_id,
+              client->mbap_header.length,
+              client->mbap_header.unit_id);
+
+        /* FIXME - we should check the unit ID here. */
 
         /* Extract function code */
         if (!buf_read_u8(&client->recv_buf, "function_code", &function_code)) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Failed to read function code");
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to read function code");
             break;
         }
 
-        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Processing function code 0x%02x", function_code);
-
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Processing function code 0x%02x", function_code);
         /* Capture process start time */
         client->timing.process_start_us = util_time_us();
 
@@ -368,7 +415,7 @@ static void client_handler(Task *t) {
         client->timing.process_complete_us = util_time_us();
 
         if (err != UTIL_OK) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_WARN, "Request processing failed");
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Request processing failed");
 
             modbus_build_exception_response(
                 &client->send_buf,
@@ -378,16 +425,16 @@ static void client_handler(Task *t) {
             );
         } else {
 
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Request processed successfully");
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Request processed successfully");
         }
 
         /* Capture send start time */
         client->timing.send_start_us = util_time_us();
 
         /* Send response */
-        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
         while(err = cr_buf_write(t, &client->send_buf), err == UTIL_EAGAIN) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Waiting to send more data");
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Waiting to send more data");
             CR_YIELD(t, POLLOUT);
         }
 
@@ -396,33 +443,38 @@ static void client_handler(Task *t) {
 
         /* Calculate response time and component times */
         int64_t total_response_time = client->timing.send_complete_us - client->timing.request_start_us;
+        int64_t recv_time = client->timing.recv_complete_us - client->timing.recv_start_us;
+        int64_t poll_overhead = client->timing.first_byte_us - client->timing.request_start_us;
+        int64_t actual_io_time = client->timing.recv_complete_us - client->timing.first_byte_us;
         int64_t process_time = client->timing.process_complete_us - client->timing.process_start_us;
         int64_t send_time = client->timing.send_complete_us - client->timing.send_start_us;
-        int64_t overhead_time = total_response_time - client->timing.total_recv_time_us - process_time - send_time;
+        int64_t overhead_time = total_response_time - recv_time - process_time - send_time;
 
         /* Update statistics atomically */
         server_stats_t *stats = &client->server->stats;
         atomic_add_int64(&stats->total_requests, 1);
         atomic_add_int64(&stats->total_response_time_us, total_response_time);
         atomic_add_int64(&stats->total_response_time_sq_us, total_response_time * total_response_time);
-        atomic_add_int64(&stats->total_recv_time_us, client->timing.total_recv_time_us);
+        atomic_add_int64(&stats->total_recv_time_us, recv_time);
+        atomic_add_int64(&stats->total_poll_overhead_us, poll_overhead);
+        atomic_add_int64(&stats->total_actual_io_time_us, actual_io_time);
         atomic_add_int64(&stats->total_process_time_us, process_time);
         atomic_add_int64(&stats->total_send_time_us, send_time);
         atomic_add_int64(&stats->total_overhead_time_us, overhead_time);
 
         update_min(&stats->min_response_time_us, total_response_time);
         update_max(&stats->max_response_time_us, total_response_time);
+
         update_histogram(stats, total_response_time);
 
-        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL,
-              "Request completed: total=%lldus, recv=%lldus, process=%lldus, send=%lldus, overhead=%lldus",
-              (long long)total_response_time, (long long)client->timing.total_recv_time_us,
-              (long long)process_time, (long long)send_time, (long long)overhead_time);
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL,
+              "Request completed: total=%" PRId64 "us, recv=%" PRId64 "us, process=%" PRId64 "us, send=%" PRId64 "us, overhead=%" PRId64 "us",
+              total_response_time, recv_time, process_time, send_time, overhead_time);
 
         memset(&client->timing, 0, sizeof(client->timing));
     }
 
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Client handler closing");
+    pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler closing");
     free(client);
     CR_END(t);
 }
@@ -437,13 +489,13 @@ typedef struct {
     uint16_t bind_port;
 } listener_info_t;
 
-static void listener_handler(Task *t) {
+static void listener_handler(task_t *t) {
     listener_info_t *listener = (listener_info_t *)t->context;
     CSOCKET client_fd;
 
     CR_START(t);
 
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Listener started on %s:%u", listener->bind_address, listener->bind_port);
+    pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener started on %s:%u", listener->bind_address, listener->bind_port);
 
     while (listener->server->running) {
         util_err_t err = cr_accept(t, &client_fd);
@@ -452,16 +504,16 @@ static void listener_handler(Task *t) {
             CR_YIELD(t, POLLIN);
             continue;
         } else if (err != UTIL_OK) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to accept connection");
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to accept connection");
             break;
         }
 
-        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_DETAIL, "Accepted client connection");
+        pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_DETAIL, "Accepted client connection");
 
         /* Create client context */
         modbus_client_t *client = (modbus_client_t *)malloc(sizeof(modbus_client_t));
         if (!client) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to allocate client context");
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to allocate client context");
             CS_CLOSE(client_fd);
             continue;
         }
@@ -477,11 +529,11 @@ static void listener_handler(Task *t) {
         client->server = listener->server;
         client->expected_pdu_length = 0;
 
-        /* Register with event loop - client is stored in the Task, not separate context */
+        /* Register with event loop - client is stored in the task_t, not separate context */
         coro_add(client_fd, client_handler, (void *)client);
     }
 
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Listener stopping");
+    pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener stopping");
     free(t->context);
     CR_END(t);
 }
@@ -565,7 +617,7 @@ int main(int argc, char *argv[]) {
 
     util_err_t parse_rc = args_parse(argc, (const char **)argv, flags, num_flags, &args_result);
     if (parse_rc != UTIL_OK) {
-        printf("Error: %s\n", args_get_error_detail(&args_result));
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to parse arguments: %s", args_get_error_detail(&args_result));
         args_print_help(argv[0], flags, num_flags);
         args_free(&args_result);
         return EXIT_FAILURE;
@@ -605,7 +657,7 @@ int main(int argc, char *argv[]) {
         di_val < 0 || di_val > 65535 ||
         hr_val < 0 || hr_val > 65535 ||
         ir_val < 0 || ir_val > 65535) {
-        printf("Error: Register counts must be 0-65535\n");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Register counts must be 0-65535");
         args_free(&args_result);
         return EXIT_FAILURE;
     }
@@ -617,7 +669,7 @@ int main(int argc, char *argv[]) {
         (size_t)ir_val
     );
     if (!temp_storage) {
-        printf("Error: Failed to create storage\n");
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create storage");
         args_free(&args_result);
         return EXIT_FAILURE;
     }
@@ -629,9 +681,11 @@ int main(int argc, char *argv[]) {
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Holding Registers: %zu", (size_t)hr_val);
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Input Registers: %zu", (size_t)ir_val);
 
+    /* Initialize the coroutine system */
     coro_init();
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+
+    /* Set up signal handler for graceful shutdown */
+    util_set_interrupt_handler(signal_handler);
 
     size_t listen_count = args_get_count(&args_result, "listen");
     if (listen_count == 0) {
@@ -657,7 +711,7 @@ int main(int argc, char *argv[]) {
 
         char *colon = strchr(addr_copy, ':');
         if (!colon) {
-            printf("Error: Invalid address format: %s\n", listen_addr);
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Invalid address format: %s", listen_addr);
             args_free(&args_result);
             register_storage_destroy(temp_storage);
             return EXIT_FAILURE;
@@ -671,6 +725,7 @@ int main(int argc, char *argv[]) {
 
         CSOCKET listen_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (listen_fd == (CSOCKET)-1) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create socket");
             perror("socket");
             args_free(&args_result);
             register_storage_destroy(temp_storage);
@@ -687,6 +742,7 @@ int main(int argc, char *argv[]) {
         inet_pton(AF_INET, addr_str, &addr.sin_addr);
 
         if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to bind socket to %s:%u", addr_str, port);
             perror("bind");
             CS_CLOSE(listen_fd);
             args_free(&args_result);
@@ -695,6 +751,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (listen(listen_fd, 128) < 0) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to listen on socket");
             perror("listen");
             CS_CLOSE(listen_fd);
             args_free(&args_result);
@@ -704,7 +761,7 @@ int main(int argc, char *argv[]) {
 
         listener_info_t *listener_info = (listener_info_t *)malloc(sizeof(listener_info_t));
         if (!listener_info) {
-            printf("Error: Failed to allocate listener info\n");
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to allocate listener info");
             CS_CLOSE(listen_fd);
             args_free(&args_result);
             register_storage_destroy(temp_storage);
@@ -719,7 +776,7 @@ int main(int argc, char *argv[]) {
         coro_add(listen_fd, listener_handler, listener_info);
     }
 
-    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server running");
+    pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Starting coroutine event loop");
     coro_run();
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server shutting down");
@@ -729,3 +786,4 @@ int main(int argc, char *argv[]) {
 
     return EXIT_SUCCESS;
 }
+
