@@ -339,7 +339,8 @@ static void client_handler(task_t *t) {
         /* Read MBAP header */
 
         /* clear the receive buffer */
-        buf_reset(&client->recv_buf);
+        // buf_reset(&client->recv_buf);
+        buf_compact(&client->recv_buf);
 
         /* Capture request start time - right before we start receiving */
         client->timing.request_start_us = util_time_us();
@@ -348,20 +349,20 @@ static void client_handler(task_t *t) {
         /* read until we get enough data for a full APU */
         client->timing.recv_start_us = util_time_us();
 
-        /* Track whether buffer had data before the first read attempt */
-        bool had_data_before_read = (buf_read_size(&client->recv_buf) > 0);
+        cr_yield_read(t, &client->recv_buf, modbus_frame_check, err);
 
-        while((err = cr_buf_read(t, &client->recv_buf, modbus_frame_check)) == UTIL_EAGAIN) {
-            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Waiting for more data to complete request");
+        // while((err = cr_read(t, &client->recv_buf, modbus_frame_check)) == UTIL_EAGAIN) {
+        //     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Waiting for more data to complete request");
 
-            /* Capture first byte arrival time on first successful read */
-            if (client->timing.first_byte_us == 0 && buf_read_size(&client->recv_buf) > 0 && !had_data_before_read) {
-                client->timing.first_byte_us = util_time_us();
-                had_data_before_read = true;  /* Mark that we've captured first byte timestamp */
-            }
+        //     /* Capture first byte arrival time on first successful read */
+        //     if (client->timing.first_byte_us == 0 && buf_read_size(&client->recv_buf) > 0 && !had_data_before_read) {
+        //         client->timing.first_byte_us = util_time_us();
+        //         had_data_before_read = true;  /* Mark that we've captured first byte timestamp */
+        //     }
 
-            CR_YIELD(t, POLLIN);
-        }
+        //     CR_YIELD(t, POLLIN);
+        // }
+
         client->timing.recv_complete_us = util_time_us();
 
         /* If we got data but didn't capture first_byte_us yet (e.g., all data arrived before first EAGAIN),
@@ -424,7 +425,6 @@ static void client_handler(task_t *t) {
                 err
             );
         } else {
-
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Request processed successfully");
         }
 
@@ -433,9 +433,9 @@ static void client_handler(task_t *t) {
 
         /* Send response */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
-        while(err = cr_buf_write(t, &client->send_buf), err == UTIL_EAGAIN) {
-            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Waiting to send more data");
-            CR_YIELD(t, POLLOUT);
+        cr_yield_write(t, &client->send_buf, err);
+        if(err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
         }
 
         /* Capture send complete time and calculate statistics */

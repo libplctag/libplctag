@@ -19,6 +19,7 @@ typedef enum {
     UTIL_ECONNRESET,    // connection reset by peer
     UTIL_EDESTROYED,    // object destroyed
     UTIL_EHOSTUNREACH,  // host unreachable
+    UTIL_EINTR,         // interrupted system call
     UTIL_EINTERNAL,     // internal error
     UTIL_EINVAL,        // invalid argument
     UTIL_EIO,           // I/O error

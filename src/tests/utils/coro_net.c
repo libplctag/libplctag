@@ -13,10 +13,9 @@ static coro_pollfd pfds[MAX_TASKS];
 static bool running = false;
 static CSOCKET wake_read_fd = (CSOCKET)-1;
 static CSOCKET wake_write_fd = (CSOCKET)-1;
-static int task_count = 0;
+// static int task_count = 0;
 
-// --- Platform Helpers ---
-
+static util_err_t get_last_socket_error(void);
 static void set_non_blocking(CSOCKET fd);
 static void set_no_delay(CSOCKET fd);
 static int coro_create_wakeup_pipe(void);
@@ -147,17 +146,10 @@ void coro_run(void) {
         int64_t poll_time = util_time_us() - poll_start;
 
         if (poll_result < 0) {
-#ifdef _WIN32
-            // Check for interruption/error
-            if (WSAGetLastError() != WSAEINTR) {
-                fprintf(stderr, "Poll failed: %d\n", WSAGetLastError());
-                break;
-            }
-#else
-            if (errno == EINTR) continue;
-            perror("Poll failed");
-            break;
-#endif
+            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Poll error: %s", util_err_to_string(get_last_socket_error()));
+
+            /* just keep swimming, just keep swimming ... */
+            continue;
         }
 
         // 3. Dispatch
@@ -196,7 +188,149 @@ void coro_run(void) {
 }
 
 
+/* --- I/O Functions --- */
+
+util_err_t cr_accept(task_t *t, CSOCKET *new_fd) {
+    *new_fd = accept(t->fd, NULL, NULL);
+    if (*new_fd == (CSOCKET)-1) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        } else {
+            return util_err_from_errno(errno);
+        }
+    }
+    return UTIL_OK;
+}
+
+util_err_t cr_connect(task_t *t, const struct sockaddr *addr, socklen_t addrlen) {
+    int res = connect(t->fd, addr, addrlen);
+    if (res < 0) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK || errno == EINPROGRESS) {
+            return UTIL_EAGAIN;
+        } else {
+            return util_err_from_errno(errno);
+        }
+    }
+    return UTIL_OK;
+}
+
+
+util_err_t cr_read(task_t *t, buf_t *buf, util_err_t (*frame_func)(buf_t *)) {
+    ssize_t r;
+    util_err_t rc = UTIL_OK;
+    do {
+        r = recv(t->fd, buf_write_ptr(buf), buf_write_size(buf), 0);
+        if (r < 0) {
+            if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+                return UTIL_EAGAIN;
+            } else {
+                util_err_t err = util_err_from_errno(errno);
+                buf_set_error(buf, err, "socket read");
+                return err;
+            }
+        } else if (r == 0) {
+            buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+            return UTIL_ECLOSED;
+        }
+
+        if((size_t)r > buf_write_size(buf)) {
+            buf_set_error(buf, UTIL_EBOUNDS, "buffer overflow");
+            return UTIL_EBOUNDS;
+        }
+
+        buf_write_advance(buf, (size_t)r);
+    } while (frame_func && (rc = frame_func(buf)) == UTIL_EAGAIN);
+
+    return rc;
+}
+
+
+util_err_t cr_recvfrom(task_t *t, buf_t *buf) {
+    ssize_t r;
+    t->addrlen = sizeof(t->addr);
+    r = recvfrom(t->fd, buf_write_ptr(buf), buf_write_size(buf), 0,
+                 (struct sockaddr *)&t->addr, &t->addrlen);
+    if (r < 0) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        } else {
+            util_err_t err = util_err_from_errno(errno);
+            buf_set_error(buf, err, "socket recvfrom");
+            return err;
+        }
+    } else if (r == 0) {
+        buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+        return UTIL_ECLOSED;
+    } else {
+        if ((size_t)r > buf_write_size(buf)) {
+            buf_set_error(buf, UTIL_EBOUNDS, "buffer overflow");
+            return UTIL_EBOUNDS;
+        }
+        buf_write_advance(buf, (size_t)r);
+        return UTIL_OK;  /* UDP is datagram-based; exit after one packet */
+    }
+}
+
+
+util_err_t cr_sendto(task_t *t, buf_t *buf) {
+    ssize_t r;
+    r = sendto(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0,
+               (struct sockaddr *)&t->addr, t->addrlen);
+    if (r < 0) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        } else {
+            util_err_t err = util_err_from_errno(errno);
+            buf_set_error(buf, err, "socket sendto");
+            return err;
+        }
+    } else if (r == 0) {
+        buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+        return UTIL_ECLOSED;
+    } else {
+        buf_read_advance(buf, (size_t)r);
+        return UTIL_OK;
+    }
+}
+
+
+util_err_t cr_write(task_t *t, buf_t *buf) {
+    ssize_t r;
+    do {
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Attempting to write %zu bytes to socket:", buf_read_size(buf));
+        pdlog_bytes(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, buf);
+        r = send(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0);
+        if (r < 0) {
+            if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+                pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Socket write would block");
+                return UTIL_EAGAIN;
+            } else {
+                util_err_t err = util_err_from_errno(errno);
+                buf_set_error(buf, err, "socket write");
+                return err;
+            }
+        } else {
+            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Wrote %zd bytes to socket", r);
+            buf_read_advance(buf, (size_t)r);
+        }
+    } while(buf_read_size(buf));
+
+    return UTIL_OK;
+}
+
+
+
+
 /* Helpers */
+
+
+static util_err_t get_last_socket_error(void) {
+#ifdef _WIN32
+    return util_err_from_errno(WSAGetLastError());
+#else
+    return util_err_from_errno(errno);
+#endif
+}
 
 
 static void set_non_blocking(CSOCKET fd) {
