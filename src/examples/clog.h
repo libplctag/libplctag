@@ -581,7 +581,7 @@ _clog_log(const char *sfile, int sline, enum clog_level level,
     va_copy(ap_copy, ap);
     result = vsnprintf(dynbuf, buf_size, fmt, ap);
     if ((size_t) result >= buf_size) {
-        buf_size = result + 1;
+        buf_size = (size_t)(result + 1);
         dynbuf = (char *) malloc(buf_size);
         result = vsnprintf(dynbuf, buf_size, fmt, ap_copy);
         if ((size_t) result >= buf_size) {
@@ -606,7 +606,7 @@ _clog_log(const char *sfile, int sline, enum clog_level level,
             }
             return;
         }
-        result = write(logger->fd, message, strlen(message));
+        result = (int)write(logger->fd, message, strlen(message));
         if (result == -1) {
             _clog_err("Unable to write to log file: %s\n", strerror(errno));
         }
