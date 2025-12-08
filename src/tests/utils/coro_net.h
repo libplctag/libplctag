@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include "buf.h"
+#include "log.h"
 
 
 // --- Platform Includes and Defines ---
@@ -42,13 +43,13 @@ typedef struct pollfd coro_pollfd;
 // } buf_t;
 
 
-// --- Task Structure (The Coroutine Context) ---
+// --- task_t Structure (The Coroutine Context) ---
 
-typedef struct Task {
+typedef struct task_t {
     CSOCKET fd;
     int line;           // Coroutine "Instruction Pointer"
     short events;       // Used by poll/WSAPoll
-    void (*handler)(struct Task*);
+    void (*handler)(struct task_t*);
     void *context;      // Application-provided context pointer
 
     // I/O Buffers for simultaneous read/write
@@ -58,15 +59,15 @@ typedef struct Task {
     // Fields for UDP/Connectionless Operations
     socklen_t addrlen;
     struct sockaddr_storage addr; // Source/Destination address storage
-} Task;
+} task_t;
 
 // --- Public API ---
 void coro_init(void);
-void coro_add(CSOCKET fd, void (*handler)(Task*), void *context);
+void coro_add(CSOCKET fd, void (*handler)(task_t*), void *context);
 void coro_remove(CSOCKET fd);
 void coro_run(void);
 void coro_stop(void);
-void coro_set_buffer(Task *t, buf_t *rx, buf_t *tx);
+void coro_set_buffer(task_t *t, buf_t *rx, buf_t *tx);
 
 
 // --- CORE COROUTINE MACROS ---
@@ -92,7 +93,7 @@ void coro_set_buffer(Task *t, buf_t *rx, buf_t *tx);
  * @param buf 
  * @param frame_func 
  */
-static inline util_err_t cr_buf_read(Task *t, buf_t *buf, util_err_t (*frame_func)(buf_t *)) {
+static inline util_err_t cr_buf_read(task_t *t, buf_t *buf, util_err_t (*frame_func)(buf_t *)) {
     ssize_t r;
     util_err_t rc = UTIL_OK;
     do {
@@ -110,7 +111,7 @@ static inline util_err_t cr_buf_read(Task *t, buf_t *buf, util_err_t (*frame_fun
             return UTIL_ECLOSED;
         }
 
-        if(r > buf_write_size(buf)) {
+        if((size_t)r > buf_write_size(buf)) {
             buf_set_error(buf, UTIL_EBOUNDS, "buffer overflow");
             return UTIL_EBOUNDS;
         }
@@ -122,12 +123,15 @@ static inline util_err_t cr_buf_read(Task *t, buf_t *buf, util_err_t (*frame_fun
 }
 
 
-static inline util_err_t cr_buf_write(Task *t, buf_t *buf) {
+static inline util_err_t cr_buf_write(task_t *t, buf_t *buf) {
     ssize_t r;
     do {
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Attempting to write %zu bytes to socket:", buf_read_size(buf));
+        pdlog_bytes(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, buf);
         r = send(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0);
         if (r < 0) {
             if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+                pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Socket write would block");
                 return UTIL_EAGAIN;
             } else {
                 util_err_t err = util_err_from_errno(errno);
@@ -135,6 +139,7 @@ static inline util_err_t cr_buf_write(Task *t, buf_t *buf) {
                 return err;
             }
         } else {
+            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Wrote %zd bytes to socket", r);
             buf_read_advance(buf, (size_t)r);
         }
     } while(buf_read_size(buf));
@@ -144,7 +149,7 @@ static inline util_err_t cr_buf_write(Task *t, buf_t *buf) {
 
 
 // Pseudo-blocking accept() call
-static inline util_err_t cr_accept(Task *t, CSOCKET *new_fd) {
+static inline util_err_t cr_accept(task_t *t, CSOCKET *new_fd) {
     *new_fd = accept(t->fd, NULL, NULL);
     if (*new_fd == (CSOCKET)-1) {
         if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
@@ -157,7 +162,7 @@ static inline util_err_t cr_accept(Task *t, CSOCKET *new_fd) {
 }
 
 // UDP: Pseudo-blocking recvfrom()
-static inline util_err_t cr_recvfrom(Task *t, buf_t *buf) {
+static inline util_err_t cr_recvfrom(task_t *t, buf_t *buf) {
     ssize_t r;
     t->addrlen = sizeof(t->addr);
     r = recvfrom(t->fd, buf_write_ptr(buf), buf_write_size(buf), 0,
@@ -184,7 +189,7 @@ static inline util_err_t cr_recvfrom(Task *t, buf_t *buf) {
 }
 
 // UDP: Pseudo-blocking sendto()
-static inline util_err_t cr_sendto(Task *t, buf_t *buf) {
+static inline util_err_t cr_sendto(task_t *t, buf_t *buf) {
     ssize_t r;
     r = sendto(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0,
                (struct sockaddr *)&t->addr, t->addrlen);
