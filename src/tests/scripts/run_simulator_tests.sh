@@ -577,7 +577,7 @@ fi
 # Check that exactly 2 PLC objects were created during test 29.
 # This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
-echo -n "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
+echo "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
 PLC_COUNT=$(grep -c "Creating new PLC connection\." ${TST_LOG})
 if [ "${PLC_COUNT}" = "2" ] ; then
     echo "OK (found ${PLC_COUNT} PLC creation entries in log file ${TST_LOG})"

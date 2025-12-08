@@ -60,7 +60,7 @@ if [[ ! -d $TEST_DIR ]]; then
 fi
 
 # test for the executables.
-EXECUTABLES="ab_server list_tags_logix string_non_standard_udt string_standard tag_rw2 test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
+EXECUTABLES="ab_server list_tags_logix modbus_server modbus_server_coro string_non_standard_udt string_standard tag_rw2 test_connection_stress test_fairness test_auto_sync test_callback test_callback_ex test_callback_ex_logix test_callback_ex_modbus test_modbus_multiple test_raw_cip test_reconnect_after_outage_async test_reconnect_after_outage_sync test_shutdown_cip test_shutdown_modbus test_shutdown_restart test_special test_string test_tag_attributes test_tag_type_attribute thread_stress"
 # echo -n "  Checking for executables..."
 for EXECUTABLE in $EXECUTABLES
 do
@@ -74,14 +74,19 @@ done
 # echo "...Done."
 
 
-kill_process ab_server
+echo "Killing any existing Modbus emulator processes."
+
+kill_process modbus_server
 
 kill_process modbus_server_coro
 
 # wait for them to exit
 sleep 2
 
-echo "Starting Modbus server $SCRIPT_DIR/modbus_server_coro."
+
+echo "Phase 1: Modbus server $SCRIPT_DIR/modbus_server_coro."
+
+echo "  Starting Modbus server $SCRIPT_DIR/modbus_server_coro."
 $TEST_DIR/modbus_server_coro --listen=127.0.0.1:1502 --listen=127.0.0.1:2502 --debug=DETAIL > "$LOG_DIR/modbus_server_coro.log" 2>&1 &
 MODBUS_PID=$!
 if [ $MODBUS_PID -le 0 ]; then
@@ -120,6 +125,18 @@ fi
 let TEST++
 echo -n "  Test $TEST: thread stress Modbus... "
 $VALGRIND$TEST_DIR/thread_stress 10 'protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "$LOG_DIR/${TEST}_modbus_stress_test.log" 2>&1
+if [ $? != 0 ]; then
+    echo "FAILURE"
+    let FAILURES++
+else
+    echo "OK"
+    let SUCCESSES++
+fi
+
+
+let TEST++
+echo -n "  Test $TEST: connection stress (multiple connections) Modbus... "
+$VALGRIND$TEST_DIR/test_connection_stress --num-threads=10 --tag='protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "$LOG_DIR/${TEST}_modbus_connection_stress_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -191,7 +208,9 @@ else
     let FAILURES++
 fi
 
+
 # echo "  Killing Modbus emulator."
+kill_process modbus_server
 kill_process modbus_server_coro
 
 # wait for them to exit
@@ -205,3 +224,4 @@ echo " - $SUCCESSES successes."
 echo " - $FAILURES failures."
 
 exit $FAILURES
+
