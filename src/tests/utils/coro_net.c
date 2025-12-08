@@ -3,24 +3,79 @@
 #include "utils.h"
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <arpa/inet.h>
 #include <string.h>
+#include <limits.h>
 
 #define MAX_TASKS 64
+#define MAX_TIMERS 64
+#define INVALID_HANDLE -1
+#define INET_ADDRSTRLEN 16
 
-static task_t tasks[MAX_TASKS];
+// --- socket_entry_t Structure (Private) ---
+typedef struct socket_entry_t {
+    CSOCKET fd;
+    int line;
+    short events;
+    void (*handler)(coro_socket_handle_t handle, CSOCKET fd, void *context);
+    void *context;
+    char ip_addr[INET_ADDRSTRLEN];  // IPv4 address buffer
+    uint16_t port;                   // Port number
+} socket_entry_t;
+
+typedef struct timer_t {
+    bool used;
+    int64_t deadline_us;
+    void (*handler)(coro_timer_handle_t handle, void *context);
+    void *context;
+} timer_t;
+
+static socket_entry_t sockets[MAX_TASKS];
+static timer_t timers[MAX_TIMERS];
 static coro_pollfd pfds[MAX_TASKS];
-
 static bool running = false;
-static CSOCKET wake_read_fd = (CSOCKET)-1;
-static CSOCKET wake_write_fd = (CSOCKET)-1;
-// static int task_count = 0;
 
 static util_err_t get_last_socket_error(void);
 static void set_non_blocking(CSOCKET fd);
 static void set_no_delay(CSOCKET fd);
-static int coro_create_wakeup_pipe(void);
-static void coro_destroy_wakeup_pipe(void);
-static void coro_signal_wakeup(void);
+static int64_t now_us(void);
+static int64_t next_timer_timeout_ms(void);
+static void timer_dispatch_due(void);
+
+// Helper to validate handle
+static inline bool is_valid_socket_handle(coro_socket_handle_t handle) {
+    return (handle >= 0 && handle < MAX_TASKS && sockets[handle].fd != (CSOCKET)-1);
+}
+
+// Accessor functions for macros
+int coro_get_line(coro_socket_handle_t handle) {
+    if (handle < 0 || handle >= MAX_TASKS) return 0;
+    return sockets[handle].line;
+}
+
+void coro_set_line(coro_socket_handle_t handle, int line) {
+    if (handle < 0 || handle >= MAX_TASKS) return;
+    sockets[handle].line = line;
+}
+
+void coro_set_events(coro_socket_handle_t handle, short events) {
+    if (handle < 0 || handle >= MAX_TASKS) return;
+    sockets[handle].events = events;
+}
+
+CSOCKET coro_get_fd(coro_socket_handle_t handle) {
+    if (handle < 0 || handle >= MAX_TASKS) return (CSOCKET)-1;
+    return sockets[handle].fd;
+}
+
+void coro_close_socket(coro_socket_handle_t handle) {
+    if (handle < 0 || handle >= MAX_TASKS) return;
+    if (sockets[handle].fd != (CSOCKET)-1) {
+        CS_CLOSE(sockets[handle].fd);
+        sockets[handle].fd = (CSOCKET)-1;
+        sockets[handle].line = 0;
+    }
+}
 
 void coro_init(void) {
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Initializing coroutine network library.");
@@ -32,73 +87,100 @@ void coro_init(void) {
     }
 #endif
     for (int i = 0; i < MAX_TASKS; i++) {
-        tasks[i].fd = (CSOCKET)-1;
+        sockets[i].fd = (CSOCKET)-1;
     }
 
-    if (coro_create_wakeup_pipe() != 0) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to create wakeup pipe.");
-        exit(EXIT_FAILURE);
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        timers[i].used = false;
     }
 
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Coroutine network library initialized.");
 }
-
-
 
 void coro_stop(void) {
     running = false;
 
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Stopping coroutine network library.");
     for (int i = 0; i < MAX_TASKS; i++) {
-        if (tasks[i].fd != (CSOCKET)-1) {
-            CS_CLOSE(tasks[i].fd);
-            tasks[i].fd = (CSOCKET)-1;
+        if (sockets[i].fd != (CSOCKET)-1) {
+            CS_CLOSE(sockets[i].fd);
+            sockets[i].fd = (CSOCKET)-1;
         }
     }
-    coro_destroy_wakeup_pipe();
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Coroutine network library stopped.");
 }
 
-
-
-void coro_add(CSOCKET fd, void (*handler)(task_t*), void *context) {
+util_err_t coro_add_socket(coro_socket_handle_t *handle, 
+                           CSOCKET fd, 
+                           void (*handler)(coro_socket_handle_t handle, CSOCKET fd, void *context), 
+                           void *context) {
+    if (!handle) return UTIL_EINVAL;
 
     set_non_blocking(fd);
     set_no_delay(fd);
 
     for (int i = 0; i < MAX_TASKS; i++) {
-        if (tasks[i].fd == (CSOCKET)-1) {
-            tasks[i].fd = fd;
-            tasks[i].line = 0;
-            tasks[i].handler = handler;
-            tasks[i].context = context;
-            tasks[i].events = POLLIN; // Default start state
-            coro_signal_wakeup();  // Signal to wake up event loop immediately
-            return;
+        if (sockets[i].fd == (CSOCKET)-1) {
+            sockets[i].fd = fd;
+            sockets[i].line = 0;
+            sockets[i].handler = handler;
+            sockets[i].context = context;
+            sockets[i].events = POLLIN;
+            sockets[i].ip_addr[0] = '\0';
+            sockets[i].port = 0;
+            *handle = i;
+            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Added socket fd=%d with handle=%d", (int)fd, i);
+            return UTIL_OK;
         }
     }
 
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_WARN, "task_t list full");
+    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_WARN, "socket list full");
     CS_CLOSE(fd);
+    *handle = INVALID_HANDLE;
+    return UTIL_ERESOURCE;
 }
 
-void coro_remove(CSOCKET fd) {
-    for (size_t i = 0; i < MAX_TASKS; i++) {
-        if (tasks[i].fd == fd) {
-            CS_CLOSE(tasks[i].fd);
-            tasks[i].fd = (CSOCKET)-1;
-            coro_signal_wakeup();  // Signal to wake up event loop immediately
-            return;
-        }
+void coro_remove_socket(coro_socket_handle_t handle) {
+    if (handle < 0 || handle >= MAX_TASKS) return;
+    
+    if (sockets[handle].fd != (CSOCKET)-1) {
+        CS_CLOSE(sockets[handle].fd);
+        sockets[handle].fd = (CSOCKET)-1;
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Removed socket with handle=%d", handle);
     }
 }
 
-// Sets the application-managed buffers for the task
-void coro_set_buffer(task_t *t, buf_t *rx, buf_t *tx) {
-    t->rx_buf = *rx;
-    t->tx_buf = *tx;
+util_err_t coro_add_timer(coro_timer_handle_t *handle,
+                          int64_t delay_ms,
+                          void (*handler)(coro_timer_handle_t handle, void *context),
+                          void *context) {
+    if (!handle) return UTIL_EINVAL;
+
+    int64_t deadline = now_us() + (delay_ms * 1000);
+    
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        if (!timers[i].used) {
+            timers[i].used = true;
+            timers[i].deadline_us = deadline;
+            timers[i].handler = handler;
+            timers[i].context = context;
+            *handle = i;
+            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Timer added with handle=%d, delay=%lldms", i, (long long)delay_ms);
+            return UTIL_OK;
+        }
+    }
+    
+    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_WARN, "timer list full");
+    *handle = INVALID_HANDLE;
+    return UTIL_ERESOURCE;
 }
 
+void coro_remove_timer(coro_timer_handle_t handle) {
+    if (handle < 0 || handle >= MAX_TIMERS) return;
+    
+    timers[handle].used = false;
+    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Removed timer with handle=%d", handle);
+}
 
 void coro_run(void) {
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Starting coroutine network loop.");
@@ -106,25 +188,14 @@ void coro_run(void) {
 
     while (running) {
         size_t nfds = 0;
-        size_t task_map[MAX_TASKS];
-        size_t wake_pipe_index = (size_t)-1;  // Track wake pipe position in poll array
+        coro_socket_handle_t task_map[MAX_TASKS];
 
-        // 1. Rebuild Poll List
         int64_t rebuild_start = util_time_us();
 
-        // Always include the wake pipe for instant wakeup
-        if (wake_read_fd != (CSOCKET)-1) {
-            pfds[nfds].fd = wake_read_fd;
-            pfds[nfds].events = POLLIN;
-            pfds[nfds].revents = 0;
-            wake_pipe_index = nfds;
-            nfds++;
-        }
-
-        for (size_t i = 0; i < MAX_TASKS; i++) {
-            if (tasks[i].fd != (CSOCKET)-1) {
-                pfds[nfds].fd = tasks[i].fd;
-                pfds[nfds].events = tasks[i].events;
+        for (coro_socket_handle_t i = 0; i < MAX_TASKS; i++) {
+            if (sockets[i].fd != (CSOCKET)-1) {
+                pfds[nfds].fd = sockets[i].fd;
+                pfds[nfds].events = sockets[i].events;
                 pfds[nfds].revents = 0;
                 task_map[nfds] = i;
                 nfds++;
@@ -133,52 +204,37 @@ void coro_run(void) {
 
         int64_t rebuild_time = util_time_us() - rebuild_start;
 
-        //if (nfds == 0) break;
-
-        /* If nothing to do, wait a little bit to allow something to happen.  This should be handled by a wake up pipe or similar */
-        if(nfds == 0) {
-            util_sleep_ms(10);
+        if (nfds == 0) {
+            int64_t sleep_ms = next_timer_timeout_ms();
+            util_sleep_ms(sleep_ms);
+            timer_dispatch_due();
             continue;
         }
 
         int64_t poll_start = util_time_us();
-        int poll_result = coro_poll(pfds, (nfds_t)nfds, 100);
+        int64_t timeout_ms = next_timer_timeout_ms();
+        int poll_result = coro_poll(pfds, (nfds_t)nfds, (int)timeout_ms);
         int64_t poll_time = util_time_us() - poll_start;
 
         if (poll_result < 0) {
             pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Poll error: %s", util_err_to_string(get_last_socket_error()));
-
-            /* just keep swimming, just keep swimming ... */
             continue;
         }
 
-        // 3. Dispatch
         int64_t dispatch_start = util_time_us();
 
-        // Handle wake pipe first if it has events
-        if (wake_pipe_index != (size_t)-1 && pfds[wake_pipe_index].revents) {
-            // Drain any pending wakeup signals to prevent poll from hanging
-            uint8_t buf[256];
-            ssize_t n;
-            while ((n = recv(wake_read_fd, (char *)buf, sizeof(buf), 0)) > 0) {
-                // Just discard the bytes
-            }
-            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Wakeup signal received and drained.");
-        }
-
-        // Handle regular tasks
         for (size_t i = 0; i < nfds; i++) {
-            // Skip the wake pipe (already handled above)
-            if (i == wake_pipe_index) continue;
-
             if (pfds[i].revents) {
-                size_t ti = task_map[i];
-                tasks[ti].handler(&tasks[ti]);
+                coro_socket_handle_t handle = task_map[i];
+                sockets[handle].handler(handle, sockets[handle].fd, sockets[handle].context);
             }
         }
+
+        timer_dispatch_due();
+
         int64_t dispatch_time = util_time_us() - dispatch_start;
 
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Loop iteration: rebuild=%lldus, poll=%lldus, dispatch=%lldus, nfds=%u",
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Loop iteration: rebuild=%lldus, poll=%lldus, dispatch=%lldus, nfds=%zu",
               (long long)rebuild_time, (long long)poll_time, (long long)dispatch_time, nfds);
     }
 #ifdef _WIN32
@@ -187,12 +243,13 @@ void coro_run(void) {
     pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Coroutine network loop exited.");
 }
 
-
 /* --- I/O Functions --- */
 
-util_err_t cr_accept(task_t *t, CSOCKET *new_fd) {
-    *new_fd = accept(t->fd, NULL, NULL);
-    if (*new_fd == (CSOCKET)-1) {
+util_err_t cr_accept(coro_socket_handle_t listener_handle, CSOCKET *client) {
+    if (!is_valid_socket_handle(listener_handle)) return UTIL_EINVAL;
+    
+    *client = accept(sockets[listener_handle].fd, NULL, NULL);
+    if (*client == (CSOCKET)-1) {
         if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
             return UTIL_EAGAIN;
         } else {
@@ -202,8 +259,21 @@ util_err_t cr_accept(task_t *t, CSOCKET *new_fd) {
     return UTIL_OK;
 }
 
-util_err_t cr_connect(task_t *t, const struct sockaddr *addr, socklen_t addrlen) {
-    int res = connect(t->fd, addr, addrlen);
+util_err_t cr_connect(coro_socket_handle_t sock_handle, const char *ip_addr, uint16_t port) {
+    if (!is_valid_socket_handle(sock_handle)) return UTIL_EINVAL;
+    if (!ip_addr) return UTIL_EINVAL;
+    
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    
+    if (inet_pton(AF_INET, ip_addr, &addr.sin_addr) != 1) {
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Invalid IP address: %s", ip_addr);
+        return UTIL_EINVAL;
+    }
+    
+    int res = connect(sockets[sock_handle].fd, (struct sockaddr *)&addr, sizeof(addr));
     if (res < 0) {
         if (errno == CS_EAGAIN || errno == EWOULDBLOCK || errno == EINPROGRESS) {
             return UTIL_EAGAIN;
@@ -214,115 +284,139 @@ util_err_t cr_connect(task_t *t, const struct sockaddr *addr, socklen_t addrlen)
     return UTIL_OK;
 }
 
-
-util_err_t cr_read(task_t *t, buf_t *buf, util_err_t (*frame_func)(buf_t *)) {
+util_err_t cr_read(coro_socket_handle_t sock_handle, buf_t *read_buf, util_err_t (*frame_func)(buf_t *buf, void *context), void *context) {
+    if (!is_valid_socket_handle(sock_handle)) return UTIL_EINVAL;
+    
     ssize_t r;
     util_err_t rc = UTIL_OK;
     do {
-        r = recv(t->fd, buf_write_ptr(buf), buf_write_size(buf), 0);
+        r = recv(sockets[sock_handle].fd, buf_write_ptr(read_buf), buf_write_size(read_buf), 0);
         if (r < 0) {
             if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
                 return UTIL_EAGAIN;
             } else {
                 util_err_t err = util_err_from_errno(errno);
-                buf_set_error(buf, err, "socket read");
+                buf_set_error(read_buf, err, "socket read");
                 return err;
             }
         } else if (r == 0) {
-            buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+            buf_set_error(read_buf, UTIL_ECLOSED, "socket closed");
             return UTIL_ECLOSED;
         }
 
-        if((size_t)r > buf_write_size(buf)) {
-            buf_set_error(buf, UTIL_EBOUNDS, "buffer overflow");
+        if ((size_t)r > buf_write_size(read_buf)) {
+            buf_set_error(read_buf, UTIL_EBOUNDS, "buffer overflow");
             return UTIL_EBOUNDS;
         }
 
-        buf_write_advance(buf, (size_t)r);
-    } while (frame_func && (rc = frame_func(buf)) == UTIL_EAGAIN);
+        buf_write_advance(read_buf, (size_t)r);
+    } while (frame_func && (rc = frame_func(read_buf, context)) == UTIL_EAGAIN);
 
     return rc;
 }
 
-
-util_err_t cr_recvfrom(task_t *t, buf_t *buf) {
-    ssize_t r;
-    t->addrlen = sizeof(t->addr);
-    r = recvfrom(t->fd, buf_write_ptr(buf), buf_write_size(buf), 0,
-                 (struct sockaddr *)&t->addr, &t->addrlen);
+util_err_t cr_recvfrom(coro_socket_handle_t sock_handle, buf_t *read_buf, const char **ip_addr, uint16_t *port) {
+    if (!is_valid_socket_handle(sock_handle)) return UTIL_EINVAL;
+    if (!ip_addr || !port) return UTIL_EINVAL;
+    
+    struct sockaddr_in addr;
+    socklen_t addrlen = sizeof(addr);
+    
+    ssize_t r = recvfrom(sockets[sock_handle].fd, buf_write_ptr(read_buf), buf_write_size(read_buf), 0, 
+                         (struct sockaddr *)&addr, &addrlen);
     if (r < 0) {
         if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
             return UTIL_EAGAIN;
         } else {
             util_err_t err = util_err_from_errno(errno);
-            buf_set_error(buf, err, "socket recvfrom");
+            buf_set_error(read_buf, err, "socket recvfrom");
             return err;
         }
     } else if (r == 0) {
-        buf_set_error(buf, UTIL_ECLOSED, "socket closed");
+        buf_set_error(read_buf, UTIL_ECLOSED, "socket closed");
         return UTIL_ECLOSED;
     } else {
-        if ((size_t)r > buf_write_size(buf)) {
-            buf_set_error(buf, UTIL_EBOUNDS, "buffer overflow");
+        if ((size_t)r > buf_write_size(read_buf)) {
+            buf_set_error(read_buf, UTIL_EBOUNDS, "buffer overflow");
             return UTIL_EBOUNDS;
         }
-        buf_write_advance(buf, (size_t)r);
-        return UTIL_OK;  /* UDP is datagram-based; exit after one packet */
-    }
-}
-
-
-util_err_t cr_sendto(task_t *t, buf_t *buf) {
-    ssize_t r;
-    r = sendto(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0,
-               (struct sockaddr *)&t->addr, t->addrlen);
-    if (r < 0) {
-        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
-            return UTIL_EAGAIN;
-        } else {
-            util_err_t err = util_err_from_errno(errno);
-            buf_set_error(buf, err, "socket sendto");
-            return err;
+        
+        // Convert address to string and store in socket entry
+        if (inet_ntop(AF_INET, &addr.sin_addr, sockets[sock_handle].ip_addr, INET_ADDRSTRLEN) == NULL) {
+            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to convert IP address");
+            return UTIL_EINVAL;
         }
-    } else if (r == 0) {
-        buf_set_error(buf, UTIL_ECLOSED, "socket closed");
-        return UTIL_ECLOSED;
-    } else {
-        buf_read_advance(buf, (size_t)r);
+        sockets[sock_handle].port = ntohs(addr.sin_port);
+        
+        // Return pointers to the stored values
+        *ip_addr = sockets[sock_handle].ip_addr;
+        *port = sockets[sock_handle].port;
+        
+        buf_write_advance(read_buf, (size_t)r);
         return UTIL_OK;
     }
 }
 
+util_err_t cr_sendto(coro_socket_handle_t sock_handle, buf_t *write_buf, const char *ip_addr, uint16_t port) {
+    if (!is_valid_socket_handle(sock_handle)) return UTIL_EINVAL;
+    if (!ip_addr) return UTIL_EINVAL;
+    
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    
+    if (inet_pton(AF_INET, ip_addr, &addr.sin_addr) != 1) {
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Invalid IP address: %s", ip_addr);
+        return UTIL_EINVAL;
+    }
+    
+    ssize_t r = sendto(sockets[sock_handle].fd, buf_read_ptr(write_buf), buf_read_size(write_buf), 0,
+                       (struct sockaddr *)&addr, sizeof(addr));
+    if (r < 0) {
+        if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
+            return UTIL_EAGAIN;
+        } else {
+            util_err_t err = util_err_from_errno(errno);
+            buf_set_error(write_buf, err, "socket sendto");
+            return err;
+        }
+    } else if (r == 0) {
+        buf_set_error(write_buf, UTIL_ECLOSED, "socket closed");
+        return UTIL_ECLOSED;
+    } else {
+        buf_read_advance(write_buf, (size_t)r);
+        return UTIL_OK;
+    }
+}
 
-util_err_t cr_write(task_t *t, buf_t *buf) {
+util_err_t cr_write(coro_socket_handle_t sock_handle, buf_t *write_buf) {
+    if (!is_valid_socket_handle(sock_handle)) return UTIL_EINVAL;
+    
     ssize_t r;
     do {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Attempting to write %zu bytes to socket:", buf_read_size(buf));
-        pdlog_bytes(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, buf);
-        r = send(t->fd, buf_read_ptr(buf), buf_read_size(buf), 0);
+        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Attempting to write %zu bytes to socket:", buf_read_size(write_buf));
+        pdlog_bytes(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, write_buf);
+        r = send(sockets[sock_handle].fd, buf_read_ptr(write_buf), buf_read_size(write_buf), 0);
         if (r < 0) {
             if (errno == CS_EAGAIN || errno == EWOULDBLOCK) {
                 pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Socket write would block");
                 return UTIL_EAGAIN;
             } else {
                 util_err_t err = util_err_from_errno(errno);
-                buf_set_error(buf, err, "socket write");
+                buf_set_error(write_buf, err, "socket write");
                 return err;
             }
         } else {
             pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Wrote %zd bytes to socket", r);
-            buf_read_advance(buf, (size_t)r);
+            buf_read_advance(write_buf, (size_t)r);
         }
-    } while(buf_read_size(buf));
+    } while (buf_read_size(write_buf));
 
     return UTIL_OK;
 }
 
-
-
-
 /* Helpers */
-
 
 static util_err_t get_last_socket_error(void) {
 #ifdef _WIN32
@@ -331,7 +425,6 @@ static util_err_t get_last_socket_error(void) {
     return util_err_from_errno(errno);
 #endif
 }
-
 
 static void set_non_blocking(CSOCKET fd) {
 #ifdef _WIN32
@@ -342,217 +435,48 @@ static void set_non_blocking(CSOCKET fd) {
 #endif
 }
 
-
 static void set_no_delay(CSOCKET fd) {
     int flag = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(int));
 }
 
+/* --- Timer Functions --- */
 
-/**
- * Signal the wakeup pipe to interrupt the event loop.
- * This wakes up poll() instantly instead of waiting for the timeout.
- */
-static void coro_signal_wakeup(void) {
-    if (wake_write_fd != (CSOCKET)-1) {
-        uint8_t byte = 0xFF;
-        ssize_t sent = send(wake_write_fd, (char *)&byte, 1, 0);
-        (void)sent;  /* Suppress unused variable warning */
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Wakeup signal sent.");
-    }
+static int64_t now_us(void) {
+    return util_time_us();
 }
 
+static int64_t next_timer_timeout_ms(void) {
+    int64_t next_deadline = INT64_MAX;
+    int64_t now = now_us();
 
-/**
- * Destroy the wakeup pipe and clean up resources.
- */
-static void coro_destroy_wakeup_pipe(void) {
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Destroying wakeup pipe.");
-
-    if (wake_read_fd != (CSOCKET)-1) {
-        CS_CLOSE(wake_read_fd);
-        wake_read_fd = (CSOCKET)-1;
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        if (timers[i].used && timers[i].deadline_us < next_deadline) {
+            next_deadline = timers[i].deadline_us;
+        }
     }
 
-    if (wake_write_fd != (CSOCKET)-1) {
-        CS_CLOSE(wake_write_fd);
-        wake_write_fd = (CSOCKET)-1;
+    if (next_deadline == INT64_MAX) {
+        return 100;
     }
+
+    int64_t diff_us = next_deadline - now;
+    if (diff_us < 0) {
+        return 0;
+    }
+
+    return (diff_us + 999) / 1000;
 }
 
+static void timer_dispatch_due(void) {
+    int64_t now = now_us();
 
-/**
- * Create a wakeup pipe using socketpair (POSIX) or TCP sockets (Windows).
- * This allows the event loop to be interrupted instantly when:
- * - A new task is added via coro_add()
- * - The event mask changes for an existing task
- * - The loop needs to be stopped
- *
- * Returns 0 on success, -1 on failure.
- */
-
-#ifdef _WIN32
-/**
- * Windows implementation: Create a pair of connected TCP sockets on loopback.
- */
-static int coro_create_wakeup_pipe(void) {
-    SOCKET listener = INVALID_SOCKET;
-    SOCKET accept_fd = INVALID_SOCKET;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(struct sockaddr_in);
-    u_long non_blocking = 1;
-
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Creating wakeup pipe (Windows TCP socket pair).");
-
-    /* Create listening socket */
-    listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listener == INVALID_SOCKET) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to create listener socket: %d", WSAGetLastError());
-        return -1;
+    for (int i = 0; i < MAX_TIMERS; i++) {
+        if (timers[i].used && timers[i].deadline_us <= now) {
+            timers[i].used = false;
+            pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Timer expired, dispatching handler for handle=%d", i);
+            timers[i].handler(i, timers[i].context);
+        }
     }
-
-    /* Bind to loopback on any port */
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = 0;  /* Let OS choose port */
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-    if (bind(listener, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to bind listener socket: %d", WSAGetLastError());
-        closesocket(listener);
-        return -1;
-    }
-
-    if (listen(listener, 1) == SOCKET_ERROR) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to listen on socket: %d", WSAGetLastError());
-        closesocket(listener);
-        return -1;
-    }
-
-    /* Get the bound port */
-    addr_len = sizeof(addr);
-    if (getsockname(listener, (struct sockaddr *)&addr, &addr_len) == SOCKET_ERROR) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to get listener socket name: %d", WSAGetLastError());
-        closesocket(listener);
-        return -1;
-    }
-
-    /* Connect to create the read side */
-    wake_read_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (wake_read_fd == INVALID_SOCKET) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to create read socket: %d", WSAGetLastError());
-        closesocket(listener);
-        return -1;
-    }
-
-    if (connect(wake_read_fd, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to connect read socket: %d", WSAGetLastError());
-        closesocket(listener);
-        closesocket(wake_read_fd);
-        wake_read_fd = INVALID_SOCKET;
-        return -1;
-    }
-
-    /* Accept to create the write side */
-    accept_fd = accept(listener, NULL, NULL);
-    if (accept_fd == INVALID_SOCKET) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to accept connection: %d", WSAGetLastError());
-        closesocket(listener);
-        closesocket(wake_read_fd);
-        wake_read_fd = INVALID_SOCKET;
-        return -1;
-    }
-
-    wake_write_fd = accept_fd;
-
-    /* Close listener, we don't need it anymore */
-    closesocket(listener);
-
-    /* Set both to non-blocking */
-    if (ioctlsocket(wake_read_fd, FIONBIO, &non_blocking) == SOCKET_ERROR) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to set read fd non-blocking: %d", WSAGetLastError());
-        closesocket(wake_read_fd);
-        closesocket(wake_write_fd);
-        wake_read_fd = INVALID_SOCKET;
-        wake_write_fd = INVALID_SOCKET;
-        return -1;
-    }
-
-    if (ioctlsocket(wake_write_fd, FIONBIO, &non_blocking) == SOCKET_ERROR) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to set write fd non-blocking: %d", WSAGetLastError());
-        closesocket(wake_read_fd);
-        closesocket(wake_write_fd);
-        wake_read_fd = INVALID_SOCKET;
-        wake_write_fd = INVALID_SOCKET;
-        return -1;
-    }
-
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Wakeup pipe created successfully.");
-    return 0;
 }
-
-#else
-
-/**
- * POSIX implementation: Use socketpair to create a bidirectional socket pair.
- */
-static int coro_create_wakeup_pipe(void) {
-    int wake_fds[2] = {-1, -1};
-    int flags = 0;
-
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Creating wakeup pipe (POSIX socketpair).");
-
-    if (socketpair(PF_LOCAL, SOCK_STREAM, 0, wake_fds) < 0) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to create socketpair: %s", strerror(errno));
-        return -1;
-    }
-
-    wake_read_fd = wake_fds[0];
-    wake_write_fd = wake_fds[1];
-
-    /* Set read fd to non-blocking */
-    if ((flags = fcntl(wake_read_fd, F_GETFL)) < 0) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to get flags on read fd: %s", strerror(errno));
-        close(wake_read_fd);
-        close(wake_write_fd);
-        wake_read_fd = -1;
-        wake_write_fd = -1;
-        return -1;
-    }
-
-    flags |= O_NONBLOCK;
-    if (fcntl(wake_read_fd, F_SETFL, flags) < 0) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to set read fd non-blocking: %s", strerror(errno));
-        close(wake_read_fd);
-        close(wake_write_fd);
-        wake_read_fd = -1;
-        wake_write_fd = -1;
-        return -1;
-    }
-
-    /* Set write fd to non-blocking */
-    if ((flags = fcntl(wake_write_fd, F_GETFL)) < 0) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to get flags on write fd: %s", strerror(errno));
-        close(wake_read_fd);
-        close(wake_write_fd);
-        wake_read_fd = -1;
-        wake_write_fd = -1;
-        return -1;
-    }
-
-    flags |= O_NONBLOCK;
-    if (fcntl(wake_write_fd, F_SETFL, flags) < 0) {
-        pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_ERROR, "Failed to set write fd non-blocking: %s", strerror(errno));
-        close(wake_read_fd);
-        close(wake_write_fd);
-        wake_read_fd = -1;
-        wake_write_fd = -1;
-        return -1;
-    }
-
-    pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_INFO, "Wakeup pipe created successfully.");
-    return 0;
-}
-
-#endif
 
