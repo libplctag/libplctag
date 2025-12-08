@@ -92,12 +92,13 @@ int util_sleep_ms(int ms) {
 #else
 
 int util_sleep_ms(int ms) {
-    struct timeval tv;
+    struct timespec req;
+    struct timespec rem = {0};
 
-    tv.tv_sec = ms / 1000;
-    tv.tv_usec = (ms % 1000) * 1000;
+    req.tv_sec = ms / 1000;
+    req.tv_nsec = (ms % 1000) * 1000000;
 
-    return select(0, NULL, NULL, NULL, &tv);
+    return nanosleep(&req, &rem);
 }
 
 #endif
