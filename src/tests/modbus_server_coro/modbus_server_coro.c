@@ -130,7 +130,7 @@ struct server_ctx_s {
  * ============================================================================ */
 
 struct modbus_client_s {
-    task_t base;
+    coro_socket_handle_t handle;
     server_ctx_t *server;
     uint8_t recv_buffer[MODBUS_RECV_BUFFER_SIZE];
     uint8_t send_buffer[MODBUS_SEND_BUFFER_SIZE];
@@ -284,7 +284,6 @@ static void print_statistics(server_ctx_t *server) {
  * Signal Handling
  * ============================================================================ */
 
-/* FIXME - I don't this this actually works. It is in a signal thread/process/context */
 static void signal_handler(void) {
     if (g_server) {
         g_server->running = 0;
@@ -293,10 +292,12 @@ static void signal_handler(void) {
 }
 
 /* ============================================================================
- * Client Coroutine Handler - SIMPLIFIED VERSION
+ * Client Coroutine Handler
  * ============================================================================ */
 
-static util_err_t modbus_frame_check(buf_t *buf) {
+static util_err_t modbus_frame_check(buf_t *buf, void *context) {
+    (void)context;  /* unused */
+    
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Checking for complete Modbus frame");
     /* Check if we have enough data for the MBAP header */
     if (buf_read_size(buf) < MBAP_HEADER_SIZE) {
@@ -326,20 +327,19 @@ static util_err_t modbus_frame_check(buf_t *buf) {
 }
 
 
-static void client_handler(task_t *t) {
-    modbus_client_t *client = (modbus_client_t *)t->context;
+static void client_handler(coro_socket_handle_t handle, CSOCKET fd, void *context) {
+    modbus_client_t *client = (modbus_client_t *)context;
     uint8_t function_code;
     util_err_t err;
 
-    CR_START(t);
+    (void)fd;  /* We have the fd in the handle */
+
+    CR_START(handle);
 
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler started");
 
     while (1) {
-        /* Read MBAP header */
-
         /* clear the receive buffer */
-        // buf_reset(&client->recv_buf);
         buf_compact(&client->recv_buf);
 
         /* Capture request start time - right before we start receiving */
@@ -349,19 +349,7 @@ static void client_handler(task_t *t) {
         /* read until we get enough data for a full APU */
         client->timing.recv_start_us = util_time_us();
 
-        cr_yield_read(t, &client->recv_buf, modbus_frame_check, err);
-
-        // while((err = cr_read(t, &client->recv_buf, modbus_frame_check)) == UTIL_EAGAIN) {
-        //     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Waiting for more data to complete request");
-
-        //     /* Capture first byte arrival time on first successful read */
-        //     if (client->timing.first_byte_us == 0 && buf_read_size(&client->recv_buf) > 0 && !had_data_before_read) {
-        //         client->timing.first_byte_us = util_time_us();
-        //         had_data_before_read = true;  /* Mark that we've captured first byte timestamp */
-        //     }
-
-        //     CR_YIELD(t, POLLIN);
-        // }
+        cr_yield_read(handle, &client->recv_buf, modbus_frame_check, NULL, err);
 
         client->timing.recv_complete_us = util_time_us();
 
@@ -433,7 +421,7 @@ static void client_handler(task_t *t) {
 
         /* Send response */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
-        cr_yield_write(t, &client->send_buf, err);
+        cr_yield_write(handle, &client->send_buf, err);
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
         }
@@ -476,7 +464,7 @@ static void client_handler(task_t *t) {
 
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler closing");
     free(client);
-    CR_END(t);
+    CR_END(handle);
 }
 
 /* ============================================================================
@@ -484,26 +472,27 @@ static void client_handler(task_t *t) {
  * ============================================================================ */
 
 typedef struct {
+    coro_socket_handle_t handle;
     server_ctx_t *server;
     char bind_address[256];
     uint16_t bind_port;
 } listener_info_t;
 
-static void listener_handler(task_t *t) {
-    listener_info_t *listener = (listener_info_t *)t->context;
+static void listener_handler(coro_socket_handle_t handle, CSOCKET fd, void *context) {
+    listener_info_t *listener = (listener_info_t *)context;
     CSOCKET client_fd;
+    util_err_t err;
 
-    CR_START(t);
+    (void)fd;  /* We have the fd in the handle */
+
+    CR_START(handle);
 
     pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener started on %s:%u", listener->bind_address, listener->bind_port);
 
     while (listener->server->running) {
-        util_err_t err = cr_accept(t, &client_fd);
+        cr_yield_accept(handle, &client_fd, err);
 
-        if (err == UTIL_EAGAIN) {
-            CR_YIELD(t, POLLIN);
-            continue;
-        } else if (err != UTIL_OK) {
+        if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to accept connection");
             break;
         }
@@ -519,23 +508,27 @@ static void listener_handler(task_t *t) {
         }
 
         memset(client, 0, sizeof(modbus_client_t));
-        client->base.fd = client_fd;
-        client->base.line = 0;
-        client->base.handler = client_handler;
-        client->base.events = POLLIN;
-
         client->recv_buf = buf_init(client->recv_buffer, MODBUS_RECV_BUFFER_SIZE);
         client->send_buf = buf_init(client->send_buffer, MODBUS_SEND_BUFFER_SIZE);
         client->server = listener->server;
         client->expected_pdu_length = 0;
 
-        /* Register with event loop - client is stored in the task_t, not separate context */
-        coro_add(client_fd, client_handler, (void *)client);
+        /* Register with event loop */
+        coro_socket_handle_t client_handle;
+        err = coro_add_socket(&client_handle, client_fd, client_handler, (void *)client);
+        if (err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to add client socket: %s", util_err_str(err));
+            CS_CLOSE(client_fd);
+            free(client);
+            continue;
+        }
+        
+        client->handle = client_handle;
     }
 
     pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener stopping");
-    free(t->context);
-    CR_END(t);
+    free(listener);
+    CR_END(handle);
 }
 
 /* ============================================================================
@@ -773,7 +766,18 @@ int main(int argc, char *argv[]) {
         strncpy(listener_info->bind_address, addr_str, sizeof(listener_info->bind_address) - 1);
         listener_info->bind_port = port;
 
-        coro_add(listen_fd, listener_handler, listener_info);
+        coro_socket_handle_t listener_handle;
+        util_err_t err = coro_add_socket(&listener_handle, listen_fd, listener_handler, listener_info);
+        if (err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to add listener socket: %s", util_err_str(err));
+            CS_CLOSE(listen_fd);
+            free(listener_info);
+            args_free(&args_result);
+            register_storage_destroy(temp_storage);
+            return EXIT_FAILURE;
+        }
+        
+        listener_info->handle = listener_handle;
     }
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Starting coroutine event loop");
