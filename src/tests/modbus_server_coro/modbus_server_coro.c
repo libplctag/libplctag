@@ -360,7 +360,7 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
 
     (void)fd;  /* We have the fd in the handle */
 
-    CR_START(handle);
+    CORO_START(handle);
 
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler started");
 
@@ -503,7 +503,7 @@ static void client_handler(coro_task_handle_t handle, socket_t fd, void *context
     socket_close(coro_get_fd(client->handle));
     free(client);
 
-    CR_END(handle);
+    CORO_END(handle);
 }
 
 /* ============================================================================
@@ -518,7 +518,7 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
 
     (void)fd;  /* We have the fd in the handle */
 
-    CR_START(handle);
+    CORO_START(handle);
 
     pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener started on %s:%u", listener->bind_address, listener->bind_port);
 
@@ -568,7 +568,7 @@ static void listener_handler(coro_task_handle_t handle, socket_t fd, void *conte
     socket_close(coro_get_fd(listener->handle));
     free(listener);
 
-    CR_END(handle);
+    CORO_END(handle);
 }
 
 /* ============================================================================
