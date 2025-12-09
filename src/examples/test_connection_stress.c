@@ -160,7 +160,7 @@ void *test_runner(void *data) {
 }
 
 
-#define MAX_THREADS (100)
+#define MAX_THREADS (200)
 
 int main(int argc, char **argv) {
     compat_thread_t thread[MAX_THREADS];
