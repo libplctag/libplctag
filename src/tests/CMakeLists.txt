@@ -97,3 +97,4 @@ set_tests_properties(modbus_server_single_listener PROPERTIES TIMEOUT 5)
 set_tests_properties(modbus_server_multiple_listeners PROPERTIES TIMEOUT 5)
 set_tests_properties(modbus_server_with_debug_level PROPERTIES TIMEOUT 5)
 
+

@@ -70,7 +70,7 @@ util_err_t socket_get_err(void);
 
 typedef struct {
     struct sockaddr_storage addr;
-    socklen_t               addr_len;
+    socklen_t addr_len;
 } socket_address_t;
 
 /**
