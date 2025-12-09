@@ -124,75 +124,14 @@ util_err_t coro_add_task(coro_task_handle_t *task,
 void coro_remove_task(coro_task_handle_t task);
 
 
-/* --- I/O Functions --- */
 
-/**
- * @brief Accept a connection on a listening socket
- *
- * @param listener_task Task handle for the listening socket
- * @param client_fd_ptr Output parameter for accepted client socket FD
- * @param client_addr Output parameter for client address (can be NULL if not needed)
- * @return UTIL_OK if connection accepted, UTIL_EAGAIN if would block, error code otherwise
- */
-util_err_t cr_accept(coro_task_handle_t listener_task, socket_t *client_fd_ptr, socket_address_t *client_addr);
-
-/**
- * @brief Connect to a remote address
- *
- * @param task Task handle for the socket
- * @param address Remote address to connect to
- * @return UTIL_OK if connected, UTIL_EAGAIN if would block, error code otherwise
- */
-util_err_t cr_connect(coro_task_handle_t task, socket_address_t *address);
-
-/**
- * @brief read data from socket until frame_func indicates a complete frame
- * 
- * @param task Task handle for the socket
- * @param read_buf Buffer to accumulate received data
- * @param frame_func Callback to check if complete frame received (NULL to read all available)
- * @param context Context for frame_func
- * @return UTIL_OK if frame complete, UTIL_EAGAIN if would block, error code otherwise
- */
-util_err_t cr_read(coro_task_handle_t task, buf_t *read_buf,
-                   util_err_t (*frame_func)(buf_t *buf, void *context), void *context);
-
-/**
- * @brief Receive a datagram from socket
- *
- * @param task Task handle for the socket
- * @param read_buf Buffer to receive data
- * @param from_addr Output: address of sender
- * @return UTIL_OK if datagram received, UTIL_EAGAIN if would block, error code otherwise
- */
-util_err_t cr_recvfrom(coro_task_handle_t task, buf_t *read_buf, socket_address_t *from_addr);
-
-/**
- * @brief Send datagram to address
- *
- * @param task Task handle for the socket
- * @param write_buf Buffer containing data to send
- * @param to_addr Destination address
- * @return UTIL_OK if sent, UTIL_EAGAIN if would block, error code otherwise
- */
-util_err_t cr_sendto(coro_task_handle_t task, buf_t *write_buf, socket_address_t *to_addr);
-
-/**
- * @brief Write data to socket
- * 
- * @param task Task handle for the socket
- * @param write_buf Buffer containing data to send
- * @return UTIL_OK if all data sent, UTIL_EAGAIN if would block, error code otherwise
- */
-util_err_t cr_write(coro_task_handle_t task, buf_t *write_buf);
-
-/* --- Internal Accessors (for macros) --- */
+/* Accessors for macros */
 
 /**
  * @brief Set the event(s) this task is waiting for
  * 
  * This should generally not need to be called directly by user code, as the
- * CR_YIELD macro handles this automatically. However, it can be used for
+ * coro_wait_for_event macro handles this automatically. However, it can be used for
  * advanced scenarios where the task needs to change its event outside of the
  * coroutine handler.
  * 
@@ -205,13 +144,13 @@ util_err_t coro_set_task_event(coro_task_handle_t task, short event);
 
 /**
  * Get the current line number for a task's coroutine
- * (Used by CR_START/CR_YIELD macros for switch statement)
+ * (Used by CORO_START/coro_wait_for_event macros for switch statement)
  */
 int coro_get_line(coro_task_handle_t task);
 
 /**
  * Set the line number for a task's coroutine
- * (Used by CR_YIELD macro)
+ * (Used by coro_wait_for_event macro)
  */
 util_err_t coro_set_line(coro_task_handle_t task, int line);
 
@@ -226,21 +165,21 @@ socket_t coro_get_fd(coro_task_handle_t task);
  * Start a coroutine handler function
  * Usage:
  *   void my_handler(coro_task_handle_t task, socket_t fd, void *context) {
- *       CR_START(task);
+ *       CORO_START(task);
  *       // ... coroutine code
- *       CR_END(task);
+ *       CORO_END(task);
  *   }
  */
-#define CR_START(task) switch(coro_get_line(task)) { case 0:
+#define CORO_START(task) switch(coro_get_line(task)) { case 0:
 
 /**
  * Yield execution until a task event occurs
  * Usage:
- *   CR_YIELD(task, POLLIN);        // Wait for socket read
- *   CR_YIELD(task, POLLOUT);       // Wait for socket write
- *   CR_YIELD(task, CORO_EVENT_ALWAYS);  // Run next loop cycle
+ *   coro_wait_for_event(task, POLLIN);        // Wait for socket read
+ *   coro_wait_for_event(task, POLLOUT);       // Wait for socket write
+ *   coro_wait_for_event(task, CORO_EVENT_ALWAYS);  // Run next loop cycle
  */
-#define CR_YIELD(task, ev) \
+#define coro_wait_for_event(task, ev) \
     do { \
         coro_set_line((task), __LINE__); \
         coro_set_task_event((task), (ev)); \
@@ -252,7 +191,7 @@ socket_t coro_get_fd(coro_task_handle_t task);
  * End a coroutine handler function
  * This removes the task from the event loop
  */
-#define CR_END(task) default: break; } coro_remove_task(task);
+#define CORO_END(task) default: break; } coro_remove_task(task);
 
 
 /**
@@ -273,7 +212,7 @@ socket_t coro_get_fd(coro_task_handle_t task);
             pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Accept returned %s", util_err_str(__err)); \
             if (__err == UTIL_EAGAIN) { \
                 pdlog(LOG_MODULE_CORO_NET, LOG_LEVEL_DETAIL, "Yielding on accept for fd=%d", (int)__listen_fd); \
-                CR_YIELD((task), CORO_EVENT_ACCEPT); \
+                coro_wait_for_event((task), CORO_EVENT_ACCEPT); \
                 __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
             } \
         } while (__err == UTIL_EAGAIN); \
@@ -294,7 +233,7 @@ socket_t coro_get_fd(coro_task_handle_t task);
             __fd = coro_get_fd(task); \
             __err = socket_connect(__fd, (address)); \
             if (__err == UTIL_EAGAIN) { \
-                CR_YIELD((task), CORO_EVENT_CONNECT); \
+                coro_wait_for_event((task), CORO_EVENT_CONNECT); \
                 __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
             } \
         } while (__err == UTIL_EAGAIN); \
@@ -330,7 +269,7 @@ socket_t coro_get_fd(coro_task_handle_t task);
                 } \
             } \
             if( __err == UTIL_EAGAIN) { \
-                CR_YIELD((task), CORO_EVENT_READ); \
+                coro_wait_for_event((task), CORO_EVENT_READ); \
                 __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
             } \
         } while (__err == UTIL_EAGAIN); \
@@ -351,7 +290,7 @@ socket_t coro_get_fd(coro_task_handle_t task);
             __fd = coro_get_fd(task); \
             __err = socket_recvfrom_buf(__fd, (from_addr), (buf)); \
             if (__err == UTIL_EAGAIN) { \
-                CR_YIELD((task), CORO_EVENT_READ); \
+                coro_wait_for_event((task), CORO_EVENT_READ); \
                 __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
             } \
         } while (__err == UTIL_EAGAIN); \
@@ -372,7 +311,7 @@ socket_t coro_get_fd(coro_task_handle_t task);
             __fd = coro_get_fd(task); \
             __err = socket_sendto_buf(__fd, (to_addr), (buf)); \
             if (__err == UTIL_EAGAIN) { \
-                CR_YIELD((task), CORO_EVENT_WRITE); \
+                coro_wait_for_event((task), CORO_EVENT_WRITE); \
                 __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
             } \
         } while (__err == UTIL_EAGAIN); \
@@ -393,7 +332,7 @@ socket_t coro_get_fd(coro_task_handle_t task);
             __fd = coro_get_fd(task); \
             __err = socket_send_buf(__fd, (buf)); \
             if (__err == UTIL_EAGAIN) { \
-                CR_YIELD((task), CORO_EVENT_WRITE); \
+                coro_wait_for_event((task), CORO_EVENT_WRITE); \
                 __err = UTIL_EAGAIN; /* Re-initialize after yield for loop condition */ \
             } else if (__err != UTIL_OK) { \
                 break; \
