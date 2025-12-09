@@ -62,9 +62,9 @@ endif()
     target_link_options(ab_server PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
 # endif()
 
-# Build the coroutine-based Modbus TCP server (using coro_net)
-# This is a lighter-weight implementation using the coro_net event-based reactor
-message("Building Modbus TCP server (coro_net version).")
-add_subdirectory("modbus_server_coro")
+# Build the Modbus TCP server
+# This is a lightweight implementation using the coro_net event-based reactor
+message("Building Modbus TCP server.")
+add_subdirectory("modbus_server")
 
 
