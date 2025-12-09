@@ -136,7 +136,7 @@ fi
 
 let TEST++
 echo -n "  Test $TEST: connection stress (multiple connections) Modbus... "
-$VALGRIND$TEST_DIR/test_connection_stress --num-threads=10 --tag='protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "$LOG_DIR/${TEST}_modbus_connection_stress_test.log" 2>&1
+$VALGRIND$TEST_DIR/test_connection_stress --num-threads=200 --tag='protocol=modbus-tcp&gateway=127.0.0.1:1502&path=0&elem_count=2&name=hr10' > "$LOG_DIR/${TEST}_modbus_connection_stress_test.log" 2>&1
 if [ $? != 0 ]; then
     echo "FAILURE"
     let FAILURES++
@@ -195,8 +195,8 @@ else
 fi
 
 
-# Check that exactly 2 PLC objects were created during test 29.
-# This validates proper PLC object reuse and no spurious creation/destruction.
+#Check that exactly 2 PLC objects were created during test 29.
+#This validates proper PLC object reuse and no spurious creation/destruction.
 let TEST++
 echo -n "  Test $TEST: check for exactly 2 PLC creation entries in Modbus reconnect test log... "
 PLC_COUNT=$(grep -c "Creating new PLC connection\." ${TST_LOG})

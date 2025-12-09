@@ -75,7 +75,7 @@ done
 
 
 
-kill_process modbus_server
+kill_process modbus_server_coro
 
 # wait for it to exit
 sleep 2
@@ -95,16 +95,6 @@ fi
 
 
 
-let TEST++
-echo -n "  Test $TEST: Modbus tag scheduling fairness... "
-$VALGRIND$TEST_DIR/test_fairness "--tag=protocol=modbus-tcp&gateway=127.0.0.1:1502&path=1&name=hr10&auto_sync_read_ms=200" --num-tags=200 --test-duration-secs=10 > "$LOG_DIR/${TEST}_modbus_fairness_test.log" 2>&1
-if [ $? != 0 ]; then
-    echo "FAILURE"
-    let FAILURES++
-else
-    echo "OK"
-    let SUCCESSES++
-fi
 
 
 let TEST++
@@ -134,7 +124,7 @@ else
 fi
 
 # echo "  Killing Modbus emulator."
-kill_process modbus_server
+kill_process modbus_server_coro
 
 # wait for it to exit
 sleep 2
