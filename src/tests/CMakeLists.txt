@@ -62,39 +62,9 @@ endif()
     target_link_options(ab_server PRIVATE ${STATIC_C_LINKER_OPTIONS} ${EXTRA_LINK_FLAGS})
 # endif()
 
-# Build the standalone Modbus TCP server (no external dependencies)
-# This is a pure C11 implementation using only BSD sockets
-message("Building Modbus TCP server.")
-add_subdirectory("modbus_server")
-
 # Build the coroutine-based Modbus TCP server (using coro_net)
 # This is a lighter-weight implementation using the coro_net event-based reactor
 message("Building Modbus TCP server (coro_net version).")
 add_subdirectory("modbus_server_coro")
-
-# Register CTest tests for modbus_server
-# Test that modbus_server binary exists and is executable
-add_test(NAME modbus_server_binary_exists
-         COMMAND test -x "${CMAKE_BINARY_DIR}/bin_dist/modbus_server")
-
-# Test that modbus_server can start with single listen address
-add_test(NAME modbus_server_single_listener
-         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --listen=127.0.0.1:9502 & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
-         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
-
-# Test that modbus_server can start with multiple listen addresses
-add_test(NAME modbus_server_multiple_listeners
-         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --listen=127.0.0.1:9502 --listen=127.0.0.1:9503 & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
-         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
-
-# Test that modbus_server can start with debug level
-add_test(NAME modbus_server_with_debug_level
-         COMMAND sh -c "${CMAKE_BINARY_DIR}/bin_dist/modbus_server --listen=127.0.0.1:9504 --debug=DETAIL & sleep 1; kill \$! 2>/dev/null; wait 2>/dev/null; true"
-         WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
-
-set_tests_properties(modbus_server_binary_exists PROPERTIES TIMEOUT 5)
-set_tests_properties(modbus_server_single_listener PROPERTIES TIMEOUT 5)
-set_tests_properties(modbus_server_multiple_listeners PROPERTIES TIMEOUT 5)
-set_tests_properties(modbus_server_with_debug_level PROPERTIES TIMEOUT 5)
 
 
