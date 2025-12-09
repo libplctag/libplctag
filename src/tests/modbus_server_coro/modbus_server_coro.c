@@ -40,18 +40,19 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <stdarg.h>
+#include <inttypes.h>
+#include <math.h>
 
 #include "modbus_protocol.h"
 #include "register_storage.h"
 #include "coro_net.h"
+#include "socket.h"
 #include "log.h"
 #include "err.h"
 #include "buf.h"
 #include "args.h"
 #include "utils.h"
 #include "atomic_utils.h"
-#include <inttypes.h>
-#include <math.h>
 
 /* ============================================================================
  * Forward Declarations and Constants
@@ -93,6 +94,9 @@ typedef struct {
     atomic_int64_t total_send_time_us;
     atomic_int64_t total_overhead_time_us;
 
+    atomic_int64_t clients_connected;
+    atomic_int64_t clients_disconnected;
+
     /* Histogram buckets for response time distribution */
     atomic_int64_t hist_buckets[HIST_BUCKET_COUNT];
 } server_stats_t;
@@ -120,6 +124,7 @@ static server_ctx_t *g_server = NULL;
 
 struct server_ctx_s {
     register_storage_t *storage;
+    coro_net_t *coro_net;
     volatile int running;
     int64_t start_time_us;
     server_stats_t stats;
@@ -130,7 +135,7 @@ struct server_ctx_s {
  * ============================================================================ */
 
 struct modbus_client_s {
-    coro_socket_handle_t handle;
+    coro_task_handle_t handle;
     server_ctx_t *server;
     uint8_t recv_buffer[MODBUS_RECV_BUFFER_SIZE];
     uint8_t send_buffer[MODBUS_SEND_BUFFER_SIZE];
@@ -140,6 +145,22 @@ struct modbus_client_s {
     uint16_t expected_pdu_length;
     request_timing_t timing;
 };
+
+
+/* ============================================================================
+ * Modbus Listener Context (per endpoint)
+ * ============================================================================ */
+
+ struct listener_info_s {
+    coro_task_handle_t handle;
+    server_ctx_t *server;
+    char bind_address[256];
+    uint16_t bind_port;
+    size_t clients_created;
+    size_t clients_closed;
+};
+
+typedef struct listener_info_s listener_info_t;
 
 /* ============================================================================
  * Statistics Helpers
@@ -221,6 +242,11 @@ static void print_statistics(server_ctx_t *server) {
         fprintf(stderr, "║ Throughput: %.2f requests/sec                                    \n", (double)total_reqs / (double)runtime_sec);
     }
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║                       CLIENT STATISTICS                          ║\n");
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
+    fprintf(stderr, "║ Clients connected:    %" PRId64 "                                     \n", (long long)atomic_get_int64(&stats->clients_connected));
+    fprintf(stderr, "║ Clients disconnected: %" PRId64 "                                     \n", (long long)atomic_get_int64(&stats->clients_disconnected));
+    fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
     fprintf(stderr, "║                     RESPONSE TIME SUMMARY                        ║\n");
     fprintf(stderr, "╠══════════════════════════════════════════════════════════════════╣\n");
 
@@ -287,7 +313,7 @@ static void print_statistics(server_ctx_t *server) {
 static void signal_handler(void) {
     if (g_server) {
         g_server->running = 0;
-        coro_stop();
+        coro_stop(g_server->coro_net);
     }
 }
 
@@ -327,7 +353,7 @@ static util_err_t modbus_frame_check(buf_t *buf, void *context) {
 }
 
 
-static void client_handler(coro_socket_handle_t handle, CSOCKET fd, void *context) {
+static void client_handler(coro_task_handle_t handle, socket_t fd, void *context) {
     modbus_client_t *client = (modbus_client_t *)context;
     uint8_t function_code;
     util_err_t err;
@@ -338,26 +364,27 @@ static void client_handler(coro_socket_handle_t handle, CSOCKET fd, void *contex
 
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler started");
 
+    atomic_add_int64(&client->server->stats.clients_connected, 1);
+
     while (1) {
-        /* clear the receive buffer */
+        /* compact the receive buffer */
         buf_compact(&client->recv_buf);
 
-        /* Capture request start time - right before we start receiving */
-        client->timing.request_start_us = util_time_us();
-        client->timing.first_byte_us = 0;  /* Reset for new request */
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "%zu bytes space in receive buffer before read", buf_write_size(&client->recv_buf));
 
-        /* read until we get enough data for a full APU */
+        /* Reset timestamps for new request */
+        client->timing.first_byte_us = 0;
+        client->timing.recv_complete_us = 0;
+
+        /* Capture when we start trying to receive (may block waiting for data) */
         client->timing.recv_start_us = util_time_us();
 
-        cr_yield_read(handle, &client->recv_buf, modbus_frame_check, NULL, err);
+        /* Read until we get a full frame - macro will set first_byte_us and recv_complete_us */
+        socket_read_yield(handle, &client->recv_buf, modbus_frame_check, NULL,
+                         &client->timing.first_byte_us, &client->timing.recv_complete_us, err);
 
-        client->timing.recv_complete_us = util_time_us();
-
-        /* If we got data but didn't capture first_byte_us yet (e.g., all data arrived before first EAGAIN),
-         * capture it now. Also handles case where buffer had pre-existing data. */
-        if (client->timing.first_byte_us == 0) {
-            client->timing.first_byte_us = client->timing.recv_start_us;
-        }
+        /* Request processing start is when data actually arrived (not when we started blocking) */
+        client->timing.request_start_us = client->timing.first_byte_us;
 
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Client error %s during APU read", util_err_str(err));
@@ -416,12 +443,15 @@ static void client_handler(coro_socket_handle_t handle, CSOCKET fd, void *contex
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Request processed successfully");
         }
 
+        pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Prepared response of %zu bytes:", buf_read_size(&client->send_buf));
+        pdlog_bytes(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, &client->send_buf);
+
         /* Capture send start time */
         client->timing.send_start_us = util_time_us();
 
         /* Send response */
         pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Sending response of %zu bytes", buf_write_pos(&client->send_buf));
-        cr_yield_write(handle, &client->send_buf, err);
+        socket_write_yield(handle, &client->send_buf, err);
         if(err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_WARN, "Failed to send response: %s", util_err_str(err));
         }
@@ -429,14 +459,17 @@ static void client_handler(coro_socket_handle_t handle, CSOCKET fd, void *contex
         /* Capture send complete time and calculate statistics */
         client->timing.send_complete_us = util_time_us();
 
-        /* Calculate response time and component times */
+        /* Calculate response time and component times
+         * Note: total_response_time excludes poll_overhead (time blocked waiting for data)
+         * It measures pure processing time from when data arrives to when response is sent
+         */
         int64_t total_response_time = client->timing.send_complete_us - client->timing.request_start_us;
-        int64_t recv_time = client->timing.recv_complete_us - client->timing.recv_start_us;
-        int64_t poll_overhead = client->timing.first_byte_us - client->timing.request_start_us;
+        int64_t poll_overhead = client->timing.first_byte_us - client->timing.recv_start_us;
         int64_t actual_io_time = client->timing.recv_complete_us - client->timing.first_byte_us;
+        int64_t recv_time = poll_overhead + actual_io_time;  /* Total receive time including blocking */
         int64_t process_time = client->timing.process_complete_us - client->timing.process_start_us;
         int64_t send_time = client->timing.send_complete_us - client->timing.send_start_us;
-        int64_t overhead_time = total_response_time - recv_time - process_time - send_time;
+        int64_t overhead_time = total_response_time - actual_io_time - process_time - send_time;
 
         /* Update statistics atomically */
         server_stats_t *stats = &client->server->stats;
@@ -463,7 +496,13 @@ static void client_handler(coro_socket_handle_t handle, CSOCKET fd, void *contex
     }
 
     pdlog(LOG_MODULE_MODBUS_CORO_CLIENT, LOG_LEVEL_DETAIL, "Client handler closing");
+
+    atomic_add_int64(&client->server->stats.clients_disconnected, 1);
+
+    coro_remove_task(client->handle);
+    socket_close(coro_get_fd(client->handle));
     free(client);
+
     CR_END(handle);
 }
 
@@ -471,16 +510,10 @@ static void client_handler(coro_socket_handle_t handle, CSOCKET fd, void *contex
  * Listener Coroutine Handler
  * ============================================================================ */
 
-typedef struct {
-    coro_socket_handle_t handle;
-    server_ctx_t *server;
-    char bind_address[256];
-    uint16_t bind_port;
-} listener_info_t;
-
-static void listener_handler(coro_socket_handle_t handle, CSOCKET fd, void *context) {
+static void listener_handler(coro_task_handle_t handle, socket_t fd, void *context) {
     listener_info_t *listener = (listener_info_t *)context;
-    CSOCKET client_fd;
+    socket_t client_fd;
+    socket_address_t client_addr;
     util_err_t err;
 
     (void)fd;  /* We have the fd in the handle */
@@ -490,32 +523,35 @@ static void listener_handler(coro_socket_handle_t handle, CSOCKET fd, void *cont
     pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener started on %s:%u", listener->bind_address, listener->bind_port);
 
     while (listener->server->running) {
-        cr_yield_accept(handle, &client_fd, err);
-
+        pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_DETAIL, "Waiting for incoming connections...");
+        socket_accept_yield(handle, &client_fd, &client_addr, err);
         if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to accept connection");
             break;
         }
 
-        pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_DETAIL, "Accepted client connection");
+        char client_ip[INET6_ADDRSTRLEN];
+        socket_address_get_addr_str(&client_addr, client_ip, sizeof(client_ip));
+        uint16_t client_port = socket_address_get_port(&client_addr);
+        pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_DETAIL, "Accepted client connection from %s:%u (fd %d)",
+              client_ip, client_port, client_fd);
 
         /* Create client context */
-        modbus_client_t *client = (modbus_client_t *)malloc(sizeof(modbus_client_t));
+        modbus_client_t *client = (modbus_client_t *)calloc(1, sizeof(modbus_client_t));
         if (!client) {
             pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to allocate client context");
             CS_CLOSE(client_fd);
             continue;
         }
 
-        memset(client, 0, sizeof(modbus_client_t));
         client->recv_buf = buf_init(client->recv_buffer, MODBUS_RECV_BUFFER_SIZE);
         client->send_buf = buf_init(client->send_buffer, MODBUS_SEND_BUFFER_SIZE);
         client->server = listener->server;
         client->expected_pdu_length = 0;
 
         /* Register with event loop */
-        coro_socket_handle_t client_handle;
-        err = coro_add_socket(&client_handle, client_fd, client_handler, (void *)client);
+        coro_task_handle_t client_handle;
+        err = coro_add_task(&client_handle, client->server->coro_net, client_fd, client_handler, (void *)client);
         if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_ERROR, "Failed to add client socket: %s", util_err_str(err));
             CS_CLOSE(client_fd);
@@ -527,7 +563,11 @@ static void listener_handler(coro_socket_handle_t handle, CSOCKET fd, void *cont
     }
 
     pdlog(LOG_MODULE_MODBUS_CORO_LISTENER, LOG_LEVEL_INFO, "Listener stopping");
+
+    coro_remove_task(listener->handle);
+    socket_close(coro_get_fd(listener->handle));
     free(listener);
+
     CR_END(handle);
 }
 
@@ -540,6 +580,13 @@ int main(int argc, char *argv[]) {
     server_ctx_t server = {0};
     g_server = &server;
     server.running = 1;
+
+    /* Initialize socket subsystem */
+    util_err_t socket_err = socket_init();
+    if (socket_err != UTIL_OK) {
+        fprintf(stderr, "Failed to initialize socket subsystem: %s\n", util_err_str(socket_err));
+        return EXIT_FAILURE;
+    }
 
     args_flag_def_t flags[] = {
         {
@@ -675,7 +722,11 @@ int main(int argc, char *argv[]) {
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "  Input Registers: %zu", (size_t)ir_val);
 
     /* Initialize the coroutine system */
-    coro_init();
+    util_err_t err = coro_create(&g_server->coro_net, 256);
+    if (err != UTIL_OK) {
+        pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create coro_net instance: %s", util_err_str(err));
+        return EXIT_FAILURE;
+    }
 
     /* Set up signal handler for graceful shutdown */
     util_set_interrupt_handler(signal_handler);
@@ -716,41 +767,28 @@ int main(int argc, char *argv[]) {
 
         pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Creating listener on %s:%u", addr_str, port);
 
-        CSOCKET listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (listen_fd == (CSOCKET)-1) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create socket");
-            perror("socket");
+        /* Initialize socket address */
+        socket_address_t listen_address;
+        util_err_t addr_err = socket_address_init(&listen_address, addr_str, port);
+        if (addr_err != UTIL_OK) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to initialize socket address: %s", util_err_str(addr_err));
             args_free(&args_result);
             register_storage_destroy(temp_storage);
             return EXIT_FAILURE;
         }
 
-        int reuse = 1;
-        setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
-
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
-        inet_pton(AF_INET, addr_str, &addr.sin_addr);
-
-        if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to bind socket to %s:%u", addr_str, port);
-            perror("bind");
-            CS_CLOSE(listen_fd);
+        /* Create TCP server socket */
+        socket_t listen_fd = socket_create_tcp_server(&listen_address, 128);
+        if (listen_fd == INVALID_SOCKET) {
+            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to create TCP server on %s:%u: %s",
+                  addr_str, port, util_err_str(socket_get_err()));
             args_free(&args_result);
             register_storage_destroy(temp_storage);
             return EXIT_FAILURE;
         }
 
-        if (listen(listen_fd, 128) < 0) {
-            pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to listen on socket");
-            perror("listen");
-            CS_CLOSE(listen_fd);
-            args_free(&args_result);
-            register_storage_destroy(temp_storage);
-            return EXIT_FAILURE;
-        }
+        /* Set socket options */
+        socket_set_reuseaddr(listen_fd, true);
 
         listener_info_t *listener_info = (listener_info_t *)malloc(sizeof(listener_info_t));
         if (!listener_info) {
@@ -766,8 +804,8 @@ int main(int argc, char *argv[]) {
         strncpy(listener_info->bind_address, addr_str, sizeof(listener_info->bind_address) - 1);
         listener_info->bind_port = port;
 
-        coro_socket_handle_t listener_handle;
-        util_err_t err = coro_add_socket(&listener_handle, listen_fd, listener_handler, listener_info);
+        coro_task_handle_t listener_handle;
+        util_err_t err = coro_add_task(&listener_handle, g_server->coro_net, listen_fd, listener_handler, listener_info);
         if (err != UTIL_OK) {
             pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_ERROR, "Failed to add listener socket: %s", util_err_str(err));
             CS_CLOSE(listen_fd);
@@ -776,17 +814,23 @@ int main(int argc, char *argv[]) {
             register_storage_destroy(temp_storage);
             return EXIT_FAILURE;
         }
-        
+
         listener_info->handle = listener_handle;
     }
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Starting coroutine event loop");
-    coro_run();
+    coro_run(&(g_server->coro_net), 50);  /* 50ms tick interval */
 
     pdlog(LOG_MODULE_MODBUS_SERVER, LOG_LEVEL_INFO, "Modbus server shutting down");
+    coro_destroy(&(g_server->coro_net));
+
+    g_server->coro_net = NULL;
+
     print_statistics(&server);
+
     args_free(&args_result);
     register_storage_destroy(temp_storage);
+    socket_cleanup();
 
     return EXIT_SUCCESS;
 }
