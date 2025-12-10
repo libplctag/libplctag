@@ -13,13 +13,13 @@
  *
  * Uses platform-specific functions.
  */
-uint64_t util_time_ms(void) {
+int64_t util_time_ms(void) {
 #ifdef _WIN32
     return (uint64_t)GetTickCount();
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+    return (int64_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 #endif
 }
 
