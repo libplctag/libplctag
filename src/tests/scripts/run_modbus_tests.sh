@@ -44,7 +44,8 @@ VALGRIND=""
 kill_process() {
     local process_name=$1
     # Find process by name using ps and send SIGTERM for graceful shutdown
-    local pids=$(ps -W | grep -i "${process_name}" | grep -v grep | awk '{print $1}' || true)
+    # Note: ps aux works on Linux, macOS, and Windows Git Bash; PID is always the 2nd field
+    local pids=$(ps aux | grep -i "${process_name}" | grep -v grep | awk '{print $2}' || true)
     if [[ -n "$pids" ]]; then
         # Send SIGTERM to allow graceful shutdown and statistics printing
         for pid in $pids; do
